@@ -477,6 +477,119 @@ export function revealNode(node: RevealTarget, block: RevealBlock = "nearest"): 
   node.scrollIntoView({ block });
 }
 
+/**
+ * The two boxes a reveal compares, in ONE coordinate system.
+ *
+ * Viewport coordinates (what `getBoundingClientRect` answers) rather than
+ * content-relative offsets, because the node whose reveal is asked for sits an
+ * arbitrary number of positioned ancestors below the scroll box — a sub-feed
+ * panel nested inside another bubble's panel — and `offsetTop` would then be
+ * measured against whichever of them happens to be the offset parent. The two
+ * rects are read off the same layout in the same units, so their difference is
+ * a scroll delta and nothing has to be reconstructed.
+ */
+export interface RevealGeometry {
+  /** The scroll box's own top edge. */
+  boxTop: number;
+  /** The scroll box's visible height. */
+  boxHeight: number;
+  /** The revealed node's top edge. */
+  nodeTop: number;
+  /** The revealed node's full height, however far past the fold it runs. */
+  nodeHeight: number;
+}
+
+/**
+ * How far the box must move for NODE to be as visible as it can be, WITHOUT
+ * pushing the node's own top off the viewport.
+ *
+ * This is "expanding a bubble reveals what it expands", as an arithmetic. The
+ * node is the sub-feed panel that just appeared beneath a bubble's head, so:
+ *
+ * - a panel already wholly on screen is not moved at all (0), because a reader
+ *   who can already see what they opened has nothing to be scrolled toward;
+ * - a panel running BELOW the fold is scrolled up by exactly its overhang,
+ *   capped at the panel's distance from the top of the viewport — the cap is
+ *   what keeps the bubble's HEAD where it was, and it binds whenever the panel
+ *   is taller than the viewport, where the best that fits is the panel's own
+ *   top edge flush with the box's;
+ * - a panel above the viewport top (a bubble opened while its head is scrolled
+ *   off) is brought down to it.
+ *
+ * Positive is downward, matching `scrollTop`.
+ */
+export function revealDelta(g: RevealGeometry): number {
+  const boxBottom = g.boxTop + g.boxHeight;
+  const nodeBottom = g.nodeTop + g.nodeHeight;
+  if (g.nodeTop < g.boxTop) return g.nodeTop - g.boxTop;
+  if (nodeBottom <= boxBottom) return 0;
+  return Math.min(nodeBottom - boxBottom, g.nodeTop - g.boxTop);
+}
+
+/** What a reveal needs of the tail owner, and nothing more. */
+export interface RevealWriter {
+  shift(delta: number): void;
+  release(): void;
+}
+
+/**
+ * WHAT A BUBBLE'S CARET DOES TO THE VIEW, as the one thing that may do it.
+ *
+ * Expanding a fold grows the feed BELOW the fold, and growth alone moves
+ * nothing: the reader clicked a caret and the sub-feed it opened unrolled
+ * entirely off the bottom of the screen (measured at the click: `below=208
+ * scrollTop=40`). Revealing what an expansion revealed is therefore part of
+ * expanding, not a separate courtesy — and it goes through the tail owner,
+ * because a second party writing `scrollTop` is exactly the arrangement
+ * `TailFollow` exists to prevent.
+ *
+ * TWO CASES, DECIDED BEFORE THE CLICK IS ACTED ON. A reader following the tail
+ * stays following it: the expansion's new rows are the newest content, so the
+ * tail re-lands and they are at the bottom of it. Anyone else is holding a
+ * place, so the view moves by the least that puts the opened panel on screen
+ * and the follow decision is left alone — `shift` is relative and decides
+ * nothing, which is precisely why it is what a reveal uses.
+ */
+export interface FeedReveal {
+  /** Was the feed following its tail when the caret was clicked? */
+  isFollowing(): boolean;
+  /** Re-land the tail, for a reader who was following it. */
+  park(): void;
+  /** Bring NODE as far into view as fits, for a reader who was not. */
+  reveal(node: HTMLElement): void;
+}
+
+/** Bind a REAL scroll box and its tail owner into the caret's view rule. */
+export function feedReveal(box: HTMLElement, tail: TailFollow): FeedReveal {
+  return {
+    isFollowing: () => tail.isFollowing(),
+    park: () => tail.park(),
+    reveal: (node) => revealInBox(box, node, tail),
+  };
+}
+
+/**
+ * Move BOX so NODE is as visible as it fits, through TAIL.
+ *
+ * `release` first, which is the state this reader is now in whatever the
+ * geometry says: they deliberately opened content to read, so streaming output
+ * arriving into the feed underneath them must not pull the view off it. That is
+ * the sentence `TailFollow.release` was written for, and until this call site
+ * existed nothing in production said it.
+ */
+export function revealInBox(box: HTMLElement, node: HTMLElement, tail: RevealWriter): void {
+  const b = box.getBoundingClientRect();
+  const n = node.getBoundingClientRect();
+  tail.release();
+  const delta = revealDelta({
+    boxTop: b.top,
+    boxHeight: b.height,
+    nodeTop: n.top,
+    nodeHeight: n.height,
+  });
+  if (delta !== 0) tail.shift(delta);
+}
+
 /** True when the element both clips its content and scrolls it vertically. */
 export function isScrollBox(m: ScrollMetrics): boolean {
   if (m.overflowY !== "auto" && m.overflowY !== "scroll") return false;

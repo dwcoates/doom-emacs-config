@@ -26,6 +26,8 @@ import {
   type RevealBlock,
   type RevealTarget,
   revealNode,
+  revealDelta,
+  revealInBox,
   observeScrollBox,
 } from "../src/scroll.js";
 import { fireResize } from "./resize-observer.js";
@@ -1126,5 +1128,79 @@ describe("observeScrollBox", () => {
     unobserve();
     // Assert — nothing watches it any more, so a fire finds no observer.
     expect(() => fireResize(box.element)).toThrow(/no ResizeObserver/);
+  });
+});
+
+/**
+ * THE EXPANSION'S OWN REVEAL.
+ *
+ * A caret opens a sub-feed BELOW the fold and growth moves nothing on its own,
+ * so the reader was left looking at the head of something they could not see
+ * (measured at a click: `below=208 scrollTop=40`). The arithmetic below is the
+ * whole of the answer; the caret's two cases (pinned, not pinned) live in
+ * test/feed/bubble.test.ts, where the caret is.
+ */
+describe("revealDelta", () => {
+  /** A 300px viewport starting at the top of the screen. */
+  const box = { boxTop: 0, boxHeight: 300 };
+
+  it("moves nothing for a panel already wholly on screen", () => {
+    expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 100 })).toBe(0);
+  });
+
+  it("moves by exactly the overhang for a panel running past the fold", () => {
+    expect(revealDelta({ ...box, nodeTop: 250, nodeHeight: 200 })).toBe(150);
+  });
+
+  it("stops at the panel's own top for a panel taller than the viewport", () => {
+    // Capped: the head above it stays on screen rather than being pushed off
+    // to chase a bottom edge that cannot fit anyway.
+    expect(revealDelta({ ...box, nodeTop: 80, nodeHeight: 900 })).toBe(80);
+  });
+
+  it("brings a panel above the viewport back down to its top", () => {
+    expect(revealDelta({ ...box, nodeTop: -50, nodeHeight: 100 })).toBe(-50);
+  });
+
+  it("counts a panel ending exactly at the fold as visible", () => {
+    expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 200 })).toBe(0);
+  });
+});
+
+describe("revealInBox", () => {
+  /** An element answering a scripted rect, jsdom laying nothing out. */
+  const at = (top: number, height: number): HTMLElement => {
+    const el = document.createElement("div");
+    el.getBoundingClientRect = () => ({
+      top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top,
+      toJSON: () => ({}),
+    });
+    return el;
+  };
+
+  /** The two writes a reveal is allowed to make, recorded. */
+  const writer = () => {
+    const shifts: number[] = [];
+    let released = 0;
+    return { shifts, released: () => released, shift: (d: number) => shifts.push(d),
+      release: () => { released += 1; } };
+  };
+
+  it("shifts the box by the delta the geometry asks for", () => {
+    const w = writer();
+    revealInBox(at(0, 300), at(250, 200), w);
+    expect(w.shifts).toEqual([150]);
+  });
+
+  it("writes nothing when the node is already on screen", () => {
+    const w = writer();
+    revealInBox(at(0, 300), at(100, 100), w);
+    expect(w.shifts).toEqual([]);
+  });
+
+  it("ends the follow even when it moves nothing, the reader having opened content to read", () => {
+    const w = writer();
+    revealInBox(at(0, 300), at(100, 100), w);
+    expect(w.released()).toBe(1);
   });
 });
