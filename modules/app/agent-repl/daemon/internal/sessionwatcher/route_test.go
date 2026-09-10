@@ -569,7 +569,10 @@ func TestRouteDetachedSubagentFrame(t *testing.T) {
 	h.quiet()
 
 	// Act.
-	got := h.route(open.stream, entryFrame(&conversationv1.AgentFrame{
+	// The frame is this run's terminal, so it REAPS its own stream: it is
+	// bounded by the stream's end, never by a sentinel the reap would close
+	// out from under (see routeReaping).
+	got := h.routeReaping(open.stream, entryFrame(&conversationv1.AgentFrame{
 		AgentId: agentID("sub-1"),
 		Result: &conversationv1.AgentFrame_Update{Update: activityUpdate(&conversationv1.AgentActivity{
 			ActivityId: &conversationv1.AgentActivityId{Value: "sub-unit-9"},
