@@ -64,6 +64,17 @@ type Profile struct {
 	// daemon's very first request: a test that queued the answer over the
 	// control socket would be racing the spawn it is scripting.
 	LiveWork [][]byte `json:"live_work,omitempty"`
+	// ResumeHistory is the conversation a RESUMED session already holds: each
+	// element is one binary-encoded conversation.v1 HistoryEntry, stated
+	// NEWEST FIRST as a producer serves a page, and every WatchAgent stream of
+	// a resumed session opens with them as its floored catch-up page.
+	//
+	// It models what the real shim does off the store — a resume serves the
+	// agent's whole book, a fresh start serves an empty floor — and it is a
+	// PROFILE rather than a scripted answer because the page is the opening
+	// frame of a stream the daemon opens during bring-up, which a control
+	// socket script would race.
+	ResumeHistory [][]byte `json:"resume_history,omitempty"`
 }
 
 // ColdFacts are the shim's stated facts on a cold refusal.
