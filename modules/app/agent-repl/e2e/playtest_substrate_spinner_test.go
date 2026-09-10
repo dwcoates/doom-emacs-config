@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // THE SUBSTRATE'S RUNNING-MARKER PRECONDITION, MEASURED IN PIXELS.
@@ -194,6 +195,10 @@ type spinnerPage struct {
 	sheet string
 	dir   string
 	seq   int
+
+	// asked numbers the questions put to the page, so every answer can be
+	// matched to the question that asked it. See spinnerProbeSetup.
+	asked int
 }
 
 // newSpinnerPage brings up an Emacs, sizes its frame to the whole screen,
@@ -225,18 +230,76 @@ func newSpinnerPage(t *testing.T) *spinnerPage {
 
 // spinnerProbeSetup installs the page probe, in the two-eval shape
 // `playtestProbeSetup` explains: `xwidget-webkit-execute-script` is
-// asynchronous, so each call issues the script again and answers what the
+// asynchronous, so each call issues the script again and answers what a
 // PREVIOUS issue's callback stored.
+//
+// EVERY ANSWER CARRIES THE QUESTION IT ANSWERS, and that is not decoration.
+// Clearing the stored answer before a new question is not enough: the
+// callback of the question BEFORE it is still in flight and lands after the
+// clear, so the next poll reads a stale answer to a question nobody is
+// asking any more. MEASURED, and it is how this file's third check failed on
+// a page that was drawing correctly -- it asked for the arc's computed
+// `animation-delay` and was handed the fade-in wait's own `pageYes`
+// diagnostic, `no: url=... text=running…`, which its `!= ""` predicate
+// accepted on the first poll.
+//
+// So the answer is stored as `(id . value)` and the probe answers ONLY when
+// the stored id is the id of the question it was just asked. A late callback
+// from an earlier question stores an earlier id and is ignored, which is the
+// guarantee rather than a narrower window on the same race.
 const spinnerProbeSetup = `(progn
-             (defvar agent-repl-spinnertest--js nil)
-             (defun agent-repl-spinnertest--probe (script)
+             (defvar agent-repl-spinnertest--answer nil)
+             (defun agent-repl-spinnertest--probe (id script)
                (let ((xw (xwidget-webkit-current-session)))
                  (unless xw (error "no live webkit session for the spinner page"))
                  (xwidget-webkit-execute-script
                   xw script
-                  (lambda (value) (setq agent-repl-spinnertest--js (format "%s" value))))
-                 agent-repl-spinnertest--js))
+                  (lambda (value)
+                    (setq agent-repl-spinnertest--answer (cons id (format "%s" value)))))
+                 (if (and (consp agent-repl-spinnertest--answer)
+                          (equal (car agent-repl-spinnertest--answer) id))
+                     (cdr agent-repl-spinnertest--answer)
+                   "")))
              t)`
+
+// ask puts one question to the page and answers it once the renderer has,
+// polling through the layer's own `AwaitEval` and never sleeping.
+//
+// The id is minted here, per question, and threaded through the probe, so
+// what comes back cannot be an earlier question's answer.
+func (p *spinnerPage) ask(t *testing.T, bound time.Duration, what, script string, ok func(string) bool) string {
+	t.Helper()
+	p.asked++
+	id := fmt.Sprintf("q%d", p.asked)
+	raw := p.e.AwaitEvalFor(bound, what,
+		`(agent-repl-spinnertest--probe `+elispString(id)+` `+elispString(script)+`)`,
+		func(raw json.RawMessage) bool { return ok(decodeString(raw)) })
+	return decodeString(raw)
+}
+
+// askYes puts a `pageYes` question to the page and waits for its "yes".
+func (p *spinnerPage) askYes(t *testing.T, bound time.Duration, what, expression string) {
+	t.Helper()
+	p.ask(t, bound, what, pageYes(expression),
+		func(answer string) bool { return answer == "yes" })
+}
+
+// onThisPage guards an expression with the page's OWN readiness signal: the
+// sequence number this navigation stamped on the document element.
+//
+// A URI is not a page and a navigation is not a mount. `xwidget-webkit-browse-url`
+// returns immediately and the webview keeps serving the PREVIOUS document
+// until the new one commits, so a question about "the badge" can be answered
+// by the badge of the page before it -- this file shows the same stage
+// twice in a row, so the shape of the DOM does not tell them apart. The
+// stamp does, because it is minted per navigation.
+func (p *spinnerPage) onThisPage(expression string) string {
+	return `document.documentElement.getAttribute(` + jsString(spinnerSeqAttribute) + `) === ` +
+		jsString(fmt.Sprint(p.seq)) + ` && ` + expression
+}
+
+// spinnerSeqAttribute is where a navigation stamps its sequence number.
+const spinnerSeqAttribute = "data-spinner-seq"
 
 // spinnerPageHTML builds the page: the shipped stylesheet verbatim, a white
 // ground, and the product's own `running…` badge markup blown up so a pixel
@@ -256,7 +319,8 @@ func (p *spinnerPage) spinnerPageHTML(stage spinnerStage, flag spinnerFlag) stri
 		head = `<script>document.documentElement.setAttribute(` +
 			jsString(playtestMotionAttribute) + `, ` + jsString(playtestMotionPaused) + `);</script>`
 	}
-	return `<!doctype html><html><head><meta charset="utf-8"><title>spinner</title>` + head +
+	return `<!doctype html><html ` + spinnerSeqAttribute + `="` + fmt.Sprint(p.seq) +
+		`"><head><meta charset="utf-8"><title>spinner</title>` + head +
 		`<style>` + p.sheet + `</style><style>
 html { font-size: ` + fmt.Sprint(spinnerRootFontSizePx) + `px; }
 body { margin: 0; padding: 0; background: #ffffff; }
@@ -300,20 +364,20 @@ func (p *spinnerPage) show(t *testing.T, stage spinnerStage, flag spinnerFlag) {
 		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
 	p.e.Eval(spinnerProbeSetup)
 
-	// The page is MOUNTED when the badge this navigation asked for is in the
-	// document -- a URI is not a page, and a webview still holding the
-	// previous stage would answer every question about it.
+	// The page is MOUNTED when THIS navigation's own document is in the
+	// webview -- its sequence stamp, then the badge it asked for. The URI
+	// wait above is a wait on a navigation being ISSUED, and the webview
+	// serves the previous document until the new one commits; this file
+	// shows the same stage twice running, so the DOM alone cannot tell the
+	// two apart and the stamp is what does.
 	wantArc := "true"
 	if stage == spinnerStageNoArc {
 		wantArc = "false"
 	}
-	p.e.Eval(`(setq agent-repl-spinnertest--js nil)`)
-	p.e.AwaitEvalFor(playtestPageBound, "the spinner page to hold the badge this step navigated to",
-		`(agent-repl-spinnertest--probe `+elispString(pageYes(
-			`document.readyState === "complete" && `+
-				`document.querySelector("#stage .badge.run") !== null && `+
-				`(document.getElementById("arc") !== null) === `+wantArc))+`)`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+	p.askYes(t, playtestPageBound, "the spinner page to hold the badge this step navigated to",
+		p.onThisPage(`document.readyState === "complete" && `+
+			`document.querySelector("#stage .badge.run") !== null && `+
+			`(document.getElementById("arc") !== null) === `+wantArc))
 
 	if flag == spinnerFlagAtParse {
 		p.requireMotionHeld(t)
@@ -326,11 +390,9 @@ func (p *spinnerPage) show(t *testing.T, stage spinnerStage, flag spinnerFlag) {
 // wait rather than break it.
 func (p *spinnerPage) awaitFadedIn(t *testing.T) {
 	t.Helper()
-	p.e.Eval(`(setq agent-repl-spinnertest--js nil)`)
-	p.e.AwaitEvalFor(spinnerFadeInBound, "the running arc's own fade-in to reach full opacity",
-		`(agent-repl-spinnertest--probe `+elispString(pageYes(
-			`getComputedStyle(document.getElementById("arc")).opacity === "1"`))+`)`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+	p.askYes(t, spinnerFadeInBound, "the running arc's own fade-in to reach full opacity",
+		p.onThisPage(`document.getElementById("arc") !== null && `+
+			`getComputedStyle(document.getElementById("arc")).opacity === "1"`))
 }
 
 // spinnerFadeInBound is how long the arc's fade-in is given to run.
@@ -342,14 +404,18 @@ const spinnerFadeInBound = 4 * playtestPageBound
 
 // computedStyleOf answers one computed style property of the arc, as the
 // renderer resolved it.
+// The question is asked OF THE ARC ON THIS PAGE, and answers nothing while
+// either is missing: a script that dereferenced a null arc would throw, and
+// what a throw leaves in the probe is not a computed style.
 func (p *spinnerPage) computedStyleOf(t *testing.T, property string) string {
 	t.Helper()
-	p.e.Eval(`(setq agent-repl-spinnertest--js nil)`)
-	raw := p.e.AwaitEvalFor(playtestPageBound, "the running arc's computed "+property,
-		`(agent-repl-spinnertest--probe `+elispString(
-			`getComputedStyle(document.getElementById("arc")).`+property)+`)`,
-		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
-	return decodeString(raw)
+	return p.ask(t, playtestPageBound, "the running arc's computed "+property,
+		`(function () {
+                   var arc = document.getElementById("arc");
+                   if (!(`+p.onThisPage(`arc !== null`)+`)) { return ""; }
+                   return getComputedStyle(arc).`+property+`;
+                 })()`,
+		func(answer string) bool { return answer != "" })
 }
 
 // requireMotionHeld is the precondition every capture below rests on: with
@@ -358,12 +424,9 @@ func (p *spinnerPage) computedStyleOf(t *testing.T, property string) string {
 // torn frame.
 func (p *spinnerPage) requireMotionHeld(t *testing.T) {
 	t.Helper()
-	p.e.Eval(`(setq agent-repl-spinnertest--js nil)`)
-	p.e.AwaitEvalFor(playtestPageBound, "the photographer's flag to be up on the spinner page",
-		`(agent-repl-spinnertest--probe `+elispString(pageYes(
-			`document.documentElement.getAttribute(`+jsString(playtestMotionAttribute)+`) === `+
-				jsString(playtestMotionPaused)))+`)`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+	p.askYes(t, playtestPageBound, "the photographer's flag to be up on the spinner page",
+		p.onThisPage(`document.documentElement.getAttribute(`+jsString(playtestMotionAttribute)+`) === `+
+			jsString(playtestMotionPaused)))
 }
 
 // ---------------------------------------------------------------------------
@@ -415,10 +478,9 @@ func (p *spinnerPage) capture(t *testing.T, token string) *image.RGBA {
 // DOM now in it. See playtestPaintFrames.
 func (p *spinnerPage) awaitPainted(t *testing.T, token string) {
 	t.Helper()
-	p.e.Eval(`(setq agent-repl-spinnertest--js nil)`)
-	p.e.AwaitEvalFor(playtestPaintBound, "the spinner page to deliver its own frames",
-		`(agent-repl-spinnertest--probe `+elispString(playtestPaintGateScript(token))+`)`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+	p.ask(t, playtestPaintBound, "the spinner page to deliver its own frames",
+		playtestPaintGateScript(token),
+		func(answer string) bool { return answer == "yes" })
 }
 
 // redraw garbages the frame twice, for the double-buffer reason
