@@ -5201,7 +5201,8 @@ body.draining #composer-input::placeholder {
 }
 
 /* The three right-hand controls share one quiet button treatment, so a reader
-   learns the affordance once. */
+   learns the affordance once. THE SHARED TREATMENT IS THE BOX AND NOT THE
+   COLOR — see the muted rule just below it. */
 .topbar-model-button,
 .topbar-mode-button,
 .topbar-context-figure,
@@ -5211,16 +5212,37 @@ body.draining #composer-input::placeholder {
   border-radius: 3px;
   padding: 0.15rem 0.45rem;
   font: inherit;
-  color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
+}
+/* THE QUIET COLOR IS NOT SHARED, AND THAT IS A FIX A PICTURE BOUGHT. The rule
+   above used to carry `color: var(--muted)` for all four controls.
+   `.tone-yellow` — which `drawTopbarContextChip` puts on the figure precisely
+   so the context register rides it — is a single class too, and it is declared
+   thousands of lines EARLIER, so this rule won the cascade and THE ONE COLORED
+   NUMBER IN THE STRIP WAS PAINTED GREY in every running page. The class was on
+   the element the whole time, which is why the unit test asserting the class
+   passed straight over it; a playtest capture of the topbar is what saw it. So
+   the controls that ARE quiet say so here, and the figure's color is left to
+   the tone it carries. */
+.topbar-model-button,
+.topbar-mode-button,
+.topbar-warning-chip {
+  color: var(--muted);
 }
 .topbar-model-button:hover,
 .topbar-mode-button:hover,
 .topbar-context-figure:hover,
 .topbar-warning-chip:hover {
-  color: var(--fg);
   border-color: var(--border);
+}
+/* Hover lifts the quiet controls to the ordinary foreground. THE FIGURE IS NOT
+   AMONG THEM: its color IS its register, and a register that vanishes under the
+   pointer is the same defect the rule above fixes, only intermittent. */
+.topbar-model-button:hover,
+.topbar-mode-button:hover,
+.topbar-warning-chip:hover {
+  color: var(--fg);
 }
 /* An unset selection reads as an invitation, not as a value. */
 .topbar-model-button[data-unselected] {

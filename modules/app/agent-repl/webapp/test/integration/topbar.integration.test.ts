@@ -22,6 +22,7 @@ import {
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { startHarness, type Harness } from "./harness";
 import { MODEL_PLACEHOLDER } from "../../src/topbar/model";
 import { isKnownTone, RENDER_COLORS } from "./vocab";
@@ -411,6 +412,24 @@ describe("the context chip", () => {
     await withTopbar({});
     // Assert: yellow is the context figure's own color by directive.
     expect(harness.$(".topbar-context")?.className).toContain("tone-yellow");
+  });
+
+  it("paints the figure yellow with the REAL stylesheet over the whole strip", async () => {
+    // The class above is what the drawing code decides; this is what a reader
+    // gets, and the two disagreed. A later same-specificity topbar-button rule
+    // set `color: var(--muted)` on the figure, so the one colored number in the
+    // strip came out GREY in the running application while every class
+    // assertion in this suite stayed green. A playtest capture of the topbar
+    // caught it; this is the assertion that keeps it caught.
+    // Arrange
+    const remove = installStylesheet();
+    // Act
+    await withTopbar({ contextText: "184k" });
+    // Assert
+    expect(cascadedValue(harness.$(".topbar-context-figure") as Element, "color")).toBe(
+      "var(--async)",
+    );
+    remove();
   });
 
   it("reveals the breakdown's section heading verbatim", async () => {
