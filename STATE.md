@@ -26,12 +26,18 @@ adding the marker-property paragraph).
   REQUIRED to hold the same image resolver. Unit tests: promptqueue
   deliver_test (2) + queue_test refusal case, feed image_test (3).
 
+- `fix(webapp/feed)`: `.prompt-block-image` had NO rule, so an attached image
+  drew at its intrinsic size and a screenshot would push the feed's column off
+  the panel. Capped at the bubble, height following. Test in
+  `test/feed/rows/blocks.test.ts` (2).
+
 ## Gates run so far (host)
 - daemon `go build`/`go vet`/`go test ./internal/... ./cmd/...`: green.
 - daemon integration suite (whole, -parallel 8): green.
 - lisp aggregate: 3759/3759.
 - e2e gofmt + vet (plain, playtest, integration tags): green.
-- webapp typecheck: green.
+- webapp typecheck, lint and `npm test` (103 files, 3776 tests): green.
+- byte-compile: clean.
 
 ## Runs
 - Run 5 (pre-rebase, commit 44f6366d8): GREEN. Not counted -- the section has
