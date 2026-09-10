@@ -180,6 +180,9 @@ type sidecar struct {
 	// defect that never stops being true stays visible, logarithmically,
 	// rather than becoming the log's entire content.
 	defects map[string]*fileDefect
+	// watchedThisPass counts the files ONE rescan started watching, so the
+	// pass can state a count rather than a record per file.
+	watchedThisPass int
 	// rewound remembers which files have had their one boot rewind, so the
 	// bounded backward scan happens once per file per process rather than on
 	// every reconnect.
@@ -571,6 +574,7 @@ func (s *sidecar) reportResumed() {
 func (s *sidecar) rescan() {
 	s.requireCursors("rescan")
 	now := s.now()
+	s.watchedThisPass = 0
 	// THE IDENTITY RECORDS ARE RE-READ BEFORE ANYTHING IS DISCOVERED OR
 	// RE-KEYED, so a rotation that happened since the last pass is already
 	// known when the transcript it produced is first seen.
@@ -614,6 +618,26 @@ func (s *sidecar) rescan() {
 		}
 		s.watch(resolved, identity, cursor, now)
 	}
+	s.reportRescan()
+}
+
+// reportRescan states, ONCE PER PASS, what the pass did to the watched set.
+//
+// The per-file `watch` record is verbose because this process has no age bound
+// on discovery: every transcript ever written under either config root is
+// watched forever, so on a working machine that is thousands of records per
+// boot describing files nothing will ever append to again. The lifecycle fact
+// an operator actually reads off the log is HOW MANY — the size of the watched
+// set, and whether this pass grew it — so that is what stands at normal
+// verbosity. A pass that changed nothing says nothing.
+func (s *sidecar) reportRescan() {
+	if s.watchedThisPass == 0 {
+		return
+	}
+	s.log.With(logging.Context{
+		Operation: "rescan", Repeat: logging.Repeat(s.watchedThisPass),
+	}).Log("this rescan started watching %d newly discovered file(s); %d file(s) are now watched",
+		s.watchedThisPass, len(s.watchers))
 }
 
 // refreshSpawnFacts re-reads, for every watched file, the one attribution fact
@@ -728,7 +752,14 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 	}
 	s.watchers[target.Path] = &watched{target: target, tailer: tailer, ctx: ctx}
 	s.trackDetached(target, now)
-	bound.With(logging.Context{Operation: "watch"}).Log("watching %s", target.Kind)
+	// PER FILE, SO VERBOSE. This process watches every transcript under both
+	// config roots with no age bound, which on a developer's machine is
+	// thousands of long-dead files; one normal-verbosity record each made
+	// every boot cost megabytes of log that said nothing but "still here".
+	// The COUNTS are the lifecycle fact and rescan states those; WHICH file,
+	// and of what kind, is per-record detail.
+	bound.With(logging.Context{Operation: "watch"}).LogVerbose("watching %s", target.Kind)
+	s.watchedThisPass++
 	// A stop that arrived while this spool was held is NOT applied here, even
 	// though the spool now has a reader.
 	//

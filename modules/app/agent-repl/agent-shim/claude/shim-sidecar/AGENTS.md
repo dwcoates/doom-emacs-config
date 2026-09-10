@@ -553,6 +553,14 @@ pre-logger bootstrap failure and the sink-emergency path.
 - Hot per-record and per-batch success diagnostics use `LogVerbose` (gated by
   `AGENT_REPL_LOG_VERBOSE`); lifecycle, invariant violations, refusals and
   failures are normal-verbosity records.
+- A PER-FILE RECORD IS A HOT RECORD HERE, and `watch` is one. Discovery has no
+  age bound: every transcript ever written under either config root is watched
+  for the life of the process, which on a working machine is thousands of files
+  nothing will ever append to again. One normal-verbosity record each cost
+  megabytes per boot that said nothing but "still here". The COUNT is the
+  lifecycle fact, so `rescan` states it once per pass — how many files the pass
+  started watching and how many are watched now — and a pass that changed
+  nothing states nothing. WHICH file, and of what kind, is verbose detail.
 - R10: SIDECAR SELF-DIAGNOSTICS HAVE NO WIRE HOME. They are structured logs
   only. The diagnostic outbox that wrote them to the store is deleted; do not
   aim them at an approximate arm.

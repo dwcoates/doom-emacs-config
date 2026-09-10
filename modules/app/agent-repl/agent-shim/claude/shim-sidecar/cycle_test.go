@@ -1507,3 +1507,47 @@ func TestTwoFilesTallyTheirDefectsSeparately(t *testing.T) {
 		t.Errorf("the second file's first defect counted %d stated=%v, want its own tally starting at 1", count, stated)
 	}
 }
+
+// TestARescanStatesTheCountItWatchedRatherThanARecordPerFile covers the boot
+// volume: discovery has no age bound, so a per-file record at normal verbosity
+// costs megabytes of log per boot that say nothing but "still here".
+func TestARescanStatesTheCountItWatchedRatherThanARecordPerFile(t *testing.T) {
+	// Arrange: three transcripts to discover.
+	h := newHarness(t, &fakeStore{})
+	for _, session := range []string{"sess-1", "sess-2", "sess-3"} {
+		h.transcript(t, session, promptLine)
+	}
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert: one summary naming the count, and no per-file record beside it.
+	rec := h.requireOnce(t, "rescan", "info")
+	if got, ok := rec.Context["repeat_count"].(float64); !ok || int(got) != 3 {
+		t.Errorf("repeat_count = %v, want the 3 files this pass started watching", rec.Context["repeat_count"])
+	}
+	h.requireNone(t, "watch", "info")
+}
+
+// TestARescanThatWatchedNothingStatesNothing covers the quiet pass: the rescan
+// tick runs every 30s for the life of the process, and a pass that changed the
+// watched set not at all has no lifecycle fact to report.
+func TestARescanThatWatchedNothingStatesNothing(t *testing.T) {
+	// Arrange: a cycle that has already watched everything there is.
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	before := len(h.opsAt(t, "rescan", "info"))
+
+	// Act: a second pass over the same, unchanged set.
+	h.sc.rescan()
+
+	// Assert.
+	if got := len(h.opsAt(t, "rescan", "info")); got != before {
+		t.Errorf("a rescan that watched nothing wrote %d more record(s), want none", got-before)
+	}
+}
