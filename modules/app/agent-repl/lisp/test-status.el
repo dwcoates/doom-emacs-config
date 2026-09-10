@@ -214,14 +214,12 @@ the color this surface actually assigns the state."
 
 (ert-deftest agent-repl-test-tab-spec-merge-conflict-falls-back-to-default ()
   "`:merge-conflict\=' takes no tab color, so its spec is the default one.
-The default\='s unselected background is the UN-ARMED pair rather than
-`unspecified\=': an inherited background is a different color on every
-theme, and pairing a foreground with it is a promise the palette cannot
-keep."
+The default\='s unselected background is the TAB BAR\='s own, so a tab with
+no arm sits flush on the bar instead of painting a ground of its own."
   ;; Arrange
   (let ((spec (agent-repl--tab-spec :merge-conflict nil)))
     ;; Act / Assert
-    (should (equal (plist-get spec :bg) agent-repl--color-unarmed-bg))))
+    (should (equal (plist-get spec :bg) (agent-repl--tab-bar-background)))))
 
 (ert-deftest agent-repl-test-tab-spec-idle-async-is-yellow ()
   ":idle-async resolves to the amber background so an idle-but-working tab
@@ -477,16 +475,20 @@ reads distinctly from :idle orange and :thinking red."
     (should (equal (plist-get spec :bracket-bg) "#1a7a1a"))))
 
 (ert-deftest agent-repl-test-tab-spec-unknown-state-falls-back-to-default ()
-  "tab-spec returns the default spec for states absent from the palette."
+  "tab-spec returns the default spec for states absent from the palette.
+The unselected numeral takes the foreground chosen against the BAR (the
+ground it is drawn on now) rather than a fixed white, which is what it
+was when it was drawn over an inherited background."
   (let ((unsel (agent-repl--tab-spec :bogus nil))
         (sel   (agent-repl--tab-spec :bogus t)))
-    (should (equal (plist-get unsel :bracket-fg) "white"))
+    (should (equal (plist-get unsel :bracket-fg)
+                   (agent-repl--tab-bar-legible-fg)))
     (should (equal (plist-get sel :bg) "#c0c0c0"))))
 
 (ert-deftest agent-repl-test-tab-spec-nil-state-uses-default ()
   "tab-spec with nil state returns the default spec."
   (should (equal (plist-get (agent-repl--tab-spec nil nil) :bracket-fg)
-                 "white")))
+                 (agent-repl--tab-bar-legible-fg))))
 
 (ert-deftest agent-repl-test-tab-spec-permission-selected-no-face-override ()
   "The :permission :selected spec carries no :face-override so the
@@ -630,11 +632,11 @@ appended *after* the faced padding, not merged into it."
   (should (eq (agent-repl--tab-face nil t) '+workspace-tab-selected-face)))
 
 (ert-deftest agent-repl-test-tab-face-nil-state-unselected ()
-  "tab-face with nil state and unselected takes this module\='s OWN un-armed
+  "tab-face with nil state and unselected names this module\='s OWN un-armed
 face, not Doom\='s `+workspace-tab-face\='.  That one inherits both its colors
 from the frame, which is why an un-armed tab drew black glyphs on
 `#14141a\=' — the one appearance in the palette with no pairing at all."
-  (should (eq (agent-repl--tab-face nil nil) 'agent-repl-tab-unarmed)))
+  (should (memq 'agent-repl-tab-unarmed (agent-repl--tab-face nil nil))))
 
 ;;;; ---- Tests: the selection face belongs to the selected tab alone ----
 
@@ -663,13 +665,35 @@ have to break for that to happen."
     ;; Act / Assert
     (should (eq (agent-repl--tab-face arm t) (agent-repl--ws-tab-selected-face)))))
 
-;;;; ---- Tests: the un-armed tab's legibility ----
+;;;; ---- Tests: the un-armed tab's ground and its legibility ----
 ;;
-;; Every one of these is one edge case of ONE rule: a tab's own foreground
-;; and background are a stated pair, and the pair is readable.  The un-armed
-;; tab was the single appearance that stated neither, and it drew black
-;; glyphs on `#14141a' (about 1.06:1) with a white numeral on `#d9d9d9'
-;; (about 1.3:1) on the playtest's own frame.
+;; TWO rules, one edge case per test.  An UNSELECTED tab's ground is the TAB
+;; BAR's own background, read off the `tab-bar' face, so the tab sits flush on
+;; the bar; and the text drawn on that ground clears
+;; `agent-repl-tab-contrast-floor' against it, whatever color the bar is.
+;;
+;; The second rule is the one the un-armed tab used to break outright: it
+;; stated neither half of its pair and drew black glyphs on `#14141a' (about
+;; 1.06:1) with a white numeral on `#d9d9d9' (about 1.3:1) on the playtest's
+;; own frame.  The stated dark grey that first answered it is GONE — an
+;; unselected tab that paints its own ground is a ground the bar does not
+;; have — so the tests that held that grey clear of the state colors and of
+;; the selection grey went with it: there is no such constant to hold, and
+;; the color a THEME gives its own tab bar is not this module's to constrain.
+
+(defmacro agent-repl-test--with-tab-bar-background (color &rest body)
+  "Run BODY with the `tab-bar' face's background set to COLOR, then restore it.
+This is how a THEMED frame is reached from a batch run: the readers under
+test ask the live frame what the bar is, so the only way to test another
+theme's answer is to give the frame another answer."
+  (declare (indent 1))
+  `(let ((agent-repl-test--saved-bar-bg
+          (face-attribute 'tab-bar :background nil nil)))
+     (unwind-protect
+         (progn (set-face-attribute 'tab-bar nil :background ,color)
+                ,@body)
+       (set-face-attribute 'tab-bar nil
+                           :background agent-repl-test--saved-bar-bg))))
 
 (ert-deftest agent-repl-test-contrast-ratio-of-a-color-with-itself-is-one ()
   "Two identical colors have a contrast ratio of 1, the floor of the scale."
@@ -699,46 +723,75 @@ invented here would let an illegible pair pass this very check."
   ;; Arrange / Act / Assert
   (should-error (agent-repl-color-contrast-ratio "not-a-color-at-all" "white")))
 
-(ert-deftest agent-repl-test-unarmed-pair-meets-the-contrast-floor ()
-  "The un-armed tab's own pair is readable, by the module's own number."
-  ;; Arrange / Act
-  (let ((ratio (agent-repl-color-contrast-ratio agent-repl--color-unarmed-fg
-                                                agent-repl--color-unarmed-bg)))
-    ;; Assert
-    (should (>= ratio agent-repl-tab-contrast-floor))))
-
-(ert-deftest agent-repl-test-unarmed-background-is-not-inherited ()
-  "The un-armed background is a STATED color, never `unspecified'.
-An inherited background resolves to a different color on every theme, so
-no foreground can be paired with it."
-  ;; Arrange / Act / Assert
-  (should (stringp agent-repl--color-unarmed-bg)))
-
-(ert-deftest agent-repl-test-unarmed-background-is-not-a-state-color ()
-  "The un-armed grey is clear of all five state colors, so a tab with no
-arm cannot be misread as a tab in one."
+(ert-deftest agent-repl-test-unselected-ground-is-the-tab-bar-background ()
+  "An UNSELECTED un-armed tab\='s background is the bar\='s own background.
+This is the ruling the stated grey was replaced by: the tab is flush on
+the bar, so the only thing separating the two is the text."
   ;; Arrange
-  (let ((states (list agent-repl--color-init-blue
-                      agent-repl--color-thinking-red
-                      agent-repl--color-done-green
-                      agent-repl--color-idle-async-yellow
-                      agent-repl--color-merging-purple)))
+  (let ((spec (plist-get (agent-repl--tab-default) :unselected)))
     ;; Act / Assert
-    (should-not (member agent-repl--color-unarmed-bg states))))
+    (should (equal (plist-get spec :bg)
+                   (face-background 'tab-bar nil t)))))
 
-(ert-deftest agent-repl-test-unarmed-background-is-not-the-selected-grey ()
-  "The un-armed grey is not the SELECTED grey either: an unselected tab
-that painted itself the selection color would say the wrong thing about
-which workspace the user is standing in."
+(ert-deftest agent-repl-test-selected-ground-is-still-the-selection-grey ()
+  "The SELECTED tab\='s background did not move: it is still the shared grey.
+Only the unselected half went flush with the bar; a selection that also
+took the bar\='s color would stop saying which workspace the user is in."
+  ;; Arrange
+  (let ((spec (plist-get (agent-repl--tab-default) :selected)))
+    ;; Act / Assert
+    (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))))
+
+(ert-deftest agent-repl-test-unselected-foreground-clears-the-floor-on-a-dark-bar ()
+  "On a DARK themed bar the chosen foreground still clears the floor.
+`#14141a\=' is the frame the illegible tab was measured on, where an
+inherited foreground drew black on near-black at about 1.06:1."
+  ;; Arrange
+  (agent-repl-test--with-tab-bar-background "#14141a"
+    ;; Act
+    (let* ((bg (agent-repl--tab-bar-background))
+           (fg (agent-repl--tab-bar-legible-fg bg)))
+      ;; Assert
+      (should (>= (agent-repl-color-contrast-ratio fg bg)
+                  agent-repl-tab-contrast-floor)))))
+
+(ert-deftest agent-repl-test-unselected-foreground-clears-the-floor-on-a-light-bar ()
+  "On a LIGHT themed bar the chosen foreground still clears the floor.
+`#d9d9d9\=' is the bar the un-armed numeral was drawn white on, at about
+1.3:1 — the same defect from the other end of the scale."
+  ;; Arrange
+  (agent-repl-test--with-tab-bar-background "#d9d9d9"
+    ;; Act
+    (let* ((bg (agent-repl--tab-bar-background))
+           (fg (agent-repl--tab-bar-legible-fg bg)))
+      ;; Assert
+      (should (>= (agent-repl-color-contrast-ratio fg bg)
+                  agent-repl-tab-contrast-floor)))))
+
+(ert-deftest agent-repl-test-unselected-foreground-clears-the-floor-with-no-theme ()
+  "With NO theme loaded the chosen foreground clears the floor as well.
+This is the sandbox frame the playtests run on, where `tab-bar\=' falls
+through to its own defface and the whole defect first appeared."
+  ;; Arrange / Act
+  (let* ((bg (agent-repl--tab-bar-background))
+         (fg (agent-repl--tab-bar-legible-fg bg)))
+    ;; Assert
+    (should (>= (agent-repl-color-contrast-ratio fg bg)
+                agent-repl-tab-contrast-floor))))
+
+(ert-deftest agent-repl-test-a-bar-with-no-resolvable-background-is-an-error ()
+  "A bar this frame cannot resolve is refused, never guessed at: a color
+invented here would let an illegible pair pass the floor check."
   ;; Arrange / Act / Assert
-  (should-not (equal agent-repl--color-unarmed-bg agent-repl--color-selected-bg)))
+  (agent-repl-test--with-tab-bar-background 'unspecified
+    (should-error (agent-repl--tab-bar-background))))
 
 (ert-deftest agent-repl-test-default-spec-unselected-bracket-meets-the-contrast-floor ()
   "The default spec's unselected NUMERAL is readable on its own background.
 It was `agent-repl--color-default-bracket' — white — over an inherited
 background, which resolved to about 1.3:1 on the playtest's frame."
   ;; Arrange
-  (let* ((spec (plist-get agent-repl--tab-default :unselected))
+  (let* ((spec (plist-get (agent-repl--tab-default) :unselected))
          (bg   (or (plist-get spec :bracket-bg) (plist-get spec :bg)))
          (fg   (plist-get spec :bracket-fg)))
     ;; Act / Assert
@@ -748,7 +801,7 @@ background, which resolved to about 1.3:1 on the playtest's frame."
 (ert-deftest agent-repl-test-default-spec-unselected-name-meets-the-contrast-floor ()
   "The default spec's unselected NAME region is readable on its background."
   ;; Arrange
-  (let ((spec (plist-get agent-repl--tab-default :unselected)))
+  (let ((spec (plist-get (agent-repl--tab-default) :unselected)))
     ;; Act / Assert
     (should (>= (agent-repl-color-contrast-ratio (plist-get spec :fg)
                                                  (plist-get spec :bg))
@@ -758,7 +811,7 @@ background, which resolved to about 1.3:1 on the playtest's frame."
   "The SELECTED half of the default spec was already a stated pair, and it
 is held to the same number so a later edit cannot quietly break it."
   ;; Arrange
-  (let* ((spec (plist-get agent-repl--tab-default :selected))
+  (let* ((spec (plist-get (agent-repl--tab-default) :selected))
          (bg   (or (plist-get spec :bracket-bg) (plist-get spec :bg)))
          (fg   (plist-get spec :bracket-fg)))
     ;; Act / Assert
@@ -776,18 +829,36 @@ rule is the palette's rather than one row's exception."
                                                    (plist-get spec :bg))
                   agent-repl-tab-contrast-floor)))))
 
-(ert-deftest agent-repl-test-unarmed-face-carries-the-unarmed-background ()
-  "The face the renderer puts on an un-armed name run carries the stated
-background, so what is DRAWN is the pair the palette states."
+(ert-deftest agent-repl-test-unarmed-face-takes-the-bar-background ()
+  "The face the renderer puts on an un-armed name run resolves to the BAR\='s
+background, because it inherits `tab-bar\=' for exactly that half."
   ;; Arrange / Act / Assert
-  (should (equal agent-repl--color-unarmed-bg
-                 (face-attribute 'agent-repl-tab-unarmed :background nil t))))
+  (should (equal (face-background 'tab-bar nil t)
+                 (face-background 'agent-repl-tab-unarmed nil t))))
 
-(ert-deftest agent-repl-test-unarmed-face-carries-the-unarmed-foreground ()
-  "The same face carries the stated foreground."
+(ert-deftest agent-repl-test-unarmed-name-face-states-the-chosen-foreground ()
+  "The spec the renderer draws the name run with states the foreground
+chosen against the bar, rather than inheriting one from the frame — the
+inherited foreground is the whole defect."
+  ;; Arrange / Act
+  (let ((face (agent-repl--tab-face nil nil)))
+    ;; Assert
+    (should (equal (agent-repl--tab-bar-legible-fg)
+                   (plist-get (car face) :foreground)))))
+
+(ert-deftest agent-repl-test-an-armed-unselected-tab-keeps-its-arm-color ()
+  "An ARMED unselected tab is untouched by the flush-on-the-bar rule: its
+name run is still the arm\='s own face, so the arm\='s color is what the
+user sees."
   ;; Arrange / Act / Assert
-  (should (equal agent-repl--color-unarmed-fg
-                 (face-attribute 'agent-repl-tab-unarmed :foreground nil t))))
+  (should (eq 'agent-repl-tab-thinking (agent-repl--tab-face :thinking nil))))
+
+(ert-deftest agent-repl-test-an-armed-unselected-tab-keeps-its-arm-background ()
+  "The same armed tab\='s spec still states the arm\='s color as its ground,
+not the bar\='s."
+  ;; Arrange / Act / Assert
+  (should (equal agent-repl--color-thinking-red
+                 (plist-get (agent-repl--tab-spec :thinking nil) :bg))))
 
 (ert-deftest agent-repl-test-a-bracket-only-tab-name-takes-the-unarmed-face ()
   "A workspace whose full-tab color is suppressed — panels dismissed, or a
@@ -795,7 +866,7 @@ background, so what is DRAWN is the pair the palette states."
 its bracket keeps the arm's color.  That is the exact path the illegible
 tab was reached by."
   ;; Arrange / Act / Assert
-  (should (eq 'agent-repl-tab-unarmed (agent-repl--tab-face nil nil))))
+  (should (memq 'agent-repl-tab-unarmed (agent-repl--tab-face nil nil))))
 
 ;;;; ---- Tests: tab-priority-image-str ----
 
