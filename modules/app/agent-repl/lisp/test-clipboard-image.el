@@ -6,10 +6,13 @@
 ;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
 ;;     -l lisp/test-clipboard-image.el -f ert-run-tests-batch-and-exit
 ;;
-;; The ONE external boundary (`agent-repl--image-call-process', which shells
-;; out to osascript and sips) is stubbed per test so each capture branch --
-;; the PNG flavor, the TIFF-plus-conversion fallback, and an empty clipboard
-;; -- runs with no subprocess.
+;; Every external boundary is stubbed per test so each capture branch runs
+;; with no subprocess and no real clipboard: `agent-repl--image-call-process'
+;; (osascript/sips) for the macOS branches -- the PNG flavor, the
+;; TIFF-plus-conversion fallback, and an empty clipboard -- and
+;; `agent-repl--image-call-process-to-file' plus
+;; `agent-repl--image-executable-find' for the Linux branches, where the
+;; display server and what is installed on PATH are both stated by the test.
 ;;
 ;; The behavior under test is the one the overhaul changed: the captured file
 ;; becomes an ATTACHMENT, registered through the composer's own entry point,
@@ -53,6 +56,9 @@
   (declare (indent 0))
   `(let* ((agent-repl-test-image--calls nil)
           (agent-repl-test-image--written nil)
+          ;; The AppleScript branch is a macOS branch, so these scenarios
+          ;; state the platform rather than inheriting the host's.
+          (system-type 'darwin)
           (agent-repl-test-image--dir (make-temp-file "agent-repl-image-test" t))
           (buf (generate-new-buffer " *agent-repl-test-composer*")))
      (unwind-protect
@@ -205,6 +211,155 @@
   "A TTY frame draws no thumbnail, and the marker text carries on alone."
   (agent-repl-test-image--with
     (should-not (agent-repl--image-thumbnail "/tmp/x.png" "ws-one"))))
+
+;;;; ---- Which reader the platform gets ----
+
+;; The capture used to be macOS-only: it shelled out to `osascript' on every
+;; host, so on Linux -- the e2e sandbox and any Linux user -- the verb simply
+;; failed.  The reader is now chosen BY PLATFORM at the source, and a host
+;; with no reader installed is REPORTED, naming the tool it wanted.
+
+(defvar agent-repl-test-image--to-file-calls nil
+  "Calls to the stdout-to-file boundary, oldest first, as (PROGRAM . ARGS).")
+
+(defvar agent-repl-test-image--installed nil
+  "Program names the fake host has on PATH.")
+
+(defvar agent-repl-test-image--errors nil
+  "Formatted `agent-repl--error' records, oldest first.")
+
+(defmacro agent-repl-test-image--on-linux (display installed &rest body)
+  "Run BODY on a fake Linux host under DISPLAY with INSTALLED tools on PATH.
+DISPLAY is `wayland' or `x11'; INSTALLED is a list of program names.  The
+capture writes PNG bytes whenever it runs, so a scenario that reaches a
+reader gets a successful capture unless it says otherwise."
+  (declare (indent 2))
+  `(let* ((agent-repl-test-image--to-file-calls nil)
+          (agent-repl-test-image--installed ,installed)
+          (agent-repl-test-image--errors nil)
+          (agent-repl-test-image--dir (make-temp-file "agent-repl-image-test" t))
+          (system-type 'gnu/linux)
+          (process-environment
+           (cons (if (eq ,display 'wayland) "WAYLAND_DISPLAY=wayland-0" "DISPLAY=:0")
+                 (seq-remove (lambda (v) (or (string-prefix-p "DISPLAY=" v)
+                                             (string-prefix-p "WAYLAND_DISPLAY=" v)))
+                             process-environment))))
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
+                   ((symbol-function 'agent-repl--ws-dir)
+                    (lambda (_ws) agent-repl-test-image--dir))
+                   ((symbol-function 'agent-repl--image-executable-find)
+                    (lambda (program)
+                      (when (member program agent-repl-test-image--installed)
+                        (concat "/usr/bin/" program))))
+                   ((symbol-function 'agent-repl--image-call-process-to-file)
+                    (lambda (dest program &rest args)
+                      (push (cons program args) agent-repl-test-image--to-file-calls)
+                      (with-temp-file dest (insert "png-bytes"))
+                      0))
+                   ((symbol-function 'agent-repl--error)
+                    (lambda (_ws fmt &rest args)
+                      (push (apply #'format fmt args) agent-repl-test-image--errors)
+                      nil))
+                   ((symbol-function 'message) (lambda (&rest _) nil)))
+           ,@body)
+       (delete-directory agent-repl-test-image--dir t))))
+
+(defun agent-repl-test-image--to-file-programs ()
+  "Return the programs the stdout-to-file boundary ran, oldest first."
+  (mapcar #'car (reverse agent-repl-test-image--to-file-calls)))
+
+(ert-deftest agent-repl-image-macos-reads-through-osascript ()
+  "On macOS the reader is the AppleScript pasteboard read, as it always was."
+  (agent-repl-test-image--with
+    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+      (setq agent-repl-test-image--written (list dest))
+      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
+      (should (equal (agent-repl-test-image--programs) '("osascript"))))))
+
+(ert-deftest agent-repl-image-linux-x11-reads-through-xclip ()
+  "Under X11 the reader is `xclip', asked for the clipboard's PNG target."
+  (agent-repl-test-image--on-linux 'x11 '("xclip")
+    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
+      (should (equal (reverse agent-repl-test-image--to-file-calls)
+                     '(("xclip" "-selection" "clipboard" "-t" "image/png" "-o")))))))
+
+(ert-deftest agent-repl-image-linux-wayland-reads-through-wl-paste ()
+  "Under Wayland the reader is `wl-paste', asked for the PNG mime type."
+  (agent-repl-test-image--on-linux 'wayland '("wl-paste")
+    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
+      (should (equal (reverse agent-repl-test-image--to-file-calls)
+                     '(("wl-paste" "-t" "image/png")))))))
+
+(ert-deftest agent-repl-image-linux-falls-back-to-the-installed-tool ()
+  "A Wayland session carrying only `xclip' uses it rather than refusing."
+  (agent-repl-test-image--on-linux 'wayland '("xclip")
+    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
+      (should (equal (agent-repl-test-image--to-file-programs) '("xclip"))))))
+
+(ert-deftest agent-repl-image-linux-without-a-tool-refuses ()
+  "No clipboard tool on PATH is a refusal the user sees, never a no-op."
+  (agent-repl-test-image--on-linux 'x11 '()
+    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+      (should-error (agent-repl--image-capture-clipboard dest "ws-one")
+                    :type 'user-error)
+      (should-not agent-repl-test-image--to-file-calls))))
+
+(ert-deftest agent-repl-image-linux-without-a-tool-names-the-tool ()
+  "The refusal names the tool to install, so the user can act on it."
+  (agent-repl-test-image--on-linux 'x11 '()
+    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+      (should (string-match-p
+               "xclip"
+               (cadr (should-error (agent-repl--image-capture-clipboard dest "ws-one")
+                                   :type 'user-error)))))))
+
+(ert-deftest agent-repl-image-linux-without-a-tool-is-recorded ()
+  "The missing tool also lands on the error record, not only in the echo area."
+  (agent-repl-test-image--on-linux 'wayland '()
+    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+      (should-error (agent-repl--image-capture-clipboard dest "ws-one")
+                    :type 'user-error)
+      (should (seq-find (lambda (line) (string-match-p "wl-paste" line))
+                        agent-repl-test-image--errors)))))
+
+(ert-deftest agent-repl-image-linux-empty-clipboard-refuses ()
+  "A reader that returns nothing is an empty clipboard, and it is reported."
+  (agent-repl-test-image--on-linux 'x11 '("xclip")
+    (cl-letf (((symbol-function 'agent-repl--image-call-process-to-file)
+               (lambda (dest _program &rest _args)
+                 (with-temp-file dest (insert ""))
+                 1)))
+      (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+        (should-error (agent-repl--image-capture-clipboard dest "ws-one")
+                      :type 'user-error)
+        (should agent-repl-test-image--errors)))))
+
+(ert-deftest agent-repl-image-unsupported-platform-refuses ()
+  "A platform with no reader at all refuses instead of trying AppleScript."
+  (agent-repl-test-image--on-linux 'x11 '("xclip")
+    (let ((system-type 'windows-nt)
+          (dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
+      (should-error (agent-repl--image-capture-clipboard dest "ws-one")
+                    :type 'user-error)
+      (should-not agent-repl-test-image--to-file-calls))))
+
+(ert-deftest agent-repl-image-display-type-prefers-wayland ()
+  "With both variables set the compositor wins: a Wayland session is Wayland."
+  (let ((process-environment (append '("WAYLAND_DISPLAY=wayland-0" "DISPLAY=:0")
+                                     process-environment)))
+    (should (eq (agent-repl--image-display-type "ws-one") 'wayland))))
+
+(ert-deftest agent-repl-image-display-type-is-x11-when-headless ()
+  "With neither variable set the answer is X11, so a report names `xclip'."
+  (let ((process-environment
+         (seq-remove (lambda (v) (or (string-prefix-p "DISPLAY=" v)
+                                     (string-prefix-p "WAYLAND_DISPLAY=" v)))
+                     process-environment)))
+    (should (eq (agent-repl--image-display-type "ws-one") 'x11))))
 
 (provide 'test-clipboard-image)
 

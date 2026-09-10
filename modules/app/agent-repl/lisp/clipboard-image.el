@@ -21,21 +21,37 @@
 ;; is stripped from the composer along with everything else the moment the
 ;; daemon accepts the submission.
 ;;
-;; Capture strategy (macOS): an AppleScript writes the clipboard's PNG
-;; flavor straight to a file; when only a TIFF flavor is present, the TIFF
-;; is written and then converted to PNG with `sips'.  The MIME type is
-;; read from the FLAVOR that won, never sniffed from the extension.  Every
-;; shell-out goes through the single external-boundary wrapper
-;; `agent-repl--image-call-process', registered in
+;; Capture strategy is chosen BY PLATFORM at the source, never assumed.
+;;
+;; macOS: an AppleScript writes the clipboard's PNG flavor straight to a
+;; file; when only a TIFF flavor is present, the TIFF is written and then
+;; converted to PNG with `sips'.  The MIME type is read from the FLAVOR
+;; that won, never sniffed from the extension.
+;;
+;; Linux: the clipboard is read by the tool that matches the display
+;; server -- `wl-paste' under Wayland, `xclip' under X11 -- with the other
+;; accepted as a second choice when the first is not installed, and the
+;; PNG bytes are piped straight into the destination file.  A host with
+;; NEITHER tool is a REPORTED failure that names the tool it wanted: an
+;; `agent-repl--error' record plus a `user-error' the user sees.  It is
+;; never a silent no-op, and it is never a macOS-only path that simply
+;; fails on every other host.
+;;
+;; Every shell-out and every PATH lookup goes through an external-boundary
+;; wrapper -- `agent-repl--image-call-process',
+;; `agent-repl--image-call-process-to-file' and
+;; `agent-repl--image-executable-find' -- each registered in
 ;; `agent-repl--external-boundary-functions' (core.el) so the batch test
 ;; harness stubs the boundary instead of shelling out.
 
 ;;; Code:
 
 (require 'image)
+(require 'seq)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-dir "agent-repl-status" (ws))
 (declare-function agent-repl-input-attach-image "agent-repl-input" (path media-type))
@@ -57,10 +73,26 @@ runs in (its Read tool resolves the path without a cross-project prompt).")
 
 (defun agent-repl--image-call-process (program &rest args)
   "Run PROGRAM with ARGS synchronously; return its exit code (output discarded).
-The one external-boundary wrapper for clipboard-image capture; registered
-in `agent-repl--external-boundary-functions' (core.el) so tests stub it via
+An external-boundary wrapper for clipboard-image capture; registered in
+`agent-repl--external-boundary-functions' (core.el) so tests stub it via
 `cl-letf' rather than shelling out to `osascript'/`sips'."
   (apply #'call-process program nil nil nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
+
+(defun agent-repl--image-call-process-to-file (dest program &rest args)
+  "Run PROGRAM with ARGS, writing its STDOUT to DEST; return its exit code.
+The Linux readers (`wl-paste', `xclip') emit the clipboard's PNG bytes on
+stdout rather than writing a file themselves, so this boundary exists to
+land those bytes.  Registered in `agent-repl--external-boundary-functions'
+(core.el) so tests stub it rather than shelling out."
+  (apply #'call-process program nil (list :file dest) nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
+
+(defun agent-repl--image-executable-find (program)
+  "Return the absolute path of PROGRAM on PATH, or nil when it is absent.
+A PATH lookup is external state, so it is a boundary of its own and is
+registered in `agent-repl--external-boundary-functions' (core.el): a test
+decides which clipboard tools the host has rather than inheriting the
+host's real PATH."
+  (executable-find program)) ;; ALLOW-EXTERNAL-BOUNDARY
 
 ;;;; ---- Capture --------------------------------------------------------------
 
@@ -124,8 +156,101 @@ TIFF flavor is converted by `sips' before it is attached.  The type is
 therefore stated by the capture, never sniffed from the extension by a
 later reader.")
 
+(defconst agent-repl--image-linux-readers
+  '((wayland ("wl-paste" "-t" "image/png")
+             ("xclip" "-selection" "clipboard" "-t" "image/png" "-o"))
+    (x11 ("xclip" "-selection" "clipboard" "-t" "image/png" "-o")
+         ("wl-paste" "-t" "image/png")))
+  "Linux clipboard readers, in preference order, keyed by display server.
+The head of each list is the tool that BELONGS to that display server and
+is the one named when nothing is installed; the tail is accepted when it
+happens to be present (an Xwayland session may carry only `xclip', and a
+`wl-paste' under XWayland still reads the same clipboard).  Each entry is
+(PROGRAM . ARGS) and every one of them writes PNG bytes to stdout.")
+
+(defun agent-repl--image-display-type (&optional ws)
+  "Return the Linux display server in use: `wayland' or `x11'.
+Decided by environment, because that is what the running compositor
+actually sets.  With neither variable set (a headless host) the answer is
+`x11', so the tool a failure names is the X11 one."
+  (let* ((wayland (getenv "WAYLAND_DISPLAY"))
+         (x11 (getenv "DISPLAY"))
+         (type (cond ((and wayland (not (string-empty-p wayland))) 'wayland)
+                     ((and x11 (not (string-empty-p x11))) 'x11)
+                     (t 'x11))))
+    (agent-repl--log ws
+                     "clipboard-image: display type decided type=%s wayland-display=%s x11-display=%s"
+                     type wayland x11)
+    type))
+
+(defun agent-repl--image-linux-reader (&optional ws)
+  "Return the installed Linux clipboard reader as (PROGRAM . ARGS), or nil.
+Preference comes from the display server; presence comes from PATH.  Nil
+means NO reader is installed -- the caller reports that, naming the tool
+the display server wanted."
+  (let* ((display (agent-repl--image-display-type ws))
+         (candidates (cdr (assq display agent-repl--image-linux-readers)))
+         (reader (seq-find (lambda (candidate)
+                             (agent-repl--image-executable-find (car candidate)))
+                           candidates)))
+    (agent-repl--log ws
+                     "clipboard-image: linux reader selection display=%s candidates=%s chosen=%s"
+                     display (mapcar #'car candidates) (car reader))
+    reader))
+
+(defun agent-repl--image-linux-preferred-program (&optional ws)
+  "Return the program name this display server wants, installed or not.
+This is what a missing-tool report names, so the user is told what to
+install rather than that something unspecified went wrong."
+  (car (car (cdr (assq (agent-repl--image-display-type ws)
+                       agent-repl--image-linux-readers)))))
+
+(defun agent-repl--image-capture-linux (dest &optional ws)
+  "Capture the clipboard image to DEST on Linux; return DEST or signal.
+Reads the clipboard through the display server's own tool and pipes the
+PNG bytes into DEST.  An absent tool and an empty clipboard are both
+REPORTED -- an `agent-repl--error' record and a `user-error' the user
+sees -- never a silent no-op."
+  (agent-repl--log ws "clipboard-image: linux capture started destination=%s" dest)
+  (let ((reader (agent-repl--image-linux-reader ws)))
+    (unless reader
+      (let ((wanted (agent-repl--image-linux-preferred-program ws)))
+        (agent-repl--error ws
+                           "clipboard-image: no clipboard reader installed destination=%s wanted=%s"
+                           dest wanted)
+        (user-error "agent-repl: no clipboard image reader found; install %s" wanted)))
+    (let* ((program (car reader))
+           (exit-code (apply #'agent-repl--image-call-process-to-file
+                             dest program (cdr reader)))
+           (nonempty (and (eq 0 exit-code)
+                          (agent-repl--image-nonempty-file-p dest ws))))
+      (agent-repl--log ws
+                       "clipboard-image: linux capture finished program=%s destination=%s exit=%s nonempty=%s"
+                       program dest exit-code nonempty)
+      (unless nonempty
+        (agent-repl--error ws
+                           "clipboard-image: linux capture produced no image program=%s destination=%s exit=%s"
+                           program dest exit-code)
+        (user-error "agent-repl: no image found on the clipboard"))
+      dest)))
+
 (defun agent-repl--image-capture-clipboard (dest &optional ws)
   "Capture the clipboard image to DEST (a .png path); return DEST or signal.
+The reader is chosen BY PLATFORM: `agent-repl--image-capture-macos' on
+macOS, `agent-repl--image-capture-linux' on Linux.  Any other platform is
+a reported refusal rather than a macOS attempt that cannot work."
+  (cond
+   ((eq system-type 'darwin) (agent-repl--image-capture-macos dest ws))
+   ((memq system-type '(gnu/linux gnu gnu/kfreebsd berkeley-unix))
+    (agent-repl--image-capture-linux dest ws))
+   (t
+    (agent-repl--error ws
+                       "clipboard-image: no clipboard reader for this platform system-type=%s destination=%s"
+                       system-type dest)
+    (user-error "agent-repl: clipboard image capture is unsupported on %s" system-type))))
+
+(defun agent-repl--image-capture-macos (dest &optional ws)
+  "Capture the clipboard image to DEST (a .png path) on macOS; return DEST.
 Tries the PNG pasteboard flavor first (what a macOS screenshot provides),
 then a TIFF flavor converted to PNG with `sips'.  Signals a `user-error'
 when the clipboard holds no image at all -- an empty attachment would be
