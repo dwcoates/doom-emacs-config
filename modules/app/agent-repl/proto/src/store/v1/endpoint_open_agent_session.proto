@@ -22,6 +22,16 @@ message OpenAgentSessionRequest {
   // it or anything older. The store tracks nothing about what it previously
   // served — the caller states its own high-water mark.
   optional StoreItemPointer known_through = 3;
+  // Whether the caller will FOLLOW this open with a watch. UNSET/false = a
+  // watch is coming: the store mints a token and pins the tail (the ordinary
+  // open). SET = a one-shot read: the caller wants the page and nothing more,
+  // no token is minted, `watch` in the success is UNSET, and a watch cannot
+  // be opened from this page. Stated by the caller because the store has no
+  // other way to learn a page was abandoned — OpenAgentSession is unary and
+  // there is no close — and every unclaimed token minted for a read that
+  // never watched lived for the store's whole process lifetime (measured:
+  // two per turn, 2026-09-10).
+  bool page_only = 4;
 }
 
 // The page, or why it could not be served.
@@ -42,7 +52,7 @@ message OpenAgentSessionSuccess {
   // The watch address: opaque, store-minted at THIS open, pinning the tail to
   // begin exactly after this page's newest item — nothing is missed or
   // doubled between page and stream. A caller cannot watch an agent it did
-  // not open.
+  // not open. UNSET when the request said `page_only`: no token was minted.
   AgentSessionToken watch = 2;
 }
 
