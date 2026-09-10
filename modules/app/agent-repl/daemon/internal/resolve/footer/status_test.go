@@ -404,6 +404,30 @@ func TestAQueryDeathBlocksTheSession(t *testing.T) {
 	}
 }
 
+func TestAQueryDeathKeepsItsLineUnderTheTurnsFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
+	})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ExecutionError{
+			ExecutionError: &conversationv1.AgentExecutionError{},
+		},
+	})
+
+	// Assert
+	blocked := h.view(t).GetStrip().GetStatus().GetBlocked()
+	if blocked.GetActivity().GetQueryDied().GetText() == "" {
+		t.Fatalf("the dead-query line is missing: activity = %+v", blocked.GetActivity())
+	}
+}
+
 func TestAnAuthFailureBlocksOnAuth(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
