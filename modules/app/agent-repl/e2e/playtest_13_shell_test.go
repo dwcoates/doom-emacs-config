@@ -193,12 +193,29 @@ func TestPlaytestShellFamily(t *testing.T) {
 		{
 			prompt:  "!bash-timeout",
 			command: "sleep 600",
+			// THE ROW'S FACTS ARE AWAITED APART, each under its own name, so a
+			// failure says WHICH of the two halves was missing rather than
+			// reporting one unreadable conjunction. This cost a whole run to
+			// learn: the joint predicate's diagnosis could not say whether the
+			// detached row was absent or the card had wrongly settled.
+			settle: func(t *testing.T, s *playtestScenario) {
+				s.awaitInPage(t, "the detached shell row for sleep 600 to be drawn live",
+					`(function () { var sh = `+playtestShellBubbleJS("sleep 600")+`;
+					               return sh !== null && sh.getAttribute("data-state") === "live"; })()`)
+				s.awaitInPage(t, "the detached shell row for sleep 600 to carry the spool the scenario wrote",
+					`(function () { var sh = `+playtestShellBubbleJS("sleep 600")+`;
+					               return sh.querySelector(".shell-spool") !== null &&
+					                      sh.querySelector(".shell-spool").textContent.indexOf("still going") >= 0; })()`)
+				s.awaitInPage(t, "the Bash card for sleep 600 to be STILL RUNNING, its work having moved rather than ended",
+					`(function () { var card = `+playtestBashCardJS("sleep 600")+`;
+					               return card !== null && card.getAttribute("data-state") === "running"; })()`)
+			},
 			// THE CARD DOES NOT SETTLE, AND THAT IS THE CONTRACT. The receipt
-			// names a `backgroundTaskId`, so the shim answers no terminal for
-			// it -- "A BACKGROUNDED COMMAND DID NOT END, IT MOVED" -- and the
-			// work goes on as the detached row this waits for. The card
-			// staying `running` is therefore the truth about the command; what
-			// it cannot say is that the run MOVED, which is filed.
+			// names a `backgroundTaskId`, so NEITHER plane answers a terminal
+			// for it -- "A BACKGROUNDED COMMAND DID NOT END, IT MOVED" -- and
+			// the work goes on as the detached row above. The card staying
+			// `running` is the truth about the command; what it cannot say is
+			// that the run MOVED, which is filed.
 			settled: `card.getAttribute("data-state") === "running" &&
 			          (function () { var sh = ` + playtestShellBubbleJS("sleep 600") + `;
 			                         return sh !== null && sh.getAttribute("data-state") === "live" &&
