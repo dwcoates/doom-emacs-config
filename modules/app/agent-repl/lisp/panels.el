@@ -28,6 +28,7 @@
 (declare-function agent-repl--send-to-agent "commands")
 (declare-function agent-repl--state-save "history")
 (declare-function agent-repl--warn "core")
+(declare-function agent-repl--with-log-context "core" (workspace request-id function))
 (declare-function agent-repl--ws-buffers "workspace")
 (declare-function agent-repl--ws-current-log-name "workspace")
 (declare-function agent-repl--ws-current-name "workspace")
@@ -58,6 +59,7 @@
 (declare-function agent-repl-window--delete-where "window")
 (declare-function agent-repl-window--ensure-layout "window")
 (declare-function agent-repl-window--panel-buffer "window")
+(defvar agent-repl--global-log-scope)
 (declare-function agent-repl-window--panel-window "window")
 (declare-function agent-repl-window--panels-restorable-p "window")
 (declare-function agent-repl-window--side-window-p "window")
@@ -513,34 +515,42 @@ workspace keeps its attribution — the screen only demotes names that could
 not be routed at all.
 "
   (let* ((ws (or ws (agent-repl--ws-current-name)))
-         (log-ws (agent-repl--ws-log-name ws)))
-    (agent-repl--log-verbose log-ws "workspace-switch ws=%s" ws)
-    ;; Purge stale panel windows from other workspaces and restore own
-    ;; panels if they were visible before this workspace was deactivated.
-    ;; Must run BEFORE autoselect so it sees the correct panel windows.
-    (agent-repl--ensure-own-panels-on-persp-switch ws)
-    ;; Repaint: the switch changed which tab is SELECTED, and selection is
-    ;; the one part of a tab's appearance the roster does not carry.  There
-    ;; is nothing to refresh beyond that — every workspace's state arrived on
-    ;; the roster stream.
-    (agent-repl--force-tab-bar-redraw)
-    (agent-repl--drain-pending-magit ws)
-    (agent-repl--drain-pending-initial-buffers ws)
-    (agent-repl--drain-pending-show-panels ws)
-    (agent-repl--maybe-autoselect-input ws)
-    ;; The workspace is SELECTED: SelectWorkspace is Emacs's own second
-    ;; and last contribution to the roster, and host.el sends it from the
-    ;; perspective-activated hook.  Nothing else about the switch reaches
-    ;; the daemon, and nothing about it is asked of the page.
-    ;; THE FULLY-LOADED LATCH IS GONE with the session events that armed
-    ;; its other half: readiness is the daemon's, and a workspace's state
-    ;; arrives on the roster rather than being latched together here out of
-    ;; two local observations.
-    (when ws
-      ;; Screened through `--ws-log-name' like every other record on this
-      ;; path: persp-mode hands it its own placeholders too, and those own
-      ;; no durable sink to route a workspace-attributed record to.
-      (agent-repl--log log-ws "elisp.panels.switch: complete ws=%s" ws))))
+         (log-ws (agent-repl--ws-log-name ws))
+         (scope (cond
+                 (log-ws log-ws)
+                 ((or (null ws) (agent-repl--pseudo-workspace-name-p ws))
+                  agent-repl--global-log-scope)
+                 (t ws))))
+    (agent-repl--with-log-context
+     scope nil
+     (lambda ()
+       (agent-repl--log-verbose log-ws "workspace-switch ws=%s" ws)
+       ;; Purge stale panel windows from other workspaces and restore own
+       ;; panels if they were visible before this workspace was deactivated.
+       ;; Must run BEFORE autoselect so it sees the correct panel windows.
+       (agent-repl--ensure-own-panels-on-persp-switch ws)
+       ;; Repaint: the switch changed which tab is SELECTED, and selection is
+       ;; the one part of a tab's appearance the roster does not carry.  There
+       ;; is nothing to refresh beyond that — every workspace's state arrived on
+       ;; the roster stream.
+       (agent-repl--force-tab-bar-redraw)
+       (agent-repl--drain-pending-magit ws)
+       (agent-repl--drain-pending-initial-buffers ws)
+       (agent-repl--drain-pending-show-panels ws)
+       (agent-repl--maybe-autoselect-input ws)
+       ;; The workspace is SELECTED: SelectWorkspace is Emacs's own second
+       ;; and last contribution to the roster, and host.el sends it from the
+       ;; perspective-activated hook.  Nothing else about the switch reaches
+       ;; the daemon, and nothing about it is asked of the page.
+       ;; THE FULLY-LOADED LATCH IS GONE with the session events that armed
+       ;; its other half: readiness is the daemon's, and a workspace's state
+       ;; arrives on the roster rather than being latched together here out of
+       ;; two local observations.
+       (when ws
+         ;; Screened through `--ws-log-name' like every other record on this
+         ;; path: persp-mode hands it its own placeholders too, and those own
+         ;; no durable sink to route a workspace-attributed record to.
+         (agent-repl--log log-ws "elisp.panels.switch: complete ws=%s" ws))))))
 
 ;; Save window state for current workspace before switching away,
 ;; so the panel-visibility paint can inspect the saved config.
@@ -597,18 +607,22 @@ placeholders (`persp-nil-name' \"none\", Doom's initial \"main\"), so the
 bookkeeping uses the unscreened name while the log lines use
 `agent-repl--ws-current-log-name': a placeholder owns no durable sink, and
 its deactivation is a genuinely global-scope event."
-  (let ((ws (agent-repl--ws-current-name))
-        (log-ws (agent-repl--ws-current-log-name)))
-    (agent-repl--log log-ws "before-persp-deactivate: entry ws=%s cache=%S"
-                      ws (or (agent-repl--ws-names-cache) "(unbound)"))
-    ;; Record whether panels are visible BEFORE redirecting/saving so
-    ;; the activated hook can restore them if persp-mode drops them.
-    (agent-repl--ws-put ws :panels-were-visible (agent-repl--panels-visible-p))
-    (agent-repl--redirect-from-agent-before-save)
-    (condition-case err
-        (agent-repl--ws-frame-save-state)
-      (error (agent-repl--warn log-ws "persp-frame-save-state failed for ws=%s: %S" ws err)
-             (agent-repl--log log-ws "before-persp-deactivate: persp-frame-save-state error ws=%s: %S" ws err)))))
+  (let* ((ws (agent-repl--ws-current-name))
+         (log-ws (agent-repl--ws-current-log-name))
+         (scope (if log-ws log-ws agent-repl--global-log-scope)))
+    (agent-repl--with-log-context
+     scope nil
+     (lambda ()
+       (agent-repl--log log-ws "before-persp-deactivate: entry ws=%s cache=%S"
+                         ws (or (agent-repl--ws-names-cache) "(unbound)"))
+       ;; Record whether panels are visible BEFORE redirecting/saving so
+       ;; the activated hook can restore them if persp-mode drops them.
+       (agent-repl--ws-put ws :panels-were-visible (agent-repl--panels-visible-p))
+       (agent-repl--redirect-from-agent-before-save)
+       (condition-case err
+           (agent-repl--ws-frame-save-state)
+         (error (agent-repl--warn log-ws "persp-frame-save-state failed for ws=%s: %S" ws err)
+                (agent-repl--log log-ws "before-persp-deactivate: persp-frame-save-state error ws=%s: %S" ws err)))))))
 
 (defun agent-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch.
@@ -960,19 +974,24 @@ hide-overlay that blanked the vterm's bottom rows (the TUI drew its
 own input box there, which Emacs's input panel replaced); the webview
 hides its composer declaratively instead, so there is nothing left to
 refresh."
-  (if (active-minibuffer-window)
-      ;; Skip reconciliation while a minibuffer is active (e.g. the
-      ;; `SPC p p' picker).  The window configuration is transient — the
-      ;; picker's own window churn is what fired this debounced idle
-      ;; timer — so reconciling now would rearrange windows under the open
-      ;; picker (and sweep the undeletable minibuffer window).  Closing the
-      ;; minibuffer changes the window configuration again, re-firing this
-      ;; hook to reconcile the settled layout.
-      (agent-repl--log-verbose (agent-repl--ws-current-log-name)
-                                "on-window-change: minibuffer active — deferring reconcile")
-    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "on-window-change")
-    (agent-repl--sync-panels)
-    (agent-repl-window--ensure-layout)))
+  (let* ((log-ws (agent-repl--ws-current-log-name))
+         (scope (if log-ws log-ws agent-repl--global-log-scope)))
+    (agent-repl--with-log-context
+     scope nil
+     (lambda ()
+       (if (active-minibuffer-window)
+           ;; Skip reconciliation while a minibuffer is active (e.g. the
+           ;; `SPC p p' picker).  The window configuration is transient — the
+           ;; picker's own window churn is what fired this debounced idle
+           ;; timer — so reconciling now would rearrange windows under the open
+           ;; picker (and sweep the undeletable minibuffer window).  Closing the
+           ;; minibuffer changes the window configuration again, re-firing this
+           ;; hook to reconcile the settled layout.
+           (agent-repl--log-verbose log-ws
+                                    "on-window-change: minibuffer active — deferring reconcile")
+         (agent-repl--log-verbose log-ws "on-window-change")
+         (agent-repl--sync-panels)
+         (agent-repl-window--ensure-layout))))))
 
 (defmacro agent-repl--deferred (timer-var fn)
   "Return a lambda that debounces calls to FN via TIMER-VAR.

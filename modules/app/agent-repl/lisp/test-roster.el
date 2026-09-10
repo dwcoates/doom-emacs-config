@@ -116,6 +116,13 @@ whose calls are the observation."
                   (lambda (ws &rest _) (push ws agent-repl-test-roster--switched) ws))
                  ((symbol-function 'agent-repl--ws-current-name)
                   (lambda () agent-repl-test-roster--current-name))
+                 ((symbol-function 'agent-repl--ws-log-routable-p)
+                  (lambda (ws)
+                    (and (stringp ws) (not (member ws '("main" "none"))))))
+                 ((symbol-function 'agent-repl--workspace-log-identity)
+                  (lambda (ws)
+                    (list :project-dir (format "/tmp/agent-repl-test/%s" ws)
+                          :workspace-id (format "id-%s" ws))))
                  ((symbol-function 'agent-repl-host-subscribe)
                   (lambda (_conn ws _ref) (push ws agent-repl-test-roster--subscribed) ws))
                  ((symbol-function 'agent-repl-host-unsubscribe)
@@ -127,6 +134,24 @@ whose calls are the observation."
 (defun agent-repl-test-roster--tabs ()
   "Return the live roster-owned workspace names, in tab order."
   (agent-repl-roster-tab-order))
+
+(ert-deftest agent-repl-test-roster-push-binds-a-request-correlation-id ()
+  "One inbound roster push carries one process-global request identity."
+  ;; Arrange
+  (let (seen)
+    (cl-letf (((symbol-function 'agent-repl--next-log-request-id)
+               (lambda () "roster-1"))
+              ((symbol-function 'agent-repl-roster-apply)
+               (lambda (roster)
+                 (setq seen (list roster
+                                  agent-repl--log-context-workspace
+                                  agent-repl--log-context-request-id)))))
+      ;; Act
+      (agent-repl-roster-on-push '(:roster roster-value))
+      ;; Assert
+      (should (equal seen
+                     (list 'roster-value agent-repl--global-log-scope
+                           "roster-1"))))))
 
 ;;;; ---- The walk ----
 
@@ -1183,20 +1208,22 @@ user's next sidebar click."
 (ert-deftest agent-repl-test-roster-move-tab-to-back-puts-ws-last ()
   "The deprio shuffle moves WS to the last slot of the roster tab order."
   ;; Arrange
-  (let ((agent-repl-roster--tab-order '("a" "b" "c")))
-    ;; Act
-    (agent-repl-roster-move-tab-to-back "a")
-    ;; Assert
-    (should (equal agent-repl-roster--tab-order '("b" "c" "a")))))
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-roster--tab-order '("a" "b" "c")))
+      ;; Act
+      (agent-repl-roster-move-tab-to-back "a")
+      ;; Assert
+      (should (equal agent-repl-roster--tab-order '("b" "c" "a"))))))
 
 (ert-deftest agent-repl-test-roster-move-tab-to-back-returns-the-new-order ()
   "The shuffle returns the order it installed, so the caller can mirror it."
   ;; Arrange
-  (let ((agent-repl-roster--tab-order '("a" "b" "c")))
-    ;; Act
-    (let ((got (agent-repl-roster-move-tab-to-back "b")))
-      ;; Assert
-      (should (equal got '("a" "c" "b"))))))
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-roster--tab-order '("a" "b" "c")))
+      ;; Act
+      (let ((got (agent-repl-roster-move-tab-to-back "b")))
+        ;; Assert
+        (should (equal got '("a" "c" "b")))))))
 
 (ert-deftest agent-repl-test-roster-move-tab-to-back-unknown-ws-is-nil ()
   "A workspace with no tab returns nil and leaves the order alone."

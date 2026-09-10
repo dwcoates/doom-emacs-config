@@ -48,6 +48,8 @@
 ;; `test-helpers.el' is loaded above at RUNTIME, so the byte-compiler does not
 ;; see its definitions; declare the one variable this file reads out of it.
 (defvar agent-repl-test--external-original-functions)
+(defvar agent-repl--timers)
+(defvar agent-repl-status--marker-on)
 
 (defvar agent-repl-itest--binary nil
   "Absolute path of the fake daemon binary built for this Emacs process.
@@ -169,6 +171,20 @@ The directory itself is NOT created: production creates a workspace's
 `.claude' tree the first time it routes a record there, and a scenario
 that needs the directory earlier makes it itself."
   (expand-file-name name agent-repl-itest--fixture-root))
+
+(defun agent-repl-itest--ws-put-with-real-project-dir
+    (original ws key value)
+  "Call ORIGINAL for WS / KEY / VALUE after materializing fixture project dirs.
+Only `:project-dir' values below the process-private fixture root are created.
+Production logging requires a registered project directory to exist before it
+can own a sink; integration scenarios model that precondition here rather than
+letting a path-only fixture silently route as a workspace."
+  (when (and (eq key :project-dir)
+             (stringp value)
+             (string-prefix-p (file-name-as-directory agent-repl-itest--fixture-root)
+                              (file-name-as-directory value)))
+    (make-directory value t))
+  (funcall original ws key value))
 
 (defun agent-repl-itest--delete-fixture-root ()
   "Delete this process's fixture root.  Runs on `kill-emacs-hook'."
@@ -895,8 +911,7 @@ The daemon is always stopped and its state dir removed, even when BODY
 signals."
   (declare (indent 1) (debug (symbolp body)))
   `(let ((,var (agent-repl-itest--begin-scenario)))
-     (unwind-protect
-         (let* ((agent-repl-itest-notifications nil)
+     (let* ((agent-repl-itest-notifications nil)
                 (agent-repl-itest-webview-urls nil)
                 (agent-repl-itest--orphaned-log-targets nil)
                 ;; SCRATCH REGISTRIES, one set per scenario.  Each of these is
@@ -915,6 +930,18 @@ signals."
                 (agent-repl-host--by-name (make-hash-table :test 'equal))
                 (agent-repl--prompt-queue (make-hash-table :test 'equal))
                 (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
+                ;; Real blink-cadence scenarios arm keyed timers.  Give the
+                ;; scenario its own registry and marker table so their later
+                ;; steps cannot fire after the workspace registry unwinds.
+                (agent-repl--timers nil)
+                (agent-repl-status--marker-on (make-hash-table :test 'equal))
+                ;; Preserve the production handover consumers but isolate
+                ;; scenario-owned, self-removing continuations.  A transfer
+                ;; that intentionally waits for a later announcement leaves
+                ;; one such continuation armed; it must not fire during a
+                ;; different scenario's promotion with the old workspace name.
+                (agent-repl-link-handover-functions
+                 (copy-sequence agent-repl-link-handover-functions))
                 ;; The log-target registry belongs in this list for the SAME
                 ;; reason as the others, and for one more: it is what decides
                 ;; where a scenario's workspace-owned records LAND.  Left
@@ -927,6 +954,8 @@ signals."
                 ;; own canonical link, so a record found is a record this
                 ;; scenario wrote.
                 (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+                (agent-repl-itest--real-ws-put
+                 (symbol-function 'agent-repl--ws-put))
                 (process-environment
                  (append (list (concat "AGENT_REPL_STATE_DIR="
                                        (agent-repl-itest-daemon-state-dir ,var))
@@ -934,9 +963,16 @@ signals."
                          process-environment))
                 (agent-repl-log-to-file t)
                 (agent-repl-log-file-name (agent-repl-itest--log-file ,var))
-                (agent-repl--log-write-counter 0))
-           (cl-letf (((symbol-function 'agent-repl-connect--open-socket)
+                ;; Integration assertions cover debug request boundaries; the
+                ;; production default is info, so this scenario-local switch
+                ;; opens the sink without changing the process environment.
+                (agent-repl-log-file-level 'debug))
+       (cl-letf (((symbol-function 'agent-repl-connect--open-socket)
                       (agent-repl-itest--real-open-socket))
+                     ((symbol-function 'agent-repl--ws-put)
+                      (lambda (ws key value)
+                        (agent-repl-itest--ws-put-with-real-project-dir
+                         agent-repl-itest--real-ws-put ws key value)))
                      ((symbol-function 'agent-repl--ws-forget-emacs-log-target)
                       (let ((real (symbol-function
                                    'agent-repl--ws-forget-emacs-log-target)))
@@ -946,18 +982,27 @@ signals."
                      ((symbol-function 'agent-repl--frontend-make-webview-buffer)
                       (agent-repl-test--fake-webview-factory 'agent-repl-itest-webview-urls))
                      (agent-repl--notification-backend (agent-repl-itest--fake-notifier)))
-             ,@body))
-       ;; A verb may STAND THE LINK on its own (a daemon-admin verb can be
-       ;; the first thing that needs one), and a link outliving its daemon
-       ;; leaves an armed reconnect timer that fires into the next
-       ;; scenario.  Tearing it down is the only thing that actually ends
-       ;; it -- the same reason the cold-start reset exists.
-       ;; The daemon is NOT stopped: it is the one this whole run shares, and
-       ;; `agent-repl-itest--begin-scenario' is what hands the next scenario a
-       ;; clean one.  Doing the cleaning on the way IN rather than on the way
-       ;; out is deliberate — a scenario that dies mid-way still cannot poison
-       ;; its successor.
-       (agent-repl-itest--teardown-link))))
+         (unwind-protect
+             (progn ,@body)
+           ;; A verb may STAND THE LINK on its own (a daemon-admin verb can be
+           ;; the first thing that needs one), and a link outliving its daemon
+           ;; leaves an armed reconnect timer that fires into the next
+           ;; scenario.  Tearing it down is the only thing that actually ends
+           ;; it -- the same reason the cold-start reset exists.
+           ;;
+           ;; Keep teardown INSIDE the scenario's scratch workspace and host
+           ;; registries.  Closing a promoted stream runs sentinels immediately;
+           ;; after these bindings unwind, those records would resolve against
+           ;; unrelated process-global test state and report a false unroutable
+           ;; workspace.
+           ;;
+           ;; The daemon is NOT stopped: it is the one this whole run shares,
+           ;; and `agent-repl-itest--begin-scenario' is what hands the next
+           ;; scenario a clean one.  Doing the cleaning on the way IN rather
+           ;; than on the way out is deliberate — a scenario that dies mid-way
+           ;; still cannot poison its successor.
+           (agent-repl-itest--teardown-link)
+           (agent-repl--cancel-all-timers))))))
 
 (defmacro agent-repl-itest--with-second-daemon (primary var &rest body)
   "Run BODY with VAR bound to a SECOND fake daemon sharing PRIMARY's state dir.
