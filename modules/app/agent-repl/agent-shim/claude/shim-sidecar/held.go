@@ -16,12 +16,18 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
+
+type workspaceAttribution struct {
+	dir string
+	id  string
+}
 
 // UnownedSpoolWindow is how long a spool may sit unclaimed before its bytes are
 // ingested as residue rather than waited on any longer. It is the DEFAULT:
@@ -94,7 +100,7 @@ func (h *heldSpools) demote(path string) bool {
 // spawning call is observed or the bounded wait expires.
 func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover.Target, bool) {
 	if target.SessionID != "" {
-		return target, true
+		return s.resolveTranscriptWorkspace(target)
 	}
 	if target.Kind == tail.KindResidueSpool {
 		// Its task-id prefix already failed classification, so no owner would
@@ -112,6 +118,15 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 		} else {
 			target.AgentID = obs.agentID
 		}
+		target.WorkspaceDir = obs.workspaceDir
+		target.WorkspaceID = obs.workspaceID
+		target.ClaudeSessionID = obs.claudeSessionID
+		if target.WorkspaceDir == "" || target.WorkspaceID == "" || target.ClaudeSessionID == "" {
+			s.log.With(logging.Context{
+				Operation: "resolve-spool-workspace", Path: target.Path, TaskID: target.TaskID, Level: "error",
+			}).Log("spool owner carries no complete workspace/session attribution; the spool is not watched")
+			return discover.Target{}, false
+		}
 		return target, true
 	}
 	if !s.held.hold(target.Path, now) {
@@ -125,5 +140,42 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 	}
 	target.Kind = tail.KindResidueSpool
 	target.Raw = true
+	return target, true
+}
+
+func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.Target, bool) {
+	key := target.ConfigRoot + "\x00" + target.ProjectKey + "\x00" + target.SessionID
+	workspace, ok := s.workspaceBySession[key]
+	if !ok {
+		dir, id, err := discover.ResolveWorkspace(target)
+		if err != nil {
+			detail := err.Error()
+			ctx := logging.Context{
+				Operation: "resolve-transcript-workspace", Path: target.Path,
+				ClaudeSessionID: target.SessionID, Level: "warn",
+			}
+			if s.workspaceFailures[key] == detail {
+				ctx.Level = "debug"
+				s.log.With(ctx).LogVerbose("transcript still held without workspace attribution: %v", err)
+			} else {
+				s.workspaceFailures[key] = detail
+				s.log.With(ctx).Log("transcript held: workspace attribution is required before any bytes are read: %v", err)
+			}
+			return discover.Target{}, false
+		}
+		workspace = workspaceAttribution{dir: dir, id: id}
+		s.workspaceBySession[key] = workspace
+		delete(s.workspaceFailures, key)
+		s.log.With(logging.Context{
+			Operation: "resolve-transcript-workspace", Path: target.Path,
+			WorkspaceDir: dir, WorkspaceID: id, ClaudeSessionID: target.SessionID,
+		}).LogVerbose("workspace attribution resolved from the main transcript")
+	}
+	if workspace.dir == "" || workspace.id == "" {
+		panic(fmt.Sprintf("sidecar: cached workspace attribution for %q is incomplete", key))
+	}
+	target.WorkspaceDir = workspace.dir
+	target.WorkspaceID = workspace.id
+	target.ClaudeSessionID = target.SessionID
 	return target, true
 }

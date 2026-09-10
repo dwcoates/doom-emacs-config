@@ -40,6 +40,7 @@ func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
 
 // Handle implements tail.Handler.
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
+	h.obs.bind(ctx)
 	h.log.With(handleCtx("transcript-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 

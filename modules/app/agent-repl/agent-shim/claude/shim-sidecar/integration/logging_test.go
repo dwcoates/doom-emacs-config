@@ -24,7 +24,7 @@ func ingestGreenPath(t *testing.T) []logRecord {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
-	opts.ExtraEnv = []string{"AGENT_REPL_LOG_VERBOSE=1"}
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 
 	startSidecar(t, opts)
 	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
@@ -202,7 +202,7 @@ func TestRetiredCorrelationKeysAreGone(t *testing.T) {
 }
 
 // TestHotDiagnosticsRideTheVerboseHelper asserts per-record chatter is gated:
-// with AGENT_REPL_LOG_VERBOSE unset, the log is lifecycle-sized rather than
+// with AGENT_REPL_LOG_LEVEL at its default info threshold, the log is lifecycle-sized rather than
 // one record per converted line.
 func TestHotDiagnosticsRideTheVerboseHelper(t *testing.T) {
 	t.Parallel()
@@ -214,7 +214,7 @@ func TestHotDiagnosticsRideTheVerboseHelper(t *testing.T) {
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
 
-	// Act: no AGENT_REPL_LOG_VERBOSE in the environment.
+	// Act: no AGENT_REPL_LOG_LEVEL in the environment, so info is the threshold.
 	startSidecar(t, opts)
 	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
 	for _, line := range captured.Lines {
@@ -225,7 +225,7 @@ func TestHotDiagnosticsRideTheVerboseHelper(t *testing.T) {
 	// Assert.
 	for _, r := range readLog(t, opts.LogPath) {
 		if r.Verbosity == "verbose" {
-			t.Errorf("a verbose record reached the durable log with AGENT_REPL_LOG_VERBOSE unset: %q", r.Message)
+			t.Errorf("a debug record reached the durable log at the default info threshold: %q", r.Message)
 		}
 	}
 }

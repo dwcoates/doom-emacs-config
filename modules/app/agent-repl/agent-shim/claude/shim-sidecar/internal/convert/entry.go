@@ -33,6 +33,9 @@ const maxUnparsedRaw = 64 << 10
 // frame and the identical write_id. There is deliberately no producer clock on
 // this struct.
 type Attribution struct {
+	WorkspaceDir    string
+	WorkspaceID     string
+	ClaudeSessionID string
 	// VendorSessionID is the transcript FILE's session uuid — the basename of
 	// `<session>.jsonl`, never the per-record `sessionId` field, which diverges
 	// from the runtime's answer in ~22% of records.
@@ -106,6 +109,9 @@ type Attribution struct {
 func (at Attribution) ctxFor(operation string) logging.Context {
 	return logging.Context{
 		Operation:       operation,
+		WorkspaceDir:    at.WorkspaceDir,
+		WorkspaceID:     at.WorkspaceID,
+		ClaudeSessionID: at.ClaudeSessionID,
 		Producer:        Producer,
 		Path:            at.Path,
 		FileID:          at.FileID,

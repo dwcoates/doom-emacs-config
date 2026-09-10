@@ -52,6 +52,7 @@ func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 
 // Handle implements tail.Handler.
 func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
+	h.obs.bind(ctx)
 	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 	// WHERE WE READ IS A READER FACT, not a conversion outcome, so it is

@@ -139,6 +139,20 @@ func TestASpawnWithNoCallIsRejected(t *testing.T) {
 	requireOnceIn(t, parseLogLines(t, *logs), "record-spawn", "error")
 }
 
+func TestTaskSpawnedRejectsIncompleteWorkspaceAttribution(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+
+	// Act.
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "/tmp/b1.output", false, "", "", "")
+
+	// Assert.
+	if _, ok := h.sc.owners.resolve(spoolTarget("/tmp/b1.output", "b1")); ok {
+		t.Fatal("spawn with no workspace attribution was recorded")
+	}
+	h.requireOnce(t, "record-spawn", "error")
+}
+
 func TestMainAgentOfASessionTranscriptIsItsFileName(t *testing.T) {
 	// Arrange: the per-record sessionId diverges from the file's; the file wins.
 	index, _ := ownerIndexFor(t)
@@ -158,7 +172,7 @@ func TestObserverNormalizesTheOutputPath(t *testing.T) {
 	spool := h.spoolFile(t, "b1", "hello\n")
 
 	// Act.
-	h.sc.TaskSpawned("b1", "call-1", "", filepath.Join(h.base, "spool", "claude-501", "proj", "runtime-sess", "tasks", "b1.output"), false)
+	h.sc.TaskSpawned("b1", "call-1", "", filepath.Join(h.base, "spool", "claude-501", "proj", "runtime-sess", "tasks", "b1.output"), false, "/workspace", "workspace-id", "session-1")
 	got, ok := h.sc.owners.resolve(spoolTarget(spool, "b1"))
 
 	// Assert: the same file must not read as two.
@@ -174,7 +188,7 @@ func TestAStopMintsTheCancelledTerminalThroughTheSpoolsReader(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1stopped", "partial work\n")
-	h.sc.TaskSpawned("b1stopped", "toolu_stopped_run", "", spool, false)
+	h.sc.TaskSpawned("b1stopped", "toolu_stopped_run", "", spool, false, "/workspace", "workspace-id", "session-1")
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -202,7 +216,7 @@ func TestAStoppedRunIsNeverConcludedLost(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1stopswept", "partial work\n")
-	h.sc.TaskSpawned("b1stopswept", "toolu_stopswept_run", "", spool, false)
+	h.sc.TaskSpawned("b1stopswept", "toolu_stopswept_run", "", spool, false, "/workspace", "workspace-id", "session-1")
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -238,7 +252,7 @@ func TestAStopForAnUnclaimedSpoolIsHeldAndAppliedOnClaim(t *testing.T) {
 	if cut := interruptedFor(store.writes, "toolu_late_run"); cut != nil {
 		t.Fatal("a terminal was minted for a spool that had no reader yet")
 	}
-	h.sc.TaskSpawned("b1late", "toolu_late_run", "", spool, false)
+	h.sc.TaskSpawned("b1late", "toolu_late_run", "", spool, false, "/workspace", "workspace-id", "session-1")
 	h.sc.rescan()
 	h.sc.pollAll()
 

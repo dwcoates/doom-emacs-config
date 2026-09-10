@@ -403,7 +403,6 @@ func TestSweepWithoutABootTimeCannotConcludeSweptUp(t *testing.T) {
 
 func TestSweepStatesAnUnknownBootTimeOnce(t *testing.T) {
 	// Arrange: the statement is verbose, so verbose emission is on.
-	t.Setenv("AGENT_REPL_LOG_VERBOSE", "1")
 	tr, logs := tracker(t, Options{})
 
 	// Act: the sweep runs on a timer, so the statement must not repeat.
@@ -411,7 +410,7 @@ func TestSweepStatesAnUnknownBootTimeOnce(t *testing.T) {
 	tr.Sweep(0, nowMs)
 
 	// Assert.
-	rec := requireOnceIn(t, parseLogLines(t, *logs), "lost-policy", "info")
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "lost-policy", "debug")
 	if rec.Verbosity != "verbose" {
 		t.Fatalf("the inert-boot-arm statement was recorded at verbosity %q, want verbose", rec.Verbosity)
 	}

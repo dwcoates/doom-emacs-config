@@ -42,6 +42,9 @@ type Context = tail.Context
 func attribute(ctx *Context, offset int64) convert.Attribution {
 	main := firstNonEmpty(ctx.MainAgentID, ctx.SessionID, sessionIDFromPath(ctx.Path))
 	at := convert.Attribution{
+		WorkspaceDir:    ctx.WorkspaceDir,
+		WorkspaceID:     ctx.WorkspaceID,
+		ClaudeSessionID: ctx.ClaudeSessionID,
 		VendorSessionID: firstNonEmpty(ctx.SessionID, main),
 		MainAgentID:     main,
 		Path:            ctx.Path,
@@ -132,6 +135,9 @@ func logResidue(log *logging.Bound, ctx *Context, offset int64, entries []*store
 func handleCtx(operation string, ctx *Context) logging.Context {
 	return logging.Context{
 		Operation:       operation,
+		WorkspaceDir:    ctx.WorkspaceDir,
+		WorkspaceID:     ctx.WorkspaceID,
+		ClaudeSessionID: ctx.ClaudeSessionID,
 		Producer:        Producer,
 		Path:            ctx.Path,
 		FileID:          ctx.FileID,
