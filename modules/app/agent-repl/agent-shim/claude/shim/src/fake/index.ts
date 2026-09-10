@@ -762,10 +762,30 @@ export function createFakeQuery(
   const systemMessage = (subtype: string, fields: Record<string, unknown>): void =>
     emit({ type: "system", subtype, ...fields });
 
-  const systemRecord = (subtype: string, fields: Record<string, unknown>): void => {
+  const systemRecord = (
+    subtype: string,
+    fields: Record<string, unknown>,
+    file?: Record<string, unknown>,
+  ): string => {
+    // BOTH PLANES, ONE UUID, exactly as `attachment` and `result` do it — and
+    // `file` is here because some records are not spelled identically on the
+    // two planes. The vendor puts `compact_metadata` on the stream and
+    // `compactMetadata` in the transcript for ONE `compact_boundary`, and the
+    // grounded capture shows the two carrying the SAME uuid. A scenario that
+    // hand-rolled the transcript line minted a second uuid, which is a shape no
+    // real session has: the two planes' rows could then never collide on one
+    // upsert key, and one compaction reached the feed as two dividers.
     const uuid = opts.newUuid();
     emitWithUuid(uuid, { type: "system", subtype, ...fields });
-    files.transcript.append({ type: "system", subtype, isMeta: false, ...fields, uuid, timestamp: nowIso() });
+    files.transcript.append({
+      type: "system",
+      subtype,
+      isMeta: false,
+      ...(file ?? fields),
+      uuid,
+      timestamp: nowIso(),
+    });
+    return uuid;
   };
 
   const result = (spec: ResultSpec): void => {

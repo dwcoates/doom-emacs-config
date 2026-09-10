@@ -22,6 +22,7 @@ import {
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { startHarness, type Harness } from "./harness";
 import { MODEL_PLACEHOLDER } from "../../src/topbar/model";
 import { isKnownTone, RENDER_COLORS } from "./vocab";
@@ -196,6 +197,25 @@ describe("the model selector", () => {
     await withTopbar({});
     // Assert
     expect(harness.text(".topbar-model")).toContain("Opus");
+  });
+
+  it("names the model in force by the served AgentModel, not by the label drawn", async () => {
+    // Arrange / Act: the pushed selection is `sonnet` while the chip's text is
+    // the catalog's first display name, so only the echo token identifies it.
+    await withTopbar({ selected: "sonnet" });
+    // Assert
+    expect(harness.$(".topbar-model")?.getAttribute("data-model")).toBe("sonnet");
+  });
+
+  it("marks the offered row that the served selection names", async () => {
+    // Arrange
+    await withTopbar({ selected: "sonnet" });
+    // Act
+    await harness.click(".topbar-model");
+    // Assert
+    expect(
+      harness.$$("[data-model-option][data-selected]").map((el) => el.dataset.modelOption),
+    ).toEqual(["sonnet"]);
   });
 
   it("lists exactly the options the view carries", async () => {
@@ -392,6 +412,24 @@ describe("the context chip", () => {
     await withTopbar({});
     // Assert: yellow is the context figure's own color by directive.
     expect(harness.$(".topbar-context")?.className).toContain("tone-yellow");
+  });
+
+  it("paints the figure yellow with the REAL stylesheet over the whole strip", async () => {
+    // The class above is what the drawing code decides; this is what a reader
+    // gets, and the two disagreed. A later same-specificity topbar-button rule
+    // set `color: var(--muted)` on the figure, so the one colored number in the
+    // strip came out GREY in the running application while every class
+    // assertion in this suite stayed green. A playtest capture of the topbar
+    // caught it; this is the assertion that keeps it caught.
+    // Arrange
+    const remove = installStylesheet();
+    // Act
+    await withTopbar({ contextText: "184k" });
+    // Assert
+    expect(cascadedValue(harness.$(".topbar-context-figure") as Element, "color")).toBe(
+      "var(--async)",
+    );
+    remove();
   });
 
   it("reveals the breakdown's section heading verbatim", async () => {
@@ -898,6 +936,13 @@ describe("the model selector with nothing selected", () => {
     await withTopbar({ unselected: true });
     // Assert
     expect(harness.$(".topbar-model-button")?.hasAttribute("data-unselected")).toBe(true);
+  });
+
+  it("names no model at all", async () => {
+    // Arrange / Act
+    await withTopbar({ unselected: true });
+    // Assert: absent, not empty — an empty name would read as a nameless model.
+    expect(harness.$(".topbar-model")?.hasAttribute("data-model")).toBe(false);
   });
 
   it("still lists every option the view carries", async () => {

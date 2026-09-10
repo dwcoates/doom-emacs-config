@@ -5,6 +5,7 @@ import {
   FeedSessionSeparationSchema,
   type FeedSessionSeparation,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import stylesheet from "../../../src/styles.css?raw";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   SEPARATION_ARMS,
@@ -151,6 +152,29 @@ describe("drawFeedSessionSeparation: the compaction", () => {
   it("starts folded when the wire says folded", () => {
     const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
     expect(el.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(true);
+  });
+
+  // A FOLDED SUMMARY MUST ACTUALLY BE INVISIBLE, which the assertion above
+  // does NOT establish: it reads the DOM property, and jsdom applies no
+  // stylesheet, so `hidden` reads true while the real page drew the summary
+  // anyway. That is exactly what happened — the D30 playtest photographed a
+  // divider whose toggle said FOLDED with the summary sitting open beneath it.
+  //
+  // THE CAUSE IS SPECIFICITY, so this is pinned against the stylesheet rather
+  // than against the DOM: the fold hides an element carrying `.bubble`,
+  // `.bubble` sets `display`, and a class selector outranks the user-agent
+  // `[hidden]` rule — so without an explicit guard `hidden` is inert here.
+  it("hides the folded summary in the stylesheet too, not only as a DOM property", () => {
+    // Arrange: the element the fold actually toggles.
+    const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
+    const summary = el.querySelector<HTMLElement>(".sep-summary");
+
+    // Act / Assert: it is a bubble, and `.bubble` sets display...
+    expect(summary?.classList.contains("bubble")).toBe(true);
+    expect(/\.bubble\s*\{[^}]*\bdisplay\s*:/.test(stylesheet)).toBe(true);
+
+    // ...so the sheet must carry the guard that makes `hidden` bite.
+    expect(/\.bubble\[hidden\]\s*\{[^}]*\bdisplay\s*:\s*none/.test(stylesheet)).toBe(true);
   });
 
   it("starts open when the wire says unfolded", () => {
