@@ -232,6 +232,38 @@ smallest first.
   capture is taken immediately, and the decoded pixels are counted —
   957,676 of them exactly magenta with the gate, and zero without it.
 
+## Minting a workspace settles before the next step runs
+
+A workspace this editor mints comes up on its own panel, by design and by
+three commands: `agent-repl-add-project-workspace` registers a directory,
+`agent-repl-create-workspace` makes one and `agent-repl-fork-workspace` forks
+one, and all three hand the daemon's minted `WorkspaceRef` to
+`agent-repl-verbs-select-minted`, which stands on the minted worktree and arms
+`:pending-show-panels` so the perspective activation drain shows the
+workspace's view.
+
+Every step of that is asynchronous — the verb returns once the request is on
+the wire, the answer arrives on a callback, the tab itself arrives on the
+ROSTER stream, and the switch is then deferred onto a timer — so a playbook
+that arranged windows or photographed as soon as the registry held the name
+was racing a panel show it never asked for. Measured under the panels soak:
+the show arrived MID-SCENARIO and collapsed a work layout arranged before it.
+
+So the substrate waits it out ONCE, in `s.register` and in the create/fork
+helpers that read a minted name off the tab bar, through the single predicate
+in `landing_test.go`. Settled is four facts at once: the workspace is in
+Emacs's registry, nothing is left in `agent-repl-verbs--pending-landing`, the
+workspace is the current one, and its panel is on the frame — nothing armed in
+`:pending-show-panels` and its frontend buffer holding a live window. The
+window is what makes the wait safe: the flag alone reads as settled in the
+moment before the arm. Nothing sleeps and nothing polls a fixed interval;
+these are the product's own signals.
+
+The consequence for a manifest sentence: after a register, a create or a
+fork, the workspace's panel IS on the frame. A playbook that wants a
+panel-free frame puts the landing away (`putTheLandingAway`) rather than
+photographing before it.
+
 ## Driving the page
 
 The webapp exposes no readiness flag — no `data-ready`, no global — so
