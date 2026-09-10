@@ -1262,6 +1262,19 @@ func (p *playbook) redrawFrame() {
 // the round count is logged so a capture that needed more than the window's
 // own rounds is on the record.
 //
+// AND THE REDISPLAY BETWEEN THE READS IS `redrawFrame`, THE DOUBLE ONE. It
+// used to be a single `(redraw-frame) (redisplay t)`, which is exactly the
+// incremental-parity hazard `redrawFrame` documents: one garbaged redisplay
+// fills ONE of the two buffers, and this X server does not honour XdbeCopied,
+// so which buffer the next read sees is a coin toss. MEASURED, by the
+// settle diagnostic over one run of the D29-D32 playbook: 4 of 645 changed
+// rounds reported the WHOLE 1280x1024 frame changing at once, in consecutive
+// pairs — the two buffers alternating under the reads, on a screen where
+// nothing had been redrawn. Nothing else in a run moves a third of a million
+// pixels between two reads 20ms apart. Doing what the capture's own kick does
+// — garbage and redisplay twice — puts the complete frame in both buffers
+// every round, so the window closes on the glass rather than on the parity.
+//
 // AND WHY THE READS ARE AN INTERVAL APART, EACH BEHIND ITS OWN EVAL. On pgtk
 // `redisplay` paints Emacs's own surface; the pixels reach the X server only
 // when GTK's main loop runs, which happens while Emacs waits for input --
@@ -1286,7 +1299,7 @@ func (p *playbook) settleFrame() (body []byte, settled bool, took time.Duration,
 	var last []byte
 	redisplayAndRead := func() []byte {
 		rounds++
-		p.e.Eval(`(progn (redraw-frame) (redisplay t) t)`)
+		p.redrawFrame()
 		body := p.readFramebuffer()
 		if diag && last != nil {
 			box, changed, err := xwdChangedBounds(last, body)
