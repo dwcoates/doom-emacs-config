@@ -65,8 +65,13 @@ func taskAct(id string, state *conversationv1.AgentTaskState) *conversationv1.Ag
 	}
 }
 
+// stated is a subject the act NAMES. `AgentTaskState.subject` carries presence,
+// so a test says which of the two things it means -- named, or not named at
+// all -- rather than leaning on the empty string to mean either.
+func stated(subject string) *string { return &subject }
+
 // pendingTask is a recorded, unstarted task.
-func pendingTask(subject string) *conversationv1.AgentTaskState {
+func pendingTask(subject *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{
 		Subject: subject,
 		Status:  &conversationv1.AgentTaskState_Pending{Pending: &conversationv1.AgentTaskPending{}},
@@ -74,7 +79,7 @@ func pendingTask(subject string) *conversationv1.AgentTaskState {
 }
 
 // completedTask is a task that achieved what it described.
-func completedTask(subject string) *conversationv1.AgentTaskState {
+func completedTask(subject *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{
 		Subject: subject,
 		Status:  &conversationv1.AgentTaskState_Completed{Completed: &conversationv1.AgentTaskCompleted{}},
@@ -83,7 +88,7 @@ func completedTask(subject string) *conversationv1.AgentTaskState {
 
 // runningTask is a task being worked on, with the agent's phrasing when it gave
 // one.
-func runningTask(subject string, activeForm *string) *conversationv1.AgentTaskState {
+func runningTask(subject *string, activeForm *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{
 		Subject: subject,
 		Status: &conversationv1.AgentTaskState_Running{
@@ -93,7 +98,7 @@ func runningTask(subject string, activeForm *string) *conversationv1.AgentTaskSt
 }
 
 // deletedTask is a task removed from the plan.
-func deletedTask(subject string) *conversationv1.AgentTaskState {
+func deletedTask(subject *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{
 		Subject: subject,
 		Status:  &conversationv1.AgentTaskState_Deleted{Deleted: &conversationv1.AgentTaskDeleted{}},
@@ -263,8 +268,8 @@ func TestTheTaskChipCountsDoneOverTotal(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", completedTask("write it")))
-	h.r.OnActivity(testWS, mainAgent, taskAct("t2", pendingTask("test it")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", completedTask(stated("write it"))))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t2", pendingTask(stated("test it"))))
 
 	// Assert
 	chip := h.view(t).GetStrip().GetLiveWork().GetTasks()
@@ -280,7 +285,7 @@ func TestARunningTaskCarriesItsActiveForm(t *testing.T) {
 	form := "running the migration"
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("migrate", &form)))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(stated("migrate"), &form)))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -295,7 +300,7 @@ func TestARunningTaskWithNoPhrasingDrawsNoActiveForm(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("migrate", nil)))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(stated("migrate"), nil)))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -307,7 +312,7 @@ func TestARunningTaskWithNoPhrasingDrawsNoActiveForm(t *testing.T) {
 // unstatedTask is a state that says NOTHING about where the task stands --
 // the shape a `TaskUpdate` that moved only an edge or a subject produces, and
 // the shape an announcement the tracker has not answered yet produces.
-func unstatedTask(subject string) *conversationv1.AgentTaskState {
+func unstatedTask(subject *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{Subject: subject}
 }
 
@@ -320,10 +325,10 @@ func TestAnUnstatedStatusLeavesARunningTaskRunning(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	form := "running the migration"
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("migrate", &form)))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(stated("migrate"), &form)))
 
 	// Act: an update that names an edge and no status at all.
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask("migrate")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask(stated("migrate"))))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -340,7 +345,7 @@ func TestAnUnstatedStatusOnANewTaskIsPending(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask("brand new")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask(stated("brand new"))))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -349,18 +354,18 @@ func TestAnUnstatedStatusOnANewTaskIsPending(t *testing.T) {
 	}
 }
 
-// AN EMPTY SUBJECT IS NOT A SUBJECT. A `TaskUpdate` naming only a status
+// AN UNSTATED SUBJECT IS NOT A SUBJECT. A `TaskUpdate` naming only a status
 // carries none, and overwriting with it drew the whole checklist as blank
 // lines beside its glyphs -- observed in the G52 playbook.
 func TestAnActThatNamesNoSubjectKeepsTheOneTheTaskHas(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("Land the converter")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask(stated("Land the converter"))))
 
 	// Act: a status-only update, which is what the tracker's own answer to
-	// `TaskUpdate(status)` produces.
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("", nil)))
+	// `TaskUpdate(status)` produces -- the subject field UNSET, not empty.
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(nil, nil)))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -378,10 +383,10 @@ func TestAnActWithNoSubjectOpensNoChecklistEntry(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("Land the converter")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask(stated("Land the converter"))))
 
 	// Act: the refused update's own shape -- a task nobody has named.
-	h.r.OnActivity(testWS, mainAgent, taskAct("t9", unstatedTask("")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t9", unstatedTask(nil)))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -393,14 +398,33 @@ func TestAnActWithNoSubjectOpensNoChecklistEntry(t *testing.T) {
 	}
 }
 
+// A SUBJECT STATED EMPTY IS A SUBJECT. Presence is what tells the two apart,
+// and the reading that mattered for the checklist -- keeping what an act did
+// not state -- must not become a reading that IGNORES what an act did state.
+func TestAnActThatStatesAnEmptySubjectSetsIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask(stated("Land the converter"))))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(stated(""), nil)))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetTasks().GetRows()
+	if got := rows[0].GetSubject().GetText(); got != "" {
+		t.Fatalf("task subject = %q, want the empty subject the act stated", got)
+	}
+}
+
 func TestADeletedTaskLeavesTheChecklist(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("drop me")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask(stated("drop me"))))
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", deletedTask("drop me")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", deletedTask(stated("drop me"))))
 
 	// Assert
 	if h.view(t).GetStrip().GetLiveWork().GetTasks() != nil {
