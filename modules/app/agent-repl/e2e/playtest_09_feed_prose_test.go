@@ -197,10 +197,7 @@ func p09QueryDeathExpected(causeWords string) string {
 		"hue, not the green of a conclusion. Its headline says THE QUERY DIED and names the fault, and " +
 		"on a smaller line directly BENEATH the headline is the cause sentence \"" + causeWords +
 		"\". The footer's leftmost cells read BLOCKED and QUERY DIED, and its status line says the " +
-		"next prompt restarts the session. The manifest's \"still changing after 2s\" note is EXPECTED " +
-		"here and is not a torn frame: the sidebar draws a pulsing dot for every workspace that is not " +
-		"idle (`ws-pulse`, 1.3s, infinite), so from the second row on the screen never runs out of " +
-		"changes and every capture spends its whole settle budget."
+		"next prompt restarts the session."
 }
 
 // TestPlaytestFeedProseFamilies is plan D25-D28.
