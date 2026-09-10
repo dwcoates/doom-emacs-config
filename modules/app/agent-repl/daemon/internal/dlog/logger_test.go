@@ -92,7 +92,7 @@ func TestLoggerReportsADegradedMirrorDurably(t *testing.T) {
 	// Arrange: a terminal wedged inside its first write, and a queue of one.
 	terminal := newBlockingWriter()
 	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
-	s, err := openSurfaces(runLogPath, true, terminal)
+	s, err := openSurfaces(runLogPath, LevelDebug, terminal)
 	if err != nil {
 		t.Fatalf("openSurfaces: %v", err)
 	}

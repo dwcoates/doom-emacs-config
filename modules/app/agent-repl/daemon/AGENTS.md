@@ -280,13 +280,28 @@ daemon imports it, and its `bin/test-all.sh` roster entry is gone.
 
 ## Logging
 
-Only `internal/dlog`. Every logical branch logs (DEBUG ordinary, WARN
-warnings, ERROR errors) with `operation = daemon.<package>.<verb>` and
-structured context, per `../logging-contract.md`. Workspace-bound records
-go to `<workspace>/.claude/emacs/daemon.log`; failing to resolve the
-workspace is an invariant violation, never a global write. That canonical path
-is a SYMLINK, and its target is minted under `<state>/logs/`, never the OS temp
-dir — the state root owns the daemon's durable logs.
+`internal/dlog` owns the daemon's logging function and exposes `Logger.Debug`,
+`Logger.Info`, `Logger.Warn`, and `Logger.Error`. Every logical branch records
+`operation = daemon.<package>.<verb>` plus structured context, per
+`../logging-contract.md`. `AGENT_REPL_LOG_LEVEL` selects the minimum persisted
+and terminal-mirrored level (`debug`, `info`, `warn`, or `error`) and defaults
+to `info`; any other value is a boot error.
+
+Global records land in `<state>/logs/daemon.run.log`. The run log appends
+across process restarts and rotates at 64 MiB through
+`agentrepl/logging.OpenRotating`, retaining `logging.DefaultBackups`
+generations. Workspace-bound daemon records go to
+`<workspace>/.claude/emacs/daemon.log`; the shim writes `shim.log` through its
+inherited descriptor, and forwarded webapp and sidecar records go to
+`webapp.log` and `sidecar.log`. Each canonical workspace path is a symlink to
+a daemon-owned target under `<state>/logs/`. Failing to resolve a workspace is
+an invariant violation, never a global write.
+
+`logging_bypass_test.go` is the bypass lint. It fails any direct `fmt.Print*`,
+`log.Print*`, or `os.Stderr.Write*` call in production code outside the
+explicitly counted bootstrap, terminal-mirror self-report, and injected CLI
+reporting sites. New diagnostics go through `internal/dlog`, never by growing
+that allowlist.
 
 ## Conventions
 
