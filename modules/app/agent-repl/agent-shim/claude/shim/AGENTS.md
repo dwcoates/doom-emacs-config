@@ -448,6 +448,19 @@ way a refusal does.
    (an `AbortSignal`), never by a bare close: a bare close leaves the store
    holding a reading session nobody will ever pull, and the store has no other
    signal that the reader is gone.
+4. **A READ THAT STANDS NO TAIL GOES THROUGH `readFirstPage`, NEVER
+   `openAgentPage`.** The two differ in what they stand, not in how they are
+   called: `openAgentPage` opens a session the caller will watch, while
+   `readFirstPage` opens `page_only` so the store mints no watch token at all.
+   The store cannot tell the difference on its own — `OpenAgentSession` is
+   unary and its service has no close — so a page opened and then closed here
+   leaves a token nothing will ever spend, for the store's whole process
+   lifetime. Every one-shot site uses the read verb: StartTurn's opening page,
+   the teardown's book head, the StartSession reconciliation read, the
+   live-work re-announcement, and `ReadHistory`. `e2e`'s
+   `TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding` is what holds
+   this: it drives a real turn and stop, then reads the store's own shutdown
+   record for `outstanding_tokens=0`.
 
 ## Validation and errors
 

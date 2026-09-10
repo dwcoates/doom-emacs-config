@@ -1876,6 +1876,70 @@ describe("a book whose id this shim minted", () => {
 // is its tail; a read stands no tail, so an unasked store would be reported as
 // an empty history the moment the store went away.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// page_only: WHO ASKS FOR A TOKEN.
+//
+// OpenAgentSession is unary and the store's service has no close, so a token
+// minted for a page that is then abandoned can never be reclaimed: it lived
+// for the store's whole process lifetime. The caller therefore states at the
+// open whether a watch follows, and a read that stands no tail says so.
+// ---------------------------------------------------------------------------
+describe("a read that stands no tail asks for no watch token", () => {
+  it("sends page_only on readFirstPage, so the store mints nothing", async () => {
+    // Arrange.
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([storedLine("p1", "u1")]), undefined);
+      },
+    });
+
+    // Act.
+    await reader.readFirstPage(BOOK, 10);
+
+    // Assert.
+    expect(requests.map((request) => request.pageOnly)).toEqual([true]);
+  });
+
+  it("never reads the watch field of a page-only open", async () => {
+    // Arrange. The store answers a page-only open with no token, as it must.
+    let watches = 0;
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([storedLine("p1", "u1")]), undefined),
+      watchAgentSession: () => {
+        watches += 1;
+        return standingWatch([]);
+      },
+    });
+
+    // Act.
+    const page = await reader.readFirstPage(BOOK, 10);
+
+    // Assert.
+    expect([page.entries.length, watches]).toEqual([1, 0]);
+  });
+
+  it("leaves page_only UNSET on the watched open, which does want a token", async () => {
+    // Arrange.
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([storedLine("p1", "u1")]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, 10);
+    session.close();
+
+    // Assert.
+    expect(requests.map((request) => request.pageOnly)).toEqual([false]);
+  });
+});
+
 describe("readFirstPage on a book whose id this shim minted", () => {
   /** The refusal the store gives for a book it holds no row for. */
   function noSuchBook(): storev1.OpenAgentSessionResponse {
@@ -1905,7 +1969,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act.
-    await reader.readFirstPage(BOOK, 10, () => true);
+    await reader.readFirstPage(BOOK, 10, undefined, () => true);
 
     // Assert.
     expect(opens).toBe(1);
@@ -1917,7 +1981,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act.
-    const page = await reader.readFirstPage(BOOK, 10, () => true);
+    const page = await reader.readFirstPage(BOOK, 10, undefined, () => true);
 
     // Assert.
     expect([page.entries.length, page.boundary.case]).toEqual([0, "floor"]);
@@ -1933,7 +1997,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act, Assert.
-    await expect(reader.readFirstPage(BOOK, 10, () => true)).rejects.toMatchObject({
+    await expect(reader.readFirstPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -1960,7 +2024,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act, Assert.
-    await expect(reader.readFirstPage(BOOK, 10, () => true)).rejects.toMatchObject({
+    await expect(reader.readFirstPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });

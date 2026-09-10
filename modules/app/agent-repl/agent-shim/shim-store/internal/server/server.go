@@ -297,7 +297,7 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 	msg := req.Msg
 	agentID := msg.GetAgent().GetValue()
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID},
-		"open page_size=%d known_through=%t", msg.GetPageSize(), msg.KnownThrough != nil)
+		"open page_size=%d known_through=%t page_only=%t", msg.GetPageSize(), msg.KnownThrough != nil, msg.GetPageOnly())
 
 	if ref := validateOpenAgentSessionRequest(msg); ref != nil {
 		s.logRefusal(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
@@ -313,6 +313,22 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 		ref := refuseClass(classStorage, SiteDatabaseFailure, "", "the store produced no page for this open")
 		s.logOwnFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
+	}
+
+	// A PAGE-ONLY OPEN MINTS NOTHING. OpenAgentSession is unary and the service
+	// has no close, so the store cannot learn that a page was abandoned: a token
+	// minted for a read that never watched lived for the whole process lifetime.
+	// The caller states at the open whether a watch follows, and a page-only
+	// open answers with `watch` UNSET — there is nothing to present later, and a
+	// watch attempted from it meets the ordinary unknown-token refusal.
+	if msg.GetPageOnly() {
+		log.Log(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WriteSeq: opened.PinSeq},
+			"page-only read served; no watch token minted lines=%d", len(opened.Page.GetLines()))
+		return connect.NewResponse(&storev1.OpenAgentSessionResponse{
+			Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
+				Page: opened.Page,
+			}},
+		}), nil
 	}
 
 	token, err := s.tokens.mint(agentID, opened.PinSeq)

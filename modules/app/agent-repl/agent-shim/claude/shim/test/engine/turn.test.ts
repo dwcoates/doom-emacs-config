@@ -983,12 +983,16 @@ describe("the opening page StartTurn paints", () => {
     expect(h.persistence.closedPages).toBe(1);
   });
 
-  it("closes the page session at once: StartTurn paints once and never tails", async () => {
+  it("opens no page session at all: StartTurn paints once and never tails", async () => {
+    // The opening page goes through the ONE-SHOT verb, so the store mints no
+    // watch token for it. A reading session opened here and closed again would
+    // leave the store holding a token nothing will ever spend, because
+    // OpenAgentSession is unary and its service has no close.
     const h = await harness();
 
     await h.turns.startTurn(startTurn());
 
-    expect(h.persistence.closedPages).toBe(1);
+    expect([h.persistence.firstPageReads, h.persistence.pagesOpened]).toEqual([1, 0]);
   });
 
   it("answers an EMPTY page with a floor when the store cannot be read, never a failure", async () => {
