@@ -938,7 +938,13 @@ workspace restore a stale configuration, so the plist key is cleared."
       (should (null (agent-repl--ws-get "ws1" :fullscreen-config))))))
 
 (ert-deftest agent-repl-test-frontend-display-saves-layout-once ()
-  "The display path saves :fullscreen-config only on a genuine open."
+  "The display path saves :fullscreen-config only on a genuine open.
+The workspace carries its panel buffers on the plist exactly as
+production does — `--frontend-ensure-webview' records `:frontend-buffer'
+before the display and `--ensure-input-buffer' records `:input-buffer'
+on the way in — because that is how the re-show is RECOGNIZED as one:
+the mount is a re-show when the frame holds nothing but this
+workspace's own panels (`agent-repl--panels-cover-frame-p')."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*")))
@@ -946,9 +952,13 @@ workspace restore a stale configuration, so the plist key is cleared."
           (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
                      (lambda () nil))
                     ((symbol-function 'agent-repl--ensure-input-buffer)
-                     (lambda (_ws) (get-buffer-create "*layout-input*")))
+                     (lambda (ws)
+                       (let ((input (get-buffer-create "*layout-input*")))
+                         (agent-repl--ws-put ws :input-buffer input)
+                         input)))
                     ((symbol-function 'agent-repl-window--harden)
                      (lambda (&rest _) nil)))
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
             ;; Act
             (agent-repl--frontend-display-webview "ws1" buf)
             (let ((saved (agent-repl--ws-get "ws1" :fullscreen-config)))
@@ -959,6 +969,47 @@ workspace restore a stale configuration, so the plist key is cleared."
         (delete-other-windows)
         (kill-buffer buf)
         (kill-buffer "*layout-input*")))))
+
+(ert-deftest agent-repl-test-frontend-display-replaces-a-stale-layout ()
+  "A remount over a dead mount saves the USER's layout, not the landing's.
+`delete-other-windows' from the composer takes the webview window and
+leaves the delete-protected composer alone, so the landing-era
+`:fullscreen-config' outlives the mount it belongs to.  The next
+display must therefore record the layout it is ACTUALLY covering — the
+user's own work windows — so the close that follows restores those and
+not the landing."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((view-buf    (generate-new-buffer "*fake-webview*"))
+          (landing-buf (get-buffer-create "*stale-landing*"))
+          (work-buf    (get-buffer-create "*stale-user-work*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                     (lambda () nil))
+                    ((symbol-function 'agent-repl--ensure-input-buffer)
+                     (lambda (_ws) (get-buffer-create "*stale-input*")))
+                    ((symbol-function 'agent-repl-window--harden)
+                     (lambda (&rest _) nil)))
+            (agent-repl--ws-put "ws1" :frontend-buffer view-buf)
+            ;; The landing the panels first went up over.
+            (delete-other-windows)
+            (set-window-buffer (selected-window) landing-buf)
+            (agent-repl--ws-put "ws1" :fullscreen-config
+                                (current-window-configuration))
+            ;; The frame the user has since built for themselves; the
+            ;; webview holds no window, exactly as the sweep left it.
+            (set-window-buffer (selected-window) work-buf)
+            (should-not (get-buffer-window view-buf))
+            ;; Act
+            (agent-repl--frontend-display-webview "ws1" view-buf)
+            ;; Assert — restoring what was saved brings the user's
+            ;; window back, and the landing does not return.
+            (set-window-configuration (agent-repl--ws-get "ws1" :fullscreen-config))
+            (should (get-buffer-window work-buf))
+            (should-not (get-buffer-window landing-buf)))
+        (delete-other-windows)
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
+              (list view-buf landing-buf work-buf (get-buffer "*stale-input*")))))))
 
 (ert-deftest agent-repl-test-frontend-gui-kill-tears-down-layout-first ()
   "gui kill hides the webview/input windows BEFORE releasing the webview.

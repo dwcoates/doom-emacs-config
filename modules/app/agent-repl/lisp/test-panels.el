@@ -880,6 +880,108 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
         (should-not (agent-repl--restore-fullscreen-config "test-ws"))
         (should (= 0 restore-called))))))
 
+(ert-deftest agent-repl-test-panels-restore-fullscreen-config-drops-a-stale-config ()
+  "A `delete-other-windows' over the panels leaves NO stale fullscreen config.
+The composer is delete-protected, so the sweep takes the webview window
+and leaves the composer standing alone.  The landing-era
+`:fullscreen-config' recorded for that mount now describes a frame that
+is gone, so the close drops it (returning nil, no restore) instead of
+putting the landing back over whatever the user does next."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((view-buf  (get-buffer-create "*agent-frontend-stale01*"))
+          (input-buf (get-buffer-create "*agent-panel-input-stale01*"))
+          (restored  nil))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (set-window-buffer (selected-window) view-buf)
+            (let ((input-win (split-window (selected-window) nil 'below)))
+              (set-window-buffer input-win input-buf)
+              (agent-repl-window--harden input-win :delete-protect t)
+              (agent-repl--ws-put "test-ws" :frontend-buffer view-buf)
+              (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+              (agent-repl--ws-put "test-ws" :fullscreen-config
+                                  (current-window-configuration))
+              (select-window input-win)
+              ;; Act — the ordinary binding, pressed from the composer,
+              ;; and then the user builds a window of their own on the
+              ;; frame the half-torn mount left behind.
+              (delete-other-windows)
+              (should-not (get-buffer-window view-buf))
+              (set-window-buffer (split-window (selected-window) nil 'above)
+                                 (get-buffer-create "*stale-user-work*"))
+              (cl-letf (((symbol-function 'set-window-configuration)
+                         (lambda (cfg) (setq restored cfg))))
+                ;; Assert
+                (should-not (agent-repl--restore-fullscreen-config "test-ws"))
+                (should-not restored)
+                (should-not (agent-repl--ws-get "test-ws" :fullscreen-config)))))
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
+              (list view-buf input-buf (get-buffer "*stale-user-work*")))
+        (delete-other-windows)))))
+
+(ert-deftest agent-repl-test-panels-restore-fullscreen-config-keeps-a-covered-frame ()
+  "A frame holding only the mount's REMAINS keeps its saved config.
+The window-change reconciler repairs exactly this state
+\(`agent-repl-window--ensure-layout'): the composer survived alone and
+nothing else has taken the frame, so the layout underneath is still the
+one the configuration was recorded from and the close must restore it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((view-buf  (get-buffer-create "*agent-frontend-covered1*"))
+          (input-buf (get-buffer-create "*agent-panel-input-covered1*"))
+          (restored  nil))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (set-window-buffer (selected-window) view-buf)
+            (let ((input-win (split-window (selected-window) nil 'below)))
+              (set-window-buffer input-win input-buf)
+              (agent-repl-window--harden input-win :delete-protect t)
+              (agent-repl--ws-put "test-ws" :frontend-buffer view-buf)
+              (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+              (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
+              (select-window input-win)
+              ;; Act — the composer is left alone, and nothing else
+              ;; comes onto the frame.
+              (delete-other-windows)
+              (should-not (get-buffer-window view-buf))
+              (cl-letf (((symbol-function 'set-window-configuration)
+                         (lambda (cfg) (setq restored cfg))))
+                ;; Assert
+                (should (agent-repl--restore-fullscreen-config "test-ws"))
+                (should (eq restored 'saved-config)))))
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
+              (list view-buf input-buf))
+        (delete-other-windows)))))
+
+(ert-deftest agent-repl-test-panels-delete-other-windows-spares-the-composer ()
+  "The composer's delete protection is unchanged by the staleness rule.
+`delete-other-windows' invoked from the webview window must still leave
+the hardened composer window alive — that protection is what the
+`:fullscreen-config' staleness rule reads, and it is not relaxed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((view-buf  (get-buffer-create "*agent-frontend-protect1*"))
+          (input-buf (get-buffer-create "*agent-panel-input-protect1*")))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (set-window-buffer (selected-window) view-buf)
+            (let ((input-win (split-window (selected-window) nil 'below)))
+              (set-window-buffer input-win input-buf)
+              (agent-repl-window--harden input-win :delete-protect t)
+              (select-window (get-buffer-window view-buf))
+              ;; Act
+              (delete-other-windows)
+              ;; Assert
+              (should (window-live-p input-win))
+              (should (eq (window-buffer input-win) input-buf))))
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
+              (list view-buf input-buf))
+        (delete-other-windows)))))
+
 (ert-deftest agent-repl-test-panels-restore-fullscreen-config-noop-on-nil-ws ()
   "restore-fullscreen-config returns nil when WS is nil."
   (agent-repl-test--with-clean-state
@@ -2425,6 +2527,39 @@ windows."
               (should-not agent-repl--window-fullscreen-config)))
         (switch-to-buffer "*scratch*")
         (when (buffer-live-p agent-buf) (kill-buffer agent-buf))))))
+
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-toggles-a-work-window ()
+  "The non-agent fullscreen toggle still maximizes and then restores.
+Nothing about the `:fullscreen-config' staleness rule touches
+`agent-repl--window-fullscreen-config', the toggle's OWN saved layout:
+one press leaves a single work window, the next brings the other window
+back."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((work-buf  (get-buffer-create "*fullscreen-toggle-work*"))
+          (other-buf (get-buffer-create "*fullscreen-toggle-other*"))
+          (agent-repl--window-fullscreen-config nil))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+            (delete-other-windows)
+            (set-window-buffer (selected-window) work-buf)
+            (set-window-buffer (split-window-right) other-buf)
+            (select-window (get-buffer-window work-buf))
+            ;; Act — maximize.
+            (agent-repl-fullscreen-and-focus)
+            ;; Assert — only the work window is left, and the layout is held.
+            (should-not (get-buffer-window other-buf))
+            (should (get-buffer-window work-buf))
+            (should agent-repl--window-fullscreen-config)
+            ;; Act — toggle back.
+            (agent-repl-fullscreen-and-focus)
+            ;; Assert — the second window returns and the hold is released.
+            (should (get-buffer-window other-buf))
+            (should (get-buffer-window work-buf))
+            (should-not agent-repl--window-fullscreen-config))
+        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
+              (list work-buf other-buf))
+        (delete-other-windows)))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-selects-input ()
   "fullscreen-and-focus selects the input window after toggling when in an agent buffer."
