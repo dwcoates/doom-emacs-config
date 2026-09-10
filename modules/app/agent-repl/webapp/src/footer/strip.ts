@@ -533,6 +533,17 @@ export function drawFooterStatusActivityWakeup(
  * line is now reachable with NEITHER window figured — a session whose very
  * first usage sample failed has read nothing yet and still has an unread to
  * state.
+ *
+ * THE NEWSWORTHY WINDOW LEADS, AND THE UNREAD MARKER IS NOT PART OF WHAT THE
+ * STRIP CUTS. The dock is one line capped at the response bubble's width, so
+ * this line is routinely wider than the cell holding it; the cut used to fall
+ * wherever the DOM order happened to put it, which at 1280 left the second
+ * window and the whole caveat off the glass. So the figures ride in ONE
+ * ELASTIC child that ellipsizes, ordered with the newsworthy window first —
+ * it is the figure that changes what the reader does — and the marker rides
+ * in a RIGID child beside it, which is what makes it un-cuttable rather than
+ * merely early. The sentence the marker condenses is drawn in full in the
+ * tokens sheet (expanded.ts), and stands as the marker's own title.
  */
 export function drawFooterStatusActivityRateLimited(
   u: FooterStatusActivityRateLimited,
@@ -541,20 +552,49 @@ export function drawFooterStatusActivityRateLimited(
 ): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-rate-limited";
-  const parts: HTMLElement[] = [];
-  if (u.session !== undefined) {
-    parts.push(drawFooterAllowance(u.session, "session", deps, `${path}.session`));
-  }
-  if (u.weekly !== undefined) {
-    parts.push(drawFooterAllowance(u.weekly, "weekly", deps, `${path}.weekly`));
-  }
-  const sample = drawFooterAllowanceSample(u.sample, `${path}.sample`);
-  if (sample !== null) parts.push(sample);
-  parts.forEach((part, index) => {
-    if (index > 0) line.appendChild(document.createTextNode(" | "));
-    line.appendChild(part);
+
+  const figures = document.createElement("span");
+  figures.className = "footer-rate-figures";
+  const ordered = orderedAllowances(u);
+  ordered.forEach((allowance, index) => {
+    if (index > 0) figures.appendChild(document.createTextNode(" | "));
+    figures.appendChild(
+      drawFooterAllowance(allowance.value, allowance.label, deps, `${path}.${allowance.label}`),
+    );
   });
+  if (ordered.length > 0) line.appendChild(figures);
+
+  const marker = drawFooterAllowanceSample(u.sample, `${path}.sample`);
+  if (marker !== null) {
+    if (ordered.length > 0) line.appendChild(document.createTextNode(" | "));
+    line.appendChild(marker);
+  }
   return line;
+}
+
+/** One drawable allowance, under the label the strip and the sheet both use. */
+export interface LabelledAllowance {
+  readonly label: string;
+  readonly value: FooterAllowance;
+}
+
+/**
+ * The windows the producer figured, NEWSWORTHY FIRST.
+ *
+ * Stable within each group, so with nothing newsworthy the pair keeps the
+ * contract's own session-then-weekly order and nothing moves under a reader
+ * for no reason. Exported because the tokens sheet draws the same windows in
+ * the same order — a reader who opens the sheet must find the line they were
+ * reading on the strip, not a reshuffled one.
+ */
+export function orderedAllowances(u: FooterStatusActivityRateLimited): LabelledAllowance[] {
+  const present: LabelledAllowance[] = [];
+  if (u.session !== undefined) present.push({ label: "session", value: u.session });
+  if (u.weekly !== undefined) present.push({ label: "weekly", value: u.weekly });
+  return [
+    ...present.filter((a) => a.value.newsworthy),
+    ...present.filter((a) => !a.value.newsworthy),
+  ];
 }
 
 /** The sentence each unread outcome draws. */
@@ -563,6 +603,41 @@ const ALLOWANCE_UNREAD_SENTENCES = {
   windowUnavailable: "no five-hour window was reported",
   utilizationUnavailable: "no utilization figure was reported",
 } as const;
+
+/** What the strip's marker condenses: the caveat, whole, in one sentence. */
+export const ALLOWANCE_UNREAD_MARKER = "usage unread";
+
+/**
+ * THE CAVEAT IN FULL, or null when the last read managed a figure.
+ *
+ * One composition serving two surfaces: the strip's marker wears it as a
+ * title and the tokens sheet draws it as a row, so the words a reader hovers
+ * and the words they open the sheet to find can never drift apart.
+ */
+export function allowanceUnreadSentence(
+  u: FooterAllowanceSample | undefined,
+  path: string,
+): string | null {
+  const outcome = u?.outcome;
+  if (outcome === undefined || outcome.case === undefined) return null;
+  if (outcome.case === "available") return null;
+  switch (outcome.case) {
+    case "serviceUnavailable":
+    case "windowUnavailable":
+    case "utilizationUnavailable":
+      return `${ALLOWANCE_UNREAD_MARKER} — ${ALLOWANCE_UNREAD_SENTENCES[outcome.case]}`;
+    case "samplingFailure":
+      // THE SHIM'S CAUSE VERBATIM where it stated one; the fixed half of the
+      // sentence carries the meaning when it did not.
+      return outcome.value.cause === ""
+        ? `${ALLOWANCE_UNREAD_MARKER} — the sampling failed`
+        : `${ALLOWANCE_UNREAD_MARKER} — the sampling failed: ${outcome.value.cause}`;
+    default: {
+      const other: { case: string } = outcome;
+      return unreachableArm(path, other.case);
+    }
+  }
+}
 
 /**
  * WHAT THE LAST USAGE SAMPLE MANAGED TO READ, drawn only when it read NOTHING.
@@ -577,6 +652,12 @@ const ALLOWANCE_UNREAD_SENTENCES = {
  * as fresh as the sample — and a strip cell saying so would crowd the line to
  * report that nothing is wrong. Unset draws nothing either: no sample has been
  * attempted at all, so there is no read to report on.
+ *
+ * ON THE STRIP IT IS A MARKER, NOT THE SENTENCE. The strip has room for two
+ * words beside a figure and not for a clause, and a caveat that is cut off is
+ * a caveat nobody reads. So the cell says `usage unread` and nothing else; the
+ * reason rides as its title and as a row of the tokens sheet, and the ARM is
+ * still on the cell for anyone querying the drawn surface.
  */
 export function drawFooterAllowanceSample(
   u: FooterAllowanceSample | undefined,
@@ -584,31 +665,14 @@ export function drawFooterAllowanceSample(
 ): HTMLElement | null {
   const outcome = u?.outcome;
   if (outcome === undefined || outcome.case === undefined) return null;
-  if (outcome.case === "available") return null;
+  const sentence = allowanceUnreadSentence(u, path);
+  if (sentence === null) return null;
 
   const cell = document.createElement("span");
   cell.className = "footer-allowance-unread";
   cell.setAttribute("data-sample", outcome.case);
-  switch (outcome.case) {
-    case "serviceUnavailable":
-    case "windowUnavailable":
-    case "utilizationUnavailable":
-      cell.textContent = `usage unread — ${ALLOWANCE_UNREAD_SENTENCES[outcome.case]}`;
-      break;
-    case "samplingFailure":
-      // THE SHIM'S CAUSE VERBATIM where it stated one; the fixed half of the
-      // sentence carries the meaning when it did not.
-      cell.textContent =
-        outcome.value.cause === ""
-          ? "usage unread — the sampling failed"
-          : `usage unread — the sampling failed: ${outcome.value.cause}`;
-      break;
-    default: {
-      const other: { case: string } = outcome;
-      return unreachableArm(path, other.case);
-    }
-  }
-  cell.title = "the figures beside this were the last ones read, and may be stale";
+  cell.textContent = ALLOWANCE_UNREAD_MARKER;
+  cell.title = `${sentence} — the figures beside this were the last ones read, and may be stale`;
   return cell;
 }
 
