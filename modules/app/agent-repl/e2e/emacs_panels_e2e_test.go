@@ -32,6 +32,11 @@ const panelSettleBound = emacsBootBound
 // own launcher, and `count` workspaces registered against scripted fake-git
 // worktrees. It returns the workspace names in registration order.
 //
+// THE FRAME IT HANDS OVER IS PANEL-FREE AND SETTLED: each registration's own
+// landing is waited out and then put away (`awaitRegistrationLanding`,
+// `putTheLandingAway`), so a scenario's first act is not racing a panel show
+// the registration asked for on the user's behalf.
+//
 // No real git: `harness.NewRepoAt` is the scripted fake, per SPEC.md.
 func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 	t.Helper()
