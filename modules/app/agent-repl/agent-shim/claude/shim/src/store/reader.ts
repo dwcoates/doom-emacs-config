@@ -232,6 +232,7 @@ interface Reader {
   readFirstPage(
     agent: conversationv1.AgentId,
     pageSize: number,
+    knownThrough?: conversationv1.HistoryPointer,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage>;
   readAgentPage(
@@ -882,6 +883,7 @@ export function createReader(options: ReaderOptions): Reader {
   const readFirstPage = async (
     agent: conversationv1.AgentId,
     pageSize: number,
+    knownThrough?: conversationv1.HistoryPointer,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> => {
     let opened: storev1.OpenAgentSessionSuccess;
@@ -889,7 +891,7 @@ export function createReader(options: ReaderOptions): Reader {
       // PAGE-ONLY: this read stands no tail, so it asks for no token. Nothing
       // is minted, so there is nothing to abandon — the reason the store's
       // registry no longer grows by one per one-shot read.
-      opened = await openSession(agent, pageSize, undefined, true);
+      opened = await openSession(agent, pageSize, knownThrough, true);
     } catch (error) {
       if (known === undefined || !(error instanceof PersistenceError)) throw error;
       if (error.kind !== "unknown_agent" || !known()) throw error;
@@ -921,8 +923,8 @@ export function createReader(options: ReaderOptions): Reader {
       return openBook(agent, pageSize, knownThrough, known);
     },
 
-    readFirstPage(agent, pageSize, known) {
-      return readFirstPage(agent, pageSize, known);
+    readFirstPage(agent, pageSize, knownThrough, known) {
+      return readFirstPage(agent, pageSize, knownThrough, known);
     },
 
     async readAgentPage(agent, pageSize, after) {

@@ -380,10 +380,11 @@ export class TurnEngine {
     pageSize: number,
     knownThrough?: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage> {
-    let opened: AgentPageSession | undefined;
     try {
-      opened = await this.session.persistence.openAgentPage(agent, pageSize, knownThrough);
-      return opened.page;
+      // READ, NOT WATCH: the one-shot verb, so the store mints no watch token
+      // for a tail this call never stands. There is no session to close, which
+      // is the point — an abandoned token is one the store can never reclaim.
+      return await this.session.persistence.readFirstPage(agent, pageSize, knownThrough);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       LOGGER.log(
@@ -391,8 +392,6 @@ export class TurnEngine {
         "the opening page could not be read; answering an empty page rather than failing a turn that is running",
       );
       return emptyOpeningPage();
-    } finally {
-      opened?.close();
     }
   }
 
@@ -944,7 +943,7 @@ export class TurnEngine {
       // only thing that tells an empty book apart from a store that is down or
       // failing reads, and this endpoint owes a typed refusal for both.
       return readHistoryPage(
-        await this.session.persistence.readFirstPage(target, request.pageSize, () =>
+        await this.session.persistence.readFirstPage(target, request.pageSize, undefined, () =>
           this.session.knowsAgent(target),
         ),
       );

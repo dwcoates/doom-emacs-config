@@ -300,6 +300,7 @@ export class RecordingPersistence implements Persistence {
   readFirstPage(
     _agent?: conversationv1.AgentId,
     _pageSize?: number,
+    _knownThrough?: conversationv1.HistoryPointer,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> {
     this.lastKnownAgent = known;
