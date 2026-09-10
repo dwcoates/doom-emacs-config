@@ -39,6 +39,7 @@
   (load (expand-file-name "test-core.el" dir) nil t)
   (load (expand-file-name "test-daemon.el" dir) nil t)
   (load (expand-file-name "test-daemon-link.el" dir) nil t)
+  (load (expand-file-name "test-declarations.el" dir) nil t)
   (load (expand-file-name "test-emoji.el" dir) nil t)
   (load (expand-file-name "test-find-file-workspace.el" dir) nil t)
   (load (expand-file-name "test-frontend.el" dir) nil t)
