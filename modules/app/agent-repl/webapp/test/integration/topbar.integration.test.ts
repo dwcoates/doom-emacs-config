@@ -97,6 +97,40 @@ describe("the title and session line", () => {
     expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("carries the rotated session identity into a reveal the reader already had open", async () => {
+    // Arrange: the reader opens the session reveal on the session the page
+    // booted with. This is the state a rotation actually finds a reader in,
+    // and it is the state playtest D28 photographs.
+    await withTopbar({ sessionLine: "vend-1 · ~/.claude · fake-opus-4-8" });
+    await harness.click(".topbar-title");
+    // Act: the vendor rotated its conversation, so the daemon pushes a whole
+    // new topbar view carrying the NEW identity.
+    harness.fake.setTopbar(
+      WORKSPACE_ID,
+      topbarView({ sessionLine: "vend-2 · ~/.claude · fake-opus-4-8" }),
+    );
+    await harness.settle();
+    // Assert: the panel is still open and speaks for the new session. A push
+    // replaces the strip WHOLE, so a reveal that did not re-draw from the new
+    // push would leave the reader reading an identity that no longer exists.
+    expect(harness.text('.topbar-reveal[data-reveal="session"]')).toContain("vend-2");
+  });
+
+  it("does not leave the pre-rotation session identity in the open reveal", async () => {
+    // Arrange
+    await withTopbar({ sessionLine: "vend-1 · ~/.claude · fake-opus-4-8" });
+    await harness.click(".topbar-title");
+    // Act
+    harness.fake.setTopbar(
+      WORKSPACE_ID,
+      topbarView({ sessionLine: "vend-2 · ~/.claude · fake-opus-4-8" }),
+    );
+    await harness.settle();
+    // Assert: the OLD id is gone, which is the half "contains the new one"
+    // cannot prove on its own -- a panel drawing both lines would pass that.
+    expect(harness.text('.topbar-reveal[data-reveal="session"]')).not.toContain("vend-1");
+  });
+
   it("does not open the session reveal above the strip", async () => {
     // Arrange
     await withTopbar({});
