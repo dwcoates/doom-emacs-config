@@ -78,6 +78,12 @@ type Resolver interface {
 	// only while all three hops are live, so a hop down is drawn as not
 	// connected however healthy the shim link is.
 	SetParticipants(ws ids.WorkspaceID, host, web bool)
+	// SetParked states that the idle sweep stood this workspace's shim down on
+	// purpose. While it stands, a DEAD link draws `no_session` rather than
+	// `dead`: the daemon put the route down and a prompt brings it back, so
+	// the indicator reports an absent session and never a broken one. It is
+	// lifted by the next link state of any kind.
+	SetParked(ws ids.WorkspaceID, parked bool)
 	// SetWorkspaceDir binds the workspace's directory, which is what resolves
 	// its durable log sink. The daemon calls it at registration, BEFORE any
 	// frame can arrive; a frame for an unbound workspace is an invariant

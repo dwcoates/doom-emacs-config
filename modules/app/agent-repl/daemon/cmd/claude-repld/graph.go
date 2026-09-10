@@ -454,8 +454,28 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Freeness:     fleet.Freeness(),
 		Announcer:    pushes,
 		LeaseChanged: queue.OnLeaseChanged,
-		Exit:         orderlyExit(p.Exit),
-		Log:          p.Surfaces,
+		PublishHost:  relay.PublishHostWorkspace,
+		// The verbs own the roster's durable half and are built AFTER this
+		// controller, so the republish reads them out of the forwarder --
+		// exactly as the merge orchestrator's own roster republish does.
+		PublishRegistry: func(ctx context.Context) error {
+			verbs, ok := verbsRef.verbs()
+			if !ok {
+				return fmt.Errorf("claude-repld: a session was hibernated before the workspace verbs existed")
+			}
+			return verbs.PublishRegistry(ctx)
+		},
+		// ONE PARK, ONE CALL, BOTH SESSION-SCOPED SURFACES. The footer's strip
+		// and the topbar's indicator each draw the shim link, and the roster
+		// promises they agree with it about the same link
+		// (resolve/sidebar/status.go's linkArm); telling them from one closure
+		// is what makes a park they could disagree about unrepresentable.
+		SetParked: func(ws ids.WorkspaceID, parked bool) {
+			footerResolver.SetParked(ws, parked)
+			topbarResolver.SetParked(ws, parked)
+		},
+		Exit: orderlyExit(p.Exit),
+		Log:  p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the drain controller: %w", err)

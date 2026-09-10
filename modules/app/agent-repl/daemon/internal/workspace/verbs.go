@@ -123,9 +123,15 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 		log.Error(operation, "could not read the current workspace for the roster", dlog.Context{"cause": err.Error()})
 		return
 	}
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(workspaces, repositories, tasks, current))
+	sessions, err := sessionRecords(ctx, v.deps.DB, workspaces)
+	if err != nil {
+		log.Error(operation, "could not read the session records for the roster", dlog.Context{"cause": err.Error()})
+		return
+	}
+	v.deps.Sidebar.SetRegistry(sidebarRegistry(workspaces, repositories, tasks, sessions, current))
 	log.Debug(operation, "republished the roster registry", dlog.Context{
 		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
+		"sessions": len(sessions),
 	})
 }
 

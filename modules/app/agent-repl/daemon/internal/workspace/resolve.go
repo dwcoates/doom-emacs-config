@@ -60,11 +60,39 @@ func (v *verbs) Resolve(ctx context.Context, ref *workspacev1.WorkspaceRef) (wsm
 // sidebarRegistry composes the roster's durable half. It lives beside Resolve
 // because both are pure translations of WSM facts into another package's
 // vocabulary.
-func sidebarRegistry(workspaces []wsm.Workspace, repositories []wsm.Repository, tasks []wsm.Task, current *ids.WorkspaceID) sidebar.Registry {
+func sidebarRegistry(workspaces []wsm.Workspace, repositories []wsm.Repository, tasks []wsm.Task, sessions []wsm.Session, current *ids.WorkspaceID) sidebar.Registry {
 	return sidebar.Registry{
 		Workspaces:   workspaces,
 		Repositories: repositories,
 		Tasks:        tasks,
+		Sessions:     sessions,
 		Current:      current,
 	}
+}
+
+// sessionRecords reads one durable session record per registered workspace.
+//
+// THE ROSTER CANNOT TELL A PARK FROM A FAULT WITHOUT THEM. sidebar.Registry
+// has carried a Sessions field since the resolver landed, and the status
+// precedence keys three of its answers on it -- `none` (an assertion that no
+// session has EVER existed), the receding of a killed row, and the idle arm a
+// HIBERNATED session keeps instead of the link's `dead`. Nothing populated the
+// field, so every one of those read a nil record: a session the idle sweep
+// parked on purpose resolved as `dead` and Emacs painted the tab as broken.
+//
+// A workspace with no session contributes no record; the resolver keys on the
+// record's own workspace, and an absent one is the `none` arm it asserts.
+func sessionRecords(ctx context.Context, db wsm.DB, workspaces []wsm.Workspace) ([]wsm.Session, error) {
+	sessions := make([]wsm.Session, 0, len(workspaces))
+	for _, ws := range workspaces {
+		session, found, err := db.Session(ctx, ws.ID)
+		if err != nil {
+			return nil, fmt.Errorf("read workspace %q's session record: %w", ws.ID, err)
+		}
+		if !found {
+			continue
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
 }

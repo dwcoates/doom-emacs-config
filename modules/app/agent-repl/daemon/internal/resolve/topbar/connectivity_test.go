@@ -9,7 +9,7 @@ import (
 
 func TestAnUnobservedLinkIsNoSession(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(false, shimclient.LinkConnected, true)
+	got := connectivityKey(false, shimclient.LinkConnected, true, false)
 
 	// Assert
 	if got != linkNoSession {
@@ -19,7 +19,7 @@ func TestAnUnobservedLinkIsNoSession(t *testing.T) {
 
 func TestADialingLinkIsConnecting(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDialing, true)
+	got := connectivityKey(true, shimclient.LinkDialing, true, false)
 
 	// Assert
 	if got != linkConnecting {
@@ -29,7 +29,7 @@ func TestADialingLinkIsConnecting(t *testing.T) {
 
 func TestAServingLinkIsConnected(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkConnected, true)
+	got := connectivityKey(true, shimclient.LinkConnected, true, false)
 
 	// Assert
 	if got != linkConnected {
@@ -39,7 +39,7 @@ func TestAServingLinkIsConnected(t *testing.T) {
 
 func TestARedialingLinkIsSevered(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkRedialing, true)
+	got := connectivityKey(true, shimclient.LinkRedialing, true, false)
 
 	// Assert
 	if got != linkSevered {
@@ -49,7 +49,7 @@ func TestARedialingLinkIsSevered(t *testing.T) {
 
 func TestADeadLinkIsDead(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDead, true)
+	got := connectivityKey(true, shimclient.LinkDead, true, false)
 
 	// Assert
 	if got != linkDead {
@@ -59,7 +59,7 @@ func TestADeadLinkIsDead(t *testing.T) {
 
 func TestAServingLinkWithAPeerHopDownIsSevered(t *testing.T) {
 	// Arrange, Act: the shim hop serves but a client hop does not.
-	got := connectivityKey(true, shimclient.LinkConnected, false)
+	got := connectivityKey(true, shimclient.LinkConnected, false, false)
 
 	// Assert
 	if got != linkSevered {
@@ -70,7 +70,7 @@ func TestAServingLinkWithAPeerHopDownIsSevered(t *testing.T) {
 func TestADialingLinkWithAPeerHopDownIsStillConnecting(t *testing.T) {
 	// Arrange, Act: the shim hop already says not-connected, and the peer hop
 	// must not overwrite the more specific bring-up state.
-	got := connectivityKey(true, shimclient.LinkDialing, false)
+	got := connectivityKey(true, shimclient.LinkDialing, false, false)
 
 	// Assert
 	if got != linkConnecting {
@@ -80,7 +80,7 @@ func TestADialingLinkWithAPeerHopDownIsStillConnecting(t *testing.T) {
 
 func TestADeadLinkWithAPeerHopDownIsStillDead(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDead, false)
+	got := connectivityKey(true, shimclient.LinkDead, false, false)
 
 	// Assert
 	if got != linkDead {
@@ -90,7 +90,7 @@ func TestADeadLinkWithAPeerHopDownIsStillDead(t *testing.T) {
 
 func TestAnUnobservedLinkWithAPeerHopDownIsStillNoSession(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(false, shimclient.LinkConnected, false)
+	got := connectivityKey(false, shimclient.LinkConnected, false, false)
 
 	// Assert
 	if got != linkNoSession {
@@ -253,5 +253,33 @@ func TestTheLastPeerHopComingUpDrawsTheServingTone(t *testing.T) {
 	got := h.view(t).GetConnectivity()
 	if got.GetTone() != "green" {
 		t.Fatalf("tone = %q, want green once every hop is live", got.GetTone())
+	}
+}
+
+func TestAParkedDeadLinkIsNoSession(t *testing.T) {
+	// Arrange, Act: the idle sweep's deliberate stand-down.
+	got := connectivityKey(true, shimclient.LinkDead, true, true)
+
+	// Assert: `dead` hollows the indicator with "the session's process is
+	// gone", which reports a fault for a route the daemon put down itself.
+	if got != linkNoSession {
+		t.Fatalf("connectivityKey = %q, want %q for a parked session", got, linkNoSession)
+	}
+}
+
+func TestARevivalLiftsTheParkFromTheIndicator(t *testing.T) {
+	// Arrange: parked, then the reviving prompt's own shim attaches.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+	h.r.SetParked(testWS, true)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+
+	// Act: the revived shim dies for real.
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if got := h.view(t).GetConnectivity().GetGlyph(); got != connectivityGlyph(linkDead) {
+		t.Fatalf("connectivity glyph = %q, want the dead glyph: the park was lifted by the revival", got)
 	}
 }
