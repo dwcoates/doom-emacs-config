@@ -16,7 +16,7 @@
 //	--state-dir        agent-repl state root (default $AGENT_REPL_STATE_DIR, else ~/.claude-emacs)
 //	--config-roots     comma-separated config roots (~/.claude,~/.claude-chesscom)
 //	--spool-root       task-spool root (/tmp; resolves claude-<uid>/… itself)
-//	--log              append-only log file (also to stderr)
+//	--log              size-capped rotating log file
 //	--poll-interval    how often each watched file is polled (1s)
 //	--rescan-interval  how often discovery runs (30s)
 //
@@ -118,7 +118,7 @@ func main() {
 		"agent-repl state root holding the shim's identity records (default $"+StateDirEnv+", else ~/"+DefaultStateDirName+")")
 	configRoots := flag.String("config-roots", "~/.claude,~/.claude-chesscom", "comma-separated config roots")
 	spoolRoot := flag.String("spool-root", "/tmp", "task-spool root (resolves claude-<uid>/ itself)")
-	logPath := flag.String("log", filepath.Join(base, "log", "shim-claude-sidecar.log"), "log file path (also to stderr)")
+	logPath := flag.String("log", filepath.Join(base, "log", "shim-claude-sidecar.log"), "log file path (size-capped, rotated into N generations)")
 	pollInterval := flag.Duration("poll-interval", DefaultPollInterval, "how often each watched file is polled")
 	rescanInterval := flag.Duration("rescan-interval", DefaultRescanInterval, "how often discovery runs")
 	// The LOST windows are STRINGS rather than flag.Duration values because
@@ -412,15 +412,21 @@ func logProcessExit(logf *logging.Bound, err *error) {
 
 // openLogger creates the sidecar's only persistent diagnostic sink. Failures
 // here are bootstrap failures, because no canonical logger can exist yet.
+//
+// THE SINK IS BOUNDED AND IT IS THE ONLY COPY. Both halves of that matter, and
+// both were missing: the log was an ordinary append-only file, and every
+// record was ALSO mirrored to stderr, which under launchd is a second
+// append-only file the process does not own. This is a long-lived service
+// watching thousands of transcripts, so the two copies grew without limit —
+// 6.2 GB of stderr beside a 666 MB `--log` on the owner's machine. The durable
+// sink now rolls at a byte cap with a fixed number of generations, and the
+// terminal keeps only the sink-emergency record it is the last channel for.
 func openLogger(storeSocket, logPath string) (*logging.Bound, func(), error) {
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return nil, nil, bootstrapError{fmt.Errorf("creating log dir: %w", err)}
-	}
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	file, err := sharedlogging.OpenRotating(logPath, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
-	logf := logging.New(os.Stderr, file).With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
+	logf := logging.NewDurableOnly(os.Stderr, file).With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
 	return logf, func() { _ = file.Close() }, nil
 }
 

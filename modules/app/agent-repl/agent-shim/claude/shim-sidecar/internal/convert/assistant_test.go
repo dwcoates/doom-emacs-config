@@ -4,9 +4,13 @@ package convert
 // response's accounting rides.
 
 import (
+	"bytes"
+	"io"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
 const ts1 = "2026-07-22T19:58:36.000Z"
@@ -273,5 +277,104 @@ func TestUnmodeledContentBlockIsNotDrawnAsProse(t *testing.T) {
 	// Assert.
 	if got := vendorKindOf(entries[0]); got != "content_block/fallback" {
 		t.Fatalf("kind = %q, want content_block/fallback", got)
+	}
+}
+
+// loggedConverter is a converter whose records are readable, for the subjects
+// that are ABOUT what the log says.
+func loggedConverter(t *testing.T) (*Converter, *bytes.Buffer) {
+	t.Helper()
+	sink := &bytes.Buffer{}
+	return New(logging.New(io.Discard, sink).With(logging.Context{Component: "test"})), sink
+}
+
+// TestASpawnOnlyResponseNamesTheDeferredAnnounce covers the shape the reader
+// misdescribed on the owner's machine: a response whose only block is a
+// subagent SPAWN produces no units because the spawn announces at its RESULT,
+// which is a decision this converter took — not the exempt set, which it did
+// not.
+func TestASpawnOnlyResponseNamesTheDeferredAnnounce(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1,
+		toolCall("toolu_spawn", "Agent", `{"subagent_type":"Explore","prompt":"look"}`)))
+
+	// Assert.
+	if len(entries) != 0 {
+		t.Fatalf("a spawn-only response minted %d entry(ies), want the unit deferred to the launch's answer", len(entries))
+	}
+	if !strings.Contains(sink.String(), "announces at its result") {
+		t.Errorf("the no-units record does not name the deferred announce: %s", sink.String())
+	}
+	if strings.Contains(sink.String(), "exempt set") {
+		t.Errorf("the no-units record blames the exempt set for a deferred announce: %s", sink.String())
+	}
+}
+
+// TestAnExemptOnlyResponseNamesTheExemptSet covers the other cause, so the two
+// stay distinguishable in the log rather than collapsing back onto one
+// sentence.
+func TestAnExemptOnlyResponseNamesTheExemptSet(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1,
+		toolCall("toolu_search", "ToolSearch", `{"query":"select:Read"}`)))
+
+	// Assert.
+	if len(entries) != 0 {
+		t.Fatalf("an exempt-only response minted %d entry(ies), want none", len(entries))
+	}
+	if !strings.Contains(sink.String(), "the tool is in the exempt set") {
+		t.Errorf("the no-units record does not name the exempt set: %s", sink.String())
+	}
+}
+
+// TestAResponseWithBothCausesNamesBoth covers the mixed record: naming only the
+// first cause would send a reader looking for a bug in the wrong half.
+func TestAResponseWithBothCausesNamesBoth(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1,
+		toolCall("toolu_search", "ToolSearch", `{"query":"select:Read"}`)+","+
+			toolCall("toolu_spawn", "Agent", `{"subagent_type":"Explore","prompt":"look"}`)))
+
+	// Assert.
+	if len(entries) != 0 {
+		t.Fatalf("the response minted %d entry(ies), want none", len(entries))
+	}
+	logged := sink.String()
+	if !strings.Contains(logged, "the tool is in the exempt set") || !strings.Contains(logged, "announces at its result") {
+		t.Errorf("the no-units record names only one of the two causes: %s", logged)
+	}
+}
+
+// TestDescribeNoUnitsDoesNotRepeatOneCause covers the rendering: five exempt
+// blocks are one reason, not five.
+func TestDescribeNoUnitsDoesNotRepeatOneCause(t *testing.T) {
+	// Arrange / Act.
+	got := describeNoUnits([]noUnitReason{reasonExempt, reasonExempt, reasonExempt})
+
+	// Assert.
+	if strings.Count(got, string(reasonExempt)) != 1 {
+		t.Errorf("describeNoUnits = %q, want one cause stated once", got)
+	}
+}
+
+// TestDescribeNoUnitsCallsAnUnnamedCauseAModellingGap covers the case no block
+// owner accounted for: a record producing nothing for a reason nobody decided
+// is a gap, and saying so is the point of the record.
+func TestDescribeNoUnitsCallsAnUnnamedCauseAModellingGap(t *testing.T) {
+	// Arrange / Act.
+	got := describeNoUnits(nil)
+
+	// Assert.
+	if !strings.Contains(got, "modelling gap") {
+		t.Errorf("describeNoUnits(nil) = %q, want it named as a modelling gap", got)
 	}
 }

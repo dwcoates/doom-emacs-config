@@ -112,7 +112,18 @@ type Context struct {
 	// WriteIDs lists the write_ids of a whole refused batch. A batch is refused
 	// WHOLE, so naming one of its records would misreport what was rejected.
 	WriteIDs []string
+	// Repeat is how many times the SAME condition has now been observed for
+	// the same subject, when a record stands in for more occurrences than the
+	// one that produced it. A repeating condition is restated logarithmically
+	// rather than per occurrence, so a defect that never stops being true
+	// stays visible without being the log's entire content — and the reader
+	// can tell "seen once" from "seen ten thousand times" without counting
+	// records that were deliberately not written.
+	Repeat *int
 }
+
+// Repeat boxes an occurrence count for Context.Repeat.
+func Repeat(v int) *int { return &v }
 
 // Off boxes a byte offset for Context.Offset, so an unset offset is genuinely
 // absent rather than a zero that reads as "the start of the file".
@@ -145,13 +156,25 @@ type record struct {
 // Logger writes the sidecar's records to its persistent log and to stderr.
 // Verbose records are emitted only when AGENT_REPL_LOG_VERBOSE is set.
 type Logger struct {
-	stderr   io.Writer
-	file     io.Writer
-	mu       sync.Mutex
-	now      func() time.Time
-	pid      func() int
-	verbose  func() bool
-	poisoned error
+	stderr io.Writer
+	file   io.Writer
+	// terminalEmergencyOnly withholds the ORDINARY record stream from the
+	// terminal sink, leaving it the one thing it is the last channel for: a
+	// SinkEmergency record, which must not re-enter the failed durable sink.
+	//
+	// WHY IT EXISTS. Under launchd the terminal is a plain append-only file
+	// the service does not own and therefore cannot cap or roll, so mirroring
+	// every record there is an unbounded second copy of a log that is already
+	// durable and rotated. On the owner's machine that copy reached 6.2 GB
+	// against a 666 MB `--log`. Nothing is lost by withholding it: the
+	// durable sink carries the identical bytes, and a failure of THAT sink is
+	// exactly the case this flag still lets through.
+	terminalEmergencyOnly bool
+	mu                    sync.Mutex
+	now                   func() time.Time
+	pid                   func() int
+	verbose               func() bool
+	poisoned              error
 }
 
 // Bound is the runtime logger passed through sidecar packages.
@@ -173,6 +196,20 @@ func New(stderr, file io.Writer) *Logger {
 		pid:     os.Getpid,
 		verbose: func() bool { return os.Getenv("AGENT_REPL_LOG_VERBOSE") != "" },
 	}
+}
+
+// NewDurableOnly constructs a logger that writes the record stream to the
+// durable sink ALONE, keeping the terminal for the sink-emergency record it is
+// the last channel for.
+//
+// This is what PRODUCTION uses. `New`'s two-sink mirroring is right when both
+// sinks are the caller's to manage — a test holding two buffers, a foreground
+// run whose terminal is a person — and wrong under launchd, where the terminal
+// is an unbounded file nobody rolls.
+func NewDurableOnly(terminal, file io.Writer) *Logger {
+	l := New(terminal, file)
+	l.terminalEmergencyOnly = true
+	return l
 }
 
 // With creates a logger with stable runtime attribution.
@@ -247,6 +284,9 @@ func contextMap(ctx Context) map[string]any {
 	if ctx.Attempt != nil {
 		out["attempt"] = *ctx.Attempt
 	}
+	if ctx.Repeat != nil {
+		out["repeat_count"] = *ctx.Repeat
+	}
 	if ctx.BackoffMs != nil {
 		out["backoff_ms"] = *ctx.BackoffMs
 	}
@@ -306,6 +346,9 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 			l.reportSinkFailure(now, ctx.Operation, err)
 			panic(fmt.Sprintf("sidecar logging: persistent sink failed: %v", err))
 		}
+	}
+	if l.terminalEmergencyOnly && !ctx.SinkEmergency {
+		return
 	}
 	if err := writeAll(l.stderr, line); err != nil {
 		panic(fmt.Sprintf("sidecar logging: stderr sink failed: %v", err))
@@ -393,6 +436,9 @@ func mergeContext(base, add Context) Context {
 	}
 	if add.Attempt != nil {
 		base.Attempt = add.Attempt
+	}
+	if add.Repeat != nil {
+		base.Repeat = add.Repeat
 	}
 	if add.BackoffMs != nil {
 		base.BackoffMs = add.BackoffMs

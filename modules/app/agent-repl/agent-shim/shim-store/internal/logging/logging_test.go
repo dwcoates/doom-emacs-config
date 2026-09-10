@@ -444,3 +444,46 @@ func TestNoStatementFamilyOmitsTheQueryTimingTrio(t *testing.T) {
 		}
 	}
 }
+
+// TestDurableOnlyWithholdsAnOrdinaryRecordFromTheTerminal covers the bound on
+// the launchd stderr file: the record stream is durable-sink-only, so the file
+// nobody rolls stops receiving a second copy of an already-rotated log.
+func TestDurableOnlyWithholdsAnOrdinaryRecordFromTheTerminal(t *testing.T) {
+	// Arrange.
+	var file, stderr bytes.Buffer
+	log := NewDurableOnly(&file, &stderr, false)
+
+	// Act.
+	log.Log(Fields{Operation: "write-batch"}, "accepted=%d", 2)
+
+	// Assert: durably recorded, and not mirrored.
+	if !strings.Contains(file.String(), `"operation":"write-batch"`) {
+		t.Fatalf("the durable sink holds %q, want the record", file.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("an ordinary record reached the terminal under NewDurableOnly: %q", stderr.String())
+	}
+}
+
+// TestDurableOnlyStillNarratesASinkFailureToTheTerminal covers the carve-out: a
+// failure OF the durable sink can only be reported through the terminal, so
+// withholding the ordinary stream must not close that channel.
+func TestDurableOnlyStillNarratesASinkFailureToTheTerminal(t *testing.T) {
+	// Arrange.
+	var stderr bytes.Buffer
+
+	// Act.
+	capturePanic(t, func() {
+		NewDurableOnly(failingWriter{errors.New("disk full")}, &stderr, false).
+			Log(Fields{Operation: "write", Level: "error"}, "critical")
+	})
+
+	// Assert.
+	var emergency record
+	if err := json.Unmarshal(stderr.Bytes(), &emergency); err != nil {
+		t.Fatalf("emergency stderr is not JSON: %v: %q", err, stderr.String())
+	}
+	if emergency.Operation != "store.logging.sink-failure" {
+		t.Fatalf("emergency stderr record = %#v, want the sink-failure narration", emergency)
+	}
+}

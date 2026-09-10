@@ -1403,3 +1403,151 @@ func TestSignalUnwedgesTheCycleFromAnInFlightWrite(t *testing.T) {
 		})
 	}
 }
+
+// TestTheFirstProducerDefectRecordCountsItself covers the running count on the
+// record a reader actually sees: "seen once" must be distinguishable from
+// "seen ten thousand times" without counting records that were deliberately
+// not written.
+func TestTheFirstProducerDefectRecordCountsItself(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "entry 0 carries no upsert_key"
+	store.writeInvalidField = "batch.entries[0].upsert_key"
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	rec := h.requireOnce(t, "producer-defect", "error")
+	if got, ok := rec.Context["repeat_count"].(float64); !ok || int(got) != 1 {
+		t.Errorf("repeat_count = %v, want the first occurrence counted as 1", rec.Context["repeat_count"])
+	}
+}
+
+// TestARepeatedDefectForOneFileIsNotRestated covers the un-park loop: a
+// condition that never changes must not become a record per poll.
+func TestARepeatedDefectForOneFileIsNotRestated(t *testing.T) {
+	// Arrange: one file has already defected twice on the same field.
+	h := newHarness(t, &fakeStore{})
+	for i := 0; i < 2; i++ {
+		h.sc.countDefect("16777233:1", "/p/a.jsonl", "entries[1].page_agent_id")
+	}
+
+	// Act: the third occurrence of the identical defect.
+	count, stated := h.sc.countDefect("16777233:1", "/p/a.jsonl", "entries[1].page_agent_id")
+
+	// Assert.
+	if stated {
+		t.Error("the third identical defect for one file was restated; a condition that never changes drowns the log")
+	}
+	if count != 3 {
+		t.Errorf("count = %d, want every occurrence tallied even when it is not stated", count)
+	}
+}
+
+// TestARepeatedDefectIsRestatedOnAPowerOfTwo covers the other half of the
+// ladder: a defect stuck in a loop stays VISIBLE, logarithmically.
+func TestARepeatedDefectIsRestatedOnAPowerOfTwo(t *testing.T) {
+	// Arrange: three occurrences already tallied.
+	h := newHarness(t, &fakeStore{})
+	for i := 0; i < 3; i++ {
+		h.sc.countDefect("16777233:1", "/p/a.jsonl", "entries[1].page_agent_id")
+	}
+
+	// Act: the fourth.
+	count, stated := h.sc.countDefect("16777233:1", "/p/a.jsonl", "entries[1].page_agent_id")
+
+	// Assert.
+	if !stated || count != 4 {
+		t.Errorf("occurrence %d stated=%v, want the 4th restated so a stuck defect stays visible", count, stated)
+	}
+}
+
+// TestADifferentFieldForOneFileIsAlwaysStated covers the carve-out: the store
+// named a different part of the batch, so it is a different bug and must not
+// hide behind the first one's tally.
+func TestADifferentFieldForOneFileIsAlwaysStated(t *testing.T) {
+	// Arrange: a file well past its restatement ladder on one field.
+	h := newHarness(t, &fakeStore{})
+	for i := 0; i < 5; i++ {
+		h.sc.countDefect("16777233:1", "/p/a.jsonl", "entries[1].page_agent_id")
+	}
+
+	// Act: the store now names a different field.
+	count, stated := h.sc.countDefect("16777233:1", "/p/a.jsonl", "entries[0].upsert_key")
+
+	// Assert.
+	if !stated {
+		t.Error("a defect on a NEW field was suppressed by the previous field's tally")
+	}
+	if count != 1 {
+		t.Errorf("count = %d, want a new field to start its own tally", count)
+	}
+}
+
+// TestTwoFilesTallyTheirDefectsSeparately covers the key: one file's noisy
+// defect must not suppress another file's first one.
+func TestTwoFilesTallyTheirDefectsSeparately(t *testing.T) {
+	// Arrange: one file well past its ladder.
+	h := newHarness(t, &fakeStore{})
+	for i := 0; i < 5; i++ {
+		h.sc.countDefect("16777233:1", "/p/a.jsonl", "entries[1].page_agent_id")
+	}
+
+	// Act: a DIFFERENT file's first defect, on the same field.
+	count, stated := h.sc.countDefect("16777233:2", "/p/b.jsonl", "entries[1].page_agent_id")
+
+	// Assert.
+	if !stated || count != 1 {
+		t.Errorf("the second file's first defect counted %d stated=%v, want its own tally starting at 1", count, stated)
+	}
+}
+
+// TestARescanStatesTheCountItWatchedRatherThanARecordPerFile covers the boot
+// volume: discovery has no age bound, so a per-file record at normal verbosity
+// costs megabytes of log per boot that say nothing but "still here".
+func TestARescanStatesTheCountItWatchedRatherThanARecordPerFile(t *testing.T) {
+	// Arrange: three transcripts to discover.
+	h := newHarness(t, &fakeStore{})
+	for _, session := range []string{"sess-1", "sess-2", "sess-3"} {
+		h.transcript(t, session, promptLine)
+	}
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert: one summary naming the count, and no per-file record beside it.
+	rec := h.requireOnce(t, "rescan", "info")
+	if got, ok := rec.Context["repeat_count"].(float64); !ok || int(got) != 3 {
+		t.Errorf("repeat_count = %v, want the 3 files this pass started watching", rec.Context["repeat_count"])
+	}
+	h.requireNone(t, "watch", "info")
+}
+
+// TestARescanThatWatchedNothingStatesNothing covers the quiet pass: the rescan
+// tick runs every 30s for the life of the process, and a pass that changed the
+// watched set not at all has no lifecycle fact to report.
+func TestARescanThatWatchedNothingStatesNothing(t *testing.T) {
+	// Arrange: a cycle that has already watched everything there is.
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	before := len(h.opsAt(t, "rescan", "info"))
+
+	// Act: a second pass over the same, unchanged set.
+	h.sc.rescan()
+
+	// Assert.
+	if got := len(h.opsAt(t, "rescan", "info")); got != before {
+		t.Errorf("a rescan that watched nothing wrote %d more record(s), want none", got-before)
+	}
+}

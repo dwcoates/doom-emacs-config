@@ -180,6 +180,17 @@ which the proto documents as never switched on.
     store's `field`, the `write_ids` of the whole refused batch (a batch is
     refused whole, so naming one record would misreport it), the `path`,
     `file_id` and `offset`;
+  - A REPEAT OF THE SAME DEFECT FOR THE SAME FILE IS RESTATED ONLY ON POWERS
+    OF TWO, and every record carries `repeat_count`. A park normally states
+    the defect once and that is the end of it — but a park is not permanent:
+    the un-park below re-reads the file, and if the identity that decides its
+    book oscillates the same refusal returns on every poll. That is a record
+    per second for a condition that never changes, which is the exact drowning
+    the park exists to prevent arriving through the un-park door. The ladder
+    keeps such a defect visible (1, 2, 4, 8 ...) without letting it become the
+    log's entire content, and the count says "seen ten thousand times" without
+    ten thousand records. A defect naming a DIFFERENT `field` is a different
+    bug and is always stated, starting its own tally;
   - THAT FILE's tailer is PARKED for the life of the process. Nothing more is
     read from it, because re-reading the same durable bytes re-mints the same
     rejected batch forever — a tight identical replay loop that makes no
@@ -544,11 +555,36 @@ pre-logger bootstrap failure and the sink-emergency path.
 - Hot per-record and per-batch success diagnostics use `LogVerbose` (gated by
   `AGENT_REPL_LOG_VERBOSE`); lifecycle, invariant violations, refusals and
   failures are normal-verbosity records.
+- A PER-FILE RECORD IS A HOT RECORD HERE, and `watch` is one. Discovery has no
+  age bound: every transcript ever written under either config root is watched
+  for the life of the process, which on a working machine is thousands of files
+  nothing will ever append to again. One normal-verbosity record each cost
+  megabytes per boot that said nothing but "still here". The COUNT is the
+  lifecycle fact, so `rescan` states it once per pass — how many files the pass
+  started watching and how many are watched now — and a pass that changed
+  nothing states nothing. WHICH file, and of what kind, is verbose detail.
 - R10: SIDECAR SELF-DIAGNOSTICS HAVE NO WIRE HOME. They are structured logs
   only. The diagnostic outbox that wrote them to the store is deleted; do not
   aim them at an approximate arm.
 - Lifecycle records persist in
   `~/.cache/agent-repl/log/shim-claude-sidecar.log` (`--log`).
+- THE DURABLE LOG IS THE ONLY COPY, AND IT IS BOUNDED. `--log` is opened
+  through `agentrepl/logging`.`OpenRotating`: it appends to what it finds and
+  ROLLS AT A BYTE CAP into a fixed number of generations (`<path>.1` newest
+  through `<path>.N` oldest), so the file plane's disk footprint is
+  `(N+1) x cap` no matter how long the process runs. It does NOT roll on open —
+  this is a launchd service bounced by every deploy and every crash, and
+  rolling per boot would evict every generation of real history.
+- THE TERMINAL IS NOT A SECOND LOG. Production builds the logger with
+  `logging.NewDurableOnly`, so ordinary records go to the durable sink ALONE.
+  Under launchd stderr is a plain append-only file the process neither owns nor
+  can roll; mirroring every record there was an unbounded second copy of an
+  already-rotated log, and it reached 6.2 GB beside a 666 MB `--log` on the
+  owner's machine. The terminal keeps exactly two things: the BOOTSTRAP errors
+  written before a logger exists (a malformed window, an unopenable log), and
+  the SINK-EMERGENCY record, which must not re-enter the failed durable sink.
+  `logging.New`'s two-sink mirroring stays for tests and foreground runs, where
+  both sinks are the caller's to manage.
 
 ## Standing policies
 
@@ -815,6 +851,19 @@ the suite rather than quietly shrinking what the feed can show.
 - EXACTLY ONE UNIT PER API RESPONSE carries `usage` and `effort`: the unit for
   block 0 of the response. Every other unit leaves both UNSET, or a consumer
   summing units over-counts the bill by the number of blocks.
+- A RESPONSE THAT PRODUCES NO UNITS AT ALL IS LEGITIMATE, AND THE RECORD THAT
+  REPORTS IT NAMES THE REAL CAUSE. There are two, and they are different
+  decisions: the EXEMPT SET (the tool is dropped at the call and at the result
+  alike) and the DEFERRED ANNOUNCE (the unit is real and appears at the call's
+  RESULT, because the subagent spawn's `created_agent_id` is not knowable until
+  the launch answers). The record used to assert the exempt set unconditionally,
+  which is a lie on the commonest shape it fires for — a response whose only
+  block is a spawn — and it sent a reader hunting a modelling gap into a
+  decision that was never taken. Each block that produced nothing answers WHY;
+  the record renders the distinct causes in block order. A response producing
+  nothing for a cause NO BLOCK NAMED is stated as a modelling gap, because that
+  is what it is. The accounting still has nowhere to land either way, so the
+  record stays loud.
 - INSTANTS COME FROM THE FILE, never a clock here. Every `started_at` /
   `settled_at` is the record's own timestamp, so a re-read after a restart mints
   byte-identical frames under byte-identical write ids.

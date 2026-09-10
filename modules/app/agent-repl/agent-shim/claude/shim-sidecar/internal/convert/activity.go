@@ -13,9 +13,28 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
+// noUnitReason names WHY a block produced no unit, for the one record that has
+// to say so truthfully. An empty reason means the block produced units.
+type noUnitReason string
+
+const (
+	// reasonExempt: the tool is in the exempt set and is dropped at the call
+	// and at the result alike.
+	reasonExempt noUnitReason = "the tool is in the exempt set"
+	// reasonDeferredAnnounce: the unit is real and appears at the call's
+	// RESULT, because something the announcement needs is not knowable until
+	// the launch answers.
+	reasonDeferredAnnounce noUnitReason = "the tool announces at its result rather than at its call"
+	// reasonStreamOwned: the stream plane authors this unit whole, because the
+	// transcript's rendering of it is lossy (streamowned.go); the file plane
+	// deliberately writes no part of it.
+	reasonStreamOwned noUnitReason = "the tool is stream-owned and not converted from the transcript"
+)
+
 // toolCallBlock converts one `tool_use` block into its announcement, and
-// remembers the call so its result can settle it.
-func (c *Converter) toolCallBlock(block map[string]any, index int, messageID string, at Attribution, env envelope, agent string) []*storev1.StoreEntry {
+// remembers the call so its result can settle it. A block that produced no
+// unit answers WHY, so the record that reports it does not have to guess.
+func (c *Converter) toolCallBlock(block map[string]any, index int, messageID string, at Attribution, env envelope, agent string) ([]*storev1.StoreEntry, noUnitReason) {
 	name := str(block["name"])
 	id := firstNonEmpty(str(block["id"]), BlockActivityID(messageID, index))
 	input := obj(block["input"])
@@ -30,7 +49,7 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		c.rememberCall(id, openCall{name: name, input: input, startedAt: env.timestampMs, activityID: id, agentID: agent})
 		c.log.With(at.ctxFor("exempt-drop")).With(logging.Context{ActivityID: id}).
 			LogVerbose("tool call name=%q is in the exempt set; dropped entirely", name)
-		return nil
+		return nil, reasonExempt
 	}
 
 	c.rememberCall(id, openCall{name: name, input: input, startedAt: env.timestampMs, activityID: id, agentID: agent})
@@ -41,12 +60,12 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		// than filed as an orphan settle.
 		c.log.With(at.ctxFor("stream-owned-drop")).With(logging.Context{ActivityID: id}).
 			LogVerbose("tool call name=%q is authored by the stream plane; not converted here", name)
-		return nil
+		return nil, reasonStreamOwned
 	}
 
 	kind, known := classifyTool(name)
 	if !known {
-		return []*storev1.StoreEntry{c.unmodeledCall(name, id, index, input, block, at, env, agent)}
+		return []*storev1.StoreEntry{c.unmodeledCall(name, id, index, input, block, at, env, agent)}, ""
 	}
 
 	activity := c.callItem(kind, name, input, env.timestampMs, at, id)
@@ -56,13 +75,13 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		// until the launch answers. The unit appears at its settle instead.
 		c.log.With(at.ctxFor("deferred-announce")).With(logging.Context{ActivityID: id}).
 			LogVerbose("tool call name=%q announces at its result, not at its call", name)
-		return nil
+		return nil, reasonDeferredAnnounce
 	}
 
 	c.log.With(at.ctxFor("tool-call")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
 		LogVerbose("tool call name=%q announced", name)
 	activity.ActivityId = activityID(id)
-	return []*storev1.StoreEntry{c.activityEntry(at, env, agent, id, index, activity)}
+	return []*storev1.StoreEntry{c.activityEntry(at, env, agent, id, index, activity)}, ""
 }
 
 // rememberCall indexes one OPEN call. Bounded by concurrent in-flight calls: the

@@ -129,9 +129,15 @@ type record struct {
 // Logger writes normal records to the persistent log and stderr. Verbose
 // records reach both sinks only when verbose mode is enabled.
 type Logger struct {
-	file           io.Writer
-	stderr         io.Writer
-	verboseEnabled bool
+	file   io.Writer
+	stderr io.Writer
+	// terminalEmergencyOnly withholds the ORDINARY record stream from the
+	// terminal, leaving it the sink-failure record it is the last channel for.
+	// Under launchd the terminal is an append-only file the process neither
+	// owns nor can roll, so mirroring every record there is a second,
+	// unbounded copy of a log that is already durable and rotated.
+	terminalEmergencyOnly bool
+	verboseEnabled        bool
 	fields         Fields
 	state          *sinkState
 	clock          func() time.Time
@@ -157,6 +163,18 @@ func New(file, stderr io.Writer, verboseEnabled bool) *Logger {
 		clock:          time.Now,
 		pid:            os.Getpid,
 	}
+}
+
+// NewDurableOnly creates a logger that writes the record stream to the durable
+// sink ALONE, keeping the terminal for the sink-failure record.
+//
+// This is what PRODUCTION uses. `New`'s mirroring is right when both sinks are
+// the caller's to manage and wrong under launchd, where the terminal is an
+// unbounded file nobody rolls.
+func NewDurableOnly(file, terminal io.Writer, verboseEnabled bool) *Logger {
+	l := New(file, terminal, verboseEnabled)
+	l.terminalEmergencyOnly = true
+	return l
 }
 
 // With returns a logger that adds fields to every record. Explicit fields on
@@ -294,6 +312,9 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 			panic(fmt.Sprintf("shim-store logging: persistent sink failed: %v; emergency stderr also failed: %v", err, terminalErr))
 		}
 		panic(fmt.Sprintf("shim-store logging: persistent sink failed: %v", err))
+	}
+	if l.terminalEmergencyOnly {
+		return
 	}
 	if err := writeFull(l.stderr, line); err != nil {
 		l.state.poisoned = fmt.Errorf("stderr sink: %w", err)
