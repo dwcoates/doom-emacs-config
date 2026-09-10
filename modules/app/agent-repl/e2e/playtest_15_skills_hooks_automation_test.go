@@ -252,7 +252,7 @@ func TestPlaytestAutomation(t *testing.T) {
 			predicate: `document.querySelector('[data-row-kind="separation"][data-state="worktreeLeft"] .sep-worktree[data-left="removed"] .sep-discarded') !== null`,
 			asserted:  "the feed carries a `worktreeLeft` divider whose outcome is `removed`, with the discard line drawn",
 			expected: "Two more worktree dividers: entering `/w/worktrees/throwaway`, then leaving it with a LOUD " +
-				"discard line stating the 3 files and 1 commit thrown away, and no path link -- there is nowhere " +
+				"discard line reading `3 files, 1 commit discarded`, and no path link -- there is nowhere " +
 				"left to go.",
 		},
 		{
@@ -263,6 +263,36 @@ func TestPlaytestAutomation(t *testing.T) {
 			expected: "The `!cron` prompt bubble followed directly by the response bubble `Created, listed and " +
 				"deleted a cron job.` No card for any of the three acts, and NO ◷ chip in the footer: the job " +
 				"was created and deleted within the turn, so nothing is scheduled once it settled.",
+		},
+		{
+			name:   "wakeup-scheduled",
+			prompt: "!wakeup-schedule",
+			predicate: `document.querySelector('.footer-substatus[data-arm="wakeup"]') !== null &&
+			            document.querySelector('.footer-chip[data-chip="crons"]') !== null`,
+			asserted: "the footer's status carries the `wakeup` sub-status and its ◷ chip counts the pending wakeup",
+			expected: "THE FOOTER IS THE SUBJECT: its status cell says the session is waiting on a WAKEUP, with a " +
+				"countdown ticking down from about 20 minutes, and the right-hand chips carry a ◷ chip counting " +
+				"1 scheduled job. The feed shows only the prompt and the response `Scheduled the wakeup.`",
+			// THE WAKEUP ROWS COME BEFORE THE MONITORS, and the order is the
+			// contract's rather than a convenience. footer.proto words the
+			// waiting-on-wakeup arm as "the self-scheduled wakeup fallback:
+			// shown only when the footer would otherwise read idle/done", and
+			// the resolver ranks it BELOW `background`, which stands while any
+			// monitor, agent or detached shell is live. Driven after
+			// `!monitor-persistent` -- whose monitor never stops -- the footer
+			// therefore reads `background` and the fallback correctly never
+			// appears, so this step waited its bound out against the product
+			// behaving exactly as written.
+		},
+		{
+			name:   "wakeup-stopped",
+			prompt: "!wakeup-stop",
+			predicate: `document.querySelector('.footer-substatus[data-arm="wakeup"]') === null &&
+			            document.querySelector('.footer-chip[data-chip="crons"]') === null`,
+			asserted: "the footer's `wakeup` sub-status is gone and the ◷ chip is no longer drawn: the stop retired both",
+			expected: "The ◷ chip from the previous picture is GONE from the footer and the status cell no longer " +
+				"mentions a wakeup -- it reads idle/done as it did before the schedule. No other chip stands " +
+				"in its place: the monitors come later. The response reads `Stopped the wakeup loop.`",
 		},
 		{
 			name:   "monitor-deadline",
@@ -281,28 +311,9 @@ func TestPlaytestAutomation(t *testing.T) {
 			            parseInt(document.querySelector('.footer-chip[data-chip="monitors"]').textContent.replace(/[^0-9]/g, ""), 10) >= 1`,
 			asserted: "the footer's ◉ monitors chip is still drawn with a count of at least one after the persistent monitor was started",
 			expected: "The ◉ monitors chip is still in the footer, its count now the number of live monitors " +
-				"(2 if the deadline monitor from the previous row is still standing). The response reads " +
-				"`Monitoring until something stops it.`",
-		},
-		{
-			name:   "wakeup-scheduled",
-			prompt: "!wakeup-schedule",
-			predicate: `document.querySelector('.footer-substatus[data-arm="wakeup"]') !== null &&
-			            document.querySelector('.footer-chip[data-chip="crons"]') !== null`,
-			asserted: "the footer's status carries the `wakeup` sub-status and its ◷ chip counts the pending wakeup",
-			expected: "THE FOOTER IS THE SUBJECT: its status cell says the session is waiting on a WAKEUP, with a " +
-				"countdown ticking down from about 20 minutes, and the right-hand chips carry a ◷ chip counting " +
-				"1 scheduled job. The feed shows only the prompt and the response `Scheduled the wakeup.`",
-		},
-		{
-			name:   "wakeup-stopped",
-			prompt: "!wakeup-stop",
-			predicate: `document.querySelector('.footer-substatus[data-arm="wakeup"]') === null &&
-			            document.querySelector('.footer-chip[data-chip="crons"]') === null`,
-			asserted: "the footer's `wakeup` sub-status is gone and the ◷ chip is no longer drawn: the stop retired both",
-			expected: "The ◷ chip from the previous picture is GONE from the footer and the status cell no longer " +
-				"mentions a wakeup -- it reads idle/done as it did before the schedule. The ◉ monitors chip " +
-				"remains. The response reads `Stopped the wakeup loop.`",
+				"(2 if the deadline monitor from the previous row is still standing). The footer's status " +
+				"cell reads BACKGROUND rather than idle, live monitors being background work. The response " +
+				"reads `Monitoring until something stops it.`",
 		},
 		{
 			name:   "artifact-published",
