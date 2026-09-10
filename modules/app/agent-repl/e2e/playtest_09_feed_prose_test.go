@@ -55,8 +55,27 @@ func p09ReadInPage(t *testing.T, s *playtestScenario, what, expression string) s
 	script := `(function () {
                    try {
                      var v = (` + expression + `);
-                     return v === null || v === undefined || v === "" ? "" : "ok:" + v;
-                   } catch (e) { return "no: " + e; }
+                     if (v !== null && v !== undefined && v !== "") { return "ok:" + v; }
+                   } catch (e) { return "no: the expression threw " + e; }
+                   // THE DIAGNOSIS, on the same terms as pageYes's: a wait
+                   // that runs out here says WHY there was nothing to read.
+                   // "" alone cannot tell a missing reveal from an open one
+                   // whose line the daemon left blank, and the first run of
+                   // D28 lost an hour to exactly that ambiguity.
+                   var panel = document.querySelector('.topbar-reveal[data-reveal="session"]');
+                   return "no: anchors=" +
+                          document.querySelectorAll('[data-reveal-anchor="session"]').length +
+                          " openReveal=" +
+                          (function () {
+                             var open = document.querySelector(".topbar-reveal");
+                             return open ? open.getAttribute("data-reveal") : "<none>";
+                           })() +
+                          " sessionPanel=" + (panel ? "open" : "<none>") +
+                          " panelHtml=" + (panel ? panel.innerHTML.slice(0, 200) : "<none>") +
+                          " strip=" + (function () {
+                             var strip = document.querySelector("[data-topbar-strip]");
+                             return strip ? strip.innerText.slice(0, 120) : "<no strip>";
+                           })();
                  })()`
 	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
 	raw := s.E.AwaitEvalFor(playtestPageBound, what,
