@@ -36,13 +36,17 @@ func TestUnownedSpoolIsRetainedAcrossRescans(t *testing.T) {
 	}
 
 	// Act: the spawning call arrives on a later pass.
-	h.sc.TaskSpawned("b1", "call-1", "", "", false)
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
 	h.sc.rescan()
 
 	// Assert: it was held, never dropped, so it is tailed the moment it is
 	// claimed.
-	if _, watched := h.sc.watchers[spool]; !watched {
+	watched, ok := h.sc.watchers[spool]
+	if !ok {
 		t.Fatal("a held spool was not picked up once its owner arrived")
+	}
+	if watched.target.WorkspaceDir != "/workspace" || watched.target.WorkspaceID != "workspace-id" || watched.target.ClaudeSessionID != "session-1" {
+		t.Fatalf("spool attribution = %+v, want the spawning transcript's workspace and session", watched.target)
 	}
 }
 

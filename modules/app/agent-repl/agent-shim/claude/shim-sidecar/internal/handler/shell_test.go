@@ -190,16 +190,20 @@ func TestTaskObserverReceivesALaunchReadOffAToolResult(t *testing.T) {
 	// Arrange. The launch result is the ONLY place the vendor states which call
 	// opened which spool, and only the conversion side reads tool results.
 	h := NewSessionTranscriptHandler(testLogger(t))
-	type spawn struct{ task, call, agent, output string }
+	type spawn struct{ task, call, agent, output, workspaceDir, workspaceID, claudeSessionID string }
 	var seen []spawn
-	h.SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool) {
-		seen = append(seen, spawn{taskID, toolUseID, agentID, outputPath})
+	h.SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string) {
+		seen = append(seen, spawn{taskID, toolUseID, agentID, outputPath, workspaceDir, workspaceID, claudeSessionID})
 	})
 	lines := `{"type":"assistant","uuid":"a1","isSidechain":false,"timestamp":"2026-07-21T15:36:10.000Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"toolu_spawn","name":"Agent","input":{"description":"d","prompt":"p"}}]}}
 {"type":"user","uuid":"u1","isSidechain":false,"timestamp":"2026-07-21T15:36:13.295Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_spawn","content":[{"type":"text","text":"launched"}]}]},"toolUseResult":{"isAsync":true,"agentId":"a15b5267244c1360e","outputFile":"/tmp/a15.output","description":"d","prompt":"p"}}`
 
 	// Act.
-	h.Handle(framesFrom(t, lines), sessionContext("/p/s.jsonl", "s"))
+	ctx := sessionContext("/p/s.jsonl", "s")
+	ctx.WorkspaceDir = "/workspace"
+	ctx.WorkspaceID = "workspace-id"
+	ctx.ClaudeSessionID = "session-1"
+	h.Handle(framesFrom(t, lines), ctx)
 
 	// Assert.
 	if len(seen) != 1 {
@@ -213,6 +217,9 @@ func TestTaskObserverReceivesALaunchReadOffAToolResult(t *testing.T) {
 	}
 	if seen[0].output != "/tmp/a15.output" {
 		t.Fatalf("output = %q, want the spool path the vendor named", seen[0].output)
+	}
+	if seen[0].workspaceDir != "/workspace" || seen[0].workspaceID != "workspace-id" || seen[0].claudeSessionID != "session-1" {
+		t.Fatalf("workspace attribution = %+v, want the handler's file scope", seen[0])
 	}
 }
 
