@@ -507,32 +507,106 @@ nothing is armed."
       (should-not switched)
       (should-not agent-repl--opened-recent-cycle))))
 
-(ert-deftest agent-repl-test-commands-switch-right-moves-forward ()
-  "Cycling right lands on the next workspace in roster order."
-  (let ((switched nil))
-    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("a" "b" "c")))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
-              ((symbol-function 'agent-repl--ws-switch) (lambda (ws) (setq switched ws))))
-      (agent-repl-switch-right)
-      (should (equal switched "b")))))
+;;;; ---- Navigation follows the DRAWN tab order ----
 
-(ert-deftest agent-repl-test-commands-switch-left-wraps ()
-  "Cycling left from the first workspace wraps to the last."
-  (let ((switched nil))
-    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("a" "b" "c")))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
-              ((symbol-function 'agent-repl--ws-switch) (lambda (ws) (setq switched ws))))
+;; The bar is drawn from `agent-repl-roster-tab-order' (roster.el), so that
+;; is the list every one of these stubs, and the registry's own
+;; `agent-repl--live-ws-names' is stubbed DIFFERENTLY on purpose wherever
+;; both are in play: the two disagreeing is exactly the defect these cover.
+
+(defmacro agent-repl-test-commands--with-bar (tabs current &rest body)
+  "Run BODY with the tab bar drawing TABS and CURRENT the active workspace.
+Binds `agent-repl-test-commands--switched' to the workspace switched to."
+  (declare (indent 2))
+  `(let ((agent-repl-test-commands--switched nil))
+     (cl-letf (((symbol-function 'agent-repl-roster-tab-order) (lambda () ,tabs))
+               ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
+               ((symbol-function 'agent-repl--ws-current-log-name) (lambda () ,current))
+               ((symbol-function 'agent-repl--ws-switch)
+                (lambda (ws &rest _) (setq agent-repl-test-commands--switched ws)))
+               ((symbol-function 'message) (lambda (&rest _) nil)))
+       ,@body)))
+
+(defvar agent-repl-test-commands--switched nil
+  "The workspace the stubbed switch boundary was handed.")
+
+(ert-deftest agent-repl-test-commands-switch-right-follows-the-drawn-order ()
+  "Cycling right lands on the tab drawn to the RIGHT of the current one."
+  (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+    (agent-repl-switch-right)
+    (should (equal agent-repl-test-commands--switched "second"))))
+
+(ert-deftest agent-repl-test-commands-switch-left-follows-the-drawn-order ()
+  "Cycling left lands on the tab drawn to the LEFT of the current one."
+  (agent-repl-test-commands--with-bar '("first" "second" "third") "third"
+    (agent-repl-switch-left)
+    (should (equal agent-repl-test-commands--switched "second"))))
+
+(ert-deftest agent-repl-test-commands-switch-right-wraps-at-the-last-tab ()
+  "Cycling right off the last tab wraps to the first."
+  (agent-repl-test-commands--with-bar '("first" "second" "third") "third"
+    (agent-repl-switch-right)
+    (should (equal agent-repl-test-commands--switched "first"))))
+
+(ert-deftest agent-repl-test-commands-switch-left-wraps-at-the-first-tab ()
+  "Cycling left off the first tab wraps to the last."
+  (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+    (agent-repl-switch-left)
+    (should (equal agent-repl-test-commands--switched "third"))))
+
+(ert-deftest agent-repl-test-commands-cycle-never-reaches-a-pseudo-perspective ()
+  "persp-mode's own perspectives are in the registry and NOT on the bar.
+Cycling walked the registry, so off one end it switched to Doom's `main'
+or signaled trying to reach `none' -- a splash screen with no tab
+highlighted. The drawn order cannot carry either name."
+  (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+             (lambda () '("main" "first" "none"))))
+    (agent-repl-test-commands--with-bar '("first") "first"
       (agent-repl-switch-left)
-      (should (equal switched "c")))))
+      (should (equal agent-repl-test-commands--switched "first")))))
 
-(ert-deftest agent-repl-test-commands-cycle-does-nothing-off-the-roster ()
-  "A workspace not on the roster has no position to cycle from."
-  (let ((switched nil))
-    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("a" "b")))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "elsewhere"))
-              ((symbol-function 'agent-repl--ws-switch) (lambda (ws) (setq switched ws))))
-      (agent-repl-switch-right)
-      (should-not switched))))
+(ert-deftest agent-repl-test-commands-cycle-on-an-empty-bar-is-a-logged-no-op ()
+  "With no tabs drawn there is no slot to count from, and no error either."
+  (agent-repl-test-commands--with-bar nil "first"
+    (agent-repl-switch-right)
+    (should-not agent-repl-test-commands--switched)))
+
+(ert-deftest agent-repl-test-commands-cycle-does-nothing-off-the-bar ()
+  "A workspace with no tab has no position to cycle from."
+  (agent-repl-test-commands--with-bar '("first" "second") "elsewhere"
+    (agent-repl-switch-right)
+    (should-not agent-repl-test-commands--switched)))
+
+;;;; ---- The numerals index the drawn bar ----
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-lands-on-the-nth-tab ()
+  "N counts from 1 along the DRAWN order, so 2 is the second tab."
+  (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+    (agent-repl-switch-to-workspace 2)
+    (should (equal agent-repl-test-commands--switched "second"))))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-past-the-end-is-a-no-op ()
+  "A slot the bar does not draw is reported, not switched to."
+  (agent-repl-test-commands--with-bar '("first" "second") "first"
+    (agent-repl-switch-to-workspace 3)
+    (should-not agent-repl-test-commands--switched)))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-offers-only-drawn-names ()
+  "The picker cannot offer a target a chord could not reach."
+  (let ((offered nil))
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+               (lambda () '("main" "first" "second" "none")))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt candidates &rest _) (setq offered candidates) "first")))
+      (agent-repl-test-commands--with-bar '("first" "second") "first"
+        (agent-repl-switch-to-workspace nil)
+        (should (equal offered '("first" "second")))))))
+
+(ert-deftest agent-repl-test-commands-last-numeral-lands-on-the-last-tab ()
+  "`M-9' on a three-tab bar means the tab at the end of the bar."
+  (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+    (agent-repl-switch-to-workspace-9)
+    (should (equal agent-repl-test-commands--switched "third"))))
 
 (ert-deftest agent-repl-test-commands-switch-to-project-refuses-with-no-workspaces ()
   "With nothing live there is nothing to switch to."
