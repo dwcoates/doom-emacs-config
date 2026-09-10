@@ -38,7 +38,7 @@ func TestPlaytestArmSentenceNamesTheIndexBadgeAndNeverADisc(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := armSentence("ws-a", tc.arm, tc.col)
+			got := armSentence("ws-a", tc.arm, tc.col, "")
 
 			if strings.Contains(strings.ToLower(got), "disc") {
 				t.Errorf("the sentence for %s says %q; it names a status disc, and the module paints "+
@@ -59,7 +59,7 @@ func TestPlaytestArmSentenceNamesTheIndexBadgeAndNeverADisc(t *testing.T) {
 // the half of the correction that stops a reviewer reading the NAME's color
 // as the arm's.
 func TestPlaytestAColoredArmSentenceSaysTheNameCarriesSelectionNotTheArm(t *testing.T) {
-	got := armSentence("ws-a", ":idle", "green")
+	got := armSentence("ws-a", ":idle", "green", "")
 
 	if !strings.Contains(got, "selection") {
 		t.Errorf("the colored-arm sentence says %q, and never tells the reviewer the name beside the "+
@@ -123,4 +123,40 @@ func columnCount(row string) int {
 		}
 	}
 	return n
+}
+
+// TestPlaytestASelectedNoneArmBadgeSaysTheDarkerGroundIsTheSelection is the
+// half a reviewer would otherwise file as a defect: a `none`-arm badge on the
+// SELECTED tab sits on `agent-repl--color-selected-bg`, visibly darker than
+// the bar, and a sentence promising "the tab bar's own ordinary background"
+// says the product is painting something it should not be.
+func TestPlaytestASelectedNoneArmBadgeSaysTheDarkerGroundIsTheSelection(t *testing.T) {
+	const selectedBg = "#c0c0c0"
+
+	got := armSentence("ws-a", ":none", "none", selectedBg)
+
+	if !strings.Contains(got, selectedBg) {
+		t.Errorf("the selected none-arm sentence says %q, and never names the %s ground the badge is "+
+			"actually drawn on", got, selectedBg)
+	}
+	if !strings.Contains(got, "SELECTION") {
+		t.Errorf("the selected none-arm sentence says %q, and never tells the reviewer the darker "+
+			"ground is the selection rather than an arm color", got)
+	}
+}
+
+// TestPlaytestAnUnselectedNoneArmBadgeSaysTheBarsOwnBackground is the other
+// case, and it must not borrow the selected wording: an unselected tab's badge
+// really is on the bar's own ground, and naming a grey there would send a
+// reviewer hunting a darker patch that is not in the picture.
+func TestPlaytestAnUnselectedNoneArmBadgeSaysTheBarsOwnBackground(t *testing.T) {
+	got := armSentence("ws-a", ":none", "none", "")
+
+	if !strings.Contains(got, "the tab bar's own ordinary background") {
+		t.Errorf("the unselected none-arm sentence says %q, and never names the bar's own background", got)
+	}
+	if strings.Contains(got, "SELECTED") {
+		t.Errorf("the unselected none-arm sentence says %q; it describes a selected tab's darker "+
+			"ground on a tab that is not selected", got)
+	}
 }
