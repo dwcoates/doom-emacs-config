@@ -491,6 +491,43 @@ func TestAPublishDrawsItsHeadingThenItsUrl(t *testing.T) {
 	}
 }
 
+func TestAPublishedTitleKeepsTheFaviconTheCallAnnounced(t *testing.T) {
+	// Arrange: the call announces the favicon and a working title.
+	h := newHarness(t)
+	favicon, title := "📊", "Draft"
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
+			Result: &conversationv1.AgentArtifact_Start{Start: &conversationv1.AgentArtifactStart{
+				Act: &conversationv1.AgentArtifactStart_Publish{Publish: &conversationv1.AgentArtifactPublish{
+					FilePath: "/tmp/report.html", Favicon: &favicon, Title: &title,
+				}},
+				StartedAtMs: 1_000,
+			}},
+		}},
+	})
+
+	// Act: the outcome restates the title -- and never a favicon, which no
+	// outcome carries.
+	published := "Offline Report"
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
+			Result: &conversationv1.AgentArtifact_Success{Success: &conversationv1.AgentArtifactSuccess{
+				Outcome: &conversationv1.AgentArtifactSuccess_Published{
+					Published: &conversationv1.AgentArtifactPublished{Url: "https://claude.ai/a/1", Title: &published},
+				},
+			}},
+		}},
+	})
+
+	// Assert: feed.proto words the heading as "favicon emoji + title", so the
+	// finished card keeps the glyph it wore while it was publishing.
+	if got := h.artifactBubble().GetHeading().GetText(); got != "📊 Offline Report" {
+		t.Fatalf("heading = %q, want the outcome's title under the call's favicon", got)
+	}
+}
+
 func TestAPublishWithNoTitleFallsBackToTheFilesName(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)

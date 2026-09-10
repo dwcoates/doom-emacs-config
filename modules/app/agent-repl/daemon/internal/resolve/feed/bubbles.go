@@ -267,7 +267,8 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 			return nil, errNotARow
 		}
 		u.startedAtMs = frame.Start.GetStartedAtMs()
-		u.input = artifactHeading(publish.Publish.GetFavicon(), publish.Publish.GetTitle(), publish.Publish.GetFilePath())
+		u.artifactFavicon = publish.Publish.GetFavicon()
+		u.input = artifactHeading(u.artifactFavicon, publish.Publish.GetTitle(), publish.Publish.GetFilePath())
 		bubble.Heading = &frontendv1.FeedArtifactHeading{Text: u.input}
 		bubble.State = &frontendv1.FeedArtifact_Publishing{Publishing: &frontendv1.FeedArtifactPublishing{}}
 	case *conversationv1.AgentArtifact_Success:
@@ -277,7 +278,11 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 		}
 		heading := u.input
 		if title := published.Published.GetTitle(); title != "" {
-			heading = artifactHeading("", title, "")
+			// The outcome's title WINS over the one the call announced, and the
+			// favicon still comes from the call: the publish is the only frame
+			// that carries one, so recomposing from the outcome alone dropped
+			// the glyph off the finished card (photographed by the playtest).
+			heading = artifactHeading(u.artifactFavicon, title, "")
 		}
 		bubble.Heading = &frontendv1.FeedArtifactHeading{Text: heading}
 		bubble.State = &frontendv1.FeedArtifact_Published{Published: &frontendv1.FeedArtifactPublished{
