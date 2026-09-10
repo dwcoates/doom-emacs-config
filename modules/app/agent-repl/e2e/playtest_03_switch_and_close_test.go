@@ -260,7 +260,7 @@ func enterWorkspace(t *testing.T, s *playtestScenario, ws string) {
 // reported: a workspace on `agent-repl--ws-tabline-names` whose name the
 // rendered line does not carry is a bar that lost a tab, which is a defect in
 // `status.el` before any picture is taken.
-func tabPaint(t *testing.T, s *playtestScenario, ws string) string {
+func tabPaintSummary(t *testing.T, s *playtestScenario, ws string) string {
 	t.Helper()
 	parts := s.E.EvalStrings(`(let* ((line (agent-repl-workspace-tabline-formatted))
                                      (plain (substring-no-properties line))
@@ -283,14 +283,14 @@ func tabPaint(t *testing.T, s *playtestScenario, ws string) string {
 		"and the face on its name run is %s", ws, parts[1], parts[2], parts[3], parts[4], parts[5])
 }
 
-// tabPaints answers `tabPaint` for every name on the bar, joined, so a
+// tabPaints answers `tabPaintSummary` for every name on the bar, joined, so a
 // capture's assertion cell says what EVERY tab was decided and written as
 // rather than only the one the step moved.
 func tabPaints(t *testing.T, s *playtestScenario, names []string) string {
 	t.Helper()
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		out = append(out, tabPaint(t, s, name))
+		out = append(out, tabPaintSummary(t, s, name))
 	}
 	return strings.Join(out, "; ")
 }
