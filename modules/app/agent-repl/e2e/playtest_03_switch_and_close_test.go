@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -322,43 +321,75 @@ func barFaceColors(t *testing.T, s *playtestScenario) string {
 // THE BAR MUST BE READABLE, AND THAT IS READ OFF THE PICTURE
 // ---------------------------------------------------------------------------
 
-// assertTabBarLegible requires every run of text the tab bar draws to reach
-// `agent-repl-tab-contrast-floor` against the ground it is drawn on, measured
-// in the PHOTOGRAPH rather than in the palette.
+// assertTabBarLegible requires the un-armed tab's STATED pair of colors --
+// `agent-repl-tab-unarmed`'s own foreground and background -- to clear
+// `agent-repl-tab-contrast-floor` by the module's own arithmetic, and to
+// actually be the colors on the glass in the picture just taken.
 //
-// WHY IT IS MEASURED HERE AND NOT ONLY IN ERT. The palette's own pairs are
-// asserted in `lisp/test-status.el`, and they were not the whole story: an
-// un-armed tab left BOTH halves of its pair `unspecified`, so there was no
-// pair for an ERT test to check and the two colors only came into existence
-// when a frame resolved them. Measured on this frame, that resolved to black
-// glyphs on `#14141a` -- 1.06:1 -- and a white numeral on the tab bar's own
-// `#d9d9d9` -- 1.3:1. The only place those numbers exist is the glass, so the
-// assertion belongs where the picture is.
+// WHY THE ASSERTION IS SHAPED THIS WAY. The defect it exists for was not a
+// pair that was too close together; it was NO PAIR AT ALL. An un-armed tab
+// left both halves `unspecified` and inherited them from the frame, so there
+// was nothing for an ERT test to check and the two colors came into being
+// only when a frame resolved them -- to black glyphs on `#14141a` (1.06:1)
+// with a white numeral on the tab bar's own `#d9d9d9` (1.3:1). Both numbers
+// existed only on the glass.
 //
-// THE FLOOR IS READ FROM THE MODULE, never restated here: the number is
-// `status.el`'s, and a copy of it in this file could drift from the one the
-// palette is held to.
+// So this asks the two questions that together close that hole, and neither
+// of them alone does:
 //
-// HOW A RUN IS FOUND, without geometry this file would have to guess at. A
-// GROUND is any color covering at least `playtestTabBarFieldArea` pixels of
-// the band -- the tab bar's own and each tab's -- and the text on one is
-// every pixel beside it in the same row that is not itself a ground. A ground
-// carrying no text at all is skipped rather than failed: padding is not
-// illegible. What is required is that the BEST contrast any pixel achieves on
-// a given ground reaches the floor, because a ground where nothing drawn on
-// it clears the floor is a ground whose text cannot be read at all -- which
-// is exactly the defect this was written for.
+//   - IS THE PAIR READABLE? Asked of `agent-repl-color-contrast-ratio`, the
+//     module's own answer, against the module's own floor. Nothing is
+//     restated here, so this cannot drift from what `lisp/test-status.el`
+//     holds the palette to.
+//   - DID THAT PAIR REACH THE GLASS? The stated background must cover a
+//     tab-sized field of the tab-bar band, and the stated foreground must be
+//     drawn on it. A face whose colors are right and whose pixels are some
+//     other pair is the display failing to take a string that was correct,
+//     which is the OTHER half of the split `tabPaint` sets up.
+//
+// IT IS NOT A HEURISTIC OVER GLYPH PIXELS, and that was tried first: reading
+// the "best contrast any ink achieves on each ground" catches the defect, but
+// it also reads the anti-aliased fringe around a tab's edge, where the answer
+// is a fraction of a ratio away from the floor and depends on where a glyph
+// happens to land. An assertion that can be pushed over by font hinting is a
+// flake waiting to be re-run, and a re-run is not a strategy. Exact colors
+// over a tab-sized area are decided by the palette, not by the rasterizer.
 func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, capture string) {
 	t.Helper()
-	// THE FLOOR COMES ACROSS AS A STRING and is parsed here, because the
-	// layer's eval helpers answer bools, strings and ints and a ratio is none
-	// of those. Reading it rather than restating it keeps the number the
-	// MODULE's.
-	raw := s.E.EvalString(`(format "%s" agent-repl-tab-contrast-floor)`)
-	floor, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		t.Fatalf("`agent-repl-tab-contrast-floor` reads %q, which is not a ratio: %v", raw, err)
+	// EVERY NUMBER HERE IS THE MODULE'S. The pair, the ratio it makes and the
+	// floor it is held to all come back from Emacs; this file supplies only
+	// the picture.
+	answer := s.E.EvalStrings(`(let* ((hex (lambda (c)
+                                            (apply #'format "#%02x%02x%02x"
+                                                   (mapcar (lambda (v) (/ v 256)) (color-values c)))))
+                                     (fg (face-foreground 'agent-repl-tab-unarmed nil t))
+                                     (bg (face-background 'agent-repl-tab-unarmed nil t)))
+                                (list (funcall hex fg)
+                                      (funcall hex bg)
+                                      (format "%.4f" (agent-repl-color-contrast-ratio fg bg))
+                                      (format "%s" agent-repl-tab-contrast-floor)))`)
+	if len(answer) != 4 {
+		t.Fatalf("capture %s: reading the un-armed pair answered %v, want its foreground, its "+
+			"background, their ratio and the floor", capture, answer)
 	}
+	fg, bg := mustParseHexColor(t, answer[0]), mustParseHexColor(t, answer[1])
+	ratio, err := strconv.ParseFloat(answer[2], 64)
+	if err != nil {
+		t.Fatalf("capture %s: `agent-repl-color-contrast-ratio` answered %q, which is not a ratio: %v",
+			capture, answer[2], err)
+	}
+	floor, err := strconv.ParseFloat(answer[3], 64)
+	if err != nil {
+		t.Fatalf("capture %s: `agent-repl-tab-contrast-floor` reads %q, which is not a ratio: %v",
+			capture, answer[3], err)
+	}
+	if ratio < floor {
+		t.Fatalf("capture %s: the un-armed tab's own pair, %s on %s, is %.2f:1 -- under the %.2f:1 "+
+			"floor `agent-repl-tab-contrast-floor` states. Every appearance in "+
+			"`agent-repl--tab-palette` states a foreground legible against its background.",
+			capture, answer[0], answer[1], ratio, floor)
+	}
+
 	band := s.E.EvalInt(`(tab-bar-height nil t)`)
 	if band <= 0 {
 		t.Fatalf("capture %s: `tab-bar-height` answers %d pixels, so there is no tab bar to read",
@@ -368,98 +399,124 @@ func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, cap
 		band = img.Bounds().Dy()
 	}
 
-	rows := make([][]color.RGBA, band)
-	area := map[color.RGBA]int{}
+	field, ink := 0, 0
 	for y := 0; y < band; y++ {
-		row := make([]color.RGBA, img.Bounds().Dx())
-		for x := range row {
-			r, g, b, _ := img.At(x, y).RGBA()
-			c := color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), 0xff}
-			row[x] = c
-			area[c]++
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			switch pixelAt(img, x, y) {
+			case bg:
+				field++
+			case fg:
+				// INK ONLY WHERE IT SITS ON THAT GROUND. The same foreground
+				// is drawn elsewhere on the bar, so a count of the color
+				// alone would not say the un-armed TAB carried any text.
+				//
+				// THE NEAREST GROUND ALONG THE ROW, not the pixel next door:
+				// a glyph's stroke is separated from the ground it sits on by
+				// the rasterizer's own blend, so the two exact colors are
+				// almost never neighbours. What decides which tab a stroke
+				// belongs to is which tab's ground it is standing in.
+				if nearestGroundIs(img, x, y, bg, fg) {
+					ink++
+				}
+			}
 		}
-		rows[y] = row
 	}
+	if field < playtestTabBarFieldArea {
+		t.Errorf("capture %s: the un-armed tab's stated background %s covers %d pixels of the "+
+			"%d-pixel tab bar band, want at least %d. The module says an un-armed tab is drawn in "+
+			"that color, and the glass says it is not: the string was right and the display did "+
+			"not take it.", capture, answer[1], field, band, playtestTabBarFieldArea)
+	}
+	if ink == 0 {
+		t.Errorf("capture %s: not one pixel of the un-armed tab's stated foreground %s is drawn on "+
+			"its stated background %s, so the tab carries no readable text at all in this picture",
+			capture, answer[0], answer[1])
+	}
+}
 
-	grounds := map[color.RGBA]bool{}
-	for c, n := range area {
-		if n >= playtestTabBarFieldArea {
-			grounds[c] = true
-		}
-	}
-	if len(grounds) == 0 {
-		t.Fatalf("capture %s: no color covers %d pixels of the %d-pixel tab bar band, so the bar drew "+
-			"no ground at all", capture, playtestTabBarFieldArea, band)
-	}
-
-	best := map[color.RGBA]float64{}
-	inked := map[color.RGBA]bool{}
-	for _, row := range rows {
-		for x, c := range row {
-			if grounds[c] {
+// nearestGroundIs answers whether the ground the pixel at X,Y stands in is
+// BG: scanning left and right along the row, the first pixel that is either
+// GROUND or some other flat color -- anything that is not the blend between
+// the two -- is BG on at least one side.
+//
+// Scanning rather than reading the neighbour is what makes this robust to
+// anti-aliasing, which is the whole difficulty: a white stroke on a grey
+// ground has two or three blended pixels between the two exact colors, so
+// "is the pixel next door the ground?" answers no for every glyph ever
+// drawn.
+func nearestGroundIs(img *image.RGBA, x, y int, bg, fg color.RGBA) bool {
+	for _, dir := range []int{-1, 1} {
+		for k := 1; k <= playtestGlyphBlendReach; k++ {
+			n := x + dir*k
+			if n < 0 || n >= img.Bounds().Dx() {
+				break
+			}
+			c := pixelAt(img, n, y)
+			if c == fg {
 				continue
 			}
-			for _, dx := range []int{-1, 1} {
-				n := x + dx
-				if n < 0 || n >= len(row) || !grounds[row[n]] {
-					continue
-				}
-				inked[row[n]] = true
-				if r := contrastRatio(c, row[n]); r > best[row[n]] {
-					best[row[n]] = r
-				}
+			if c == bg {
+				return true
+			}
+			// Some other flat color: the stroke is standing somewhere else.
+			if c != bg && isFlatNeighbourhood(img, n, y) {
+				break
 			}
 		}
 	}
-
-	for ground := range inked {
-		if best[ground] < floor {
-			t.Errorf("capture %s: the tab bar draws text on %s that reaches only %.2f:1 at its very "+
-				"best, under the %.2f:1 floor `agent-repl-tab-contrast-floor` states. Nothing drawn on "+
-				"that ground can be read: this is a foreground and a background that were never paired, "+
-				"and every appearance in `agent-repl--tab-palette` states its pair.",
-				capture, hexOf(ground), best[ground], floor)
-		}
-	}
+	return false
 }
 
-// playtestTabBarFieldArea is how many pixels of the tab-bar band a color must
-// cover to be one of its GROUNDS rather than ink drawn on one.
+// isFlatNeighbourhood answers whether the pixel at X,Y is the same color as
+// the one beside it, which is what separates a GROUND from the one-to-three
+// pixel gradient a rasterizer lays between a stroke and its ground.
+func isFlatNeighbourhood(img *image.RGBA, x, y int) bool {
+	c := pixelAt(img, x, y)
+	for _, dir := range []int{-1, 1} {
+		n := x + dir
+		if n >= 0 && n < img.Bounds().Dx() && pixelAt(img, n, y) == c {
+			return true
+		}
+	}
+	return false
+}
+
+// playtestGlyphBlendReach is how far along a row the search for the ground a
+// stroke stands on may travel.
 //
-// MEASURED, not chosen: on this frame the smallest ground -- one tab of a
-// two-tab bar -- covers about 1,500 pixels of the band, and the largest ink
-// run covers under 200. 600 sits between the two populations by more than a
-// factor of two on either side, so it separates them rather than cutting
-// through one.
+// MEASURED: the widest blend between a glyph stroke and its ground in these
+// captures is 3 pixels, and the narrowest gap between two glyph strokes is 2.
+// 12 clears both by a wide margin while staying far inside a tab, whose
+// narrowest is over 90 pixels.
+const playtestGlyphBlendReach = 12
+
+// playtestTabBarFieldArea is how many pixels of the tab-bar band the un-armed
+// tab's own background must cover before the tab counts as DRAWN.
+//
+// MEASURED, not chosen: on this frame one tab of a two-tab bar covers about
+// 1,500 pixels of the band, and the largest run of glyph ink covers under
+// 300. 600 sits between the two populations by more than a factor of two on
+// either side, so it separates them rather than cutting through one.
 const playtestTabBarFieldArea = 600
 
-// contrastRatio answers the WCAG contrast ratio between two colors -- the
-// same arithmetic `agent-repl-color-contrast-ratio` does in the module.
-//
-// It is computed here rather than asked of Emacs because it is asked of
-// hundreds of thousands of pixel pairs per capture, and a round trip each
-// would cost more than the run it is part of. The MODULE's floor is still
-// what it is compared against, so only the arithmetic is local.
-func contrastRatio(a, b color.RGBA) float64 {
-	la, lb := relativeLuminance(a), relativeLuminance(b)
-	if la < lb {
-		la, lb = lb, la
-	}
-	return (la + 0.05) / (lb + 0.05)
+// pixelAt answers the picture's color at one point, alpha discarded, so two
+// colors compare as values.
+func pixelAt(img *image.RGBA, x, y int) color.RGBA {
+	r, g, b, _ := img.At(x, y).RGBA()
+	return color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), 0xff}
 }
 
-func relativeLuminance(c color.RGBA) float64 {
-	channel := func(v uint8) float64 {
-		f := float64(v) / 255
-		if f <= 0.03928 {
-			return f / 12.92
-		}
-		return math.Pow((f+0.055)/1.055, 2.4)
+// mustParseHexColor turns Emacs's `#rrggbb` into a comparable color, and
+// fails the test on anything else rather than defaulting to a color that
+// would silently match nothing.
+func mustParseHexColor(t *testing.T, hex string) color.RGBA {
+	t.Helper()
+	var r, g, b uint8
+	if n, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b); n != 3 || err != nil {
+		t.Fatalf("the color %q is not #rrggbb (read %d fields: %v)", hex, n, err)
 	}
-	return 0.2126*channel(c.R) + 0.7152*channel(c.G) + 0.0722*channel(c.B)
+	return color.RGBA{r, g, b, 0xff}
 }
-
-func hexOf(c color.RGBA) string { return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B) }
 
 // ---------------------------------------------------------------------------
 // A.7 -- SWITCH
