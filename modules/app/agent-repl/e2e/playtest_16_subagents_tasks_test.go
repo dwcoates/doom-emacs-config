@@ -327,9 +327,32 @@ func TestPlaytest16SubagentPlacements(t *testing.T) {
 	// drew EXACTLY ONE bubble, so no placement has quietly doubled.
 	s.awaitInPage(t, "one detached bubble per commission and no more",
 		fmt.Sprintf(`document.querySelectorAll('%s').length === %d`, pt16DetachedBubble, len(rows)))
-	p.note("the four placements all drawn",
+	p.note("the three placements all drawn",
 		fmt.Sprintf("the root feed carries exactly %d `detachedSubagent` rows -- one per commission, "+
 			"none doubled", len(rows)))
+
+	// A REMAINDER THIS PLAYBOOK RECORDS RATHER THAN ASSERTS, in the shape
+	// `00-feed-tail` used for the caret it handed this owner.
+	//
+	// The footer's ⚙ chip is the count of LIVE agent-spawned subagents and its
+	// panel is titled "live agents". By this point one of the three spawns is
+	// live and two have settled -- their heads read `done` and `failed` -- and
+	// the chip is read here rather than asserted, because what the chip counts
+	// is the footer's own business (owner 11's section) and not a claim about
+	// the placements this playbook is photographing.
+	live := s.readInPage(t, "the footer's agents chip",
+		`(function () { var c = document.querySelector('.footer-chip[data-chip="agents"]');
+                   return c ? c.textContent.trim() : "<no agents chip>"; })()`)
+	states := s.readInPage(t, "the placements' settled arms",
+		`Array.prototype.map.call(document.querySelectorAll('`+pt16DetachedBubble+` .subagent-head'),
+                   function (h) { return h.getAttribute("data-state"); }).join(",")`)
+	p.note("the ⚙ chip read beside the placements' own arms",
+		fmt.Sprintf("the bubbles' heads read [%s] and the footer's agents chip reads %q. WHAT THIS DOES "+
+			"NOT SETTLE: whether a DETACHED subagent's terminal retires its ⚙ row. The footer's sink "+
+			"carries `OnBash`, which retires a shell chip at its command's terminal, and nothing "+
+			"equivalent for a subagent -- `applySubagent` only ever hears the SPAWNING call's own "+
+			"activity stream. Filed by owner 16 for the footer's owner rather than fixed here",
+			states, live))
 }
 
 // ---------------------------------------------------------------------------
