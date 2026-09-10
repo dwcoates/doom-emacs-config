@@ -240,6 +240,16 @@ type LifecycleSink interface {
 	// OnNotification raises a host notification and the roster's attention
 	// marker.
 	OnNotification(ws ids.WorkspaceID, note HostNotification)
+	// OnAsksSettled reports that every ask whose notification raised this
+	// workspace's attention marker has SETTLED — answered by the user, decided
+	// without them, or failed to be put at all. It CLEARS the marker: the
+	// marker means an UNSEEN notification, and an ask that is over is not one.
+	//
+	// It is the counterpart of OnNotification rather than a second spelling of
+	// SelectWorkspace's clear: a user who answers a card has looked at the
+	// workspace whether or not they ever selected it, and a workspace that is
+	// never selected would otherwise wear its marker forever.
+	OnAsksSettled(ws ids.WorkspaceID)
 	// OnLinkFault reports a link this daemon LOST, as evidence rather than as
 	// a view fact: a severed standing stream, or a reaped shim process with
 	// its exit code. Each becomes a per-session fault record, which is what
