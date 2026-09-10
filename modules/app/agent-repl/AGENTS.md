@@ -327,7 +327,10 @@ current file plus rotation generations `.1` (newest) through `.5` (oldest);
 merges every selected runtime by timestamp; and fails with the source path and
 line number when any selected JSONL line is malformed. Its default output is a
 compact local-time line. Use `--json` when another program will consume the
-records.
+records. An absent or unreadable sink and a workspace sink that is not a
+symlink are findings: harvest includes attributed finding rows, other modes
+summarize them on stderr, and the reader fails only when none of the selected
+sinks can be read.
 
 | evidence | path, including retained generations | writer process | format | select a run window | attribution | level switch |
 |---|---|---|---|---|---|---|

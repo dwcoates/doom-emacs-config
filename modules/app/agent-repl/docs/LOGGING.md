@@ -32,9 +32,12 @@ audit found, which are the work.
    `info`), honored by every system without a rebuild.
 4. Retrieval: ONE reader, `bin/logs.sh`, that answers a workspace (by id, dir
    or name), the central records, or everything, merged by timestamp,
-   filtered by level and runtime, and `--harvest <from> <to>` for every
-   warn/error in a window as an attributed table (the realtest remediation
-   bar). `scripts/agent-repl-log-discovery.sh` is what it grows from.
+  filtered by level and runtime, and `--harvest <from> <to>` for every
+  warn/error and unavailable-sink finding in a window as an attributed table
+  (the realtest remediation bar). An unavailable sink does not block readable
+  peers; other modes summarize those findings on stderr. The reader exits
+  nonzero when none of the selected sinks can be read.
+  `scripts/agent-repl-log-discovery.sh` is what it grows from.
 5. Rotation everywhere: size cap with N generations (`agentrepl/logging`'s
    `OpenRotating`); never truncate-and-lose, never poison.
 6. Codified: the module's AGENTS.md carries the layout, every log path, the
