@@ -37,8 +37,29 @@ import (
 // the figures on hand standing (daemon/internal/resolve/footer/resolver.go
 // observeAccountUsage) and is itself a reason the line is news (activity.go
 // rateLine), so the event's own figure survives the close and the picture
-// is of a settled footer. The unread caveat is therefore in every D33
-// picture, BESIDE the figures, and the manifest says so.
+// is of a settled footer. The unread caveat is therefore in the DOM of every
+// D33 picture, BESIDE the figures, and the manifest says so.
+//
+// THE STRIP CUTS THE LINE OFF, AND EVERY MANIFEST SENTENCE BELOW SAYS WHERE.
+// The footer dock is capped at the widest response bubble's width
+// (styles.css `.pfooter`, `max-width: var(--agent-bubble-cap)`) and its one
+// elastic cell ellipsizes rather than wrapping, because the design fixes the
+// dock at one line. MEASURED off these captures at the playtest's fixed
+// 1280x1024: the cell holds about `session 82% · resets in 59m` and no more,
+// so the weekly allowance, the unread caveat and the context-budget
+// sentence's tail are all in the DOM -- asserted, every one of them -- and
+// none of them are on the glass. That is a product finding this section
+// FILES rather than fixes: how the strip should carry a line it cannot fit
+// (wrap, hand it to the expansion sheet, shorten it) is a design decision.
+// The sentences here state what the picture actually shows, so a reviewer
+// judges the paint rather than re-deriving the truncation each time.
+//
+// SO IS `resets in 0m`. catalogs.ts fixes the sampled windows at absolute
+// instants in 2026-08-29 / 2026-09-02, which are now in the past, so a
+// countdown drawn off the SAMPLE reads `0m` while one drawn off a rate-limit
+// EVENT (minted at `now + 3600s`) counts down properly. Also filed: it is
+// the fake's fixture, and its determinism is what the golden conformance
+// corpora rest on.
 
 // fsRow is one row of a footer-and-sidebar table: what the user submits,
 // the DRAWN fact the capture waits on, and what the picture must show.
@@ -253,11 +274,13 @@ func TestPlaytestFooterRateLimits(t *testing.T) {
 			what:    "the SESSION allowance to draw the event's 82% under the allowed_warning arm, with the weekly figure and the unread caveat still beside it",
 			predicate: fsPercent("session") + ` === "` + fsEventSession + `" && ` + fsAllowanceArm("session") + ` === "allowedWarning" && ` +
 				fsPercent("weekly") + ` === "` + fsStandingWeekly + `" && ` + fsUnread + ` === "serviceUnavailable"`,
-			expected: "The footer's activity cell (the wide cell after the status word) reads `session 82% · resets in " +
-				"<about an hour, counting down>` in the WARNING tone and bold, because 82% is newsworthy and the vendor's " +
-				"verdict was allowed_warning; then ` | weekly 63% · resets in <a countdown>` in the plain tone; then ` | " +
-				fsUnreadService + "`. The feed above carries the `!usage-service-unavailable` and `!rate-limit-five-hour` " +
-				"prompt bubbles with their prose answers.",
+			expected: "The footer's activity cell (the wide cell between the `done` cell and the empty turn-clock cell) " +
+				"reads `session 82% · resets in 59m` -- the figure and the word `resets` in the WARNING tone and bold, " +
+				"because 82% is newsworthy and the vendor's verdict was allowed_warning -- and is then CUT OFF at the " +
+				"cell's edge with an ellipsis. The weekly figure and `" + fsUnreadService + "` follow it in the DOM (this " +
+				"step asserts both) and are NOT on the glass: the strip cannot fit the line, which is this section's " +
+				"filed finding rather than a fault in the paint. The feed above carries the `!usage-service-unavailable` " +
+				"and `!rate-limit-five-hour` prompt bubbles with their prose answers.",
 		},
 		{
 			name:    "seven-day-allowance",
@@ -265,9 +288,11 @@ func TestPlaytestFooterRateLimits(t *testing.T) {
 			what:    "the WEEKLY allowance to draw the event's 91% under the allowed_warning arm, with the session figure and the unread caveat still beside it",
 			predicate: fsPercent("weekly") + ` === "` + fsEventWeekly + `" && ` + fsAllowanceArm("weekly") + ` === "allowedWarning" && ` +
 				fsPercent("session") + ` === "` + fsEventSession + `" && ` + fsUnread + ` === "serviceUnavailable"`,
-			expected: "The footer's activity cell reads `session 82% · resets in <countdown>` as before, then ` | weekly 91% " +
-				"· resets in <about three days, counting down>` now ALSO in the warning tone and bold, then ` | " +
-				fsUnreadService + "`. Both allowances are newsworthy now, so both are emphasized.",
+			expected: "The footer's activity cell is UNCHANGED on the glass from the previous picture -- `session 82% · " +
+				"resets in 59m` in the warning tone, cut off at the cell's edge. The weekly allowance now carries the " +
+				"event's 91% under the same warning arm, and it is asserted in the DOM by this step, but the strip has " +
+				"no room to draw it: the ONLY visible difference between this picture and the last is the feed, which " +
+				"has gained the `!rate-limit-seven-day` prompt bubble and the prose `The seven_day window is 91% used.`",
 		},
 	})
 
@@ -282,10 +307,10 @@ func TestPlaytestFooterRateLimits(t *testing.T) {
 	p.capture("overage-dropped", "submitted `!rate-limit` (the overage window) with composer RET and let it settle",
 		fmt.Sprintf("the daemon wrote the warn record `%s` (%q) to the workspace's own log, and the footer still draws exactly two `.footer-allowance` cells with the previous figures",
 			fsOverageOperation, record.Message),
-		"The footer's activity cell is UNCHANGED from the previous picture: `session 82%` and `weekly 91%` with their "+
-			"countdowns and the unread caveat, and NO third allowance cell and no mention of overage anywhere on the "+
-			"strip. The feed carries one more prompt bubble, `!rate-limit`, with the prose `The account is approaching "+
-			"its overage threshold.` beneath it.")
+		"The footer's activity cell is UNCHANGED from the previous picture -- `session 82% · resets in 59m` in the "+
+			"warning tone, cut off at the cell's edge -- and NOWHERE on the strip is there a third allowance cell or "+
+			"any mention of overage. The feed carries one more prompt bubble, `!rate-limit`, with the prose `The "+
+			"account is approaching its overage threshold.` beneath it.")
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +325,9 @@ func TestPlaytestFooterUsageOutcomes(t *testing.T) {
 			"reasons draw `.footer-allowance-unread` BESIDE the figures the last readable sample filed (never "+
 			"instead of them), and `opus_absent` -- an available answer with one optional window missing -- reads "+
 			"again and retires the line entirely, because the fake's figures are under the newsworthiness gate. "+
-			"First sighting of the unread caveat in a real webview (Landing 13).")
+			"Landing 13 wanted the unread caveat's first sighting in a real webview, and this is it: the caveat is "+
+			"drawn, with its exact words and beside the standing figures, in every one of these pages -- and NONE of "+
+			"it reaches the glass, because the strip's one elastic cell ellipsizes before it. That is the finding.")
 	p := s.Book
 
 	repository := s.repoAt(t, "repo")
@@ -321,9 +348,12 @@ func TestPlaytestFooterUsageOutcomes(t *testing.T) {
 			fsPercent("session") + ` === "` + fsStandingSession + `" && ` + fsPercent("weekly") + ` === "` + fsStandingWeekly + `"`
 	}
 	beside := func(sentence string) string {
-		return "The footer's activity cell reads `session 41% · resets in <a countdown>` in the plain tone (41% is not " +
-			"newsworthy, so not bold), then ` | weekly 63% · resets in <a countdown>`, then ` | " + sentence + "` in the " +
-			"caveat's own muted style. THE FIGURES ARE STILL THERE: the caveat is drawn beside them, not in their place."
+		return "The footer's activity cell reads `session 41% · resets in 0m |` in the plain tone (41% is not " +
+			"newsworthy, so not bold) and is CUT OFF there with an ellipsis. `weekly 63%` and `" + sentence + "` follow " +
+			"in the DOM -- this step asserts the caveat's exact words and both standing figures -- and the strip has no " +
+			"room to draw them. The `0m` is the fake's own fixed reset instant, now in the past. Both are this " +
+			"section's filed findings; what the picture must show is the figures STANDING (the caveat never replaced " +
+			"them) and the cell ending in an ellipsis rather than in a bare `session 41%`."
 	}
 
 	s.run(t, []fsRow{
@@ -355,7 +385,8 @@ func TestPlaytestFooterUsageOutcomes(t *testing.T) {
 			predicate: fsUnread + ` === "samplingFailure" && ` + fsUnreadText + `.indexOf("` + fsUnreadSampling + `: ") === 0 && ` +
 				fsPercent("session") + ` === "` + fsStandingSession + `" && ` + fsPercent("weekly") + ` === "` + fsStandingWeekly + `"`,
 			expected: beside(fsUnreadSampling+": <the shim's own account of what threw>") +
-				" The cause after the colon is the shim's verbatim error text and must not be empty.",
+				" The cause after the colon is the shim's verbatim error text, asserted non-empty here and, like the " +
+				"rest of the caveat, off the glass.",
 		},
 		{
 			name:      "opus-absent-retires-the-line",
@@ -412,10 +443,11 @@ func TestPlaytestFooterContextStatus(t *testing.T) {
 			prompts:   []string{"!context-budget-warning"},
 			what:      "the footer's idle activity line to carry the context-budget warning verbatim",
 			predicate: fsStatusArm + ` === "idle" && ` + fsBudgetText + ` === "` + fsBudgetWarning + `"`,
-			expected: "The footer's status word reads `idle` and its activity cell now reads `" + fsBudgetWarning + "` " +
-				"verbatim, followed by a small relative age. The feed carries three prompt bubbles, the last " +
-				"`!context-budget-warning` with the prose `The CLI warned that the context budget is filling.`, and " +
-				"still NO row for the warning: it is footer-only.",
+			expected: "The footer's status word reads `idle` and its activity cell now carries the warning, drawn as " +
+				"far as the cell reaches -- `The conversation is approaching its…` -- with the rest of `" + fsBudgetWarning +
+				"` and its relative age in the DOM (this step asserts the sentence verbatim) and off the glass. The feed " +
+				"carries three prompt bubbles, the last `!context-budget-warning` with the prose `The CLI warned that " +
+				"the context budget is filling.`, and still NO row for the warning: it is footer-only.",
 		},
 	})
 }
