@@ -25,7 +25,7 @@ import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
-import { sessionUpsertKey } from "../store/keys.js";
+import { contextCutUpsertKey, sessionUpsertKey } from "../store/keys.js";
 import { pageLineEntry, prose } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { residueEntry, residueKind, vendorSpecificResidue } from "./residue.js";
@@ -46,11 +46,6 @@ function sessionEntry(
     keepalive: context.keepalive,
     item: { kind: "session_update", update },
   };
-}
-
-/** The upsert key a context cut takes: the vendor record that stated it. */
-function contextCutUpsertKey(vendorUuid: string): string {
-  return `cut:${vendorUuid}`;
 }
 
 // ---------------------------------------------------------------------------

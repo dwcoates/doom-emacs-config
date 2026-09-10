@@ -528,6 +528,29 @@ function preservedUuids(ctx: ScenarioContext, head: string) {
   };
 }
 
+/**
+ * The `isCompactSummary` user line the vendor writes RIGHT AFTER a boundary.
+ *
+ * GROUNDED: `testdata/captures/compaction-directed` has it — a `user` record,
+ * `isVisibleInTranscriptOnly`, parented on the boundary's uuid. It is not
+ * decoration. The file plane's converter coalesces the boundary with THIS line
+ * to fill `ContextCompacted.summary`, so a mock that omitted it produced a cut
+ * whose summary was empty and a divider with a hole where the discarded history
+ * should be.
+ */
+function appendCompactSummaryLine(ctx: ScenarioContext, boundaryUuid: string, summary: string): void {
+  ctx.files.transcript.append({
+    parentUuid: boundaryUuid,
+    isSidechain: false,
+    type: "user",
+    message: { role: "user", content: summary },
+    isVisibleInTranscriptOnly: true,
+    isCompactSummary: true,
+    uuid: ctx.newUuid(),
+    timestamp: ctx.nowIso(),
+  });
+}
+
 const COMPACT = scenario({
   name: "compact",
   prompt: "!compact [summary]",
@@ -544,40 +567,37 @@ const COMPACT = scenario({
     ctx.log({ turn: ctx.turn, branch: "compact", summary }, "fake compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
     const preserved = preservedUuids(ctx, ctx.files.transcript.chainHead ?? ctx.newUuid());
-    ctx.emit({
-      type: "system",
-      subtype: "compact_boundary",
-      compact_metadata: {
-        trigger: "manual",
-        pre_tokens: 435_029,
-        post_tokens: 8_639,
-        cumulative_dropped_tokens: 705_119,
-        duration_ms: 194_511,
-        ...preserved.stream,
+    const boundaryUuid = ctx.systemRecord(
+      "compact_boundary",
+      {
+        compact_metadata: {
+          trigger: "manual",
+          pre_tokens: 435_029,
+          post_tokens: 8_639,
+          cumulative_dropped_tokens: 705_119,
+          duration_ms: 194_511,
+          ...preserved.stream,
+        },
+        // GROUNDED: in BOTH real captures `logical_parent_uuid` equals the
+        // preserved TAIL, not the head — it names the message the post-boundary
+        // transcript hangs off, which is the last preserved one.
+        logical_parent_uuid: preserved.tail,
       },
-      // GROUNDED: in BOTH real captures `logical_parent_uuid` equals the
-      // preserved TAIL, not the head — it names the message the post-boundary
-      // transcript hangs off, which is the last preserved one.
-      logical_parent_uuid: preserved.tail,
-    });
-    ctx.files.transcript.append({
-      type: "system",
-      subtype: "compact_boundary",
-      content: "Conversation compacted",
-      isMeta: false,
-      level: "info",
-      logicalParentUuid: preserved.tail,
-      compactMetadata: {
-        trigger: "manual",
-        preTokens: 435_029,
-        durationMs: 194_511,
-        ...preserved.file,
-        postTokens: 8_639,
-        cumulativeDroppedTokens: 705_119,
+      {
+        content: "Conversation compacted",
+        level: "info",
+        logicalParentUuid: preserved.tail,
+        compactMetadata: {
+          trigger: "manual",
+          preTokens: 435_029,
+          durationMs: 194_511,
+          ...preserved.file,
+          postTokens: 8_639,
+          cumulativeDroppedTokens: 705_119,
+        },
       },
-      uuid: ctx.newUuid(),
-      timestamp: ctx.nowIso(),
-    });
+    );
+    appendCompactSummaryLine(ctx, boundaryUuid, summary);
     ctx.systemMessage("status", { status: null, compact_result: "success" });
     conclude(ctx, summary);
   },
@@ -593,43 +613,41 @@ const COMPACT_AUTO = scenario({
     ctx.log({ turn: ctx.turn, branch: "compact-auto" }, "fake auto-compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
     const preserved = preservedUuids(ctx, ctx.files.transcript.chainHead ?? ctx.newUuid());
-    ctx.emit({
-      type: "system",
-      subtype: "compact_boundary",
-      // GROUNDED, verbatim from `testdata/captures/auto-compaction` (Haiku,
-      // 2026-09-04): sixteen paced 40000-byte reads carried the window to
-      // 165716 tokens and the vendor compacted on its own. The figures were
-      // invented before that capture existed.
-      compact_metadata: {
-        trigger: "auto",
-        pre_tokens: 165_716,
-        post_tokens: 13_675,
-        cumulative_dropped_tokens: 152_041,
-        duration_ms: 18_695,
-        ...preserved.stream,
+    const boundaryUuid = ctx.systemRecord(
+      "compact_boundary",
+      {
+        // GROUNDED, verbatim from `testdata/captures/auto-compaction` (Haiku,
+        // 2026-09-04): sixteen paced 40000-byte reads carried the window to
+        // 165716 tokens and the vendor compacted on its own. The figures were
+        // invented before that capture existed.
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: 165_716,
+          post_tokens: 13_675,
+          cumulative_dropped_tokens: 152_041,
+          duration_ms: 18_695,
+          ...preserved.stream,
+        },
+        logical_parent_uuid: preserved.tail,
       },
-      logical_parent_uuid: preserved.tail,
-    });
-    ctx.files.transcript.append({
-      type: "system",
-      subtype: "compact_boundary",
-      content: "Conversation compacted",
-      isMeta: false,
-      level: "info",
-      logicalParentUuid: preserved.tail,
-      compactMetadata: {
-        trigger: "auto",
-        preTokens: 165_716,
-        durationMs: 18_695,
-        ...preserved.file,
-        postTokens: 13_675,
-        cumulativeDroppedTokens: 152_041,
+      {
+        content: "Conversation compacted",
+        level: "info",
+        logicalParentUuid: preserved.tail,
+        compactMetadata: {
+          trigger: "auto",
+          preTokens: 165_716,
+          durationMs: 18_695,
+          ...preserved.file,
+          postTokens: 13_675,
+          cumulativeDroppedTokens: 152_041,
+        },
       },
-      uuid: ctx.newUuid(),
-      timestamp: ctx.nowIso(),
-    });
+    );
+    const autoSummary = "The conversation was compacted automatically.";
+    appendCompactSummaryLine(ctx, boundaryUuid, autoSummary);
     ctx.systemMessage("status", { status: null, compact_result: "success" });
-    conclude(ctx, "The conversation was compacted automatically.");
+    conclude(ctx, autoSummary);
   },
 });
 

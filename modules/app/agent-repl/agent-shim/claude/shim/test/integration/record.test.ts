@@ -279,6 +279,46 @@ describe("every entry's envelope", () => {
     stream.close();
   });
 
+  test("a compaction's cut is keyed session:context_cut:<the boundary's own uuid>", async () => {
+    // ONE COMPACTION IS ONE ROW. The vendor states a `compact_boundary` on the
+    // stream AND writes the identical record — same uuid — to the transcript,
+    // so this plane and the sidecar both convert it. They collapse onto one
+    // store row only if the key BYTES match, and the sidecar mints
+    // `session:context_cut:<uuid>`. This plane spelled it `cut:<uuid>`, so the
+    // store held two entries at two positions and the feed drew the divider
+    // twice, the second copy from whichever plane's frame was less complete.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!compact");
+    await awaitFile(sessionTranscriptPath(shim.dirs, started.vendorSessionId));
+
+    const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
+      (record) => record.type === "system" && record.subtype === "compact_boundary",
+    );
+    expect(boundaries).toHaveLength(1);
+    const uuid = boundaries[0]?.uuid as string;
+    expect(writtenKeys(shim.store?.writes() ?? [])).toContain(`session:context_cut:${uuid}`);
+    stream.close();
+  });
+
+  test("a compaction writes exactly one context-cut row, however many planes saw it", async () => {
+    // The duplicate the key fixes is COUNTED here rather than spelled: two keys
+    // for one boundary is two rows however either of them is spelled.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!compact");
+
+    const cutKeys = new Set(
+      writtenKeys(shim.store?.writes() ?? []).filter((key) => key.startsWith("session:context_cut:")),
+    );
+    expect([...cutKeys]).toHaveLength(1);
+    stream.close();
+  });
+
   test("a question's rows are keyed question:<the ask's tool_use_id>", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());

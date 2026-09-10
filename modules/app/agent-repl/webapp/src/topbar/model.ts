@@ -114,6 +114,22 @@ export const COLD_ATTENTION_VALUE = "coldGate";
 /** The footer notice's own hook, drawn only when no gate card is on the page. */
 export const COLD_NOTICE_ATTRIBUTE = "data-footer-notice";
 
+/**
+ * The hook naming the model actually in force, carried by the control itself.
+ *
+ * THE NAME, NOT THE LABEL: two catalog rows may share a display name, so the
+ * button's text cannot identify a selection and a reader — human or test —
+ * asking "which model is this session on?" has nothing to read. The value is
+ * `AgentModel.name`, the same echo token `[data-model-option]` carries on the
+ * rows, so the selection and the offer are named in one vocabulary. Absent
+ * when there is no selection: `[data-unselected]` is that state's hook, and a
+ * name attribute holding an empty string would read as a nameless model.
+ */
+export const SELECTED_MODEL_ATTRIBUTE = "data-model";
+
+/** The hook marking the offered row that is the current selection. */
+export const SELECTED_OPTION_ATTRIBUTE = "data-selected";
+
 /** The causes only SetModel can answer with. */
 export const SET_MODEL_CAUSES = {
   noSession: () => "this workspace has no session to set a model on",
@@ -185,6 +201,14 @@ export function drawTopbarModelSelector(u: TopbarModelSelector, tc: TopbarContex
   button.toggleAttribute("data-unselected", u.selected === undefined);
   wrap.append(button);
 
+  // THE CONTROL CARRIES THE NAME, for the same reason the anchor and the click
+  // do: `.topbar-model` is the element the DOM contract names (preamble §5b),
+  // and the button is the label inside it. Omitted rather than emptied when
+  // nothing is selected.
+  if (u.selected !== undefined) {
+    wrap.setAttribute(SELECTED_MODEL_ATTRIBUTE, selectedModelName(u.selected));
+  }
+
   // THE CONTROL IS THE WRAP, not the label inside it. `.topbar-model` is the
   // hook the DOM contract names (preamble §5b), so the anchor and the click
   // both live on it: a reader clicking anywhere in the chip — the label or the
@@ -199,6 +223,17 @@ export function drawTopbarModelSelector(u: TopbarModelSelector, tc: TopbarContex
   return wrap;
 }
 
+/**
+ * The selection's own echo token.
+ *
+ * Read through `requireMessage` like every other served submessage: a
+ * selection with no model is a malformed push, and the guard that wraps the
+ * draw is what turns it into a refusal instead of a silently unnamed chip.
+ */
+export function selectedModelName(selected: ModelOption): string {
+  return requireMessage(selected.model, "TopbarModelSelector.selected.model").name;
+}
+
 /** The reveal: exactly the served options, in the served order. */
 export function drawModelOptions(
   u: TopbarModelSelector,
@@ -208,8 +243,17 @@ export function drawModelOptions(
 ): HTMLElement {
   const list = document.createElement("div");
   list.className = "topbar-model-options list-rows";
+  const selected = u.selected === undefined ? undefined : selectedModelName(u.selected);
   for (const option of offerableOptions(u.options)) {
-    list.append(drawModelOption(option, tc, wrap, button));
+    const row = drawModelOption(option, tc, wrap, button);
+    // The row that IS the selection, named by the same echo token the button
+    // carries — so the reveal shows where the reader already is rather than
+    // offering the current model as if it were a change.
+    row.toggleAttribute(
+      SELECTED_OPTION_ATTRIBUTE,
+      selected !== undefined && row.getAttribute("data-model-option") === selected,
+    );
+    list.append(row);
   }
   return list;
 }

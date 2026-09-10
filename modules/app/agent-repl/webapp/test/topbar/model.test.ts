@@ -20,6 +20,8 @@ import {
   COLD_NOTICE_ATTRIBUTE,
   COLD_REFUSAL_SENTENCE,
   MODEL_PLACEHOLDER,
+  SELECTED_MODEL_ATTRIBUTE,
+  SELECTED_OPTION_ATTRIBUTE,
   drawModelCapabilities,
   drawTopbarModelSelector,
   effortLevelName,
@@ -88,6 +90,53 @@ describe("drawTopbarModelSelector", () => {
   it("marks the unselected state, so it can read as an invitation", () => {
     const { host, tc } = topbarContext();
     expect(mountSelector(tc, host, selector({})).hasAttribute("data-unselected")).toBe(true);
+  });
+
+  it("names the model in force by its echo token, which a shared display name cannot", () => {
+    // ARRANGE: two catalog rows spelled the same on screen, one of them chosen.
+    const { host, tc } = topbarContext();
+    const view = selector({
+      selected: option("opus-5-1m", { displayName: "Opus 5" }),
+      options: [option("opus-5", { displayName: "Opus 5" }), option("opus-5-1m", { displayName: "Opus 5" })],
+    });
+    // ACT
+    mountSelector(tc, host, view);
+    // ASSERT
+    expect(host.querySelector(".topbar-model")!.getAttribute(SELECTED_MODEL_ATTRIBUTE)).toBe("opus-5-1m");
+  });
+
+  it("carries no model name at all when the daemon reports no selection", () => {
+    // ARRANGE / ACT
+    const { host, tc } = topbarContext();
+    mountSelector(tc, host, selector({ options: [option("a")] }));
+    // ASSERT: absent, not empty — an empty name would read as a nameless model.
+    expect(host.querySelector(".topbar-model")!.hasAttribute(SELECTED_MODEL_ATTRIBUTE)).toBe(false);
+  });
+
+  it("marks the offered row that is the current selection", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    const button = mountSelector(
+      tc,
+      host,
+      selector({ selected: option("b"), options: [option("a"), option("b")] }),
+    );
+    // ACT
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    const marked = Array.from(openPanel(host)!.querySelectorAll(`[${SELECTED_OPTION_ATTRIBUTE}]`)).map(
+      (el) => el.getAttribute("data-model-option"),
+    );
+    expect(marked).toEqual(["b"]);
+  });
+
+  it("refuses a selection carrying no model rather than drawing an unnamed chip", () => {
+    // ARRANGE: a served selection whose model submessage never arrived.
+    const { host, tc } = topbarContext();
+    const view = selector({ options: [option("a")] });
+    view.selected = create(ModelOptionSchema, { displayName: "Opus 5" });
+    // ACT / ASSERT
+    expect(() => mountSelector(tc, host, view)).toThrow("TopbarModelSelector.selected.model");
   });
 
   it("lists exactly the served options, in the served order", () => {
