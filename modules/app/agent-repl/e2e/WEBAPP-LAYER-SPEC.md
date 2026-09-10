@@ -235,9 +235,25 @@ Every bound below is either REUSED from an already-measured constant or set at
 | `WebappLayerTimeout` (Go, per area) | 10 s | MEASURED: two full nine-area runs, child durations 1.21-3.16 s (slowest: feed families, 22 real turns in one child); 3x the max. Bounds a HANG only. |
 | `BOOT_BUDGET_MS` (vitest) | 5 s | REUSED: the Go suite's `harness.DefaultTimeout`, minus the shim spawn boot does not pay. |
 | `TURN_BUDGET_MS` (vitest) | 5 s | REUSED: the same measured 5 s, for exactly the shape it was measured on (a real shim spawn plus a turn through a real store). |
+| `COMPOSER_READY_BUDGET_MS` (vitest) | 5 s | REUSED: `TURN_BUDGET_MS`. What it waits out is the TAIL OF THE PREVIOUS SUBMISSION — `composer.ts` keeps Send disabled for the whole of its `SubmitPrompt` unary — which is strictly less than the turn that budget already bounds. Zero rounds on a healthy chain. |
 | per-test `TURN_TEST_MS` | 10 s | boot + one turn, at each site that drives a real turn — never a raised global. |
 | vitest `testTimeout`/`hookTimeout` | 900 ms | UNCHANGED from the integration project. Tests that cost real process time carry their own budget at the site. |
 | unit project's 300 ms | untouched | this layer is excluded from it. |
+
+A DROPPED PRESS IS NOT A BOUND PROBLEM, and was mistaken for one. `send`
+used to click and settle. `src/composer/composer.ts` drops a press it cannot
+take — an empty box, a closed gate, or a submission still in flight — and says
+nothing, which is right for production; and the harness's in-flight set clears
+when a response HEAD lands while the composer stays `inFlight` until the whole
+unary resolves, so `settle()` could report the page quiet with Send still
+disabled. `driveTurn` pressed into that window and the turn never started.
+Measured on the run that found it (`feed-families.layer.test.ts`, `!rotate`,
+2026-09-10): 11514 settle rounds inside the 5 s budget with nothing in flight,
+and no `StartTurn` in the shim between the previous turn's and the NEXT test's.
+`send` now waits for a pressable button and then PROVES the press was taken,
+reading `disabled` synchronously after the click; `press` is the same thing
+answering whether it was taken, for §F8 #33, the one scenario that presses
+expecting nothing. Neither bound moved.
 
 Two bound corrections worth recording, both of which came from measuring
 rather than guessing:

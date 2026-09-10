@@ -64,6 +64,8 @@
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
 (declare-function agent-repl-host-faults "agent-repl-host" (ws))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm))
+(declare-function agent-repl-host-take-restart-hold "agent-repl-host" (ws))
+(declare-function agent-repl-host-release-restart-hold "agent-repl-host" (ws reason))
 (declare-function agent-repl-switch-to-project "commands" (&optional project))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-link-connect "agent-repl-daemon-link" ())
@@ -438,14 +440,30 @@ queue onward is the feed's merge bubble and the roster."
   "Restart WS's session; FORCE interrupts the live turn first.
 The DAEMON owns everything the restart entails, the webview bounce
 included.  Forced restarts do NOT resume the agent afterwards: continuing
-is the user's next prompt."
+is the user's next prompt.
+
+A FORCED restart CLOSES THE COMPOSER THE MOMENT IT IS SENT, rather than
+waiting for the `restarting' arm to come back over the host stream.  The
+send is async and the bounce is later still, so between the two the gate
+would otherwise read the dying generation's `:open' and take a prompt the
+daemon is about to refuse (`agent-repl-host-take-restart-hold').  A
+REFUSED restart bounces nothing, so its arm releases the hold again; a
+graceful restart is scheduled rather than immediate and takes none."
   (let ((ref (agent-repl-verbs--ref ws)))
+    (when force (agent-repl-host-take-restart-hold ws))
     (agent-repl-verbs--send
      #'agent-repl-rpc-restart-workspace (agent-repl-verbs--conn ws)
      (list :workspace ref :force (and force t))
      :ws ws :op "restart"
      :on-success
-     (lambda (_) (message "agent-repl: restart %s" (if force "under way" "scheduled"))))))
+     (lambda (_) (message "agent-repl: restart %s" (if force "under way" "scheduled")))
+     :on-error
+     (lambda (_)
+       ;; The arm is NOT claimed (nil): the refusal still reports itself
+       ;; through the generic path.  All this arm does is give back a hold
+       ;; taken for a bounce that will never happen.
+       (when force (agent-repl-host-release-restart-hold ws "restart-refused"))
+       nil))))
 
 (defun agent-repl-verb-set-priority (ws priority)
   "Set WS's PRIORITY, or CLEAR it when PRIORITY is nil.
