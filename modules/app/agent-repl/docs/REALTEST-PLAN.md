@@ -119,7 +119,7 @@ Scale
 
 | # | status | ruling |
 |---|---|---|
-| 0 | pending | retire the old playtest layer |
+| 0 | done (cc93abb9d) | retire the old playtest layer |
 | 1 | pending | |
 
 The lead updates this table as each realtest runs, is ruled on, and is
