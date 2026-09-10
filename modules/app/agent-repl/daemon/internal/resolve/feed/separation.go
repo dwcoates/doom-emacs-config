@@ -98,7 +98,7 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		// rides the turn's evidence, because the terminal is where a reader
 		// looks when they ask what went wrong.
 		reason := arm.CompactionFailed.GetError()
-		r.addEvidence(s, "a compaction failed and nothing was cut: "+reason)
+		r.addEvidence(s, turnEvidenceLine{text: "a compaction failed and nothing was cut: " + reason})
 		log.Warn("daemon.feed.compaction_failed",
 			"a compaction failed, so the divider says nothing was cut; it also rides the turn's evidence",
 			dlog.Context{"agent": agent.GetValue(), "error": reason})
