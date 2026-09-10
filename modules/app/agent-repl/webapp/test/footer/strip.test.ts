@@ -444,31 +444,42 @@ describe("the ticking activity figures", () => {
     return row.querySelector(".footer-allowance-unread")?.textContent ?? undefined;
   }
 
-  it("names a service-unavailable read on the strip", () => {
-    expect(unreadText(sampleRow({ case: "serviceUnavailable", value: {} }))).toBe(
+  /** The unread cell's title — the caveat in full — or undefined. */
+  function unreadTitle(row: HTMLElement): string | undefined {
+    return row.querySelector<HTMLElement>(".footer-allowance-unread")?.title;
+  }
+
+  // THE STRIP CARRIES A MARKER, NOT THE SENTENCE. The words themselves are in
+  // the tokens sheet and in this cell's title; the strip has room for two.
+  it("condenses the caveat to a marker on the strip", () => {
+    expect(unreadText(sampleRow({ case: "serviceUnavailable", value: {} }))).toBe("usage unread");
+  });
+
+  it("names a service-unavailable read in the marker's title", () => {
+    expect(unreadTitle(sampleRow({ case: "serviceUnavailable", value: {} }))).toContain(
       "usage unread — the usage service did not answer",
     );
   });
 
-  it("names a window-unavailable read on the strip", () => {
-    expect(unreadText(sampleRow({ case: "windowUnavailable", value: {} }))).toBe(
+  it("names a window-unavailable read in the marker's title", () => {
+    expect(unreadTitle(sampleRow({ case: "windowUnavailable", value: {} }))).toContain(
       "usage unread — no five-hour window was reported",
     );
   });
 
-  it("names a utilization-unavailable read on the strip", () => {
-    expect(unreadText(sampleRow({ case: "utilizationUnavailable", value: {} }))).toBe(
+  it("names a utilization-unavailable read in the marker's title", () => {
+    expect(unreadTitle(sampleRow({ case: "utilizationUnavailable", value: {} }))).toContain(
       "usage unread — no utilization figure was reported",
     );
   });
 
   it("keeps the shim's sampling-failure cause verbatim", () => {
     const row = sampleRow({ case: "samplingFailure", value: { cause: "socket hang up" } });
-    expect(unreadText(row)).toBe("usage unread — the sampling failed: socket hang up");
+    expect(unreadTitle(row)).toContain("usage unread — the sampling failed: socket hang up");
   });
 
   it("says the sampling failed even when the shim named no cause", () => {
-    expect(unreadText(sampleRow({ case: "samplingFailure", value: { cause: "" } }))).toBe(
+    expect(unreadTitle(sampleRow({ case: "samplingFailure", value: { cause: "" } }))).toContain(
       "usage unread — the sampling failed",
     );
   });
@@ -496,15 +507,53 @@ describe("the ticking activity figures", () => {
 
   // A session whose very first sample failed has read nothing yet, so the line
   // is reachable with NO allowance at all.
-  it("draws the unread alone when no figure has ever been read", () => {
+  it("draws the marker alone when no figure has ever been read", () => {
     const { row } = drawStrip({
       status: withActivity("idle", null, "rateLimited", {
         sample: { outcome: { case: "serviceUnavailable", value: {} } as never },
       }),
     });
-    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).toBe(
-      "usage unread — the usage service did not answer",
-    );
+    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).toBe("usage unread");
+  });
+
+  // ---- What the strip cuts, and what it must not.
+
+  // THE MARKER IS BEFORE THE CUT: the figures are the line's one elastic part
+  // and the marker rides outside them, so a tightening strip eats a window and
+  // never the caveat.
+  it("keeps the unread marker out of the ellipsizing figures", () => {
+    const row = sampleRow({ case: "serviceUnavailable", value: {} });
+    const line = row.querySelector(".footer-activity-rate-limited");
+    expect(line?.querySelector(".footer-rate-figures .footer-allowance-unread")).toBeNull();
+    expect(line?.lastElementChild?.className).toBe("footer-allowance-unread");
+  });
+
+  // THE NEWSWORTHY WINDOW LEADS: it is the figure that changes what the reader
+  // does, so it is the half of the line that survives the cut.
+  it("draws the newsworthy window first even when it is the weekly one", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "rateLimited", {
+        session: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt(NOW / 1000) },
+        weekly: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt(NOW / 1000) },
+      }),
+    });
+    expect(
+      row.querySelector(".footer-rate-figures")?.firstElementChild?.getAttribute("data-allowance"),
+    ).toBe("weekly");
+  });
+
+  // THE CELL'S HOVER IS THE WHOLE LINE. The cell ellipsizes by design, so the
+  // title is what a reader who cannot open the sheet still has.
+  it("titles the activity cell with the full line it may be cutting", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "rateLimited", {
+        session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
+        weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
+        sample: { outcome: { case: "serviceUnavailable", value: {} } as never },
+      }),
+    });
+    const cell = row.querySelector<HTMLElement>(".footer-activity");
+    expect(cell?.title).toBe(row.querySelector(".footer-activity-rate-limited")?.textContent);
   });
 
   it.each(FOOTER_ALLOWANCE_STATUS_CASES)("carries the %s arm on the cell", (arm) => {

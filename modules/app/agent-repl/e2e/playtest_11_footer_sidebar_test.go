@@ -40,19 +40,31 @@ import (
 // is of a settled footer. The unread caveat is therefore in the DOM of every
 // D33 picture, BESIDE the figures, and the manifest says so.
 //
-// THE STRIP CUTS THE LINE OFF, AND EVERY MANIFEST SENTENCE BELOW SAYS WHERE.
+// THE STRIP STILL CUTS THE LINE OFF, AND NOW IT CUTS IT SOMEWHERE CHOSEN.
 // The footer dock is capped at the widest response bubble's width
-// (styles.css `.pfooter`, `max-width: var(--agent-bubble-cap)`) and its one
-// elastic cell ellipsizes rather than wrapping, because the design fixes the
-// dock at one line. MEASURED off these captures at the playtest's fixed
-// 1280x1024: the cell holds about `session 82% · resets in 59m` and no more,
-// so the weekly allowance, the unread caveat and the context-budget
-// sentence's tail are all in the DOM -- asserted, every one of them -- and
-// none of them are on the glass. That is a product finding this section
-// FILES rather than fixes: how the strip should carry a line it cannot fit
-// (wrap, hand it to the expansion sheet, shorten it) is a design decision.
-// The sentences here state what the picture actually shows, so a reviewer
-// judges the paint rather than re-deriving the truncation each time.
+// (styles.css `.pfooter`, `max-width: var(--agent-bubble-cap)`) and it is one
+// line by design, so at the playtest's fixed 1280x1024 the rate line is wider
+// than the cell holding it -- the cell fits about `session 82% · resets in 59m`
+// and no more. The earlier run of this section FILED that as a finding: the
+// cut fell wherever the DOM order put it, so the weekly window, the whole
+// `usage unread` caveat and the tail of the context-budget sentence were all
+// in the DOM and never on the glass.
+//
+// The ruling on that finding is drawn now, and it is what the sentences below
+// describe. The line orders itself: the NEWSWORTHY window leads (it is the
+// figure that changes what the reader does) inside the one elastic child that
+// ellipsizes, and the unread caveat rides beside that child as a RIGID
+// two-word marker -- `usage unread` -- so the marker is on the glass whenever
+// it is in the DOM, and the figures are what gives. Every row below asserts
+// that programmatically, off the marker's own drawn box against the strip's
+// visible width (fsUnreadOnGlass), never off the reviewer's eye.
+//
+// WHAT THE MARKER CONDENSES IS NOT LOST: the reason rides as the marker's
+// title (asserted here, verbatim) and as a row of the TOKENS SHEET, which the
+// tokens cell opens and which now carries every allowance window with its
+// reset countdown, the caveat in full, and the context-budget sentence whole.
+// The strip says which window and that the figures are stale; the sheet says
+// everything.
 //
 // SO IS `resets in 0m`. catalogs.ts fixes the sampled windows at absolute
 // instants in 2026-08-29 / 2026-09-02, which are now in the past, so a
@@ -167,9 +179,36 @@ func fsAllowanceArm(allowance string) string {
 const fsUnread = `(function () { var el = document.querySelector('.footer-allowance-unread');
                                 return el ? el.getAttribute("data-sample") : ""; })()`
 
-// fsUnreadText is the JavaScript for the caveat's own text.
+// fsUnreadText is the JavaScript for the marker's own text -- the condensed
+// wording the strip draws, never the sentence.
 const fsUnreadText = `(function () { var el = document.querySelector('.footer-allowance-unread');
                                     return el ? el.textContent : ""; })()`
+
+// fsUnreadTitle is the JavaScript for the marker's title: the caveat in full,
+// the words the marker condenses.
+const fsUnreadTitle = `(function () { var el = document.querySelector('.footer-allowance-unread');
+                                     return el ? el.title : ""; })()`
+
+// fsUnreadOnGlass holds when the marker is DRAWN WITHIN THE STRIP'S VISIBLE
+// WIDTH -- its own box, measured, inside the strip's client box.
+//
+// This is the assertion the section's filed finding earned. A cell that
+// ellipsizes leaves everything past the cut in the DOM, so every query for the
+// caveat's text passed while the caveat was off the glass; only the geometry
+// tells the two apart. `clientWidth` is the strip's padding box without its
+// scrollbar, which is exactly the extent a reader can see.
+const fsUnreadOnGlass = `(function () {
+        var marker = document.querySelector('.footer-allowance-unread');
+        var strip = document.querySelector('.footer-strip');
+        if (marker === null || strip === null) { return false; }
+        var m = marker.getBoundingClientRect();
+        var s = strip.getBoundingClientRect();
+        return m.width > 0 && m.left >= s.left && m.right <= s.left + strip.clientWidth;
+      })()`
+
+// fsMarkerWording is the two words the strip draws in place of the sentence
+// (webapp/src/footer/strip.ts ALLOWANCE_UNREAD_MARKER).
+const fsMarkerWording = "usage unread"
 
 // fsNoRateLine holds when the footer draws no rate-limit line at all.
 const fsNoRateLine = `document.querySelector('.footer-activity-rate-limited') === null`
@@ -248,7 +287,10 @@ func TestPlaytestFooterRateLimits(t *testing.T) {
 			"IS IN EVERY PICTURE BY ARRANGEMENT: the shim reprobes account usage at each turn's close, and "+
 			"with a readable answer that reprobe retires the event's figure inside the same turn, so the "+
 			"account-usage answer is switched to `service_unavailable` first. An unread sample leaves the "+
-			"figures on hand standing, which is what makes the event's own figure photographable.")
+			"figures on hand standing, which is what makes the event's own figure photographable. THE CAVEAT IS "+
+			"NOW A TWO-WORD MARKER on the strip -- `usage unread` -- pinned outside the part of the line the strip "+
+			"ellipsizes, so it is ON THE GLASS in every picture here; its sentence rides as the marker's title and "+
+			"as a row of the tokens sheet.")
 	p := s.Book
 
 	repository := s.repoAt(t, "repo")
@@ -260,39 +302,44 @@ func TestPlaytestFooterRateLimits(t *testing.T) {
 	// known to have taken, and it gets a note rather than a picture because
 	// D34 photographs exactly this state.
 	s.drive(t, "!usage-service-unavailable")
-	s.awaitInPage(t, "the unread caveat to stand beside the session-start figures",
-		fsUnread+` === "serviceUnavailable" && `+fsPercent("session")+` === "`+fsStandingSession+`" && `+
-			fsPercent("weekly")+` === "`+fsStandingWeekly+`"`)
+	s.awaitInPage(t, "the unread marker to stand, on the glass, beside the session-start figures",
+		fsUnread+` === "serviceUnavailable" && `+fsUnreadText+` === "`+fsMarkerWording+`" && `+fsUnreadOnGlass+` && `+
+			fsPercent("session")+` === "`+fsStandingSession+`" && `+fsPercent("weekly")+` === "`+fsStandingWeekly+`"`)
 	p.note("`!usage-service-unavailable` submitted and settled, so every later turn-close reprobe answers UNREAD",
-		fmt.Sprintf("the footer draws `.footer-allowance-unread[data-sample=\"serviceUnavailable\"]` beside the standing %s / %s figures the session-start probe filed",
-			fsStandingSession, fsStandingWeekly))
+		fmt.Sprintf("the footer draws `.footer-allowance-unread[data-sample=\"serviceUnavailable\"]` reading `%s`, its box measured inside the strip's own visible width, beside the standing %s / %s figures the session-start probe filed",
+			fsMarkerWording, fsStandingSession, fsStandingWeekly))
 
 	s.run(t, []fsRow{
 		{
 			name:    "five-hour-allowance",
 			prompts: []string{"!rate-limit-five-hour"},
-			what:    "the SESSION allowance to draw the event's 82% under the allowed_warning arm, with the weekly figure and the unread caveat still beside it",
+			what:    "the SESSION allowance to lead the line with the event's 82% under the allowed_warning arm, with the unread marker on the glass beside it",
 			predicate: fsPercent("session") + ` === "` + fsEventSession + `" && ` + fsAllowanceArm("session") + ` === "allowedWarning" && ` +
-				fsPercent("weekly") + ` === "` + fsStandingWeekly + `" && ` + fsUnread + ` === "serviceUnavailable"`,
+				fsPercent("weekly") + ` === "` + fsStandingWeekly + `" && ` + fsUnread + ` === "serviceUnavailable" && ` +
+				fsUnreadOnGlass + ` && ` + fsUnreadTitle + `.indexOf("` + fsUnreadService + `") === 0`,
 			expected: "The footer's activity cell (the wide cell between the `done` cell and the empty turn-clock cell) " +
 				"reads `session 82% · resets in 59m` -- the figure and the word `resets` in the WARNING tone and bold, " +
-				"because 82% is newsworthy and the vendor's verdict was allowed_warning -- and is then CUT OFF at the " +
-				"cell's edge with an ellipsis. The weekly figure and `" + fsUnreadService + "` follow it in the DOM (this " +
-				"step asserts both) and are NOT on the glass: the strip cannot fit the line, which is this section's " +
-				"filed finding rather than a fault in the paint. The feed above carries the `!usage-service-unavailable` " +
-				"and `!rate-limit-five-hour` prompt bubbles with their prose answers.",
+				"because 82% is newsworthy and the vendor's verdict was allowed_warning -- and ENDS AT THE RIGHT OF THAT " +
+				"CELL with `| usage unread` in the muted italic caveat register. The 82% window leads because it is the " +
+				"newsworthy one, and the marker is on the glass because it is pinned outside the ellipsizing part of the " +
+				"line: this step measures its box against the strip's visible width. What is NOT on the glass is the " +
+				"weekly figure (asserted in the DOM here) and the caveat's reason `" + fsUnreadService + "` -- the reason " +
+				"is the marker's hover title (asserted verbatim here) and a row of the tokens sheet. The feed above " +
+				"carries the `!usage-service-unavailable` and `!rate-limit-five-hour` prompt bubbles with their prose answers.",
 		},
 		{
 			name:    "seven-day-allowance",
 			prompts: []string{"!rate-limit-seven-day"},
-			what:    "the WEEKLY allowance to draw the event's 91% under the allowed_warning arm, with the session figure and the unread caveat still beside it",
+			what:    "the WEEKLY allowance to draw the event's 91% under the allowed_warning arm, with the session figure leading and the marker still on the glass",
 			predicate: fsPercent("weekly") + ` === "` + fsEventWeekly + `" && ` + fsAllowanceArm("weekly") + ` === "allowedWarning" && ` +
-				fsPercent("session") + ` === "` + fsEventSession + `" && ` + fsUnread + ` === "serviceUnavailable"`,
+				fsPercent("session") + ` === "` + fsEventSession + `" && ` + fsUnread + ` === "serviceUnavailable" && ` + fsUnreadOnGlass,
 			expected: "The footer's activity cell is UNCHANGED on the glass from the previous picture -- `session 82% · " +
-				"resets in 59m` in the warning tone, cut off at the cell's edge. The weekly allowance now carries the " +
-				"event's 91% under the same warning arm, and it is asserted in the DOM by this step, but the strip has " +
-				"no room to draw it: the ONLY visible difference between this picture and the last is the feed, which " +
-				"has gained the `!rate-limit-seven-day` prompt bubble and the prose `The seven_day window is 91% used.`",
+				"resets in 59m` in the warning tone, then `| usage unread` at the cell's right. Both windows are now " +
+				"newsworthy, so the contract's own session-then-weekly order stands and the session figure still leads; " +
+				"the weekly allowance carries the event's 91% under the same warning arm and is asserted in the DOM by " +
+				"this step, but the cell has no room to draw it. The marker is measured on the glass again. The ONLY " +
+				"visible difference between this picture and the last is the feed, which has gained the " +
+				"`!rate-limit-seven-day` prompt bubble and the prose `The seven_day window is 91% used.`",
 		},
 	})
 
@@ -308,9 +355,9 @@ func TestPlaytestFooterRateLimits(t *testing.T) {
 		fmt.Sprintf("the daemon wrote the warn record `%s` (%q) to the workspace's own log, and the footer still draws exactly two `.footer-allowance` cells with the previous figures",
 			fsOverageOperation, record.Message),
 		"The footer's activity cell is UNCHANGED from the previous picture -- `session 82% · resets in 59m` in the "+
-			"warning tone, cut off at the cell's edge -- and NOWHERE on the strip is there a third allowance cell or "+
-			"any mention of overage. The feed carries one more prompt bubble, `!rate-limit`, with the prose `The "+
-			"account is approaching its overage threshold.` beneath it.")
+			"warning tone, then `| usage unread` at the cell's right -- and NOWHERE on the strip is there a third "+
+			"allowance cell or any mention of overage. The feed carries one more prompt bubble, `!rate-limit`, with "+
+			"the prose `The account is approaching its overage threshold.` beneath it.")
 }
 
 // ---------------------------------------------------------------------------
@@ -326,8 +373,10 @@ func TestPlaytestFooterUsageOutcomes(t *testing.T) {
 			"instead of them), and `opus_absent` -- an available answer with one optional window missing -- reads "+
 			"again and retires the line entirely, because the fake's figures are under the newsworthiness gate. "+
 			"Landing 13 wanted the unread caveat's first sighting in a real webview, and this is it: the caveat is "+
-			"drawn, with its exact words and beside the standing figures, in every one of these pages -- and NONE of "+
-			"it reaches the glass, because the strip's one elastic cell ellipsizes before it. That is the finding.")
+			"drawn beside the standing figures in every one of these pages, ON THE GLASS, as the two-word marker "+
+			"`usage unread` pinned outside the part of the line the strip ellipsizes -- measured here, box against "+
+			"the strip's visible width. Its exact words are the marker's title (asserted verbatim per arm) and a row "+
+			"of the tokens sheet.")
 	p := s.Book
 
 	repository := s.repoAt(t, "repo")
@@ -344,16 +393,19 @@ func TestPlaytestFooterUsageOutcomes(t *testing.T) {
 		"the footer draws no `.footer-activity-rate-limited` at all: both figures are under the 0.8 newsworthiness gate")
 
 	unread := func(sample, sentence string) string {
-		return fsUnread + ` === "` + sample + `" && ` + fsUnreadText + ` === "` + sentence + `" && ` +
+		return fsUnread + ` === "` + sample + `" && ` + fsUnreadText + ` === "` + fsMarkerWording + `" && ` +
+			fsUnreadTitle + `.indexOf("` + sentence + `") === 0 && ` + fsUnreadOnGlass + ` && ` +
 			fsPercent("session") + ` === "` + fsStandingSession + `" && ` + fsPercent("weekly") + ` === "` + fsStandingWeekly + `"`
 	}
 	beside := func(sentence string) string {
-		return "The footer's activity cell reads `session 41% · resets in 0m |` in the plain tone (41% is not " +
-			"newsworthy, so not bold) and is CUT OFF there with an ellipsis. `weekly 63%` and `" + sentence + "` follow " +
-			"in the DOM -- this step asserts the caveat's exact words and both standing figures -- and the strip has no " +
-			"room to draw them. The `0m` is the fake's own fixed reset instant, now in the past. Both are this " +
-			"section's filed findings; what the picture must show is the figures STANDING (the caveat never replaced " +
-			"them) and the cell ending in an ellipsis rather than in a bare `session 41%`."
+		return "The footer's activity cell reads `session 41% · resets in 0m` in the plain tone (41% is not " +
+			"newsworthy, so nothing is bold) and ENDS AT THE CELL'S RIGHT with `| usage unread` in the muted italic " +
+			"caveat register. The marker is ON THE GLASS -- this step measures its box inside the strip's visible " +
+			"width -- and `weekly 63%` is what the cell gave up instead, asserted in the DOM here. The caveat's own " +
+			"words, `" + sentence + "`, are the marker's hover title (asserted verbatim here) and a row of the tokens " +
+			"sheet. The `0m` is the fake's own fixed reset instant, now in the past, and remains this section's filed " +
+			"finding. What the picture must show is the figures STANDING (the caveat never replaced them) and the " +
+			"marker drawn whole rather than cut."
 	}
 
 	s.run(t, []fsRow{
@@ -382,18 +434,20 @@ func TestPlaytestFooterUsageOutcomes(t *testing.T) {
 			name:    "sampling-failure",
 			prompts: []string{"!usage-available", "!usage-sampling-failure"},
 			what:    "the sampling_failure caveat, carrying the shim's own cause, to be drawn beside the standing 41% / 63%",
-			predicate: fsUnread + ` === "samplingFailure" && ` + fsUnreadText + `.indexOf("` + fsUnreadSampling + `: ") === 0 && ` +
+			predicate: fsUnread + ` === "samplingFailure" && ` + fsUnreadText + ` === "` + fsMarkerWording + `" && ` +
+				fsUnreadTitle + `.indexOf("` + fsUnreadSampling + `: ") === 0 && ` + fsUnreadOnGlass + ` && ` +
 				fsPercent("session") + ` === "` + fsStandingSession + `" && ` + fsPercent("weekly") + ` === "` + fsStandingWeekly + `"`,
 			expected: beside(fsUnreadSampling+": <the shim's own account of what threw>") +
-				" The cause after the colon is the shim's verbatim error text, asserted non-empty here and, like the " +
-				"rest of the caveat, off the glass.",
+				" The cause after the colon is the shim's verbatim error text, asserted non-empty here; it is in the " +
+				"marker's title and in the tokens sheet, and the strip draws the same two words for it as for every " +
+				"other unread arm.",
 		},
 		{
 			name:      "opus-absent-retires-the-line",
 			prompts:   []string{"!usage-opus-absent"},
 			what:      "the rate-limit line to be gone entirely: an absent optional window is a READ, and the figures are under the gate",
 			predicate: fsNoRateLine,
-			expected: "The footer's activity cell is EMPTY: no `session`, no `weekly`, and no `usage unread` caveat -- the " +
+			expected: "The footer's activity cell is EMPTY: no `session`, no `weekly`, and no `usage unread` marker -- the " +
 				"sample read again, so the caveat is retired, and with both figures under the newsworthiness gate the " +
 				"line it rode on is gone with it. The status word still reads `idle`. The feed carries the whole " +
 				"sequence of `!usage-*` prompt bubbles, the last being `!usage-opus-absent` with the prose `The " +
@@ -445,7 +499,9 @@ func TestPlaytestFooterContextStatus(t *testing.T) {
 			predicate: fsStatusArm + ` === "idle" && ` + fsBudgetText + ` === "` + fsBudgetWarning + `"`,
 			expected: "The footer's status word reads `idle` and its activity cell now carries the warning, drawn as " +
 				"far as the cell reaches -- `The conversation is approaching its…` -- with the rest of `" + fsBudgetWarning +
-				"` and its relative age in the DOM (this step asserts the sentence verbatim) and off the glass. The feed " +
+				"` and its relative age in the DOM (this step asserts the sentence verbatim) and off the glass. The " +
+				"sentence is reachable whole in two places now: the cell's own hover title, and a row of the tokens " +
+				"sheet the tokens cell opens. The feed " +
 				"carries three prompt bubbles, the last `!context-budget-warning` with the prose `The CLI warned that " +
 				"the context budget is filling.`, and still NO row for the warning: it is footer-only.",
 		},
