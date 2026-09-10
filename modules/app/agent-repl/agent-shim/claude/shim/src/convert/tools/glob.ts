@@ -46,7 +46,7 @@ function omittedArm(
 ): conversationv1.AgentGlobPartial["omitted"] {
   const total = uint(record, "totalMatches");
   if (total === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a truncated match stated no total; only a floor of zero omitted can be claimed",
     );
@@ -76,7 +76,7 @@ function globSuccess(
 ): conversationv1.AgentGlobSuccess | undefined {
   const record = asRecord(outcome.structured);
   if (record === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a match settled with no typed output; no success frame is produced",
     );
@@ -84,7 +84,7 @@ function globSuccess(
   }
   const numFiles = uint(record, "numFiles");
   if (numFiles === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a match stated no returned-file count; no success frame is produced",
     );
@@ -122,7 +122,7 @@ export const globConverter: ToolConverter = {
   start(call) {
     const pattern = requestedPattern(call);
     if (pattern === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a match was announced with no pattern; no start frame is produced",
       );
@@ -157,7 +157,7 @@ export const globConverter: ToolConverter = {
     }
     const pattern = requestedPattern(call);
     if (pattern === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a match settled with no pattern to restate; no success frame is produced",
       );

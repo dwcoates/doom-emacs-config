@@ -147,6 +147,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     }
   }
   if (skipped > 0) {
+    // warn: a defect because malformed transcript rows were omitted from cold-cache judgment.
     LOGGER.warn(
       { file, skipped_lines: skipped },
       "skipped unparsable transcript lines while reading the cold-gate facts",

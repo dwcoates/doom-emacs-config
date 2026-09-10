@@ -257,7 +257,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     if (producer === undefined || producer === "") {
       const message =
         "shim store writer: a row was produced before StartSession named the conversation; write ids would land in a namespace no replay can absorb";
-      LOGGER.error({}, message);
+      LOGGER.error({ detail: message }, message);
       throw new PersistenceError("store_unavailable", message);
     }
     return producer;
@@ -317,6 +317,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     degradedSince = options.nowMs();
     degradedReason = reason;
     droppedWhileDegraded = 0n;
+    // warn: a defect because the record plane is unavailable while writes continue to buffer.
     LOGGER.warn(
       { reason },
       "the store is unreachable; writes are buffering and a degraded window is open",
@@ -494,6 +495,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         return false;
       }
       const backoff = retry.backoffMs[Math.min(batch.attempts - 1, retry.backoffMs.length - 1)] ?? 0;
+      // warn: a defect because the store rejected a batch that must be replayed from memory.
       LOGGER.warn(
         { attempt: batch.attempts, backoff_ms: backoff, detail: failure.detail },
         "the store refused a batch; replaying it from the retry buffer",
@@ -574,7 +576,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         // caller mistook a ROTATED id for the original one, which would split
         // this conversation's write-id namespace at the rotation.
         LOGGER.error(
-          { producer, next },
+          { producer, next, detail: "the producer identity cannot change after it is set" },
           "refusing to re-key the producer: a conversation has exactly one original vendor session id",
         );
         throw new PersistenceError(
@@ -593,7 +595,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         // derived from it, and a later name would put one conversation's rows
         // in two namespaces that can never absorb each other.
         LOGGER.error(
-          { producer },
+          { producer, detail: "the producer identity cannot be cleared after rows are written" },
           "refusing to un-name the producer: rows have already been written under it",
         );
         throw new PersistenceError(

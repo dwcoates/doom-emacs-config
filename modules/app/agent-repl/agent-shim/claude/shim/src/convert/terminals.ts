@@ -350,7 +350,7 @@ export function convertResult(
   // ---- The failure arms --------------------------------------------------
   if (reason === "api_error") {
     const status = typeof raw.api_error_status === "number" ? raw.api_error_status : undefined;
-    LOGGER.warn(
+    LOGGER.info(
       {
         turn: context.turnId?.value,
         http_status: status,
@@ -384,6 +384,7 @@ export function convertResult(
     // unclassified execution failure, with `errors` as the account — which is
     // exactly what that arm is for — and the site is logged so the gap is
     // reported rather than guessed at.
+    // warn: a defect because an unknown terminal reason can only be relayed as unclassified failure.
     LOGGER.warn(
       { turn: context.turnId?.value, terminal_reason: reason, subtype: raw.subtype },
       "no failure arm spells this terminal reason; relayed as an unclassified execution failure",
@@ -402,7 +403,7 @@ export function convertResult(
   }
 
   const failure = arm();
-  LOGGER.warn(
+  LOGGER.debug(
     { turn: context.turnId?.value, terminal_reason: reason, arm: failure.case },
     "the turn ended on a vendor-stated failure",
   );

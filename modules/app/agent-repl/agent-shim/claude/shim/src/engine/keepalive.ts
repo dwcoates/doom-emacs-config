@@ -98,7 +98,7 @@ export class KeepaliveRewind {
   obligation(): RewindObligation | undefined {
     if (this.keepaliveTurns === 0) return undefined;
     if (this.anchor === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { keepalive_turns: this.keepaliveTurns },
         "keep-alive turns ran before any real record: no rewind anchor exists, so the next real prompt proceeds without a rewind",
       );

@@ -259,6 +259,7 @@ function rateLimitStatus(
     case "rejected":
       return { case: "rejected", value: create(conversationv1.SessionRateLimitRejectedSchema, {}) };
     default:
+      // warn: a defect because an unknown rate-limit status leaves the wire arm unset.
       LOGGER.warn(
         { status: String(value) },
         "the vendor named a rate-limit status this contract does not spell; the arm stays unset",
@@ -302,6 +303,7 @@ function rateLimitType(value: unknown): conversationv1.SessionRateLimitType | un
     // UNSET, never guessed: a status attributed to the wrong window would tell
     // a user their weekly allowance is nearly spent when it was the five-hour.
     if (value !== undefined) {
+      // warn: a defect because an unknown rate-limit window leaves the wire field unset.
       LOGGER.warn(
         // JSON, not String: the vendor sends `unknown` here, and the one shape
         // worth logging — an object this contract did not expect — is exactly
@@ -440,6 +442,7 @@ export function convertSessionMessage(
     // clear rotated to, which this record does not name; `PendingClear` says
     // why, and the init that follows releases it.
     if (clearSink === undefined) {
+      // warn: a defect because a reset without a fold cannot retain its pending session cut.
       LOGGER.warn(
         { uuid },
         "a conversation reset arrived with nowhere to hold it until the init names the session it rotated to",
@@ -531,6 +534,7 @@ export function convertSessionMessage(
         durationMs: typeof duration === "number" ? BigInt(Math.trunc(duration)) : 0n,
       };
       if (compactionSink === undefined) {
+        // warn: a defect because a compaction without a fold cannot retain its pending summary cut.
         LOGGER.warn(
           { uuid },
           "a compaction boundary arrived with nowhere to hold it until its summary lands",
@@ -553,7 +557,7 @@ export function convertSessionMessage(
       // NOTHING ON THE WIRE, BY DESIGN: a retried request did not end the turn
       // and did not fail it, so there is no conversation fact yet. The evidence
       // that matters lands as the turn's own terminal if the retries run out.
-      LOGGER.warn(
+      LOGGER.debug(
         {
           uuid,
           attempt: record.attempt,
@@ -580,7 +584,7 @@ export function convertSessionMessage(
       ];
 
     default:
-      LOGGER.warn(
+      LOGGER.debug(
         { uuid, type: message.type, subtype },
         "no session converter owns this vendor record; recorded as vendor-specific residue",
       );
