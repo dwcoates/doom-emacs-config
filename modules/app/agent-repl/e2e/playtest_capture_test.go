@@ -193,6 +193,65 @@ func playtestPaintGateScript(token string) string {
                  })()`
 }
 
+// playtestMotionAttribute and playtestMotionPaused are the webapp's own
+// photographer's flag: `data-motion="paused"` on the page's root element
+// freezes every running CSS animation WHERE IT STANDS, and removing the
+// attribute lets them all continue from there.
+//
+// WHY A CAPTURE NEEDS IT. Several of the webapp's animations run forever and
+// by design — the prompt bubble's `bubble-wave`, the sidebar's state-dot
+// pulse, the footer's breath, a running tool's arc. `settleFrame` waits for
+// the framebuffer to hold still for a whole `playtestSettleWindow` before it
+// fires, and against an animation that never stops that wait cannot be
+// satisfied: it runs `playtestSettleBound` out and photographs a moving
+// screen anyway, with the manifest's torn-frame note on a picture that is
+// not, in fact, showing anything wrong.
+//
+// MEASURED, before this existed, by the settle diagnostic
+// (`playtestSettleDiagEnv`) over one run of the D29-D32 playbook: 10 of 10
+// captures ran the full 2s budget, 645 rounds saw the framebuffer change,
+// and EVERY persistent changed box was right-edged at the prompt column
+// (x=1149-1150) with its left edge at a `.bubble.user` bubble's own left
+// edge. One box per prompt bubble in the scrollback, and nothing anywhere
+// else: not the sidebar's workspace age, not the footer's elapsed clock. The
+// page's one-second tickers change a handful of glyphs once a second and
+// leave ~950ms of stillness for a 50ms window to close in, so they were
+// never the cause and are not what this holds.
+//
+// IT IS HELD PER CAPTURE, NOT FOR THE RUN. A page paused at boot would never
+// run the animations whose FINAL state a picture is supposed to show — a
+// running tool's arc fades in on a 1s delay, and a page that never ran that
+// delay would photograph an invisible spinner in every playbook. So the flag
+// goes on as a capture begins and comes off as it ends, and between captures
+// the page animates exactly as a user's does.
+const (
+	playtestMotionAttribute = "data-motion"
+	playtestMotionPaused    = "paused"
+)
+
+// playtestHoldMotionScript sets the flag and answers whether it is set, in
+// the `pageYes` shape: a wait that fails prints its last value.
+func playtestHoldMotionScript() string {
+	return `(function () {
+                   document.documentElement.setAttribute(` + jsString(playtestMotionAttribute) + `,
+                                                         ` + jsString(playtestMotionPaused) + `);
+                   return document.documentElement.getAttribute(` + jsString(playtestMotionAttribute) + `) === ` +
+		jsString(playtestMotionPaused) + `;
+                 })()`
+}
+
+// playtestReleaseMotionScript removes the flag and answers whether it is
+// gone. The release is asserted rather than fired and forgotten: a page left
+// paused would freeze every animation for every LATER capture in the same
+// playbook, and those pictures would be wrong in a way no assertion here
+// looks at.
+func playtestReleaseMotionScript() string {
+	return `(function () {
+                   document.documentElement.removeAttribute(` + jsString(playtestMotionAttribute) + `);
+                   return !document.documentElement.hasAttribute(` + jsString(playtestMotionAttribute) + `);
+                 })()`
+}
+
 // jsString renders a Go string as a JavaScript string literal.
 //
 // It lives HERE, in the untagged half of the mechanism, rather than beside
@@ -451,6 +510,99 @@ func distinctColors(img *image.RGBA) int {
 		}
 	}
 	return len(seen)
+}
+
+// ---------------------------------------------------------------------------
+// WHERE A FRAME IS STILL CHANGING
+// ---------------------------------------------------------------------------
+
+// playtestSettleDiagEnv, when set to any non-empty value, makes every settle
+// round that saw the framebuffer change say WHERE it changed.
+//
+// It exists because "the screen was still changing" is not a diagnosis. A
+// capture that runs its whole patience budget out has learned only that two
+// reads differed, and the three candidate causes — an animating surface in
+// the page, a blinking piece of Emacs's own chrome, and the capture's own
+// forced redraw flipping the double buffer — are told apart by WHICH PIXELS
+// moved, not by how long the wait was. So a diagnostic run reports the
+// bounding box, and the box names the culprit: a small box on the sidebar's
+// age column is a clock, a box that is the whole frame is the buffer parity.
+const playtestSettleDiagEnv = "AGENT_REPL_PLAYTEST_SETTLE_DIAG"
+
+// xwdChangedBounds answers the bounding box of the pixels that differ
+// between two XWD dumps, and how many differ.
+//
+// It reads the raw dumps rather than two decoded images: the comparison
+// `settleFramebuffer` makes is over the bytes, so a diagnostic that decoded
+// first could report "nothing changed" for a difference that restarted the
+// window, and a full decode of two 5 MiB dumps per settle round would cost
+// more than the wait it is measuring.
+//
+// An empty rectangle means the two agree over their pixels.
+func xwdChangedBounds(prev, cur []byte) (image.Rectangle, int, error) {
+	geom := func(name string, body []byte) (w, h, stride, offset int, err error) {
+		if len(body) < xwdMinHeaderWords*4 {
+			return 0, 0, 0, 0, fmt.Errorf("the %s dump is %d bytes, under the %d of an XWD header",
+				name, len(body), xwdMinHeaderWords*4)
+		}
+		word := func(i int) int { return int(binary.BigEndian.Uint32(body[i*4:])) }
+		w, h = word(xwdPixmapWidth), word(xwdPixmapHeight)
+		stride = word(xwdBytesPerLine)
+		offset = word(xwdHeaderSize) + word(xwdNColors)*xwdColorEntry
+		if w <= 0 || h <= 0 {
+			return 0, 0, 0, 0, fmt.Errorf("the %s dump's geometry is %dx%d", name, w, h)
+		}
+		if stride < w*4 {
+			return 0, 0, 0, 0, fmt.Errorf("the %s dump's stride is %d, too small for %d pixels of 4 bytes",
+				name, stride, w)
+		}
+		if want := offset + stride*h; len(body) < want {
+			return 0, 0, 0, 0, fmt.Errorf("the %s dump is %d bytes, want at least %d for %dx%d at stride %d",
+				name, len(body), want, w, h, stride)
+		}
+		return w, h, stride, offset, nil
+	}
+
+	pw, ph, pstride, poffset, err := geom("earlier", prev)
+	if err != nil {
+		return image.Rectangle{}, 0, err
+	}
+	cw, ch, cstride, coffset, err := geom("later", cur)
+	if err != nil {
+		return image.Rectangle{}, 0, err
+	}
+	if pw != cw || ph != ch {
+		return image.Rectangle{}, 0, fmt.Errorf("the two dumps are %dx%d and %dx%d, so no per-pixel box exists",
+			pw, ph, cw, ch)
+	}
+
+	minX, minY, maxX, maxY, changed := cw, ch, -1, -1, 0
+	for y := 0; y < ch; y++ {
+		prow := prev[poffset+y*pstride:][:cw*4]
+		crow := cur[coffset+y*cstride:][:cw*4]
+		for x := 0; x < cw; x++ {
+			if string(prow[x*4:x*4+4]) == string(crow[x*4:x*4+4]) {
+				continue
+			}
+			changed++
+			if x < minX {
+				minX = x
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if y > maxY {
+				maxY = y
+			}
+		}
+	}
+	if changed == 0 {
+		return image.Rectangle{}, 0, nil
+	}
+	return image.Rect(minX, minY, maxX+1, maxY+1), changed, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -919,6 +1071,26 @@ type playbook struct {
 	// it the moment one exists.
 	awaitPaint func() time.Duration
 
+	// holdMotion freezes the page's resting animations for the duration of
+	// one capture and answers the release. See playtestMotionPaused: the
+	// webapp's prompt-bubble wave, state dots and footer breath run
+	// FOREVER by design, so a capture of a page carrying any of them can
+	// only run its whole patience budget out and photograph a torn frame.
+	//
+	// IT IS NIL UNTIL A PANEL IS OPEN, for the same reason `awaitPaint` is:
+	// a frame with no page in it has no animation to hold.
+	holdMotion func() func()
+
+	// lastSettled and lastSettle are what the most recent `capture` learned
+	// about the screen it photographed. They exist for ONE caller: the
+	// substrate's own proof that an idle frame settles (see
+	// playtest_substrate_settle_test.go). The manifest note is for a human
+	// and the log line is for a reader, and neither is a claim anything
+	// fails on — so the fact a test can assert is kept here rather than
+	// scraped back out of either.
+	lastSettled bool
+	lastSettle  time.Duration
+
 	step     int
 	manifest *os.File
 }
@@ -1058,6 +1230,15 @@ func (p *playbook) capture(step, act, asserted, expected string) *image.RGBA {
 	p.step++
 	name := fmt.Sprintf("%02d-%s.png", p.step, step)
 
+	// THE PAGE'S RESTING ANIMATIONS ARE HELD FIRST, and released the moment
+	// this capture has its bytes. See playtestMotionPaused. It is FIRST
+	// because everything below it — the redraws, the paint gate and the
+	// settle — is a wait for the screen to stop changing, and against an
+	// animation that never stops that wait has no answer.
+	if p.holdMotion != nil {
+		defer p.holdMotion()()
+	}
+
 	// THE WHOLE FRAME IS REDRAWN, AND THAT IS A MEASUREMENT.
 	//
 	// The tab bar is repainted by Emacs's C redisplay, which keeps the last
@@ -1086,6 +1267,7 @@ func (p *playbook) capture(step, act, asserted, expected string) *image.RGBA {
 	p.redrawFrame()
 
 	body, settled, took, rounds := p.settleFrame()
+	p.lastSettled, p.lastSettle = settled, took
 	img, err := decodeXWD(body)
 	if err != nil {
 		p.t.Fatalf("capture %s: decode the framebuffer at %s: %v", name, p.e.Display.FramebufferPath, err)
@@ -1169,6 +1351,19 @@ func (p *playbook) redrawFrame() {
 // the round count is logged so a capture that needed more than the window's
 // own rounds is on the record.
 //
+// AND THE REDISPLAY BETWEEN THE READS IS `redrawFrame`, THE DOUBLE ONE. It
+// used to be a single `(redraw-frame) (redisplay t)`, which is exactly the
+// incremental-parity hazard `redrawFrame` documents: one garbaged redisplay
+// fills ONE of the two buffers, and this X server does not honour XdbeCopied,
+// so which buffer the next read sees is a coin toss. MEASURED, by the
+// settle diagnostic over one run of the D29-D32 playbook: 4 of 645 changed
+// rounds reported the WHOLE 1280x1024 frame changing at once, in consecutive
+// pairs — the two buffers alternating under the reads, on a screen where
+// nothing had been redrawn. Nothing else in a run moves a third of a million
+// pixels between two reads 20ms apart. Doing what the capture's own kick does
+// — garbage and redisplay twice — puts the complete frame in both buffers
+// every round, so the window closes on the glass rather than on the parity.
+//
 // AND WHY THE READS ARE AN INTERVAL APART, EACH BEHIND ITS OWN EVAL. On pgtk
 // `redisplay` paints Emacs's own surface; the pixels reach the X server only
 // when GTK's main loop runs, which happens while Emacs waits for input --
@@ -1189,10 +1384,24 @@ func (p *playbook) redrawFrame() {
 // playbook's business and not the window's.
 func (p *playbook) settleFrame() (body []byte, settled bool, took time.Duration, rounds int) {
 	p.t.Helper()
+	diag := os.Getenv(playtestSettleDiagEnv) != ""
+	var last []byte
 	redisplayAndRead := func() []byte {
 		rounds++
-		p.e.Eval(`(progn (redraw-frame) (redisplay t) t)`)
-		return p.readFramebuffer()
+		p.redrawFrame()
+		body := p.readFramebuffer()
+		if diag && last != nil {
+			box, changed, err := xwdChangedBounds(last, body)
+			switch {
+			case err != nil:
+				p.t.Logf("playtest settle diag round %d: %v", rounds, err)
+			case changed > 0:
+				p.t.Logf("playtest settle diag round %d: %d pixels changed in %v (%dx%d)",
+					rounds, changed, box, box.Dx(), box.Dy())
+			}
+		}
+		last = body
+		return body
 	}
 	body, settled, took = settleFramebuffer(redisplayAndRead, realSettleClock{})
 	return body, settled, took, rounds
@@ -1257,4 +1466,146 @@ func (p *playbook) readFramebuffer() []byte {
 		p.t.Fatalf("read the Xvfb framebuffer at %s: %v", p.e.Display.FramebufferPath, err)
 	}
 	return body
+}
+
+// TestPlaytestTheChangedBoxIsTheSmallestOneHoldingEveryMovedPixel is the
+// diagnostic's whole claim: a reviewer reads the culprit off the box, so the
+// box has to be the pixels that moved and nothing else.
+func TestPlaytestTheChangedBoxIsTheSmallestOneHoldingEveryMovedPixel(t *testing.T) {
+	t.Parallel()
+	// A 4x4 field with two pixels moved, at (1,1) and (2,3): the tight box
+	// is x in [1,3), y in [1,4), and a box that merely CONTAINED them would
+	// pass a looser assertion while naming the wrong surface on a real
+	// frame.
+	base := make([]uint32, 16)
+	moved := make([]uint32, 16)
+	copy(moved, base)
+	moved[1*4+1] = 0x00ff0000
+	moved[3*4+2] = 0x0000ff00
+
+	box, changed, err := xwdChangedBounds(buildXWD(t, 4, 4, nil, base), buildXWD(t, 4, 4, nil, moved))
+	if err != nil {
+		t.Fatalf("bound the change between two well-formed dumps: %v", err)
+	}
+	if changed != 2 {
+		t.Errorf("the diagnostic counted %d moved pixels, want the 2 that moved", changed)
+	}
+	if want := image.Rect(1, 1, 3, 4); box != want {
+		t.Errorf("the changed box is %v, want the tight %v", box, want)
+	}
+}
+
+// TestPlaytestTwoIdenticalFramesChangedNothing keeps the settled case honest:
+// a diagnostic that reported a box for a still screen would accuse a surface
+// that never moved.
+func TestPlaytestTwoIdenticalFramesChangedNothing(t *testing.T) {
+	t.Parallel()
+	pixels := []uint32{0x00ff0000, 0x0000ff00, 0x000000ff, 0x00ffffff}
+	body := buildXWD(t, 2, 2, nil, pixels)
+
+	box, changed, err := xwdChangedBounds(body, buildXWD(t, 2, 2, nil, pixels))
+	if err != nil {
+		t.Fatalf("bound the change between two identical dumps: %v", err)
+	}
+	if changed != 0 {
+		t.Errorf("the diagnostic counted %d moved pixels between two identical dumps, want 0", changed)
+	}
+	if !box.Empty() {
+		t.Errorf("the changed box for two identical dumps is %v, want an empty one", box)
+	}
+}
+
+// TestPlaytestPaddingBeyondTheRowIsNotAChange holds the diagnostic to the
+// PIXELS rather than to the bytes. A row's stride may exceed its pixels, and
+// whatever X leaves in that padding is not on the glass -- so a diagnostic
+// that compared whole rows would report a box for a frame nobody could see
+// move.
+func TestPlaytestPaddingBeyondTheRowIsNotAChange(t *testing.T) {
+	t.Parallel()
+	// Two 1x2 dumps at a stride of three pixels, agreeing on their one real
+	// pixel per row and differing in every padding word.
+	pad := func(fill uint32) []byte {
+		return buildXWD(t, 1, 2, func(h []uint32) { h[xwdBytesPerLine] = 3 * 4 },
+			[]uint32{0x00112233, fill, fill, 0x00445566, fill, fill})
+	}
+
+	box, changed, err := xwdChangedBounds(pad(0x00000000), pad(0x00ffffff))
+	if err != nil {
+		t.Fatalf("bound the change between two padded dumps: %v", err)
+	}
+	if changed != 0 {
+		t.Errorf("the diagnostic counted %d moved pixels, want 0: only the row padding differed", changed)
+	}
+	if !box.Empty() {
+		t.Errorf("the changed box is %v, want an empty one: only the row padding differed", box)
+	}
+}
+
+// TestPlaytestTwoGeometriesHaveNoBoxBetweenThem refuses rather than answers.
+// A run whose screen changed size has a fact about the harness in it, and a
+// per-pixel box invented across two geometries would bury it.
+func TestPlaytestTwoGeometriesHaveNoBoxBetweenThem(t *testing.T) {
+	t.Parallel()
+	_, _, err := xwdChangedBounds(buildXWD(t, 2, 2, nil, make([]uint32, 4)),
+		buildXWD(t, 3, 2, nil, make([]uint32, 6)))
+
+	if err == nil {
+		t.Fatal("two dumps of different geometry were bounded against each other; want a refusal")
+	}
+	if !strings.Contains(err.Error(), "2x2") || !strings.Contains(err.Error(), "3x2") {
+		t.Errorf("the refusal says %q, and never names both geometries", err)
+	}
+}
+
+// TestPlaytestATruncatedDumpIsRefusedByName keeps the diagnostic's own
+// failure legible: a short read of the framebuffer must say which of the two
+// dumps was short, not panic inside a slice.
+func TestPlaytestATruncatedDumpIsRefusedByName(t *testing.T) {
+	t.Parallel()
+	whole := buildXWD(t, 2, 2, nil, make([]uint32, 4))
+
+	_, _, err := xwdChangedBounds(whole, whole[:len(whole)-4])
+
+	if err == nil {
+		t.Fatal("a truncated dump was bounded; want a refusal")
+	}
+	if !strings.Contains(err.Error(), "later") {
+		t.Errorf("the refusal says %q, and never says WHICH of the two dumps was short", err)
+	}
+}
+
+// TestPlaytestHoldingMotionSetsTheFlagTheStylesheetReads keeps the Go side
+// and the stylesheet on ONE spelling of the attribute. The rule that freezes
+// the animations is `:root[data-motion="paused"]`, and a script that wrote
+// any other name would set an attribute nothing reads -- the capture would
+// then settle or not by luck, with no failure anywhere to say why.
+func TestPlaytestHoldingMotionSetsTheFlagTheStylesheetReads(t *testing.T) {
+	t.Parallel()
+	got := playtestHoldMotionScript()
+
+	if !strings.Contains(got, jsString(playtestMotionAttribute)) {
+		t.Errorf("the hold script is %q, and never names the %s attribute the stylesheet reads",
+			got, playtestMotionAttribute)
+	}
+	if !strings.Contains(got, jsString(playtestMotionPaused)) {
+		t.Errorf("the hold script is %q, and never writes the %q value the stylesheet matches",
+			got, playtestMotionPaused)
+	}
+}
+
+// TestPlaytestReleasingMotionRemovesTheFlagRatherThanBlankingIt is the other
+// half, and the distinction matters: the stylesheet matches the attribute's
+// VALUE, so a release that wrote an empty string would leave the attribute
+// on the element for every later reader to find and would not obviously be
+// wrong. It is removed.
+func TestPlaytestReleasingMotionRemovesTheFlagRatherThanBlankingIt(t *testing.T) {
+	t.Parallel()
+	got := playtestReleaseMotionScript()
+
+	if !strings.Contains(got, "removeAttribute") {
+		t.Errorf("the release script is %q, and never removes the attribute", got)
+	}
+	if strings.Contains(got, "setAttribute") {
+		t.Errorf("the release script is %q; it writes the attribute rather than removing it", got)
+	}
 }
