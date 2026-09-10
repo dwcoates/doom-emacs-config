@@ -49,6 +49,80 @@ function sessionEntry(
 }
 
 // ---------------------------------------------------------------------------
+// The pending clear — a cut whose IDENTITY the reset record does not carry
+// ---------------------------------------------------------------------------
+
+/**
+ * A `/clear` whose ROTATED-TO session id has not been announced yet.
+ *
+ * WHY THE ROW CANNOT BE WRITTEN AT THE RESET. A cut is ONE fact and the two
+ * planes both state it, so they must mint the SAME upsert key or the store
+ * holds two rows for one cut and the feed draws the divider twice. For a
+ * compaction that is easy — the vendor writes the identical `compact_boundary`,
+ * uuid and all, to both planes. FOR A CLEAR IT IS NOT: the vendor hands the
+ * planes DISJOINT records. `identity-rotation-clear` (2026-09-01) has the
+ * stream's `conversation_reset` at uuid `cc07c2a0-…` and the file plane's only
+ * evidence of the clear — the expanded `/clear` command envelope — at
+ * `04f97c00-…`, in a transcript the reset does not name. Neither uuid is
+ * derivable from the other, and `new_conversation_id` is a third uuid NOTHING
+ * ever uses.
+ *
+ * The one thing both planes DO hold is THE SESSION THE CLEAR ROTATED TO: the
+ * sidecar reads the envelope out of `<new session>.jsonl` and keys on that
+ * file's session uuid, and this plane learns the very same id from the SECOND
+ * `system:init`, which follows the reset by milliseconds and is the only place
+ * the vendor states it. So the reset is HELD — bounded to one value, cleared on
+ * use, exactly like the compaction below — and the row is written when that
+ * init lands.
+ */
+export interface PendingClear {
+  /** The `conversation_reset` record this cut came from — its provenance. */
+  readonly vendorUuid: string;
+}
+
+/**
+ * The clear's cut row, once the init that names the rotated-to session lands.
+ *
+ * PROVENANCE AND IDENTITY ARE DIFFERENT FACTS HERE: `source.vendorUuid` names
+ * the reset record this plane converted, and the upsert key names the CUT,
+ * which is the session it rotated to — the one spelling the file plane can also
+ * reach.
+ */
+export function clearedCutEntry(
+  context: FoldContext,
+  pending: PendingClear,
+  vendorSessionId: string,
+): PersistEntry {
+  LOGGER.log(
+    { uuid: pending.vendorUuid, vendor_session_id: vendorSessionId },
+    "the context was cleared; recording the cut keyed on the session it rotated to",
+  );
+  return pageLineEntry(
+    context,
+    {
+      agentId: context.mainAgentId,
+      vendorUuid: pending.vendorUuid,
+      discriminator: "agent_update.context_cut.cleared",
+    },
+    contextCutUpsertKey(vendorSessionId),
+    create(conversationv1.AgentUpdateSchema, {
+      update: {
+        case: "contextCut",
+        value: create(conversationv1.ContextCutSchema, {
+          cut: {
+            case: "cleared",
+            // The vendor's reset record carries NO token delta, so
+            // `ContextCleared` states nothing — which is the honest shape,
+            // and why its only field was retired.
+            value: create(conversationv1.ContextClearedSchema, {}),
+          },
+        }),
+      },
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // The pending compaction — the one bounded join this file makes
 // ---------------------------------------------------------------------------
 
@@ -321,11 +395,17 @@ function rateLimitStatusUpdate(
  * `compactionSink` receives a boundary whose summary has not arrived yet; the
  * caller (the fold) holds the one pending value and emits the row when the next
  * assistant message supplies the summary.
+ *
+ * `clearSink` receives a reset whose ROTATED-TO session id has not been stated
+ * yet, on the same terms: the fold holds it and emits the row when the init
+ * that names that id lands. See `PendingClear` for why the reset itself cannot
+ * name the cut.
  */
 export function convertSessionMessage(
   message: SdkMessage,
   context: FoldContext,
   compactionSink?: (pending: PendingCompaction) => void,
+  clearSink?: (pending: PendingClear) => void,
 ): readonly PersistEntry[] {
   const record = message as unknown as Record<string, unknown>;
   const uuid = typeof record.uuid === "string" ? record.uuid : "";
@@ -356,32 +436,18 @@ export function convertSessionMessage(
         }),
       },
     });
-    return [
-      sessionEntry(context, uuid, "identity_rotated", rotated),
-      pageLineEntry(
-        context,
-        {
-          agentId: context.mainAgentId,
-          vendorUuid: uuid,
-          discriminator: "agent_update.context_cut.cleared",
-        },
-        contextCutUpsertKey(uuid),
-        create(conversationv1.AgentUpdateSchema, {
-          update: {
-            case: "contextCut",
-            value: create(conversationv1.ContextCutSchema, {
-              cut: {
-                case: "cleared",
-                // The vendor's reset record carries NO token delta, so
-                // `ContextCleared` states nothing — which is the honest shape,
-                // and why its only field was retired.
-                value: create(conversationv1.ContextClearedSchema, {}),
-              },
-            }),
-          },
-        }),
-      ),
-    ];
+    // THE CUT IS HELD, NOT WRITTEN HERE. Its upsert key is the session the
+    // clear rotated to, which this record does not name; `PendingClear` says
+    // why, and the init that follows releases it.
+    if (clearSink === undefined) {
+      LOGGER.log(
+        { level: "warn", uuid },
+        "a conversation reset arrived with nowhere to hold it until the init names the session it rotated to",
+      );
+    } else {
+      clearSink({ vendorUuid: uuid });
+    }
+    return [sessionEntry(context, uuid, "identity_rotated", rotated)];
   }
 
   switch (subtype) {
