@@ -2,9 +2,6 @@
 
 ;;; Code:
 
-;; evil is an external package, absent under `emacs -Q'.
-(declare-function evil-window-left "evil-commands")
-
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
@@ -1295,15 +1292,31 @@ Frontend-blind: dispatches the workspace's registered frontend's
     (funcall (agent-repl-frontend-restart-fn (agent-repl--ws-frontend ws)) ws)))
 
 (defun agent-repl-focus-input ()
-  "Focus the agent input buffer, or return to previous window if already there.
+  "Focus the agent input buffer, or return to the webview if already there.
 If the agent isn't running, start it (same as `agent-repl')."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
     (cond
      ;; Already in the input buffer — jump back
      ((eq (current-buffer) (agent-repl--ws-get ws :input-buffer))
-      (agent-repl--log ws "focus-input branch=jump-back")
-      (evil-window-left 1))
+      ;; JUMP BACK IS TO THE WEBVIEW, NOT LEFTWARD.  The panels are
+      ;; STACKED — the composer is split BELOW the webview
+      ;; (`agent-repl--frontend-display-webview') — so there is no window
+      ;; to the left of the composer and `evil-window-left' SIGNALLED
+      ;; ("No window left from selected window"): pressing `SPC o v' a
+      ;; second time raised an error instead of leaving the composer.
+      ;; The window to come back to is the workspace's own webview.
+      ;;
+      ;; With no webview window the press is a recorded no-op: there is
+      ;; nowhere to jump back to, and an error is not an answer to that.
+      (let* ((webview (agent-repl--ws-get ws :frontend-buffer))
+             (win (and (buffer-live-p webview) (get-buffer-window webview))))
+        (if win
+            (progn
+              (agent-repl--log ws "focus-input branch=jump-back win=%s" win)
+              (select-window win))
+          (agent-repl--log ws "focus-input branch=jump-back-nowhere webview=%s"
+                           (agent-repl--safe-buffer-name webview)))))
      ;; No composer buffer yet — bring the workspace's panels up.  The
      ;; question here is editor-local ("are this workspace's panels
      ;; mounted?"), not "is a session running": session liveness is the

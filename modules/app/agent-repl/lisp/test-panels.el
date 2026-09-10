@@ -1452,6 +1452,56 @@ foreign directory."
                              "/home/user/project/"))))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
 
+
+;;;; ---- Tests: focus-input jump-back branch ----
+
+(ert-deftest agent-repl-test-panels-focus-input-jump-back-selects-webview ()
+  "focus-input from the composer jumps back to the workspace's webview window."
+  (agent-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*focus-input-jump-back-input*"))
+          (webview-buf (get-buffer-create "*focus-input-jump-back-webview*"))
+          (input-win nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+            (agent-repl--ws-put "test-ws" :frontend-buffer webview-buf)
+            ;; The panels are STACKED: the webview above, the composer
+            ;; below, which is the layout the jump-back has to move in.
+            (delete-other-windows)
+            (set-window-buffer (selected-window) webview-buf)
+            (setq input-win (split-window nil nil 'below))
+            (set-window-buffer input-win input-buf)
+            (select-window input-win)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+              (with-current-buffer input-buf
+                (agent-repl-focus-input))
+              (should (eq (window-buffer (selected-window)) webview-buf))))
+        (when (and input-win (window-live-p input-win))
+          (ignore-errors (delete-window input-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (buffer-live-p webview-buf) (kill-buffer webview-buf))))))
+
+(ert-deftest agent-repl-test-panels-focus-input-jump-back-without-webview-window ()
+  "focus-input from the composer does not signal when no webview window exists."
+  (agent-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*focus-input-jump-back-alone-input*"))
+          (webview-buf (get-buffer-create "*focus-input-jump-back-alone-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+            (agent-repl--ws-put "test-ws" :frontend-buffer webview-buf)
+            ;; The composer alone on the frame is exactly the state that
+            ;; used to raise "No window left from selected window".
+            (delete-other-windows)
+            (set-window-buffer (selected-window) input-buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+              (with-current-buffer input-buf
+                (agent-repl-focus-input))
+              ;; Nowhere to go, so the composer keeps the selection.
+              (should (eq (window-buffer (selected-window)) input-buf))))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (buffer-live-p webview-buf) (kill-buffer webview-buf))))))
+
 ;;;; ---- Tests: focus-input show-or-focus branch ----
 
 (ert-deftest agent-repl-test-panels-focus-input-selects-window ()
