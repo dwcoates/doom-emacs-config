@@ -1078,3 +1078,102 @@ describe("a jump whose target is not drawn", () => {
     expect(harness.row(FOOTER_SHELL_TARGET)).toBeNull();
   });
 });
+
+describe("the usage line the strip cannot fit", () => {
+  /**
+   * The state playtest 11 photographs: both windows figured, the newest usage
+   * sample unreadable, so the caveat rides beside figures the daemon will not
+   * clear. On the strip that is more line than the dock's one row can hold.
+   */
+  const UNREAD_RATE_LIMITED = {
+    session: {
+      newsworthy: true,
+      utilization: 0.82,
+      resetsAtS: 1_700n,
+      status: { case: "allowedWarning", value: {} },
+    },
+    weekly: {
+      newsworthy: false,
+      utilization: 0.63,
+      resetsAtS: 9_000n,
+      status: { case: "allowed", value: {} },
+    },
+    sample: { outcome: { case: "serviceUnavailable", value: {} } },
+  };
+
+  /** Boot with that line standing. */
+  async function withUnreadRateLine(): Promise<void> {
+    await withFooter({
+      status: "idle",
+      activity: "rateLimited",
+      activityOverride: UNREAD_RATE_LIMITED,
+    });
+  }
+
+  it("condenses the caveat to a marker on the strip", async () => {
+    // Arrange / Act
+    await withUnreadRateLine();
+    // Assert: two words beside a figure, not a clause the cell would cut.
+    expect(harness.text(".footer-strip .footer-allowance-unread")).toBe("usage unread");
+  });
+
+  it("keeps the marker out of the part the strip ellipsizes", async () => {
+    // Arrange / Act
+    await withUnreadRateLine();
+    // Assert: the figures are the elastic child; the marker is its sibling.
+    expect(harness.$(".footer-rate-figures .footer-allowance-unread")).toBeNull();
+  });
+
+  it("leads the strip's figures with the newsworthy window", async () => {
+    // Arrange / Act
+    await withUnreadRateLine();
+    // Assert
+    expect(harness.$(".footer-rate-figures [data-allowance]")?.dataset.allowance).toBe("session");
+  });
+
+  it("titles the activity cell with the whole line", async () => {
+    // Arrange / Act
+    await withUnreadRateLine();
+    // Assert
+    expect(harness.$(".footer-activity")?.title).toBe(
+      harness.text(".footer-activity-rate-limited"),
+    );
+  });
+
+  it("carries the weekly window into the tokens sheet", async () => {
+    // Arrange
+    await withUnreadRateLine();
+    // Act
+    await harness.click(".footer-tokens");
+    // Assert
+    expect(
+      harness.text('.footer-expanded[data-panel="tokens"] [data-usage-allowance="weekly"]'),
+    ).toContain("weekly 63%");
+  });
+
+  it("carries the unread caveat into the tokens sheet in full", async () => {
+    // Arrange
+    await withUnreadRateLine();
+    // Act
+    await harness.click(".footer-tokens");
+    // Assert
+    expect(harness.text('.footer-expanded[data-panel="tokens"] [data-usage="unread"]')).toBe(
+      "usage unread — the usage service did not answer",
+    );
+  });
+
+  it("carries the context-budget sentence into the tokens sheet in full", async () => {
+    // Arrange
+    await withFooter({
+      status: "idle",
+      activity: "contextBudget",
+      activityOverride: { text: "84% of the window" },
+    });
+    // Act
+    await harness.click(".footer-tokens");
+    // Assert
+    expect(
+      harness.text('.footer-expanded[data-panel="tokens"] [data-usage="context-budget"]'),
+    ).toBe("84% of the window");
+  });
+});

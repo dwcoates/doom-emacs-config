@@ -38,7 +38,7 @@ import type { AppContext } from "../rpc/context.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { drawFooterExpanded, FOOTER_PANELS, type FooterPanel } from "./expanded.js";
-import { drawFooterStrip } from "./strip.js";
+import { drawFooterStrip, footerStatusActivity } from "./strip.js";
 
 /** Where the open panel is remembered, per workspace. */
 export function panelStorageKey(workspaceId: string): string {
@@ -121,7 +121,14 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     dock.setAttribute("role", "status");
     dock.setAttribute("aria-live", "polite");
 
-    const panel = drawFooterExpanded(expanded, selection, { ctx, revealRow: deps.revealRow });
+    // THE SHEET IS HANDED THE STRIP'S OWN ACTIVITY. The tokens sheet expands
+    // the usage line the strip is drawing, and handing the message across is
+    // what keeps the two from disagreeing about a figure.
+    const panel = drawFooterExpanded(expanded, selection, {
+      ctx,
+      revealRow: deps.revealRow,
+      activity: footerStatusActivity(requireMessage(strip.status, `FooterStrip.status`)),
+    });
     if (panel !== null) dock.appendChild(panel);
     dock.appendChild(drawFooterStrip(strip, { ctx, selection, onSelect: select }));
 

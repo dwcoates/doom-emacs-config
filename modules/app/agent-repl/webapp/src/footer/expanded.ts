@@ -58,7 +58,13 @@ import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawAgentsPanelStopAll } from "./stop.js";
-import { remainingLabel } from "./strip.js";
+import {
+  allowanceUnreadSentence,
+  drawFooterAllowance,
+  orderedAllowances,
+  remainingLabel,
+  type FooterActivity,
+} from "./strip.js";
 
 /** The selectable panels, named by the strip element that opens each. */
 export type FooterPanel = "tokens" | "agents" | "tasks" | "shells" | "monitors" | "crons";
@@ -80,6 +86,14 @@ export const EXPANDED_FOOTER_MAX_ROWS = 8;
 export interface ExpandedDeps {
   ctx: AppContext;
   readonly revealRow: (id: FeedId) => Promise<boolean>;
+  /**
+   * The activity line the strip is drawing right now, when there is one.
+   *
+   * NOT A SECOND RESOLUTION OF IT — the same message, handed across — so the
+   * tokens sheet's usage rows and the strip's line can never disagree about a
+   * figure. The sheet expands the strip's line; the strip is where it lives.
+   */
+  readonly activity?: FooterActivity;
 }
 
 /**
@@ -103,10 +117,10 @@ export function drawFooterExpanded(
 
   switch (selection) {
     case "tokens":
-      return panel(
-        selection,
-        drawFooterExpandedTokens(requireMessage(u.tokens, `${path}.tokens`), `${path}.tokens`),
-      );
+      return panel(selection, [
+        ...drawFooterExpandedTokens(requireMessage(u.tokens, `${path}.tokens`), `${path}.tokens`),
+        ...drawFooterUsageRows(deps.activity, deps.ctx, "FooterStatus.activity"),
+      ]);
     case "agents":
       return panel(
         selection,
@@ -256,6 +270,84 @@ export function drawFooterTokensLineVerdict(
       return unreachableArm(`${path}.verdict`, other.case);
     }
   }
+}
+
+// ---- the usage rows, under the tokens panel -------------------------------
+
+/**
+ * THE USAGE CONTENT THE STRIP CANNOT FIT, drawn in full.
+ *
+ * The strip is one line capped at the response bubble's width and its rate
+ * line is routinely wider than that, so the second allowance window, the
+ * unread caveat's reason and the tail of a context-budget warning were in the
+ * DOM and never on the glass. They belong somewhere a reader can reach them,
+ * and this sheet -- the one the tokens cell opens, already the sheet about
+ * what the account is spending -- is that place.
+ *
+ * IT IS THE STRIP'S OWN LINE, not a second resolution of it: the same
+ * `FooterActivity` the strip drew, drawn again without a width to fight. The
+ * allowance cells are the strip's own drawing (`drawFooterAllowance`) in the
+ * strip's own order, so a reader who opens the sheet finds the line they were
+ * reading rather than a rearranged one.
+ *
+ * TWO ARMS ONLY. `rate_limited` and `context_budget` are the activity oneof's
+ * usage arms; every other arm is about the turn rather than the account and
+ * draws nothing here, as does an absent activity.
+ */
+export function drawFooterUsageRows(
+  activity: FooterActivity | undefined,
+  ctx: AppContext,
+  path: string,
+): HTMLElement[] {
+  if (activity === undefined) return [];
+  const kind = activity.kind;
+  if (kind.case === "rateLimited") {
+    const rows: HTMLElement[] = [usageHeader("account usage")];
+    for (const allowance of orderedAllowances(kind.value)) {
+      const row = usageRow("allowance");
+      row.setAttribute("data-usage-allowance", allowance.label);
+      row.appendChild(
+        drawFooterAllowance(allowance.value, allowance.label, { ctx }, `${path}.${allowance.label}`),
+      );
+      rows.push(row);
+    }
+    const sentence = allowanceUnreadSentence(kind.value.sample, `${path}.sample`);
+    if (sentence !== null) {
+      const row = usageRow("unread");
+      const outcome = kind.value.sample?.outcome;
+      if (outcome?.case !== undefined) row.setAttribute("data-sample", outcome.case);
+      row.textContent = sentence;
+      rows.push(row);
+    }
+    return rows;
+  }
+  if (kind.case === "contextBudget") {
+    const row = usageRow("context-budget");
+    row.textContent = kind.value.text;
+    return [usageHeader("context budget"), row];
+  }
+  return [];
+}
+
+/** The usage block's own header, so its rows are not read as token figures. */
+function usageHeader(text: string): HTMLElement {
+  const header = document.createElement("div");
+  header.className = "footer-panel-header footer-usage-header";
+  header.setAttribute("data-row", "");
+  const title = document.createElement("span");
+  title.className = "footer-panel-title";
+  title.textContent = text;
+  header.appendChild(title);
+  return header;
+}
+
+/** One usage row, named by what it says. */
+function usageRow(usage: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = `footer-usage-row footer-usage-${usage}`;
+  row.setAttribute("data-row", "");
+  row.setAttribute("data-usage", usage);
+  return row;
 }
 
 // ---- the agents panel -----------------------------------------------------
