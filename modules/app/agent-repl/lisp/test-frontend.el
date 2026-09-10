@@ -99,6 +99,76 @@ agent panel it is, with no special-casing left to carve out."
 
 ;;;; ---- rescue-webview (navigated away) ----------------------------------------
 
+(ert-deftest agent-repl-test-frontend-home-origin-is-the-owning-daemons-address ()
+  "Home is the origin of the connection whose daemon owns the workspace."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-home-origin "alpha")
+                     "http://127.0.0.1:7777")))))
+
+(ert-deftest agent-repl-test-frontend-home-origin-is-nil-without-a-connection ()
+  "A workspace whose daemon cannot be named has no home to be at."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-home-origin "alpha")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-accepts-the-daemons-own-page ()
+  "The workspace's own webview URL is at home on the daemon that serves it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should (agent-repl--frontend-webview-at-home-p
+               "alpha" (agent-repl-frontend-webview-url "alpha"))))))
+
+(ert-deftest agent-repl-test-frontend-at-home-ignores-the-path-and-query ()
+  "Home is the ORIGIN: the page rewrites its own query as the user navigates."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should (agent-repl--frontend-webview-at-home-p
+               "alpha" "http://127.0.0.1:7777/other?workspace=someone-else")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-refuses-another-daemons-port ()
+  "A page served by a DIFFERENT daemon is astray, however similar its host."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p
+                   "alpha" "http://127.0.0.1:7778/?workspace=ws-1")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-refuses-a-page-that-left-the-web ()
+  "`about:blank' — where an external hyperlink can strand a webview — is not home."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p "alpha" "about:blank")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-refuses-a-webview-with-no-uri ()
+  "A webview that cannot say where it is has no claim on being left alone."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p "alpha" "")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-refuses-when-the-daemon-is-unknown ()
+  "With no connection there is no origin to certify a page against."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p
+                   "alpha" "http://127.0.0.1:7777/?workspace=ws-1")))))
+
+
 (defmacro agent-repl-test--with-rescue-webview (uri remounted messages &rest body)
   "Run BODY with a mounted webview reporting URI, capturing rescue effects.
 REMOUNTED collects the workspaces `agent-repl--frontend-remount-webview'
@@ -661,6 +731,75 @@ deadlock the non-interactive kill hook."
     (agent-repl--frontend-kill-webview buf)
     ;; Assert — killed despite the refusing query fn.
     (should-not (buffer-live-p buf))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-holds-for-a-mounted-webview ()
+  "A workspace holding a live webview reads as running, so the toggle SHOWS it."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            ;; Act / Assert
+            (should (agent-repl--gui-running-p "ws1")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-holds-for-a-hidden-webview ()
+  "The plain close hides the panels and keeps the buffer, so the ws still runs.
+This is the branch `SPC o c' toggles on: a second press must SHOW the page
+back rather than mount a second one."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (delete-other-windows)
+            ;; Act — no window shows it, the buffer is alive.
+            ;; Assert
+            (should-not (get-buffer-window buf))
+            (should (agent-repl--gui-running-p "ws1")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-fails-without-a-webview ()
+  "A workspace that was never opened has nothing to show, so the toggle OPENS."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    ;; Act / Assert
+    (should-not (agent-repl--gui-running-p "ws1"))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-fails-for-a-killed-webview ()
+  "A webview that died leaves a dead buffer, and a dead buffer is not a page."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (kill-buffer buf)
+      ;; Act / Assert
+      (should-not (agent-repl--gui-running-p "ws1")))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-answers-a-boolean ()
+  "The capability answers t or nil, never the buffer it looked at.
+The registry's callers treat the answer as a predicate, and leaking the
+buffer would make a truthy answer carry state no caller may rely on."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            ;; Act / Assert
+            (should (eq (agent-repl--gui-running-p "ws1") t)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-gui-registry-running-p-fn-is-defined ()
+  "The gui registration's `:running-p-fn' names a function that EXISTS.
+A registry slot pointing at a void symbol is a defect no unit test of the
+function itself can catch: the toggle finds it only when a user presses
+`SPC o c' on a workspace whose panels are hidden."
+  ;; Act / Assert
+  (should (fboundp (agent-repl-frontend-running-p-fn
+                    (agent-repl-frontend-get 'gui)))))
 
 (ert-deftest agent-repl-test-frontend-gui-hide-restores-saved-layout ()
   "gui hide restores the pre-panel layout when one was saved.
