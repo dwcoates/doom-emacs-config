@@ -5805,3 +5805,27 @@ body.draining #composer-input::placeholder {
 :root[data-motion="paused"] *::after {
   animation-play-state: paused !important;
 }
+
+/* THE ONE ANIMATION PAUSING ALONE CANNOT PHOTOGRAPH: a running tool's arc.
+   `.tool-spinner` is laid out from the start at `opacity: 0` and made
+   visible ONLY by `tool-run-appear`, whose 1s delay is the whole mechanic —
+   an arc appears for a call the user actually waits on, and nothing else.
+   Pausing that animation DURING its delay freezes the opacity at 0 and never
+   lets it out, so the flag does not hold the arc where the eye had it: it
+   holds it where the eye never sees it settle.
+
+   AND EVERY RUNNING CARD IS PHOTOGRAPHED INSIDE THAT SECOND. A playbook
+   asserts `data-state="running"` and captures on the next step, and a
+   rewrite (a tool-use-progress update, the input→running flip) restarts the
+   delay, so the delay is running at capture time essentially always.
+   MEASURED, owner 13's `13-shell` and `13-detached-shell` runs: all six
+   `running…` badges across both playbooks drew a reserved but EMPTY box
+   inside the pill, in every capture of two separate green runs.
+
+   So the flag lands the arc where the delay was carrying it. This is a
+   photographer's rule like the one above it — nothing in this app's own code
+   sets `data-motion`, so it cannot change what a user sees, and between
+   captures the arc fades in on its own delay exactly as it always did. */
+:root[data-motion="paused"] .tool-spinner {
+  opacity: 1;
+}
