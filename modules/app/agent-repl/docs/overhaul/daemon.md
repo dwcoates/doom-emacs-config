@@ -1071,8 +1071,15 @@ its own file only when >1 endpoint needs it.
   whole-list-replaced: `HeldPrompt` (deliver/force/cancel via
   UpdateHeldPrompt) and `HeldOffer` (a daemon-parked question, e.g. the
   merge-dequeue offer, answered via AnswerHeldOffer). Gates are NOT
-  holds: a merge lease or hibernated session REFUSES input; the
-  uninterruptible context cut is a classification, not a hold.
+  holds: a merge lease REFUSES input, and so does a hibernating
+  session's own occupancy lease FOR THE STAND-DOWN WINDOW ONLY — while
+  the Hibernate directive, its ack and the shim's exit are still in
+  flight, that lease refuses rather than holds. ONCE THE SHIM IS GONE
+  THE REFUSAL IS OVER: a prompt to a hibernated workspace implicitly
+  revives it (see "Hibernation is daemon POLICY (idle-cutoff sweep +
+  implicit revive on prompt)" and SPAWN ON MOUNT above), so a parked
+  workspace is never an input dead end. The uninterruptible context cut
+  is a classification, not a hold.
 - Occupancy leases carry PER-HOLDER REFUSAL POLICY: the merge lease
   projects to error-on-submit; restart-pending and shutdown-drain
   project to holds. A prompt arriving after a merge began is refused
