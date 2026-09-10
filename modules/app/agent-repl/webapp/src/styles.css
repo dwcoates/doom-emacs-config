@@ -1595,6 +1595,16 @@ pre {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+/* A COLLAPSED SUB-FEED MUST ACTUALLY BE HIDDEN, and this is the SAME defect the
+   `.bubble[hidden]` guard above records, in the one place that rule's own list
+   of guarded selectors missed. `bubble.ts` folds a subagent or merge bubble by
+   setting `panel.hidden` on this element; the rule above sets `display`, and a
+   class selector outranks the user-agent stylesheet's `[hidden]` rule, so the
+   fold hid NOTHING once the sub-feed had drawn its rows once. The caret flipped
+   `data-expanded` and swapped its glyph while the rows stayed on the glass --
+   which is exactly "the caret does not toggle" as a reader sees it, and it is
+   invisible to every jsdom drawing test, which install no stylesheet at all. */
+.agent-panel[hidden] { display: none; }
 /* The fixed panel a teal card's fold drops (see .fold-fixed above), capped at
    the SAME visible-line budget a response or prompt bubble stops at
    (--feed-cap-lines) and measured in the shared default line box, which is the
