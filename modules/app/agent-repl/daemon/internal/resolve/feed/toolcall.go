@@ -140,6 +140,44 @@ func failureText(failure *conversationv1.AgentToolFailure) string {
 	return strings.Join(parts, "\n")
 }
 
+// failureForm is the form a failed call's account is DRAWN in.
+//
+// THE TEXT IS THE ACCOUNT whenever there is one: AgentToolFailure's own doc
+// says a consumer shows the text, and the sentence that explains the failure
+// is what the reader came for. But a tool may answer a failure with an IMAGE
+// and nothing else — ToolResultContentBlock carries an image arm and the shim
+// populates it — and `form` is a oneof, so the picture is drawn only when no
+// text block carries a word. Dropping it silently, which is what a text-only
+// read did, left the card with an empty body and no sign anything was lost.
+func (r *resolver) failureForm(s *wsState, failure *conversationv1.AgentToolFailure) returnedForm {
+	if text := failureText(failure); text != "" {
+		return textForm(text)
+	}
+	return r.failureImageForm(s, failure)
+}
+
+// failureImageForm draws the FIRST image a wordless failure returned, through
+// the same resolver and the same shared block a prompt's image is drawn with.
+// An image the daemon cannot resolve into a src is recorded LOUDLY and draws
+// no body, rather than carrying a src that renders broken on every client.
+func (r *resolver) failureImageForm(s *wsState, failure *conversationv1.AgentToolFailure) returnedForm {
+	for _, block := range failure.GetContent().GetBlocks() {
+		image, ok := block.GetBlock().(*conversationv1.ToolResultContentBlock_Image)
+		if !ok {
+			continue
+		}
+		src, alt, err := r.resolveImage(image.Image)
+		if err != nil {
+			r.logger(s.id).Warn("daemon.feed.tool_failure_image_unresolved",
+				"a failed tool answered with an image that resolves to no drawable src; the card draws no output body",
+				dlog.Context{"media_type": image.Image.GetMediaType(), "cause": err.Error()})
+			return nil
+		}
+		return imageForm(&frontendv1.FeedImageBlock{Src: src, Alt: alt})
+	}
+	return nil
+}
+
 // failureSettledMs is the instant a failed call settled, zero when none was
 // observed.
 func failureSettledMs(failure *conversationv1.AgentToolFailure) int64 {
@@ -178,7 +216,7 @@ func (r *resolver) drawRead(s *wsState, at placement, act *conversationv1.AgentA
 			returnedOutcome(u, true, form, state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentRead_Failure:
 		return r.toolRow(s, at, unitID, "Read",
-			returnedOutcome(u, false, textForm(failureText(state.Failure.GetError())),
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
 	}
 	return nil, errNotARow
@@ -283,7 +321,7 @@ func (r *resolver) drawWrite(s *wsState, at placement, act *conversationv1.Agent
 				state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentWrite_Failure:
 		return r.toolRow(s, at, unitID, "Write",
-			returnedOutcome(u, false, textForm(failureText(state.Failure.GetError())),
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
 	case *conversationv1.AgentWrite_Diagnostics:
 		return r.applyDiagnostics(s, unitID, state.Diagnostics)
@@ -316,7 +354,7 @@ func (r *resolver) drawEdit(s *wsState, at placement, act *conversationv1.AgentA
 				state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentEdit_Failure:
 		return r.toolRow(s, at, unitID, "Edit",
-			returnedOutcome(u, false, textForm(failureText(state.Failure.GetError())),
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
 	case *conversationv1.AgentEdit_Diagnostics:
 		return r.applyDiagnostics(s, unitID, state.Diagnostics)
@@ -467,7 +505,7 @@ func (r *resolver) drawGrep(s *wsState, at placement, act *conversationv1.AgentA
 			returnedOutcome(u, true, grepForm(state.Success), state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentGrep_Failure:
 		return r.toolRow(s, at, unitID, "Grep",
-			returnedOutcome(u, false, textForm(failureText(state.Failure.GetError())),
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
 	}
 	return nil, errNotARow
@@ -530,7 +568,7 @@ func (r *resolver) drawGlob(s *wsState, at placement, act *conversationv1.AgentA
 			returnedOutcome(u, true, globForm(state.Success), state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentGlob_Failure:
 		return r.toolRow(s, at, unitID, "Glob",
-			returnedOutcome(u, false, textForm(failureText(state.Failure.GetError())),
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
 	}
 	return nil, errNotARow
@@ -613,7 +651,7 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 				bashExit(state.Success))), nil
 	case *conversationv1.AgentBash_Failure:
 		return r.toolRow(s, at, unitID, "Bash",
-			returnedOutcome(u, false, textForm(failureText(state.Failure.GetError())),
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
 	}
 	return nil, errNotARow
@@ -771,7 +809,7 @@ func (r *resolver) drawWebFetch(s *wsState, at placement, act *conversationv1.Ag
 		u.input = url
 		u.inputForm = inputFormPath
 		row := r.toolRow(s, at, unitID, "WebFetch",
-			returnedOutcome(u, false, textForm(failureText(state.Failure.GetFailure())),
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetFailure()),
 				failureSettledMs(state.Failure.GetFailure())))
 		linkInput(row, url)
 		return row, nil
@@ -813,7 +851,7 @@ func (r *resolver) drawWebSearch(s *wsState, at placement, act *conversationv1.A
 			returnedOutcome(u, true, linksForm(state.Success.GetResults()), 0)), nil
 	case *conversationv1.AgentWebSearch_Failure:
 		return r.toolRow(s, at, unitID, "WebSearch",
-			returnedOutcome(u, false, textForm(failureText(state.Failure.GetFailure())),
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetFailure()),
 				failureSettledMs(state.Failure.GetFailure()))), nil
 	}
 	return nil, errNotARow

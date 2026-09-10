@@ -980,6 +980,38 @@ input clears."
                                                   :value (list :path "/tmp/a.png"))
                                             :media-type "image/png")))))))
 
+(ert-deftest agent-repl-input-an-image-marker-never-rides-the-text-block ()
+  "The composer's attachment marker is DRAWN, never submitted as words."
+  (agent-repl-test-input--with
+    ;; Arrange: the words, then the marker clipboard-image.el draws.
+    (with-current-buffer agent-repl-test-input--buffer
+      (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+      (erase-buffer)
+      (insert "what is in this picture?")
+      (agent-repl--image-insert-marker "/tmp/a.png" "ws-one"))
+    ;; Act.
+    (agent-repl--send :user-sent)
+    ;; Assert.
+    (should (equal (plist-get (plist-get (car (agent-repl-test-input--blocks)) :value) :text)
+                   "what is in this picture?"))))
+
+(ert-deftest agent-repl-input-history-records-the-stripped-text ()
+  "The ring is the record of what was SENT, so it holds no marker either."
+  (agent-repl-test-input--with
+    ;; Arrange.
+    (let (pushed)
+      (cl-letf (((symbol-function 'agent-repl--history-push)
+                 (lambda (&optional text) (push text pushed))))
+        (with-current-buffer agent-repl-test-input--buffer
+          (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+          (erase-buffer)
+          (insert "remember only my words")
+          (agent-repl--image-insert-marker "/tmp/a.png" "ws-one"))
+        ;; Act.
+        (agent-repl--send :user-sent)
+        ;; Assert.
+        (should (equal pushed (list "remember only my words")))))))
+
 (ert-deftest agent-repl-input-attachments-cleared-after-a-turn ()
   "Attachments clear once the daemon has accepted the submission."
   (agent-repl-test-input--with
