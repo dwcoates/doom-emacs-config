@@ -22,16 +22,21 @@ regular file or symlink as its durable sink. Link replacement is atomic. An
 owned target is reused from the runtime's in-memory workspace map during that
 runtime lifetime. After a runtime restart, the runtime creates a new unique
 target under the operating system's temporary directory and atomically
-replaces the canonical link rather than trusting its old destination. An
-active target is truncated in place so readers holding the target open
-continue to observe the same inode.
+replaces the canonical link rather than trusting its old destination.
 
-The daemon opens its workspace targets with append semantics and manages a
-64 MiB cap for `daemon.log`, `shim.log`, `webapp.log`, and `sidecar.log`.
-Daemon-owned writes check the cap synchronously. A periodic daemon scan also
-checks direct shim writes made through inherited file descriptor `3`.
-Truncation first proves the canonical symlink still names the manager-owned
-inode, then clears that inode in place. A cap-maintenance failure is a
+Every runtime-owned target is capped at 64 MiB and retains five completed
+generations beside the active path. Rotation happens before the append that
+would cross the cap: the active path moves to `.1`, older generations shift
+toward `.5`, and a fresh active file receives the complete new record. `.1`
+is always the newest completed generation and `.5` the oldest. A record larger
+than the cap is kept whole in the active generation. The canonical workspace
+symlink continues to name the active target path across rotation.
+
+The daemon opens its workspace targets with append semantics for `daemon.log`,
+`shim.log`, `webapp.log`, and `sidecar.log`. Daemon-owned writes check the cap
+synchronously. A periodic daemon scan also checks direct shim writes made
+through inherited file descriptor `3`. Rotation first proves the canonical
+symlink still names the manager-owned path. A cap-maintenance failure is a
 workspace-attributed JSON error and poisons the affected sink.
 
 Global service records use the runtime's canonical global log only when the
