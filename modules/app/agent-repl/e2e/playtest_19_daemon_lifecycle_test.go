@@ -539,6 +539,20 @@ func TestPlaytestGracefulRestartHoldsThePrompt(t *testing.T) {
 	s.openPanel(t)
 	s.submit(t, emGHIGatedPrompt)
 	s.awaitArm(t, name, "the gated turn to be running before the restart", emGHIRunningArms...)
+	// AND THE PROMPT HAS REACHED THE FEED, which is what makes the picture
+	// below the same picture every run. `:submitting` is a running arm, and
+	// it is the arm a workspace carries while the daemon still HOLDS the
+	// prompt in its tray waiting for the session to come up -- the first
+	// take of this capture photographed exactly that: an empty feed and a
+	// `held (1)` tray, under a sentence about a live turn. Waiting for the
+	// bubble pins the state the step is about.
+	s.awaitInPage(t, "the gated turn's own prompt bubble to be drawn in the feed",
+		`(function () {
+                   var bubbles = document.querySelectorAll('.bubble.user');
+                   for (var i = 0; i < bubbles.length; i++) {
+                     if (bubbles[i].textContent.indexOf(`+jsString(emGHIGatedPrompt)+`) !== -1) { return true; }
+                   }
+                   return false; })()`)
 
 	// The user writes a second prompt mid-turn and enqueues it through the
 	// ordinary command. The binding is asserted first: a `SPC j RET` that
@@ -559,9 +573,11 @@ func TestPlaytestGracefulRestartHoldsThePrompt(t *testing.T) {
 	p.capture("prompt-held",
 		"a second prompt written mid-turn and deferred with `SPC j RET`",
 		fmt.Sprintf("`agent-repl-prompt-queue-pending` holds exactly one entry for %q and the composer buffer is empty", name),
-		"THE PROMPT IS NOT LOST. The gated turn is still running in the feed -- the first prompt's bubble is "+
-			"there with the turn still live beneath it -- and the composer at the bottom of the frame is EMPTY: "+
-			"the text the user just wrote has left the draft. Nothing in the picture reports a refusal.")
+		"THE PROMPT IS NOT LOST. The feed carries the FIRST prompt's bubble (\"hold here until the gate "+
+			"opens\") with its turn still running beneath it, and the composer at the bottom of the frame is "+
+			"EMPTY: the text the user just wrote has left the draft. The hold tray reads `held (0)` and that "+
+			"is correct -- this deferral is EMACS's own queue, not the daemon's tray, so nothing of it is "+
+			"drawn in the page. Nothing in the picture reports a refusal.")
 
 	// THE GRACEFUL RESTART -- no prefix argument, so the turn is not forced
 	// down.
