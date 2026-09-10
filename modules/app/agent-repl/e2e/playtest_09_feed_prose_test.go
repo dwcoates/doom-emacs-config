@@ -100,6 +100,30 @@ const p09ResponseRow = `[data-feed-row][data-row-kind="activity"][data-unit="res
 // is two parts.
 const p09TerminalRow = `[data-feed-row][data-row-kind="turnEnded"]`
 
+// p09SessionLine is the topbar's session identity line -- which vendor
+// session, which account root, which model
+// (`daemon/internal/resolve/topbar/resolver.go`'s `sessionLine`).
+//
+// It is scoped to the REVEAL PANEL it is drawn in rather than left bare,
+// because that is where the product puts it: the strip has no session line of
+// its own, and the panel is the only thing that ever holds one.
+const p09SessionLine = `.topbar-reveal[data-reveal="session"] .topbar-session-line`
+
+// p09EofCauseWords and p09IteratorCauseWords are the sentences the webapp
+// draws under a query-death headline, copied from `QUERY_CAUSE_WORDS` in
+// `webapp/src/feed/rows/turn-ended.ts`.
+//
+// They are MANIFEST PROSE and nothing else -- what the row ASSERTS is the
+// `data-query-cause` arm, which is the contract. They are spelled here so the
+// reviewer is told the product's own words rather than a paraphrase of them:
+// the first review of these pictures looked for "unexpected EOF" against a
+// page that says "the agent's stream ended without a close", which is a
+// mismatch in the sentence and not in the paint.
+const (
+	p09EofCauseWords      = "the agent's stream ended without a close"
+	p09IteratorCauseWords = "the agent sdk's iterator failed"
+)
+
 // p09QueryDeathAct is the act the three D27 rows share.
 //
 // The three differ ONLY in the cause the producer named and in whether an ask
@@ -137,11 +161,18 @@ func p09QueryDeathAsserted(cause string) string {
 		"\"]`, the roster arm is " + p09VendorBlockedArm + ", and the footer's status line is non-empty"
 }
 
+// p09QueryDeathExpected words the picture from the PRODUCT'S OWN sentences
+// rather than from this file's paraphrase of them: the headline is the
+// daemon's, drawn verbatim (`drawFeedTurnErrorHeadline`), and CAUSEWORDS is
+// the webapp's `QUERY_CAUSE_WORDS` entry for the arm. A manifest that invented
+// its own wording would make every future rewording of the product read as a
+// picture that does not match its sentence.
 func p09QueryDeathExpected(causeWords string) string {
 	return "Beneath the prompt bubble the turn's TERMINAL ROW is drawn as an ERRORED end — the error " +
-		"hue, not the green of a conclusion — with a headline saying the VENDOR QUERY DIED and the " +
-		"cause word \"" + causeWords + "\" beside it. The footer's status line says the session is " +
-		"BLOCKED because the query died."
+		"hue, not the green of a conclusion. Its headline says THE QUERY DIED and names the fault, and " +
+		"on a smaller line directly BENEATH the headline is the cause sentence \"" + causeWords +
+		"\". The footer's leftmost cells read BLOCKED and QUERY DIED, and its status line says the " +
+		"next prompt restarts the session."
 }
 
 // TestPlaytestFeedProseFamilies is plan D25-D28.
@@ -171,6 +202,18 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 					`document.querySelector('`+p09ResponseRow+` .bubble-body pre.md-code code')`)
 				s.awaitInPage(t, "the bulleted list to be drawn as a list",
 					`document.querySelector('`+p09ResponseRow+` .bubble-body ul li')`)
+				// THE BLOCKQUOTE AND THE RULE, which the manifest sentence
+				// sends the reviewer looking for. Without these two waits the
+				// sentence asks for something no assertion had established,
+				// and the `hr` in particular is a HAIRLINE
+				// (`.md hr { border-top: 1px solid var(--border) }`) that a
+				// reviewer cannot honestly swear to from the picture alone --
+				// so the DOM is what proves it is there and the picture is
+				// only asked to agree.
+				s.awaitInPage(t, "the blockquote to be drawn as a quote rather than a literal `>`",
+					`document.querySelector('`+p09ResponseRow+` .bubble-body blockquote')`)
+				s.awaitInPage(t, "the thematic break to be drawn as a rule rather than three dashes",
+					`document.querySelector('`+p09ResponseRow+` .bubble-body hr')`)
 				// THE WRAP ARRIVES AS LINES, which is why a count says
 				// something. The daemon wraps the tree to 105 columns before
 				// it serves it (`daemon/internal/resolve/feed/tree.go`), so
@@ -191,17 +234,23 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
                        function (p) { return p.textContent.indexOf("│   │") === 0; })`)
 				s.awaitArm(t, ws, "the turn to settle", emGHISettledArms...)
 			},
-			asserted: "the settled response bubble carries an `h1`, a `pre.md-code code` and a `ul li`; the " +
-				"tree drew at least six non-blank `.mp-line`s, one of them a continuation whose " +
-				"`.mp-prefix` begins `│   │`; the roster arm settled",
+			asserted: "the settled response bubble carries an `h1`, a `pre.md-code code`, a `ul li`, a " +
+				"`blockquote` and an `hr`; the tree drew at least six non-blank `.mp-line`s, one of them " +
+				"a continuation whose `.mp-prefix` begins `│   │`; the roster arm settled",
 			expected: "The response bubble shows \"Markdown showcase\" as a LARGE HEADING (not a literal `#`), " +
-				"a monospaced FENCED CODE BLOCK carrying the Go line, a BULLETED LIST, a BLOCKQUOTE and a " +
-				"HORIZONTAL RULE. Beneath the \"A numbered tree\" heading is a Unicode tree whose branch " +
-				"1.1 runs onto a SECOND LINE: that continuation line starts with two vertical rails " +
-				"`│   │` aligned EXACTLY under the rails of the lines around it, and `└── 1.1.1.` hangs " +
-				"beneath it. Branch 1.2's continuation is indented under its own text with NO rail, " +
-				"because nothing follows it. Every connector must be unbroken: no gap in a vertical " +
-				"rail, and no line sheared back to column 0.",
+				"a BULLETED LIST, an ORDERED LIST numbered 1. and 2., a BLOCKQUOTE behind a left bar, a " +
+				"monospaced FENCED CODE BLOCK carrying the Go line, and — between that fence and the " +
+				"\"A numbered tree\" heading — a faint HAIRLINE RULE across the bubble. Beneath that " +
+				"heading is a Unicode tree whose branch 1.1 runs onto a SECOND LINE: that continuation " +
+				"line starts with two vertical rails `│   │` aligned EXACTLY under the rails of the " +
+				"lines around it, and `└── 1.1.1` hangs beneath it. Branch 1.2's continuation is " +
+				"indented under its own text with NO rail, because nothing follows it. Every connector " +
+				"must be unbroken: no gap in a vertical rail, and no line sheared back to column 0. " +
+				"The bubble is CUT OFF mid-tree with its own scrollbar down the right edge, and that is " +
+				"the product: a bubble stops at 25 of its own lines (`--feed-cap-lines`) and scrolls " +
+				"past that, so the showcase's closing line is below the cap rather than missing. The " +
+				"root line's tree emoji draws as a TOFU BOX; the sandbox image ships no emoji font, and " +
+				"that is the image rather than the product.",
 		},
 		{
 			name:    "interrupt",
@@ -243,7 +292,7 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 			capture:  "query-eof-terminal",
 			act:      p09QueryDeathAct("unexpectedEof", false),
 			asserted: p09QueryDeathAsserted("unexpectedEof"),
-			expected: p09QueryDeathExpected("unexpected EOF"),
+			expected: p09QueryDeathExpected(p09EofCauseWords),
 		},
 		{
 			name:     "query-fail",
@@ -251,7 +300,7 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 			capture:  "query-fail-terminal",
 			act:      p09QueryDeathAct("iteratorFailure", false),
 			asserted: p09QueryDeathAsserted("iteratorFailure"),
-			expected: p09QueryDeathExpected("iterator failure"),
+			expected: p09QueryDeathExpected(p09IteratorCauseWords),
 		},
 		{
 			name:    "query-eof-mid-ask",
@@ -260,9 +309,10 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 			act:     p09QueryDeathAct("unexpectedEof", true),
 			asserted: p09QueryDeathAsserted("unexpectedEof") + ", and the permission card carries " +
 				"`[data-permission-verdict=\"deniedByUser\"]`",
-			expected: p09QueryDeathExpected("unexpected EOF") + " ABOVE that terminal row, the BASH " +
-				"PERMISSION CARD is drawn ANSWERED, carrying the verdict badge \"denied by user\" in " +
-				"the error hue, with NO buttons still being offered.",
+			expected: p09QueryDeathExpected(p09EofCauseWords) + " BENEATH that terminal row, the BASH " +
+				"PERMISSION CARD is drawn ANSWERED — \"Claude wants to run Bash\" over the verdict badge " +
+				"\"denied by user\" in the error hue, with NO buttons still being offered — and beneath the " +
+				"card the Bash tool row carries a \"denied\" badge over its `git status` command line.",
 		},
 		{
 			name:    "rotate",
@@ -279,9 +329,26 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				s.awaitInPage(t, "the warm-up answer to settle, which is what makes the topbar draw",
 					`document.querySelector('`+p09ResponseRow+`')`)
 				s.awaitArm(t, ws, "the warm-up turn to settle", emGHISettledArms...)
+
+				// THE SESSION LINE IS BEHIND A REVEAL, so the reader has to
+				// OPEN it -- and that is the product's design rather than
+				// this playbook's inconvenience: the strip carries the
+				// account chip and the title, and `bindTitleSessionReveal`
+				// makes both of them the door onto the session's own identity
+				// line (`webapp/src/topbar/strip.ts`). Nothing draws
+				// `.topbar-session-line` until that door is opened, which is
+				// what the first run of this row found by waiting two seconds
+				// for an element that was never going to exist.
+				//
+				// It is opened ONCE, before the rotate, and left open: the
+				// reveal layer survives every topbar push and re-draws itself
+				// from the NEW push's view (`reveals.refresh()` in
+				// topbar.ts), so leaving it open is also what proves the
+				// rotated identity reaches a reveal a reader already had up.
+				s.clickInPage(t, "the topbar's session anchor", `[data-reveal-anchor="session"]`)
 				before := p09ReadInPage(t, s, "the topbar's session line before the rotate",
-					`document.querySelector('.topbar-session-line') &&
-                     document.querySelector('.topbar-session-line').textContent.trim()`)
+					`document.querySelector('`+p09SessionLine+`') &&
+                     document.querySelector('`+p09SessionLine+`').textContent.trim()`)
 
 				s.submit(t, row.prompt)
 				s.awaitInPage(t, "the rotation to draw its separation row",
@@ -292,21 +359,24 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				// AND to having changed.
 				s.awaitInPage(t, "the topbar to show a session identity different from the one before the rotate",
 					`(function () {
-                       var el = document.querySelector('.topbar-session-line');
+                       var el = document.querySelector('`+p09SessionLine+`');
                        if (!el) { return false; }
                        var now = el.textContent.trim();
                        return now !== "" && now !== `+jsString(before)+`;
                      })()`)
 				s.awaitArm(t, ws, "the rotating turn to settle", emGHISettledArms...)
 			},
-			asserted: "the feed drew a `separation` row whose body carries `[data-arm=\"cleared\"]`, the " +
-				"topbar's session line is non-empty and no longer the text read before the rotate, and " +
-				"the arm settled",
+			asserted: "the feed drew a `separation` row whose body carries `[data-arm=\"cleared\"]`; the " +
+				"session reveal opened by clicking `[data-reveal-anchor=\"session\"]` is still open and " +
+				"its `.topbar-session-line` is non-empty and no longer the text read before the rotate; " +
+				"and the arm settled",
 			expected: "A FULL-WIDTH SEPARATOR RULE carrying a \"cleared\" label sits between the `!rotate` " +
 				"prompt bubble and the response \"Cleared the conversation.\". The earlier warm-up " +
 				"bubbles are STILL ABOVE it — a rotation separates the conversation, it does not erase " +
-				"the feed — and the topbar's session line shows a NEW session identity, different from " +
-				"the one it showed before.",
+				"the feed. Hanging under the topbar is the SESSION REVEAL, a small panel opened before " +
+				"the rotate and still open, carrying one line of the form " +
+				"`<vendor session id> · <account root> · <model>`; the session id in it is the NEW one " +
+				"the rotation minted, not the one the panel opened with.",
 		},
 	}
 
