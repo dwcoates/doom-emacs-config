@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -134,12 +133,4 @@ func awaitRegistrationLanding(e *Emacs, dir string) {
 	e.t.Helper()
 	awaitLanding(e, "the registration's landing to put the workspace's panel on the frame",
 		`(agent-repl--ws-name-for-dir `+elispString(dir)+`)`)
-}
-
-// awaitMintedLanding waits out the landing of the workspace WS, for a caller
-// that already read the name off the tab the roster push brought.
-func awaitMintedLanding(e *Emacs, ws string) {
-	e.t.Helper()
-	awaitLanding(e, fmt.Sprintf("the landing of the minted workspace %q to put its panel on the frame", ws),
-		elispString(ws))
 }

@@ -727,7 +727,7 @@ func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 // was reading and the footer held no allowance figure at all until a turn
 // closed and reprobed.
 //
-// MEASURED in a playtest run before the fix: the sample went out at 37.494 to
+// MEASURED in a sandbox run before the fix: the sample went out at 37.494 to
 // the bring-up's stream, the daemon's own watch opened at 37.503, and the
 // footer's first sighting of any account usage was the turn-close reprobe
 // 41ms later.

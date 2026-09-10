@@ -2744,7 +2744,7 @@ func (e *Emacs) findStrays() []stray {
 		// `awaitDaemonExit` therefore burned its whole 6s bound on every
 		// scenario, including scenarios that never started a daemon at all.
 		// MEASURED: `emacs phase daemon-exit took 6.04s (bound 6s)` on 7 of 7
-		// playtest observations, against a daemon that a host e2e measures
+		// sandbox observations, against a daemon that a host e2e measures
 		// exiting 5ms after the same stop.
 		//
 		// The exemption list is `harness`'s, not a second one of this layer's:

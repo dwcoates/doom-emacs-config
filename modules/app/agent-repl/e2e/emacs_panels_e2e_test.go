@@ -71,8 +71,7 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 
 // The landing each registration performs is waited out through
 // `awaitRegistrationLanding` (landing_test.go), the ONE settle every caller
-// that mints a workspace goes through -- this world, and the playtest
-// substrate's own `register`, `create` and `fork`.
+// that mints a workspace goes through.
 
 // putTheLandingAway leaves every scenario the same starting frame: the
 // workspaces exist and their panels are NOT on it.
