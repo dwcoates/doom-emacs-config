@@ -1766,9 +1766,9 @@ that did not happen must not read as one that did."
                nil))))))))
 
 (defun agent-repl--arm-landing-panels (target)
-  "Arm TARGET so arriving at it after a teardown puts its panel on the frame.
+  "Arm TARGET so ARRIVING at it puts its panel on the frame.
 
-A TEARDOWN LANDING THAT SHOWS NOTHING IS NOT A LANDING.  Switching to a
+A LANDING THAT SHOWS NOTHING IS NOT A LANDING.  Switching to a
 surviving workspace restores whatever window configuration persp-mode
 saved for it, and a workspace the user has not stood in since its panel
 was pre-created has no configuration worth restoring — so the frame came
@@ -1786,9 +1786,14 @@ they land on shows itself.
 
 It is the flag rather than a direct show because the flag is the
 module's own way of saying \"this workspace becomes visible on arrival\"
-\(`agent-repl--drain-pending-show-panels'), which a generated workspace
-is already born with.  A second mechanism beside it would be a second
-answer to one question."
+\(`agent-repl--drain-pending-show-panels').  A second mechanism beside
+it would be a second answer to one question.
+
+THE TEARDOWN LANDING IS NOT THE ONLY ARRIVAL THAT NEEDS IT.
+`agent-repl-switch-to-project' arms it too, for the workspace a
+projectile switch is about to stand on -- a workspace you just created
+has never been stood in either, so without the arm `SPC TAB n' left the
+user on the same empty frame."
   (when target
     (agent-repl--log target "arm-landing-panels: ws=%s" target)
     (agent-repl--ws-put target :pending-show-panels t)))
