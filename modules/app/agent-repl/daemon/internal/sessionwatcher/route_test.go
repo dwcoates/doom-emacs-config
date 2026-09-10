@@ -530,7 +530,10 @@ func TestDetachedLostIsAnOrdinaryTerminal(t *testing.T) {
 	}))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal"})
+	assertNames(t, got, []string{
+		"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
+	})
 	if !h.w.LiveWork().Empty() {
 		t.Fatal("lost work stayed in the live set")
 	}
