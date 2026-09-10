@@ -33,6 +33,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -785,5 +786,134 @@ func TestEmacsCloseThenKillDoesNotWedgeEmacs(t *testing.T) {
 	// process that died and restarted.
 	if pid := e.EvalInt(`(emacs-pid)`); pid != e.Doom.PID {
 		t.Fatalf("emacs-pid = %d, want the pid the readiness stamp carried (%d)", pid, e.Doom.PID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// #14 — NavigationFollowsTheDrawnTabBar
+// ---------------------------------------------------------------------------
+
+// standOn switches to WS through the module's own persp boundary and waits
+// until Emacs agrees that is where it stands. It is the ARRANGE step for a
+// navigation gesture, never the act under test: the acts below are keypresses.
+func (f *emacsWorkspaceFixture) standOn(ws string) {
+	f.Emacs.t.Helper()
+	f.Emacs.Eval(`(progn (agent-repl--ws-switch ` + elispString(ws) + `) t)`)
+	f.awaitCurrent(ws, "the arranged workspace to be current")
+}
+
+// awaitCurrent waits for Emacs's own current-workspace name to be WANT, and
+// reports what it was instead when it never is.
+func (f *emacsWorkspaceFixture) awaitCurrent(want, what string) {
+	f.Emacs.t.Helper()
+	f.Emacs.AwaitEvalFor(emacsVerbBound, what,
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool {
+			var got string
+			return json.Unmarshal(raw, &got) == nil && got == want
+		})
+}
+
+// pressAndLand presses KEYS and asserts Emacs lands on WANT, naming the drawn
+// bar in the failure so a wrong-direction cycle reads as one.
+func (f *emacsWorkspaceFixture) pressAndLand(keys, want string, order []string) {
+	f.Emacs.t.Helper()
+	f.Emacs.Keys(keys)
+	f.awaitCurrent(want, "`"+keys+"' to land on "+want+" of the drawn bar "+
+		fmt.Sprint(order))
+}
+
+// TestEmacsWorkspaceNavigationFollowsTheDrawnTabBar is the navigation
+// scenario, and the DRAWN ORDER IS THE WHOLE ASSERTION.
+//
+// THE DEFECT THIS PINS. `s-{' / `s-}' counted along
+// `agent-repl--live-ws-names' — the registry hash's KEY ORDER — while the bar
+// is drawn from `agent-repl-roster-tab-order'. The two are different lists:
+// measured on the owner's live Emacs the registry read (main, chess960,
+// explanation-engine, first-kept, none) against a bar drawing (first-kept,
+// explanation-engine, chess960). So left went right, and off one end the
+// switch reached persp-mode's own `none' (an error) or Doom's `main' (the
+// splash screen, no tab highlighted). `M-<n>' fell through to Doom's
+// `+workspace/switch-to-(n-1)', which indexes persp-mode's perspective list
+// with `main' at slot 0, so `M-1' landed on the splash screen and `M-2' on
+// the first tab.
+//
+// Only a booted Doom can say this: both halves are about which keymap wins
+// and which list the winner walks, and a unit test can prove what our own
+// command does but not that Doom's binding no longer answers the chord.
+func TestEmacsWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
+	t.Parallel()
+	box := requireSandbox(t)
+	f := newEmacsWorkspaceFixture(t, box)
+	e := f.Emacs
+
+	// Arrange: three workspaces, so a direction is observable (with two, left
+	// and right land on the same tab and a reversed cycle still passes).
+	second := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "repo-second"))
+	secondName := addProjectWorkspace(t, e, second.Dir)
+	third := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "repo-third"))
+	thirdName := addProjectWorkspace(t, e, third.Dir)
+
+	e.AwaitEvalFor(emacsVerbBound, "all three workspaces to be drawn on the tab bar",
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool {
+			tabs := decodeStrings(raw)
+			return containsString(tabs, f.Name) &&
+				containsString(tabs, secondName) &&
+				containsString(tabs, thirdName)
+		})
+
+	// The order under test is the one the BAR is drawn from, read as data.
+	order := f.rosterTabOrder()
+	if len(order) != 3 {
+		t.Fatalf("agent-repl-roster--tab-order = %v, want exactly the three registered workspaces "+
+			"(%q, %q, %q)", order, f.Name, secondName, thirdName)
+	}
+	for _, name := range order {
+		if !containsString(f.tabNames(), name) {
+			t.Fatalf("agent-repl--ws-tabline-names = %v, want a tab for the roster-ordered workspace %q",
+				f.tabNames(), name)
+		}
+	}
+
+	// The chords are the module's, not Doom's. `M-1' is the load-bearing one:
+	// Doom binds it to `+workspace/switch-to-0' in `global-map', and our
+	// minor-mode map has to win that lookup.
+	for keys, want := range map[string]string{
+		"s-}": "agent-repl-switch-right",
+		"s-{": "agent-repl-switch-left",
+		"M-1": "agent-repl-switch-to-workspace-1",
+		"M-2": "agent-repl-switch-to-workspace-2",
+	} {
+		if got := e.BindingFor(keys); got != want {
+			t.Fatalf("%s resolves to %q in the running Doom, want %q: Doom's own numeral "+
+				"indexes persp-mode's perspective list, whose slot 0 is its `main'", keys, got, want)
+		}
+	}
+
+	// Act + assert: `s-}' walks the bar left to right, wrapping.
+	f.standOn(order[0])
+	f.pressAndLand("s-}", order[1], order)
+	f.pressAndLand("s-}", order[2], order)
+	f.pressAndLand("s-}", order[0], order)
+
+	// And `s-{' walks it right to left, wrapping.
+	f.standOn(order[2])
+	f.pressAndLand("s-{", order[1], order)
+	f.pressAndLand("s-{", order[0], order)
+	f.pressAndLand("s-{", order[2], order)
+
+	// `M-2' is the SECOND DRAWN TAB, which is what Doom's own `M-2' was not.
+	f.standOn(order[0])
+	f.pressAndLand("M-2", order[1], order)
+
+	// `M-1' is the FIRST DRAWN TAB and never Doom's `main': that pseudo
+	// perspective is where the old binding landed, and it is read back BY ITS
+	// OWN NAME rather than inferred from the tab that ended up highlighted.
+	f.pressAndLand("M-1", order[0], order)
+	main := e.EvalString(`(format "%s" (agent-repl--ws-main-name))`)
+	if current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`); current == main {
+		t.Fatalf("`M-1' landed on %q, Doom's own startup perspective: the numerals index the drawn "+
+			"tab bar %v, which a pseudo perspective can never appear in", current, order)
 	}
 }
