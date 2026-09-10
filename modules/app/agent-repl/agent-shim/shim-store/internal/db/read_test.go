@@ -303,6 +303,108 @@ func TestOpenPagePinsTheWatchAtTheGlobalWriteOrdinal(t *testing.T) {
 	}
 }
 
+// A WATCH OPENED BEHIND THE HEAD IS CAUGHT UP BY ITS OWN OPEN, and these three
+// say so at each distance a caller can be behind by. The catch-up is the OPEN's
+// page — every line newer than `known_through` — and the pin is taken in that
+// same transaction, so the replay that follows has nothing left to serve. A
+// caller whose tail stood on the pin while the page skipped the intervening
+// rows would wait forever for lines already written, which is exactly the stall
+// these pin: the shim's teardown concludes a tail through the book's HEAD, and
+// a tail that never received the head cannot end on it.
+
+func TestAWatchOpenedOneRowBehindTheHeadIsCaughtUpByItsPage(t *testing.T) {
+	// Arrange: the caller has read everything but the newest line.
+	d, _ := newStore(t)
+	pointers := seedBook(t, d, "agent-1", 2)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, pointers[0])
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	replay, err := d.LinesSince(ctx(), "agent-1", opened.PinSeq)
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+
+	// Assert: the head came in the page, and the tail begins after it.
+	if got := pageValues(opened.Page); len(got) != 1 || got[0] != pointers[1].GetValue() {
+		t.Fatalf("page = %v, want only the head %q", got, pointers[1].GetValue())
+	}
+	if len(replay) != 0 {
+		t.Fatalf("replay = %d lines, want none — the page already carried them", len(replay))
+	}
+}
+
+func TestAWatchOpenedManyRowsBehindTheHeadIsCaughtUpByItsPage(t *testing.T) {
+	// Arrange: five lines landed since the caller's mark, and the page budget
+	// is wide enough to carry all of them.
+	d, _ := newStore(t)
+	pointers := seedBook(t, d, "agent-1", 6)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, pointers[0])
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	replay, err := d.LinesSince(ctx(), "agent-1", opened.PinSeq)
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+
+	// Assert: every line between the mark and the head, newest first, and
+	// nothing left for the tail.
+	want := []string{
+		pointers[5].GetValue(), pointers[4].GetValue(), pointers[3].GetValue(),
+		pointers[2].GetValue(), pointers[1].GetValue(),
+	}
+	got := pageValues(opened.Page)
+	if len(got) != len(want) {
+		t.Fatalf("page = %v, want the five lines newer than the mark", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("page[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if len(replay) != 0 {
+		t.Fatalf("replay = %d lines, want none — the page already carried them", len(replay))
+	}
+}
+
+func TestAWatchOpenedAtTheHeadIsCaughtUpWithNothing(t *testing.T) {
+	// Arrange: the caller's mark IS the head, which is the ordinary re-open.
+	d, _ := newStore(t)
+	pointers := seedBook(t, d, "agent-1", 3)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, pointers[2])
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	replay, err := d.LinesSince(ctx(), "agent-1", opened.PinSeq)
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+
+	// Assert
+	if got := pageValues(opened.Page); len(got) != 0 {
+		t.Fatalf("page = %v, want nothing — the caller is already at the head", got)
+	}
+	if len(replay) != 0 {
+		t.Fatalf("replay = %d lines, want none", len(replay))
+	}
+}
+
+// pageValues renders a page's pointers in the order it served them.
+func pageValues(page *storev1.AgentSessionPage) []string {
+	out := make([]string, 0, len(page.GetLines()))
+	for _, line := range page.GetLines() {
+		out = append(out, line.GetAt().GetValue())
+	}
+	return out
+}
+
 func TestOpenPageNeverReturnsAKeepAliveRow(t *testing.T) {
 	// Arrange: a keep-alive is a well-formed fact with NO BOOK, and the NULL
 	// book is what makes it structurally unreachable from a page query.
