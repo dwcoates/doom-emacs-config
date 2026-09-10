@@ -74,3 +74,49 @@ func TestTaskActSettledMarksARejectionWithoutChangingTheTask(t *testing.T) {
 		t.Fatal("State = not pending, want the task's own still-pending status preserved")
 	}
 }
+
+func TestTaskActSettledNeverResolvesTheStatusARejectedActAskedFor(t *testing.T) {
+	// Arrange: the board REFUSED `TaskUpdate(9, completed)` and echoed no task
+	// of its own -- which is what a refusal for an id the tracker does not hold
+	// looks like. The status the call asked for is not the standing one.
+	call := openCall{name: "TaskUpdate", input: map[string]any{"taskId": "9", "status": "completed"}}
+	failure := &conversationv1.AgentToolFailure{SettledAt: settledAt(1000)}
+
+	// Act
+	got := taskActSettled(call, map[string]any{"taskId": "9"}, true, failure)
+
+	// Assert: no status at all, and above all not the one that was refused.
+	if got.GetTaskAct().GetState().GetStatus() != nil {
+		t.Fatalf("State.Status = %+v, want it UNSET: a refusal states nothing about where the task stands",
+			got.GetTaskAct().GetState().GetStatus())
+	}
+}
+
+func TestTaskActSettledLeavesAnUnstatedUpdateStatusUnset(t *testing.T) {
+	// Arrange: an update that moved only an edge. `AgentTaskState.status` is a
+	// oneof so "this act said nothing about where the task stands" is
+	// representable; resolving `pending` invents one.
+	call := openCall{name: "TaskUpdate", input: map[string]any{"taskId": "t2", "addBlockedBy": []any{"t1"}}}
+
+	// Act
+	got := taskActSettled(call, map[string]any{"taskId": "t2"}, false, nil)
+
+	// Assert
+	if got.GetTaskAct().GetState().GetStatus() != nil {
+		t.Fatalf("State.Status = %+v, want it UNSET", got.GetTaskAct().GetState().GetStatus())
+	}
+}
+
+func TestTaskActSettledStillLeavesACreatePending(t *testing.T) {
+	// Arrange: the create tool takes no status, and a new entry IS recorded
+	// and not begun -- the one place the default is the right answer.
+	call := openCall{name: "TaskCreate", input: map[string]any{"subject": "Land the converter"}}
+
+	// Act
+	got := taskActSettled(call, map[string]any{"task": map[string]any{"id": "1"}}, false, nil)
+
+	// Assert
+	if got.GetTaskAct().GetState().GetPending() == nil {
+		t.Fatalf("State.Status = %+v, want pending", got.GetTaskAct().GetState().GetStatus())
+	}
+}
