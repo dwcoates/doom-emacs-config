@@ -52,6 +52,8 @@ daemon/
     ids/           the identity newtypes shared by every package (WorkspaceID, RepoID, InstanceID,
                    LeaseID, TurnID, TaskID, FaultID) — a leaf below wsm and feedid; both alias them
     feedid/        FeedId encode/decode (no table)
+    apiresponses/  the unit -> API RESPONSE filing every token reconciliation runs over
+                   (usage rides exactly one unit per response; shared by footer + topbar)
     prompts/       prompts/ directory reader: header parse, placeholder validation, splice
     wsm/           the state client (SQLite; the durable fact inventory; lease policy metadata)
     sessionlock/   shim-held kernel lock PROBES (path derivation + flock probe); daemon never holds
@@ -89,7 +91,7 @@ daemon/
 
 Package dependency direction (a package may import only what is at or
 below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
-feedid, prompts, publish  <  wsm, sessionlock, shimclient, gitclient,
+feedid, prompts, publish, apiresponses  <  wsm, sessionlock, shimclient, gitclient,
 account, externalbrowser, login  <  sessionwatcher, resolve/*  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
 health, commandfile  <  server, boot  <  cmd. The shim client and git
