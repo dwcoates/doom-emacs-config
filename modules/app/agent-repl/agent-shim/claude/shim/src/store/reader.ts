@@ -241,6 +241,23 @@ interface Reader {
    * straight back into the same refusal.
    */
   noteAgentRows(agents: Iterable<string>): void;
+  /**
+   * Report that this shim MINTED an agent id, so the store has never heard of
+   * it and cannot until this shim's first write under it lands.
+   *
+   * THE ORDER, STATED RATHER THAN PROBED. A book is registered by its first
+   * write, so a consumer that opens the main agent's watch before the first
+   * turn — which the endpoint contract tells the daemon to do — names a book
+   * that provably does not exist yet. Asking the store anyway earned a
+   * `unknown_agent` refusal on every healthy cold bring-up, which the store
+   * rightly logged as the refusal it is. With this note the reader knows the
+   * answer without asking and defers the book directly.
+   *
+   * ONLY FOR AN ID THIS PROCESS MINTED. A resumed conversation's id was minted
+   * by an earlier session that may well have written under it, and claiming
+   * absence there would serve an empty opening page over a book with history.
+   */
+  noteAgentMinted(agentValue: string): void;
 }
 
 /** What a reader needs to exist. */
@@ -378,6 +395,28 @@ export function createReader(options: ReaderOptions): Reader {
    */
   const agentRows = firstRowGate(AGENT_ROW_RECHECK_MS);
 
+  /**
+   * Agents whose id THIS PROCESS MINTED and has written nothing under yet.
+   *
+   * A MINTED ID IS A FACT, NOT AN OBSERVATION. The store registers a book on
+   * the first write that names its agent, and a minted id is a uuid this shim
+   * made moments ago — so no book can exist for it, and none can come into
+   * existence except through a write this shim makes and observes landing.
+   * That is what lets a caller here SKIP the ask instead of making it: an ask
+   * for a book known absent buys nothing but an `unknown_agent` refusal in the
+   * store's log, and a contract-abiding cold bring-up made exactly two of them
+   * per fresh agent — the open, and the deferred session's own re-open.
+   *
+   * IT IS NOT THE OBSERVED refusal. A store that answered `unknown_agent` for
+   * an id this shim did not mint has told us about a book ANOTHER writer may
+   * yet register, and that wait keeps its recheck cadence (below) as the belt
+   * to a note that would never come. Only a minted id waits on the note alone.
+   *
+   * An id leaves the set the moment a batch naming it lands, or an open for it
+   * succeeds — either way the book demonstrably exists.
+   */
+  const booksMinted = new Set<string>();
+
   /** Wake everyone waiting on this run; the store now holds a row for it. */
   const wakeFirstRowWaiters = (runValue: string): void => bashRows.wake(runValue);
 
@@ -442,6 +481,10 @@ export function createReader(options: ReaderOptions): Reader {
         "the store opened a reading session with no page or no watch token",
       );
     }
+    // THE STORE ANSWERED FOR THE BOOK, so it holds a row for it. A minted id
+    // whose book demonstrably exists is no longer a certain absence, and the
+    // belief must not outlive the answer that disproved it.
+    booksMinted.delete(agent.value);
     const page = toHistoryPage(opened.page);
     LOGGER.log(
       { agent: agent.value, page_size: pageSize, entries: page.entries.length },
@@ -590,14 +633,27 @@ export function createReader(options: ReaderOptions): Reader {
     const openWhenWritten = async (): Promise<AgentPageSession | undefined> => {
       for (;;) {
         if (closed) return undefined;
+        // A MINTED BOOK IS WAITED FOR, NEVER ASKED ABOUT. This session was
+        // deferred BECAUSE no book can exist yet, so an ask here would earn the
+        // refusal that built it a second time and learn nothing. The write that
+        // ends the absence is this shim's own and wakes the wait, so there is
+        // nothing for a recheck to discover in the meantime. A producer that no
+        // longer vouches falls through to the ask deliberately: the store's own
+        // refusal is what such a caller is owed.
+        if (booksMinted.has(agent.value) && known()) {
+          // A CONCLUDED TAIL WAITS FOR NOTHING. The teardown writes the terminal
+          // it owes BEFORE concluding, so a book still absent here holds nothing
+          // this consumer is owed and standing on would never end the stream.
+          if (concluded) return undefined;
+          await agentRows.wait(agent.value);
+          continue;
+        }
         try {
           return await openBookNow(agent, pageSize, knownThrough);
         } catch (error) {
           if (!(error instanceof PersistenceError) || error.kind !== "unknown_agent") throw error;
           if (closed) return undefined;
-          // A CONCLUDED TAIL WAITS FOR NOTHING. The teardown writes the terminal
-          // it owes BEFORE concluding, so a book still absent here holds nothing
-          // this consumer is owed and standing on would never end the stream.
+          // A CONCLUDED TAIL WAITS FOR NOTHING, as above.
           if (concluded) return undefined;
           if (!known()) throw error;
           await agentRows.wait(agent.value);
@@ -663,6 +719,17 @@ export function createReader(options: ReaderOptions): Reader {
     knownThrough?: conversationv1.HistoryPointer,
     known?: () => boolean,
   ): Promise<AgentPageSession> => {
+    // THE BOOK CANNOT EXIST YET: this shim minted the id and has written
+    // nothing under it. Asking anyway buys nothing but an `unknown_agent`
+    // refusal in the store's log on a bring-up going exactly as the contract
+    // says it should — the store is right to refuse, so it is not asked.
+    if (known !== undefined && known() && booksMinted.has(agent.value)) {
+      LOGGER.log(
+        { agent: agent.value },
+        "this agent's id was minted here and nothing is written under it yet, so no book was asked for; serving an empty page and standing the tail on its first row",
+      );
+      return deferredBook(agent, pageSize, knownThrough, known);
+    }
     try {
       return await openBookNow(agent, pageSize, knownThrough);
     } catch (error) {
@@ -854,8 +921,23 @@ export function createReader(options: ReaderOptions): Reader {
       // waking it here is what makes that wait a synchronization and not a poll.
       for (const agent of agents) {
         if (agent === "") continue;
+        // THE ABSENCE IS OVER: this batch is the write that registers the book,
+        // so the next open is an ask that can succeed rather than one that is
+        // known to refuse.
+        booksMinted.delete(agent);
         agentRows.wake(agent);
       }
+    },
+
+    noteAgentMinted(agentValue) {
+      // An empty id names no agent and could only ever be an ErrInvalid at the
+      // store; recording absence for it would let a caller defer forever on it.
+      if (agentValue === "") return;
+      booksMinted.add(agentValue);
+      LOGGER.logVerbose(
+        { agent: agentValue },
+        "this shim minted the agent id; its book exists only once the first write under it lands",
+      );
     },
   };
 }
