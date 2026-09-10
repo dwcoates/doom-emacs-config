@@ -107,7 +107,19 @@ type ClientLogRecord struct {
 	// whatever that call site had in hand; no schema can exist ahead of the
 	// sites. Nothing routes on it, nothing renders it; it is written to the
 	// log verbatim for a human debugger.
-	Context       *structpb.Struct `protobuf:"bytes,7,opt,name=context,proto3" json:"context,omitempty"`
+	Context *structpb.Struct `protobuf:"bytes,7,opt,name=context,proto3" json:"context,omitempty"`
+	// The instant the CLIENT wrote the record, RFC 3339 with offset. UNSET =
+	// the daemon stamps its own arrival clock and says so
+	// (`timestamp_source: daemon_arrival`); SET = the daemon persists this
+	// instant, so a record is ordered by when it happened, not by when the
+	// rpc landed (measured 2026-09-10: every webapp record persisted with the
+	// arrival clock because nothing carried the client's).
+	Timestamp string `protobuf:"bytes,8,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// The record's own verbosity class: false = normal (the run's story);
+	// true = verbose (wanted only when tracing). The daemon persists it as
+	// stated rather than recomputing it from the level, so a client's verbose
+	// info record stays verbose on disk.
+	Verbose       bool `protobuf:"varint,9,opt,name=verbose,proto3" json:"verbose,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -204,6 +216,20 @@ func (x *ClientLogRecord) GetContext() *structpb.Struct {
 		return x.Context
 	}
 	return nil
+}
+
+func (x *ClientLogRecord) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *ClientLogRecord) GetVerbose() bool {
+	if x != nil {
+		return x.Verbose
+	}
+	return false
 }
 
 type isClientLogRecord_Level interface {
@@ -542,7 +568,7 @@ const file_agentrepl_v1_endpoint_client_log_proto_rawDesc = "" +
 	"&agentrepl/v1/endpoint_client_log.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x83\x01\n" +
 	"\x10ClientLogRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x125\n" +
-	"\x06record\x18\x02 \x01(\v2\x1d.agentrepl.v1.ClientLogRecordR\x06record\"\xeb\x02\n" +
+	"\x06record\x18\x02 \x01(\v2\x1d.agentrepl.v1.ClientLogRecordR\x06record\"\xa3\x03\n" +
 	"\x0fClientLogRecord\x129\n" +
 	"\x05debug\x18\x01 \x01(\v2!.agentrepl.v1.ClientLogLevelDebugH\x00R\x05debug\x126\n" +
 	"\x04info\x18\x02 \x01(\v2 .agentrepl.v1.ClientLogLevelInfoH\x00R\x04info\x126\n" +
@@ -550,7 +576,9 @@ const file_agentrepl_v1_endpoint_client_log_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\v2!.agentrepl.v1.ClientLogLevelErrorH\x00R\x05error\x12\x1c\n" +
 	"\toperation\x18\x05 \x01(\tR\toperation\x12\x18\n" +
 	"\amessage\x18\x06 \x01(\tR\amessage\x121\n" +
-	"\acontext\x18\a \x01(\v2\x17.google.protobuf.StructR\acontextB\a\n" +
+	"\acontext\x18\a \x01(\v2\x17.google.protobuf.StructR\acontext\x12\x1c\n" +
+	"\ttimestamp\x18\b \x01(\tR\ttimestamp\x12\x18\n" +
+	"\averbose\x18\t \x01(\bR\averboseB\a\n" +
 	"\x05level\"\x15\n" +
 	"\x13ClientLogLevelDebug\"\x14\n" +
 	"\x12ClientLogLevelInfo\"\x14\n" +
