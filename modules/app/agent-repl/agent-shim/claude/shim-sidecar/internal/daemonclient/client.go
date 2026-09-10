@@ -118,15 +118,10 @@ func (c *Client) resolveWorkspace(
 	address string,
 	dir string,
 ) (*workspacev1.WorkspaceRef, error) {
-	wanted, err := filepath.Abs(dir)
+	wanted, err := normalizeWorkspaceDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("resolve workspace directory %q: %w", dir, err)
+		return nil, err
 	}
-	wanted, err = filepath.EvalSymlinks(wanted)
-	if err != nil {
-		return nil, fmt.Errorf("resolve workspace directory symlinks %q: %w", dir, err)
-	}
-	wanted = filepath.Clean(wanted)
 	if cached := c.cachedWorkspace(address, wanted); cached != nil {
 		return cached, nil
 	}
@@ -156,6 +151,34 @@ func (c *Client) resolveWorkspace(
 		return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before workspace %q appeared: %w", address, wanted, err)
 	}
 	return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before workspace %q appeared", address, wanted)
+}
+
+// normalizeWorkspaceDir matches the daemon registry's spelling: absolute and
+// clean, with the deepest existing ancestor symlink-resolved. A transcript can
+// outlive its deleted worktree, so requiring the leaf itself to exist would
+// make the roster's preserved ref impossible to match.
+func normalizeWorkspaceDir(dir string) (string, error) {
+	if strings.TrimSpace(dir) == "" {
+		return "", fmt.Errorf("a workspace directory is required")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace directory %q: %w", dir, err)
+	}
+	abs = filepath.Clean(abs)
+	rest := ""
+	head := abs
+	for {
+		if resolved, err := filepath.EvalSymlinks(head); err == nil {
+			return filepath.Clean(filepath.Join(resolved, rest)), nil
+		}
+		parent := filepath.Dir(head)
+		if parent == head {
+			return "", fmt.Errorf("resolve an existing ancestor of workspace directory %q", dir)
+		}
+		rest = filepath.Join(filepath.Base(head), rest)
+		head = parent
+	}
 }
 
 func workspaceRefInRoster(roster *frontendv1.WorkspaceRoster, wantedDir string) (*workspacev1.WorkspaceRef, error) {
