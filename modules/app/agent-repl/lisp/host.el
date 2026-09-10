@@ -158,6 +158,25 @@ Generation-scoped: a fault window dies with its generation, which is why
 these live on the live arm alone."
   (plist-get (agent-repl-host--live ws) :faults))
 
+(defun agent-repl-host-vendor-session-id (ws)
+  "Return WS's VENDOR conversation id, or nil.
+
+This is the durable id — the claude session uuid a resume replays — and
+it is read off the live arm's `vendor_info' oneof, which is the only
+place the daemon publishes it to Emacs.  It is NOT
+`agent-repl-host-state\='s session `id', which is the daemon-minted echo
+token that rotates under one workspace.
+
+Nil is the ORDINARY early state, not a failure: the oneof stays unset
+until a vendor conversation exists (the wire decoder reads an absent arm
+as nil), and a workspace with no live session has no live arm at all.
+
+Only the `claude' arm carries an id; any other vendor arm that lands
+later answers nil here until it is threaded through deliberately."
+  (let ((vendor (plist-get (agent-repl-host--live ws) :vendor-info)))
+    (when (eq (plist-get vendor :arm) :claude)
+      (plist-get (plist-get vendor :value) :session-id))))
+
 (defun agent-repl-host-composer-gate (ws)
   "Return the composer gate for WS as one keyword of the fixed vocabulary.
 

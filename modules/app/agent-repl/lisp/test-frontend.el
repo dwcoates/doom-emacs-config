@@ -801,6 +801,63 @@ function itself can catch: the toggle finds it only when a user presses
   (should (fboundp (agent-repl-frontend-running-p-fn
                     (agent-repl-frontend-get 'gui)))))
 
+(ert-deftest agent-repl-test-frontend-gui-registry-every-capability-is-defined ()
+  "EVERY function-valued slot of the gui registration names a live function.
+The registry is the one place a capability can name a symbol nothing
+defines and no compiler complains: a `declare-function' satisfies the byte
+compiler, and the void function surfaces only when a user reaches that
+capability.  Deleting a source file (frontend-client.el) left three slots
+in exactly that state, so this walks the struct rather than naming slots
+one by one — a capability added later is covered the day it is added."
+  ;; Arrange
+  (let ((fe (agent-repl-frontend-get 'gui))
+        (undefined nil))
+    ;; Act
+    (dolist (slot (cdr (cl-struct-slot-info 'agent-repl-frontend)))
+      (let* ((name (car slot))
+             (value (cl-struct-slot-value 'agent-repl-frontend name fe)))
+        (when (and (string-suffix-p "-fn" (symbol-name name))
+                   value
+                   (not (functionp value)))
+          (push name undefined))))
+    ;; Assert
+    (should (equal undefined nil))))
+
+(ert-deftest agent-repl-test-frontend-gui-registry-declares-no-cancel-detached ()
+  "The gui cannot stop detached work, and leaves the capability UNSET.
+Stopping detached work is the `Interrupt' verb's `all_agents' target, and
+`Interrupt' is a feed verb the webapp footer owns; Emacs calls no
+interrupt rpc.  An unset slot makes the dispatch warn loudly instead of
+sending something that could not reach the work."
+  ;; Act / Assert
+  (should-not (agent-repl-frontend-cancel-detached-fn
+               (agent-repl-frontend-get 'gui))))
+
+(ert-deftest agent-repl-test-frontend-gui-registry-declares-no-adopt-session ()
+  "The gui cannot adopt a named vendor session, and leaves the slot UNSET.
+No post-overhaul verb binds a workspace to a session uuid a client names:
+the daemon owns session identity and resumes a workspace's own
+conversation from its own record."
+  ;; Act / Assert
+  (should-not (agent-repl-frontend-adopt-session-fn
+               (agent-repl-frontend-get 'gui))))
+
+(ert-deftest agent-repl-test-frontend-gui-durable-session-id-is-the-vendor-id ()
+  "The durable id is the vendor conversation's, read off the host stream."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-host-vendor-session-id)
+             (lambda (ws) (and (equal ws "ws1") "sess-uuid-1"))))
+    ;; Act / Assert
+    (should (equal (agent-repl--gui-durable-session-id "ws1") "sess-uuid-1"))))
+
+(ert-deftest agent-repl-test-frontend-gui-durable-session-id-is-nil-without-a-conversation ()
+  "No vendor conversation durably identifies nothing, which is an answer."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-host-vendor-session-id)
+             (lambda (_ws) nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--gui-durable-session-id "ws1"))))
+
 (ert-deftest agent-repl-test-frontend-gui-hide-restores-saved-layout ()
   "gui hide restores the pre-panel layout when one was saved.
 Restoring is what removes BOTH gui windows, since the input window
@@ -1239,48 +1296,6 @@ purely daemon-driven."
 
 ;;;; ---- Chess-board keyboard navigation ---------------------------------------
 
-;;;; ---- the hard session restart command ---------------------------------
-
-(defmacro agent-repl-test--with-restart-session (build &rest body)
-  "Run BODY with the restart verb's collaborators faked, ws1 current.
-BUILD stands in for `agent-repl--frontend-build-targets-async' and is
-called with (TARGETS FORCE ON-SUCCESS ON-FAILURE), so each test decides
-whether the build succeeds, fails, or never settles.
-`agent-repl-test--restart-asked' records the workspace whose shim restart
-was issued, `agent-repl-test--restart-acked' the continuation the verb
-hung off that restart's success ack (call it to simulate the ack landing),
-and `agent-repl-test--restart-opened' the workspace whose webview was
-reopened.  The faked client NEVER calls the continuation itself, so a test
-that does not fire it is testing a restart still in flight."
-  (declare (indent 1))
-  `(let ((agent-repl-test--restart-asked nil)
-         (agent-repl-test--restart-acked nil)
-         (agent-repl-test--restart-opened nil))
-     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-               ((symbol-function 'agent-repl--frontend-restart-session)
-                (lambda (ws &optional on-restarted)
-                  (setq agent-repl-test--restart-asked ws
-                        agent-repl-test--restart-acked on-restarted)
-                  "req-1"))
-               ((symbol-function 'agent-repl--gui-open)
-                (lambda (ws) (setq agent-repl-test--restart-opened ws)))
-               ((symbol-function 'agent-repl--frontend-build-targets-async) ,build)
-               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-               ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
-               ((symbol-function 'message) (lambda (&rest _) nil)))
-       ,@body)))
-
-(defvar agent-repl-test--restart-asked nil
-  "Workspace whose shim restart the faked client recorded.")
-
-(defvar agent-repl-test--restart-acked nil
-  "Continuation the restart verb hung off the shim restart's success ack.")
-
-(defvar agent-repl-test--restart-opened nil
-  "Workspace whose webview the faked gui open recorded.")
-
-;;;; ---- the deliberate hibernate command ---------------------------------
-
 ;;;; ---- Refreshing live webviews -----------------------------------------
 
 (defmacro agent-repl-test--with-webview-buffers (names &rest body)
@@ -1291,46 +1306,12 @@ that does not fire it is testing a restart still in flight."
        (dolist (b agent-repl-test--bufs)
          (when (buffer-live-p b) (kill-buffer b))))))
 
-;; WHAT A SWEEP DOES is tested in test-webview-recovery.el, which is where
-;; the sweep now lives: `agent-repl-refresh-webviews' is the deploy-time
-;; entry point into `agent-repl--webview-recovery-sweep' and holds no
-;; per-webview logic of its own.  What is owned here is the delegation, the
-;; buffer enumeration, and the boundary wrappers the sweep reaches through.
-
-(ert-deftest agent-repl-test-refresh-webviews-delegates-to-the-recovery-sweep ()
-  "The deploy-time refresh runs the one sweep, naming the deploy as its reason."
-  ;; Arrange
-  (let (reasons)
-    (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep)
-               (lambda (reason) (push reason reasons) 3)))
-      ;; Act
-      (should (equal 3 (agent-repl-refresh-webviews)))
-      ;; Assert
-      (should (equal reasons (list "deploy_refresh"))))))
-
-(ert-deftest agent-repl-test-refresh-webviews-reports-zero-for-a-debounced-sweep ()
-  "A debounced sweep reports the integer 0, never nil: deploy-all formats %d."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep) (lambda (_reason) nil)))
-    ;; Act / Assert
-    (should (equal 0 (agent-repl-refresh-webviews)))))
-
-(ert-deftest agent-repl-test-refresh-webviews-always-returns-an-integer ()
-  "Every refresh answer survives the `%d' deploy-all formats it with."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep) (lambda (_reason) nil)))
-    ;; Act
-    (let ((answer (agent-repl-refresh-webviews)))
-      ;; Assert
-      (should (integerp answer))
-      (should (equal "refreshed 0" (format "refreshed %d" answer))))))
-
-(ert-deftest agent-repl-test-refresh-webviews-widget-probe-is-a-registered-boundary ()
+(ert-deftest agent-repl-test-frontend-webview-live-widget-is-a-registered-boundary ()
   "The live-widget probe is registered as an external boundary wrapper."
   (should (memq 'agent-repl--frontend-webview-live-widget
                 agent-repl--external-boundary-functions)))
 
-(ert-deftest agent-repl-test-refresh-webviews-reload-is-a-registered-boundary ()
+(ert-deftest agent-repl-test-frontend-webview-reload-is-a-registered-boundary ()
   "The reload wrapper is registered as an external boundary wrapper."
   (should (memq 'agent-repl--frontend-webview-reload-widget
                 agent-repl--external-boundary-functions)))
