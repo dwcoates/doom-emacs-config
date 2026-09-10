@@ -132,7 +132,7 @@ export interface AllowanceDeps {
  */
 export function drawFooterStrip(u: FooterStrip, deps: StripDeps): HTMLElement {
   const path = "FooterStrip";
-  log("debug", "drawing the footer strip", { operation: "footer.strip", context: {} });
+  log.debug("drawing the footer strip", { operation: "footer.strip", context: {} });
 
   const row = document.createElement("div");
   row.className = "pfooter-cells footer-strip";
@@ -209,7 +209,7 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
   const path = "FooterStatus.status";
   const status = requireCase(u.status, path);
   const parts = statusParts(status, path);
-  log("debug", `drawing the footer status: ${status.case}`, {
+  log.debug(`drawing the footer status: ${status.case}`, {
     operation: "footer.strip.status",
     context: {
       status: status.case,
@@ -758,7 +758,7 @@ export function drawFooterAllowance(
   }
   if (u.newsworthy) span.setAttribute("data-newsworthy", "true");
   if (u.newsworthy) span.classList.add("footer-allowance-newsworthy");
-  log("debug", `drawing the ${label} allowance as ${status?.case ?? "unverdicted"}`, {
+  log.debug(`drawing the ${label} allowance as ${status?.case ?? "unverdicted"}`, {
     operation: "footer.strip.allowance",
     context: { allowance: label, status: status?.case, newsworthy: u.newsworthy },
   });

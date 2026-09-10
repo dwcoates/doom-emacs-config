@@ -41,7 +41,7 @@ export function registerWorkspaceMoved(handler: (address: string) => void): () =
  */
 export function workspaceMoved(address: string): boolean {
   if (moveHandler === null) {
-    log("warn", `the workspace moved to ${address} but no lifecycle is mounted to say so`, {
+    log.warn(`the workspace moved to ${address} but no lifecycle is mounted to say so`, {
       operation: "lifecycle.move-unhandled",
       context: { address },
     });

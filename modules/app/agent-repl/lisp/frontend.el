@@ -119,6 +119,27 @@ that namespace and the webview must stay outside it."
   :type 'string
   :group 'agent-repl)
 
+(defun agent-repl--frontend-getenv (name)
+  "External-boundary wrapper: return environment variable NAME.
+The body does nothing but read Emacs's process environment.  URL-building
+tests bind `process-environment' so they never depend on ambient host state."
+  (getenv name))
+
+(defun agent-repl--frontend-log-level (ws)
+  "Return the validated `AGENT_REPL_LOG_LEVEL' for WS's webview URL.
+An unset variable means `info', the logging contract's declared default.  Any
+present value outside the four-level vocabulary is an invariant violation and
+aborts before a webview is created."
+  (let ((value (agent-repl--frontend-getenv "AGENT_REPL_LOG_LEVEL")))
+    (cond
+     ((null value) "info")
+     ((member value '("debug" "info" "warn" "error")) value)
+     (t
+      (agent-repl--fatal
+       ws
+       "elisp.frontend.log-level: invalid ws=%s variable=AGENT_REPL_LOG_LEVEL value=%S allowed=debug,info,warn,error"
+       ws value)))))
+
 ;;;; ---- Capability -----------------------------------------------------------
 
 (defun agent-repl--frontend-xwidget-available-p ()
@@ -669,15 +690,21 @@ Refusals, all preconditions rather than failures:
 (defun agent-repl-frontend-webview-url (ws)
   "Return the webapp URL WS's webview loads.
 
-  http://<daemon address>/?workspace=<id>&dir=<dir>
+  http://<daemon address>/?workspace=<id>&dir=<dir>&log_level=<level>
 
-BOTH VALUES COME FROM THE WorkspaceRef VERBATIM — the one the daemon
+THE WORKSPACE VALUES COME FROM THE WorkspaceRef VERBATIM — the one the daemon
 minted and handed back (RegisterWorkspace's answer, or the roster) —
 URL-encoded and nothing else.  The id is opaque and compared byte-wise,
 so it is echoed, never constructed from a path; the dir rides along for
 display and for opening files, and is likewise never parsed.
 
-NOTHING ELSE RIDES THE URL.  There is no composer flag (the webapp runs
+THE LOG LEVEL IS THE ONE PIECE OF DAEMON CONFIGURATION THAT RIDES THE URL.
+JavaScript cannot read the daemon process's environment, so the host carries
+the effective `AGENT_REPL_LOG_LEVEL' into the page's boot address.  An unset
+variable becomes the logging contract's explicit `info' default; an invalid
+present value fails before the webview is created.
+
+Nothing else rides the URL.  There is no composer flag (the webapp runs
 composer-less unless `&composer=1', which only dev mode and the webapp's
 own tests use) and no parent_ws (the daemon resolves and draws
 parentage).  A query parameter here would be a second, drifting channel
@@ -697,10 +724,11 @@ than no webview."
       (agent-repl--fatal ws "elisp.frontend.webview-url: no ref for ws=%s" ws))
     (unless conn
       (agent-repl--fatal ws "elisp.frontend.webview-url: no connection for ws=%s" ws))
-    (let ((url (format "http://%s/?workspace=%s&dir=%s"
+    (let ((url (format "http://%s/?workspace=%s&dir=%s&log_level=%s"
                        (agent-repl-connect-connection-address conn)
                        (url-hexify-string (plist-get ref :id))
-                       (url-hexify-string (plist-get ref :dir)))))
+                       (url-hexify-string (plist-get ref :dir))
+                       (url-hexify-string (agent-repl--frontend-log-level ws)))))
       (agent-repl--log ws "elisp.frontend.webview-url: ws=%s url=%s" ws url)
       url)))
 

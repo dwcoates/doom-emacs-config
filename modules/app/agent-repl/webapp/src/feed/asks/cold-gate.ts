@@ -104,7 +104,7 @@ const SCOPE_NAMES = {
 /** The cold-context gate row. */
 export function drawFeedColdGate(u: FeedColdGate, rc: RowContext): HTMLElement {
   const state = requireCase(u.state, `${PATH}.state`);
-  log("debug", "drawing a cold-context gate", {
+  log.debug("drawing a cold-context gate", {
     operation: "feed.asks.cold-gate",
     context: { state: state.case },
   });
@@ -129,7 +129,7 @@ export function drawFeedColdGateStanding(
   const lastRequest = requireMessage(u.lastRequest, `${path}.last_request`);
   const model = requireMessage(u.model, `${path}.model`);
   const menu = requireMessage(u.compact, `${path}.compact`);
-  log("debug", "drawing a standing cold gate", {
+  log.debug("drawing a standing cold gate", {
     operation: "feed.asks.cold-gate.standing",
     context: { path, models: menu.models.length, scopes: menu.scopes.length },
   });
@@ -186,7 +186,7 @@ export function drawFeedColdGateContextTokens(
   u: FeedColdGateContextTokens,
   path: string,
 ): string {
-  log("debug", "reading a cold gate's context size", {
+  log.debug("reading a cold gate's context size", {
     operation: "feed.asks.cold-gate.tokens",
     context: { path },
   });
@@ -196,7 +196,7 @@ export function drawFeedColdGateContextTokens(
 /** The session's model NAME, drawn verbatim. */
 export function drawFeedColdGateModel(u: FeedColdGateModel, path: string): string {
   const model = requireMessage(u.model, `${path}.model`);
-  log("debug", "reading a cold gate's model", {
+  log.debug("reading a cold gate's model", {
     operation: "feed.asks.cold-gate.model",
     context: { path, model: model.name },
   });
@@ -231,7 +231,7 @@ export function drawFeedColdGateResolved(
   path: string,
 ): HTMLElement {
   const choice = requireCase(u.choice, `${path}.choice`);
-  log("debug", "drawing a resolved cold gate", {
+  log.debug("drawing a resolved cold gate", {
     operation: "feed.asks.cold-gate.resolved",
     context: { path, choice: choice.case },
   });
@@ -287,7 +287,7 @@ export function drawFeedColdGateResolvedCompact(
   path: string,
 ): string {
   const model = requireMessage(u.model, `${path}.model`);
-  log("debug", "reading a compact resolution", {
+  log.debug("reading a compact resolution", {
     operation: "feed.asks.cold-gate.resolved-compact",
     context: { path, scope: u.scope },
   });
@@ -332,7 +332,7 @@ function drawActions(
   buttons.push(opener);
   opener.addEventListener("click", () => {
     submenu.el.hidden = !submenu.el.hidden;
-    log("debug", `the reader ${submenu.el.hidden ? "closed" : "opened"} the compact submenu`, {
+    log.debug(`the reader ${submenu.el.hidden ? "closed" : "opened"} the compact submenu`, {
       operation: "feed.asks.cold-gate.submenu-toggled",
       context: { open: !submenu.el.hidden },
     });
@@ -472,7 +472,7 @@ async function answer(
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearRefusals(actions);
-  log("info", `answering a cold gate with ${choice.kind}`, {
+  log.info(`answering a cold gate with ${choice.kind}`, {
     operation: "feed.asks.cold-gate.answer",
     context: {
       row: id.value,

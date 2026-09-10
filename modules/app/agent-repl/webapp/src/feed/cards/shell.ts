@@ -111,7 +111,7 @@ export const SHELL_SETTLED_ARMS: readonly string[] = Object.keys(SETTLED_WORDS);
 /** The shell bubble's body. */
 export function drawFeedShell(u: FeedShell, rc: RowContext): HTMLElement {
   const state = requireCase(u.state, `${PATH}.state`);
-  log("debug", "drawing a shell bubble", {
+  log.debug("drawing a shell bubble", {
     operation: "feed.cards.shell",
     context: { state: state.case, spool: u.spool !== undefined },
   });
@@ -177,7 +177,7 @@ export function drawFeedShell(u: FeedShell, rc: RowContext): HTMLElement {
 
 /** The command line: the client's `$` chrome, then the command verbatim. */
 export function drawFeedShellCommand(u: FeedShellCommand, path: string): HTMLElement {
-  log("debug", "drawing a shell command line", {
+  log.debug("drawing a shell command line", {
     operation: "feed.cards.shell.command",
     context: { path },
   });
@@ -203,7 +203,7 @@ export function drawFeedShellCommand(u: FeedShellCommand, path: string): HTMLEle
  * back that the follow happened without a layout engine.
  */
 export function drawFeedShellSpool(u: FeedShellSpool, path: string): HTMLElement {
-  log("debug", "drawing a shell spool", {
+  log.debug("drawing a shell spool", {
     operation: "feed.cards.shell.spool",
     context: { path, length: u.text.length, omitted: u.omitted !== undefined },
   });
@@ -225,7 +225,7 @@ export function drawFeedShellSpool(u: FeedShellSpool, path: string): HTMLElement
 
 /** The exit chip. Tone is zero-vs-non-zero; absence draws no chip at all. */
 export function drawFeedShellExit(u: FeedShellExit, path: string): HTMLElement {
-  log("debug", "drawing a shell exit chip", {
+  log.debug("drawing a shell exit chip", {
     operation: "feed.cards.shell.exit",
     context: { path, code: u.code },
   });
@@ -311,7 +311,7 @@ async function stop(
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearOutcome(wrap);
-  log("info", "stopping a detached shell", {
+  log.info("stopping a detached shell", {
     operation: "feed.cards.shell.stop",
     context: { row: id.value },
   });

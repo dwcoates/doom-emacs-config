@@ -142,7 +142,7 @@ export function drawCreateTaskControl(sc: SidebarContext): HTMLElement {
   const send = (): void => {
     const title = input.value.trim();
     if (title === "") return;
-    log("info", "creating a task from the rail", {
+    log.info("creating a task from the rail", {
       operation: "sidebar.tasks.create",
       context: { length: title.length },
     });

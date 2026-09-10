@@ -59,7 +59,7 @@ export interface TopbarDeps {
  * only thing that closes it.
  */
 export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps): Handle {
-  log("debug", "mounting the topbar", { operation: "topbar.mount" });
+  log.debug("mounting the topbar", { operation: "topbar.mount" });
 
   const strip = document.createElement("div");
   strip.className = "topbar-strip";
@@ -89,7 +89,7 @@ export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps
 
   return {
     dispose(): void {
-      log("debug", "disposing the topbar", { operation: "topbar.dispose" });
+      log.debug("disposing the topbar", { operation: "topbar.dispose" });
       stream.cancel();
       reveals.dispose();
       stopTicking(strip);
@@ -100,7 +100,7 @@ export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps
 
 /** The whole strip, in its three groups. */
 export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
-  log("debug", "drawing the topbar view", { operation: "topbar.draw" });
+  log.debug("drawing the topbar view", { operation: "topbar.draw" });
 
   const row = document.createElement("div");
   row.className = "topbar-row";

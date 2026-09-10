@@ -61,7 +61,7 @@ export const SKILL_OUTCOME_ARMS: readonly string[] = Object.keys(OUTCOME_BADGES)
 /** The skill card. */
 export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
   const outcome = requireCase(u.outcome, `${PATH}.outcome`);
-  log("debug", "drawing a skill card", {
+  log.debug("drawing a skill card", {
     operation: "feed.cards.skill",
     context: { outcome: outcome.case },
   });
@@ -122,7 +122,7 @@ export function drawFeedSkillInvocation(
   u: FeedSkillInvocation,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a skill invocation line", {
+  log.debug("drawing a skill invocation line", {
     operation: "feed.cards.skill.invocation",
     context: { path },
   });
@@ -140,7 +140,7 @@ export function drawFeedSkillInvocation(
  * the stylesheet states for a skill body — not a second literal here.
  */
 export function drawFeedSkillDocument(u: FeedSkillDocument, path: string): HTMLElement {
-  log("debug", "drawing a skill document", {
+  log.debug("drawing a skill document", {
     operation: "feed.cards.skill.document",
     context: { path, length: u.markdown.length },
   });
@@ -155,7 +155,7 @@ export function drawFeedSkillAllowances(
   u: FeedSkillAllowances,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a skill's allowances", {
+  log.debug("drawing a skill's allowances", {
     operation: "feed.cards.skill.allowances",
     context: { path },
   });
@@ -167,7 +167,7 @@ export function drawFeedSkillAllowances(
 
 /** The failed state's composed reason, drawn verbatim. */
 export function drawFeedSkillFailed(u: FeedSkillFailed, path: string): HTMLElement {
-  log("debug", "drawing a failed skill", {
+  log.debug("drawing a failed skill", {
     operation: "feed.cards.skill.failed",
     context: { path },
   });

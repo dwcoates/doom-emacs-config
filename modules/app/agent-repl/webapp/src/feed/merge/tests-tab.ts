@@ -41,7 +41,7 @@ export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLEleme
 /** One suite: its name, its state glyph, its painted output. */
 export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
   const state = requireCase(suite.state, `${PATH}.state`);
-  log("debug", `drawing a merge test suite as ${state.case}`, {
+  log.debug(`drawing a merge test suite as ${state.case}`, {
     operation: "merge.draw-suite",
     context: { suite: suite.name, arm: state.case },
   });

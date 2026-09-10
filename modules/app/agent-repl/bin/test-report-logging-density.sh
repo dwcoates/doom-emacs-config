@@ -51,8 +51,9 @@ printf '%s\n' \
     'LOGGER.logVerbose({}, "detail");' \
     >"$tree/modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"
 printf '%s\n' \
-    'log("info", "start", options);' \
-    'logVerbose("info", "detail", options);' \
+    'log.info("start", options);' \
+    'log.debug("detail", { ...options, verbosity: "verbose" });' \
+    'log("warn", "retired", options);' \
     >"$tree/modules/app/agent-repl/webapp/src/main.ts"
 
 out="$("$bin/report-logging-density.sh")"
@@ -64,7 +65,7 @@ printf '%s\n' "$out" | grep -q '^logging,go,1,2,0,0.00$' ||
     fail "shared logging zero-call case was not reported"
 printf '%s\n' "$out" | grep -q '^shim,typescript,1,2,2,1000.00$' ||
     fail "shim canonical calls were not counted"
-printf '%s\n' "$out" | grep -q '^webapp,typescript,1,2,2,1000.00$' ||
+printf '%s\n' "$out" | grep -q '^webapp,typescript,1,3,2,666.67$' ||
     fail "webapp canonical calls were not counted"
 
 out="$("$bin/report-logging-density.sh" store)"

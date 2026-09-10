@@ -75,7 +75,7 @@ export const FINDINGS_OUTCOME_ARMS: readonly string[] = Object.keys(OUTCOME_BADG
 
 /** The findings bubble. */
 export function drawFeedFindings(u: FeedFindings, rc: RowContext): HTMLElement {
-  log("debug", "drawing a findings bubble", {
+  log.debug("drawing a findings bubble", {
     operation: "feed.cards.findings",
     context: { rows: u.rows.length },
   });
@@ -107,7 +107,7 @@ export function drawFeedFindings(u: FeedFindings, rc: RowContext): HTMLElement {
 
 /** The composed heading line, drawn verbatim. */
 export function drawFeedFindingsHeading(u: FeedFindingsHeading, path: string): string {
-  log("debug", "reading a findings heading", {
+  log.debug("reading a findings heading", {
     operation: "feed.cards.findings.heading",
     context: { path },
   });
@@ -172,7 +172,7 @@ export function drawFeedFindingsRow(
     }),
   );
 
-  log("debug", "drew a finding row", {
+  log.debug("drew a finding row", {
     operation: "feed.cards.findings.row",
     context: {
       path,
@@ -235,7 +235,7 @@ export function drawFeedFindingsCategory(
   u: FeedFindingsCategory,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a finding category", {
+  log.debug("drawing a finding category", {
     operation: "feed.cards.findings.category",
     context: { path },
   });
@@ -256,7 +256,7 @@ export function drawFeedFindingsLocation(
   ctx: AppContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a finding location", {
+  log.debug("drawing a finding location", {
     operation: "feed.cards.findings.location",
     context: { path, line: u.line },
   });
@@ -277,7 +277,7 @@ export function drawFeedFindingsSummary(
   u: FeedFindingsSummary,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a finding summary", {
+  log.debug("drawing a finding summary", {
     operation: "feed.cards.findings.summary",
     context: { path },
   });
@@ -292,7 +292,7 @@ export function drawFeedFindingsScenario(
   u: FeedFindingsScenario,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a finding scenario", {
+  log.debug("drawing a finding scenario", {
     operation: "feed.cards.findings.scenario",
     context: { path },
   });

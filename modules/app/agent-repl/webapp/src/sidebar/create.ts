@@ -187,7 +187,7 @@ export function drawCreateWorkspaceForm(
   repository: RepositoryRef,
   sc: SidebarContext,
 ): HTMLElement {
-  log("debug", "drawing the create-workspace form", {
+  log.debug("drawing the create-workspace form", {
     operation: "sidebar.create.form",
     context: { repository: repository.id },
   });

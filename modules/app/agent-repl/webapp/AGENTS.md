@@ -18,7 +18,7 @@ src/rpc/                  the contract layer, imported by every component
   refusal | refuse          the ONE refusal hook (see "Standing rules")
   guard                     guardMalformed: the ONE fire-and-forget click guard
   moved                     the page-wide "workspace moved" signal registry
-  page-address | workspace-ref   ?workspace=<id>&dir=<dir>[&composer=1]
+  page-address | workspace-ref   ?workspace=<id>&dir=<dir>&log_level=<level>[&composer=1]
 src/format.ts             the ONE client-side token formatter
 src/clock.ts src/duration.ts   the shared ticker and its formatters
 src/vocab.ts              typed accessors over proto/vocab/*.json
@@ -37,7 +37,8 @@ test/integration/         the whole app under jsdom against a fake daemon
 
 1. `shellElements(document)` — a broken shell fails here, by id.
 2. the page address, then the transport, the client and the failure overlay.
-3. the logger, bound to this page's identity.
+3. the logger, bound to this page's identity and configured from the page's
+   `log_level` boot parameter.
 4. `adoptAtBoot(ctx)` — BEFORE any view stream. A joining daemon refuses every
    per-workspace rpc with `not_yet_adopted` until its rendezvous finishes, so
    adopting first turns a race into a wait. A terminal refusal throws
@@ -160,11 +161,29 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   SUCCESS arms.
 - **THE FOUR IDENTIFIER SPACES** — `FeedId`, `TurnId`, `WorkspaceRef.id`,
   `FeedWatchToken` — are never interchangeable. Echo them verbatim.
-- **LOGGING** goes through `src/log.ts` only (`log`, `logVerbose`). Every
-  nontrivial function logs its entry at debug; every branch selecting a
-  materially different outcome logs its selection; every error is logged
-  exactly once by its owning layer with resolved inputs and cause. No direct
-  `console.*` outside the documented pre-logger bootstrap path in `main.ts`.
+- **LOGGING** goes through the one logger in `src/log.ts`. Its public emission
+  API is exactly one method per level: `log.debug`, `log.info`, `log.warn` and
+  `log.error`. A call marks tracing-only evidence with
+  `verbosity: "verbose"`; omitted verbosity is `normal`. Every forwarded
+  `agentrepl.v1.ClientLogRecord` carries the client-side `timestamp` captured
+  before throttling and the record's `verbose` class. Its `context` contains
+  the call site's fields plus logger-bound connection and session identities,
+  never a nested copy of the complete record.
+
+  `AGENT_REPL_LOG_LEVEL` is the only threshold. The Emacs webview host reads it
+  and carries its effective value in the page URL as `log_level`; the page
+  validates `debug|info|warn|error` during boot. An absent parameter uses the
+  contract's `info` default for ordinary browser development. An invalid
+  present value aborts boot. There is no `localStorage` logging toggle and no
+  second verbose-console switch.
+
+  The daemon persists forwarded records to the workspace's canonical
+  `.claude/emacs/webapp.log`. Every nontrivial function logs its entry at
+  debug; every branch selecting a materially different outcome logs its
+  selection; every error is logged exactly once by its owning layer with
+  resolved inputs and cause. `npm run lint` forbids direct `console.*` outside
+  `src/log.ts` and the documented pre-logger bootstrap path in `main.ts`.
+
   Read forwarded webapp records and harvest run windows through
   `../bin/logs.sh`; the full path, rotation, attribution, and level-switch
   table is in `../AGENTS.md`.

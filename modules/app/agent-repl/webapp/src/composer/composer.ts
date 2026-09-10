@@ -84,7 +84,7 @@ export function createComposerGate(): ComposerGate {
     set(next: ComposerGateState, nextReason?: string): void {
       state = next;
       reason = nextReason;
-      log("debug", `the composer gate is ${next}`, {
+      log.debug(`the composer gate is ${next}`, {
         operation: "composer.gate",
         context: { state: next, reason: nextReason },
       });
@@ -126,12 +126,12 @@ export function mountComposer(
   opts: ComposerOptions,
 ): ComposerHandle {
   if (!ctx.composerEnabled && opts.feed === undefined) {
-    log("info", "not mounting a root composer: the host owns it", {
+    log.info("not mounting a root composer: the host owns it", {
       operation: "composer.mount-skipped",
     });
     return { dispose: () => undefined, lastTurn: () => undefined };
   }
-  log("debug", "mounting a composer", {
+  log.debug("mounting a composer", {
     operation: "composer.mount",
     context: { feed: opts.feed?.value ?? "root" },
   });
@@ -215,7 +215,7 @@ export function mountComposer(
         const reason = requireCase(result.value.reason, "SubmitPromptError.reason");
         const say = submitPromptRefusal(reason);
         drawSubmitRefusal(root, reason.case, say);
-        log("warn", "SubmitPrompt was refused", {
+        log.warn("SubmitPrompt was refused", {
           operation: "composer.refused",
           context: { arm: reason.case, sentence: say },
         });
@@ -233,7 +233,7 @@ export function mountComposer(
             // The one field the answer exists to carry. Refusing it loudly is
             // right, but the words are the user's — they stay in the box.
             drawSubmitRefusal(root, "unset", MISSING_TURN_TEXT);
-            log("error", "SubmitPrompt answered a turn with no TurnId", {
+            log.error("SubmitPrompt answered a turn with no TurnId", {
               operation: "composer.turn-missing",
             });
             return;
@@ -244,7 +244,7 @@ export function mountComposer(
           // arrived while they watched.
           rememberOwnTurn(turn);
           accepted();
-          log("info", "SubmitPrompt minted a turn", {
+          log.info("SubmitPrompt minted a turn", {
             operation: "composer.submitted",
             context: { turn: turn.value },
           });
@@ -252,7 +252,7 @@ export function mountComposer(
         }
         case "commandPanel":
           accepted();
-          log("info", "SubmitPrompt answered a command panel", {
+          log.info("SubmitPrompt answered a command panel", {
             operation: "composer.command-panel",
             context: { panel: outcome.value.panel.case ?? "unset" },
           });
@@ -263,7 +263,7 @@ export function mountComposer(
           // and answered it with a feed row of its own, so the box is done with
           // these words. The card is the feed's, never this component's.
           accepted();
-          log("info", `SubmitPrompt reported ${outcome.value.command} unsupported`, {
+          log.info(`SubmitPrompt reported ${outcome.value.command} unsupported`, {
             operation: "composer.command-refused",
             context: { command: outcome.value.command },
           });
@@ -274,7 +274,7 @@ export function mountComposer(
           // on the topbar and footer streams, never here. So the box clears —
           // the words are spent — and this component draws nothing at all.
           accepted();
-          log("debug", "SubmitPrompt acted on a command without minting a turn", {
+          log.debug("SubmitPrompt acted on a command without minting a turn", {
             operation: "composer.command-acted",
           });
           return;
@@ -288,7 +288,7 @@ export function mountComposer(
       // not an unreachable daemon; it travels up rather than being mislabelled.
       if (isMalformedView(err)) throw err;
       drawSubmitRefusal(root, "transport", TRANSPORT_TEXT);
-      log("error", `SubmitPrompt failed at the transport: ${String(err)}`, {
+      log.error(`SubmitPrompt failed at the transport: ${String(err)}`, {
         operation: "composer.transport-failure",
         context: { cause: err },
       });
@@ -324,13 +324,13 @@ export function mountComposer(
   const onDropped = (event: Event): void => {
     const detail = (event as CustomEvent<HeldPromptDroppedDetail>).detail;
     if (input.value !== "") {
-      log("debug", "not restoring a dropped prompt over a draft", {
+      log.debug("not restoring a dropped prompt over a draft", {
         operation: "composer.dropped-ignored",
       });
       return;
     }
     input.value = detail.text;
-    log("info", "restored a dropped prompt's text", {
+    log.info("restored a dropped prompt's text", {
       operation: "composer.dropped-restored",
       context: { length: detail.text.length },
     });
@@ -340,7 +340,7 @@ export function mountComposer(
   return {
     lastTurn: () => lastTurn,
     dispose(): void {
-      log("debug", "disposing a composer", { operation: "composer.dispose" });
+      log.debug("disposing a composer", { operation: "composer.dispose" });
       unsubscribeGate();
       document.removeEventListener(DROPPED_EVENT, onDropped);
       root.remove();

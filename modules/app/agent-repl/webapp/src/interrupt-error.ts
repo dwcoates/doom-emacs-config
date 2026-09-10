@@ -94,7 +94,7 @@ export function logInterruptRefusal(
   sentence: string,
   operation: string,
 ): void {
-  log("warn", `the stop was refused: ${kind.case}`, {
+  log.warn(`the stop was refused: ${kind.case}`, {
     operation,
     context: { arm: kind.case, sentence },
   });
