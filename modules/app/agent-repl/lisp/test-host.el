@@ -146,6 +146,7 @@ unary rpc can produce, which the contract never collapses into one."
   (declare (indent 0))
   `(let ((agent-repl-host--by-name (make-hash-table :test 'equal))
          (agent-repl-host-last-selected-id nil)
+         (agent-repl-host-reselect-pending nil)
          (agent-repl-host-update-functions nil)
          (agent-repl-test-host--streams nil)
          (agent-repl-test-host--cancelled nil)
@@ -1450,6 +1451,155 @@ Reloading first would navigate the page at the daemon that just died."
         (agent-repl-host-on-link-up conn))
       ;; Assert
       (should (null agent-repl-test-host--calls)))))
+
+(ert-deftest agent-repl-test-host-link-up-reselects-the-dir-the-user-stood-in ()
+  "Emacs owns the user's selection across a daemon restart.
+A relaunched daemon stamps `current' on whichever workspace re-registered
+first — here ws-2, walked first — so Emacs says again what the user
+chose, addressed by the DIR, since the ids were re-minted."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-host-last-selected-id "id-before-the-outage"
+            agent-repl-test-host--current-ws "ws-1")
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("ws-2" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "id-before-the-outage") "ws-1")))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.link-up-reselect ws=ws-1")))))
+
+(ert-deftest agent-repl-test-host-link-up-reselect-waits-for-every-registration ()
+  "The re-assertion comes AFTER the last workspace re-registered.
+Asserting it earlier would let the workspaces still registering behind it
+stamp `current' again and undo the user's selection."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-host-last-selected-id "id-before-the-outage"
+            agent-repl-test-host--current-ws "ws-1")
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("ws-1" "ws-2")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "id-before-the-outage") "ws-1")))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (let ((entries (mapcar #'cdr (reverse agent-repl-test-host--logs))))
+        (should (< (seq-position entries "elisp.host.link-up-webview-repointed ws=ws-2 address=\"127.0.0.1:9001\"")
+                   (seq-position entries "elisp.host.link-up-reselect ws=ws-1 dir=\"/tmp/ws-1\"")))))))
+
+(ert-deftest agent-repl-test-host-link-up-reselect-holds-the-frame-until-acknowledged ()
+  "The suppression roster.el reads is released on the re-select's ack.
+A suppression that outlived its re-select would deafen Emacs to the
+user's next sidebar click."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-host-last-selected-id "id-before-the-outage"
+            agent-repl-test-host--current-ws "ws-1")
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "id-before-the-outage") "ws-1")))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (null agent-repl-host-reselect-pending)))))
+
+(ert-deftest agent-repl-test-host-link-up-reselect-releases-the-frame-on-a-refusal ()
+  "A refused re-select still releases the frame, and says so."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-host-last-selected-id "id-before-the-outage"
+            agent-repl-test-host--current-ws "ws-1"
+            agent-repl-test-host--select-answer
+            (list :response (list :arm :error :value (list :message "no"))))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "id-before-the-outage") "ws-1")))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (null agent-repl-host-reselect-pending)))))
+
+(ert-deftest agent-repl-test-host-link-up-reselect-brings-the-frame-to-the-selection ()
+  "The frame follows the user's own selection, not the walk order."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (switched nil))
+      (setq agent-repl-host-last-selected-id "id-before-the-outage"
+            agent-repl-test-host--current-ws "ws-2")
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("ws-2" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "id-before-the-outage") "ws-1")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (push ws switched))))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (equal switched '("ws-1"))))))
+
+(ert-deftest agent-repl-test-host-link-up-reselect-reports-a-workspace-that-did-not-come-back ()
+  "A selection whose workspace the new daemon refused is reported, not moved.
+The frame stays on the live workspace it is already standing on rather
+than being handed an arbitrary substitute."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (switched nil))
+      (setq agent-repl-host-last-selected-id "id-before-the-outage"
+            agent-repl-test-host--current-ws "ws-2"
+            agent-repl-test-host--register-answer
+            (list :response (list :arm :error :value (list :message "gone"))))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("ws-2" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "id-before-the-outage") "ws-1")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (push ws switched))))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :warn "elisp.host.link-up-reselect-lost"))
+      (should (null switched)))))
+
+(ert-deftest agent-repl-test-host-link-up-with-no-selection-reselects-nothing ()
+  "A session that never selected anything has nothing to re-assert."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :log "elisp.host.link-up-reselect-skipped")))))
 
 (ert-deftest agent-repl-test-host-link-down-drops-the-stream ()
   "A dead connection carries no subscription."
