@@ -11,8 +11,8 @@
 #     "$(basename "$entry")" where the substitution genuinely cannot fail in a
 #     way this script should abort on.
 #   SC2310 (a function in an `if` disables set -e) — that is the POINT of
-#     is_stale: it is a predicate whose false answer means "fresh", not an
-#     error. Making it abort the script would invert the staleness logic.
+#     source_is_stale: it is a predicate whose false answer means "fresh", not
+#     an error. Making it abort the script would invert the staleness logic.
 # build-frontend.sh — build the claude-repl frontend artifacts, but only
 # when they are out of date ("build-if-stale").
 #
@@ -30,10 +30,19 @@
 #               without it refuses every session — which is why `lock` is in
 #               the DEFAULT target set and store/sidecar are not.
 #
-# Staleness rule (per artifact): rebuild iff the artifact is missing, or any
-# source file under its source set is newer (mtime) than the artifact. This is
-# the same prerequisite-newer-than-target rule `make` uses, done by hand so no
-# Makefile is required and so Emacs can invoke a single entrypoint.
+# Staleness rule (per artifact): rebuild iff the artifact is missing, or the
+# SOURCE REVISION it was built from is not the source revision standing here
+# now. "Source revision" is the hash of the git index entries for that
+# system's pathspec — the same pathspec readiness-report.sh attributes to the
+# system, taken from the one table in lib-deploy-stamp.sh — and a working tree
+# that is dirty anywhere under it always reads as stale.
+#
+# It is NOT an mtime comparison any more. That rule shipped two ways to call a
+# stale artifact fresh and on 2026-09-09 a real deploy hit both: the hand-listed
+# source set was narrower than the readiness report's, so merges landing under
+# `shim/test/` and `agent-shim/logging/` were invisible to it, and an mtime is
+# wall-clock metadata a checkout or a copy can set to anything. The full
+# reasoning is at "family 3" in lib-deploy-stamp.sh.
 #
 # Every successful build also writes a `.built-sha` stamp beside its artifact
 # (dist/.built-sha, daemon/bin/.built-sha, ~/.cache/agent-repl/bin/.<name>.built-sha)
@@ -120,8 +129,7 @@ PROTO_GO_DIR="$ROOT/proto/gen/go"
 # to change, and a stale hardcoded path would silently protect nothing.
 if command -v git >/dev/null 2>&1 &&
        WORKTREE_ROOT="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null)"; then
-    REL_ROOT="${ROOT#"$WORKTREE_ROOT"/}"
-    [ "$REL_ROOT" = "$ROOT" ] && REL_ROOT=""
+    REL_ROOT="$(deploy_stamp_rel_root "$WORKTREE_ROOT" "$ROOT")"
 else
     WORKTREE_ROOT="$ROOT"
     REL_ROOT=""
@@ -163,6 +171,18 @@ DAEMON_SHA_STAMP="$DAEMON_DIR/bin/.built-sha"
 STORE_SHA_STAMP="$CACHE_BIN/.shim-store.built-sha"
 SIDECAR_SHA_STAMP="$CACHE_BIN/.shim-claude-sidecar.built-sha"
 LOCK_SHA_STAMP="$CACHE_BIN/.shim-lock.built-sha"
+
+# Source-tree stamps, beside each artifact and shaped exactly like the built-sha
+# stamps. These are the staleness authority: what the artifact standing here was
+# built from, compared against what the checkout says now. readiness-report.sh
+# reads these same files, so the build and the gate cannot reach opposite
+# answers about the same artifact.
+SHIM_TREE_STAMP="$SHIM_DIR/dist/.source-tree"
+WEBAPP_TREE_STAMP="$WEBAPP_DIR/dist/.source-tree"
+DAEMON_TREE_STAMP="$DAEMON_DIR/bin/.source-tree"
+STORE_TREE_STAMP="$CACHE_BIN/.shim-store.source-tree"
+SIDECAR_TREE_STAMP="$CACHE_BIN/.shim-claude-sidecar.source-tree"
+LOCK_TREE_STAMP="$CACHE_BIN/.shim-lock.source-tree"
 
 GRACE_MINS="${AGENT_REPL_NODE_STORE_GRACE_MINS:-60}"
 
@@ -213,85 +233,46 @@ require_bin() {
     fi
 }
 
-# newest_mtime DIR [FILE...] — echo the largest mtime (epoch seconds) among the
-# given files plus every regular file under DIR/src, skipping node_modules.
-# Emits 0 when nothing matches.
-newest_mtime() {
-    local newest=0 f mt
-    for f in "$@"; do
-        [ -e "$f" ] || continue
-        mt="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")"
-        [ "$mt" -gt "$newest" ] && newest="$mt"
-    done
-    echo "$newest"
+# system_source_id NAME — echo the source-tree id of NAME's pathspec, or return
+# 1 when it cannot be determined (no git, no checkout, a pathspec matching
+# nothing). The pathspec table is shared with readiness-report.sh; see
+# lib-deploy-stamp.sh.
+system_source_id() {
+    local paths
+    paths="$(deploy_stamp_system_paths "$1" "$REL_ROOT")" || return 1
+    # Deliberately unquoted: the table carries a space-separated pathspec list
+    # and each element must reach git as its own argument.
+    # shellcheck disable=SC2086
+    source_tree_id "$WORKTREE_ROOT" $paths
 }
 
-# artifact_mtime FILE — echo the artifact's mtime, or 0 if it is missing (which
-# forces a rebuild since any source mtime is >= 0).
-artifact_mtime() {
-    if [ -e "$1" ]; then
-        stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"
-    else
-        echo 0
-    fi
-}
-
-# is_stale ARTIFACT SOURCE... — return 0 (stale, needs build) when ARTIFACT is
-# missing or older than the newest SOURCE; return 1 (fresh) otherwise.
+# source_is_stale NAME ARTIFACT STAMP — return 0 (stale, needs build) and 1
+# (fresh, skip).
 #
-# Callers pass the source list as ${SOURCES[@]+"${SOURCES[@]}"}. The `+` guard
-# is not decoration: bash 3.2 -- still /bin/bash on macOS, and this script runs
-# under `set -u` -- aborts on "${arr[@]}" when arr is EMPTY, which is exactly
-# the case for a project with no src/ and no manifests.
-is_stale() {
-    local artifact="$1"; shift
+# Stale when any of these holds, and every one of them is a case where calling
+# the artifact fresh would be a guess:
+#   - --force was asked for;
+#   - the artifact is missing;
+#   - the source revision cannot be determined at all;
+#   - the working tree is dirty under the system's pathspec;
+#   - no stamp records what the artifact was built from; or
+#   - the recorded revision is not the one standing here now.
+source_is_stale() {
+    local name="$1" artifact="$2" stamp="$3" current recorded
     [ "$FORCE" -eq 1 ] && return 0
-    local a s
-    a="$(artifact_mtime "$artifact")"
-    s="$(newest_mtime "$@")"
-    [ "$s" -ge "$a" ] || [ "$a" -eq 0 ]
-}
-
-# emit_sources DIR [EXTRA_FIND_ARGS...] — print DIR's complete source set,
-# NUL-delimited: every regular file under DIR/src, the package/build manifests
-# that also invalidate the artifact, and (when EXTRA_FIND_ARGS are given)
-# everything `find DIR EXTRA_FIND_ARGS` matches.
-#
-# NUL rather than newline because this list is read back into an array and a
-# path is the one thing that may contain any byte except NUL. The predecessor
-# printed newline-separated paths that the caller then passed UNQUOTED, so the
-# shell split them on IFS and glob-expanded the pieces: a source file named
-# `my component.ts` reached the mtime scan as two nonexistent paths, both
-# silently skipped, and edits to it never triggered a rebuild.
-emit_sources() {
-    local dir="$1"; shift
-    if [ -d "$dir/src" ]; then
-        find "$dir/src" -type f -print0
-    fi
-    local manifest
-    for manifest in package.json tsconfig.json vite.config.ts go.mod go.sum build.mjs; do
-        if [ -f "$dir/$manifest" ]; then
-            printf '%s\0' "$dir/$manifest"
-        fi
-    done
-    if [ "$#" -gt 0 ]; then
-        find "$dir" "$@" -print0
-    fi
+    [ -e "$artifact" ] || return 0
+    current="$(system_source_id "$name")" || return 0
+    if source_tree_is_dirty "$current"; then return 0; fi
+    recorded="$(read_source_tree "$stamp")" || return 0
+    [ "$recorded" = "$current" ] && return 1
     return 0
 }
 
-# SOURCES — the array load_sources fills, consumed immediately by its caller.
-# A global because bash 3.2 (still /bin/bash on macOS) has no namerefs.
-SOURCES=()
-
-# load_sources DIR [EXTRA_FIND_ARGS...] — populate SOURCES from emit_sources,
-# one array element per path however awkward the filename.
-load_sources() {
-    SOURCES=()
-    local f
-    while IFS= read -r -d '' f; do
-        SOURCES+=("$f")
-    done < <(emit_sources "$@")
+# stamp_source_tree NAME STAMP — record what a just-built artifact was built
+# from. An id that cannot be determined removes the stamp rather than leaving a
+# stale one, which keeps the next run honest: no stamp means stale.
+stamp_source_tree() {
+    write_source_tree "$2" "$(system_source_id "$1" || true)"
 }
 
 # store_key DIR — echo a short content hash of DIR's dependency manifest, so a
@@ -472,8 +453,7 @@ build_deps() {
 
 build_shim() {
     link_node_modules "$SHIM_DIR" shim
-    load_sources "$SHIM_DIR"
-    if ! is_stale "$SHIM_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
+    if ! source_is_stale shim "$SHIM_ARTIFACT" "$SHIM_TREE_STAMP"; then
         echo "[build-frontend] shim: fresh, skipping"
         return 0
     fi
@@ -490,6 +470,7 @@ build_shim() {
     shim_sha="$(source_revision "$ROOT" || true)"
     ( cd "$SHIM_DIR" && SHIM_BUILD_SHA="$shim_sha" npm run build )
     write_built_sha_value "$SHIM_SHA_STAMP" "$shim_sha"
+    stamp_source_tree shim "$SHIM_TREE_STAMP"
     echo "[build-frontend] shim: done"
 }
 
@@ -519,8 +500,7 @@ write_webapp_build_id() {
 
 build_webapp() {
     link_node_modules "$WEBAPP_DIR" webapp
-    load_sources "$WEBAPP_DIR"
-    if ! is_stale "$WEBAPP_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
+    if ! source_is_stale webapp "$WEBAPP_ARTIFACT" "$WEBAPP_TREE_STAMP"; then
         # The build-id describes the ARTIFACT, so a skipped build still owes it:
         # the artifact standing here is the one the webview must address, and a
         # stamp missing beside it would leave that address unbuildable.
@@ -532,15 +512,14 @@ build_webapp() {
     echo "[build-frontend] webapp: building..."
     ( cd "$WEBAPP_DIR" && npm run build )
     write_built_sha "$WEBAPP_SHA_STAMP" "$ROOT"
+    stamp_source_tree webapp "$WEBAPP_TREE_STAMP"
     write_webapp_build_id
     echo "[build-frontend] webapp: done"
 }
 
 build_daemon() {
-    # The daemon's set is its manifests, every .go file in its tree, and the
-    # repo-local modules it compiles against (generated proto Go + logging).
-    load_go_sources "$DAEMON_DIR"
-    if ! is_stale "$DAEMON_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
+    require_go_source_dirs "$DAEMON_DIR"
+    if ! source_is_stale daemon "$DAEMON_ARTIFACT" "$DAEMON_TREE_STAMP"; then
         echo "[build-frontend] daemon: fresh, skipping"
         return 0
     fi
@@ -549,35 +528,35 @@ build_daemon() {
     mkdir -p "$DAEMON_DIR/bin"
     ( cd "$DAEMON_DIR" && go build -o "$DAEMON_ARTIFACT" ./cmd/claude-repld )
     write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
+    stamp_source_tree daemon "$DAEMON_TREE_STAMP"
     echo "[build-frontend] daemon: done"
 }
 
-load_go_sources() {
-    # Every Go artifact here compiles against the repo-local proto + logging
-    # modules. Their generated/source files are real prerequisites even though
-    # they live outside the built module, so a proto or logging edit must stale
-    # the binary.
-    local dir="$1" source_dir f
-    SOURCES=()
+# require_go_source_dirs MODULE_DIR — abort unless every directory a Go artifact
+# here compiles against is actually present.
+#
+# The generated proto module and the shared logging module live OUTSIDE the
+# module being built, and a checkout missing either produces a build failure
+# that reads as a compiler problem. Failing here names the missing directory
+# instead. It is a pre-flight assertion, not the staleness rule: staleness is
+# the source-tree id, which covers these same trees through the shared pathspec.
+require_go_source_dirs() {
+    local dir="$1" source_dir
     for source_dir in "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR"; do
         if [ ! -d "$source_dir" ]; then
             echo "build-frontend.sh: required Go source directory missing: $source_dir" >&2
             exit 1
         fi
     done
-    while IFS= read -r -d '' f; do
-        SOURCES+=("$f")
-    done < <(find "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR" -type f \
-             \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) -print0)
 }
 
 build_service() {
-    # NAME MODULE-DIR ARTIFACT — shared build-if-stale path for the two Go
-    # launchd services.  Keeping one helper prevents their source sets and
-    # install semantics from drifting.
-    local name="$1" dir="$2" artifact="$3" sha_stamp="$4"
-    load_go_sources "$dir"
-    if ! is_stale "$artifact" ${SOURCES[@]+"${SOURCES[@]}"}; then
+    # NAME MODULE-DIR ARTIFACT SHA-STAMP TREE-STAMP — shared build-if-stale path
+    # for the Go binaries that install into the shared cache bin. Keeping one
+    # helper prevents their source sets and install semantics from drifting.
+    local name="$1" dir="$2" artifact="$3" sha_stamp="$4" tree_stamp="$5"
+    require_go_source_dirs "$dir"
+    if ! source_is_stale "$name" "$artifact" "$tree_stamp"; then
         echo "[build-frontend] $name: fresh, skipping"
         return 0
     fi
@@ -586,6 +565,7 @@ build_service() {
     mkdir -p "$CACHE_BIN"
     ( cd "$dir" && go build -o "$artifact" . )
     write_built_sha "$sha_stamp" "$ROOT"
+    stamp_source_tree "$name" "$tree_stamp"
     echo "[build-frontend] $name: done"
 }
 
@@ -596,9 +576,9 @@ for target in "${TARGETS[@]}"; do
         shim)   build_shim ;;
         webapp) build_webapp ;;
         daemon) build_daemon ;;
-        store)  build_service shim-store "$STORE_DIR" "$STORE_ARTIFACT" "$STORE_SHA_STAMP" ;;
-        sidecar) build_service shim-claude-sidecar "$SIDECAR_DIR" "$SIDECAR_ARTIFACT" "$SIDECAR_SHA_STAMP" ;;
-        lock)   build_service shim-lock "$LOCK_DIR" "$LOCK_ARTIFACT" "$LOCK_SHA_STAMP" ;;
+        store)  build_service shim-store "$STORE_DIR" "$STORE_ARTIFACT" "$STORE_SHA_STAMP" "$STORE_TREE_STAMP" ;;
+        sidecar) build_service shim-claude-sidecar "$SIDECAR_DIR" "$SIDECAR_ARTIFACT" "$SIDECAR_SHA_STAMP" "$SIDECAR_TREE_STAMP" ;;
+        lock)   build_service shim-lock "$LOCK_DIR" "$LOCK_ARTIFACT" "$LOCK_SHA_STAMP" "$LOCK_TREE_STAMP" ;;
         gc)     EXPLICIT_GC=1 ;;
         # Unreachable: the argument parser allowlists these same names. It is
         # here so that adding a target THERE and forgetting it here fails

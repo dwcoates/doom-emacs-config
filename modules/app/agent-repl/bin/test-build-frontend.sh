@@ -11,6 +11,12 @@
 # artifact it would have produced and records that it fired. Tests then assert
 # WHICH artifacts the script decided to (re)build under each staleness scenario.
 #
+# The fixture is a scratch GIT repository, because staleness IS a git question
+# now: the script compares the source revision an artifact was built from
+# against the revision standing in the checkout. A "fresh" fixture is therefore
+# built artifacts PLUS the `.source-tree` stamps that say what they came from,
+# which is what make_fresh_artifacts writes.
+#
 # Run with:   bash bin/test-build-frontend.sh
 
 set -euo pipefail
@@ -23,6 +29,12 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/build-frontend.sh"
 
+# The fixtures stamp themselves with the SAME functions the script under test
+# stamps with. Reimplementing the id here would let the harness agree with a
+# broken script, which is the one thing a staleness harness must not do.
+# shellcheck source=lib-deploy-stamp.sh
+. "$THIS_DIR/lib-deploy-stamp.sh"
+
 PASS=0
 FAIL=0
 pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -30,8 +42,11 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $
 
 # --- build a fake project tree in a temp dir -------------------------------
 # Layout mirrors what build-frontend.sh expects relative to its parent dir.
+#
+# `make_tree ROOT nogit` skips the commit, for the one case whose subject is a
+# checkout that is not a checkout at all.
 make_tree() {
-    local root="$1"
+    local root="$1" nogit="${2:-}"
     mkdir -p "$root/bin" \
              "$root/agent-shim/claude/shim/src" \
              "$root/agent-shim/claude/shim/dist" \
@@ -63,9 +78,70 @@ make_tree() {
     echo "module logging" > "$root/agent-shim/logging/go/go.mod"
     echo "module proto" > "$root/proto/gen/go/go.mod"
 
+    # Sources the old mtime-scanned set never looked at, and which the twelve
+    # merges of 2026-09-09 landed in: the shim's tests, and the shared logging
+    # module. They are real members of each system's pathspec.
+    mkdir -p "$root/agent-shim/claude/shim/test"
+    echo "test('x', () => {})" > "$root/agent-shim/claude/shim/test/main.test.ts"
+
     # node_modules present so the stubs are never asked to `npm install`.
     mkdir -p "$root/agent-shim/claude/shim/node_modules" \
              "$root/webapp/node_modules"
+
+    [ "$nogit" = "nogit" ] || commit_tree "$root"
+}
+
+# commit_tree ROOT — turn the fixture into a real checkout. Staleness is read
+# out of git, so there is nothing to assert without one.
+commit_tree() {
+    local root="$1"
+    # Mirror the real repo, where every build output is ignored
+    # (daemon/.gitignore, webapp/.gitignore, shim/.gitignore). Without this the
+    # artifact a build just produced would itself make the tree "dirty" and
+    # every build would read as stale forever.
+    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\n*.log\nout\nerr\n' > "$root/.gitignore"
+    git -C "$root" init -q
+    git -C "$root" -c user.name=t -c user.email=t@example.com add -A
+    # The parent checkout installs an absolute shared hooksPath. Scratch
+    # fixture commits must not inherit and recursively run that repository's
+    # pre-commit suite.
+    git -C "$root" -c user.name=t -c user.email=t@example.com \
+        -c core.hooksPath=/dev/null commit -qm seed
+}
+
+# commit_change ROOT PATH CONTENT MESSAGE — land a committed source change, so
+# the checkout moves to a new source revision with a CLEAN working tree. This is
+# the shape a merge has, and the shape the old mtime rule kept missing.
+commit_change() {
+    local root="$1" rel="$2" content="$3" msg="$4"
+    mkdir -p "$(dirname "$root/$rel")"
+    printf '%s\n' "$content" >> "$root/$rel"
+    git -C "$root" -c user.name=t -c user.email=t@example.com add -A
+    git -C "$root" -c user.name=t -c user.email=t@example.com \
+        -c core.hooksPath=/dev/null commit -qm "$msg"
+}
+
+# tree_stamp_path ROOT NAME — where NAME's `.source-tree` stamp lives in a
+# fixture (HOME is redirected to $root/home, so the cache bin is in-fixture).
+tree_stamp_path() {
+    case "$2" in
+        shim)                printf '%s' "$1/agent-shim/claude/shim/dist/.source-tree" ;;
+        webapp)              printf '%s' "$1/webapp/dist/.source-tree" ;;
+        daemon)              printf '%s' "$1/daemon/bin/.source-tree" ;;
+        *)                   printf '%s' "$1/home/.cache/agent-repl/bin/.$2.source-tree" ;;
+    esac
+}
+
+# stamp_fresh_source_trees ROOT — record, for every system, that its artifact
+# was built from exactly the revision standing in the fixture.
+stamp_fresh_source_trees() {
+    local root="$1" name paths
+    for name in shim webapp daemon shim-store shim-claude-sidecar shim-lock; do
+        paths="$(deploy_stamp_system_paths "$name" "")"
+        # shellcheck disable=SC2086
+        write_source_tree "$(tree_stamp_path "$root" "$name")" \
+                          "$(source_tree_id "$root" $paths || true)"
+    done
 }
 
 # write_webapp_index PATH [HASH] — write an index.html shaped like the one Vite
@@ -85,7 +161,8 @@ write_webapp_index() {
            "$hash" > "$path"
 }
 
-# Fresh artifacts: newer than every source so nothing is stale.
+# Fresh artifacts: built outputs PLUS the source-tree stamps saying they came
+# from the revision the fixture is standing at, which is what "fresh" means now.
 make_fresh_artifacts() {
     local root="$1"
     echo built > "$root/agent-shim/claude/shim/dist/main.js"
@@ -95,14 +172,7 @@ make_fresh_artifacts() {
     echo built > "$root/home/.cache/agent-repl/bin/shim-store"
     echo built > "$root/home/.cache/agent-repl/bin/shim-claude-sidecar"
     echo built > "$root/home/.cache/agent-repl/bin/shim-lock"
-    # Bump artifact mtimes strictly past the sources.
-    sleep 1
-    touch "$root/agent-shim/claude/shim/dist/main.js" \
-          "$root/webapp/dist/index.html" \
-          "$root/daemon/bin/claude-repld" \
-          "$root/home/.cache/agent-repl/bin/shim-store" \
-          "$root/home/.cache/agent-repl/bin/shim-claude-sidecar" \
-          "$root/home/.cache/agent-repl/bin/shim-lock"
+    stamp_fresh_source_trees "$root"
 }
 
 # PATH stubs for npm/go that log to $STUB_LOG and touch their artifact.
@@ -210,8 +280,7 @@ t_one_stale() {
     local root; root="$(mktemp -d)"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    sleep 1
-    touch "$root/agent-shim/claude/shim/src/main.ts"
+    commit_change "$root" agent-shim/claude/shim/src/main.ts "export const b = 2" "edit shim"
     # Shim is now stale; the other artifacts remain fresh.
     run_script "$root" >/dev/null
     local log; log="$(cat "$root/stub.log")"
@@ -513,27 +582,9 @@ t_gc_not_run_when_nothing_minted() {
 
 # --- built-sha stamps -------------------------------------------------------
 
-# git_tree ROOT — turn the fixture into a real checkout, since the stamp is
-# read out of git and there is nothing to assert without one.
-git_tree() {
-    local root="$1"
-    # Mirror the real repo, where every build output is ignored
-    # (daemon/.gitignore, webapp/.gitignore, shim/.gitignore). Without this the
-    # artifact a build just produced would itself make the tree "dirty" and
-    # every stamp would carry the marker.
-    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\n*.log\n' > "$root/.gitignore"
-    git -C "$root" init -q
-    git -C "$root" -c user.name=t -c user.email=t@example.com add -A
-    # The parent checkout installs an absolute shared hooksPath. Scratch
-    # fixture commits must not inherit and recursively run that repository's
-    # pre-commit suite.
-    git -C "$root" -c user.name=t -c user.email=t@example.com \
-        -c core.hooksPath=/dev/null commit -qm seed
-}
-
 t_stamp_written_on_build() {
     local root sha; root="$(mktemp -d)"
-    make_tree "$root"; make_stubs "$root/stubs"; git_tree "$root"
+    make_tree "$root"; make_stubs "$root/stubs"
     sha="$(git -C "$root" rev-parse HEAD)"
     run_script "$root" daemon >/dev/null
     if [ "$(cat "$root/daemon/bin/.built-sha" 2>/dev/null)" = "$sha" ]; then
@@ -547,7 +598,7 @@ t_stamp_written_on_build() {
 
 t_stamp_marks_a_dirty_tree() {
     local root; root="$(mktemp -d)"
-    make_tree "$root"; make_stubs "$root/stubs"; git_tree "$root"
+    make_tree "$root"; make_stubs "$root/stubs"
     echo "package main // edited" > "$root/daemon/cmd/claude-repld/main.go"
     run_script "$root" daemon >/dev/null
     if grep -q -- '-dirty$' "$root/daemon/bin/.built-sha"; then
@@ -562,7 +613,6 @@ t_stamp_marks_a_dirty_tree() {
 t_stamp_untouched_by_a_skipped_build() {
     local root; root="$(mktemp -d)"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
-    git_tree "$root"
     printf 'a-previous-revision\n' > "$root/daemon/bin/.built-sha"
     run_script "$root" daemon >/dev/null
     if [ "$(cat "$root/daemon/bin/.built-sha")" = "a-previous-revision" ]; then
@@ -576,7 +626,7 @@ t_stamp_untouched_by_a_skipped_build() {
 
 t_no_git_leaves_no_stamp() {
     local root; root="$(mktemp -d)"
-    make_tree "$root"; make_stubs "$root/stubs"
+    make_tree "$root" nogit; make_stubs "$root/stubs"
     printf 'a-stale-guess\n' > "$root/daemon/bin/.built-sha"
     run_script "$root" daemon >/dev/null
     if [ ! -e "$root/daemon/bin/.built-sha" ]; then
@@ -598,20 +648,16 @@ t_gc_dry_run_deletes_nothing
 t_gc_respects_grace_window
 t_gc_runs_after_minting_an_entry
 
-# --- Tests 17-19: the staleness source list is passed WITHOUT word splitting --
-# These pin the semantics the SC2046 array refactor had to preserve (and, for
-# the space case, the bug it had to fix): build-frontend.sh used to pass
-# $(collect_sources ...) unquoted, so the shell split the list on IFS and
-# glob-expanded it before is_stale ever saw it.
+# --- awkward source filenames still reach the staleness check ---------------
+# The pathspec list is passed to git unquoted (it is a space-separated table),
+# so these pin that a FILENAME's own spaces and glob metacharacters are never
+# taken as list separators or expanded against the cwd on the way there.
 
 t_stale_source_with_space_in_name() {
     local root; root="$(mktemp -d)"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    sleep 1
-    # A source whose name contains a space. Under word splitting this arrived
-    # at newest_mtime as two nonexistent paths, both skipped, so edits to it
-    # were INVISIBLE to staleness and never triggered a rebuild.
+    # A source whose name contains a space.
     printf 'export const z = 1' > "$root/webapp/src/my component.ts"
     run_script "$root" webapp >/dev/null
     if grep -q npm "$root/stub.log"; then
@@ -626,9 +672,8 @@ t_stale_source_with_glob_chars() {
     local root; root="$(mktemp -d)"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    sleep 1
     # Glob metacharacters in a source name must be taken literally, never
-    # expanded against the cwd on their way to is_stale.
+    # expanded against the cwd on their way to the staleness check.
     printf 'export const z = 1' > "$root/webapp/src/a[1]*.ts"
     run_script "$root" webapp >/dev/null
     if grep -q npm "$root/stub.log"; then
@@ -639,22 +684,23 @@ t_stale_source_with_glob_chars() {
     rm -rf "$root"
 }
 
-t_stale_empty_source_set() {
+# An UNDETERMINABLE source set is stale, never fresh. Outside a checkout there
+# is no revision to compare against, and answering "fresh" there is how a build
+# talks itself out of work it owes — the artifact and its stamp could have come
+# from anywhere.
+t_undeterminable_source_set_rebuilds() {
     local root; root="$(mktemp -d)"
-    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    make_tree "$root" nogit; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    # No src/ and no manifests: collect_sources emits NOTHING. An empty list
-    # must neither crash the script (bash 3.2 errors on "${arr[@]}" for an
-    # empty array under `set -u`) nor be read as "stale".
-    rm -rf "$root/webapp/src" "$root/webapp/package.json"
     if run_script "$root" webapp >/dev/null 2>&1; then
-        if [ ! -s "$root/stub.log" ]; then
-            pass "staleness: an empty source set neither crashes nor forces a rebuild"
+        if grep -q "npm run build" "$root/stub.log"; then
+            pass "staleness: a source set that cannot be determined rebuilds rather than skipping"
         else
-            fail "staleness: empty source set" "stub.log: $(cat "$root/stub.log")"
+            fail "staleness: undeterminable source set rebuilds" \
+                 "stub.log: $(cat "$root/stub.log")"
         fi
     else
-        fail "staleness: empty source set" "script exited non-zero"
+        fail "staleness: undeterminable source set rebuilds" "script exited non-zero"
     fi
     rm -rf "$root"
 }
@@ -670,8 +716,7 @@ t_services_fresh_then_shared_dependency_stales_both() {
         rm -rf "$root"
         return
     fi
-    sleep 1
-    touch "$root/proto/gen/go/proto.go"
+    commit_change "$root" proto/gen/go/proto.go "// regenerated" "regen proto"
     run_script "$root" store sidecar >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 2 ]; then
         pass "services: shared proto edit rebuilds store and sidecar"
@@ -693,8 +738,7 @@ t_services_shared_logging_edit_rebuilds_both() {
         rm -rf "$root"
         return
     fi
-    sleep 1
-    touch "$root/agent-shim/logging/go/timestamp.go"
+    commit_change "$root" agent-shim/logging/go/timestamp.go "// rotated" "edit logging"
     run_script "$root" store sidecar >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 2 ]; then
         pass "services: shared logging edit rebuilds store and sidecar"
@@ -730,7 +774,7 @@ t_stamp_untouched_by_a_skipped_build
 t_no_git_leaves_no_stamp
 t_stale_source_with_space_in_name
 t_stale_source_with_glob_chars
-t_stale_empty_source_set
+t_undeterminable_source_set_rebuilds
 # The daemon compiles against the generated proto module, so a regenerated
 # binding must stale daemon/bin/claude-repld even though it lives outside
 # daemon/.
@@ -745,8 +789,7 @@ t_daemon_shared_proto_edit_rebuilds() {
         rm -rf "$root"
         return
     fi
-    sleep 1
-    touch "$root/proto/gen/go/proto.go"
+    commit_change "$root" proto/gen/go/proto.go "// regenerated" "regen proto"
     run_script "$root" daemon >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 1 ]; then
         pass "daemon: a regenerated proto binding rebuilds the daemon"
@@ -786,7 +829,6 @@ esac
 exit 0
 EOF
     chmod +x "$root/stubs/npm"
-    git_tree "$root"
     sha="$(git -C "$root" rev-parse HEAD)"
     run_script "$root" shim >/dev/null
     baked="$(cat "$root/agent-shim/claude/shim/dist/main.js" 2>/dev/null || echo MISSING)"
@@ -808,8 +850,7 @@ t_build_mjs_stales_the_shim() {
     local root; root="$(mktemp -d)"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    sleep 1
-    touch "$root/agent-shim/claude/shim/build.mjs"
+    commit_change "$root" agent-shim/claude/shim/build.mjs "// bundler tweak" "edit build.mjs"
     run_script "$root" shim >/dev/null
     if grep -q "npm run build" "$root/stub.log"; then
         pass "shim: a build.mjs edit stales the bundle"
@@ -825,7 +866,7 @@ t_build_mjs_stales_the_shim
 # the artifact standing beside it unaddressable.
 t_webapp_build_id_is_the_entry_hash() {
     local root got; root="$(mktemp -d)"
-    make_tree "$root"; make_stubs "$root/stubs"; git_tree "$root"
+    make_tree "$root"; make_stubs "$root/stubs"
     WEBAPP_ENTRY_HASH=CafeBabe01 run_script "$root" webapp >/dev/null
     got="$(cat "$root/webapp/dist/.build-id" 2>/dev/null || echo MISSING)"
     if [ "$got" = "CafeBabe01" ]; then
@@ -887,8 +928,7 @@ t_lock_is_in_the_default_target_set() {
     local root; root="$(mktemp -d)"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    sleep 1
-    touch "$root/agent-shim/shim-lock/main.go"
+    commit_change "$root" agent-shim/shim-lock/main.go "// lock tweak" "edit shim-lock"
     run_script "$root" >/dev/null
     if grep -q "shim-lock" "$root/stub.log"; then
         pass "lock: a default run rebuilds a stale shim-lock"
@@ -913,6 +953,155 @@ t_lock_installs_beside_shim_store() {
     rm -rf "$root"
 }
 t_lock_installs_beside_shim_store
+
+# --- staleness is a SOURCE REVISION question, not an mtime question ---------
+#
+# These four are the 2026-09-09 deploy defect, pinned from both ends. Twelve
+# merges landed into master; build-frontend judged the shim bundle and the
+# webapp dist fresh and skipped both, and the readiness gate then reported the
+# shim three commits behind and the webapp four — a state only `--force` could
+# clear. Two independent causes, one per pair below.
+
+# CAUSE 1: the source set was narrower than the one the gate measures. The shim
+# scanned `shim/src` plus a few manifests; the merges touched `shim/test/`.
+t_committed_change_outside_src_stales_the_shim() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    commit_change "$root" agent-shim/claude/shim/test/main.test.ts \
+                  "test('y', () => {})" "test(shim): another case"
+    run_script "$root" shim >/dev/null
+    if grep -q "npm run build" "$root/stub.log"; then
+        pass "staleness: a committed change under shim/test stales the shim bundle"
+    else
+        fail "staleness: a committed change under shim/test stales the shim bundle" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# The webapp's half of the same cause: the merges touched `webapp/test/` and the
+# shared logging module, neither of which the old scan looked at.
+t_committed_change_in_shared_logging_stales_the_webapp() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    commit_change "$root" agent-shim/logging/go/timestamp.go \
+                  "// size-capped with N generations" "feat(logging): rotate"
+    run_script "$root" webapp >/dev/null
+    if grep -q "npm run build" "$root/stub.log"; then
+        pass "staleness: a committed change to shared logging stales the webapp"
+    else
+        fail "staleness: a committed change to shared logging stales the webapp" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# CAUSE 2: an mtime is wall-clock metadata, not content. A checkout, a rebase,
+# or a copy can hand a genuinely changed file an mtime OLDER than the artifact,
+# and the prerequisite-newer-than-target rule then calls it fresh forever.
+t_older_mtime_source_change_still_rebuilds() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    commit_change "$root" daemon/cmd/claude-repld/main.go \
+                  "// changed" "fix(daemon): a real change"
+    # Backdate the changed source far behind the artifact. Under the old rule
+    # this made the daemon read as fresh; under a revision comparison the
+    # timestamp is not consulted at all.
+    touch -t 200001010000 "$root/daemon/cmd/claude-repld/main.go"
+    run_script "$root" daemon >/dev/null
+    if grep -q "^go build" "$root/stub.log"; then
+        pass "staleness: a source change with an OLDER mtime than the artifact still rebuilds"
+    else
+        fail "staleness: a source change with an OLDER mtime than the artifact still rebuilds" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# The converse, and the reason the rule can be trusted to skip: a tree that has
+# not moved is not rebuilt, however the artifact's timestamps look.
+t_unchanged_tree_skips_even_with_an_older_artifact() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    # An artifact older than every source: stale under the mtime rule, fresh
+    # under a revision comparison, and fresh is the honest answer — nothing
+    # about the source has changed.
+    touch -t 200001010000 "$root/daemon/bin/claude-repld"
+    run_script "$root" daemon >/dev/null
+    if [ ! -s "$root/stub.log" ]; then
+        pass "staleness: an unchanged source revision skips the build"
+    else
+        fail "staleness: an unchanged source revision skips the build" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# A dirty working tree always rebuilds. A source-tree id is anchored to
+# committed content and cannot describe an uncommitted edit, so the only honest
+# answer while one is outstanding is to build.
+t_dirty_tree_always_rebuilds() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    printf '// uncommitted\n' >> "$root/daemon/cmd/claude-repld/main.go"
+    run_script "$root" daemon >/dev/null
+    if grep -q "^go build" "$root/stub.log"; then
+        pass "staleness: an uncommitted edit under the system's sources rebuilds"
+    else
+        fail "staleness: an uncommitted edit under the system's sources rebuilds" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# A committed change OUTSIDE the system's pathspec leaves it alone. Without
+# this, a shared staleness rule would just rebuild everything on every commit
+# and the skip would be worthless.
+t_change_outside_the_pathspec_leaves_the_system_fresh() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    commit_change "$root" webapp/src/main.ts "export const w = 2" "feat(webapp): edit"
+    run_script "$root" daemon >/dev/null
+    if [ ! -s "$root/stub.log" ]; then
+        pass "staleness: a commit outside the system's pathspec leaves it fresh"
+    else
+        fail "staleness: a commit outside the system's pathspec leaves it fresh" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# The stamp is what makes the skip possible, so a build must leave one behind.
+t_build_records_the_source_tree_stamp() {
+    local root recorded expected paths; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"
+    run_script "$root" daemon >/dev/null
+    recorded="$(cat "$root/daemon/bin/.source-tree" 2>/dev/null || echo MISSING)"
+    paths="$(deploy_stamp_system_paths daemon "")"
+    # shellcheck disable=SC2086
+    expected="$(source_tree_id "$root" $paths)"
+    if [ "$recorded" = "$expected" ]; then
+        pass "stamp: a build records the source-tree id its artifact came from"
+    else
+        fail "stamp: a build records the source-tree id its artifact came from" \
+             "want=$expected got=$recorded"
+    fi
+    rm -rf "$root"
+}
+
+t_committed_change_outside_src_stales_the_shim
+t_committed_change_in_shared_logging_stales_the_webapp
+t_older_mtime_source_change_still_rebuilds
+t_unchanged_tree_skips_even_with_an_older_artifact
+t_dirty_tree_always_rebuilds
+t_change_outside_the_pathspec_leaves_the_system_fresh
+t_build_records_the_source_tree_stamp
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
