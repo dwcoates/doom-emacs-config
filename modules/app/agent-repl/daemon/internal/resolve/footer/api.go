@@ -139,6 +139,13 @@ type Resolver interface {
 	SetTurn(ws ids.WorkspaceID, turn *TurnStarted)
 	// SetMerge installs the merge facts the footer draws.
 	SetMerge(ws ids.WorkspaceID, facts MergeFacts)
+	// SetParked states that the idle sweep stood this workspace's shim down on
+	// purpose and recorded the `hibernated` session terminal. While it stands,
+	// a DEAD link is not a fault: the daemon put the route down and a prompt
+	// brings it straight back, so the strip keeps an idle status instead of
+	// `disconnected · dead`. It is lifted by the next link state of any kind,
+	// which belongs to the revival's own spawn.
+	SetParked(ws ids.WorkspaceID, parked bool)
 	// SetClosing installs a close refusal, nil to clear it.
 	SetClosing(ws ids.WorkspaceID, blocked *CloseBlocked)
 	// SetColdGate installs the standing cold gate.

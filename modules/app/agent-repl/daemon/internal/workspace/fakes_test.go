@@ -52,8 +52,12 @@ type fakeDB struct {
 	tasks        []wsm.Task
 	current      *ids.WorkspaceID
 	sessions     map[ids.WorkspaceID]wsm.Session
-	jobs         map[ids.WorkspaceID]wsm.CreationJob
-	held         map[ids.WorkspaceID][]wsm.HeldPrompt
+	// sessionErr makes every session read fail, which is the only way to
+	// reach the roster's session-read error branch: the fake's own map
+	// cannot fail.
+	sessionErr error
+	jobs       map[ids.WorkspaceID]wsm.CreationJob
+	held       map[ids.WorkspaceID][]wsm.HeldPrompt
 
 	registerErr error
 	registered  []wsm.RegisterFacts
@@ -235,6 +239,9 @@ func (d *fakeDB) PutSession(_ context.Context, s wsm.Session) error {
 }
 
 func (d *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
+	if d.sessionErr != nil {
+		return wsm.Session{}, false, d.sessionErr
+	}
 	s, ok := d.sessions[id]
 	return s, ok, nil
 }

@@ -329,6 +329,17 @@ type wsState struct {
 	linkSeen bool
 	// everConnected distinguishes a shim that died from one that never started.
 	everConnected bool
+	// parked reports that the idle sweep stood this workspace's shim down on
+	// purpose and recorded the `hibernated` session terminal. It is the SAME
+	// fact the roster keys its idle arm on (resolve/sidebar/status.go's
+	// `parked`), handed to both surfaces from the one site that writes the
+	// terminal, so the dot and the strip cannot disagree about the same park.
+	//
+	// It is cleared by the next link state of ANY kind: the watcher latches a
+	// dead link and publishes nothing further on it, so the next OnLink this
+	// workspace sees belongs to the revival's own spawn, and a spawn that then
+	// FAILS must read `dead` like any other.
+	parked bool
 	// hostStream and webStream are the OTHER TWO HOPS of connectivity truth
 	// (daemon.md invariant 11): the workspace is connected only while its
 	// shim.v1 WatchSession, its WatchHostWorkspace and its WatchWebWorkspace

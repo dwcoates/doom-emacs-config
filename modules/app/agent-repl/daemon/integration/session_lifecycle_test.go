@@ -2179,3 +2179,187 @@ func TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal(t *testing.
 		t.Fatalf("vendor_start_failed.detail = %q, want the shim's own account %q", failed.GetDetail(), shimDetail)
 	}
 }
+
+// TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord is the
+// roster half of "A PARKED SESSION IS IDLE, NOT BROKEN"
+// (internal/resolve/sidebar/status.go), asserted where the real sequence
+// actually breaks it.
+//
+// The roster resolver publishes on the events it is handed, and the LAST event
+// a stand-down produces is the shim link going dead — handed during the
+// hibernation's KillSession, BEFORE the sweep writes the session's hibernated
+// terminal. The row resolved on that event therefore reads `dead`, and in the
+// playtest world nothing republished afterwards: the daemon log's last
+// daemon.sidebar.row for the workspace said `dead`, and Emacs painted the tab
+// blue for a session the daemon had parked on purpose.
+//
+// The roster stream is opened AFTER the sweep's own hibernation record so the
+// first view it is served is one resolved from the parked record. A stream
+// opened earlier would match on a push taken BEFORE the park, which is how
+// TestHibernationParksAnIdleSessionAndRevivesOnPrompt's own roster assertion
+// stayed green through the defect.
+//
+// COST: the 50ms cutoff is the whole of the arrangement's wait; the test's
+// own edges are the two shim round trips and one roster push, measured at
+// 0.31s wall inside the parallel suite.
+func TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord(t *testing.T) {
+	t.Parallel()
+	// Arrange: a very short idle cutoff so hibernation fires promptly.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	f.shim.AwaitGone()
+
+	// Act: wait for the durable stand-down record, then ask for the roster.
+	// THE RECORD IS THE PARK'S COMPLETION: the shim's exit is the sweep's
+	// means, and the session terminal the roster reads is written after it.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+	})
+	roster := f.d.WatchRoster()
+
+	// Assert: the row settles on an IDLE arm. `dead` and `severed` both report
+	// a fault, and there is none: the daemon put the route down itself.
+	settled := awaitRoster(t, f.d, roster, "the parked row settling on an idle arm", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && (row.GetReady() != nil || row.GetDone() != nil)
+	})
+	row := rosterRow(settled, f.ws.GetId())
+	if row.GetDead() != nil || row.GetSevered() != nil {
+		t.Fatalf("the parked roster row = %v, want an idle arm and never a fault arm", row)
+	}
+}
+
+// TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView is the host half of the
+// same park, and the assertion the sibling lease-republish fix
+// (drain.Deps.PublishHost) exists for: the host view's composer arm is
+// composed from the OCCUPANCY LEASE, so every push taken while the
+// hibernation lease stood said `draining`, and Emacs's input.el refuses a
+// submission on that gate ("composer closed: daemon draining").
+//
+// That closes the only revival path a hibernated workspace has, because
+// reviving it IS a prompt. TestHibernationParksAnIdleSessionAndRevivesOnPrompt
+// already asserts `existing.live` with shim_attached=false; the COMPOSER is
+// what a client reads to decide it may submit at all, and nothing asserted it.
+//
+// COST: the same 50ms cutoff and the same two shim round trips as the roster
+// test above, plus one host push; measured at 0.31s wall inside the parallel
+// suite.
+func TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView(t *testing.T) {
+	t.Parallel()
+	// Arrange: a very short idle cutoff so hibernation fires promptly.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	// THE STREAM IS OPENED BEFORE THE PARK, which is what makes this a
+	// regression guard rather than a re-resolution. WatchHostWorkspace
+	// composes a fresh view for each new subscriber, so a client that
+	// subscribes AFTER the lease is gone reads an open composer whether or not
+	// anything republished; the client this defect was reported against had
+	// been streaming since the mount, and its last push was the stale one.
+	host := f.d.WatchHost(f.ws)
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+
+	// Act
+	f.shim.AwaitGone()
+
+	// Assert: live, unattached, and OPEN — the three facts a client needs to
+	// be allowed to type the prompt that revives the session.
+	settled := harness.AwaitView(t, f.d.Ctx(), host, "the parked workspace's composer reopening", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		live := r.GetHost().GetExisting().GetLive()
+		return live != nil && !live.GetShimAttached() && live.GetOpen() != nil
+	})
+	if live := settled.GetHost().GetExisting().GetLive(); live.GetDraining() != nil {
+		t.Fatalf("the parked workspace's composer = draining, want open: %v", live)
+	}
+}
+
+// TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault is the
+// SESSION-SCOPED half of the same park, and the one the webapp cannot work
+// around: the footer's `disconnected` step read the link the stand-down killed
+// as `disconnected · dead`, the topbar's indicator hollowed to the dead glyph,
+// and the webapp's composer gate IS the footer's word (webapp/src/main.ts — a
+// `disconnected` status closes the composer), so the page could not submit the
+// prompt that revives the session. Observed in the playtest world at
+// e2e/.playtest-out/playtest/05-tab-arms-lifecycle/15-arm-hibernated.
+//
+// THE STREAMS ARE OPENED AFTER THE SWEEP'S OWN HIBERNATION RECORD, exactly as
+// the roster test above does and for the same measured reason. Both topics
+// replay their LATEST value to a new subscriber, so what a late subscriber is
+// served is the last view the daemon resolved — which during the defect was
+// the link-death one. Opening either stream before the park instead matches
+// on a push taken while the session was still live: with the wiring disabled,
+// a footer stream opened early settled on `idle` and asserted nothing at all.
+//
+// The REVIVAL half is the guard on the park's release: the park must not
+// outlive the shim the reviving prompt spawns, or a later real death would be
+// masked as a stand-down nobody ordered.
+//
+// COST: the same 50ms cutoff and the same two shim round trips as the roster
+// and composer tests above, plus the revival's own StartSession, StartTurn and
+// turn conclusion; measured at 0.42s wall inside the parallel suite. The whole
+// `make integration` wall time was 17.9s before this test and 17.9s and 20.5s
+// on the two runs after it, at load averages of 10.8 and 18.6 -- this test's
+// half-second is inside the suite's own load-driven spread, not on top of it.
+func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T) {
+	t.Parallel()
+	// Arrange: a very short idle cutoff so hibernation fires promptly.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	f.shim.AwaitGone()
+	// THE RECORD IS THE PARK'S COMPLETION: the shim's exit is the sweep's
+	// means, and the terminal the park is derived from is written after it.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+	})
+	footer := f.d.WatchFooter(f.ws)
+	topbar := f.d.WatchTopbar(f.ws)
+
+	// Assert: the strip settles on the IDLE family. `disconnected` is the word
+	// the webapp closes its composer on, and there is no fault to report.
+	settled := awaitFooter(t, f, footer, "the parked footer settling on an idle status", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+	if settled.GetStrip().GetStatus().GetDisconnected() != nil {
+		t.Fatalf("the parked footer status = %v, want an idle status and never disconnected", settled.GetStrip().GetStatus())
+	}
+
+	// Assert: the indicator reports an ABSENT session rather than a broken
+	// one. `dead` ("the session's process is gone") is a fault; the daemon put
+	// this route down itself.
+	awaitTopbar(t, f, topbar, "the parked connectivity indicator reporting an absent session", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity().GetTitle() == "no session is running"
+	})
+
+	// Act: the prompt revives the session, and its turn runs to a conclusion.
+	f.submit("wake up", "k-parked-footer-revive", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	shim.ExpectStartSession()
+	shim.ExpectStartTurn()
+	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: ordinary again — idle with the link attached, which is what
+	// tells that the park was LIFTED rather than still standing over a route
+	// that happens to serve.
+	awaitFooter(t, f, footer, "the revived footer back on idle.done", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
+	})
+	awaitTopbar(t, f, topbar, "the revived connectivity indicator back on a serving route", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity().GetTitle() == "connected to the session"
+	})
+}

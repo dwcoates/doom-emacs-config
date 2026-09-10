@@ -1834,6 +1834,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           durationMs,
           trigger: "manual",
           atMs: deps.nowMs(),
+          // THE SESSION'S OWN MODE, NOT THE THROWAWAY'S. The summarizing query
+          // above runs under `plan` and resumes the user's vendor session id,
+          // so the last `permissionMode` the transcript states is `plan` — and
+          // a resume restores the conversation's posture from that field. The
+          // summary line is the LAST record this compaction appends, so
+          // stating the session's own mode there is what keeps a revival from
+          // coming back in a mode nobody chose.
+          permissionMode: toVendorPermissionMode(permissionMode),
         }),
       );
       writeContextCut(

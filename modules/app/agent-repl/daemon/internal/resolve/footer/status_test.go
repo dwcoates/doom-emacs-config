@@ -868,3 +868,50 @@ func TestTheContextCutClearsCompacting(t *testing.T) {
 		t.Fatalf("want no compacting sub-status once the cut ended the compaction")
 	}
 }
+
+// TestAParkedSessionWithADeadLinkIsIdleAndNeverDisconnected is the footer half
+// of "A PARKED SESSION IS IDLE, NOT BROKEN" (resolve/sidebar/status.go), whose
+// `linkArm` promises to mirror the disconnected step below fact for fact.
+//
+// Measured in the playtest world (05-tab-arms-lifecycle/15-arm-hibernated): the
+// strip read `disconnected · dead` after the idle sweep parked a settled
+// session, and because the webapp's composer gate IS that word
+// (webapp/src/main.ts — a `disconnected` status closes the composer) the page
+// could not submit the prompt that revives the session.
+func TestAParkedSessionWithADeadLinkIsIdleAndNeverDisconnected(t *testing.T) {
+	// Arrange: a session that served, then the sweep's stand-down — the link
+	// dies inside KillSession and the park record lands after it.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Act
+	h.r.SetParked(testWS, true)
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle: the daemon put this route down itself", got)
+	}
+}
+
+// TestAParkThatWasRevivedNoLongerMasksARealDeath is the park's release. The
+// session watcher latches a dead link and publishes nothing further on it, so
+// the next link state a workspace sees belongs to the shim the reviving prompt
+// spawned — after which an ordinary death must read `dead` again rather than
+// hiding behind a park nothing lifted.
+func TestAParkThatWasRevivedNoLongerMasksARealDeath(t *testing.T) {
+	// Arrange: parked, then revived — the revival's own link attaches.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+	h.r.SetParked(testWS, true)
+	connected(h)
+
+	// Act: the revived shim dies for real.
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetDead() == nil {
+		t.Fatalf("want disconnected · dead: the park was lifted by the revival")
+	}
+}

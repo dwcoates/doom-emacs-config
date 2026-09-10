@@ -154,6 +154,10 @@ type wsState struct {
 	link shimclient.LinkState
 	// linkSeen reports whether any link state has been observed.
 	linkSeen bool
+	// parked reports the idle sweep's deliberate stand-down, the same fact the
+	// footer and the roster key their idle arms on. It is cleared by the next
+	// link state of any kind, which belongs to the revival's own spawn.
+	parked bool
 	// hostStream and webStream are the other two hops of connectivity truth
 	// (daemon.md invariant 11): the WatchHostWorkspace and WatchWebWorkspace
 	// streams' liveness, stated by the server on every open and close edge.
