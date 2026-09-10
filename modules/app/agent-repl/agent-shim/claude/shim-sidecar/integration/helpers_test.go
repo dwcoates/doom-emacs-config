@@ -779,13 +779,21 @@ func (p *sidecarProc) Kill() {
 // A Connect client over a UNIX domain socket.
 // ---------------------------------------------------------------------------
 
+// udsHTTPClient answers a Connect client's http.Client over one unix socket.
+//
+// The transport is WRAPPED, and the wrapper is not optional: connect-go
+// withdraws a declared-length request body the moment `Do` returns, which a
+// peer that answers on the request HEAD turns into a request contradicting its
+// own Content-Length and a connection the transport tears down under every
+// other call riding it. See {@link ownedRequestBody} for the whole defect and
+// the trace that proves it.
 func udsHTTPClient(socket string) *http.Client {
 	return &http.Client{
-		Transport: &http.Transport{
+		Transport: &ownedRequestBody{next: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 			},
-		},
+		}},
 	}
 }
 
