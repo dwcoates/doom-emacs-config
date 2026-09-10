@@ -428,8 +428,10 @@ func TestPlaytestQuestionFamily(t *testing.T) {
 			open: "A FOURTH question card, `Should I keep going?`, with its options and submit button: " +
 				"nothing has been clicked.",
 			settled: "The fourth card RESOLVED WITHOUT AN ANSWER: a muted badge says the question went " +
-				"unanswered, and the turn's own terminal beneath it says it was INTERRUPTED rather than " +
-				"concluded.",
+				"unanswered. Beneath it the turn CONCLUDED with the agent's own prose (`Nobody answered " +
+				"the question.`) rather than reading interrupted -- the denial the teardown handed the " +
+				"gate is what the agent concluded on, which is the terminal the vendor's own recording " +
+				"of this scenario carries.",
 		},
 	}
 
@@ -452,25 +454,46 @@ func TestPlaytestQuestionFamily(t *testing.T) {
 			row.open)
 
 		act := "the answer picked on the card and its submit button clicked"
+		var arm string
 		if row.answer != nil {
 			row.answer(t, s, sel)
-			s.awaitInPageFor(t, playtestAskBound, "the question card to settle answered",
-				sel+`.querySelectorAll('.q-verdict').length === `+fmt.Sprint(row.blocks)+` && `+sel+`.querySelector('[data-state="answered"]') !== null`)
-			s.awaitArm(t, s.Name, "the turn to conclude", emGHISettledArms...)
+			// TWO STEPS, NOT A CONJUNCTION, and each guarded against the row
+			// being momentarily absent: a single predicate that could fail
+			// three ways reports none of them, which is how a settled card
+			// that read right in the page still timed out here once.
+			s.awaitInPageFor(t, playtestAskBound, "the question card to draw its verdict line(s)",
+				sel+` && `+sel+`.querySelectorAll('.q-verdict').length === `+fmt.Sprint(row.blocks))
+			s.awaitInPageFor(t, playtestAskBound, "the question card to read answered",
+				sel+` && `+sel+`.querySelector('[data-state="answered"]') !== null`)
+			arm = s.awaitArm(t, s.Name, "the turn to conclude", emGHISettledArms...)
 		} else {
-			// The one interrupting act Emacs has: a forced restart
-			// (EMACS-LAYER-SPEC.md area G). Nobody answers, so the card can
-			// only EXPIRE.
-			act = "nothing answered; the turn interrupted through `agent-repl-restart-workspace` with FORCE"
+			// NOBODY ANSWERS, so the ask can only be released by a teardown,
+			// and Emacs's one interrupting act is a FORCED restart
+			// (EMACS-LAYER-SPEC.md area G, "There is no interrupt command").
+			//
+			// THE TURN THEN CONCLUDES RATHER THAN READING INTERRUPTED, and
+			// that is this scenario's own shape rather than a defect. The
+			// teardown resolves the pending gate as DENIED (shim.md,
+			// "PERMISSION-CALLBACK LIVENESS"); the fake's `ask-unanswered`
+			// takes that denial as the batch ending unanswered and CONCLUDES
+			// with "Nobody answered the question."; and the vendor's own
+			// captured recording for this scenario ends `success.completed`
+			// too (shim `testdata/captures/MANIFEST.md`, row
+			// `question-unanswered`). So what is asserted is that the arm
+			// SETTLES, and the arm it settles on is read and written into the
+			// manifest rather than guessed at -- which is the open question
+			// recorded above `TestQuestionUnanswered` in
+			// `questions_e2e_test.go` resolving, measured here as `:done`.
+			act = "nothing answered; the turn torn down through `agent-repl-restart-workspace` with FORCE"
 			s.E.Eval(`(agent-repl-restart-workspace t ` + elispString(s.Name) + `)`)
-			s.awaitArm(t, s.Name, "the roster arm to settle interrupted", ":interrupted")
+			arm = s.awaitArm(t, s.Name, "the roster arm to settle after the teardown", emGHISettledArms...)
 			s.awaitInPageFor(t, playtestAskBound, "the question card to settle expired",
 				sel+`.querySelector('.q-verdict[data-arm="expired"]') !== null`)
 		}
 		verdicts := s.readInPage(t, "the verdict lines",
 			`Array.prototype.map.call(`+sel+`.querySelectorAll('.q-verdict'), function (v) { return v.textContent; }).join(" || ")`)
 		p.capture(strings.TrimPrefix(row.prompt, "!")+"-settled", act,
-			fmt.Sprintf("the card settled %s with %d `.q-verdict` line(s) reading %q, and the roster arm settled", row.settledArm, row.blocks, verdicts),
+			fmt.Sprintf("the card settled %s with %d `.q-verdict` line(s) reading %q, and the roster arm settled %s", row.settledArm, row.blocks, verdicts, arm),
 			row.settled)
 	}
 }
@@ -505,10 +528,23 @@ func TestPlaytestPermissionModePicker(t *testing.T) {
 		"The topbar carries a permission-mode button reading `default` beside the model selector. No "+
 			"options list is open.")
 
-	s.clickInPage(t, "the mode button", ".topbar-mode")
-	s.awaitInPage(t, "the mode reveal to open with the served options",
-		`document.querySelector('[data-reveal="mode"]') !== null && `+
-			`document.querySelectorAll('[data-reveal="mode"] [data-mode-option]').length === 6`)
+	// THE BUTTON IS WHAT A READER CLICKS. The wrap (`.topbar-mode`) carries the
+	// toggle and the reveal anchor, and the button is inside it, so a click on
+	// the button reaches the toggle by bubbling -- which is the path a real
+	// pointer takes and the one the webapp layer's own model-selector scenario
+	// drives.
+	s.clickInPage(t, "the mode button", ".topbar-mode-button")
+	// The reveal layer, the panel and the options are each their own step, so a
+	// failure names WHICH of them did not happen instead of reporting a
+	// conjunction that could have failed three ways.
+	t.Logf("after the click: %s reveal layer(s), %s open reveal(s), %s reveal anchor(s), %s mode option(s)",
+		s.readInPage(t, "the reveal layer count", `document.querySelectorAll('.topbar-reveal-layer').length`),
+		s.readInPage(t, "the open reveal count", `document.querySelectorAll('[data-reveal]').length`),
+		s.readInPage(t, "the reveal anchor count", `document.querySelectorAll('[data-reveal-anchor]').length`),
+		s.readInPage(t, "the mode option count", `document.querySelectorAll('[data-mode-option]').length`))
+	s.awaitInPage(t, "the mode reveal to open", `document.querySelector('[data-reveal="mode"]') !== null`)
+	s.awaitInPage(t, "the mode reveal to carry the six served modes",
+		`document.querySelectorAll('[data-reveal="mode"] [data-mode-option]').length === 6`)
 	options := s.readInPage(t, "the served modes",
 		`Array.prototype.map.call(document.querySelectorAll('[data-reveal="mode"] [data-mode-option]'), function (o) { return o.getAttribute("data-mode-option"); }).join(",")`)
 	p.capture("mode-picker-open", "the mode button clicked",
