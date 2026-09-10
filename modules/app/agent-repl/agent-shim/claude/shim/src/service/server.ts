@@ -165,9 +165,8 @@ async function cutWhenQuiet(socket: Socket, budgetMs: number): Promise<void> {
   }
   clearTimeout(budget);
   if (spent) {
-    LOGGER.log(
+    LOGGER.error(
       {
-        level: "error",
         budget_ms: budgetMs,
         pending_bytes: socket.writableLength,
         bytes_written: socket.bytesWritten,
@@ -231,11 +230,11 @@ export function probeSocket(socketPath: string): Promise<SocketProbe> {
 function unlinkSocketFile(socketPath: string, why: string): void {
   try {
     unlinkSync(socketPath);
-    LOGGER.log({ socket_path: socketPath, why }, `removed the shim socket file (${why})`);
+    LOGGER.debug({ socket_path: socketPath, why }, `removed the shim socket file (${why})`);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-    LOGGER.log(
-      { level: "error", socket_path: socketPath, why, cause: err },
+    LOGGER.error(
+      { socket_path: socketPath, why, cause: err },
       "could not remove the shim socket file",
     );
     throw err;
@@ -254,8 +253,8 @@ export async function serve(
 ): Promise<ShimServer> {
   const verdict = await probeSocket(socketPath);
   if (verdict === "live") {
-    LOGGER.log(
-      { level: "error", socket_path: socketPath },
+    LOGGER.error(
+      { socket_path: socketPath },
       "refusing to bind: another shim is already listening on this socket",
     );
     throw new Error(
@@ -318,11 +317,11 @@ export async function serve(
   const h1 = http.createServer(handler);
   const h2 = http2.createServer(handler);
   h1.on("clientError", (err, socket) => {
-    LOGGER.log({ level: "warn", cause: err }, "an HTTP/1.1 client connection failed before a request was read");
+    LOGGER.warn({ cause: err }, "an HTTP/1.1 client connection failed before a request was read");
     socket.destroy();
   });
   h2.on("sessionError", (err) => {
-    LOGGER.log({ level: "warn", cause: err }, "an h2c session failed");
+    LOGGER.warn({ cause: err }, "an h2c session failed");
   });
   // EVERY STREAM THIS SERVER RESETS SAYS SO. Without this the shim was silent
   // about its own h2 layer cutting a stream: the daemon recorded "a standing
@@ -333,8 +332,8 @@ export async function serve(
   // recorded.
   h2.on("session", (session) => {
     session.on("frameError", (type, code, id) => {
-      LOGGER.log(
-        { level: "error", frame_type: type, error_code: code, stream_id: id },
+      LOGGER.error(
+        { frame_type: type, error_code: code, stream_id: id },
         "an h2c frame could not be sent",
       );
     });
@@ -342,8 +341,8 @@ export async function serve(
       const path = headers[":path"];
       stream.once("close", () => {
         if (stream.rstCode === undefined || stream.rstCode === 0) return;
-        LOGGER.log(
-          { level: "error", stream_id: stream.id, rst_code: stream.rstCode, path },
+        LOGGER.error(
+          { stream_id: stream.id, rst_code: stream.rstCode, path },
           "an h2c stream ended with a reset code; whatever it was serving did not finish",
         );
       });
@@ -359,7 +358,7 @@ export async function serve(
 
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error): void => {
-      LOGGER.log({ level: "error", socket_path: socketPath, cause: err }, "the shim listener failed to bind");
+      LOGGER.error({ socket_path: socketPath, cause: err }, "the shim listener failed to bind");
       reject(err);
     };
     listener.once("error", onError);
@@ -372,10 +371,10 @@ export async function serve(
   // A listener error AFTER bind is not a bind failure, and an unhandled 'error'
   // on a server is an uncaught exception that would kill the shim.
   listener.on("error", (err: Error) => {
-    LOGGER.log({ level: "error", socket_path: socketPath, cause: err }, "the shim listener raised an error while serving");
+    LOGGER.error({ socket_path: socketPath, cause: err }, "the shim listener raised an error while serving");
   });
 
-  LOGGER.log({ socket_path: socketPath, probe: verdict }, "shim.v1 listener bound and accepting");
+  LOGGER.info({ socket_path: socketPath, probe: verdict }, "shim.v1 listener bound and accepting");
 
   return {
     socketPath,
@@ -384,8 +383,8 @@ export async function serve(
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
           quietWaiters.delete(settle);
-          LOGGER.log(
-            { level: "error", socket_path: socketPath, in_flight: inFlight, budget_ms: budgetMs },
+          LOGGER.error(
+            { socket_path: socketPath, in_flight: inFlight, budget_ms: budgetMs },
             "gave up waiting for the wire to go quiet; ending the process with responses still open",
           );
           resolve();
@@ -413,7 +412,7 @@ export async function serve(
       h2.close();
       h1.close();
       unlinkSocketFile(socketPath, "listener closed");
-      LOGGER.log({ socket_path: socketPath }, "shim.v1 listener closed and its socket removed");
+      LOGGER.info({ socket_path: socketPath }, "shim.v1 listener closed and its socket removed");
     },
   };
 }
@@ -535,8 +534,8 @@ export function flushStreamHead(request: StreamableRequest, response: Streamable
   response.writeHead = ((...args: unknown[]): unknown => {
     const encoding = encodingAnnouncedBy(args);
     if (encoding !== undefined && encoding !== "identity") {
-      LOGGER.log(
-        { level: "error", content_type: contentType, content_encoding: encoding },
+      LOGGER.error(
+        { content_type: contentType, content_encoding: encoding },
         "the adapter tried to announce a response encoding AFTER the stream head was flushed; the client cannot be told, so this stream would be undecodable",
       );
     }

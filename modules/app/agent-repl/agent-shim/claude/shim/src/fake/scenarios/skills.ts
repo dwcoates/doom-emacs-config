@@ -46,7 +46,7 @@ const SKILL = scenario({
   arms: "AgentSkillUse.start + AgentSkillUseSuccess settled on the document, with the allowances",
   run(ctx) {
     const { skill, skillArgs } = skillInvocationOf(ctx.args);
-    ctx.log({ turn: ctx.turn, branch: "skill", skill, skill_args: skillArgs }, "fake skill-invocation turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "skill", skill, skill_args: skillArgs }, "fake skill-invocation turn");
     const call = ctx.toolUse("Skill", { skill, args: skillArgs });
     ctx.toolResult(call, `Launching skill: ${skill}`, {
       success: true,
@@ -80,7 +80,7 @@ const SKILL_FAILURE = scenario({
   writes: "the tool_use line, the error tool_result line, the closing text line",
   arms: "AgentSkillUse.start + AgentSkillUseFailure",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "skill-fail" }, "fake failing-skill turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "skill-fail" }, "fake failing-skill turn");
     const call = ctx.toolUse("Skill", { skill: "absent-skill" });
     ctx.toolResult(call, "Error: no such skill: absent-skill", { success: false, commandName: "absent-skill" }, {
       isError: true,
@@ -96,7 +96,7 @@ const MEMORY_INJECTED = scenario({
   writes: "a `nested_memory` attachment line and a `file` attachment line carrying a memory file's body",
   arms: "AgentContextInjected.injected=memory",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "memory" }, "fake memory-injection turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "memory" }, "fake memory-injection turn");
     ctx.attachment({
       type: "nested_memory",
       path: `${ctx.cwd}/CLAUDE.md`,
@@ -134,7 +134,7 @@ const SKILLS_INJECTED = scenario({
   writes: "`invoked_skills`, `dynamic_skill` and `skill_listing` attachment lines",
   arms: "AgentContextInjected.injected=skills",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "skills-injected" }, "fake skill-injection turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "skills-injected" }, "fake skill-injection turn");
     ctx.attachment({
       type: "invoked_skills",
       skills: [

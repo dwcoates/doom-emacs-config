@@ -57,7 +57,7 @@ async function ask(ctx: ScenarioContext, questions: FakeQuestion[]): Promise<{
     decision?.behavior === "allow" && decision.updatedInput !== undefined
       ? ((decision.updatedInput as { answers?: Record<string, unknown> }).answers ?? {})
       : {};
-  ctx.log({ answered: Object.keys(answers).length, behavior: decision?.behavior ?? "none" }, "fake question resolved");
+  ctx.log.debug({ answered: Object.keys(answers).length, behavior: decision?.behavior ?? "none" }, "fake question resolved");
   return { call, answers };
 }
 
@@ -68,7 +68,7 @@ const ASK_SINGLE = scenario({
   writes: "the tool_use line, the tool_result line carrying `questions` and the `answers` map, the closing text line",
   arms: "AgentQuestion.start choices=single_select + AgentQuestionSuccess.outcome=answered",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "ask-single" }, "fake single-select question turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "ask-single" }, "fake single-select question turn");
     const questions: FakeQuestion[] = [
       {
         question: "How do you want the new branch set up?",
@@ -97,7 +97,7 @@ const ASK_MULTI = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentQuestion.choices=multi_select alongside single_select in one batch",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "ask-multi" }, "fake multi-select question turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "ask-multi" }, "fake multi-select question turn");
     const questions: FakeQuestion[] = [
       {
         question: "Which suites should run?",
@@ -134,7 +134,7 @@ const ASK_FREE_TEXT = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentQuestionAnswers carrying free text — the residue rule's subject",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "ask-free" }, "fake free-text question turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "ask-free" }, "fake free-text question turn");
     const questions: FakeQuestion[] = [
       {
         question: "Which model should the sweep use?",
@@ -168,7 +168,7 @@ const ASK_UNANSWERED = scenario({
   writes: "the tool_use line, the error tool_result line, the closing text line",
   arms: "AgentQuestionSuccess.outcome=unanswered",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "ask-unanswered" }, "fake unanswered-question turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "ask-unanswered" }, "fake unanswered-question turn");
     const questions: FakeQuestion[] = [
       {
         question: "Should I keep going?",
@@ -193,7 +193,7 @@ const ASK_UNANSWERED = scenario({
       },
     );
     const message = decision?.behavior === "deny" ? decision.message : "The question went unanswered.";
-    ctx.log({ behavior: decision?.behavior ?? "none" }, "fake question ended unanswered");
+    ctx.log.debug({ behavior: decision?.behavior ?? "none" }, "fake question ended unanswered");
     ctx.toolResult(call, `Error: ${message}`, { questions, answers: {} }, { isError: true });
     conclude(ctx, "Nobody answered the question.");
   },

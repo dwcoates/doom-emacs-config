@@ -93,7 +93,7 @@ export function clearedCutEntry(
   pending: PendingClear,
   vendorSessionId: string,
 ): PersistEntry {
-  LOGGER.log(
+  LOGGER.info(
     { uuid: pending.vendorUuid, vendor_session_id: vendorSessionId },
     "the context was cleared; recording the cut keyed on the session it rotated to",
   );
@@ -149,7 +149,7 @@ export function compactionEntry(
   pending: PendingCompaction,
   summary: string,
 ): PersistEntry {
-  LOGGER.log(
+  LOGGER.info(
     { tokens_before: pending.tokensBefore.toString(), tokens_after: pending.tokensAfter.toString() },
     "the conversation was compacted; recording the cut with its summary",
   );
@@ -259,8 +259,8 @@ function rateLimitStatus(
     case "rejected":
       return { case: "rejected", value: create(conversationv1.SessionRateLimitRejectedSchema, {}) };
     default:
-      LOGGER.log(
-        { level: "warn", status: String(value) },
+      LOGGER.warn(
+        { status: String(value) },
         "the vendor named a rate-limit status this contract does not spell; the arm stays unset",
       );
       return { case: undefined };
@@ -302,11 +302,11 @@ function rateLimitType(value: unknown): conversationv1.SessionRateLimitType | un
     // UNSET, never guessed: a status attributed to the wrong window would tell
     // a user their weekly allowance is nearly spent when it was the five-hour.
     if (value !== undefined) {
-      LOGGER.log(
+      LOGGER.warn(
         // JSON, not String: the vendor sends `unknown` here, and the one shape
         // worth logging — an object this contract did not expect — is exactly
         // the shape `String` flattens to "[object Object]".
-        { level: "warn", rate_limit_type: JSON.stringify(value) ?? typeof value },
+        { rate_limit_type: JSON.stringify(value) ?? typeof value },
         "the vendor named a rate-limit window this contract does not spell; the field stays unset",
       );
     }
@@ -412,7 +412,7 @@ export function convertSessionMessage(
   const subtype = typeof record.subtype === "string" ? record.subtype : undefined;
 
   if (message.type === "rate_limit_event") {
-    LOGGER.log({ uuid }, "the vendor stated the account's live rate-limit status");
+    LOGGER.debug({ uuid }, "the vendor stated the account's live rate-limit status");
     return [
       sessionEntry(
         context,
@@ -426,7 +426,7 @@ export function convertSessionMessage(
   if (message.type === "conversation_reset") {
     const next = typeof record.new_conversation_id === "string" ? record.new_conversation_id : "";
     const previous = typeof record.session_id === "string" ? record.session_id : "";
-    LOGGER.log({ previous, next }, "the vendor rotated the session's identity and cleared the context");
+    LOGGER.info({ previous, next }, "the vendor rotated the session's identity and cleared the context");
     const rotated = create(conversationv1.SessionUpdateSchema, {
       update: {
         case: "identityRotated",
@@ -440,8 +440,8 @@ export function convertSessionMessage(
     // clear rotated to, which this record does not name; `PendingClear` says
     // why, and the init that follows releases it.
     if (clearSink === undefined) {
-      LOGGER.log(
-        { level: "warn", uuid },
+      LOGGER.warn(
+        { uuid },
         "a conversation reset arrived with nowhere to hold it until the init names the session it rotated to",
       );
     } else {
@@ -481,7 +481,7 @@ export function convertSessionMessage(
           ),
         );
       }
-      LOGGER.log(
+      LOGGER.info(
         { uuid, mcp_servers: servers.length, fast_mode: fastMode },
         "the session opened; recording its MCP and fast-mode facts",
       );
@@ -499,7 +499,7 @@ export function convertSessionMessage(
       // it. What stays here is the SUCCESS cut, which needs the boundary's real
       // figures and the summary that follows — facts only the fold sees.
       if (status === "compacting") {
-        LOGGER.log({ uuid }, "the vendor began compacting the context");
+        LOGGER.info({ uuid }, "the vendor began compacting the context");
         return [
           sessionEntry(
             context,
@@ -531,13 +531,13 @@ export function convertSessionMessage(
         durationMs: typeof duration === "number" ? BigInt(Math.trunc(duration)) : 0n,
       };
       if (compactionSink === undefined) {
-        LOGGER.log(
-          { level: "warn", uuid },
+        LOGGER.warn(
+          { uuid },
           "a compaction boundary arrived with nowhere to hold it until its summary lands",
         );
         return [];
       }
-      LOGGER.log({ uuid }, "a compaction boundary arrived; holding it until its summary lands");
+      LOGGER.debug({ uuid }, "a compaction boundary arrived; holding it until its summary lands");
       compactionSink(pending);
       return [];
     }
@@ -553,9 +553,8 @@ export function convertSessionMessage(
       // NOTHING ON THE WIRE, BY DESIGN: a retried request did not end the turn
       // and did not fail it, so there is no conversation fact yet. The evidence
       // that matters lands as the turn's own terminal if the retries run out.
-      LOGGER.log(
+      LOGGER.warn(
         {
-          level: "warn",
           uuid,
           attempt: record.attempt,
           max_retries: record.max_retries,
@@ -570,7 +569,7 @@ export function convertSessionMessage(
       // session command before it reaches the shim, so this is output for a
       // command this system did not send, and it has no unit identity to upsert
       // under. Understood and deliberately not carried: vendor-specific residue.
-      LOGGER.log({ uuid }, "the vendor answered a local slash command; recorded as vendor-specific residue");
+      LOGGER.debug({ uuid }, "the vendor answered a local slash command; recorded as vendor-specific residue");
       return [
         residueEntry(
           context,
@@ -581,8 +580,8 @@ export function convertSessionMessage(
       ];
 
     default:
-      LOGGER.log(
-        { level: "warn", uuid, type: message.type, subtype },
+      LOGGER.warn(
+        { uuid, type: message.type, subtype },
         "no session converter owns this vendor record; recorded as vendor-specific residue",
       );
       return [

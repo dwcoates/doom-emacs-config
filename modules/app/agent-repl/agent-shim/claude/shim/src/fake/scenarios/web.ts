@@ -16,7 +16,7 @@ const WEB_FETCH = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentWebFetch.start + AgentWebFetchSuccess",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "web-fetch" }, "fake web-fetch turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "web-fetch" }, "fake web-fetch turn");
     const call = ctx.toolUse("WebFetch", {
       url: "https://example.com/docs",
       prompt: "What does this page document?",
@@ -40,7 +40,7 @@ const WEB_FETCH_REDIRECT = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentWebFetchSuccess carrying a non-2xx status",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "web-fetch-redirect" }, "fake redirected web-fetch turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "web-fetch-redirect" }, "fake redirected web-fetch turn");
     const call = ctx.toolUse("WebFetch", { url: "https://api.example.com/methods", prompt: "List the methods." });
     const body =
       "REDIRECT DETECTED: The URL redirects to a different host.\n\n" +
@@ -65,7 +65,7 @@ const WEB_SEARCH = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentWebSearch.start + AgentWebSearchSuccess with entry=link AND entry=note",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "web-search" }, "fake web-search turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "web-search" }, "fake web-search turn");
     const call = ctx.toolUse("WebSearch", { query: "example api reference" });
     ctx.toolResult(call, "Found two pages.", {
       query: "example api reference",

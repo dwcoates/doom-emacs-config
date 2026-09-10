@@ -98,8 +98,8 @@ export class KeepaliveRewind {
   obligation(): RewindObligation | undefined {
     if (this.keepaliveTurns === 0) return undefined;
     if (this.anchor === undefined) {
-      LOGGER.log(
-        { level: "warn", keepalive_turns: this.keepaliveTurns },
+      LOGGER.warn(
+        { keepalive_turns: this.keepaliveTurns },
         "keep-alive turns ran before any real record: no rewind anchor exists, so the next real prompt proceeds without a rewind",
       );
       return undefined;
@@ -162,7 +162,7 @@ export class KeepaliveCadence {
       }
       this.beat();
     }, this.intervalMs);
-    LOGGER.log({ interval_ms: this.intervalMs }, "keep-alive cadence started");
+    LOGGER.debug({ interval_ms: this.intervalMs }, "keep-alive cadence started");
   }
 
   /** A turn is in flight; hold the beat. */
@@ -180,6 +180,6 @@ export class KeepaliveCadence {
     if (this.handle === undefined) return;
     this.scheduler.clearInterval(this.handle);
     this.handle = undefined;
-    LOGGER.log({}, "keep-alive cadence stopped");
+    LOGGER.debug({}, "keep-alive cadence stopped");
   }
 }

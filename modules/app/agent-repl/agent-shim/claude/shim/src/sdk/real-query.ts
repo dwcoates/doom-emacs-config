@@ -130,7 +130,7 @@ export async function createRealQuery(
   spec: RealQuerySpec,
   prompt: AsyncIterable<SdkUserMessage>,
 ): Promise<QueryLike> {
-  LOGGER.log(
+  LOGGER.debug(
     {
       workspace_dir: spec.cwd,
       binding: spec.binding.kind,

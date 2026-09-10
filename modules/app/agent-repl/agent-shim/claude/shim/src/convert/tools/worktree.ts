@@ -36,8 +36,8 @@ const EXIT = "ExitWorktree";
 function actNameOf(call: PendingCall): "enter" | "exit" | undefined {
   if (call.toolName === ENTER) return "enter";
   if (call.toolName === EXIT) return "exit";
-  LOGGER.log(
-    { level: "error", tool: call.toolName, tool_use_id: call.toolUseId },
+  LOGGER.warn(
+    { tool: call.toolName, tool_use_id: call.toolUseId },
     "a worktree unit was built from a tool name that is neither the enter nor the exit call",
   );
   return undefined;
@@ -58,8 +58,8 @@ function exitActionOf(call: PendingCall): conversationv1.AgentWorktreeExit["acti
     return { case: "keep", value: create(conversationv1.AgentWorktreeExitKeepSchema, {}) };
   }
   // Defaulting to either arm would state a request the agent never made.
-  LOGGER.log(
-    { level: "warn", tool_use_id: call.toolUseId, action },
+  LOGGER.warn(
+    { tool_use_id: call.toolUseId, action },
     "a worktree exit named no recognized action; what was asked for the tree is left unstated",
   );
   return { case: undefined };
@@ -85,8 +85,8 @@ function exitOutcomeOf(
   if (action === "keep") {
     return { case: "kept", value: create(conversationv1.AgentWorktreeKeptSchema, {}) };
   }
-  LOGGER.log(
-    { level: "warn", tool_use_id: toolUseId, action },
+  LOGGER.warn(
+    { tool_use_id: toolUseId, action },
     "a settled worktree exit named no recognized action; what became of the tree is left unstated",
   );
   return { case: undefined };
@@ -140,8 +140,8 @@ export const worktreeConverter: ToolConverter = {
     }
     const act = actNameOf(call);
     if (act === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a settled worktree call names no act; no success frame is produced",
       );
       return undefined;
@@ -151,8 +151,8 @@ export const worktreeConverter: ToolConverter = {
     if (output === undefined || path === undefined) {
       // The tree's path is the whole subject of both arms — the divider names
       // it, and a frame without it says the session moved somewhere unnamed.
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId, act },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId, act },
         "a settled worktree call named no worktree path; no success frame is produced",
       );
       return undefined;

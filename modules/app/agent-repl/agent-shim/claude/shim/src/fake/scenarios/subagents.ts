@@ -78,7 +78,7 @@ const SUBAGENT_SYNC = scenario({
     "sidechain transcript), plus the main transcript's tool_use and tool_result lines",
   arms: "AgentSubagent.start + AgentSubagentUpdate (nested activity) + AgentSubagentSuccess with full usage",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "subagent-sync" }, "fake synchronous-subagent turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-sync" }, "fake synchronous-subagent turn");
     const description = ctx.args === "" ? "Explore the module" : ctx.args;
     const agentPrompt = "Read the module's AGENTS.md and report the test command.";
     const call = ctx.toolUse("Agent", {
@@ -143,7 +143,7 @@ const SUBAGENT_DETACHED = scenario({
     "`<spool-root>/<slug>/<session>/tasks/a<hex>.output` written as AGENT JSONL, and the main transcript's lines",
   arms: "AgentSubagent detached_work + AgentSubagentSuccess.usage=total_only from the notification",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "subagent-detached" }, "fake detached-subagent turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-detached" }, "fake detached-subagent turn");
     const description = ctx.args === "" ? "Pointless background sweep" : ctx.args;
     const agentPrompt = "Do the sweep and report.";
     const call = ctx.toolUse("Agent", {
@@ -229,7 +229,7 @@ const SUBAGENT_DETACHED_LIVE = scenario({
     "AgentSubagent detached_work left live, an AgentPermission raised UNDER the subagent, and " +
     "AgentSubagentFailure.cause=stopped_by_user when the stop lands",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "subagent-detached-live" }, "fake LIVE detached-subagent turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-detached-live" }, "fake LIVE detached-subagent turn");
     const description = "A sweep that keeps running";
     const agentPrompt = "Sweep until told to stop.";
     const call = ctx.toolUse("Agent", {
@@ -290,7 +290,7 @@ const SUBAGENT_DETACHED_UTTERANCE = scenario({
     "AgentSubagent detached_work left live; the utterance itself proves the router keeps a live subagent's prose " +
     "OUT of the top-level feed rather than adding a new arm",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "subagent-detached-utterance" }, "fake mid-flight detached-subagent utterance turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-detached-utterance" }, "fake mid-flight detached-subagent utterance turn");
     const description = "A sweep that talks while it works";
     const agentPrompt = "Sweep and narrate as you go.";
     const call = ctx.toolUse("Agent", {
@@ -353,7 +353,7 @@ const SUBAGENT_FAILED = scenario({
   writes: "the agent's `.meta.json` and transcript, its spool, and the main transcript's lines",
   arms: "AgentSubagentFailure",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "subagent-failed" }, "fake failing detached-subagent turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-failed" }, "fake failing detached-subagent turn");
     const call = ctx.toolUse("Agent", {
       description: "A sweep that will fail",
       prompt: "Fail.",
@@ -417,7 +417,7 @@ const CANCEL_ALL = scenario({
   writes: "both agents' `.meta.json` and transcripts, the shell's spool, and the main transcript's lines",
   arms: "the fan-wide cancel: AgentSubagentFailure.cause=stopped_by_user per item, plus the agents_killed record",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "cancel-all" }, "fake fan-wide-cancel setup turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "cancel-all" }, "fake fan-wide-cancel setup turn");
     for (const description of ["Fan item one", "Fan item two"]) {
       const call = ctx.toolUse("Agent", {
         description,
@@ -486,7 +486,7 @@ const USAGE_HISTORICAL = scenario({
   writes: "the nested subagent's `agent-<id>.meta.json` and `agent-<id>.jsonl` carrying one untimed assistant record, plus the main turn's ordinary lines",
   arms: "ungrounded — see MANIFEST.md; the usage sub-fields (cache_creation split, server_tool_use, service_tier, speed, inference_geo) are the ones a session-usage aggregation would need to attribute to an untimed nested actor",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "usage-historical" }, "fake INVENTED nested-subagent historical-usage turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "usage-historical" }, "fake INVENTED nested-subagent historical-usage turn");
     const agentId = ctx.mintAgentTaskId();
     const writer = ctx.files.subagent(agentId);
     // `spawnDepth: 2` is what makes this agent NESTED — a subagent of a

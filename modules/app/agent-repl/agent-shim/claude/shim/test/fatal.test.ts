@@ -8,7 +8,7 @@
  */
 import { writeSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAIN_FATAL_OPERATION, MAIN_LIFECYCLE_OPERATION, logMainLifecycle, reportFatal } from "../src/fatal.js";
+import { MAIN_FATAL_OPERATION, MAIN_LIFECYCLE_LOGGER, MAIN_LIFECYCLE_OPERATION, reportFatal } from "../src/fatal.js";
 
 const mockedWriteSync = vi.mocked(writeSync);
 
@@ -31,10 +31,10 @@ beforeEach(() => {
   mockedWriteSync.mockClear();
 });
 
-describe("logMainLifecycle", () => {
-  it("emits at info under the lifecycle operation when the caller names no level", () => {
+describe("MAIN_LIFECYCLE_LOGGER", () => {
+  it("emits lifecycle records at the selected method's level", () => {
     // Arrange, Act.
-    logMainLifecycle({ outcome: "serving" }, "shim.v1 is being served");
+    MAIN_LIFECYCLE_LOGGER.info({ outcome: "serving" }, "shim.v1 is being served");
 
     // Assert.
     expect(onlyRecord()).toMatchObject({
@@ -45,9 +45,9 @@ describe("logMainLifecycle", () => {
     });
   });
 
-  it("lets the caller override the level to error", () => {
+  it("emits lifecycle errors through the error method", () => {
     // Arrange, Act.
-    logMainLifecycle({ level: "error", outcome: "exit_before_serving" }, "no listener yet");
+    MAIN_LIFECYCLE_LOGGER.error({ outcome: "exit_before_serving" }, "no listener yet");
 
     // Assert.
     expect(onlyRecord()).toMatchObject({ level: "error" });
@@ -136,7 +136,10 @@ describe("reportFatal when its logger itself fails", () => {
     vi.resetModules();
     vi.doMock("../src/log.js", () => ({
       bindLog: () => ({
-        log: (): void => {
+        debug: (): void => {},
+        info: (): void => {},
+        warn: (): void => {},
+        error: (): void => {
           throw thrown;
         },
         logVerbose: (): void => {},
