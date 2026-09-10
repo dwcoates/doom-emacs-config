@@ -36,7 +36,18 @@ const EmacsBinDir = "/Applications/Emacs.app/Contents/MacOS/bin"
 // Emacs.app rather than whatever is on PATH: a Homebrew emacsclient of a
 // different version can fail to speak to this server, and the failure reads as
 // "Emacs is not answering".
-var EmacsClientPath = filepath.Join(EmacsBinDir, "emacsclient")
+//
+// AGENT_REPL_REALTEST_EMACSCLIENT overrides it, and bin/realtest.sh exports the
+// client it used, so the script's refusals and the run's probes can never end
+// up talking to two different clients.
+var EmacsClientPath = envOr("AGENT_REPL_REALTEST_EMACSCLIENT", filepath.Join(EmacsBinDir, "emacsclient"))
+
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
 
 // EmacsAppBinary is the executable inside the bundle, for the launch method
 // that spawns it directly.
