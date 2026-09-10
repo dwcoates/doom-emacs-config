@@ -754,7 +754,7 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
     to a non-terminal end (not in `agent-repl--open-progress-terminal-phases`).
     The ladder is blessed host-native UX over Emacs-observable stages.
 
-### D. Composer and prompt submission (6)
+### D. Composer and prompt submission (7)
 
 20. **SubmitFromComposerYieldsAResponseRow** -- insert text into the input
     buffer, then **press RET** -- the response is visible in Emacs's own
@@ -779,6 +779,13 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
     four Emacs-local reactions.
 25. **HistoryRecallRestoresTheLastPrompt** -- `agent-repl--history-prev` --
     the input buffer holds the previously submitted text.
+25a. **AttachedImageMarkerNeverRidesAsWords** --
+    `agent-repl-input-attach-image` plus `agent-repl--image-insert-marker`,
+    then **press RET** -- the submitted `UserSaid` carries the typed words in
+    its text block and the file in an `ImageBlock{path, media_type}`, and the
+    `[image attached: ...]` marker appears in NEITHER. The marker is drawn so
+    the user can see the attachment; clipboard-image.el's own contract is that
+    nothing about the image rides the words.
 
 ### E. Roster paint, modeline and attention (5) -- Emacs-only
 

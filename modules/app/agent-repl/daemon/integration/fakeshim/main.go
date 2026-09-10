@@ -392,6 +392,18 @@ func (p *process) apply(line []byte) Reply {
 		p.srv.agents.publish(agentFrame{agent: agent, frame: f})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
+	case OpPushUserPrompt:
+		prompt := &conversationv1.AgentPrompt{}
+		if err := proto.Unmarshal(payload, prompt); err != nil {
+			return Reply{Error: fmt.Sprintf("fakeshim: decode user prompt: %v", err)}
+		}
+		agent := cmd.Agent
+		if agent == "" {
+			agent = prompt.GetAgent().GetValue()
+		}
+		p.srv.agents.publish(agentFrame{agent: agent, prompt: prompt})
+		return Reply{OK: true, Count: p.srv.agents.count()}
+
 	case OpPushBash:
 		b := &conversationv1.AgentBash{}
 		if err := proto.Unmarshal(payload, b); err != nil {

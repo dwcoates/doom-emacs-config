@@ -128,22 +128,46 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 	return "You"
 }
 
-// drawUserBlocks resolves what a person composed into drawable blocks: the
+// drawUserBlocks resolves what a person composed into drawable blocks, with
+// this resolver's own strip and image resolution.
+func (r *resolver) drawUserBlocks(s *wsState, content *conversationv1.UserContent) []*frontendv1.FeedUserPromptBlock {
+	return DrawUserBlocks(content, r.deps.StripSentinels, r.resolveImage, r.logger(s.id))
+}
+
+// DrawUserBlocks resolves what a person composed into drawable blocks: the
 // text with the host's sentinel spans STRIPPED (the full text stays on the
 // record), each image reference resolved to a src the webview can load, and
 // anything unmodeled named rather than dropped.
-func (r *resolver) drawUserBlocks(s *wsState, content *conversationv1.UserContent) []*frontendv1.FeedUserPromptBlock {
-	log := r.logger(s.id)
+//
+// IT IS EXPORTED BECAUSE TWO PRODUCERS DRAW THE SAME ROW. The resolver draws
+// a user prompt when history replays it; the prompt queue MIRRORS the same
+// row the instant a submission is accepted, so the person sees what they
+// said without waiting for the shim. Those are one row under one key, and
+// when they were two implementations they disagreed: the mirror dropped every
+// image block, so an attached image was invisible for the whole live session
+// and appeared only on the next page that replayed history. One function is
+// the only arrangement in which they cannot disagree again.
+func DrawUserBlocks(
+	content *conversationv1.UserContent,
+	strip func(string) string,
+	resolveImage ImageResolver,
+	log dlog.Logger,
+) []*frontendv1.FeedUserPromptBlock {
 	blocks := make([]*frontendv1.FeedUserPromptBlock, 0, len(content.GetBlocks()))
 	for _, block := range content.GetBlocks() {
 		switch b := block.GetBlock().(type) {
 		case *conversationv1.UserContentBlock_Text:
-			drawn := r.deps.StripSentinels(b.Text.GetText())
+			drawn := strip(b.Text.GetText())
+			// A block whose whole text was sentinel span is NOTHING TO DRAW,
+			// and an empty text block draws as an empty line in the bubble.
+			if drawn == "" {
+				continue
+			}
 			blocks = append(blocks, &frontendv1.FeedUserPromptBlock{
 				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: drawn}},
 			})
 		case *conversationv1.UserContentBlock_Image:
-			src, alt, err := r.resolveImage(b.Image)
+			src, alt, err := resolveImage(b.Image)
 			if err != nil {
 				log.Warn("daemon.feed.image_unresolved",
 					"an image reference could not be resolved to a drawable src; the block is drawn as unsupported",

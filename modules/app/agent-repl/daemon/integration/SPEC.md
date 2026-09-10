@@ -314,6 +314,15 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - findings draw rows in served order
 - unmodeled tool draws NO row and adds one topbar warning per distinct name
 
+### image_origin_test.go
+- an attached `ImageBlock{path}` draws as an image block with a src and the
+  file's own name as alt text -- never the `unsupported block: image`
+  placeholder a missing resolver produced
+- a GET of that src off the daemon's own listener answers the file's bytes
+  under the RECORD's media type
+- an id no conversation registered is 404: the origin serves only what a feed
+  already drew, so an arbitrary host path has no id a page could ask for
+
 ### footer_topbar_test.go
 - footer pushes are whole views, deduplicated (an identical frame yields no push)
 - every panel arrives populated on every push (agents/tasks/shells/monitors/crons)

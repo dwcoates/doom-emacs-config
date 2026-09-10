@@ -228,3 +228,38 @@ func TestDropBashStreamsForgetsTheBacklog(t *testing.T) {
 		t.Fatalf("the backlog after a drop = %v, want nothing replayed onto a redial", backlog)
 	}
 }
+
+// TestPushedFrameRendersTheAgentFrameArm covers the ordinary push: an agent
+// frame becomes the agent_frame arm of the history entry WatchAgent delivers.
+func TestPushedFrameRendersTheAgentFrameArm(t *testing.T) {
+	// Arrange.
+	pushed := agentFrame{agent: MainAgentID, frame: &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: MainAgentID},
+	}}
+
+	// Act.
+	entry := pushed.entry()
+
+	// Assert.
+	if entry.GetAgentFrame() == nil {
+		t.Fatalf("entry = %T, want the agent_frame arm", entry.GetEntry())
+	}
+}
+
+// TestPushedUserPromptRendersTheUserPromptArm covers the arm a prompt's own
+// content blocks reach the daemon on: a pushed prompt must NOT be wrapped as
+// an agent frame, or the feed never draws a prompt row for it.
+func TestPushedUserPromptRendersTheUserPromptArm(t *testing.T) {
+	// Arrange.
+	pushed := agentFrame{agent: MainAgentID, prompt: &conversationv1.AgentPrompt{
+		Id: &conversationv1.TurnId{Value: "turn-1"},
+	}}
+
+	// Act.
+	entry := pushed.entry()
+
+	// Assert.
+	if entry.GetUserPrompt().GetId().GetValue() != "turn-1" {
+		t.Fatalf("entry = %T, want the user_prompt arm carrying turn-1", entry.GetEntry())
+	}
+}

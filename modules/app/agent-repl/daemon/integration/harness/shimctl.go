@@ -360,6 +360,15 @@ func (s *ShimControl) PushAgentFrame(agent string, f *conversationv1.AgentFrame)
 	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Payload: encode(s.t, f)})
 }
 
+// PushUserPrompt delivers one DELIVERED PROMPT on the matching WatchAgent
+// stream — the history entry the vendor lays down when a turn's prompt is
+// delivered, and the only path by which a prompt's own content blocks reach
+// the feed resolver. An empty agent addresses the prompt's own recipient.
+func (s *ShimControl) PushUserPrompt(agent string, p *conversationv1.AgentPrompt) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "push_user_prompt", Agent: agent, Payload: encode(s.t, p)})
+}
+
 // PushBash delivers one bash frame on the detached shell's WatchBash stream.
 func (s *ShimControl) PushBash(work string, b *conversationv1.AgentBash) {
 	s.t.Helper()

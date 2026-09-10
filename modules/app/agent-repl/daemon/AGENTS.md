@@ -253,10 +253,15 @@ the queue's parked route read the orchestrator out of a forwarder for the same
 reason. The background loops — the drain sweep and the command-file ingress —
 start after the bindings, because each of them can push.
 
-The one collaborator with NO PRODUCER is the feed's image origin: nothing in
-the daemon serves an image reference as a fetchable `src`, so the resolver is
-wired with `feed.UnproducedImageResolver`, which refuses loudly and names the
-missing producer. `/todos` and `/mcp` have no producer either, and `/agents`
+The feed's image origin IS produced, by `internal/imageorigin` mounted at
+`/feed-images/`: `feed.PathImageResolver` registers a prompt's
+`ImageBlock{path}` with it and draws the origin's URL. Registering is the only
+way a path becomes servable, so the origin serves exactly the images some
+conversation carried. The SAME resolver is required by `promptqueue`, which
+mirrors the same row live -- both draws go through `feed.DrawUserBlocks`, and a
+mirror that drew fewer blocks than the resolver is what once made an attached
+image invisible for a whole live session. `/todos` and `/mcp` have no producer,
+and `/agents`
 and `/help` are ruled unproduced: `server.Panels` answers `/context` (the
 topbar resolver's context tree) and `/status` (the daemon's build stamp plus
 the resolver's spliced account/model/mode facts) and fails loudly for every

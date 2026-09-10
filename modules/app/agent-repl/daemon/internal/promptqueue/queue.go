@@ -105,6 +105,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs a shim client resolver")
 	case deps.Watcher == nil:
 		return nil, fmt.Errorf("the prompt queue needs a session watcher resolver")
+	case deps.ResolveImage == nil:
+		return nil, fmt.Errorf("the prompt queue needs an image resolver for the rows it mirrors")
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now

@@ -70,10 +70,27 @@ func (h *hub[T]) count() int {
 	return len(h.subs)
 }
 
-// agentFrame is one pushed frame addressed to an agent stream.
+// agentFrame is one pushed HISTORY ENTRY addressed to an agent stream. The
+// entry has two arms and the fake pushes both: an agent frame, and the user
+// prompt the vendor lays down when a turn's prompt is delivered. Modelled as
+// the two arms rather than as an opaque entry so a caller cannot push an
+// entry with no arm set at all.
 type agentFrame struct {
-	agent string
-	frame *conversationv1.AgentFrame
+	agent  string
+	frame  *conversationv1.AgentFrame
+	prompt *conversationv1.AgentPrompt
+}
+
+// entry renders the pushed arm as the history entry WatchAgent delivers.
+func (f agentFrame) entry() *conversationv1.HistoryEntry {
+	if f.prompt != nil {
+		return &conversationv1.HistoryEntry{
+			Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: f.prompt},
+		}
+	}
+	return &conversationv1.HistoryEntry{
+		Entry: &conversationv1.HistoryEntry_AgentFrame{AgentFrame: f.frame},
+	}
 }
 
 // bashFrame is one pushed frame addressed to a detached shell's stream.
@@ -543,7 +560,7 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 			if err := stream.Send(&shimv1.WatchAgentResponse{
 				Frame: &shimv1.WatchAgentResponse_Entry{Entry: &conversationv1.HistoryEntryAt{
 					At:    &conversationv1.HistoryPointer{Value: pointerAt(target, seq)},
-					Entry: &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_AgentFrame{AgentFrame: f.frame}},
+					Entry: f.entry(),
 				}},
 			}); err != nil {
 				return err
