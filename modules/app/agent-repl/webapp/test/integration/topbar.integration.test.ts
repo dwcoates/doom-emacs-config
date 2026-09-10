@@ -83,6 +83,34 @@ describe("the title and session line", () => {
     );
   });
 
+  // A LONG ACCOUNT ROOT IS THE ORDINARY CASE, not a stress case: the line the
+  // daemon composes is `<session id> · <account root> · <model>` and a checkout
+  // path is as long as the checkout is deep. Drawn `nowrap` inside a panel
+  // capped at `min(90vw, 32rem)`, the MODEL at the end of it was off the glass
+  // in every capture -- and the model is exactly what a reader opens this
+  // reveal to check.
+  it("keeps the whole line on the glass when the account root is long", async () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      await withTopbar({
+        sessionLine: "vend-7f3a91 · ~/workspace/chesscom/explanation-engine/worktrees/overhaul · fake-opus-4-8",
+      });
+
+      // Act
+      await harness.click(".topbar-title");
+
+      // Assert: the model is drawn, and the line is free to take a second row
+      // rather than run past the panel's cap with its tail hidden.
+      const line = harness.$('.topbar-reveal[data-reveal="session"] .topbar-session-line');
+      if (!line) throw new Error("the topbar drew no session line in the reveal");
+      expect(line.textContent).toContain("fake-opus-4-8");
+      expect(cascadedValue(line, "white-space")).not.toBe("nowrap");
+    } finally {
+      teardown();
+    }
+  });
+
   it("opens the session reveal downward, below the strip", async () => {
     // Arrange
     await withTopbar({});
