@@ -1344,14 +1344,14 @@ func TestContextCutClearedDrawsASeparation(t *testing.T) {
 // ONE CLEAR IS ONE DIVIDER, HOWEVER MANY PLANES DELIVER IT.
 //
 // A `/clear` is stated to BOTH producers: the shim reads the SDK's
-// `conversation_reset` and the sidecar reads the expanded `/clear` envelope out
-// of the transcript. They write ONE store row -- keyed
+// `conversation_reset` and the sidecar reads the expanded `/clear` envelope
+// out of the transcript. They write ONE store row -- keyed
 // `session:context_cut:<the session the clear rotated to>`, the one identity
 // both planes can mint -- and every write of a row is delivered on the agent's
 // tail at that row's OWN position, so the daemon sees the cut twice at ONE
-// pointer. Playtest 9's D28 saw the two writes land as `context_cut:sip1-33`
-// and `context_cut:sip1-3k`: two rows, two positions, two dividers, the second
-// arriving after the turn had settled.
+// pointer. A headless run's D28 case saw the two writes land as
+// `context_cut:sip1-33` and `context_cut:sip1-3k`: two rows, two positions,
+// two dividers, the second arriving after the turn had settled.
 func TestAClearDeliveredOnBothPlanesDrawsOneDivider(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -2571,8 +2571,8 @@ func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
 // session transcript FIRST, then the shim's own stream terminal for the same
 // failure.
 //
-// Section H's playtest (e2e/playtest_17_failure_arms_test.go) caught this as a
-// 3ms race — `api-401` drew "the credential was rejected — sign in again (a
+// Section H's headless run of the real editor caught this as a 3ms race —
+// `api-401` drew "the credential was rejected — sign in again (a
 // vendor request failed mid-turn and the turn went on: Authentication failed.)"
 // while `api-429`, 17ms the other way, drew its arm's sentence alone. The turn
 // did NOT go on, so the evidence clause is false wherever it appears, and the
@@ -2654,7 +2654,7 @@ func TestApiRequestFailedTerminalStatesAMidTurnFailureItSurvived(t *testing.T) {
 // card the agent's call drew, and the detached shell bubble the run reports
 // from -- and only the bubble settles. The card said `running` forever above a
 // bubble already reporting `exit 0` until the `moved` arm existed to say where
-// the work went (playtest F43, 2026-09-09).
+// the work went (observed 2026-09-09).
 
 func TestABackgroundedForegroundShellsCardDrawsTheMovedArm(t *testing.T) {
 	t.Parallel()

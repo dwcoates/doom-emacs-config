@@ -178,15 +178,14 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 	// transcript's `system:api_error` line, and the shim's own stream terminal.
 	// So an api failure that ENDS a turn also arrives as mid-turn evidence, and
 	// which of the two lands first is a schedule nobody controls. Measured in
-	// one playtest run of the twelve `!api-*` arms (e2e/playtest_17_failure_
-	// arms_test.go): the evidence lost that race by 17ms on `api-429` and won
-	// it by 3ms on `api-401`, so ONE run drew two different headlines for the
-	// same shape of failure. The evidence line's own words settle which is
-	// right — it says the turn WENT ON, which is false of the failure that
-	// ended it — so the terminal drops its own failure from its evidence and
-	// the headline is the arm's sentence whatever the schedule. A DIFFERENT
-	// mid-turn failure still rides: a 429 the turn survived and a 500 it then
-	// died of are two facts, and the reader wants both.
+	// one headless run of the twelve `!api-*` arms: the evidence lost that race
+	// by 17ms on `api-429` and won it by 3ms on `api-401`, so ONE run drew two
+	// different headlines for the same shape of failure. The evidence line's own
+	// words settle which is right — it says the turn WENT ON, which is false of
+	// the failure that ended it — so the terminal drops its own failure from its
+	// evidence and the headline is the arm's sentence whatever the schedule. A
+	// DIFFERENT mid-turn failure still rides: a 429 the turn survived and a 500
+	// it then died of are two facts, and the reader wants both.
 	evidence, dropped := evidenceBesides(s.turnEvidence[turn], endedOn)
 	if dropped > 0 {
 		r.logger(s.id).Debug("daemon.feed.terminal_evidence_is_the_terminal",

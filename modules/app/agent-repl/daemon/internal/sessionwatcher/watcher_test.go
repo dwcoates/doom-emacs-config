@@ -490,7 +490,7 @@ func TestABringUpLinkReplayWithEveryStreamStandingDoesNotReopen(t *testing.T) {
 // the replay: the watcher is born on the connected link, so the bring-up's
 // own `dialing` arriving late must not be published as a transition. It was,
 // and the roster painted `init` over a workspace whose turn was already
-// accepted (the playtest's cold start measured `submitting` -> `init` ->
+// accepted (a headless run's cold start measured `submitting` -> `init` ->
 // `submitting` within 1ms of the first StartTurn).
 func TestABringUpLinkReplayNeverWalksTheLinkBackToDialing(t *testing.T) {
 	// Arrange: a started session, already published as connected.

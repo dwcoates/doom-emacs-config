@@ -1098,7 +1098,7 @@ func TestATextOutputShellDrawsNoExitChipWhenNoneWasStated(t *testing.T) {
 // finishes. The detached shell row published beneath it is the record of the
 // run and the only row that settles; the card owes the reader the fact that the
 // work left. Without the arm it kept the `running` it drew with forever, above a
-// row already reporting `exit 0` (playtest F43, 2026-09-09).
+// row already reporting `exit 0` (observed 2026-09-09).
 
 // movedCard is a foreground shell whose work then left for the background.
 func movedCard(h *harness, unit string) *frontendv1.FeedSimpleToolCall {

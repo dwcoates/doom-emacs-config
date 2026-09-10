@@ -127,17 +127,17 @@ interface CompactionLinesSpec {
   /**
    * The permission mode THE SESSION is in, in the vendor's own spelling.
    *
-   * It is written onto the summary `user` line, and that is a correction
-   * rather than a decoration. The summarizing query runs under `plan` so it
-   * can take no tools, it RESUMES the user's own vendor session id, and the
-   * vendor records `permissionMode` on every `user` record it writes — so the
+   * It is written onto the summary `user` line, and that is a correction rather
+   * than a decoration. The summarizing query runs under `plan` so it can take
+   * no tools, it RESUMES the user's own vendor session id, and the vendor
+   * records `permissionMode` on every `user` record it writes — so the
    * throwaway leaves `plan` as the last mode the transcript states. A resume
    * restores the conversation's posture from exactly that field
    * (`engine/cold.ts`), so a session hibernated straight after a compaction
-   * came back in PLAN MODE, which nobody chose: observed on the playtest's own
-   * revival, where the topbar read `plan` and the revived turn ran under it.
-   * Writing the session's own mode on the last record the compaction appends
-   * puts the transcript's final word back in the user's hands.
+   * came back in PLAN MODE, which nobody chose: observed on a headless sandbox
+   * run's own revival, where the topbar read `plan` and the revived turn ran
+   * under it. Writing the session's own mode on the last record the compaction
+   * appends puts the transcript's final word back in the user's hands.
    */
   readonly permissionMode: string;
   readonly newUuid?: () => string;
