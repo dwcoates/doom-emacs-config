@@ -172,6 +172,94 @@ func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 	}
 }
 
+// TestEmacsPlainCloseTogglesThePanelsBack is the other half of scenario 15:
+// `SPC o c` is a TOGGLE, so a second press on a workspace whose panels are
+// merely hidden must put them back.
+//
+// It is a separate scenario from the close because it reaches a DIFFERENT
+// branch of `agent-repl--toggle`: with no panel window on the frame the
+// toggle asks the frontend registry whether the workspace is running
+// (`:running-p-fn`) and shows rather than opens. That slot pointed at a void
+// symbol, and nothing caught it — the close half passes without ever asking
+// the question, and no unit test of a function that does not exist can fail.
+func TestEmacsPlainCloseTogglesThePanelsBack(t *testing.T) {
+	t.Parallel()
+	w, _ := emacsPanelWorld(t, 1)
+	e := w.Emacs
+	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
+
+	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
+	openPanel(e)
+	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+
+	e.Leader("o c")
+	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+		})
+	// The hidden webview is what makes the workspace READ as running, which
+	// is the state the second press is about.
+	if !e.EvalBool(`(and (buffer-live-p (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer)) t)`) {
+		t.Fatal("the plain close killed the webview buffer; it only hides the panels")
+	}
+	if !e.EvalBool(`(and (funcall (agent-repl-frontend-running-p-fn (agent-repl--ws-frontend ` + elispString(current) + `)) ` + elispString(current) + `) t)`) {
+		t.Fatalf("the frontend registry says workspace %q is not running while its webview is alive; the toggle would mount a second page", current)
+	}
+
+	e.Leader("o c")
+	e.AwaitEvalFor(panelSettleBound, "the panel windows to come back",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) >= 2
+		})
+	// SHOWN, NOT REMOUNTED: the same buffer is back, so the page the user was
+	// looking at was not thrown away and rebuilt.
+	if !e.EvalBool(`(and (buffer-live-p (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer))
+                          (get-buffer-window (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer))
+                          t)`) {
+		t.Fatalf("workspace %q's own webview buffer is not the one on the frame after the toggle reopened", current)
+	}
+}
+
+// TestEmacsWebviewIsAtHomeOnItsOwnDaemon is the rescue's own predicate,
+// against the real running daemon: `agent-repl--frontend-webview-at-home-p`
+// decides whether `SPC o L` navigates or leaves the page alone, so a
+// predicate that cannot be CALLED makes the rescue unreachable.
+//
+// It reached a `agent-repl--frontend-base-url` that no longer exists, and
+// every unit test of the rescue mocked around it.
+func TestEmacsWebviewIsAtHomeOnItsOwnDaemon(t *testing.T) {
+	t.Parallel()
+	w, _ := emacsPanelWorld(t, 1)
+	e := w.Emacs
+	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
+
+	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
+	openPanel(e)
+	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+
+	// Home is the origin of the connection that OWNS the workspace, and it is
+	// the origin the webview's own URL is built from.
+	origin := e.EvalString(`(or (agent-repl--frontend-home-origin ` + elispString(current) + `) "")`)
+	if origin == "" {
+		t.Fatalf("workspace %q has no home origin while its daemon link is up", current)
+	}
+	url := e.EvalString(`(agent-repl-frontend-webview-url ` + elispString(current) + `)`)
+	if !strings.HasPrefix(url, origin) {
+		t.Fatalf("the webview URL %q is not served from the workspace's own home origin %q", url, origin)
+	}
+	if !e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(current) + ` ` + elispString(url) + `) t)`) {
+		t.Fatalf("the workspace's own webview URL %q does not read as home", url)
+	}
+	// And a page that left the daemon does not: this is the state the rescue
+	// exists for, and reading it wrong either strands the user or throws away
+	// a rendered feed.
+	if e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(current) + ` "about:blank") t)`) {
+		t.Fatal("`about:blank` reads as home; the rescue would refuse to bring a stranded webview back")
+	}
+}
+
 // TestEmacsDeprioCloseShufflesTheTab is scenario 16. The two close variants
 // differing is the whole reason both commands exist, so the claim is exactly
 // the difference: `SPC o C` records `:saved-tab-index` and pushes the
@@ -252,14 +340,35 @@ func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
 
+	// THE WORK LAYOUT IS ARRANGED BEFORE THE PANELS, because a buffer opened
+	// while the panels are visible closes them: `close-panels-on-open.el`
+	// advises `switch-to-buffer' itself, so a split made after the open
+	// collapses back to the pre-panel layout and there is no "work window
+	// beside the panels" state to press the key in. Arranged first, this
+	// two-window layout is what the panels' own open SAVES and what the plain
+	// close restores -- so the maximize below acts on a real work layout.
+	e.Eval(`(progn (delete-other-windows)
+                   (switch-to-buffer (get-buffer-create "*e2e-work-a*"))
+                   (select-window (split-window))
+                   (switch-to-buffer (get-buffer-create "*e2e-work-b*"))
+                   t)`)
+
 	openPanel(e)
 	awaitPanelWindows(e, frontendPrefix, panelPrefix)
 
-	// An ordinary, non-agent work window, selected.
-	e.Eval(`(progn (select-window (split-window))
-                   (switch-to-buffer (get-buffer-create "*e2e-work*"))
-                   t)`)
-	before := len(windowBuffers(e))
+	// Back to the work layout: the plain close restores what the open saved.
+	e.Leader("o c")
+	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+		})
+	e.Eval(`(progn (select-window (get-buffer-window (get-buffer "*e2e-work-b*"))) t)`)
+	beforeBuffers := windowBuffers(e)
+	before := len(beforeBuffers)
+	if before < 2 {
+		t.Fatalf("the restored work layout holds %d windows (%q); a restore is unobservable from one", before, beforeBuffers)
+	}
 
 	if want, got := "agent-repl-fullscreen-and-focus", e.LeaderBinding("w f"); got != want {
 		t.Fatalf("SPC w f resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
@@ -269,6 +378,9 @@ func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
 	if !e.EvalBool(`(and agent-repl--window-fullscreen-config t)`) {
 		t.Fatal("the first SPC w f saved no window configuration, so there is nothing to restore to")
 	}
+	if maximized := windowBuffers(e); len(maximized) != 1 || maximized[0] != "*e2e-work-b*" {
+		t.Fatalf("the frame holds %q after SPC w f, want exactly the maximized work window", maximized)
+	}
 
 	e.Leader("w f")
 	if e.EvalBool(`(and agent-repl--window-fullscreen-config t)`) {
@@ -276,6 +388,11 @@ func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
 	}
 	if after := len(windowBuffers(e)); after != before {
 		t.Fatalf("the window count did not return to its starting value: %d -> %d", before, after)
+	}
+	// RESTORED, not merely re-split: the same buffers are back in the same
+	// order, which a rebuilt layout would not guarantee.
+	if after := windowBuffers(e); strings.Join(after, "\x00") != strings.Join(beforeBuffers, "\x00") {
+		t.Fatalf("the restored layout shows %q, want the layout it replaced, %q", after, beforeBuffers)
 	}
 }
 
