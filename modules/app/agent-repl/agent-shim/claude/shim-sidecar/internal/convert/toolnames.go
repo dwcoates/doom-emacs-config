@@ -2,6 +2,10 @@ package convert
 
 // toolnames.go — the vendor's tool vocabulary, in one table.
 //
+// ASKUSERQUESTION IS ABSENT ON PURPOSE, and its absence is not a modelling gap:
+// the stream plane authors that unit whole (see streamowned.go), so the name is
+// dropped before it ever reaches this table.
+//
 // A NAME NOT LISTED HERE IS NOT AUTOMATICALLY UNMODELED. AgentUnmodeled means "a
 // tool whose schema genuinely cannot be known" — an MCP server's tool, or one
 // the vendor added after this schema was written. A recognizable built-in
@@ -33,7 +37,6 @@ const (
 	kindWorktree
 	kindCron
 	kindPushNotification
-	kindQuestion
 )
 
 // builtinTools maps the vendor's tool names onto the unit kind each becomes.
@@ -64,7 +67,6 @@ var builtinTools = map[string]toolKind{
 	"CronDelete":       kindCron,
 	"CronList":         kindCron,
 	"PushNotification": kindPushNotification,
-	"AskUserQuestion":  kindQuestion,
 }
 
 // classifyTool resolves a tool name to its conversion, and whether the name is a

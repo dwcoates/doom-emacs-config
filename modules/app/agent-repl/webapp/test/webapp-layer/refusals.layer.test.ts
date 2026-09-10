@@ -19,8 +19,8 @@ import {
   TURN_TEST_MS,
   awaitDrawn,
   bootLayer,
+  press,
   rows,
-  send,
   submit,
   textOf,
   type,
@@ -90,12 +90,15 @@ it(
     // Arrange
     const before = rows(app, "userPrompt").length;
 
-    // Act — the send control with an empty box.
+    // Act — the send control with an empty box. `press` rather than `send`:
+    // this is the ONE scenario that presses expecting the composer to take
+    // nothing, and `send` exists to make that a fault everywhere else.
     await type(app, "");
-    await send(app);
+    const taken = await press(app);
 
-    // Assert — no row, no refusal: an empty submission is not an error, it is
-    // not a submission.
+    // Assert — the press was honestly dropped, and no row, no refusal: an
+    // empty submission is not an error, it is not a submission.
+    expect(taken).toBe(false);
     expect(rows(app, "userPrompt").length).toBe(before);
     expect(app.refusalArms()).toHaveLength(0);
   },

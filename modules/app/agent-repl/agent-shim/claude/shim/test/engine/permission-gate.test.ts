@@ -304,6 +304,77 @@ describe("a question through the gate", () => {
   });
 });
 
+// A MULTI-SELECT ANSWER IS A LIST END TO END. `chosen` is a repeated field, and
+// the vendor's one-string-per-question join happens EXACTLY ONCE, in the
+// `updatedInput` this gate hands the SDK. The frame this gate settles the ask
+// with keeps the list — nothing downstream re-derives it from the joined string,
+// which question.proto's retired tag 4 says cannot be split back.
+describe("the settled ask keeps the picks as a list", () => {
+  const MULTI_INPUT = {
+    questions: [
+      {
+        question: "Which suites should run?",
+        header: "Suites",
+        multiSelect: true,
+        options: [
+          { label: "Unit", description: "the vitest suites" },
+          { label: "Integration", description: "the shim.v1 suite" },
+          { label: "Elisp, batch", description: "the ert suites" },
+        ],
+      },
+    ],
+  };
+
+  function multiAnswers(chosen: string[]): conversationv1.AgentQuestionAnswers {
+    return create(conversationv1.AgentQuestionAnswersSchema, {
+      answers: [
+        create(conversationv1.AgentQuestionSelectionSchema, {
+          question: create(conversationv1.AgentQuestionTextSchema, { text: "Which suites should run?" }),
+          chosen: chosen.map((label) =>
+            create(conversationv1.AgentQuestionChoiceSchema, {
+              label: create(conversationv1.AgentQuestionOptionLabelSchema, { label }),
+            }),
+          ),
+        }),
+      ],
+    });
+  }
+
+  async function settledChosen(chosen: string[]): Promise<string[]> {
+    const { gate, written } = gateWith();
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, MULTI_INPUT, callOptions());
+    await Promise.resolve();
+
+    gate.answerQuestion(create(conversationv1.AgentQuestionIdSchema, { value: "toolu_1" }), multiAnswers(chosen));
+
+    const settled = written[1]?.item;
+    const update =
+      settled?.kind === "frame" && settled.frame.result.case === "update"
+        ? settled.frame.result.value.update
+        : undefined;
+    if (update?.case !== "question" || update.value.result.case !== "success") {
+      throw new Error("the ask did not settle on its success arm");
+    }
+    const outcome = update.value.result.value.outcome;
+    if (outcome.case !== "answered") {
+      throw new Error("the ask did not settle as answered");
+    }
+    return outcome.value.answers[0]?.chosen.map((choice) => choice.label?.label ?? "") ?? [];
+  }
+
+  it("settles two picks as TWO chosen labels", async () => {
+    expect(await settledChosen(["Unit", "Integration"])).toEqual(["Unit", "Integration"]);
+  });
+
+  it("settles one pick as one chosen label", async () => {
+    expect(await settledChosen(["Unit"])).toEqual(["Unit"]);
+  });
+
+  it("keeps a label that CONTAINS a comma as one pick, never split at it", async () => {
+    expect(await settledChosen(["Elisp, batch"])).toEqual(["Elisp, batch"]);
+  });
+});
+
 describe("a permission through the gate", () => {
   it("keys the ask by the GATED call, so consent joins the work it gates", async () => {
     const { gate, written } = gateWith();

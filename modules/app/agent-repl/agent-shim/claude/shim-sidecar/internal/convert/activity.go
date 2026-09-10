@@ -35,16 +35,18 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 
 	c.rememberCall(id, openCall{name: name, input: input, startedAt: env.timestampMs, activityID: id, agentID: agent})
 
+	if IsStreamOwned(name) {
+		// The stream plane authors this unit whole; see streamowned.go. The call
+		// is still remembered so its result is dropped as this same unit rather
+		// than filed as an orphan settle.
+		c.log.With(at.ctxFor("stream-owned-drop")).With(logging.Context{ActivityID: id}).
+			LogVerbose("tool call name=%q is authored by the stream plane; not converted here", name)
+		return nil
+	}
+
 	kind, known := classifyTool(name)
 	if !known {
 		return []*storev1.StoreEntry{c.unmodeledCall(name, id, index, input, block, at, env, agent)}
-	}
-
-	// A question is not read-only work: it BLOCKS the agent on the user's
-	// choice, so it rides AgentUpdate directly rather than the activity
-	// envelope, and it is keyed in its own identity space.
-	if kind == kindQuestion {
-		return []*storev1.StoreEntry{c.questionAsk(id, input, at, env, agent)}
 	}
 
 	activity := c.callItem(kind, name, input, env.timestampMs, at, id)
@@ -409,65 +411,6 @@ func cronStart(name string, input map[string]any, ts int64) *conversationv1.Agen
 		}}
 	}
 	return start
-}
-
-// ---------------------------------------------------------------------------
-// the ask
-// ---------------------------------------------------------------------------
-
-// questionAsk converts an AskUserQuestion call into the open ask.
-//
-// ITS OWN IDENTITY SPACE, keyed by the posing call: a question joins to no unit
-// of work, unlike a permission, whose identity is the tool unit it gates.
-func (c *Converter) questionAsk(id string, input map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	batch := &conversationv1.AgentQuestionBatch{}
-	for _, raw := range list(input["questions"]) {
-		q := obj(raw)
-		if q == nil {
-			continue
-		}
-		batch.Questions = append(batch.Questions, questionAsked(q))
-	}
-	c.log.With(at.ctxFor("question")).With(logging.Context{ActivityID: id, UpsertKey: QuestionKey(id)}).
-		LogVerbose("ask posed %d question(s)", len(batch.Questions))
-
-	frame := updateFrame(agent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
-			Id: &conversationv1.AgentQuestionId{Value: id},
-			Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
-				Batch:     batch,
-				StartedAt: startedAt(env.timestampMs),
-			}},
-		}},
-	})
-	return c.landFrame(at, agent, QuestionKey(id), "question", frame)
-}
-
-// questionAsked reads one posed question. The MODE IS PER QUESTION: one batch
-// can mix a pick-one with a pick-any, so it is read here and never lifted.
-func questionAsked(q map[string]any) *conversationv1.AgentQuestionAsked {
-	asked := &conversationv1.AgentQuestionAsked{
-		Question: &conversationv1.AgentQuestionText{Text: str(q["question"])},
-		Header:   str(q["header"]),
-	}
-	var options []*conversationv1.AgentQuestionOption
-	for _, raw := range list(q["options"]) {
-		option := obj(raw)
-		if option == nil {
-			continue
-		}
-		options = append(options, &conversationv1.AgentQuestionOption{
-			Label:       &conversationv1.AgentQuestionOptionLabel{Label: str(option["label"])},
-			Description: str(option["description"]),
-			Preview:     optionalString(option["preview"]),
-		})
-	}
-	if boolean(pick(q, "multiSelect", "multi_select")) {
-		asked.Choices = &conversationv1.AgentQuestionAsked_MultiSelect{MultiSelect: &conversationv1.AgentQuestionMultiSelect{Options: options}}
-	} else {
-		asked.Choices = &conversationv1.AgentQuestionAsked_SingleSelect{SingleSelect: &conversationv1.AgentQuestionSingleSelect{Options: options}}
-	}
-	return asked
 }
 
 // item wraps one built arm as the activity carrying it. The generated oneof
