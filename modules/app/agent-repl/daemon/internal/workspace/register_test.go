@@ -316,6 +316,30 @@ func TestRegisterRevivesAKnownWorkspacesRecordedConversation(t *testing.T) {
 	}
 }
 
+// TestRegisterLeavesALiveSessionAlone is the OTHER half of the relaunch rule.
+// The revival exists for a daemon that came back to a conversation nobody was
+// serving; a re-announcement of a workspace whose session is ALREADY UP on
+// THIS daemon is a no-op for the session. Emacs re-announces on every link-up,
+// so a revival that did not check would roll a live shim out from under a
+// mounted panel mid-turn -- which reads to the user as a restart nothing asked
+// for.
+func TestRegisterLeavesALiveSessionAlone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir, record := registeredWithAConversation(t, f, nil)
+	f.fleet.live[record.ID] = true
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("the re-announcement: %v", err)
+	}
+
+	// Assert.
+	if got := f.fleet.started; len(got) != 0 {
+		t.Fatalf("sessions started by a re-announcement of a LIVE workspace = %v, want none: the live session was rolled", got)
+	}
+}
+
 // TestRegisterSpawnsNothingForAFirstAnnouncement holds SPAWN ON MOUNT: a
 // directory this daemon has never seen has no conversation to lose, so its
 // announcement mints a roster row and nothing else. A registration that

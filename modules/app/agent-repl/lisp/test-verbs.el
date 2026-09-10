@@ -110,6 +110,7 @@ answers a bare success, which is what almost every verb's success is."
          (agent-repl-test-verbs--messages nil)
          (agent-repl-test-verbs--handover nil)
          (agent-repl-test-verbs--selected nil)
+         (agent-repl-test-verbs--restart-holds nil)
          (agent-repl-test-verbs--answers ,answers))
      (cl-letf* (((symbol-function 'agent-repl-host-ref)
                  (lambda (_ws) (agent-repl-test-verbs--ref)))
@@ -117,6 +118,12 @@ answers a bare success, which is what almost every verb's success is."
                 ((symbol-function 'agent-repl-host-faults) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl-host-handle-refusal)
                  (lambda (ws arm) (push (list ws arm) agent-repl-test-verbs--handover)))
+                ((symbol-function 'agent-repl-host-take-restart-hold)
+                 (lambda (ws) (push ws agent-repl-test-verbs--restart-holds)))
+                ((symbol-function 'agent-repl-host-release-restart-hold)
+                 (lambda (ws _reason)
+                   (setq agent-repl-test-verbs--restart-holds
+                         (delete ws agent-repl-test-verbs--restart-holds))))
                 ((symbol-function 'agent-repl-link-primary) (lambda () 'test-conn))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
                 ;; The default registry is one real workspace, "ws-one", which
@@ -164,6 +171,9 @@ answers a bare success, which is what almost every verb's success is."
                 ((symbol-function 'agent-repl-rpc-session-health)
                  (agent-repl-test-verbs--stub :session-health)))
        ,@body)))
+
+(defvar agent-repl-test-verbs--restart-holds nil
+  "Workspaces whose composer a forced restart closed, bound by `--with'.")
 
 (defvar agent-repl-test-verbs--answers nil
   "The scripted answers for the rpc stubs, bound by the `--with' macro.")
@@ -234,6 +244,32 @@ answers a bare success, which is what almost every verb's success is."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-restart "ws-one" nil)
     (should (equal (plist-get (agent-repl-test-verbs--request :restart) :force) nil))))
+
+(ert-deftest agent-repl-verbs-restart-force-closes-the-composer-on-the-send ()
+  "A forced restart's SEND is what closes the composer, not the later push."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange / Act
+    (agent-repl-verb-restart "ws-one" t)
+    ;; Assert
+    (should (equal agent-repl-test-verbs--restart-holds '("ws-one")))))
+
+(ert-deftest agent-repl-verbs-restart-graceful-leaves-the-composer-open ()
+  "A graceful restart is SCHEDULED, so it takes no hold on the composer."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange / Act
+    (agent-repl-verb-restart "ws-one" nil)
+    ;; Assert
+    (should (null agent-repl-test-verbs--restart-holds))))
+
+(ert-deftest agent-repl-verbs-restart-refused-gives-the-composer-back ()
+  "A refused forced restart bounces nothing, so it holds nothing shut."
+  (agent-repl-test-verbs--with
+      '((:restart . (:response (:arm :error
+                                :value (:arm :no-session :value nil)))))
+    ;; Arrange / Act
+    (agent-repl-verb-restart "ws-one" t)
+    ;; Assert
+    (should (null agent-repl-test-verbs--restart-holds))))
 
 (ert-deftest agent-repl-verbs-restart-force-sets-force-true ()
   "A forced restart sets `force'."
