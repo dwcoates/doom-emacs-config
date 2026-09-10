@@ -35,6 +35,12 @@ type unitState struct {
 	row *frontendv1.FeedRow
 	// feedKey is the feed that row landed on.
 	feedKey string
+	// artifactFavicon is the emoji the PUBLISH announced. Kept because the
+	// published outcome restates the title and never the favicon, and
+	// feed.proto words the artifact heading as "favicon emoji + title" — so a
+	// heading recomposed from the outcome alone would lose the glyph the
+	// bubble had while it was publishing.
+	artifactFavicon string
 	// sendAddressedTo is WHO a send addressed, exactly as the caller wrote it.
 	// Kept because the send's success arm resolves an identity but never
 	// restates the addressed string, and the address line prefers a name a
