@@ -406,6 +406,13 @@ type wsState struct {
 	blockedOnUser *standing
 	// authLine is the standing auth prompt line.
 	authLine *standing
+	// queryDied is the standing dead-query line. It is SESSION-scoped, not
+	// part of the block: the vendor's query death and the turn's terminal are
+	// two facts about the same event arriving separately, and the terminal's
+	// failure respells the block WITHOUT knowing a query died — so keeping the
+	// line on the block let the terminal erase the only sentence the strip had
+	// about the death. It stands until the next prompt opens a turn.
+	queryDied *standing
 	// mergingCommit is the commit a merge is landing right now.
 	mergingCommit *mergingCommit
 
