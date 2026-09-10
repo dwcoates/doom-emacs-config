@@ -212,6 +212,9 @@ export type SubscribeScroll = (onScroll: () => void) => void;
 /** Registering a listener for a box's own size changes. */
 export type SubscribeResize = (onResize: () => void) => void;
 
+/** Registering a listener for the reader's own input on a box. */
+export type SubscribeInput = (onInput: () => void) => void;
+
 /** Everything the tail owner reads and writes on the box it guards. */
 export type ReanchorBox = ScrollTail & ScrollPosition;
 
@@ -263,11 +266,24 @@ export interface TailWriter {
  * that window by comparing the box's live scrollTop against the last position
  * this owner knows about, so a read can never precede the movement it is
  * about.
+ *
+ * AND WHY A MOVEMENT IS NOT ENOUGH: THE READER MUST HAVE DONE SOMETHING. The
+ * box writes its own position too — `scrollTop` cannot sit past the end of the
+ * scrollable range, so content shrinking drags it down, and the drag is
+ * indistinguishable from a gesture upward by looking at the number. Correcting
+ * for that inside `sync` only works while the range is still short, and nothing
+ * schedules `sync` there; a shrink and a regrowth between two reconciles leave
+ * the position at the old bottom under a range that has moved on. So intent is
+ * read off the box's position ONLY once a real user input has reached it
+ * (`onInput`): the clamp arrives with nothing behind it and is inert, and the
+ * gesture arrives with an input and ends the follow on its first upward pixel.
  */
 export class TailFollow {
   private following: boolean;
   /** The last position this owner knows about: what it wrote, or what it saw. */
   private lastTop: number;
+  /** Whether the READER has reached this box since the tail was last parked. */
+  private touched = false;
 
   constructor(
     private readonly box: ReanchorBox,
@@ -298,6 +314,9 @@ export class TailFollow {
     parkAtTail(this.box);
     this.lastTop = this.box.scrollTop;
     this.following = true;
+    // The reader's last input spoke about a position this park has replaced,
+    // so it stops speaking here (see `onInput`).
+    this.touched = false;
   }
 
   /**
@@ -346,6 +365,39 @@ export class TailFollow {
   }
 
   /**
+   * A USER INPUT reached the box — a wheel, a touch, a pointer on its bar, a
+   * key while something in it has focus. It decides nothing on its own; it is
+   * what makes the NEXT movement of the box attributable to the reader.
+   *
+   * WHY THE LATCH NEEDS THIS, and it is a measured defect rather than a
+   * precaution. `sync` reads intent out of the box's position, and the box
+   * writes that position too: `scrollTop` can never sit past the end of the
+   * scrollable range, so content shrinking drags it down and the drag looks
+   * exactly like a gesture upward. `sync` corrects for that by lowering its
+   * baseline into the range — which works only if it is LOOKING while the range
+   * is still short. Nothing guarantees that it is. A shrink and a regrowth that
+   * land between two reconciles (a `ResizeObserver` reports one coalesced size
+   * per frame, and any forced layout inside the frame applies the clamp) leave
+   * the position at the OLD bottom under a range that has moved on, and the
+   * next reconcile reads a gesture nobody made. The follow then ends for good:
+   * only arriving back at the tail or an explicit `park` resumes it, and
+   * nothing parks a feed that is not following.
+   *
+   * Measured, from the hibernated tab's playbook under load: `scrollTop=52`
+   * with `scrollHeight=853 clientHeight=637` and again `scrollHeight=1099`,
+   * where 52 is exactly the reachable extent the feed had had one turn
+   * earlier -- a clamp, held while 400px of new rows arrived beneath it.
+   *
+   * So the reader must have DONE something before a movement may be read as
+   * theirs. A clamp arrives with no input behind it and is therefore inert,
+   * whatever the timing; a gesture arrives with one and the direction rule
+   * above applies to it verbatim, on the very first upward pixel.
+   */
+  onInput(): void {
+    this.touched = true;
+  }
+
+  /**
    * A resize of the box. A workspace switch relayouts the feed asynchronously
    * relative to the lisp that triggered it, so the host's snap and the resize
    * land in either order — a snap that lands FIRST is otherwise undone by the
@@ -368,6 +420,11 @@ export class TailFollow {
    *
    * `sync` now attributes the clamp itself (see there), so the reason to skip
    * it is gone and the window with it.
+   *
+   * IT IS ALSO WHAT THE CONTENT'S OWN SIZE REPORTS THROUGH. A box that keeps
+   * the same viewport while the rows inside it grow has moved its tail exactly
+   * as far as one that shrank, and the correction is identical — so the two
+   * arrive at the same method rather than at a twin that could drift from it.
    */
   onResize(): void {
     this.sync();
@@ -375,9 +432,14 @@ export class TailFollow {
   }
 
   /** Wire the box's own events into the owner. */
-  observe(subscribeScroll: SubscribeScroll, subscribeResize: SubscribeResize): void {
+  observe(
+    subscribeScroll: SubscribeScroll,
+    subscribeResize: SubscribeResize,
+    subscribeInput: SubscribeInput,
+  ): void {
     subscribeScroll(() => this.onScroll());
     subscribeResize(() => this.onResize());
+    subscribeInput(() => this.onInput());
   }
 
   /**
@@ -406,14 +468,19 @@ export class TailFollow {
     if (this.lastTop > reachable) this.lastTop = reachable;
     const top = this.box.scrollTop;
     if (top === this.lastTop) return;
-    this.following = top > this.lastTop && isPinnedToBottom(this.box, this.pinPx);
+    // AND ONLY THE READER IS ON THE OTHER SIDE OF THIS COMPARISON. A movement
+    // with no user input behind it is the box's own (see `onInput`), so it
+    // re-baselines and decides nothing.
+    if (this.touched) {
+      this.following = top > this.lastTop && isPinnedToBottom(this.box, this.pinPx);
+    }
     this.lastTop = top;
   }
 }
 
 /**
- * Wire a REAL scroll box to its tail owner: the box's own scroll events, and
- * the box's own size changes.
+ * Wire a REAL scroll box to its tail owner: the box's own scroll events, the
+ * box's own size changes, and the size of the CONTENT inside it.
  *
  * THE SIZE HALF IS WHAT KEEPS THE LAST BUBBLE OUT FROM UNDER THE FOOTER.
  * The progress footer is a flex sibling laid out BELOW the scroll box
@@ -437,21 +504,88 @@ export class TailFollow {
  * reader who scrolled away is left where they are, which is `onResize`'s own
  * rule and not re-decided here.
  *
+ * THE CONTENT HALF IS THE OTHER WAY THE TAIL GOES STALE, and it is the half
+ * that outlived the footer fix. Watching only the box hears every change to
+ * the VIEWPORT and none to what is inside it, yet `scrollHeight` growing under
+ * a `scrollTop` nobody moved leaves the tail exactly as far below the fold as
+ * a shrinking viewport does. The renders that append rows re-park themselves
+ * (`feed-view.ts`'s followTail), so the growth that escapes is the growth NO
+ * render performs: a bubble the wire pushed unfolded fetches its own page and
+ * paints it into its panel milliseconds later (`bubble.ts`'s `initialFolded`
+ * open), a deferred card settles to its real height, a font or a highlighted
+ * block relayouts. Each of those grows the feed after the last park, and under
+ * load — where the fetch behind that unfold is slowest — it is the LAST thing
+ * that happens, so nothing follows it to correct the position. That is the
+ * `awaitTailClearsFooter` failure that survived subscribing the box.
+ *
+ * `scrollHeight` is not observable, but it is the sum of the box's children's
+ * heights, so the children are what is watched — and the child set is kept in
+ * step with the DOM, so a content root mounted after this call is watched too
+ * rather than silently exempt.
+ *
  * Returns the unsubscriber. A mount that drops it leaks an observer onto an
  * element the next workspace will mount over.
  */
 export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void {
   const observer = new ResizeObserver(() => tail.onResize());
   const onScroll = (): void => tail.onScroll();
+  const onInput = (): void => tail.onInput();
+  const watched = new Set<Element>();
+  const watchChildren = (): void => {
+    for (const child of box.children) {
+      if (watched.has(child)) continue;
+      watched.add(child);
+      observer.observe(child);
+    }
+    for (const child of watched) {
+      if (child.parentElement === box) continue;
+      watched.delete(child);
+      observer.unobserve(child);
+    }
+  };
+  const children = new MutationObserver(watchChildren);
   tail.observe(
     () => box.addEventListener("scroll", onScroll, { passive: true }),
-    () => observer.observe(box),
+    () => {
+      observer.observe(box);
+      watchChildren();
+      children.observe(box, { childList: true });
+    },
+    () => {
+      for (const kind of READER_INPUTS) {
+        box.addEventListener(kind, onInput, { passive: true, capture: true });
+      }
+    },
   );
   return () => {
     box.removeEventListener("scroll", onScroll);
+    for (const kind of READER_INPUTS) {
+      box.removeEventListener(kind, onInput, { capture: true });
+    }
+    children.disconnect();
     observer.disconnect();
+    watched.clear();
   };
 }
+
+/**
+ * EVERY WAY THE READER CAN MOVE THIS BOX, as the events that arrive first.
+ *
+ * `wheel` is the trackpad and the mouse wheel, `touchstart` the drag on a
+ * touch screen, `pointerdown` the grab on the scrollbar (and the click that
+ * starts a jump), `keydown` the arrows, page keys and Home/End while something
+ * inside the box has focus. Each of them PRECEDES the movement it causes, and
+ * each bubbles to the box, so listening on the box catches them wherever inside
+ * it they land -- captured and passive, so nothing here can alter or delay what
+ * the reader asked for.
+ *
+ * A source missing from this list would be a gesture the follow latch cannot
+ * see, and the feed would pull the reader back off it (`TailFollow.onInput`).
+ * That is the failure to look for if a new input path is added -- a
+ * scroll-snap control, a custom scrollbar, a gamepad -- rather than a silent
+ * degradation.
+ */
+const READER_INPUTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
 
 /** Where a revealed node lands: flush with the top, or as little as possible. */
 export type RevealBlock = "start" | "nearest";

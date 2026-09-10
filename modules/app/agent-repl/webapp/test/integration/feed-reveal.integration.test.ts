@@ -99,6 +99,13 @@ async function bootWithBubble(scrollTop: number, panelTop: number) {
   // The scroll event the browser dispatches for the reader's own arrival: the
   // tail owner reconciles against the position it last knows about, and under
   // jsdom the box only acquires one when a test scripts it.
+  //
+  // A box scripted SHORT of its tail was put there by the READER, so their
+  // input is dispatched first. The owner reads intent off the box's position
+  // only once a real user input has reached it (`TailFollow.onInput`), because
+  // the box moves that position too — a shrink clamps it down — and a bare
+  // number cannot tell the two apart.
+  if (scrollTop < CONTENT_HEIGHT - BOX_HEIGHT) box.dispatchEvent(new Event("wheel"));
   box.dispatchEvent(new Event("scroll"));
   return { top: () => top };
 }
