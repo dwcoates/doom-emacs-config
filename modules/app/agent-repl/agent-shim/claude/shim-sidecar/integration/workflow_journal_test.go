@@ -33,6 +33,8 @@ func TestAWorkflowJournalIsTailedToResidueAndReachesNoPage(t *testing.T) {
 	journalPath := filepath.Join(tree.projectDir(slug), session, "subagents", "workflows", "wf_0001", "journal.jsonl")
 
 	// Act.
+	anchor := newGrowingFile(t, tree.sessionPath(slug, session))
+	anchor.AppendLine(encodeRecord(t, map[string]any{"type": "queue-operation", "cwd": cwd, "sessionId": session}))
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	journal := newGrowingFile(t, journalPath)
 	for _, line := range corpusLines(t, "journals/complete-journal.jsonl") {

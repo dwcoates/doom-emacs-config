@@ -64,6 +64,18 @@ import (
 type Target struct {
 	Path string
 	Kind tail.Kind
+	// WorkspaceDir and WorkspaceID come from the main transcript's authoritative
+	// cwd and the shared log correlation digest. The project slug is never
+	// decoded because that transformation is lossy.
+	WorkspaceDir string
+	WorkspaceID  string
+	// ClaudeSessionID is the transcript session that owns this file. It remains
+	// distinct from SessionID because spool ownership must not change the path
+	// classification rules that intentionally require SessionID to stay empty.
+	ClaudeSessionID string
+	// ProjectKey is the opaque lossy slug's directory segment. It is a cache
+	// locator only and is never decoded or emitted as workspace identity.
+	ProjectKey string
 
 	// SessionID is the owning session's vendor uuid, read from a CONFIG-ROOT
 	// path only. EMPTY for a spool: that path states where the bytes live, not
@@ -236,6 +248,7 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 				Kind:       tail.KindSessionTranscript,
 				SessionID:  strings.TrimSuffix(segs[1], ".jsonl"),
 				ConfigRoot: root,
+				ProjectKey: segs[0],
 			}, true
 		case len(segs) == 4 && segs[2] == "subagents" && isAgentTranscript(segs[3]):
 			// projects/<project>/<session>/subagents/agent-<id>.jsonl
@@ -246,6 +259,7 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 				VendorAgentID: agentIDOf(segs[3]),
 				TaskID:        agentIDOf(segs[3]),
 				ConfigRoot:    root,
+				ProjectKey:    segs[0],
 			}), true
 		case len(segs) == 6 && segs[2] == "subagents" && segs[3] == "workflows" &&
 			strings.HasPrefix(segs[4], "wf_") && segs[5] == "journal.jsonl":
@@ -257,6 +271,7 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 				RunID:      segs[4],
 				TaskID:     segs[4],
 				ConfigRoot: root,
+				ProjectKey: segs[0],
 			}, true
 		case len(segs) == 6 && segs[2] == "subagents" && segs[3] == "workflows" &&
 			strings.HasPrefix(segs[4], "wf_") && isAgentTranscript(segs[5]):
@@ -273,6 +288,7 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 				VendorAgentID: agentIDOf(segs[5]),
 				TaskID:        agentIDOf(segs[5]),
 				ConfigRoot:    root,
+				ProjectKey:    segs[0],
 			}), true
 		}
 		return Target{}, false

@@ -284,6 +284,13 @@ func validEntry(writeID, upsertKey string) *storev1.StoreEntry {
 	}
 }
 
+func attributedEntry(writeID, upsertKey, topLevel, book string) *storev1.StoreEntry {
+	entry := validEntry(writeID, upsertKey)
+	entry.GetAgentUpdate().TopLevel = agentID(topLevel)
+	entry.GetAgentUpdate().GetServeableFrame().PageAgentId = agentID(book)
+	return entry
+}
+
 func writeOne(t *testing.T, h *harness) {
 	t.Helper()
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
@@ -314,6 +321,64 @@ func openSession(t *testing.T, h *harness, agent string) string {
 }
 
 // ---- WriteBatch ----
+
+func TestBatchAttributionUsesSingularKeysForOneAgent(t *testing.T) {
+	// Arrange.
+	batch := &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+		attributedEntry("w1", "u1", "agent-1", "agent-1"),
+	}}
+
+	// Act.
+	got := batchAttribution(batch)
+
+	// Assert.
+	if got.AgentID != "agent-1" || got.BookAgentID != "agent-1" {
+		t.Fatalf("batchAttribution = %+v, want singular agent and book", got)
+	}
+	if len(got.AgentIDs) != 0 || len(got.BookAgentIDs) != 0 {
+		t.Fatalf("batchAttribution = %+v, want no aggregate keys", got)
+	}
+}
+
+func TestBatchAttributionUsesSortedAggregateKeysForAMixedBatch(t *testing.T) {
+	// Arrange.
+	batch := &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+		attributedEntry("w1", "u1", "agent-b", "book-b"),
+		attributedEntry("w2", "u2", "agent-a", "book-a"),
+	}}
+
+	// Act.
+	got := batchAttribution(batch)
+
+	// Assert.
+	if got.AgentID != "" || got.BookAgentID != "" {
+		t.Fatalf("batchAttribution = %+v, want no arbitrary singular identity", got)
+	}
+	if strings.Join(got.AgentIDs, ",") != "agent-a,agent-b" {
+		t.Fatalf("agent ids = %q, want deterministic aggregate attribution", got.AgentIDs)
+	}
+	if strings.Join(got.BookAgentIDs, ",") != "book-a,book-b" {
+		t.Fatalf("book ids = %q, want deterministic aggregate attribution", got.BookAgentIDs)
+	}
+}
+
+func TestBatchAttributionDoesNotSynthesizeAnAgentFromTheBook(t *testing.T) {
+	// Arrange.
+	batch := &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+		attributedEntry("w1", "u1", "", "book-1"),
+	}}
+
+	// Act.
+	got := batchAttribution(batch)
+
+	// Assert.
+	if got.AgentID != "" || len(got.AgentIDs) != 0 {
+		t.Fatalf("batchAttribution = %+v, want no invented agent identity", got)
+	}
+	if got.BookAgentID != "book-1" {
+		t.Fatalf("book agent id = %q, want book-1", got.BookAgentID)
+	}
+}
 
 func TestWriteBatchSuccessArmOnACommittedBatch(t *testing.T) {
 	// Arrange.
@@ -381,8 +446,14 @@ func TestWriteBatchMapsAStorageFailureToTheFailureArm(t *testing.T) {
 	if _, ok := findRecord(t, h.logs, "store.rpc.write-batch", "error"); ok {
 		t.Fatalf("records = %+v, want no second error record for a db failure", records(t, h.logs))
 	}
-	rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "debug")
-	if !ok || rec.Context["refusal_site"] != SiteDatabaseFailure {
+	var found bool
+	for _, rec := range records(t, h.logs) {
+		if rec.Operation == "store.rpc.write-batch" && rec.Level == "debug" && rec.Context["refusal_site"] == SiteDatabaseFailure {
+			found = true
+			break
+		}
+	}
+	if !found {
 		t.Fatalf("records = %+v, want a verbose trace at site %q", records(t, h.logs), SiteDatabaseFailure)
 	}
 }
@@ -451,6 +522,35 @@ func TestOpenAgentSessionAnswersAPageAndAToken(t *testing.T) {
 	success := res.Msg.GetSuccess()
 	if success == nil || len(success.GetPage().GetLines()) != 1 || success.GetWatch().GetValue() == "" {
 		t.Fatalf("result = %v, want one page line and a minted token", res.Msg.GetResult())
+	}
+}
+
+func TestOpenAgentSessionRecordsCarryTheAgentAndBook(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.opened = OpenedPage{Page: &storev1.AgentSessionPage{}, PinSeq: 7}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("agent-1"), PageSize: 10,
+	})); err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+
+	// Assert.
+	found := false
+	for _, rec := range records(t, h.logs) {
+		if rec.Operation != "store.rpc.open-agent-session" {
+			continue
+		}
+		found = true
+		if rec.Context["agent_id"] != "agent-1" || rec.Context["book_agent_id"] != "agent-1" {
+			t.Fatalf("record = %+v, want request-scoped agent and book", rec)
+		}
+	}
+	if !found {
+		t.Fatal("no open-agent-session record found")
 	}
 }
 
@@ -1050,6 +1150,33 @@ func TestReadAgentPageServesAPage(t *testing.T) {
 	// placeholder mark for a page it walked to.
 	if got := success.GetLines()[0].GetAt().GetValue(); got != "sip1-8" {
 		t.Fatalf("line pointer = %q, want the position the store served", got)
+	}
+}
+
+func TestReadAgentPageRecordsCarryTheAgentAndBook(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	if _, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("agent-1"), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p9"},
+	})); err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+
+	// Assert.
+	found := false
+	for _, rec := range records(t, h.logs) {
+		if rec.Operation != "store.rpc.read-agent-page" {
+			continue
+		}
+		found = true
+		if rec.Context["agent_id"] != "agent-1" || rec.Context["book_agent_id"] != "agent-1" {
+			t.Fatalf("record = %+v, want request-scoped agent and book", rec)
+		}
+	}
+	if !found {
+		t.Fatal("no read-agent-page record found")
 	}
 }
 

@@ -130,7 +130,9 @@ func TestARotationLinkThatAppearsMidTailMovesTheBook(t *testing.T) {
 	options.StateDir = stateDir
 	startSidecar(t, options)
 	g := newGrowingFile(t, tree.sessionPath(captured.Slug, rotationNewID))
-	g.AppendLine(captured.Lines[0])
+	first := decodeRecord(t, captured.Lines[0])
+	first["cwd"] = "/Users/dodgecoates/.config/doom-worktrees/bounce-continuity-probe-hhj"
+	g.AppendLine(encodeRecord(t, first))
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 	// The books are read off `top_level`, which every update carries, rather
 	// than off page lines: the transcript's first record need not be a page

@@ -92,8 +92,8 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "integration: setting AGENT_REPL_FORBID_VENDOR_CALLS: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.Unsetenv("AGENT_REPL_LOG_VERBOSE"); err != nil {
-		fmt.Fprintf(os.Stderr, "integration: unsetting AGENT_REPL_LOG_VERBOSE: %v\n", err)
+	if err := os.Unsetenv("AGENT_REPL_LOG_LEVEL"); err != nil {
+		fmt.Fprintf(os.Stderr, "integration: unsetting AGENT_REPL_LOG_LEVEL: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -147,7 +147,7 @@ type storeOptions struct {
 	// noSocketFlag starts the store WITHOUT --socket, so the environment
 	// variable is the only thing that can name its socket.
 	noSocketFlag bool
-	// verbose runs the store with AGENT_REPL_LOG_VERBOSE=1, which is what makes
+	// verbose runs the store with AGENT_REPL_LOG_LEVEL=debug, which is what makes
 	// its per-statement traces durable — the only way a test can assert that a
 	// refused request never reached storage.
 	verbose bool
@@ -257,12 +257,12 @@ func (s *storeProcess) launch() {
 }
 
 // storeEnv is the child's environment: the private socket as the documented
-// default, the vendor-call guard on, and verbose logging off unless the subject
+// default, the vendor-call guard on, and info logging unless the subject
 // asked for it.
 func storeEnv(socket string, verbose bool) []string {
 	env := make([]string, 0, len(os.Environ())+3)
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "AGENT_REPL_LOG_VERBOSE=") ||
+		if strings.HasPrefix(kv, "AGENT_REPL_LOG_LEVEL=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_STORE_SOCKET=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_FORBID_VENDOR_CALLS=") {
 			continue
@@ -272,9 +272,10 @@ func storeEnv(socket string, verbose bool) []string {
 	env = append(env,
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		"AGENT_REPL_LOG_LEVEL=info",
 	)
 	if verbose {
-		env = append(env, "AGENT_REPL_LOG_VERBOSE=1")
+		env[len(env)-1] = "AGENT_REPL_LOG_LEVEL=debug"
 	}
 	return env
 }

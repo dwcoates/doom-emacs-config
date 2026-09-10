@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	sharedlogging "agentrepl/logging"
 )
 
 func TestMain(m *testing.M) {
@@ -21,10 +23,13 @@ func TestMain(m *testing.M) {
 func sinks(t *testing.T, verbose bool) (*Logger, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	stderr, file := &bytes.Buffer{}, &bytes.Buffer{}
-	l := New(stderr, file)
+	level := sharedlogging.LevelInfo
+	if verbose {
+		level = sharedlogging.LevelDebug
+	}
+	l := NewAtLevel(stderr, file, level)
 	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
 	l.pid = func() int { return 4242 }
-	l.verbose = func() bool { return verbose }
 	return l, stderr, file
 }
 
@@ -74,9 +79,63 @@ func TestVerboseEmittedWhenEnabled(t *testing.T) {
 	l.With(Context{Operation: "cycle"}).LogVerbose("chatter")
 
 	// Assert.
-	if got := decode(t, file.String()).Verbosity; got != "verbose" {
-		t.Fatalf("verbosity = %q, want %q", got, "verbose")
+	got := decode(t, file.String())
+	if got.Verbosity != "verbose" || got.Level != "debug" {
+		t.Fatalf("verbose classification = level %q verbosity %q, want debug/verbose", got.Level, got.Verbosity)
 	}
+}
+
+func TestWorkspaceAttributionIsPromotedOnTheRecord(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, false)
+
+	// Act.
+	l.With(Context{
+		Operation: "watch", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef", ClaudeSessionID: "session-1",
+	}).Log("watching")
+
+	// Assert.
+	got := decode(t, file.String())
+	if got.WorkspaceDir != "/work/repo" || got.WorkspaceID != "deadbeef" || got.ClaudeSessionID != "session-1" {
+		t.Fatalf("promoted attribution = %#v", got)
+	}
+	if _, exists := got.Context["workspace_id"]; exists {
+		t.Fatalf("workspace_id was buried in context: %#v", got.Context)
+	}
+}
+
+func TestRegisteredFileSuppliesWorkspaceAttributionToPathOnlyRecords(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, false)
+	bound := l.With(Context{Component: "sidecar"})
+	bound.RegisterFile(Context{
+		Path: "/tmp/session.jsonl", WorkspaceDir: "/work/repo",
+		WorkspaceID: "deadbeef", ClaudeSessionID: "session-1",
+	})
+
+	// Act.
+	bound.With(Context{Operation: "poll", Path: "/tmp/session.jsonl"}).Log("polling")
+
+	// Assert.
+	got := decode(t, file.String())
+	if got.WorkspaceDir != "/work/repo" || got.WorkspaceID != "deadbeef" || got.ClaudeSessionID != "session-1" {
+		t.Fatalf("registered attribution = %#v", got)
+	}
+}
+
+func TestFilteredRecordStillRejectsIncompleteWorkspaceAttribution(t *testing.T) {
+	// Arrange.
+	var stderr, file bytes.Buffer
+	l := NewAtLevel(&stderr, &file, sharedlogging.LevelError)
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("filtered record accepted an incomplete workspace identity")
+		}
+	}()
+
+	// Act.
+	l.With(Context{Operation: "watch", WorkspaceDir: "/work/repo"}).LogVerbose("watching")
 }
 
 func TestCorrelationKeysRendered(t *testing.T) {
@@ -209,7 +268,6 @@ func TestSinkFailurePanicsAfterTerminalReport(t *testing.T) {
 	l := New(stderr, failingWriter{})
 	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
 	l.pid = func() int { return 4242 }
-	l.verbose = func() bool { return false }
 	defer func() {
 		// Assert.
 		if recover() == nil {
@@ -230,7 +288,6 @@ func TestSinkEmergencySkipsPersistentSink(t *testing.T) {
 	l := New(stderr, failingWriter{})
 	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
 	l.pid = func() int { return 4242 }
-	l.verbose = func() bool { return false }
 
 	// Act.
 	l.With(Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("store unreachable")
@@ -307,7 +364,6 @@ func TestDurableOnlyWithholdsAnOrdinaryRecordFromTheTerminal(t *testing.T) {
 	l := NewDurableOnly(stderr, file)
 	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
 	l.pid = func() int { return 4242 }
-	l.verbose = func() bool { return false }
 
 	// Act.
 	l.With(Context{Operation: "cycle"}).Log("an ordinary lifecycle record")
@@ -330,7 +386,6 @@ func TestDurableOnlyStillNarratesAnEmergencyToTheTerminal(t *testing.T) {
 	l := NewDurableOnly(stderr, &bytes.Buffer{})
 	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
 	l.pid = func() int { return 4242 }
-	l.verbose = func() bool { return false }
 
 	// Act.
 	l.With(Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("store unreachable")

@@ -48,6 +48,9 @@ func (k Kind) String() string {
 // BytesObserved) with the totals THROUGH the current batch before each Handle
 // call.
 type Context struct {
+	WorkspaceDir    string
+	WorkspaceID     string
+	ClaudeSessionID string
 	// SessionID is the vendor's session uuid for this file, read from the file
 	// PATH (the `<session>.jsonl` basename, or the session directory a subagent
 	// transcript sits under). It is an ATTRIBUTE, never an address: the

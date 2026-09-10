@@ -79,9 +79,9 @@ func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
 	// Arrange: the store's own default buffer, not a test-shrunk one.
 	//
 	// THE BOUNDS HERE ARE THIS SITE'S OWN. A 4096-entry WriteBatch and a
-	// 4096-frame delivery are the heaviest calls in the package, and the
-	// package-wide 2s bound they used to share is sized off single-item rpcs,
-	// so it said nothing about this site's real cost. See burstCallTimeout.
+	// 4096-frame delivery are the heaviest calls in the package. Their distinct
+	// bounds must not share one expiring context: the stream has to remain live
+	// for the bounded write and its own bounded delivery. See burstCallTimeout.
 	store := startStore(t, storeOptions{})
 	setupCtx, cancelSetup := callContext(t)
 	defer cancelSetup()
@@ -104,9 +104,9 @@ func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
 		entries = append(entries, shim.agentEntry("w-"+label, "u-"+label,
 			frameLine(agentID("main"), responseFrame("main", "act-"+label, label))))
 	}
-	burstCtx, cancelBurst := callContextWithin(t, burstCallTimeout)
-	defer cancelBurst()
-	shim.write(burstCtx, t, entries...)
+	writeCtx, cancelWrite := callContextWithin(t, burstCallTimeout)
+	defer cancelWrite()
+	shim.write(writeCtx, t, entries...)
 
 	// Assert: every frame arrives, and the store never gave up on the watcher.
 	got := receiveLinesWithin(t, stream, burst, burstStreamTimeout)

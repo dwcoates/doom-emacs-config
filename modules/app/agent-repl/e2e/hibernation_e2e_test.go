@@ -409,7 +409,10 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 	// Act: wait for a SECOND durable cursor advance with NO second prompt —
 	// proof a real keep-alive turn's bytes were durably ingested.
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
-	cursorCtx, cancel := context.WithTimeout(w.Ctx(), keepAliveObservationWindow)
+	// The baseline is one ordinary store RPC, not part of the post-baseline
+	// keep-alive observation window. Give that RPC the suite's ordinary bound;
+	// awaitCursorAdvanceWithin owns the exact 2s observation bound below.
+	cursorCtx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	baseline := cursorOffsetsUnder(w.Store.Cursors(t, cursorCtx), projectDir)
 	// ON keepAliveObservationWindow, NOT DefaultTimeout. The context above

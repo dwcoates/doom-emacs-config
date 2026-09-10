@@ -280,6 +280,10 @@ func logProcessExit(log *logging.Logger, err *error) {
 // those paths is created by the layer that owns it (db.OpenWithOptions,
 // server.Listen).
 func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), error) {
+	level, err := sharedlogging.ParseLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"))
+	if err != nil {
+		return nil, nil, bootstrapError{err}
+	}
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", logPath, err)}
 	}
@@ -287,7 +291,7 @@ func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), er
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
-	log := logging.NewDurableOnly(lf, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	log := logging.NewDurableOnlyAtLevel(lf, os.Stderr, level)
 	log = log.With(logging.Fields{Component: "store", DatabasePath: dbPath, Socket: socketPath})
 	return log, func() { _ = lf.Close() }, nil
 }
