@@ -1,0 +1,640 @@
+//go:build playtest
+
+package e2e
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// OWNER 8 of PLAYTEST-PLAN.md's partition: C22-C24 -- the composer's extras.
+//
+//   - C22: a line, a region and a magit hunk turned into a prompt, through
+//     the canned verb (`agent-repl-explain`) and the prompting one
+//     (`agent-repl-explain-prompt`), with the file reference carried in
+//     the prompt bubble.
+//   - C23: an image put on the X clipboard and attached to the composer by
+//     the real verb, the thumbnail marker it draws there, the attachment
+//     travelling as its own `ImageBlock` beside the words, and the chip the
+//     feed draws for it.
+//   - C24: `agent-repl-history-search` recalling the last accepted prompt
+//     into the composer.
+//
+// Every submission is read at the module's OWN outbound RPC boundary
+// (`armSubmissionObserver`, the composer area's observer), and the daemon's
+// acceptance is asserted as well through the drawn feed: a green step means
+// Emacs composed the right words AND the daemon took them.
+//
+// THE KEYS ARE THE PRODUCT'S. The explain verbs live under the `SPC j`
+// ("claude") prefix as `SPC j e e` and `SPC j e E` (`lisp/keybindings.el`).
+// The plan once wrote them as `SPC TAB e` / `SPC TAB E`; that was the plan's
+// error, corrected there, and the playbook asserts the binding the product
+// actually carries rather than either text.
+
+// playtestContextFile is the plain file C22 visits, and its lines are what
+// the references count. Five lines, so a line-3 point and a 2-4 region are
+// both interior and cannot be confused with the file's edges.
+const (
+	playtestContextFileName = "notes.txt"
+	playtestContextFileBody = "line one\nline two\nline three\nline four\nline five\n"
+)
+
+// playtestExplainOriginContext and playtestExplainOriginPrompt are the
+// `PromptOrigin` keywords the two explain verbs own; each origin has exactly
+// one production send site, so the origin is what says WHICH verb sent.
+const (
+	playtestExplainOriginContext = ":command-explain-context"
+	playtestExplainOriginPrompt  = ":command-explain-prompt"
+)
+
+// userPromptBubbleWith is a page predicate: some user prompt bubble's body
+// carries TEXT.
+func userPromptBubbleWith(text string) string {
+	return `Array.prototype.some.call(
+             document.querySelectorAll('[data-feed-row][data-row-kind="userPrompt"] .bubble-body'),
+             function (b) { return b.textContent.indexOf(` + jsString(text) + `) !== -1; })`
+}
+
+// settledResponsesAtLeast is a page predicate: at least N response bubbles
+// have settled. It is COUNT-based rather than arm-based on purpose: after
+// the first turn settles, the roster arm stays settled until the next
+// submission has been taken up, so "await a settled arm" right after a
+// submit is satisfied by the previous turn.
+func settledResponsesAtLeast(n int) string {
+	return fmt.Sprintf(`document.querySelectorAll('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]').length >= %d`, n)
+}
+
+// ---------------------------------------------------------------------------
+// C22. Line, region and hunk prompts
+// ---------------------------------------------------------------------------
+
+// TestPlaytestContextPrompts is plan C.22.
+func TestPlaytestContextPrompts(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "08-composer-extras-context-prompts",
+		"Plan C.22. A line, a region and a magit hunk turned into prompts by the canned verb "+
+			"(`SPC j e E`) and the prompting verb (`SPC j e e`); each prompt bubble carries the "+
+			"file reference the editor composed.")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	// THE TREE IS DIRTY BEFORE ANYTHING READS IT. The scripted fake git
+	// answers magit's worktree `diff` with one unified hunk on `dirty.txt`
+	// only while the worktree is scripted dirty, and the first status
+	// buffer over this repository must already carry that hunk. NO REAL GIT
+	// RUNS: the hunk is fakegit's own text.
+	repository.SetDirty(repository.Dir, true)
+	contextPath := filepath.Join(repository.Dir, playtestContextFileName)
+	if err := os.WriteFile(contextPath, []byte(playtestContextFileBody), 0o644); err != nil {
+		t.Fatalf("write the context file %s: %v", contextPath, err)
+	}
+
+	s.register(t, repository.Dir)
+	s.openPanel(t)
+	armSubmissionObserver(t, e)
+
+	// THE BINDINGS ARE LOOKED UP, not pressed: both verbs act on the buffer
+	// the user stands in, and one of them prompts.
+	if want, got := "agent-repl-explain-prompt", e.LeaderBinding("j e e"); got != want {
+		t.Fatalf("SPC j e e resolves to %q, want %q", got, want)
+	}
+	if want, got := "agent-repl-explain", e.LeaderBinding("j e E"); got != want {
+		t.Fatalf("SPC j e E resolves to %q, want %q", got, want)
+	}
+	p.note("the explain bindings looked up",
+		"`SPC j e e` resolves to `agent-repl-explain-prompt` and `SPC j e E` to `agent-repl-explain`")
+
+	template := e.EvalString(`agent-repl-explain-prompt-template`)
+
+	// --- a line, through the CANNED verb ---------------------------------
+	//
+	// THE FILE IS VISITED THROUGH THE MODULE'S OWN EDITOR POPUP, not through
+	// a raw `find-file`. `find-file` from the panel's selected window (the
+	// composer, a dedicated input window) REPLACED THE WEBVIEW with the
+	// visited file, so every capture below it showed the file alone and no
+	// panel at all. `agent-repl-popup-open` is the one shared open-a-file
+	// subroutine (lisp/popup.el): a right side window at half the frame,
+	// which leaves the webview and the composer where they are. Point goes
+	// to line 3 and the verb is invoked as a command, which is where a user
+	// invoking it stands.
+	e.Eval(`(progn
+             (defvar agent-repl-playtest08--context nil)
+             (setq agent-repl-playtest08--context
+                   (agent-repl-popup-open ` + elispString(contextPath) + ` 3))
+             t)`)
+	if !e.EvalBool(`(and (window-live-p (get-buffer-window agent-repl-playtest08--context)) t)`) {
+		t.Fatalf("the editor popup showing %s has no live window", playtestContextFileName)
+	}
+	p.note("the context file opened in the module's editor popup",
+		"`agent-repl-popup-open` put "+playtestContextFileName+" in a live right-side window, and the panel's webview and composer are untouched")
+	// POINT IS MOVED IN THE WINDOW, not merely in the buffer. A
+	// `with-current-buffer' moves the BUFFER's point while the window keeps
+	// its own, and redisplay draws the WINDOW's -- so the reference the verb
+	// composed said line 3 while the picture showed the cursor sitting on
+	// line 1, and the manifest sentence and the photograph disagreed.
+	// `with-selected-window' is where a user invoking this stands, and it
+	// syncs the window's point on the way out.
+	e.Eval(`(with-selected-window (get-buffer-window agent-repl-playtest08--context)
+              (goto-char (point-min))
+              (forward-line 2)
+              (call-interactively #'agent-repl-explain)
+              t)`)
+	// THE DRAWN LINE IS AN ASSERTION, so a picture that disagrees with the
+	// sentence fails here rather than only under a reviewer's eye.
+	if got := e.EvalInt(`(with-current-buffer agent-repl-playtest08--context
+                            (line-number-at-pos
+                             (window-point (get-buffer-window agent-repl-playtest08--context))))`); got != 3 {
+		t.Fatalf("the popup window draws its point on line %d, want line 3", got)
+	}
+	lineRef := playtestContextFileName + ":3"
+	sent := awaitSubmissions(t, e, 1, "the line prompt to reach the RPC boundary")[0]
+	if sent.Origin != playtestExplainOriginContext {
+		t.Errorf("the line prompt's origin is %q, want %q", sent.Origin, playtestExplainOriginContext)
+	}
+	if want := fmt.Sprintf(template, lineRef); sent.Text != want {
+		t.Errorf("the line prompt's text is %q, want %q", sent.Text, want)
+	}
+	s.awaitInPage(t, "the line prompt's bubble to carry the file:line reference", userPromptBubbleWith(lineRef))
+	s.awaitInPage(t, "the first turn's response to settle", settledResponsesAtLeast(1))
+	p.capture("line-canned", "`agent-repl-explain` (`SPC j e E`) with point on line 3 of "+playtestContextFileName+", no region",
+		fmt.Sprintf("the RPC boundary saw origin %s with text %q, and a user prompt bubble carrying %q is drawn",
+			playtestExplainOriginContext, sent.Text, lineRef),
+		fmt.Sprintf("The webview fills the left of the frame and its feed's user prompt bubble reads "+
+			"%q -- the canned template around the file:line reference -- with a prose response bubble "+
+			"beneath it; the composer sits under the webview. The right half of the frame is the "+
+			"editor popup showing %s, whose point is on line 3 (`line three`).",
+			fmt.Sprintf(template, lineRef), playtestContextFileName))
+
+	// --- a region, through the PROMPTING verb ----------------------------
+	//
+	// `agent-repl-explain-prompt` pre-fills `read-string` with the reference
+	// and sends what the user made of it. The minibuffer read is stubbed
+	// FOR THE DURATION OF THE ONE CALL, the way this layer drives every
+	// prompting verb, and the stub EDITS the initial text rather than
+	// replacing it, so the assertion proves the reference was the pre-fill.
+	const suffix = " -- what does this block do?"
+	e.Eval(`(with-selected-window (get-buffer-window agent-repl-playtest08--context)
+              (let ((transient-mark-mode t))
+                (goto-char (point-min))
+                (forward-line 1)
+                (push-mark (point) t t)
+                (forward-line 2)
+                (cl-letf (((symbol-function 'read-string)
+                           (lambda (_prompt &optional initial &rest _)
+                             (concat initial ` + elispString(suffix) + `))))
+                  (call-interactively #'agent-repl-explain-prompt)))
+              t)`)
+	regionRef := playtestContextFileName + ":2-4"
+	sent = awaitSubmissions(t, e, 2, "the region prompt to reach the RPC boundary")[1]
+	if sent.Origin != playtestExplainOriginPrompt {
+		t.Errorf("the region prompt's origin is %q, want %q", sent.Origin, playtestExplainOriginPrompt)
+	}
+	if want := regionRef + suffix; sent.Text != want {
+		t.Errorf("the region prompt's text is %q, want %q", sent.Text, want)
+	}
+	s.awaitInPage(t, "the region prompt's bubble to carry the file:range reference", userPromptBubbleWith(regionRef))
+	s.awaitInPage(t, "the second turn's response to settle", settledResponsesAtLeast(2))
+	p.capture("region-prompt", "`agent-repl-explain-prompt` (`SPC j e e`) with lines 2-4 of "+playtestContextFileName+" as the active region, the minibuffer answered with the pre-filled reference plus the user's own words",
+		fmt.Sprintf("the RPC boundary saw origin %s with text %q, and a user prompt bubble carrying %q is drawn",
+			playtestExplainOriginPrompt, sent.Text, regionRef),
+		fmt.Sprintf("The webview still fills the left of the frame, with the composer beneath it and "+
+			"the editor popup showing %s on the right half. The webview's newest user prompt bubble "+
+			"reads %q: the file:startline-endline reference FIRST, then the words the user added. Two "+
+			"earlier bubbles (the line prompt and its answer) sit above it.",
+			playtestContextFileName, regionRef+suffix))
+
+	// --- a magit hunk, through the CANNED verb ---------------------------
+	//
+	// THE STATUS BUFFER IS OPENED THROUGH THE MODULE'S OWN DOOR,
+	// `agent-repl--magit-status-same-window`, with the popup's window
+	// SELECTED: the door forces same-window display, so magit replaces the
+	// popup's buffer on the right half and the panel survives. A raw
+	// `magit-status-setup-buffer` instead went through Doom's own magit
+	// display function and filled the WHOLE FRAME, leaving no webview in the
+	// picture at all. The door returns magit's log line and not the buffer,
+	// so the buffer is asked for by mode.
+	//
+	// The popup's window is a SOFTLY DEDICATED side window, and
+	// `display-buffer-same-window` refuses a dedicated window; the
+	// dedication is lifted first so the same-window display can land there
+	// rather than falling through to the fallback action (which would take
+	// the webview's window).
+	e.Eval(`(progn
+             (require 'magit)
+             (defvar agent-repl-playtest08--magit nil)
+             (select-window (get-buffer-window agent-repl-playtest08--context))
+             (set-window-dedicated-p (selected-window) nil)
+             (agent-repl--magit-status-same-window ` + elispString(repository.Dir) + `)
+             (setq agent-repl-playtest08--magit (magit-get-mode-buffer 'magit-status-mode))
+             (and agent-repl-playtest08--magit t))`)
+	e.AwaitTrue("the magit status buffer to draw the scripted dirty hunk",
+		`(with-current-buffer agent-repl-playtest08--magit
+           (save-excursion
+             (goto-char (point-min))
+             (and (re-search-forward "^@@ " nil t) t)))`)
+	// THE FILE SECTION IS EXPANDED THE WAY A USER EXPANDS IT. magit's status
+	// buffer opens dirty.txt's file section COLLAPSED: the hunk's text is in
+	// the buffer (so the search above finds it) but invisible, so the
+	// capture showed a `modified dirty.txt` line and no hunk under it. Point
+	// goes to that line and the section is shown, exactly as `TAB` there
+	// would. `magit-section-show` is unconditional, so it is also correct
+	// for a section that some future magit opens already visible.
+	e.Eval(`(with-current-buffer agent-repl-playtest08--magit
+              (goto-char (point-min))
+              (re-search-forward "^modified +dirty\\.txt")
+              (beginning-of-line)
+              (magit-section-show (magit-current-section))
+              t)`)
+	if !e.EvalBool(`(with-current-buffer agent-repl-playtest08--magit
+                       (goto-char (point-min))
+                       (re-search-forward "^@@ ")
+                       (beginning-of-line)
+                       (and (magit-section-match 'hunk) t))`) {
+		t.Fatalf("point on the `@@` line of the status buffer is not inside a magit hunk section")
+	}
+	e.Eval(`(with-current-buffer agent-repl-playtest08--magit
+              (call-interactively #'agent-repl-explain)
+              t)`)
+	// fakegit's one dirty path is `dirty.txt` and its hunk is `@@ -1 +1,2 @@`,
+	// so the to-range is lines 1 through 2.
+	const hunkRef = "dirty.txt:1-2"
+	sent = awaitSubmissions(t, e, 3, "the hunk prompt to reach the RPC boundary")[2]
+	if sent.Origin != playtestExplainOriginContext {
+		t.Errorf("the hunk prompt's origin is %q, want %q", sent.Origin, playtestExplainOriginContext)
+	}
+	if want := fmt.Sprintf(template, hunkRef); sent.Text != want {
+		t.Errorf("the hunk prompt's text is %q, want %q", sent.Text, want)
+	}
+	s.awaitInPage(t, "the hunk prompt's bubble to carry the hunk's file:range reference", userPromptBubbleWith(hunkRef))
+	s.awaitInPage(t, "the third turn's response to settle", settledResponsesAtLeast(3))
+	p.capture("hunk-canned", "`agent-repl-explain` (`SPC j e E`) with point on the `@@ -1 +1,2 @@` hunk of dirty.txt in the workspace's magit status buffer",
+		fmt.Sprintf("the RPC boundary saw origin %s with text %q, and a user prompt bubble carrying %q is drawn",
+			playtestExplainOriginContext, sent.Text, hunkRef),
+		fmt.Sprintf("The webview fills the left of the frame with the composer beneath it, and its "+
+			"newest user prompt bubble reads %q: the hunk's own file and to-range, taken from the "+
+			"magit section rather than from point's line. The right half of the frame is the magit "+
+			"status buffer (it replaced the editor popup's file), showing an `Unstaged changes` "+
+			"section whose `modified   dirty.txt` entry is EXPANDED, so the `@@ -1 +1,2 @@` hunk and "+
+			"its lines are visible under it.", fmt.Sprintf(template, hunkRef)))
+}
+
+// ---------------------------------------------------------------------------
+// C23. Attach an image
+// ---------------------------------------------------------------------------
+
+// playtestImageWidth and playtestImageHeight size the image C23 attaches.
+// Small, so the thumbnail the composer overlays is drawn at its natural size
+// under `agent-repl-image-thumbnail-max-height`.
+const (
+	playtestImageWidth  = 96
+	playtestImageHeight = 64
+)
+
+// writePlaytestPNG writes a small two-color PNG -- a blue field with a red
+// block -- so the picture is unmistakable in a capture and cannot be taken
+// for the composer's own background.
+func writePlaytestPNG(t *testing.T, path string) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, playtestImageWidth, playtestImageHeight))
+	for y := 0; y < playtestImageHeight; y++ {
+		for x := 0; x < playtestImageWidth; x++ {
+			c := color.RGBA{R: 0x1e, G: 0x5a, B: 0xd6, A: 0xff}
+			if x >= playtestImageWidth/4 && x < 3*playtestImageWidth/4 &&
+				y >= playtestImageHeight/4 && y < 3*playtestImageHeight/4 {
+				c = color.RGBA{R: 0xd6, G: 0x2c, B: 0x1e, A: 0xff}
+			}
+			img.SetRGBA(x, y, c)
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create the playtest image %s: %v", path, err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		f.Close()
+		t.Fatalf("encode the playtest image %s: %v", path, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close the playtest image %s: %v", path, err)
+	}
+}
+
+// TestPlaytestClipboardImageAttachment is plan C.23.
+//
+// HOW THE IMAGE GETS IN, AND IT IS THE REAL VERB. The image is put on this
+// world's own X clipboard with `xclip` -- the display server here is Xvfb, so
+// X11 is what `agent-repl--image-linux-reader` selects, and the sandbox image
+// carries `xclip` for exactly this (its Dockerfile asserts the binary at
+// build time, so an image without it cannot exist). The verb is then invoked
+// as a command, the way a user invokes it, and its own capture reads the
+// clipboard. Nothing below the verb is driven: the file the composer attaches
+// is the one the VERB wrote, its name is the one the verb minted, and the
+// bytes are compared against what was put on the clipboard -- so the whole
+// clipboard hop is under test rather than stubbed past.
+func TestPlaytestClipboardImageAttachment(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "08-composer-extras-clipboard-image",
+		"Plan C.23. A PNG put on this world's X clipboard and attached to the composer by "+
+			"`agent-repl-attach-clipboard-image` itself, the thumbnail marker the composer draws, "+
+			"the `ImageBlock` that travels beside the words, and the image chip the feed draws for it.")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	s.openPanel(t)
+	s.awaitArm(t, name, "the tab's arm before anything is submitted", playtestUnwiredArm)
+	p.note("the panel opened and the roster's first push read",
+		"the workspace's arm is :none before anything is submitted")
+
+	if want, got := "agent-repl-attach-clipboard-image", e.BindingForIn(s.Input, "C-c C-i"); got != want {
+		t.Fatalf("composer C-c C-i resolves to %q, want %q", got, want)
+	}
+	p.note("the attach binding looked up in the composer",
+		"`C-c C-i` in the composer resolves to `agent-repl-attach-clipboard-image`")
+
+	// THE READER THE PRODUCT WILL CHOOSE IS ASSERTED BEFORE THE CLIPBOARD IS
+	// LOADED, through the module's own selection, so a world whose image lost
+	// `xclip` says THAT rather than failing later as "no image on the
+	// clipboard".
+	if want, got := "x11", e.EvalString(`(symbol-name (agent-repl--image-display-type))`); got != want {
+		t.Fatalf("the module reads this world's display server as %q, want %q", got, want)
+	}
+	if e.EvalString(`(or (agent-repl--image-executable-find "xclip") "")`) == "" {
+		t.Fatal("the sandbox image has no `xclip`, so the clipboard verb has no reader here")
+	}
+	p.note("the module's own clipboard reader selection read",
+		"the display server is `x11` and `xclip` is on PATH, so `agent-repl--image-linux-reader` has the reader it wants")
+
+	// THE IMAGE IS PUT ON THE X CLIPBOARD, by the tool a pasting application
+	// would use. `xclip -i` RUNS TO COMPLETION: it reads the file, forks a
+	// child that owns the selection for as long as the display lives, and
+	// exits. So it is a `call-process' whose exit code is checked.
+	//
+	// IT IS NOT A `start-process', and that was measured rather than assumed.
+	// `start-process' gives the child a PTY, and Emacs closing that pty when
+	// the parent exits SIGHUPs the forked selection owner with it -- so the
+	// clipboard came back empty every time. Measured in this image, one Emacs,
+	// both ways in the same batch: after `start-process' the clipboard
+	// answered `Error: target TARGETS not available` (exit 1); after
+	// `call-process' it answered `TARGETS\nimage/png` (exit 0).
+	//
+	// The forked owner is bound to this world's own Xvfb and goes when it
+	// goes, so there is nothing for a cleanup to reap.
+	clipboardSource := filepath.Join(s.Box.Scratch(), "clipboard.png")
+	writePlaytestPNG(t, clipboardSource)
+	if code := e.EvalInt(`(call-process "xclip" nil nil nil
+                                        "-selection" "clipboard" "-t" "image/png"
+                                        "-i" ` + elispString(clipboardSource) + `)`); code != 0 {
+		t.Fatalf("`xclip -i` exited %d, want 0 (the image never reached the clipboard)", code)
+	}
+	e.AwaitTrue("the X clipboard to offer the image/png target",
+		`(with-temp-buffer
+           (and (eq 0 (call-process "xclip" nil t nil "-selection" "clipboard" "-t" "TARGETS" "-o"))
+                (save-excursion (goto-char (point-min))
+                                (and (search-forward "image/png" nil t) t))))`)
+	p.note("a PNG put on this world's X clipboard with `xclip`",
+		"`xclip -i` exited 0 and the clipboard's TARGETS list carries `image/png`, so a reader has an image to take")
+
+	// The words first, then the attachment, the way a person composes.
+	const words = "what is in this picture?"
+	e.Eval(`(with-current-buffer ` + elispString(s.Input) + `
+              (erase-buffer)
+              (insert ` + elispString(words) + `)
+              t)`)
+	if got := composerText(e, s.Input); got != words {
+		t.Fatalf("the composer text is %q, want %q", got, words)
+	}
+	p.note("the words typed into the composer, nothing attached yet",
+		"the composer text is exactly the typed words")
+
+	// THE VERB READS THE CURRENT WORKSPACE from persp-mode, not from the
+	// buffer it is invoked in, so the ambient workspace is asserted here --
+	// a verb that captured into some other workspace's image directory would
+	// otherwise surface as a confusing path mismatch below.
+	if got := e.EvalString(`(or (agent-repl--ws-current-name) "")`); got != name {
+		t.Fatalf("the current workspace is %q, want the registered %q", got, name)
+	}
+
+	// THE VERB ITSELF, invoked as a command in the composer. It captures the
+	// clipboard, mints its own destination under the workspace's image
+	// directory, registers the attachment and draws the marker; the path it
+	// answers is the file it wrote and is not one this playbook chose.
+	imagePath := e.EvalString(`(with-current-buffer ` + elispString(s.Input) + `
+                                 (call-interactively #'agent-repl-attach-clipboard-image))`)
+	if imagePath == "" {
+		t.Fatal("`agent-repl-attach-clipboard-image` answered no path")
+	}
+	imageDir := e.EvalString(`(agent-repl--image-dir ` + elispString(name) + `)`)
+	if got := filepath.Dir(imagePath); got != strings.TrimSuffix(imageDir, "/") {
+		t.Errorf("the verb wrote the capture to %s, want it under the workspace image dir %s", got, imageDir)
+	}
+	// THE BYTES THAT CAME BACK ARE THE BYTES THAT WENT ON THE CLIPBOARD.
+	// Nothing else proves the clipboard hop happened: a verb that wrote an
+	// empty file, or some other file, would satisfy every assertion above.
+	wanted, err := os.ReadFile(clipboardSource)
+	if err != nil {
+		t.Fatalf("read the image put on the clipboard: %v", err)
+	}
+	captured, err := os.ReadFile(imagePath)
+	if err != nil {
+		t.Fatalf("read the image the verb captured at %s: %v", imagePath, err)
+	}
+	if !bytes.Equal(captured, wanted) {
+		t.Fatalf("the verb captured %d bytes at %s, want the %d bytes put on the clipboard",
+			len(captured), imagePath, len(wanted))
+	}
+	mediaType := e.EvalString(`agent-repl--image-media-type`)
+	marker := e.EvalString(`(agent-repl--image-marker-text ` + elispString(imagePath) + `)`)
+
+	// The attachment is REGISTERED, the text carries the MARKER and never
+	// the path, and a thumbnail overlay is on the marker.
+	attached := e.EvalStrings(`(mapcar (lambda (a) (concat (plist-get a :path) "|" (plist-get a :media-type)))
+                                      (agent-repl-input-attachments ` + elispString(name) + `))`)
+	if want := []string{imagePath + "|" + mediaType}; strings.Join(attached, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("the composer's attachments are %q, want %q", attached, want)
+	}
+	text := composerText(e, s.Input)
+	if !strings.Contains(text, marker) {
+		t.Fatalf("the composer text %q does not carry the marker %q", text, marker)
+	}
+	if strings.Contains(text, imagePath) {
+		t.Fatalf("the composer text carries the image PATH as words: %q", text)
+	}
+	if !e.EvalBool(`(with-current-buffer ` + elispString(s.Input) + `
+                       (and (seq-some (lambda (o) (and (overlay-get o 'agent-repl-image)
+                                                       (overlay-get o 'display)))
+                                      (overlays-in (point-min) (point-max)))
+                            t))`) {
+		t.Fatalf("no thumbnail overlay is on the composer's marker line")
+	}
+	// THE COMPOSER IS ON SCREEN BEFORE THE PICTURE IS TAKEN. This capture
+	// came out with the webview white and the composer black and wordless
+	// while the same run's other captures were painted, so the arrangement
+	// itself is asserted here: the composer has a live window and that
+	// window starts at the buffer's first character, which is where the
+	// typed words and the marker line are. The `redisplay' is forced in the
+	// same eval so a redisplay failure, if there is one, surfaces as an
+	// elisp error attributed to THIS step rather than as a blank picture.
+	if !e.EvalBool(`(let ((w (get-buffer-window ` + elispString(s.Input) + `)))
+                       (prog1 (and w (window-live-p w)
+                                   (with-current-buffer ` + elispString(s.Input) + `
+                                     (= (window-start w) (point-min)))
+                                   t)
+                         (redisplay t)))`) {
+		t.Fatalf("the composer has no live window showing its buffer from the top before the thumbnail capture")
+	}
+	p.capture("composer-thumbnail", "the words typed, then `agent-repl-attach-clipboard-image` (`C-c C-i`) invoked with the PNG on the X clipboard",
+		fmt.Sprintf("`agent-repl-input-attachments` holds exactly {%s, %s}; the composer text carries the marker %q and not the path; an overlay with `agent-repl-image` and a `display` image is on the marker",
+			imagePath, mediaType, marker),
+		"The composer window (beneath the webview) shows the typed words on the first line and, on "+
+			"the next line, a small THUMBNAIL of the attached picture: a blue field with a red block "+
+			"in its middle. The file's path is nowhere in the composer's text.")
+
+	// Submit with composer RET, and read the UserSaid at the RPC boundary as
+	// a whole: a text block with the words and an image block naming the
+	// path and media type, in that order.
+	e.Eval(`(progn
+             (defvar agent-repl-playtest08--said nil)
+             (setq agent-repl-playtest08--said nil)
+             (defun agent-repl-playtest08--record-said (_conn request &rest _)
+               (setq agent-repl-playtest08--said (format "%S" (plist-get request :said))))
+             (unless (advice-member-p 'agent-repl-playtest08--record-said 'agent-repl-rpc-submit-prompt)
+               (advice-add 'agent-repl-rpc-submit-prompt :before #'agent-repl-playtest08--record-said))
+             t)`)
+	if want, got := "agent-repl-send", e.BindingForIn(s.Input, "RET"); got != want {
+		t.Fatalf("composer RET resolves to %q, want %q", got, want)
+	}
+	e.KeysIn(s.Input, "RET")
+	raw := e.AwaitEval("the submission to reach the RPC boundary", `agent-repl-playtest08--said`,
+		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
+	said := decodeString(raw)
+	textAt := strings.Index(said, `:text "`+words+`"`)
+	imageAt := strings.Index(said, `:path "`+imagePath+`"`)
+	if textAt < 0 {
+		t.Fatalf("the submitted UserSaid carries no text block with %q:\n%s", words, said)
+	}
+	if imageAt < 0 {
+		t.Fatalf("the submitted UserSaid carries no image block naming %q:\n%s", imagePath, said)
+	}
+	if !strings.Contains(said, `:media-type "`+mediaType+`"`) {
+		t.Fatalf("the submitted image block does not state media type %q:\n%s", mediaType, said)
+	}
+	if imageAt < textAt {
+		t.Errorf("the image block travels BEFORE the text block; want the words first:\n%s", said)
+	}
+	p.note("composer RET pressed",
+		fmt.Sprintf("the RPC boundary saw one UserSaid with a text block %q followed by an image block {path %s, media type %s}",
+			words, imagePath, mediaType))
+
+	// Acceptance clears the composer AND its attachment list.
+	e.AwaitEval("the daemon's acceptance to clear the composer",
+		`(with-current-buffer `+elispString(s.Input)+` (buffer-string))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == "" })
+	if n := e.EvalInt(`(length (agent-repl-input-attachments ` + elispString(name) + `))`); n != 0 {
+		t.Errorf("the composer still holds %d attachments after acceptance, want none", n)
+	}
+	p.note("the submission accepted",
+		"the composer is empty and `agent-repl-input-attachments` is empty: the words and the attachment were both consumed by the accepted submission")
+
+	// The bubble carries the words AND a second block for the image. Which
+	// block the product draws for the image is READ rather than assumed:
+	// `.prompt-block-image` is the attachment chip, and anything else is
+	// what the reviewer must see and file.
+	s.awaitInPage(t, "the prompt bubble to carry the words", userPromptBubbleWith(words))
+	s.awaitInPage(t, "the prompt bubble to carry a second block beside the words",
+		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body').querySelectorAll('.prompt-block').length >= 2`)
+	s.awaitInPage(t, "the turn's response to settle", settledResponsesAtLeast(1))
+	// THE CHIP IS ASSERTED, NOT MERELY PHOTOGRAPHED. `.prompt-block-image` is
+	// the `<img>` the webapp draws for a resolved image block and
+	// `.prompt-block-unsupported` is the `unsupported block: image`
+	// placeholder it draws when the daemon could not resolve one, so the
+	// class alone tells the two apart -- and the picture is then only about
+	// whether the right PICTURE is in the chip.
+	s.awaitInPage(t, "the bubble's image block to be the resolved chip",
+		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body img.prompt-block-image') !== null`)
+	imageBlockSrc := s.pageString(t, "the src of the bubble's image chip",
+		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body img.prompt-block-image').getAttribute("src")`)
+	// The chip must have LOADED, not merely be in the DOM: a broken `<img>`
+	// is an element too, and it is exactly what a wrong src would leave.
+	s.awaitInPage(t, "the bubble's image chip to have loaded its bytes",
+		`(function () { var i = document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body img.prompt-block-image');
+                       return i !== null && i.complete && i.naturalWidth === `+fmt.Sprint(playtestImageWidth)+`; })()`)
+	p.capture("bubble-attachment", "the accepted prompt drawn in the feed",
+		fmt.Sprintf("a user prompt bubble carries %q and a second `.prompt-block`; that block is an "+
+			"`img.prompt-block-image` whose src is %q and which has LOADED at the attachment's own "+
+			"natural width of %dpx",
+			words, imageBlockSrc, playtestImageWidth),
+		fmt.Sprintf("The feed's user prompt bubble shows the words %q and, beneath them, the ATTACHED "+
+			"IMAGE itself: the blue field with the red block in its middle, served by the daemon's "+
+			"own image origin. A placeholder reading `unsupported block: image` in its place is NOT "+
+			"the chip and is a defect. A prose response bubble sits beneath.", words))
+}
+
+// pageString reads one JavaScript string expression out of the page.
+func (s *playtestScenario) pageString(t *testing.T, what, expression string) string {
+	t.Helper()
+	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
+	raw := s.E.AwaitEvalFor(playtestPageBound, what,
+		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+elispString(expression)+`)`,
+		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
+	return decodeString(raw)
+}
+
+// ---------------------------------------------------------------------------
+// C24. History search recall
+// ---------------------------------------------------------------------------
+
+// TestPlaytestHistorySearchRecall is plan C.24.
+//
+// History is pushed on ACCEPTANCE, not on the keystroke (the composer area's
+// scenario 25 says so), so the recall waits on the composer being cleared --
+// the acceptance's own visible act. `agent-repl-history-search` picks
+// through `completing-read`, which is stubbed for the duration of the one
+// call to choose the FIRST candidate: index 0 is the most recent entry.
+func TestPlaytestHistorySearchRecall(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "08-composer-extras-history-search",
+		"Plan C.24. One prompt submitted and accepted, then recalled into the composer through "+
+			"`agent-repl-history-search` (`C-M-r`).")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	s.register(t, repository.Dir)
+	s.openPanel(t)
+
+	if want, got := "agent-repl-history-search", e.BindingForIn(s.Input, "C-M-r"); got != want {
+		t.Fatalf("composer C-M-r resolves to %q, want %q", got, want)
+	}
+	p.note("the history search binding looked up in the composer",
+		"`C-M-r` in the composer resolves to `agent-repl-history-search`")
+
+	const submitted = "remember this one for the history search"
+	s.submit(t, submitted)
+	e.AwaitEval("the daemon's acceptance to clear the composer",
+		`(with-current-buffer `+elispString(s.Input)+` (buffer-string))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == "" })
+	s.awaitInPage(t, "the turn's response to settle", settledResponsesAtLeast(1))
+	p.note("one prompt submitted with composer RET and accepted",
+		"the composer is empty, which is the acceptance's own visible act and the moment the history holds the prompt")
+
+	e.Eval(`(with-current-buffer ` + elispString(s.Input) + `
+              (cl-letf (((symbol-function 'completing-read)
+                         (lambda (_prompt collection &rest _) (car collection))))
+                (call-interactively #'agent-repl-history-search))
+              t)`)
+	if got := composerText(e, s.Input); got != submitted {
+		t.Fatalf("history search put %q in the composer, want the accepted prompt %q", got, submitted)
+	}
+	p.capture("history-recalled", "`agent-repl-history-search` invoked in the empty composer, the completion answered with its first (most recent) candidate",
+		fmt.Sprintf("the composer's text is exactly %q", submitted),
+		fmt.Sprintf("The composer window (beneath the webview) holds the recalled prompt %q, and the "+
+			"feed above it shows that same prompt's bubble followed by its prose answer.", submitted))
+}

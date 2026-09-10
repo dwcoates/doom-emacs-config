@@ -66,6 +66,61 @@ func TestDeliverMirrorsTheAcceptedPromptIntoTheFeed(t *testing.T) {
 	}
 }
 
+// THE MIRROR IS THE ONLY DRAW A LIVE SESSION GETS. Nothing brings a delivered
+// user prompt back on the watch, so a mirror that drops the image block leaves
+// an attached image invisible until some later page replays history -- which
+// is exactly what it did.
+func TestDeliverMirrorsAnAttachedImageBesideTheWords(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	said := userSaidWithImage("what is in this picture?", "/w/.claude/emacs/images/clip.png")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), Submission{
+		WS: theWorkspace, Turn: "t1", Said: said,
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+	}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	blocks := h.feed.mirrored()[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("the mirrored row carries %d blocks, want the words and the image: %v", len(blocks), blocks)
+	}
+	if got := blocks[1].GetImage().GetSrc(); got != "src:/w/.claude/emacs/images/clip.png" {
+		t.Fatalf("the mirrored image src = %q, want the resolver's own answer", got)
+	}
+}
+
+// An image the resolver cannot place is NAMED in the mirror, never dropped:
+// the person is told something they attached could not be drawn.
+func TestDeliverMirrorsAnUnresolvableImageAsUnsupported(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.q.deps.ResolveImage = func(*conversationv1.ImageBlock) (string, string, error) {
+		return "", "", errors.New("no producer resolves this reference")
+	}
+	said := userSaidWithImage("look", "/w/.claude/emacs/images/clip.png")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), Submission{
+		WS: theWorkspace, Turn: "t1", Said: said,
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+	}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	blocks := h.feed.mirrored()[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("the mirrored row carries %d blocks, want the words and the named refusal: %v", len(blocks), blocks)
+	}
+	if got := blocks[1].GetUnsupported().GetKind(); got != "image" {
+		t.Fatalf("the mirrored refusal names %q, want \"image\"", got)
+	}
+}
+
 func TestDeliverStampsTheMirrorWithTheMintedTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
