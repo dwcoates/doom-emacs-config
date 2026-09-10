@@ -32,11 +32,23 @@ const opFleetRollout = "daemon.workspace.fleet_rollout"
 
 // Client answers the workspace's current shim client, false when none is up.
 // It is rollout.ShimFleet's first method.
+//
+// A REAPED CLIENT IS NO SESSION, read exactly as Fleet.Shim reads it. The map
+// entry outlives the process — a shim killed out from under the daemon leaves
+// its row behind until something tears it down — and answering that row as a
+// live client is what sent a submitted prompt down the DELIVERY path instead
+// of the revival one: StartTurn dialed a socket nothing was listening on, the
+// call answered `unavailable`, and the workspace stayed dead with the prompt
+// held as an outage. The sidebar's dead arm and this answer must not disagree
+// about which shim serves a workspace.
 func (f *Fleet) Client(ws ids.WorkspaceID) (shimclient.Client, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	session, ok := f.sessions[ws]
 	if !ok {
+		return nil, false
+	}
+	if _, reaped := session.client.Reaped(); reaped {
 		return nil, false
 	}
 	return session.client, true
