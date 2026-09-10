@@ -1969,7 +1969,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act.
-    await reader.readFirstPage(BOOK, 10, () => true);
+    await reader.readFirstPage(BOOK, 10, undefined, () => true);
 
     // Assert.
     expect(opens).toBe(1);
@@ -1981,7 +1981,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act.
-    const page = await reader.readFirstPage(BOOK, 10, () => true);
+    const page = await reader.readFirstPage(BOOK, 10, undefined, () => true);
 
     // Assert.
     expect([page.entries.length, page.boundary.case]).toEqual([0, "floor"]);
@@ -1997,7 +1997,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act, Assert.
-    await expect(reader.readFirstPage(BOOK, 10, () => true)).rejects.toMatchObject({
+    await expect(reader.readFirstPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -2024,7 +2024,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act, Assert.
-    await expect(reader.readFirstPage(BOOK, 10, () => true)).rejects.toMatchObject({
+    await expect(reader.readFirstPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });

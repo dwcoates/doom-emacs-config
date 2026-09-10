@@ -284,6 +284,7 @@ export interface Persistence {
   readFirstPage(
     agent: conversationv1.AgentId,
     pageSize: number,
+    knownThrough?: conversationv1.HistoryPointer,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage>;
   /** An OLDER page of one book, walking down from a pointer already served. */

@@ -4983,7 +4983,7 @@ describe("a vendor failure that is not an Error", () => {
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
     });
-    h.persistence.openAgentPage = () => Promise.reject("the store socket went away");
+    h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
     const before = logCursor();
 
     await started(h);
@@ -5039,7 +5039,7 @@ describe("a vendor failure that is not an Error", () => {
     });
     const details = await faultDetailsWhile(h, async () => {
       await started(h);
-      h.persistence.openAgentPage = () => Promise.reject("the store socket went away");
+      h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
       const watching = h.engine
         .watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
       await watching.next();
@@ -5101,7 +5101,7 @@ describe("a vendor failure that is not an Error", () => {
     const watching = h.engine
       .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
     await watching.next();
-    h.persistence.openAgentPage = () => Promise.reject("the store socket went away");
+    h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
     const before = logCursor();
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
