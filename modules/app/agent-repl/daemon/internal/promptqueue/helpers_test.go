@@ -682,6 +682,12 @@ func newHarness(t *testing.T) *harness {
 		drain:   &noteRecorder{},
 	}
 	q, err := newQueue(Deps{
+		// The harness's image resolver is a plain naming of the path, so a
+		// mirrored image block is legible in an assertion; every test whose
+		// SUBJECT is resolution overrides it.
+		ResolveImage: func(b *conversationv1.ImageBlock) (string, string, error) {
+			return "src:" + b.GetLocation().(*conversationv1.ImageBlock_Path).Path.GetPath(), "alt", nil
+		},
 		DB:      h.db,
 		Judge:   h.judge,
 		Feed:    h.feed,
@@ -778,6 +784,20 @@ func userSaid(text string) *conversationv1.UserSaid {
 		Blocks: []*conversationv1.UserContentBlock{{
 			Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
 		}},
+	}}
+}
+
+// userSaidWithImage composes a submission of words plus one attached image,
+// in the order the composer sends them.
+func userSaidWithImage(text, path string) *conversationv1.UserSaid {
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{
+		Blocks: []*conversationv1.UserContentBlock{
+			{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}}},
+			{Block: &conversationv1.UserContentBlock_Image{Image: &conversationv1.ImageBlock{
+				Location:  &conversationv1.ImageBlock_Path{Path: &conversationv1.ImageBlockPath{Path: path}},
+				MediaType: "image/png",
+			}}},
+		},
 	}}
 }
 

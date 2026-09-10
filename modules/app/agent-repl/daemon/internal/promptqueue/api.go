@@ -224,6 +224,13 @@ type Deps struct {
 	// MIRRORED text; the full text stays on the durable record and on the
 	// prompt the shim receives. nil is the identity.
 	StripSentinels func(string) string
+	// ResolveImage turns an attached image's reference into a src the webview
+	// can load, for the MIRRORED row. It is the SAME resolver the feed
+	// resolver holds: the mirror and the replayed draw are one row under one
+	// key, so they resolve an image the same way or they disagree about what
+	// the person attached. REQUIRED -- a nil default here is what made an
+	// attached image invisible for a whole live session.
+	ResolveImage feed.ImageResolver
 	// Now supplies the instants the queue stamps. nil means time.Now.
 	Now func() time.Time
 	// Log is the queue's logger.

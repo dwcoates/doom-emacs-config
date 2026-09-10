@@ -19,7 +19,10 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 			DB: h.db, Judge: h.judge, Feed: h.feed, Footer: h.footer, Holds: h.holds,
 			Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, true },
 			Watcher: func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, true },
-			Log:     dlog.NewTestSurfaces(),
+			ResolveImage: func(*conversationv1.ImageBlock) (string, string, error) {
+				return "src", "alt", nil
+			},
+			Log: dlog.NewTestSurfaces(),
 		}
 	}
 	tests := []struct {
@@ -34,6 +37,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"holds resolver", func(d *Deps) { d.Holds = nil }},
 		{"client resolver", func(d *Deps) { d.Client = nil }},
 		{"watcher resolver", func(d *Deps) { d.Watcher = nil }},
+		{"image resolver", func(d *Deps) { d.ResolveImage = nil }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
