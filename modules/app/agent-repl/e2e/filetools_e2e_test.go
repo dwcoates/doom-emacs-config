@@ -42,6 +42,7 @@
 package e2e
 
 import (
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -311,9 +312,29 @@ func TestWriteCreatedAndUpdated(t *testing.T) {
 	cases := []struct {
 		name     string
 		scenario string
+		// wantLines is the drawn diff, line for line: the composed hunk
+		// header first, then each line's text with its marker already
+		// stripped onto the arm.
+		wantLines []string
+		// wantAdded is how many of those lines carry the ADDED arm. A
+		// creation's every content line is an addition, and the count is
+		// asserted because a terminating newline once produced a further,
+		// BLANK addition -- an empty green row under the written line,
+		// with the header stating "+1,2" for a one-line file.
+		wantAdded int
 	}{
-		{name: "created", scenario: "write-create"},
-		{name: "updated", scenario: "write-update"},
+		{
+			name:      "created",
+			scenario:  "write-create",
+			wantLines: []string{"@@ -1,0 +1,1 @@", "export const fresh = true;"},
+			wantAdded: 1,
+		},
+		{
+			name:      "updated",
+			scenario:  "write-update",
+			wantLines: []string{"@@ -4,1 +4,2 @@", "  export const four = 4;", "  export const five = 5;"},
+			wantAdded: 1,
+		},
 	}
 
 	for _, tc := range cases {
@@ -330,6 +351,21 @@ func TestWriteCreatedAndUpdated(t *testing.T) {
 			}
 			if len(diff.GetLines()) == 0 {
 				t.Fatalf("write-%s tool call's diff output carries no lines, want the write's hunk", tc.name)
+			}
+			var got []string
+			added := 0
+			for _, line := range diff.GetLines() {
+				got = append(got, line.GetText())
+				if line.GetAdded() != nil {
+					added++
+				}
+			}
+			if !slices.Equal(got, tc.wantLines) {
+				t.Fatalf("write-%s tool call's drawn diff = %q, want %q", tc.name, got, tc.wantLines)
+			}
+			if added != tc.wantAdded {
+				t.Fatalf("write-%s tool call's drawn diff carries %d added lines, want %d: a file's terminating newline is not a further, blank addition",
+					tc.name, added, tc.wantAdded)
 			}
 		})
 	}
