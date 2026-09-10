@@ -201,9 +201,14 @@ type Verbs interface {
 	OnOneShotTurnConcluded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// Notify raises one host notification: it relays the TYPED notification
 	// onto the workspace's host stream and sets the roster's attention marker,
-	// which SelectWorkspace clears. It is the session watcher's LifecycleSink
-	// notification hook, wired by the server.
+	// which SelectWorkspace and AsksSettled clear. It is the session watcher's
+	// LifecycleSink notification hook, wired by the server.
 	Notify(ctx context.Context, ws ids.WorkspaceID, note sessionwatcher.HostNotification) error
+	// AsksSettled clears the roster's attention marker when the last ask that
+	// raised it settles. It is the session watcher's LifecycleSink
+	// asks-settled hook, and Notify's counterpart: an answered ask is a SEEN
+	// notification, whether or not the workspace was ever selected.
+	AsksSettled(ctx context.Context, ws ids.WorkspaceID) error
 	// Resolve turns a client's echoed WorkspaceRef into a workspace, keying on
 	// `id` and REFUSING a ref whose `dir` disagrees with the registry.
 	Resolve(ctx context.Context, ref *workspacev1.WorkspaceRef) (wsm.Workspace, error)

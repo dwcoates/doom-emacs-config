@@ -592,6 +592,10 @@ func (s *lifecycleSink) OnNotification(_ ids.WorkspaceID, note HostNotification)
 	s.rec.emit(event{sink: "lifecycle", method: "OnNotification", note: &held})
 }
 
+func (s *lifecycleSink) OnAsksSettled(_ ids.WorkspaceID) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnAsksSettled"})
+}
+
 // itoa keeps the recorder free of a strconv import at every call site.
 func itoa(n int) string {
 	if n == 0 {
@@ -1027,6 +1031,58 @@ func permissionUpdate(id, gatedCall, title, displayName string) *conversationv1.
 			Result: &conversationv1.AgentPermission_Start{Start: &conversationv1.AgentPermissionStart{
 				Prompt:    &conversationv1.AgentPermissionPrompt{Title: title, DisplayName: displayName},
 				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1700000000000},
+			}},
+		},
+	}}
+}
+
+// permissionSettledUpdate is a permission ask DECIDED, which is what retires
+// the attention marker the open ask raised. `decision` is the success arm.
+func permissionSettledUpdate(id string, decision *conversationv1.AgentPermissionSuccess) *conversationv1.AgentUpdate {
+	return &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Permission{
+		Permission: &conversationv1.AgentPermission{
+			Id:     &conversationv1.AgentPermissionId{Value: id},
+			Result: &conversationv1.AgentPermission_Success{Success: decision},
+		},
+	}}
+}
+
+// allowedOnce is the user's own answer on an open ask.
+func allowedOnce() *conversationv1.AgentPermissionSuccess {
+	return &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Allowed{
+			Allowed: &conversationv1.AgentPermissionAllowed{
+				Scope: &conversationv1.AgentPermissionAllowed_Once{
+					Once: &conversationv1.AgentPermissionAllowedOnce{},
+				},
+			},
+		},
+	}
+}
+
+// deniedByPolicy is a refusal nobody was asked for.
+func deniedByPolicy() *conversationv1.AgentPermissionSuccess {
+	return &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Denied{
+			Denied: &conversationv1.AgentPermissionDenied{
+				By: &conversationv1.AgentPermissionDenied_Policy{
+					Policy: &conversationv1.AgentPermissionDeniedByPolicy{},
+				},
+			},
+		},
+	}
+}
+
+// questionSettledUpdate is a question ask that concluded, however it did.
+func questionSettledUpdate(id string) *conversationv1.AgentUpdate {
+	return &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Question{
+		Question: &conversationv1.AgentQuestion{
+			Id: &conversationv1.AgentQuestionId{Value: id},
+			Result: &conversationv1.AgentQuestion_Success{Success: &conversationv1.AgentQuestionSuccess{
+				Batch: &conversationv1.AgentQuestionBatch{},
+				Outcome: &conversationv1.AgentQuestionSuccess_Answered{
+					Answered: &conversationv1.AgentQuestionAnswers{},
+				},
 			}},
 		},
 	}}

@@ -175,6 +175,18 @@ type watcher struct {
 	// and this map keys on the UNIT so nothing here ever derives a spawn
 	// unit's identity from an AgentId.
 	facts map[string]*activityFact
+
+	// unseenAsks are the asks whose notification RAISED the roster's attention
+	// marker and that have not settled yet, keyed by askKey.
+	//
+	// THE MARKER MEANS AN UNSEEN NOTIFICATION (frontend.v1.RosterRow.attention),
+	// and an ask that has been decided is not one: the user answered it, or it
+	// was decided without them. So the LAST ask settling retires the marker,
+	// exactly as selecting the workspace does. It is a SET rather than a count
+	// because a workspace with a second ask still open still has something
+	// unseen, and because a settle frame for an ask this watcher never
+	// announced must retire nothing.
+	unseenAsks map[string]struct{}
 }
 
 // activityFact is what one routed activity taught the watcher about the unit
@@ -254,6 +266,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		turnWaiters: map[ids.TurnID][]chan turnEnd{},
 		closedTurns: map[ids.TurnID]TurnClose{},
 		facts:       map[string]*activityFact{},
+		unseenAsks:  map[string]struct{}{},
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	if session.MainKnownThrough != nil {

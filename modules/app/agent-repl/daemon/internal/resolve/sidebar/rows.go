@@ -62,7 +62,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 // attention reports whether the row draws the attention marker.
 //
 // The marker is RAISED by a host notification (WSM's own flag, which the
-// notification path sets) and CLEARED by selecting the workspace. Selection is
+// notification path sets) and CLEARED by selecting the workspace, or by the
+// last ask that raised it settling (the workspace verbs' AsksSettled, which
+// clears the same flag). Selection is
 // what clears it, so the workspace being looked at never wears one: the daemon
 // stamps the selection the moment SelectWorkspace arrives, and the marker goes
 // with it rather than waiting for WSM to echo the clear back.

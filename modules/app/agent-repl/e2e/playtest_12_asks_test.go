@@ -156,13 +156,22 @@ func runPermissionFamily(t *testing.T, s *playtestScenario, rows []permissionRow
 				`document.querySelector('.topbar-mode-button[data-mode="`+row.mode+`"]') !== null`)
 		}
 		s.awaitArm(t, s.Name, "the turn to conclude", emGHISettledArms...)
+		// THE SIDEBAR ROW WEARS NO ATTENTION DOT once the ask is settled. The
+		// marker means an UNSEEN notification (frontend.v1.RosterRow.attention),
+		// and the ask that raised it has just been answered — so the daemon
+		// clears it whether or not this workspace was ever SELECTED, which is
+		// the case a single-workspace world is. Photographed as a defect once:
+		// four resolved cards, an idle footer, and an amber dot still on the row.
+		s.awaitInPageFor(t, playtestAskBound, "the sidebar row to carry no attention marker",
+			`document.querySelectorAll('[data-roster-row][data-attention]').length === 0`)
 		verdict := s.readInPage(t, "the verdict wording", sel+`.querySelector('[data-permission-verdict]').textContent`)
 		act := "the " + row.answer + " button clicked on the card"
 		if row.answer == "" {
 			act = "nothing clicked: the denial never reached an open ask"
 		}
 		p.capture(strings.TrimPrefix(row.prompt, "!")+"-settled", act,
-			fmt.Sprintf("the card carries `[data-permission-verdict=\"%s\"]` reading %q, the gated call settled %s, and the roster arm settled",
+			fmt.Sprintf("the card carries `[data-permission-verdict=\"%s\"]` reading %q, the gated call settled %s, the roster arm settled, "+
+				"and no sidebar row carries `data-attention`",
 				row.verdict, verdict, toolState),
 			row.settled)
 	}

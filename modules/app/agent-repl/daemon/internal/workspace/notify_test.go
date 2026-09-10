@@ -84,3 +84,35 @@ func TestNotifyRefusesAnUnknownWorkspace(t *testing.T) {
 	// Assert.
 	asRefusal(t, err, ArmUnknownWorkspace)
 }
+
+func TestAsksSettledClearsTheAttentionMarker(t *testing.T) {
+	// Arrange: an ask raised the marker.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	if err := f.verbs.Notify(context.Background(), "w1", sessionwatcher.HostNotification{
+		Kind: "permission_requested", ToolName: "Bash",
+	}); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+
+	// Act.
+	if err := f.verbs.AsksSettled(context.Background(), "w1"); err != nil {
+		t.Fatalf("AsksSettled: %v", err)
+	}
+
+	// Assert.
+	if f.db.attention["w1"] {
+		t.Fatal("AsksSettled() left the attention marker standing")
+	}
+}
+
+func TestAsksSettledRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	err := f.verbs.AsksSettled(context.Background(), "nope")
+
+	// Assert.
+	asRefusal(t, err, ArmUnknownWorkspace)
+}

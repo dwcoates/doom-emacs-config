@@ -207,6 +207,24 @@ func (s *lifecycleSink) OnNotification(ws ids.WorkspaceID, note sessionwatcher.H
 	}
 }
 
+// OnAsksSettled clears the roster's attention marker through the verbs, which
+// own it. It is OnNotification's counterpart: the notification an ask raised is
+// retired when the ask it was about is decided.
+func (s *lifecycleSink) OnAsksSettled(ws ids.WorkspaceID) {
+	verbs, ok := s.verbs.verbs()
+	if !ok {
+		s.log.Error("daemon.cmd.lifecycle", "an ask settled before the workspace verbs existed", dlog.Context{
+			"workspace": string(ws),
+		})
+		return
+	}
+	if err := verbs.AsksSettled(context.Background(), ws); err != nil {
+		s.log.Error("daemon.cmd.lifecycle", "the attention marker could not be cleared", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+	}
+}
+
 // OnSessionDiagnostics folds the shim's health verdict into the health
 // reporter's per-session faults, which is what SessionHealth answers with.
 //
