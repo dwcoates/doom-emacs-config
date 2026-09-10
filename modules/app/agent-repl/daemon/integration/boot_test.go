@@ -118,7 +118,10 @@ func TestJoiningDaemonDoesNotClaimTheAddressFile(t *testing.T) {
 func TestBootRefusesAnUnwritableStateRoot(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	root := filepath.Join(t.TempDir(), "readonly")
+	// The state root comes off harness.ShortTempDir, never t.TempDir(): a
+	// shim socket hangs off the state root, and t.TempDir() spells this test's
+	// whole name into the path, which overflows the 103-byte sun_path budget.
+	root := filepath.Join(harness.ShortTempDir(t), "readonly")
 	if err := os.MkdirAll(root, 0o500); err != nil {
 		t.Fatalf("mkdir a read-only state root: %v", err)
 	}
@@ -139,8 +142,10 @@ func TestBootRefusesAnUnwritableStateRoot(t *testing.T) {
 
 func TestBootOpensTheWorkspaceStateFresh(t *testing.T) {
 	t.Parallel()
-	// Arrange: a pre-existing legacy database the rebuild must abandon in place.
-	root := t.TempDir()
+	// Arrange: a pre-existing legacy database the rebuild must abandon in
+	// place, under a state root short enough to hold a shim socket (see
+	// harness.ShortTempDir).
+	root := harness.ShortTempDir(t)
 	legacy := filepath.Join(root, "state.db")
 	if err := os.WriteFile(legacy, []byte("legacy sqlite bytes"), 0o644); err != nil {
 		t.Fatalf("seed state.db: %v", err)
