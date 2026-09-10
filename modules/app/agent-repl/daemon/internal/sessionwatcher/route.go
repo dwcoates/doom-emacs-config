@@ -425,6 +425,14 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 		w.log.Debug("daemon.sessionwatcher.turn_end_withheld", "a terminal arrived before the main agent was named", dlog.Context{
 			"agent_id": agent.GetValue(), "turn_id": turnValue(w.turn),
 		})
+		if w.held != nil {
+			// ONE SLOT, and a second occupant means the main watch produced
+			// two terminals with no naming in between. That is not a thing the
+			// contract allows, and the first one would be silently lost.
+			w.log.Error("daemon.sessionwatcher.turn_end_withheld_twice", "a second terminal arrived while one was already held", dlog.Context{
+				"held_agent_id": w.held.agent.GetValue(), "agent_id": agent.GetValue(),
+			})
+		}
 		w.held = &heldTerminal{agent: agent, success: success, failure: failure}
 		return
 	}
