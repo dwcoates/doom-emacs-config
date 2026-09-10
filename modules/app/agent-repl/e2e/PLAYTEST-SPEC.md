@@ -167,6 +167,34 @@ smallest first.
   waited out, because a blinking cursor alone would make every capture run
   its whole budget.
 
+  **And the page's own resting animations are held still while the picture is
+  taken.** For the same reason, and it was not a small one. Several of the
+  webapp's animations run FOREVER by design — the prompt bubble's
+  `bubble-wave`, the sidebar's state-dot pulse, the footer's breath, a running
+  tool's arc — so a capture of any page carrying one had no answer to wait
+  for. Measured, one run of the D29–D32 playbook: 10 of 10 captures ran the
+  whole 2s budget out over 62–70 redisplay rounds and every picture carried
+  the torn-frame note, which is a note that then says nothing. The settle
+  diagnostic (set `AGENT_REPL_PLAYTEST_SETTLE_DIAG=1` and each changed round
+  reports the bounding box of the pixels that moved) named the culprit
+  outright: 645 changed rounds, every persistent box right-edged at the prompt
+  column with its left edge at a `.bubble.user` bubble's own edge, one box per
+  bubble in the scrollback, and nothing on the sidebar's workspace age or the
+  footer's elapsed clock — a one-second ticker leaves ~950ms of stillness for
+  a 50ms window to close in and was never the cause.
+
+  So `capture` sets `data-motion="paused"` on the page's root element as it
+  begins and removes it as it ends. The stylesheet's own rule pauses every
+  running animation where it stands — `animation-play-state`, never
+  `animation: none`, which would snap animated properties back to their
+  unanimated values and photograph a DIFFERENT page. It is per capture rather
+  than for the run because a page paused at boot would never run the
+  animations whose final state a picture is meant to show, and between
+  captures the page animates exactly as a user's does. Nothing in the app sets
+  the flag; a page nobody photographs never carries it. After: all 10 captures
+  settled, at 58–67ms over 3 rounds each, and the section run went from 33.3s
+  to 14.2s. `playtest_substrate_settle_test.go` is what holds it there.
+
   The window and the paint gate below are not the same gate wearing two
   names. The gate proves the PAGE produced a frame for the DOM the step
   asserted; the window proves the SCREEN then stopped changing. The blank

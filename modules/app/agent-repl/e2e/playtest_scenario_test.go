@@ -225,6 +225,33 @@ func (s *playtestScenario) openPanel(t *testing.T) {
 	// assertion that legitimately passed. The playbook's hook is installed
 	// here because here is where a page first exists to paint.
 	s.Book.awaitPaint = func() time.Duration { return s.awaitPagePainted(t) }
+	// AND EVERY CAPTURE FROM HERE ON HOLDS THE PAGE'S RESTING ANIMATIONS
+	// STILL WHILE IT FIRES. See playtestMotionPaused: the webapp's prompt
+	// bubbles, state dots and footer breath animate forever by design, and a
+	// capture cannot wait out a screen that never stops changing. Installed
+	// here, beside the paint gate, because here is where a page first exists
+	// to hold.
+	s.Book.holdMotion = func() func() { return s.holdPageMotion(t) }
+}
+
+// holdPageMotion freezes the page's resting animations and answers the
+// release.
+//
+// BOTH HALVES ARE WAITED ON. `xwidget-webkit-execute-script` is
+// asynchronous, so a script that was merely ISSUED has not necessarily run:
+// a capture that photographed before the flag landed would settle against a
+// still-animating page, and a playbook that moved on before the release
+// landed would leave every later capture in it frozen. So each half asserts
+// the attribute it just wrote, through the same probe every other page act
+// here goes through.
+func (s *playtestScenario) holdPageMotion(t *testing.T) func() {
+	t.Helper()
+	s.awaitInPage(t, "the page's resting animations to be held still for the capture",
+		playtestHoldMotionScript())
+	return func() {
+		s.awaitInPage(t, "the page's resting animations to be released after the capture",
+			playtestReleaseMotionScript())
+	}
 }
 
 // playtestPaintBound bounds one wait on the page delivering the frames the
