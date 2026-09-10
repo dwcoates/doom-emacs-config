@@ -227,10 +227,12 @@ func TestPlaytestTabArmHibernated(t *testing.T) {
 		"The tab is painted exactly as it was before the park: the revival paid nothing the user "+
 			"can see on the bracket. The webapp's feed carries BOTH turns in order with the PARK'S OWN "+
 			"CONTEXT CUT between them -- an orange separator reading `context compacted on request` and "+
-			"a foldable summary card -- because the daemon compacts before it stands a shim down. "+
-			"THE TOPBAR'S PERMISSION MODE STILL READS `default`: the summarizing query runs under plan "+
-			"and a revival that came back in plan mode would be that throwaway leaking into the user's "+
-			"session.")
+			"a foldable summary card -- because the daemon compacts before it stands a shim down. A "+
+			"SECOND such cut BELOW the revived turn is right and not a duplicate: this playbook "+
+			"compresses the idle cutoff, so the sweep parks the session again the moment that turn "+
+			"settles. THE TOPBAR'S PERMISSION MODE STILL READS `default`: the summarizing query runs "+
+			"under plan, and a revival that came back in plan mode would be that throwaway leaking into "+
+			"the user's session.")
 
 	// THE POSTURE SURVIVED THE PARK. The mode is read from the module's own
 	// topbar rather than inferred from the picture, so the sentence above is
