@@ -876,6 +876,51 @@ func subagentActivity(activityID, created string) *conversationv1.AgentActivity 
 	}
 }
 
+// detachedSubagentHarness arranges the whole life of a DETACHED run up to the
+// point it settles: the spawn is streamed as the turn's own progress, its watch
+// is opened, and the announcement then promotes that watch to detached work
+// under the handle "w-1". The run is live and addressed by its handle when this
+// returns, which is the only state its terminal is interesting from.
+func detachedSubagentHarness(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
+	h.client.nextAgentOpen(t)
+	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "spawn-1"))))
+	if live := h.w.LiveWork(); len(live.Agents) != 1 {
+		t.Fatalf("live work = %v, want the detached subagent live before its terminal", live.Agents)
+	}
+	h.quiet()
+	return h
+}
+
+// settledSubagentActivity is the SPAWN UNIT's terminal arm — the frame a
+// detached run actually settles on, since its own stream never carries an agent
+// terminal. `failed` picks the failure arm over the success one.
+func settledSubagentActivity(activityID string, failed bool) *conversationv1.AgentActivity {
+	sub := &conversationv1.AgentSubagent{
+		Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{}},
+	}
+	if failed {
+		sub.Result = &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{}}
+	}
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item:       &conversationv1.AgentActivity_Subagent{Subagent: sub},
+	}
+}
+
+// runningSubagentActivity is the spawn unit's UPDATE arm: the run reported
+// progress and has not settled.
+func runningSubagentActivity(activityID string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{}},
+		}},
+	}
+}
+
 // bashActivity is an in-turn shell call, the unit a detached shell detaches
 // from.
 func bashActivity(activityID string) *conversationv1.AgentActivity {
