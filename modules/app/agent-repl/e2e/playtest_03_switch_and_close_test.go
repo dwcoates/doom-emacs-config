@@ -234,7 +234,7 @@ func enterWorkspace(t *testing.T, s *playtestScenario, ws string) {
 // WHAT THE BAR DECIDED, WHAT IT WROTE, AND WHETHER IT CAN BE READ
 // ---------------------------------------------------------------------------
 
-// tabPaint answers what the module DECIDED about WS's tab and what it then
+// tabPaintSentence answers what the module DECIDED about WS's tab and what it then
 // WROTE for it, in ONE form, as a sentence a manifest can carry.
 //
 // WHY BOTH HALVES, AND WHY IN ONE FORM. A picture of the bar can disagree
@@ -260,7 +260,7 @@ func enterWorkspace(t *testing.T, s *playtestScenario, ws string) {
 // reported: a workspace on `agent-repl--ws-tabline-names` whose name the
 // rendered line does not carry is a bar that lost a tab, which is a defect in
 // `status.el` before any picture is taken.
-func tabPaint(t *testing.T, s *playtestScenario, ws string) string {
+func tabPaintSentence(t *testing.T, s *playtestScenario, ws string) string {
 	t.Helper()
 	parts := s.E.EvalStrings(`(let* ((line (agent-repl-workspace-tabline-formatted))
                                      (plain (substring-no-properties line))
@@ -283,14 +283,14 @@ func tabPaint(t *testing.T, s *playtestScenario, ws string) string {
 		"and the face on its name run is %s", ws, parts[1], parts[2], parts[3], parts[4], parts[5])
 }
 
-// tabPaints answers `tabPaint` for every name on the bar, joined, so a
+// tabPaints answers `tabPaintSentence` for every name on the bar, joined, so a
 // capture's assertion cell says what EVERY tab was decided and written as
 // rather than only the one the step moved.
 func tabPaints(t *testing.T, s *playtestScenario, names []string) string {
 	t.Helper()
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		out = append(out, tabPaint(t, s, name))
+		out = append(out, tabPaintSentence(t, s, name))
 	}
 	return strings.Join(out, "; ")
 }
@@ -298,7 +298,7 @@ func tabPaints(t *testing.T, s *playtestScenario, names []string) string {
 // barFaceColors answers the BACKGROUNDS the frame currently resolves the tab
 // bar's faces to, at the instant of a capture.
 //
-// WHY THIS SITS BESIDE `tabPaint`. That one says which FACE the module wrote
+// WHY THIS SITS BESIDE `tabPaintSentence`. That one says which FACE the module wrote
 // on a tab's name run; this says what that face is worth on this frame right
 // now. A run where two captures carry the SAME face and DIFFERENT pixels is
 // otherwise unattributable, and this is the read that attributes it.
@@ -384,7 +384,7 @@ func assertHighlightFollowsSelection(t *testing.T, s *playtestScenario, after st
 //     tab-sized field of the tab-bar band, and the stated foreground must be
 //     drawn on it. A face whose colors are right and whose pixels are some
 //     other pair is the display failing to take a string that was correct,
-//     which is the OTHER half of the split `tabPaint` sets up.
+//     which is the OTHER half of the split `tabPaintSentence` sets up.
 //
 // IT IS NOT A HEURISTIC OVER GLYPH PIXELS, and that was tried first: reading
 // the "best contrast any ink achieves on each ground" catches the defect, but
