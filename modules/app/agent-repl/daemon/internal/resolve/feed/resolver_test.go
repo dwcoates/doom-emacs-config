@@ -43,7 +43,8 @@ func (f *fakeSurfaces) Workspace(dir string) (dlog.Logger, error) {
 }
 
 // ShimSink implements dlog.Surfaces.
-func (f *fakeSurfaces) ShimSink(dir string) (dlog.Borrowed, error) { return nil, nil }
+func (f *fakeSurfaces) ShimSink(dir string) (dlog.Borrowed, error)    { return nil, nil }
+func (f *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 // ClientLog implements dlog.Surfaces.
 func (f *fakeSurfaces) ClientLog(dir string, record dlog.ClientRecord) error { return nil }

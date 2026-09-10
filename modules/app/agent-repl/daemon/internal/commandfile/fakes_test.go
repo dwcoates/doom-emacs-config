@@ -183,7 +183,8 @@ func (s *fakeSurfaces) Workspace(dir string) (dlog.Logger, error) {
 	return s.logger.With(dlog.Context{"dir": dir}), nil
 }
 
-func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error) { return nil, errFake }
+func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error)        { return nil, errFake }
+func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFake }
 
