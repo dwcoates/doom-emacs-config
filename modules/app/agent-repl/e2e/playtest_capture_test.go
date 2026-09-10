@@ -102,8 +102,9 @@ const playtestBlankFloor = 64
 //
 // A screenshot of a frame mid-redraw is half of one state and half of
 // another, and the file it lands in is the evidence a human then reads. So a
-// capture reads the framebuffer until TWO CONSECUTIVE READS AGREE BYTE FOR
-// BYTE, which is a real quiescence and not an interval anybody guessed.
+// capture reads the framebuffer until it has been UNCHANGED FOR A WHOLE
+// WINDOW (`playtestSettleWindow`), which is a real quiescence and not an
+// interval anybody guessed.
 //
 // It is a PATIENCE BUDGET, NOT AN ASSERTION, and that distinction is the
 // reason it may be missed without failing anything: a surface that is
@@ -239,6 +240,52 @@ func countColorWithin(img *image.RGBA, want color.RGBA, tolerance uint8) int {
 	}
 	return n
 }
+
+// playtestSettleWindow is how long the framebuffer must stay UNCHANGED
+// before a capture calls it settled.
+//
+// WHY A WINDOW AND NOT TWO AGREEING READS. Two consecutive reads
+// `playtestSettleInterval` apart is not quiescence, it is a coin toss: a GTK
+// webview is composited on the frame clock (16.7ms at 60Hz) and Emacs's own
+// X drawing after `redraw-frame` lands when the X SERVER processes it, so a
+// paint that is already committed — in the page's DOM, or queued in X — is
+// simply not on the glass yet, and two reads a few milliseconds apart agree
+// about the frame before it. MEASURED, in two real playtest runs:
+//
+//	04-arm-link-severed     settled=true took  2ms; the picture carried the
+//	                        webview alone and every piece of Emacs's own
+//	                        chrome — tab bar, mode lines, composer — blank
+//	                        white. The next capture, 22ms later, was whole.
+//	04-arm-detached-settled settled=true took  5ms; the tab bar was correctly
+//	                        green while the webview inside it still showed the
+//	                        PREVIOUS state, though the step's own
+//	                        `awaitInPage` on `[data-state="completed"]` had
+//	                        already passed. The other run of the same capture,
+//	                        taken a few ms later by chance, was whole.
+//
+// Both tore at 2-5ms and both were correct on the glass ~22ms later, so the
+// window has to outlast a display frame rather than merely exceed a poll.
+// 50ms is THREE frame periods: a frame that has been identical across a
+// window that long has had a whole composite, plus two more, to land in it.
+//
+// WHAT THE OTHER TWO GATES DO NOT COVER, and why this one is not redundant
+// beside them. The paint gate above cures the SECOND of those two tears at
+// its source, in the page: a webview whose offscreen surface still held the
+// previous DOM. The full redisplay `settleFrame` drives between its reads
+// cures a screen Emacs has simply not repainted yet. Neither can see the
+// FIRST: Emacs's own chrome and the webview had both been drawn and were
+// still ARRIVING at the X server, so every read that ran was of a frame in
+// flight, and each of those reads is as still as the last. Only a window on
+// the glass itself catches that one.
+//
+// THE COST, STATED: +50ms on every capture that settles, and a whole playtest
+// takes about 250 of them — about 12.5s across the entire run, against
+// pictures a human is going to read and disbelieve if they are torn.
+//
+// `playtestSettleBound` still caps the whole wait, and the not-settled path
+// is unchanged: an animating surface runs the budget out and says so in the
+// manifest.
+const playtestSettleWindow = 50 * time.Millisecond
 
 // ---------------------------------------------------------------------------
 // XWD
@@ -706,6 +753,133 @@ func TestPlaytestGeometryIsTheDisplaysOwn(t *testing.T) {
 	}
 }
 
+// fakeSettleClock is time as `settleFramebuffer` sees it, under the test's
+// control. `Sleep` only advances the reading; nothing here waits on anything,
+// so the settle logic is exercised at full speed and without a display.
+type fakeSettleClock struct {
+	now time.Time
+}
+
+func (c *fakeSettleClock) Now() time.Time { return c.now }
+
+func (c *fakeSettleClock) Sleep(d time.Duration) { c.now = c.now.Add(d) }
+
+// settledAt is when a window opened at `opened` closes, on the grid of poll
+// instants `settleFramebuffer` actually reads at. It is derived rather than
+// written out so the expectations below follow the constants instead of
+// restating a number that would go stale beside them.
+func settledAt(opened time.Duration) time.Duration {
+	for at := opened; ; at += playtestSettleInterval {
+		if at-opened >= playtestSettleWindow {
+			return at
+		}
+	}
+}
+
+// boundExceededAt is the first poll instant past `playtestSettleBound`, which
+// is when a screen that never holds still gives up.
+func boundExceededAt() time.Duration {
+	for at := time.Duration(0); ; at += playtestSettleInterval {
+		if at > playtestSettleBound {
+			return at
+		}
+	}
+}
+
+func TestPlaytestSettlesOnlyAfterAWholeQuietWindow(t *testing.T) {
+	t.Parallel()
+	// The defect this covers: two reads a few ms apart agreed on a frame that
+	// had not yet received a paint already committed in the DOM, and the
+	// capture was declared settled at 2ms and 5ms onto a torn picture. A
+	// window longer than a display frame is what makes the agreement mean
+	// something.
+	//
+	// `frame` is the body of the nth read, counted from the first.
+	tests := []struct {
+		name        string
+		frame       func(n int) string
+		wantSettled bool
+		wantBody    string
+		wantTook    time.Duration
+	}{
+		{
+			name:        "a screen already still settles when the window closes and not one poll before",
+			frame:       func(int) string { return "still" },
+			wantSettled: true,
+			wantBody:    "still",
+			wantTook:    settledAt(0),
+		},
+		{
+			name: "a paint landing inside the window restarts it",
+			frame: func(n int) string {
+				if n < 2 {
+					return "before the paint"
+				}
+				return "after the paint"
+			},
+			wantSettled: true,
+			wantBody:    "after the paint",
+			// The third read (n=2) is two intervals in, and its window runs
+			// from there rather than from the start.
+			wantTook: settledAt(2 * playtestSettleInterval),
+		},
+		{
+			name:        "a screen that never holds still runs the budget out",
+			frame:       func(n int) string { return fmt.Sprintf("frame %d", n) },
+			wantSettled: false,
+			wantTook:    boundExceededAt(),
+			// The answer is the LAST read, which is the frame the manifest's
+			// torn-frame note is about.
+			wantBody: fmt.Sprintf("frame %d", int(boundExceededAt()/playtestSettleInterval)),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange.
+			clock := &fakeSettleClock{now: time.Unix(0, 0)}
+			reads := 0
+			read := func() []byte {
+				body := tc.frame(reads)
+				reads++
+				return []byte(body)
+			}
+
+			// Act.
+			body, settled, took := settleFramebuffer(read, clock)
+
+			// Assert.
+			if settled != tc.wantSettled {
+				t.Errorf("settled=%v, want %v", settled, tc.wantSettled)
+			}
+			if string(body) != tc.wantBody {
+				t.Errorf("the answered frame is %q, want %q", body, tc.wantBody)
+			}
+			if took != tc.wantTook {
+				t.Errorf("it took %s, want %s", took, tc.wantTook)
+			}
+		})
+	}
+}
+
+func TestPlaytestSettleWindowOutlastsADisplayFrame(t *testing.T) {
+	t.Parallel()
+	// The measurement the constant is stated in: a display frame is 16.7ms at
+	// 60Hz, and both torn captures were settled at 2-5ms — well inside one. A
+	// window that does not outlast a frame period could not have caught
+	// either of them, whatever the poll interval is.
+	const displayFrame = 16700 * time.Microsecond
+	if playtestSettleWindow <= displayFrame {
+		t.Errorf("the settle window is %s, which does not outlast one %s display frame",
+			playtestSettleWindow, displayFrame)
+	}
+	if playtestSettleWindow >= playtestSettleBound {
+		t.Errorf("the settle window is %s and the whole patience budget is %s: a window "+
+			"no capture can complete would make every picture torn",
+			playtestSettleWindow, playtestSettleBound)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // THE PLAYBOOK
 // ---------------------------------------------------------------------------
@@ -808,9 +982,10 @@ func (p *playbook) write(format string, args ...any) {
 // in: the whole screen, and no cursor blink.
 //
 // THE BLINK IS OFF BECAUSE OF THE SETTLE, not for looks. `settleFrame` waits
-// for two consecutive reads of the framebuffer to agree, and a blinking
-// cursor guarantees they never do — so every capture in every playbook would
-// run its whole patience budget and then photograph an animating screen.
+// for the framebuffer to hold still for a whole `playtestSettleWindow`, and a
+// blinking cursor guarantees it never does — so every capture in every
+// playbook would run its whole patience budget and then photograph an
+// animating screen.
 func (p *playbook) prepareFrame() {
 	p.t.Helper()
 	p.e.Eval(fmt.Sprintf(`(progn
@@ -974,21 +1149,21 @@ func (p *playbook) redrawFrame() {
              t)`)
 }
 
-// settleFrame drives full redisplays until two CONSECUTIVE ones leave the
-// framebuffer identical, and answers the last read either way, with the
-// number of redisplay rounds it took.
+// settleFrame drives full redisplays until the framebuffer has held still
+// across a whole `playtestSettleWindow`, and answers the last read either
+// way, with the number of redisplay rounds it took.
 //
-// WHY A REDISPLAY SITS BETWEEN THE TWO READS. Two reads a few milliseconds
-// apart with nothing driven between them agree trivially on a screen Emacs
-// has simply not repainted yet, and that is a picture of the PREVIOUS
-// state passed off as settled. MEASURED, on the tab bar after a roster push
-// opened a new tab: with the two garbaged redisplays above already done,
-// the bar still showed the tab set from before the push in three of four
-// registrations, and one more `(redraw-frame) (redisplay t)` showed the new
-// one every time. So the quiescence this waits for is "a further full
-// redisplay changed nothing", which is a property of the screen rather than
-// of the poll interval, and the round count is logged so a capture that
-// needed more than one is on the record.
+// WHY A REDISPLAY SITS BETWEEN THE READS. Reads with nothing driven between
+// them agree trivially on a screen Emacs has simply not repainted yet, and
+// that is a picture of the PREVIOUS state passed off as settled. MEASURED,
+// on the tab bar after a roster push opened a new tab: with the two garbaged
+// redisplays above already done, the bar still showed the tab set from
+// before the push in three of four registrations, and one more
+// `(redraw-frame) (redisplay t)` showed the new one every time. So the
+// quiescence this waits for is "further full redisplays changed nothing",
+// which is a property of the screen rather than of the poll interval, and
+// the round count is logged so a capture that needed more than the window's
+// own rounds is on the record.
 //
 // AND WHY THE READS ARE AN INTERVAL APART, EACH BEHIND ITS OWN EVAL. On pgtk
 // `redisplay` paints Emacs's own surface; the pixels reach the X server only
@@ -998,28 +1173,74 @@ func (p *playbook) redrawFrame() {
 // asked for. MEASURED: with one redisplay between the reads and no interval,
 // the tab bar after a roster push opened a new tab still read as the
 // previous tab set in one run of three, the "settled" read and the one
-// before it agreeing because neither had been flushed yet. So BOTH reads
-// compared here follow an eval of their own, with the poll interval between
-// them, and the first read taken before any eval is never one of the pair.
+// before it agreeing because neither had been flushed yet. So every read
+// compared here follows an eval of its own, with the poll interval between
+// them, and the first read is the one that OPENS the window rather than one
+// half of a pair.
+//
+// The window logic itself is `settleFramebuffer`, which takes its reads and
+// its clock, so the one thing here a picture cannot show -- WHEN a screen is
+// declared settled -- is exercised without a display. The rounds are counted
+// in the read this passes it, because driving the redisplay is this
+// playbook's business and not the window's.
 func (p *playbook) settleFrame() (body []byte, settled bool, took time.Duration, rounds int) {
 	p.t.Helper()
-	started := time.Now()
-	deadline := started.Add(playtestSettleBound)
 	redisplayAndRead := func() []byte {
 		rounds++
 		p.e.Eval(`(progn (redraw-frame) (redisplay t) t)`)
 		return p.readFramebuffer()
 	}
-	previous := redisplayAndRead()
+	body, settled, took = settleFramebuffer(redisplayAndRead, realSettleClock{})
+	return body, settled, took, rounds
+}
+
+// settleClock is the passage of time `settleFramebuffer` measures and waits
+// on. Production passes the real one; the unit tests drive a fake, so no test
+// in this file ever sleeps.
+type settleClock interface {
+	Now() time.Time
+	Sleep(time.Duration)
+}
+
+type realSettleClock struct{}
+
+func (realSettleClock) Now() time.Time        { return time.Now() }
+func (realSettleClock) Sleep(d time.Duration) { time.Sleep(d) }
+
+// settleFramebuffer re-reads at `playtestSettleInterval` and answers settled
+// once every read across a full `playtestSettleWindow` has agreed with the
+// read that opened that window. ANY change restarts the window, so the frame
+// it answers with is always the one that then held still.
+//
+// `playtestSettleBound` caps the whole wait: a surface that never holds still
+// answers its LAST read with settled=false, which is the manifest's torn-frame
+// note and not a failure.
+//
+// THE SLEEP BETWEEN READS IS NOT SYNCHRONIZATION, and there is nothing here
+// to synchronize on: the X server's screen memory is a file that changes
+// with no notification of any kind, so the only way to learn it stopped
+// changing is to look again. The interval is the package's own poll
+// interval, the window is the measured quiescence bound stated at
+// `playtestSettleWindow`, and neither stands in for a channel that could
+// have carried the fact.
+func settleFramebuffer(read func() []byte, clock settleClock) (body []byte, settled bool, took time.Duration) {
+	started := clock.Now()
+	deadline := started.Add(playtestSettleBound)
+	held := read()
+	opened := clock.Now()
 	for {
-		time.Sleep(playtestSettleInterval)
-		current := redisplayAndRead()
-		if string(current) == string(previous) {
-			return current, true, time.Since(started), rounds
+		now := clock.Now()
+		if now.Sub(opened) >= playtestSettleWindow {
+			return held, true, now.Sub(started)
 		}
-		previous = current
-		if time.Now().After(deadline) {
-			return current, false, time.Since(started), rounds
+		if now.After(deadline) {
+			return held, false, now.Sub(started)
+		}
+		clock.Sleep(playtestSettleInterval)
+		current := read()
+		if string(current) != string(held) {
+			held = current
+			opened = clock.Now()
 		}
 	}
 }
