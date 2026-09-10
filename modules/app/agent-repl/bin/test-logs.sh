@@ -84,7 +84,7 @@ run_logs() {
         TMPDIR="$runtime_tmp" \
         GOCACHE="$TMP/go-cache" \
         AGENT_REPL_LOGS_BUILD_DIR="$TMP/build" \
-        AGENT_REPL_LOGS_TEST_ROWS="$rows" \
+        AGENT_REPL_LOGS_TEST_ROWS="${AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE:-$rows}" \
         AGENT_REPL_STATE_DIR="$state" \
         XDG_CACHE_HOME="$cache" \
         AGENT_REPL_EMACS_GLOBAL_LOG="$emacs_global" \
@@ -123,6 +123,22 @@ test_workspace_name() {
         pass "--workspace resolves a daemon workspace name"
     else
         fail "--workspace resolves a daemon workspace name"
+    fi
+}
+
+test_ambiguous_workspace_name() {
+    local ambiguous_rows="$TMP/ambiguous-workspaces.tsv" rc
+    cp "$rows" "$ambiguous_rows"
+    printf 'ws-c\t%s\talpha\n' "$workspace_b" >>"$ambiguous_rows"
+    set +e
+    AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$ambiguous_rows" \
+        run_logs --workspace alpha --json >"$TMP/ambiguous.out" 2>"$TMP/ambiguous.err"
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] && grep -q 'workspace name is ambiguous in daemon state: alpha' "$TMP/ambiguous.err"; then
+        pass "an ambiguous workspace name is rejected"
+    else
+        fail "an ambiguous workspace name is rejected"
     fi
 }
 
@@ -242,6 +258,29 @@ test_empty_harvest_window() {
     fi
 }
 
+test_harvest_incomplete_workspace_attribution() {
+    local workspace="$TMP/workspaces/incomplete" target="$targets/incomplete.log"
+    local incomplete_rows="$TMP/incomplete-workspaces.tsv" rc
+    mkdir -p "$workspace/.claude/emacs"
+    cat >"$target" <<EOF
+{"timestamp":"2026-09-10T10:06:00.000000Z","runtime":"daemon","pid":70,"level":"warn","verbosity":"normal","operation":"daemon.incomplete","message":"missing workspace ID","context":{},"workspace_dir":"$workspace"}
+EOF
+    ln -s "$target" "$workspace/.claude/emacs/daemon.log"
+    cp "$rows" "$incomplete_rows"
+    printf 'ws-incomplete\t%s\tincomplete\n' "$workspace" >>"$incomplete_rows"
+    set +e
+    AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$incomplete_rows" \
+        run_logs --harvest 2026-09-10T10:00:00Z 2026-09-10T10:10:00Z \
+        >"$TMP/incomplete.out" 2>"$TMP/incomplete.err"
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] && grep -q 'incomplete workspace attribution' "$TMP/incomplete.err"; then
+        pass "harvest rejects incomplete workspace attribution"
+    else
+        fail "harvest rejects incomplete workspace attribution"
+    fi
+}
+
 test_malformed_line() {
     local workspace="$TMP/workspaces/malformed" target="$targets/malformed.log" rc
     mkdir -p "$workspace/.claude/emacs"
@@ -324,6 +363,7 @@ EOF
 test_workspace_directory_and_default_format
 test_workspace_id
 test_workspace_name
+test_ambiguous_workspace_name
 test_central
 test_all
 test_since_rfc3339
@@ -334,6 +374,7 @@ test_runtime_list
 test_json
 test_harvest
 test_empty_harvest_window
+test_harvest_incomplete_workspace_attribution
 test_malformed_line
 test_absent_selected_log
 test_follow
