@@ -299,7 +299,9 @@ func TestRouteApiError(t *testing.T) {
 }
 
 // TestRouteHistoryPage covers a watch's opening frame: the page goes to the
-// feed whole, and its entries are NOT replayed as live frames.
+// feed AND the footer whole, and its entries are NOT replayed as live frames.
+// The footer is on the list because a resumed conversation's prior turns reach
+// this daemon only as the page.
 func TestRouteHistoryPage(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
@@ -309,7 +311,7 @@ func TestRouteHistoryPage(t *testing.T) {
 	got := h.route(h.main, pageFrame(promptEntry("ptr-9", "turn-old", "main-1")))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnHistoryPage"})
+	assertNames(t, got, []string{"feed.OnHistoryPage", "footer.OnHistoryPage"})
 	if h.w.TurnInFlight() != nil {
 		t.Fatal("a page's prompt opened a turn; a page is newest-first and its turns are already over")
 	}

@@ -579,6 +579,38 @@ func (r *fakeRollout) awaitRelaunch(t *testing.T) {
 	}
 }
 
+// awaitRecord blocks until a record with this level and operation reaches the
+// captured log, and fails with everything captured when the bound runs out.
+//
+// It exists for the ASYNCHRONOUS verbs: their failures are recorded on a
+// goroutine the verb does not join, so the arrival of a record is an event to
+// wait for rather than a state to read. The capture buffer is mutex-guarded
+// and Records copies, so polling it races with nothing.
+func awaitRecord(t *testing.T, f *fixture, level, operation string) {
+	t.Helper()
+	deadline := time.After(recordDeadline)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		for _, r := range f.log.logger.Records() {
+			if r.Level == level && r.Operation == operation {
+				return
+			}
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline:
+			t.Fatalf("records = %+v, want a %s record for %s", f.log.logger.Records(), level, operation)
+			return
+		}
+	}
+}
+
+// recordDeadline is how long awaitRecord waits for an already-running
+// goroutine to reach its next statement. It is a FAILURE bound, never a
+// synchronization device: every wait returns the moment its record lands.
+const recordDeadline = 5 * time.Second
+
 // fakeFeed is a feed.Resolver that records the rows it was given.
 type fakeFeed struct {
 	feed.Resolver
