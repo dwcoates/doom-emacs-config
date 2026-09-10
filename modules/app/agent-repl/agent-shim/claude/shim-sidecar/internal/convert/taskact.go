@@ -53,6 +53,13 @@ func taskActSettled(call openCall, result map[string]any, failed bool, failure *
 //     application. Observed in the G50-52 playbook: this file-plane act is
 //     re-delivered after the stream-plane refusal and wins. A rejection now
 //     reads only what the tracker itself echoed.
+//
+//   - A SUBJECT NOBODY STATED IS NOT A SUBJECT STATED EMPTY. Both fields carry
+//     presence, so a record that names neither leaves them UNSET and a
+//     consumer keeps what its checklist already holds; a record that states an
+//     empty one states it. Reading the empty string as the value made a
+//     status-only update blank every row it touched (G52).
+//
 //   - AN UNSTATED STATUS RESOLVED `pending`, inventing a status nobody stated:
 //     an update that moved only a subject or an edge said nothing about where
 //     the task stands, and `AgentTaskState.status` is a oneof precisely so
@@ -63,8 +70,8 @@ func taskActSettled(call openCall, result map[string]any, failed bool, failure *
 //     begun".
 func taskState(task, input map[string]any, failed, isCreate bool) *conversationv1.AgentTaskState {
 	state := &conversationv1.AgentTaskState{
-		Subject:     firstNonEmpty(str(pick(task, "subject", "title")), str(pick(input, "subject", "title"))),
-		Description: firstNonEmpty(str(task["description"]), str(input["description"])),
+		Subject:     statedString([]map[string]any{task, input}, "subject", "title"),
+		Description: statedString([]map[string]any{task, input}, "description"),
 		Owner:       optionalString(pick(task, "owner", "assignee")),
 		Blocks:      taskIDs(pick(task, "blocks")),
 		BlockedBy:   taskIDs(pick(task, "blocked_by", "blockedBy")),
@@ -90,6 +97,33 @@ func taskState(task, input map[string]any, failed, isCreate bool) *conversationv
 		}
 	}
 	return state
+}
+
+// statedString is the first STATED spelling of a field across the records that
+// could carry it, as a presence-carrying pointer.
+//
+// PRESENCE IS THE KEY'S, NOT THE VALUE'S: a record that carries the key states
+// the field even when what it states is empty, and only a record set that
+// carries none of the spellings leaves it unset. A non-empty statement still
+// wins over an empty one, which is what keeps the tracker's own echo preferred
+// over the call's input.
+func statedString(objects []map[string]any, keys ...string) *string {
+	var blank *string
+	for _, o := range objects {
+		for _, key := range keys {
+			if !has(o, key) {
+				continue
+			}
+			if v := str(pick(o, key)); v != "" {
+				return &v
+			}
+			if blank == nil {
+				empty := ""
+				blank = &empty
+			}
+		}
+	}
+	return blank
 }
 
 func taskIDs(raw any) []*conversationv1.AgentTaskId {

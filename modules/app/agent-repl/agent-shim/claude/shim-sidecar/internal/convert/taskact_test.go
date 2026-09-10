@@ -120,3 +120,69 @@ func TestTaskActSettledStillLeavesACreatePending(t *testing.T) {
 		t.Fatalf("State.Status = %+v, want pending", got.GetTaskAct().GetState().GetStatus())
 	}
 }
+
+// A RECORD THAT NAMES NO SUBJECT STATES NONE. `AgentTaskState.subject` carries
+// presence, so an update that moved only a status leaves it UNSET and a
+// checklist keeps the subject it already holds.
+func TestTaskActSettledLeavesAnUnnamedSubjectUnset(t *testing.T) {
+	// Arrange
+	call := openCall{name: "TaskUpdate", input: map[string]any{"task_id": "t1", "status": "completed"}}
+	result := map[string]any{"task": map[string]any{"id": "t1", "status": "completed"}}
+
+	// Act
+	got := taskActSettled(call, result, false, nil)
+
+	// Assert
+	if subject := got.GetTaskAct().GetState().Subject; subject != nil {
+		t.Fatalf("State.Subject = %q, want it UNSET", *subject)
+	}
+}
+
+// AND A SUBJECT STATED EMPTY IS STATED. The record carries the key, so what it
+// says is what the act says, empty or not.
+func TestTaskActSettledStatesASubjectTheRecordNamesEmpty(t *testing.T) {
+	// Arrange
+	call := openCall{name: "TaskUpdate", input: map[string]any{"task_id": "t1"}}
+	result := map[string]any{"task": map[string]any{"id": "t1", "subject": ""}}
+
+	// Act
+	got := taskActSettled(call, result, false, nil)
+
+	// Assert
+	subject := got.GetTaskAct().GetState().Subject
+	if subject == nil || *subject != "" {
+		t.Fatalf("State.Subject = %v, want the empty subject the record states", subject)
+	}
+}
+
+// THE DESCRIPTION IS THE SAME FIELD'S RULE, and it is asserted on its own
+// because a producer that fixed one and not the other still blanks a row.
+func TestTaskActSettledLeavesAnUnnamedDescriptionUnset(t *testing.T) {
+	// Arrange
+	call := openCall{name: "TaskUpdate", input: map[string]any{"task_id": "t1", "status": "completed"}}
+	result := map[string]any{"task": map[string]any{"id": "t1", "subject": "ship it"}}
+
+	// Act
+	got := taskActSettled(call, result, false, nil)
+
+	// Assert
+	if description := got.GetTaskAct().GetState().Description; description != nil {
+		t.Fatalf("State.Description = %q, want it UNSET", *description)
+	}
+}
+
+// THE TRACKER'S ECHO STILL WINS over the call's own input when both state one:
+// what the task IS is the tracker's business, and presence must not reorder it.
+func TestTaskActSettledPrefersTheTrackersEchoedSubject(t *testing.T) {
+	// Arrange
+	call := openCall{name: "TaskUpdate", input: map[string]any{"task_id": "t1", "subject": "what I asked for"}}
+	result := map[string]any{"task": map[string]any{"id": "t1", "subject": "what it is"}}
+
+	// Act
+	got := taskActSettled(call, result, false, nil)
+
+	// Assert
+	if subject := got.GetTaskAct().GetState().Subject; subject == nil || *subject != "what it is" {
+		t.Fatalf("State.Subject = %v, want the tracker's own echo", subject)
+	}
+}
