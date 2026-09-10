@@ -1748,6 +1748,13 @@ that did not happen must not read as one that did."
                 nil)
             (agent-repl--log ws "land-after-teardown: current=%s -> target=%s"
                              current target)
+            ;; THE LANDING MUST HAVE SOMETHING ON IT.  Arming the flag
+            ;; BEFORE the switch is what makes the panel arrive: the persp
+            ;; activation hook drains `:pending-show-panels' on the way in
+            ;; (`agent-repl--on-workspace-switch'), so the frame is laid out
+            ;; by the same path that lays out every other arrival at a
+            ;; workspace rather than by a repair of its own.
+            (agent-repl--arm-landing-panels target)
             (condition-case err
                 (progn
                   (agent-repl--ws-switch target)
@@ -1757,6 +1764,34 @@ that did not happen must not read as one that did."
                (agent-repl--warn ws "land-after-teardown: switch to %s FAILED: %S"
                                  target err)
                nil))))))))
+
+(defun agent-repl--arm-landing-panels (target)
+  "Arm TARGET so arriving at it after a teardown puts its panel on the frame.
+
+A TEARDOWN LANDING THAT SHOWS NOTHING IS NOT A LANDING.  Switching to a
+surviving workspace restores whatever window configuration persp-mode
+saved for it, and a workspace the user has not stood in since its panel
+was pre-created has no configuration worth restoring — so the frame came
+up EMPTY: one window, no buffer content, no mode line, with only the tab
+bar to say anything had happened at all.  That was the state after a
+merged child's tab was torn down, and it is indistinguishable from a
+wedged editor.
+
+`agent-repl--ensure-own-panels-on-persp-switch' does not cover it: that
+one re-shows panels which were VISIBLE when the workspace was last
+deactivated (`:panels-were-visible'), and a workspace nobody has stood
+in has no such record.  The question here is different and simpler — the
+user was just moved somewhere they did not ask to go, so the workspace
+they land on shows itself.
+
+It is the flag rather than a direct show because the flag is the
+module's own way of saying \"this workspace becomes visible on arrival\"
+\(`agent-repl--drain-pending-show-panels'), which a generated workspace
+is already born with.  A second mechanism beside it would be a second
+answer to one question."
+  (when target
+    (agent-repl--log target "arm-landing-panels: ws=%s" target)
+    (agent-repl--ws-put target :pending-show-panels t)))
 
 (defun agent-repl--ws-persp-kill (ws)
   "Kill the perspective named WS via the low-level `persp-kill'.
