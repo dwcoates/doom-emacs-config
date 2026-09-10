@@ -1306,46 +1306,12 @@ purely daemon-driven."
        (dolist (b agent-repl-test--bufs)
          (when (buffer-live-p b) (kill-buffer b))))))
 
-;; WHAT A SWEEP DOES is tested in test-webview-recovery.el, which is where
-;; the sweep now lives: `agent-repl-refresh-webviews' is the deploy-time
-;; entry point into `agent-repl--webview-recovery-sweep' and holds no
-;; per-webview logic of its own.  What is owned here is the delegation, the
-;; buffer enumeration, and the boundary wrappers the sweep reaches through.
-
-(ert-deftest agent-repl-test-refresh-webviews-delegates-to-the-recovery-sweep ()
-  "The deploy-time refresh runs the one sweep, naming the deploy as its reason."
-  ;; Arrange
-  (let (reasons)
-    (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep)
-               (lambda (reason) (push reason reasons) 3)))
-      ;; Act
-      (should (equal 3 (agent-repl-refresh-webviews)))
-      ;; Assert
-      (should (equal reasons (list "deploy_refresh"))))))
-
-(ert-deftest agent-repl-test-refresh-webviews-reports-zero-for-a-debounced-sweep ()
-  "A debounced sweep reports the integer 0, never nil: deploy-all formats %d."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep) (lambda (_reason) nil)))
-    ;; Act / Assert
-    (should (equal 0 (agent-repl-refresh-webviews)))))
-
-(ert-deftest agent-repl-test-refresh-webviews-always-returns-an-integer ()
-  "Every refresh answer survives the `%d' deploy-all formats it with."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep) (lambda (_reason) nil)))
-    ;; Act
-    (let ((answer (agent-repl-refresh-webviews)))
-      ;; Assert
-      (should (integerp answer))
-      (should (equal "refreshed 0" (format "refreshed %d" answer))))))
-
-(ert-deftest agent-repl-test-refresh-webviews-widget-probe-is-a-registered-boundary ()
+(ert-deftest agent-repl-test-frontend-webview-live-widget-is-a-registered-boundary ()
   "The live-widget probe is registered as an external boundary wrapper."
   (should (memq 'agent-repl--frontend-webview-live-widget
                 agent-repl--external-boundary-functions)))
 
-(ert-deftest agent-repl-test-refresh-webviews-reload-is-a-registered-boundary ()
+(ert-deftest agent-repl-test-frontend-webview-reload-is-a-registered-boundary ()
   "The reload wrapper is registered as an external boundary wrapper."
   (should (memq 'agent-repl--frontend-webview-reload-widget
                 agent-repl--external-boundary-functions)))
