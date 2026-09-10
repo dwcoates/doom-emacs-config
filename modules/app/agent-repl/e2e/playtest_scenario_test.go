@@ -439,16 +439,28 @@ func (s *playtestScenario) awaitInPageFor(t *testing.T, bound time.Duration, wha
 // The 2px slack is subpixel layout, not tolerance for being wrong: browsers
 // round fractional heights and a box parked at its bottom can read a hair
 // short of it.
+//
+// IT REPORTS THE NUMBERS WHEN IT GIVES UP, by throwing them: `pageYes` prints
+// a thrown predicate's message, and a bare `false` here said only that two
+// numbers disagreed without saying WHICH -- a scroll position left below the
+// fold and a footer laid out over the box are different defects in different
+// files, and one run of the flake was spent re-deriving which had happened.
 func (s *playtestScenario) awaitTailClearsFooter(t *testing.T) {
 	t.Helper()
 	s.awaitInPage(t, "the feed's last row to sit clear of the progress footer",
 		`(function () {
                    var box = document.getElementById('feed-scroll');
                    var strip = document.querySelector('#footer .pfooter');
-                   if (!box || !strip) { return false; }
+                   if (!box) { throw new Error("no #feed-scroll"); }
+                   if (!strip) { throw new Error("no #footer .pfooter"); }
                    var below = box.scrollHeight - box.scrollTop - box.clientHeight;
                    var overlap = box.getBoundingClientRect().bottom - strip.getBoundingClientRect().top;
-                   return below <= 2 && overlap <= 0; })()`)
+                   if (below <= 2 && overlap <= 0) { return true; }
+                   throw new Error("tail is " + below + "px below the fold (allowed 2), " +
+                                   "and the box's bottom is " + overlap + "px past the strip's top " +
+                                   "(allowed 0); scrollTop=" + box.scrollTop +
+                                   " scrollHeight=" + box.scrollHeight +
+                                   " clientHeight=" + box.clientHeight); })()`)
 }
 
 // clickInPage clicks one element inside the webview, the way a user does.
