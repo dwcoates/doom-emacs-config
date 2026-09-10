@@ -1606,7 +1606,14 @@ was asked for."
                                (format "http://%s/?workspace=%s&dir=%s"
                                        (agent-repl-itest-daemon-address successor)
                                        (url-hexify-string (plist-get ref :id))
-                                       (url-hexify-string (plist-get ref :dir))))))
+                                       (url-hexify-string (plist-get ref :dir)))))
+                ;; AND THE REST OF THE WALK IS AWAITED INSIDE THE STUBS.
+                ;; The redial now happens BEFORE the adopt is issued (see
+                ;; host.el's rendezvous note), so the navigation this test
+                ;; waits for no longer implies the adopt has landed --
+                ;; leaving here on the navigation alone would unwind the
+                ;; external-boundary stubs while the walk is still running.
+                (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id)))
             (agent-repl-connect-close successor-conn)))))))
 
 ;; audit-2 #8
@@ -1636,6 +1643,46 @@ workspace.\"  The order is only observable from inside the reload."
                  (lambda () (not (eq conn-at-reload 'unset))) nil
                  "the webview reload to be called")
                 (should (eq conn-at-reload successor-conn)))
+            (agent-repl-connect-close successor-conn)))))))
+
+(ert-deftest agent-repl-itest-host-webview-is-redialed-before-the-successor-sees-the-adopt ()
+  "The successor's rendezvous can COMPLETE, because its second participant
+already exists when its first one calls.
+
+THE DEADLOCK THIS PINS, measured in the e2e sandbox on a handover of a
+workspace with a live panel: the successor's `AdoptHostWorkspace' is a
+RENDEZVOUS that completes only when every participant the outgoing daemon
+snapshotted at announcement has called, and for an OPEN workspace those
+are the host AND the reloaded page.  The webapp never redials a successor
+of its own, so the reloaded page is the host's to produce — and producing
+it only once the adopt ANSWERED made the host's call wait for itself.
+The daemon logged `AdoptHostWorkspace timed out after 10s' and `the
+caller gave up before the rendezvous completed', and the outgoing daemon
+then sat out its whole adoption window before exiting, so the promotion
+Emacs makes on the primary stream's close never came.
+
+The claim is an ORDERING ACROSS TWO PROCESSES, which is why it belongs
+here rather than only in the unit suite: by the time the SUCCESSOR
+DAEMON has observed the adopt on the wire, this Emacs must already have
+navigated the page at it."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-subscription primary ref
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((successor-conn (agent-repl-connect-open
+                               (agent-repl-itest-daemon-address successor)))
+              (reloaded nil))
+          (unwind-protect
+              (cl-letf (((symbol-function 'agent-repl-link-successor)
+                         (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-frontend-reload-webview)
+                         (lambda (_ws) (setq reloaded t))))
+                ;; Act.
+                (agent-repl-itest--push primary "host" '((transferred . ()))
+                                        (plist-get ref :id))
+                ;; Assert.
+                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+                (should reloaded))
             (agent-repl-connect-close successor-conn)))))))
 
 ;; audit-2 #9
@@ -2126,20 +2173,29 @@ is useless without its `registry_dir'."
   "A TRANSPORT failure of AdoptHostWorkspace keeps the OLD stream and `:conn'.
 host.el: the old stream is \"kept standing on every failure path\" -- a
 gated call the client gives up on (a shrunk unary timeout) is a transport
-failure, distinct from every scripted `error' arm covered above."
+failure, distinct from every scripted `error' arm covered above.
+
+AMENDED: THE PAGE IS PUT BACK RATHER THAN NEVER MOVED.  The webview is
+now redialed BEFORE the adopt is issued, because the reloaded page is the
+participant the successor's rendezvous waits on and only the host can
+produce it (host.el, and the deadlock recorded there).  So a failed adopt
+can no longer be answered by the page never having moved; it is answered
+by the page being back on the daemon that still serves the workspace,
+which is the same guarantee stated about the END state.  The `:conn' and
+the standing stream assertions are unchanged."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary ref
       (agent-repl-itest--with-second-daemon primary successor
         (let ((successor-conn (agent-repl-connect-open
                                (agent-repl-itest-daemon-address successor)))
-              (reloaded nil)
+              (conn-at-reload nil)
               (agent-repl-connect-unary-timeout-seconds 0.3))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () successor-conn))
                         ((symbol-function 'agent-repl-frontend-reload-webview)
-                         (lambda (ws) (push ws reloaded))))
+                         (lambda (ws) (push (agent-repl-host-conn ws) conn-at-reload))))
                 (agent-repl-itest--gate successor "AdoptHostWorkspace")
                 (unwind-protect
                     (progn
@@ -2152,7 +2208,10 @@ failure, distinct from every scripted `error' arm covered above."
                                                 primary "host" (plist-get ref :id)))))
                       (should-not (eq (agent-repl-host-conn agent-repl-itest-host--ws)
                                       successor-conn))
-                      (should (null reloaded)))
+                      ;; The LAST navigation the page was given is the URL it
+                      ;; is sitting on, and it is not the successor's.
+                      (should conn-at-reload)
+                      (should-not (eq (car conn-at-reload) successor-conn)))
                   (agent-repl-itest--release-gate successor "AdoptHostWorkspace")))
             (agent-repl-connect-close successor-conn)))))))
 
