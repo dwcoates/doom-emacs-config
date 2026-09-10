@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"claude-repld/integration/harness"
 )
 
 // THE EMACS CLIENT LAYER.
@@ -2505,6 +2507,27 @@ func (e *Emacs) findStrays() []stray {
 	for _, entry := range entries {
 		pid, convErr := strconv.Atoi(entry.Name())
 		if convErr != nil || pid == self {
+			continue
+		}
+		// A PROCESS THE SCENARIO OWNS IS NEVER A STRAY, AND THE WAIT ABOVE IS
+		// WHY THIS MATTERS RATHER THAN THE KILL BELOW.
+		//
+		// The reap key is this scenario's own root, and the scenario's own
+		// infrastructure names it: the Xvfb's framebuffer directory is under
+		// it, and the sidecar's `--state-dir`, `--config-roots` and `--log`
+		// are all under it too. Each of those is started by the test, stopped
+		// by the test, and asserted to have been alive at the end — so the
+		// set this finder answers could NEVER come up empty, and
+		// `awaitDaemonExit` therefore burned its whole 6s bound on every
+		// scenario, including scenarios that never started a daemon at all.
+		// MEASURED: `emacs phase daemon-exit took 6.04s (bound 6s)` on 7 of 7
+		// playtest observations, against a daemon that a host e2e measures
+		// exiting 5ms after the same stop.
+		//
+		// The exemption list is `harness`'s, not a second one of this layer's:
+		// the store and the sidecar already declare themselves there, and two
+		// lists would drift the moment either layer gained a process.
+		if harness.SparedFromStrayReaping(pid) {
 			continue
 		}
 		raw, readErr := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"claude-repld/integration/harness"
 )
 
 // THE GUI DISPLAY.
@@ -160,6 +162,13 @@ func startXvfb(t *testing.T, box sandbox, dir string) *xdisplay {
 		t.Fatalf("start Xvfb in the sandbox: %v", err)
 	}
 	x.proc = proc
+	// THE DISPLAY IS THE SCENARIO'S OWN, NOT A DAEMON STRAY. Its `-fbdir` is
+	// under the Emacs root, which is exactly the key `Emacs.findStrays` reaps
+	// on, and the display outlives the Emacs teardown by design (its cleanup
+	// is registered after, so LIFO runs it later). Undeclared, it was a
+	// process the daemon-exit wait could never see leave, so that wait spent
+	// its whole bound on every scenario.
+	harness.SpareFromStrayReaping(t, proc.Pid())
 
 	t.Cleanup(func() {
 		x.proc.Kill()

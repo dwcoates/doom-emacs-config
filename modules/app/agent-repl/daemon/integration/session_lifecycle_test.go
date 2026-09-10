@@ -2351,6 +2351,15 @@ func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T
 	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
 	shim.ExpectStartSession()
 	shim.ExpectStartTurn()
+	// AND THEN WAIT FOR THE DAEMON TO HAVE OPENED IT. The fake shim records
+	// StartTurn when the REQUEST arrives, and the daemon names the session's
+	// main agent from that call's ANSWER (promptqueue/deliver.go's
+	// SetMainAgent, one line before OnTurnOpened) — so a terminal pushed on
+	// the request is racing the answer, and a terminal that wins is WITHHELD
+	// (sessionwatcher/route.go's `turn_end_withheld`) and never attributed to
+	// any turn. The footer then never leaves running and this test waits out
+	// its whole budget for an edge the daemon deliberately did not draw.
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 1)
 	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 
 	// Assert: ordinary again — idle with the link attached, which is what
@@ -2393,6 +2402,9 @@ func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
 	// resume — the very state the playtest was in when the shim died.
 	f.submit("do the thing", "k-dead-revive-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
+	// The daemon's own opening of the turn, not merely the shim's receipt of
+	// it: see the note on the parked-footer test above.
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 1)
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	awaitRoster(t, f.d, roster, "done after the first turn", statusIs(func(row *frontendv1.RosterRow) bool {
 		return row.GetDone() != nil
@@ -2423,6 +2435,7 @@ func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
 
 	// Assert: the held prompt is delivered once the revived session is ready.
 	revived.ExpectStartTurn()
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 2)
 
 	// Assert: the roster row LEAVES dead and settles on the revived turn.
 	revived.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
