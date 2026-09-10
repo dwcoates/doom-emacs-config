@@ -22,9 +22,11 @@
 ;; and `--establish-workspace': THE DAEMON IS THE SOURCE of which
 ;; workspaces exist, and Emacs opens tabs from the roster stream on connect.
 ;; A durable Emacs-side roster could only ever disagree with it.  Client
-;; tab ORDERING and HIDING (push/pull tab, the switch-to-N tower, priority
-;; reseating): tabs follow roster order strictly, priority included, and
-;; the resolver does the ordering.  The interrupt family: no interrupt verb
+;; tab ORDERING and HIDING (push/pull tab, priority reseating): tabs follow
+;; roster order strictly, priority included, and the resolver does the
+;; ordering.  The switch-to-N chords are NOT in that category and are back:
+;; a numeral that names a SLOT OF THE DRAWN BAR reads the given order
+;; instead of authoring one.  The interrupt family: no interrupt verb
 ;; exists in the contract, and the footer owns that gesture.  Close, kill
 ;; and nuke: `verbs.el' owns them as thin wrappers now.  The per-workspace
 ;; clipboard: dead with the host command loop that populated it.
@@ -65,6 +67,7 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-verbs-select-minted "agent-repl-verbs" (ref))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
+(declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-verbs--row-ref "agent-repl-verbs" (row))
 (declare-function agent-repl-verbs--row-closed-p "agent-repl-verbs" (row))
 (declare-function magit-current-section "magit-section" ())
@@ -720,29 +723,131 @@ resets."
       (agent-repl--log current "elisp.commands.open-most-recent-cycle-reset")
       (message "All workspaces visited -- cycle reset"))))
 
+(defun agent-repl--drawn-tab-names ()
+  "Return the workspace names the tab bar DRAWS, in the order it draws them.
+
+THE DRAWN ORDER IS NAVIGATION'S ONLY ORDER.  `agent-repl-roster-tab-order'
+is the tab bar's own order (roster.el sets it from the daemon resolver's
+walk, priority included), so left/right and the numeral chords walk the
+PICTURE THE USER IS LOOKING AT by construction rather than agreeing with
+it by coincidence.
+
+This replaced `agent-repl--live-ws-names' at every navigation site, and
+the difference was the whole defect: that list is the registry hash's key
+order, which is neither the drawn order nor even a stable one, and it
+carries persp-mode's own pseudo perspectives -- `none' and Doom's `main'
+\(`agent-repl--pseudo-workspace-name-p') -- which own no workspace at all.
+Cycling over it therefore went the wrong way relative to the bar, and off
+one end it switched to a splash screen with no tab highlighted or signaled
+an error trying to reach `none'.  A pseudo perspective can never appear in
+the roster's tab order, so it can never be a navigation target."
+  (and (fboundp 'agent-repl-roster-tab-order)
+       (agent-repl-roster-tab-order)))
+
 (defun agent-repl--workspace-cycle (n)
-  "Switch N places from the current workspace in roster order.
-Roster order is the daemon resolver's, priority included, so this is
-navigation over a given order and never a reordering of it."
-  (let* ((names (agent-repl--live-ws-names))
+  "Switch N places from the current workspace along the DRAWN tab order.
+Wraps at both ends, so `s-{' and `s-}' match the bar in both directions.
+
+A bar with no tabs, and a current workspace that is not ON the bar (a
+pseudo perspective, or a workspace whose tab the roster has torn down),
+are LOGGED NO-OPS: there is no slot to count from, and inventing one would
+land the user somewhere the picture never offered."
+  (let* ((names (agent-repl--drawn-tab-names))
          (current (agent-repl--ws-current-name))
          (index (cl-position current names :test #'equal)))
     (if (or (null names) (null index))
-        (agent-repl--log current "elisp.commands.cycle-no-position n=%d names=%d"
+        (agent-repl--log current "elisp.commands.cycle-no-position n=%d tabs=%d"
                          n (length names))
       (let ((target (nth (mod (+ index n) (length names)) names)))
         (agent-repl--log current "elisp.commands.cycle n=%d target=%s" n target)
         (agent-repl--ws-switch target)))))
 
 (defun agent-repl-switch-left ()
-  "Switch to the previous workspace in roster order."
+  "Switch to the tab LEFT of the current one on the tab bar, wrapping."
   (interactive)
   (agent-repl--workspace-cycle -1))
 
 (defun agent-repl-switch-right ()
-  "Switch to the next workspace in roster order."
+  "Switch to the tab RIGHT of the current one on the tab bar, wrapping."
   (interactive)
   (agent-repl--workspace-cycle 1))
+
+(defun agent-repl-switch-to-workspace (&optional n)
+  "Switch to the workspace in the Nth slot of the tab bar, counting from 1.
+
+N indexes the DRAWN tab order (`agent-repl--drawn-tab-names'), which is
+why this exists at all: Doom's `+workspace/switch-to-N' indexes
+persp-mode's perspective list, whose slot 0 is Doom's own `main', so
+`M-1' landed on the splash screen and every numeral was off by one
+against the bar.
+
+Called interactively with no prefix argument, completes over the DRAWN
+NAMES and switches to the chosen one -- the same set the numerals reach,
+so the picker cannot offer a target a chord could not.
+
+An empty bar and a slot the bar does not draw are REPORTED no-ops rather
+than errors: the numerals are a glance-and-press gesture, and a press
+past the end of the bar is a miss, not a fault."
+  (interactive "P")
+  (let* ((names (agent-repl--drawn-tab-names))
+         (log-ws (agent-repl--ws-current-log-name))
+         (index (and n (prefix-numeric-value n))))
+    (cond
+     ((null names)
+      (agent-repl--log log-ws "elisp.commands.switch-to-workspace-no-tabs n=%S" n)
+      (message "[agent-repl] No workspace tabs on the bar"))
+     ((null index)
+      (let ((choice (completing-read "Switch to workspace: " names nil t)))
+        (agent-repl--log log-ws "elisp.commands.switch-to-workspace-chosen ws=%s" choice)
+        (agent-repl--ws-switch choice)))
+     ((or (< index 1) (> index (length names)))
+      (agent-repl--log log-ws
+                       "elisp.commands.switch-to-workspace-out-of-range n=%d tabs=%d"
+                       index (length names))
+      (message "[agent-repl] No workspace tab %d -- the bar draws %d"
+               index (length names)))
+     (t
+      (let ((target (nth (1- index) names)))
+        (agent-repl--log log-ws "elisp.commands.switch-to-workspace n=%d target=%s"
+                         index target)
+        (agent-repl--ws-switch target))))))
+
+(eval-and-compile
+  ;; The count is needed at EXPANSION time by the macro below and at RUN time
+  ;; by the keymap `keybindings.el' builds from it, and one number has to
+  ;; serve both or a tenth command appears with no chord on it.
+  (defconst agent-repl-switch-numeral-count 9
+    "How many workspace numeral chords the module owns: `M-1\=' .. `M-9\='.
+`M-0\=' is left to Doom (`+workspace/switch-to-final\='), which is the one
+numeral whose meaning does not need a slot index to be right."))
+
+(defmacro agent-repl--define-switch-numerals ()
+  "Define `agent-repl-switch-to-workspace-1' .. `-9'.
+
+Each is a NAMED command rather than a closure in a keymap so that
+`C-h k' says what the chord does, a test can assert the chord resolves to
+it, and the keymap stays data.
+
+THE LAST CHORD IS THE ODD ONE.  `M-9' means \"the ninth tab, or the LAST
+tab when the bar draws fewer than nine\", so the chord at the end of the
+row always lands on the workspace at the end of the bar.  Chords 1-8 are
+exact slots and report a miss."
+  (cons
+   'progn
+   (cl-loop
+    for n from 1 to agent-repl-switch-numeral-count
+    collect
+    `(defun ,(intern (format "agent-repl-switch-to-workspace-%d" n)) ()
+       ,(if (= n agent-repl-switch-numeral-count)
+            (format "Switch to tab %d on the bar, or the LAST when it draws fewer." n)
+          (format "Switch to tab %d on the bar, counting from the left." n))
+       (interactive)
+       (agent-repl-switch-to-workspace
+        ,(if (= n agent-repl-switch-numeral-count)
+             `(max 1 (min ,n (length (agent-repl--drawn-tab-names))))
+           n))))))
+
+(agent-repl--define-switch-numerals)
 
 (provide 'commands)
 
