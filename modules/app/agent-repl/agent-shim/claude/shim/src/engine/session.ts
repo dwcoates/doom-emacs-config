@@ -2226,14 +2226,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         settle();
       };
     },
-    knowsAgent: (agent) => {
-      const value = agent.value;
-      if (value === "") return false;
-      if (identity !== undefined && value === identity.agentId.value) return true;
-      if (live.byToolUseId(value) !== undefined) return true;
-      if (live.retired(value)) return true;
-      return announcedAgents.has(value);
-    },
+    knowsAgent: (agent) => knowsAgent(agent),
     concludeStoppedRuns: (entries) => {
       concludeStoppedRuns(entries);
     },
@@ -2742,6 +2735,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     watchers.clear();
   }
 
+  /**
+   * Whether THIS session vouches for an agent id — the producer's own answer to
+   * "does this name an agent at all".
+   *
+   * ONE PREDICATE, used by every caller that needs it. The record plane treats
+   * it as the licence to serve a book the store holds no rows for, so a second
+   * hand-rolled copy of these conditions would let two callers disagree about
+   * whether the same id names an agent.
+   */
+  function knowsAgent(agent: conversationv1.AgentId): boolean {
+    const value = agent.value;
+    if (value === "") return false;
+    if (identity !== undefined && value === identity.agentId.value) return true;
+    if (live.byToolUseId(value) !== undefined) return true;
+    if (live.retired(value)) return true;
+    return announcedAgents.has(value);
+  }
+
   /** The newest pointer in one agent's book, or absence when the book is empty. */
   async function bookHead(
     agent: conversationv1.AgentId,
@@ -2752,7 +2763,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // Rejecting hands the caller's own catch the honest outcome -- the head
     // could not be read -- instead of stalling the stand-down.
     const opened = await deadline(
-      deps.persistence.openAgentPage(agent, 1),
+      // THE PRODUCER VOUCHES HERE TOO. A session killed before its first turn
+      // has an agent with no book, and asking the store for one earned an
+      // `unknown_agent` refusal on every such teardown. The head of a book that
+      // does not exist is absence, which is exactly what an empty page answers.
+      deps.persistence.openAgentPage(agent, 1, undefined, () => knowsAgent(agent)),
       watcherConclusionBudgetMs,
       `the store did not answer for ${agent.value}'s book within ${watcherConclusionBudgetMs}ms`,
     );
