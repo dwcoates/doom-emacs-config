@@ -369,6 +369,30 @@ func TestAnActThatNamesNoSubjectKeepsTheOneTheTaskHas(t *testing.T) {
 	}
 }
 
+// A CHECKLIST ENTRY IS A SUBJECT. A `TaskUpdate` the tracker REFUSED for an id
+// it does not hold names the task and no subject at either end, and the
+// checklist gained a PHANTOM ROW -- a bare glyph with no words, counted in the
+// chip's denominator, for a task the tracker had just said it does not have.
+// `AgentTaskRejected` says it outright: nothing was added and nothing changed.
+func TestAnActWithNoSubjectOpensNoChecklistEntry(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("Land the converter")))
+
+	// Act: the refused update's own shape -- a task nobody has named.
+	h.r.OnActivity(testWS, mainAgent, taskAct("t9", unstatedTask("")))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetTasks().GetRows()
+	if len(rows) != 1 {
+		t.Fatalf("the checklist holds %d rows, want only the one that was named: %+v", len(rows), rows)
+	}
+	if chip := h.view(t).GetStrip().GetLiveWork().GetTasks(); chip.GetTotal() != 1 {
+		t.Fatalf("tasks chip = %+v, want a denominator of 1", chip)
+	}
+}
+
 func TestADeletedTaskLeavesTheChecklist(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

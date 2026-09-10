@@ -77,7 +77,7 @@ func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, unit string, ac
 	case *conversationv1.AgentActivity_Bash:
 		r.applyBash(s, unit, item.Bash)
 	case *conversationv1.AgentActivity_TaskAct:
-		r.applyTaskAct(s, item.TaskAct)
+		r.applyTaskAct(ws, s, item.TaskAct)
 	case *conversationv1.AgentActivity_Monitor:
 		r.applyMonitor(s, unit, item.Monitor)
 	case *conversationv1.AgentActivity_Cron:
@@ -195,19 +195,39 @@ func (r *resolver) applyBash(s *wsState, unit string, bash *conversationv1.Agent
 // empty one. Filed as a proto need by owner 16; until it lands, the empty
 // string is read as "not stated", which is the only reading that does not
 // erase a subject the tracker still holds.
-func (r *resolver) applyTaskAct(s *wsState, act *conversationv1.AgentTaskAct) {
+func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversationv1.AgentTaskAct) {
 	id := act.GetTask().GetValue()
 	state := act.GetState()
 	if _, deleted := state.GetStatus().(*conversationv1.AgentTaskState_Deleted); deleted {
 		delete(s.tasks, id)
 		return
 	}
+	subject := state.GetSubject()
 	row, ok := s.tasks[id]
 	if !ok {
+		// A CHECKLIST ENTRY IS A SUBJECT, so an act that names none cannot
+		// open one. The case that forced this is a `TaskUpdate` the tracker
+		// REFUSED for an id it does not hold: its announcement and its
+		// rejection both name the task and neither names a subject, and the
+		// checklist gained a PHANTOM ROW -- a bare glyph with no words beside
+		// it, counted in the ☑ chip's denominator, for a task the tracker had
+		// just said it does not have. `AgentTaskRejected` states it outright:
+		// "Nothing was added and nothing changed". Photographed by the G52
+		// playbook.
+		//
+		// It is stated rather than dropped quietly, because the other way to
+		// reach here is a footer that missed the create's own frame, and that
+		// is worth seeing in the log.
+		if subject == "" {
+			r.logOf(ws, s).Debug("daemon.footer.task_act_unheld",
+				"a task act names no subject and no entry is held for it; the checklist is unchanged",
+				dlog.Context{"task": id})
+			return
+		}
 		row = &taskRow{id: id, order: s.nextOrder(), status: taskPending}
 		s.tasks[id] = row
 	}
-	if subject := state.GetSubject(); subject != "" {
+	if subject != "" {
 		row.subject = subject
 	}
 	switch status := state.GetStatus().(type) {

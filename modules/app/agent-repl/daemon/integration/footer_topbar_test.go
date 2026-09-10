@@ -387,6 +387,37 @@ func TestFooterChecklistKeepsWhatAnUpdateDidNotState(t *testing.T) {
 	})
 }
 
+// A REFUSED UPDATE ADDS NOTHING. `AgentTaskRejected` states it outright, and
+// the checklist gained a phantom row anyway -- a bare glyph with no words
+// beside it, counted in the chip's denominator, for a task the tracker had just
+// said it does not hold. Photographed by the G52 playbook.
+func TestFooterChecklistGainsNoRowForATaskNobodyNamed(t *testing.T) {
+	t.Parallel()
+	// Arrange: one real task.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "Land the converter", false)))
+	awaitFooter(t, f, footer, "the checklist with its one named task", func(v *frontendv1.FooterView) bool {
+		return len(v.GetExpanded().GetTasks().GetRows()) == 1
+	})
+
+	// Act: a refused update's own shape -- an act naming a task and no subject.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskUnstated("task-2", "t-9")))
+	// A second, ordinary act gives the assertion something to wait FOR, so it
+	// is not a wait on an absence that passes before the frame arrives.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-3", "t-2", "Land the store writer", false)))
+
+	// Assert
+	awaitFooter(t, f, footer, "the checklist holding only the tasks that were named", func(v *frontendv1.FooterView) bool {
+		rows := v.GetExpanded().GetTasks().GetRows()
+		if len(rows) != 2 {
+			return false
+		}
+		return rows[0].GetSubject().GetText() == "Land the converter" &&
+			rows[1].GetSubject().GetText() == "Land the store writer"
+	})
+}
+
 func TestFooterLiveWorkChipsAreUnsetWhenZero(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
