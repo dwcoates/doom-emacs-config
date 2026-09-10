@@ -116,7 +116,7 @@ func TestPlaytestPanelsOpenAndClose(t *testing.T) {
 	p, e := s.Book, s.E
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
 
-	s.register(t, s.repoAt(t, "first").Dir)
+	first := s.register(t, s.repoAt(t, "first").Dir)
 	// The panel verbs act on the CURRENT workspace, which is the one most
 	// recently added; point the scenario at it.
 	s.Name = s.register(t, s.repoAt(t, "second").Dir)
@@ -134,8 +134,9 @@ func TestPlaytestPanelsOpenAndClose(t *testing.T) {
 	windows := e.EvalInt(`(length (window-list))`)
 	p.capture("panels-open", "`agent-repl-frontend-open-panel` for the second workspace",
 		fmt.Sprintf("a %q window and a %q window are both on the frame, neither is a side window, the "+
-			"webview is live and its page mounted, and the frame's tab-bar-lines is the pinned %d",
-			frontendPrefix, panelPrefix, rows),
+			"webview is live and its page mounted, the frame's tab-bar-lines is the pinned %d, and the "+
+			"OTHER workspace's tab is drawn %s",
+			frontendPrefix, panelPrefix, rows, s.tabPaintOf(t, first)),
 		"The frame is SPLIT between the two panel kinds, both in the main area: the WEBAPP inside "+
 			"the webview window -- workspace sidebar down one side, an empty feed, and the progress "+
 			"footer with a status word along its bottom -- and a separate composer window beneath or "+
@@ -195,10 +196,31 @@ func TestPlaytestPanelsOpenAndClose(t *testing.T) {
 		t.Fatalf("the frame holds %d windows after the toggle reopened the panels, want the %d it held on the first open", got, windows)
 	}
 	p.capture("panels-reopened", "`SPC o c` again, toggling the panels back",
-		fmt.Sprintf("both panel kinds are on the frame again in the main area, the page is mounted, and "+
-			"the frame holds its original %d windows", windows),
+		fmt.Sprintf("both panel kinds are on the frame again in the main area, the page is mounted, "+
+			"the frame holds its original %d windows, and the OTHER workspace's tab is drawn %s",
+			windows, s.tabPaintOf(t, first)),
 		"The split of the first capture is back: the webapp in the webview window with its sidebar and "+
-			"footer, and the composer window beside it. The tab bar is unchanged.")
+			"footer, and the composer window beside it. The tab bar still lists BOTH workspaces in the "+
+			"SAME order with the second selected. (What COLOR the first workspace's tab is drawn is "+
+			"section B's subject, not this one; the row beside this sentence records the arm and the "+
+			"face the module chose for it at the instant of the picture.)")
+}
+
+// tabPaintOf records, as DATA for the manifest, what the module decided to
+// paint a workspace's tab with at this instant: its arm, the color its own
+// table gives that arm, and every face the drawn tabline actually carries.
+//
+// It asserts nothing. Which color a tab OUGHT to be is section B's subject
+// (the tab-arm playbooks), and a layout playbook that claimed one would be
+// filing section B's defects from a picture it took for another reason. What
+// it does is make a tab whose paint CHANGES between two of this playbook's
+// pictures explicable from the manifest alone, instead of sending a reviewer
+// to guess.
+func (s *playtestScenario) tabPaintOf(t *testing.T, ws string) string {
+	t.Helper()
+	arm, color := s.armPaint(t, ws)
+	return fmt.Sprintf("on arm %s (its table color: %s) with the drawn tabline carrying %s",
+		arm, color, s.tabFaceFor(t, ws))
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +256,12 @@ func TestPlaytestFullscreenToggleAndRestore(t *testing.T) {
 	p, e := s.Book, s.E
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
 
+	// THE WORKSPACE IS REGISTERED FIRST, and the work layout arranged after
+	// it. Registering opens the worktree's magit status in the selected
+	// window, so a layout arranged ahead of it is not the one the panels'
+	// open would save -- which is the layout the restore is judged against.
+	s.register(t, s.repoAt(t, "repo").Dir)
+
 	const workA, workB = "*playtest-work-a*", "*playtest-work-b*"
 	e.Eval(`(progn
               (delete-other-windows)
@@ -254,7 +282,6 @@ func TestPlaytestFullscreenToggleAndRestore(t *testing.T) {
 	p.note("two ordinary work windows split on the frame, before any panel exists",
 		fmt.Sprintf("the frame holds exactly the two work windows: %q", work))
 
-	s.register(t, s.repoAt(t, "repo").Dir)
 	s.openPanel(t)
 	awaitPanelWindows(e, frontendPrefix, panelPrefix)
 	requirePanelsInMainArea(t, e, frontendPrefix, panelPrefix)
@@ -391,9 +418,10 @@ func TestPlaytestReloadAndRescueWebview(t *testing.T) {
 	p.capture("reloaded", "`SPC o l` (`agent-repl-frontend-reload-webview`)",
 		"the page's marker global is gone (a new document was fetched), the page mounted again, both "+
 			"feed rows are drawn again, and the webview's URI is at the daemon's own origin",
-		"The webapp is drawn with its feed holding the SAME two bubbles as before the reload -- the "+
-			"user's prompt and the assistant's prose answer -- with the sidebar and the footer status "+
-			"word around it. Nothing is blank and no failure card is shown.")
+		"The webapp is drawn with the SAME feed as before the reload: the user's prompt bubble on the "+
+			"right, and the fake SDK's answer beneath it on the left -- a prose line and the bubble "+
+			"echoing the prompt back -- with the workspace sidebar, the topbar and the footer status "+
+			"word around them. Nothing is blank and no failure card is shown.")
 
 	// RESCUE, WHEN HOME: nothing happens. The marker survives because no
 	// navigation happened.
@@ -438,9 +466,9 @@ func TestPlaytestReloadAndRescueWebview(t *testing.T) {
 	s.requireHome(t, homeURI)
 	p.capture("rescued", "`SPC o L` (`agent-repl-frontend-rescue-webview`) on the astray page",
 		"the webview's URI is back at the daemon's origin, the page mounted, and both feed rows are drawn again",
-		"The webapp is back where the reload left it: the feed holding the user's prompt bubble and "+
-			"the assistant's prose answer, with the sidebar and the footer status word. No trace of "+
-			"the blank page remains.")
+		"The webapp is back where the reload left it, picture for picture: the same prompt bubble and "+
+			"the same two answer bubbles beneath it, with the sidebar, the topbar and the footer status "+
+			"word. No trace of the blank page remains.")
 }
 
 // webviewURI reads the URI the workspace's webview currently shows.
