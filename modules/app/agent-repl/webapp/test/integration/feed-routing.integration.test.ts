@@ -317,6 +317,31 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     expect(harness.row("bubble")?.textContent).toContain("inner work");
   });
 
+  // THE FOLD'S OTHER HALF. `data-expanded` says the bubble is shut; the panel's
+  // own `hidden` is what makes it LOOK shut, and the two came apart in the real
+  // webview -- the sheet's `.agent-panel { display: flex }` outranked the
+  // user-agent `[hidden]` rule, so a collapsed sub-feed stayed fully drawn
+  // under a caret that said it was closed. The sheet now carries the guard
+  // (pinned in test/feed/bubble.test.ts, and asserted against a real browser in
+  // the G49 playbook); what is asserted here is that the shell's own caret
+  // reaches the attribute that guard keys on.
+  it("hides the sub-feed panel when the caret folds it", async () => {
+    // Arrange
+    harness = await openBubble();
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await harness.fake.awaitStream("watchFeed", 2);
+    harness.fake.pushRow(WORKSPACE_ID, "bubble", responseRow("success", "inner work", { id: feedId("inner") }));
+    await harness.settle();
+    const panel = harness.row("bubble")?.querySelector<HTMLElement>("[data-subfeed]");
+    expect(panel?.hidden).toBe(false);
+    // Act
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await harness.settle();
+    // Assert
+    expect(panel?.hidden).toBe(true);
+    expect(harness.row("bubble")?.dataset.expanded).toBe("false");
+  });
+
   it("does not draw a sub-feed row on the root feed", async () => {
     // Arrange
     harness = await openBubble();
