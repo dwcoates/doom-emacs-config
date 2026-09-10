@@ -219,7 +219,7 @@ func TestOpenLoggerCreatesItsDirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "sidecar.log")
 
 	// Act.
-	logf, closeLog, err := openLogger("/private/tmp/store.sock", path)
+	logf, closeLog, err := openLogger("/private/tmp/store.sock", t.TempDir(), path)
 	if err != nil {
 		t.Fatalf("openLogger: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestOpenLoggerFailureIsABootstrapError(t *testing.T) {
 	}
 
 	// Act.
-	_, _, err := openLogger("/private/tmp/store.sock", filepath.Join(blocker, "sidecar.log"))
+	_, _, err := openLogger("/private/tmp/store.sock", t.TempDir(), filepath.Join(blocker, "sidecar.log"))
 
 	// Assert.
 	if !isBootstrapError(err) {
@@ -260,7 +260,7 @@ func TestOpenLoggerRejectsAnInvalidLevelBeforeCreatingItsDirectory(t *testing.T)
 	path := filepath.Join(t.TempDir(), "nested", "sidecar.log")
 
 	// Act.
-	_, _, err := openLogger("/private/tmp/store.sock", path)
+	_, _, err := openLogger("/private/tmp/store.sock", t.TempDir(), path)
 
 	// Assert.
 	if !isBootstrapError(err) {
@@ -268,6 +268,25 @@ func TestOpenLoggerRejectsAnInvalidLevelBeforeCreatingItsDirectory(t *testing.T)
 	}
 	if _, statErr := os.Stat(filepath.Dir(path)); !os.IsNotExist(statErr) {
 		t.Fatalf("log directory stat = %v, want no state created", statErr)
+	}
+}
+
+func TestOpenLoggerRejectsAnEmptyStateDirectoryBeforeCreatingItsLog(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "nested", "sidecar.log")
+
+	// Act.
+	_, _, err := openLogger("/private/tmp/store.sock", "", path)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("openLogger error = %v, want bootstrap error", err)
+	}
+	if !strings.Contains(err.Error(), "state directory is empty") {
+		t.Fatalf("openLogger error = %v, want the missing state directory named", err)
+	}
+	if _, statErr := os.Stat(filepath.Dir(path)); !os.IsNotExist(statErr) {
+		t.Fatalf("log directory exists after state-dir refusal (stat error %v), want no mutation", statErr)
 	}
 }
 

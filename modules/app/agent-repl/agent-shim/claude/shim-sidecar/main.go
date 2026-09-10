@@ -4,11 +4,13 @@
 // their per-agent transcripts, task spools), tails them with cursored,
 // truncation-aware reads, converts each record into conversation.v1 vocabulary,
 // and writes it to the store as store.v1 StoreEntry batches with the reader
-// position riding the same transaction.
+// position riding the same transaction. File-scoped diagnostics are forwarded
+// to the daemon's ClientLog RPC for persistence in workspace sidecar.log.
 //
-// It is a COPIER. It has no view of liveness, no session semantics and no
-// contact with the daemon; the only thing it ever concludes on its own is that
-// it STOPPED SEEING a detached run (see internal/stale).
+// It is a COPIER. It has no view of liveness and no session semantics. Its sole
+// daemon interaction is forwarding file-scoped diagnostics through ClientLog;
+// the only thing it concludes on its own is that it STOPPED SEEING a detached
+// run (see internal/stale).
 //
 // Flags (the launchd plists reference these):
 //
@@ -57,6 +59,7 @@ import (
 	"syscall"
 	"time"
 
+	"agentrepl/shim-claude-sidecar/internal/daemonclient"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
 
@@ -181,10 +184,10 @@ func main() {
 // Options is the sidecar's whole configuration, after flag and env resolution.
 type Options struct {
 	StoreSocket string
-	// StateDir is the agent-repl state root the shim writes its identity
-	// records under. Empty means no root could be resolved, and the reader then
-	// books every transcript under its own vendor session id — which is what it
-	// did before the records existed.
+	// StateDir is the agent-repl state root that holds the shim's identity
+	// records and the daemon's current address. It is required before the
+	// process opens its durable log because file-scoped diagnostics cannot be
+	// persisted without it.
 	StateDir       string
 	ConfigRoots    []string
 	SpoolRoot      string
@@ -329,11 +332,10 @@ func resolveBackoffOptions(min, max durationSource) (time.Duration, time.Duratio
 // else $AGENT_REPL_STATE_DIR, else $HOME/.claude-emacs — the same precedence the
 // daemon's stateroot.Root applies, so both processes resolve one root.
 //
-// A HOME THAT CANNOT BE RESOLVED IS NOT A BOOTSTRAP FAILURE. Nothing else in
-// this process needs the state root, and refusing to start over it would take
-// the whole file plane down for a facility only rotated conversations use. It
-// answers empty, which the index reports as "resolves nothing" rather than
-// guessing a path.
+// A HOME THAT CANNOT BE RESOLVED answers empty. openLogger refuses that state
+// before opening the durable sink because file-scoped diagnostics now require
+// daemon.addr beneath the same root; running without it would silently discard
+// every workspace diagnostic.
 func resolveStateDir(flagValue string) string {
 	if dir := strings.TrimSpace(flagValue); dir != "" {
 		return expandHome(dir)
@@ -378,7 +380,7 @@ func reportFatal(err error, stderr io.Writer) {
 }
 
 func run(options Options, logPath string) (err error) {
-	logf, closeLog, err := openLogger(options.StoreSocket, logPath)
+	logf, closeLog, err := openLogger(options.StoreSocket, options.StateDir, logPath)
 	if err != nil {
 		return err
 	}
@@ -421,16 +423,21 @@ func logProcessExit(logf *logging.Bound, err *error) {
 // 6.2 GB of stderr beside a 666 MB `--log` on the owner's machine. The durable
 // sink now rolls at a byte cap with a fixed number of generations, and the
 // terminal keeps only the sink-emergency record it is the last channel for.
-func openLogger(storeSocket, logPath string) (*logging.Bound, func(), error) {
+func openLogger(storeSocket, stateDir, logPath string) (*logging.Bound, func(), error) {
 	level, err := sharedlogging.ParseLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"))
 	if err != nil {
 		return nil, nil, bootstrapError{err}
+	}
+	if strings.TrimSpace(stateDir) == "" {
+		return nil, nil, bootstrapError{fmt.Errorf("agent-repl state directory is empty; daemon.addr cannot be resolved")}
 	}
 	file, err := sharedlogging.OpenRotating(logPath, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
-	logf := logging.NewDurableOnlyAtLevel(os.Stderr, file, level).With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
+	forwarder := daemonclient.New(stateDir)
+	logf := logging.NewForwardingDurableOnlyAtLevel(os.Stderr, file, level, forwarder).
+		With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
 	return logf, func() { _ = file.Close() }, nil
 }
 

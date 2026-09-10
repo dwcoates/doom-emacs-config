@@ -33,6 +33,30 @@ func sinks(t *testing.T, verbose bool) (*Logger, *bytes.Buffer, *bytes.Buffer) {
 	return l, stderr, file
 }
 
+type recordingForwarder struct {
+	address string
+	err     error
+	records []ForwardRecord
+}
+
+func (f *recordingForwarder) Forward(record ForwardRecord) (string, error) {
+	f.records = append(f.records, record)
+	return f.address, f.err
+}
+
+func forwardingSinks(t *testing.T, verbose bool, forwarder Forwarder) (*Logger, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	terminal, global := &bytes.Buffer{}, &bytes.Buffer{}
+	level := sharedlogging.LevelInfo
+	if verbose {
+		level = sharedlogging.LevelDebug
+	}
+	l := NewForwardingDurableOnlyAtLevel(terminal, global, level, forwarder)
+	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 123456000, time.UTC) }
+	l.pid = func() int { return 4242 }
+	return l, terminal, global
+}
+
 func decode(t *testing.T, raw string) record {
 	t.Helper()
 	var got record
@@ -120,6 +144,119 @@ func TestRegisteredFileSuppliesWorkspaceAttributionToPathOnlyRecords(t *testing.
 	got := decode(t, file.String())
 	if got.WorkspaceDir != "/work/repo" || got.WorkspaceID != "deadbeef" || got.ClaudeSessionID != "session-1" {
 		t.Fatalf("registered attribution = %#v", got)
+	}
+}
+
+func TestFileScopedRecordIsForwarded(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123"}
+	l, terminal, global := forwardingSinks(t, false, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "watch", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1", Path: "/work/repo/session.jsonl",
+	}).Log("watching")
+
+	// Assert.
+	if len(forwarder.records) != 1 {
+		t.Fatalf("forwarded records = %d, want 1", len(forwarder.records))
+	}
+	got := forwarder.records[0]
+	if got.WorkspaceDir != "/work/repo" || got.WorkspaceID != "deadbeef" || got.ClaudeSessionID != "session-1" {
+		t.Fatalf("forwarded workspace identity = %+v", got)
+	}
+	if got.Context["pid"] != 4242 || got.Context["claude_session_id"] != "session-1" {
+		t.Fatalf("forwarded process/session context = %v", got.Context)
+	}
+	if terminal.Len() != 0 || global.Len() != 0 {
+		t.Fatalf("file-scoped record also reached a local sink: terminal=%q global=%q", terminal.String(), global.String())
+	}
+}
+
+func TestGlobalRecordIsNotForwarded(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123"}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act.
+	l.With(Context{Operation: "start"}).Log("sidecar starting")
+
+	// Assert.
+	if len(forwarder.records) != 0 {
+		t.Fatalf("global record was forwarded: %+v", forwarder.records)
+	}
+	if got := decode(t, global.String()).Operation; got != "start" {
+		t.Fatalf("global sink operation = %q, want start", got)
+	}
+}
+
+func TestForwardFailureIsRecordedOnceAndLoggingContinues(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", err: errors.New("connection refused")}
+	l, _, global := forwardingSinks(t, false, forwarder)
+	file := Context{WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef", ClaudeSessionID: "session-1"}
+
+	// Act.
+	l.With(mergeContext(file, Context{Operation: "poll"})).Log("polling")
+	l.With(mergeContext(file, Context{Operation: "commit"})).Log("committing")
+	l.With(Context{Operation: "rescan"}).Log("rescan complete")
+
+	// Assert.
+	if len(forwarder.records) != 2 {
+		t.Fatalf("forward attempts = %d, want both file records attempted", len(forwarder.records))
+	}
+	lines := strings.Split(strings.TrimSpace(global.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("global records = %d, want one forwarding failure plus the later lifecycle record: %q", len(lines), global.String())
+	}
+	if got := decode(t, lines[0]).Operation; got != "sidecar.logging.forward-failure" {
+		t.Fatalf("first global operation = %q, want the forwarding failure", got)
+	}
+	if got := decode(t, lines[1]).Operation; got != "rescan" {
+		t.Fatalf("second global operation = %q, want proof logging continued", got)
+	}
+}
+
+func TestForwardFailureIsRecordedAgainAfterRecovery(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", err: errors.New("connection refused")}
+	l, _, global := forwardingSinks(t, false, forwarder)
+	file := Context{Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef", ClaudeSessionID: "session-1"}
+
+	// Act.
+	l.With(file).Log("first outage")
+	forwarder.err = nil
+	l.With(file).Log("recovered")
+	forwarder.err = errors.New("connection reset")
+	l.With(file).Log("second outage")
+
+	// Assert.
+	lines := strings.Split(strings.TrimSpace(global.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("forwarding failure records = %d, want one per outage window: %q", len(lines), global.String())
+	}
+}
+
+func TestForwardedRecordCarriesItsTimestampAndVerboseClass(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123"}
+	l, _, _ := forwardingSinks(t, true, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "tail-pickup", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).LogVerbose("picked up one frame")
+
+	// Assert.
+	got := forwarder.records[0]
+	wantTimestamp := sharedlogging.Timestamp(time.Date(2026, 8, 29, 12, 0, 0, 123456000, time.UTC).Local())
+	if got.Timestamp != wantTimestamp {
+		t.Fatalf("forwarded timestamp = %q, want the sidecar's own instant %q", got.Timestamp, wantTimestamp)
+	}
+	if got.Level != "debug" || !got.Verbose {
+		t.Fatalf("forwarded classification = level %q verbose %t, want debug/true", got.Level, got.Verbose)
 	}
 }
 
