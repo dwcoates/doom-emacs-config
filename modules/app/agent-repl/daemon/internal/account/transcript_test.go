@@ -294,9 +294,9 @@ func TestPortTranscriptRemintsTheSidecarsSubagentRecordsUnderTheSameMapping(t *t
 	// Arrange.
 	f := newTranscriptFixture(t)
 	src := plantTranscript(t, f.def, f.ws, "parent-uuid",
-		`{"type":"assistant","uuid":"u1","sessionId":"parent-uuid","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"subagent_type":"Explore"}}]}}`+"\n")
+		`{"type":"assistant","uuid":"u1","sessionId":"parent-uuid","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_01parentcall","name":"Agent","input":{"subagent_type":"Explore"}}]}}`+"\n")
 	plantSidecar(t, src, filepath.Join("subagents", "agent-loc1.meta.json"),
-		`{"agentType":"Explore","description":"look","toolUseId":"toolu_1","spawnDepth":1}`)
+		`{"agentType":"Explore","description":"look","toolUseId":"toolu_01parentcall","spawnDepth":1}`)
 	plantSidecar(t, src, filepath.Join("subagents", "agent-loc1.jsonl"),
 		`{"type":"user","uuid":"s1","agentId":"loc1","isSidechain":true,"sessionId":"parent-uuid"}`+"\n")
 	child := filepath.Join(t.TempDir(), "child-ws")
@@ -334,7 +334,11 @@ func TestPortTranscriptRemintsTheSidecarsSubagentRecordsUnderTheSameMapping(t *t
 	if got := jsonField(t, subagentBody, "agentId"); got != locator {
 		t.Fatalf("the subagent record states agentId %q, want the file name's %q", got, locator)
 	}
-	if strings.Contains(transcriptBody+metaBody+subagentBody, "toolu_1") {
+	// The parent's call id is spelled with letters outside hex on purpose: a
+	// re-minted `toolu_…` id keeps the vendor prefix and fills the tail with hex,
+	// so a one-character tail like `toolu_1` is a SUBSTRING of one minted id in
+	// sixteen and this scan would report a leak that did not happen.
+	if strings.Contains(transcriptBody+metaBody+subagentBody, "toolu_01parentcall") {
 		t.Fatal("the ported conversation still carries the parent's tool_use id")
 	}
 }
