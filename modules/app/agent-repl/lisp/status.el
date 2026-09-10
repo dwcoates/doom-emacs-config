@@ -394,6 +394,90 @@ the misread this color exists to prevent.")
 (defconst agent-repl--color-dark             "black"
   "Dark foreground for light state backgrounds.")
 
+(defconst agent-repl--color-unarmed-bg       "#4a4a4a"
+  "Background for a tab whose arm takes NO state color.
+
+THE UN-ARMED TAB IS A PAIR LIKE EVERY OTHER ROW, and it is spelled here
+because it was the one appearance that was not.  `:none', `:inactive'
+and the terminal merge arms take no lifecycle color, and the tab was
+drawn by leaving its background and foreground `unspecified' — which
+means \"whatever this frame's faces happen to resolve to\".  Measured on
+the playtest's own frame, that resolved to a name run of BLACK glyphs on
+`#14141a' (a contrast ratio of about 1.06:1) and a bracket numeral of
+WHITE on the tab bar's own `#d9d9d9' (about 1.3:1): a tab nobody could
+read, in two different ways at once, and both of them invisible to every
+assertion because the STRING was correct and only its resolved value was
+not.
+
+`agent-repl--tab-palette-row' already promises that every row states a
+foreground legible against its background.  An inherited value can make
+no such promise — it is a different color on a themed frame than on an
+unthemed one — so the un-armed row states BOTH halves outright, and is
+legible on either.
+
+A NEUTRAL DARK GREY, deliberately clear of all five state colors and of
+`agent-repl--color-selected-bg': it must not read as a sixth state.")
+
+(defconst agent-repl--color-unarmed-fg       "white"
+  "Foreground for a tab whose arm takes no state color.
+White on `agent-repl--color-unarmed-bg\=' is a contrast ratio of about
+8.6:1, well clear of the floor `agent-repl-tab-contrast-floor\=' states,
+and it does not move with the theme because neither half of the pair is
+inherited.")
+
+(defconst agent-repl-tab-contrast-floor 3.0
+  "The contrast ratio every tab's own foreground/background pair must meet.
+
+3.0:1 is WCAG 2.1's AA floor for LARGE text, and that is the floor this
+surface answers to because every tab is drawn at
+`agent-repl--tab-weight' — bold — which is what makes text large by the
+standard's own definition.  The ordinary-text floor of 4.5:1 is NOT used
+here, and that is a measurement rather than a convenience: two of the
+palette's existing state colors sit between the two numbers (white on
+`agent-repl--color-thinking-red' is 4.00:1 and on
+`agent-repl--color-merging-purple' 3.14:1), and re-choosing a state
+color is a change to the cross-language color contract in
+`proto/vocab/render-colors.json', not to a tab's appearance.
+
+What the floor exists to catch is nothing near that line.  The un-armed
+tab measured 1.06:1 for its name and 1.3:1 for its numeral — text drawn
+in a color one step off its own background — and every number above
+fails it by a wide margin.
+
+It is stated once, here, so the palette's rows, the faces built from
+them and the playtest that reads a pair off a photograph are all held to
+ONE number rather than to three that could drift apart.")
+
+(defun agent-repl--relative-luminance (color)
+  "Return COLOR's WCAG relative luminance, or signal if Emacs cannot read it.
+
+COLOR is any name or hex string `color-name-to-rgb' accepts.  A color
+this frame cannot resolve is an ERROR rather than a guess: a luminance
+invented here would let an illegible pair pass the very check that
+exists to catch it."
+  (let ((rgb (color-name-to-rgb color)))
+    (unless rgb
+      (error "agent-repl: cannot resolve the color %S, so its legibility cannot be checked" color))
+    (cl-loop for channel in rgb
+             for weight in '(0.2126 0.7152 0.0722)
+             sum (* weight
+                    (if (<= channel 0.03928)
+                        (/ channel 12.92)
+                      (expt (/ (+ channel 0.055) 1.055) 2.4))))))
+
+(defun agent-repl-color-contrast-ratio (foreground background)
+  "Return the WCAG contrast ratio between FOREGROUND and BACKGROUND.
+
+1.0 is two identical colors and 21.0 is black on white.  This is the
+module's own answer to \"can this be read?\", so the palette, the faces
+built from it and the playtest that reads a pair off a photograph all
+ask ONE function rather than each carrying its own arithmetic."
+  (let* ((a (agent-repl--relative-luminance foreground))
+         (b (agent-repl--relative-luminance background))
+         (lighter (max a b))
+         (darker  (min a b)))
+    (/ (+ lighter 0.05) (+ darker 0.05))))
+
 ;; There are no bracket-label glyphs.  The [N] bracket carries its number
 ;; and the state's COLOR, nothing else: a glyph beside the numeral was a
 ;; second vocabulary saying what the color already says, and the sidebar
@@ -403,15 +487,26 @@ the misread this color exists to prevent.")
   "Font weight applied to every tab face.")
 
 (defconst agent-repl--tab-default
-  `(:unselected (:bg unspecified
-                 :fg unspecified
-                 :bracket-fg ,agent-repl--color-default-bracket
+  `(:unselected (:bg ,agent-repl--color-unarmed-bg
+                 :fg ,agent-repl--color-unarmed-fg
+                 :bracket-fg ,agent-repl--color-unarmed-fg
                  :weight ,agent-repl--tab-weight)
     :selected   (:bg ,agent-repl--color-selected-bg
                  :fg ,agent-repl--color-dark
                  :bracket-fg ,agent-repl--color-dark
                  :weight ,agent-repl--tab-weight))
-  "Default tab-appearance spec for states absent from `agent-repl--tab-palette'.")
+  "Default tab-appearance spec for states absent from `agent-repl--tab-palette'.
+
+THE UNSELECTED HALF STATES BOTH COLORS, where it once left both
+`unspecified' and took `agent-repl--color-default-bracket' — white — for
+its numeral.  That numeral was white over whatever the frame resolved
+the tab bar to, which on the playtest's own frame was `#d9d9d9': about
+1.3:1, and unreadable.  See `agent-repl--color-unarmed-bg' for the
+measurement and for why an inherited value cannot make the legibility
+promise the palette's rows all make.
+
+The SELECTED half already stated its pair and is unchanged: a selected
+tab is grey with a dark numeral on it, whatever the theme.")
 
 ;; --- The six-color assignment --- ;;
 
@@ -978,6 +1073,22 @@ never prompted, or went quiet after a clean conclusion.")
   "Face for workspace tabs with no foreground turn but live detached
 background work (yellow).")
 
+(defface agent-repl-tab-unarmed
+  `((t :background ,agent-repl--color-unarmed-bg
+       :foreground ,agent-repl--color-unarmed-fg
+       :weight ,agent-repl--tab-weight))
+  "Face for the name of an unselected tab carrying NO state color.
+
+The arms that take no lifecycle color — `:none', `:inactive' and the
+terminal merge arms — plus a workspace the roster has not spoken about
+yet, and one whose full-tab color is suppressed because its panels are
+dismissed or its `:ready' view has been acknowledged.
+
+It exists because this was the only appearance in the whole palette with
+no foreground/background pairing: it fell through to Doom's
+`+workspace-tab-face', which inherits both from the frame.  See
+`agent-repl--color-unarmed-bg' for the measurement.")
+
 (defface agent-repl-tab-merging
   `((t :background ,agent-repl--color-merging-purple
        :foreground ,agent-repl--color-light
@@ -1066,12 +1177,20 @@ whenever an entry landed at a wrap (or the final row's) end."
 (defun agent-repl--tab-face (state selected)
   "Return the face symbol for the NAME portion of a tab.
 For unselected tabs, uses the palette row's `:face' or falls back to
-the Doom tab face.  For selected tabs, always uses the Doom selected-tab
-face so selection dims the state color."
+`agent-repl-tab-unarmed'.  For selected tabs, always uses the Doom
+selected-tab face so selection dims the state color.
+
+THE UNSELECTED FALLTHROUGH IS THIS MODULE'S OWN FACE, not Doom's
+`+workspace-tab-face'.  Every other row here states a foreground legible
+against its background; that one inherited both from the frame, which is
+no pairing at all — measured, it drew BLACK glyphs on `#14141a', about
+1.06:1.  `agent-repl-tab-unarmed' states the pair, so an un-armed tab is
+as readable as an armed one and does not change legibility with the
+theme."
   (if selected
       (agent-repl--ws-tab-selected-face)
     (or (plist-get (alist-get state agent-repl--tab-palette) :face)
-        (agent-repl--ws-tab-face))))
+        'agent-repl-tab-unarmed)))
 
 (defun agent-repl--tab-priority-image-str (name)
   "Return a propertized image string for workspace NAME's priority, or nil."

@@ -224,14 +224,50 @@ func (s *playtestScenario) openPanel(t *testing.T) {
 	// produced a frame photographs the previous page state under an
 	// assertion that legitimately passed. The playbook's hook is installed
 	// here because here is where a page first exists to paint.
-	s.Book.awaitPaint = func() time.Duration { return s.awaitPagePainted(t) }
+	//
+	// AND IT ANSWERS NOTHING WHEN THERE IS NO PAGE. The hook is installed
+	// once and fires on every LATER capture, including captures of a frame
+	// this workspace's panel has since been taken off -- `SPC o C` hides both
+	// panels by its own docstring, and A.8's deprio capture is a picture of
+	// exactly that. There are no frames to wait for when no webview is live,
+	// and waiting for them fails a step whose subject is their absence.
+	s.Book.awaitPaint = func() time.Duration {
+		if !s.webviewIsLive(t) {
+			return 0
+		}
+		return s.awaitPagePainted(t)
+	}
 	// AND EVERY CAPTURE FROM HERE ON HOLDS THE PAGE'S RESTING ANIMATIONS
 	// STILL WHILE IT FIRES. See playtestMotionPaused: the webapp's prompt
 	// bubbles, state dots and footer breath animate forever by design, and a
 	// capture cannot wait out a screen that never stops changing. Installed
 	// here, beside the paint gate, because here is where a page first exists
 	// to hold.
-	s.Book.holdMotion = func() func() { return s.holdPageMotion(t) }
+	//
+	// AND IT HOLDS NOTHING WHEN THERE IS NO PAGE, for the reason the paint
+	// gate answers nothing: a hidden panel has no resting animations to still.
+	s.Book.holdMotion = func() func() {
+		if !s.webviewIsLive(t) {
+			return func() {}
+		}
+		return s.holdPageMotion(t)
+	}
+}
+
+// webviewIsLive answers whether THIS SCENARIO'S CURRENT WORKSPACE has a live
+// webview widget right now.
+//
+// IT IS A READ, NOT A WAIT, and that is the whole point: it is asked at the
+// instant of a capture to decide whether there is a page to talk to at all,
+// so a wait here would turn "there is deliberately no panel" into a two
+// second stall and then a failure. The form is the one `openPanel` waits on,
+// so the two cannot disagree about what "live" means.
+func (s *playtestScenario) webviewIsLive(t *testing.T) bool {
+	t.Helper()
+	return s.E.EvalBool(`(let* ((buf (get-buffer (agent-repl--frontend-webview-buffer-name ` +
+		elispString(s.Name) + `)))
+                              (xw (and buf (agent-repl--frontend-webview-live-widget buf))))
+                         (and xw (window-live-p (get-buffer-window buf)) t))`)
 }
 
 // holdPageMotion freezes the page's resting animations and answers the
