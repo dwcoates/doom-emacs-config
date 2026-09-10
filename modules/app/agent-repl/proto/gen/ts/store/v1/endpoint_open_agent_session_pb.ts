@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_open_agent_session.proto.
  */
 export const file_store_v1_endpoint_open_agent_session: GenFile = /*@__PURE__*/
-  fileDesc("CipzdG9yZS92MS9lbmRwb2ludF9vcGVuX2FnZW50X3Nlc3Npb24ucHJvdG8SCHN0b3JlLnYxIp8BChdPcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEhEKCXBhZ2Vfc2l6ZRgCIAEoDRI2Cg1rbm93bl90aHJvdWdoGAMgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlckgAiAEBQhAKDl9rbm93bl90aHJvdWdoIpABChhPcGVuQWdlbnRTZXNzaW9uUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdWNjZXNzSAASNAoHZmFpbHVyZRgCIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0Im8KF09wZW5BZ2VudFNlc3Npb25TdWNjZXNzEigKBHBhZ2UYASABKAsyGi5zdG9yZS52MS5BZ2VudFNlc3Npb25QYWdlEioKBXdhdGNoGAIgASgLMhsuc3RvcmUudjEuQWdlbnRTZXNzaW9uVG9rZW4ivQIKF09wZW5BZ2VudFNlc3Npb25GYWlsdXJlEg4KBmRldGFpbBgBIAEoCRJDCg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyKC5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uSW52YWxpZFJlcXVlc3RIABI/Cg1zdGFsZV9wb2ludGVyGAMgASgLMiYuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlckgAEkMKD3N0b3JhZ2VfZmFpbHVyZRgEIAEoCzIoLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdG9yYWdlRmFpbHVyZUgAEj8KDXVua25vd25fYWdlbnQYBSABKAsyJi5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uVW5rbm93bkFnZW50SABCBgoEa2luZCIeChxPcGVuQWdlbnRTZXNzaW9uVW5rbm93bkFnZW50Ii8KHk9wZW5BZ2VudFNlc3Npb25JbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIgCh5PcGVuQWdlbnRTZXNzaW9uU3RvcmFnZUZhaWx1cmUiHgocT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlckIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_store_v1_store]);
+  fileDesc("CipzdG9yZS92MS9lbmRwb2ludF9vcGVuX2FnZW50X3Nlc3Npb24ucHJvdG8SCHN0b3JlLnYxIrIBChdPcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEhEKCXBhZ2Vfc2l6ZRgCIAEoDRI2Cg1rbm93bl90aHJvdWdoGAMgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlckgAiAEBEhEKCXBhZ2Vfb25seRgEIAEoCEIQCg5fa25vd25fdGhyb3VnaCKQAQoYT3BlbkFnZW50U2Vzc2lvblJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uU3VjY2Vzc0gAEjQKB2ZhaWx1cmUYAiABKAsyIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uRmFpbHVyZUgAQggKBnJlc3VsdCJvChdPcGVuQWdlbnRTZXNzaW9uU3VjY2VzcxIoCgRwYWdlGAEgASgLMhouc3RvcmUudjEuQWdlbnRTZXNzaW9uUGFnZRIqCgV3YXRjaBgCIAEoCzIbLnN0b3JlLnYxLkFnZW50U2Vzc2lvblRva2VuIr0CChdPcGVuQWdlbnRTZXNzaW9uRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSQwoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMiguc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvbkludmFsaWRSZXF1ZXN0SAASPwoNc3RhbGVfcG9pbnRlchgDIAEoCzImLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdGFsZVBvaW50ZXJIABJDCg9zdG9yYWdlX2ZhaWx1cmUYBCABKAsyKC5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uU3RvcmFnZUZhaWx1cmVIABI/Cg11bmtub3duX2FnZW50GAUgASgLMiYuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblVua25vd25BZ2VudEgAQgYKBGtpbmQiHgocT3BlbkFnZW50U2Vzc2lvblVua25vd25BZ2VudCIvCh5PcGVuQWdlbnRTZXNzaW9uSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiIAoeT3BlbkFnZW50U2Vzc2lvblN0b3JhZ2VGYWlsdXJlIh4KHE9wZW5BZ2VudFNlc3Npb25TdGFsZVBvaW50ZXJCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_store_v1_store]);
 
 /**
  * Open one agent's reading session: the first page, and the address of the
@@ -49,6 +49,21 @@ export type OpenAgentSessionRequest = Message<"store.v1.OpenAgentSessionRequest"
    * @generated from field: optional store.v1.StoreItemPointer known_through = 3;
    */
   knownThrough?: StoreItemPointer | undefined;
+
+  /**
+   * Whether the caller will FOLLOW this open with a watch. UNSET/false = a
+   * watch is coming: the store mints a token and pins the tail (the ordinary
+   * open). SET = a one-shot read: the caller wants the page and nothing more,
+   * no token is minted, `watch` in the success is UNSET, and a watch cannot
+   * be opened from this page. Stated by the caller because the store has no
+   * other way to learn a page was abandoned — OpenAgentSession is unary and
+   * there is no close — and every unclaimed token minted for a read that
+   * never watched lived for the store's whole process lifetime (measured:
+   * two per turn, 2026-09-10).
+   *
+   * @generated from field: bool page_only = 4;
+   */
+  pageOnly: boolean;
 };
 
 /**
@@ -109,7 +124,7 @@ export type OpenAgentSessionSuccess = Message<"store.v1.OpenAgentSessionSuccess"
    * The watch address: opaque, store-minted at THIS open, pinning the tail to
    * begin exactly after this page's newest item — nothing is missed or
    * doubled between page and stream. A caller cannot watch an agent it did
-   * not open.
+   * not open. UNSET when the request said `page_only`: no token was minted.
    *
    * @generated from field: store.v1.AgentSessionToken watch = 2;
    */
