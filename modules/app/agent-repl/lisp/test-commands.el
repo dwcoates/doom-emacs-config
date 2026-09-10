@@ -326,6 +326,10 @@ for a register the daemon refused."
   (declare (indent 1))
   `(agent-repl-test--with-clean-state
      (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
+               ;; The register's landing waits for the roster to give the
+               ;; minted ref a tab, so these tests deliver that arrival
+               ;; themselves (`agent-repl-test-commands--tab-arrives').
+               ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
                ((symbol-function 'agent-repl--ws-register-project) (lambda (_d) nil))
                ((symbol-function 'agent-repl-link-primary) (lambda () 'conn))
                ((symbol-function 'agent-repl--ws-current-name) (lambda () "elsewhere"))
@@ -335,6 +339,15 @@ for a register the daemon refused."
                ((symbol-function 'agent-repl-host-register)
                 (lambda (_conn _dir on-done) (funcall on-done ,answer))))
        ,@body)))
+
+(defun agent-repl-test-commands--tab-arrives (id name)
+  "Deliver the roster arrival that gives the minted ID a tab called NAME.
+A minted ref is the daemon's ANSWER; the workspace itself reaches Emacs
+on the roster stream, and the landing waits for it
+\(`agent-repl-verbs--pending-landing-fire')."
+  (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+             (lambda (want) (and (equal want id) name))))
+    (agent-repl-verbs--pending-landing-fire)))
 
 (ert-deftest agent-repl-test-commands-add-project-arms-the-registered-panels ()
   "Registering a directory arms the minted workspace to SHOW ITSELF.
@@ -347,8 +360,23 @@ a workspace and the landing arm is no longer a no-op."
               ((symbol-function 'agent-repl--ws-switch-project) (lambda (_p) nil)))
       ;; Act
       (agent-repl-add-project-workspace "/tmp/proj")
+      (agent-repl-test-commands--tab-arrives "new-id" "registered")
       ;; Assert
       (should (agent-repl--ws-get "registered" :pending-show-panels)))))
+
+(ert-deftest agent-repl-test-commands-add-project-arms-nothing-before-the-tab ()
+  "A register whose tab has not reached the roster arms NOTHING yet.
+The directory is not a workspace until the roster opens its tab, so an
+arm attempted here would be the no-op that left the user on magit."
+  ;; Arrange
+  (agent-repl-test-commands--registering (list :id "new-id" :dir "/tmp/proj/")
+    (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir)
+               (lambda (dir) (and (equal dir "/tmp/proj/") "registered")))
+              ((symbol-function 'agent-repl--ws-switch-project) (lambda (_p) nil)))
+      ;; Act
+      (agent-repl-add-project-workspace "/tmp/proj")
+      ;; Assert
+      (should-not (agent-repl--ws-get "registered" :pending-show-panels)))))
 
 (ert-deftest agent-repl-test-commands-add-project-lands-on-the-panel-not-magit ()
   "A registered workspace comes up on its own panel, never on magit status.
@@ -366,6 +394,7 @@ opened over the new workspace's panel shows up here as a magit call."
                  (lambda (dir) (agent-repl--ws-switch-project-display dir))))
         ;; Act
         (agent-repl-add-project-workspace "/tmp/proj")
+        (agent-repl-test-commands--tab-arrives "new-id" "registered")
         ;; Assert
         (should-not magit-dirs)))))
 

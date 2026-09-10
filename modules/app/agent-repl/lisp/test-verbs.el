@@ -54,6 +54,16 @@ cares what the verb does with the minted identity has to script it."
                     (list :arm :success
                           :value (list :workspace (or ref (agent-repl-test-verbs--ref))))))))
 
+(defun agent-repl-test-verbs--tab-arrives (id name)
+  "Deliver the roster arrival that gives the minted ID a tab called NAME.
+A minted ref is the daemon's ANSWER and the workspace itself reaches
+Emacs on the roster stream, so the landing waits for the tab
+\(`agent-repl-verbs--pending-landing-fire').  A create test that expects
+to STAND on what it made therefore has to let that tab arrive."
+  (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+             (lambda (want) (and (equal want id) name))))
+    (agent-repl-verbs--pending-landing-fire)))
+
 (defun agent-repl-test-verbs--repo-ref (&optional id dir)
   "Return a decoded `RepositoryRef' plist."
   (list :id (or id "repo-id-1") :dir (or dir "/tmp/agent-repl-test/repo")))
@@ -95,6 +105,7 @@ or `(:failure PLIST)', delivered to `:on-failure'.  An op with no entry
 answers a bare success, which is what almost every verb's success is."
   (declare (indent 1))
   `(let ((agent-repl-test-verbs--sent nil)
+         (agent-repl-verbs--pending-landing nil)
          (agent-repl-test-verbs--torn-down nil)
          (agent-repl-test-verbs--messages nil)
          (agent-repl-test-verbs--handover nil)
@@ -602,6 +613,7 @@ the create selects it the same way registering a directory does."
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       ;; Act.
       (agent-repl-create-workspace nil)
+      (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
       ;; Assert.
       (should (equal agent-repl-test-verbs--selected
                      '("/tmp/agent-repl-test/new"))))))
@@ -616,6 +628,7 @@ the create selects it the same way registering a directory does."
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it")))
       ;; Act.
       (agent-repl-fork-workspace)
+      (agent-repl-test-verbs--tab-arrives "fork-id" "fork-ws")
       ;; Assert.
       (should (equal agent-repl-test-verbs--selected
                      '("/tmp/agent-repl-test/fork"))))))
@@ -643,7 +656,9 @@ opened over the new workspace\'s panel shows up here as a magit call."
                    (agent-repl--ws-switch-project-display dir))))
         ;; Act.
         (agent-repl-create-workspace nil)
+        (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
         ;; Assert.
+        (should agent-repl-test-verbs--selected)
         (should-not magit-dirs)))))
 
 (ert-deftest agent-repl-verbs-fork-lands-on-the-panel-not-magit ()
@@ -666,8 +681,34 @@ opened over the new workspace\'s panel shows up here as a magit call."
                    (agent-repl--ws-switch-project-display dir))))
         ;; Act.
         (agent-repl-fork-workspace)
+        (agent-repl-test-verbs--tab-arrives "fork-id" "fork-ws")
         ;; Assert.
+        (should agent-repl-test-verbs--selected)
         (should-not magit-dirs)))))
+
+(ert-deftest agent-repl-verbs-create-does-not-land-before-the-tab-arrives ()
+  "A minted ref whose tab has not reached the roster moves the user NOWHERE.
+Standing on a directory that is not a workspace yet arms no panels and
+lands the user on Doom's empty-project fallback, so the landing waits."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      ;; Act.
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :select t)
+      ;; Assert.
+      (should-not agent-repl-test-verbs--selected))))
+
+(ert-deftest agent-repl-verbs-a-second-mint-supersedes-a-waiting-landing ()
+  "The user stands in ONE place, so a newer mint replaces one still waiting."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "first" "/tmp/a"))
+      ;; Act.
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "second" "/tmp/b"))
+      ;; Assert.
+      (should (equal (plist-get agent-repl-verbs--pending-landing :id) "second")))))
 
 (ert-deftest agent-repl-verbs-create-without-select-stands-still ()
   "A create that did not ask to be selected moves the user NOWHERE.
