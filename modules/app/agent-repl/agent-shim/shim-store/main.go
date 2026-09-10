@@ -7,7 +7,7 @@
 //
 //	--socket        UDS path to serve on   (env AGENT_REPL_STORE_SOCKET, else …/sock/store.sock)
 //	--db            SQLite database path                          (…/store/events.db)
-//	--log           append-only log file, also mirrored to stderr (…/log/shim-store.log)
+//	--log           size-capped rotating log file (…/log/shim-store.log)
 //	--pprof         OPT-IN local-only profiling surface           (env AGENT_REPL_STORE_PPROF_ADDR)
 //	--watch-buffer  per-subscriber watch frame buffer             (8192)
 //
@@ -57,7 +57,7 @@ func main() {
 	base := defaultCacheDir()
 	socketPath := flag.String("socket", socketDefault(base), "UDS path to serve store.v1.ShimStore on; defaults to $"+server.EnvSocket+" when set")
 	dbPath := flag.String("db", filepath.Join(base, "store", "events.db"), "SQLite database path")
-	logPath := flag.String("log", filepath.Join(base, "log", "shim-store.log"), "log file path (also mirrored to stderr)")
+	logPath := flag.String("log", filepath.Join(base, "log", "shim-store.log"), "log file path (size-capped, rotated into N generations)")
 	pprofAddr := flag.String("pprof", envStr(pprofsurface.EnvAddr, ""), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6061). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the store.pprof.enabled record at startup")
 	watchBuffer := flag.Int("watch-buffer", server.DefaultWatchBuffer, "per-subscriber WatchAgentSession frame buffer; a subscriber that overflows it is ended and must re-open with known_through")
 	flag.Parse()
@@ -283,11 +283,11 @@ func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), er
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", logPath, err)}
 	}
-	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	lf, err := sharedlogging.OpenRotating(logPath, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
-	log := logging.New(lf, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	log := logging.NewDurableOnly(lf, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
 	log = log.With(logging.Fields{Component: "store", DatabasePath: dbPath, Socket: socketPath})
 	return log, func() { _ = lf.Close() }, nil
 }

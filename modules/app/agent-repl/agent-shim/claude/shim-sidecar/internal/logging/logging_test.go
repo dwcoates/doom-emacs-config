@@ -297,3 +297,46 @@ func decodeOneContext(t *testing.T, sink *bytes.Buffer) map[string]any {
 	}
 	return rec.Context
 }
+
+// TestDurableOnlyWithholdsAnOrdinaryRecordFromTheTerminal covers the bound on
+// the launchd stderr file: the record stream is durable-sink-only, so the file
+// nobody rolls stops receiving a second copy of a log that is already rotated.
+func TestDurableOnlyWithholdsAnOrdinaryRecordFromTheTerminal(t *testing.T) {
+	// Arrange.
+	stderr, file := &bytes.Buffer{}, &bytes.Buffer{}
+	l := NewDurableOnly(stderr, file)
+	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
+	l.pid = func() int { return 4242 }
+	l.verbose = func() bool { return false }
+
+	// Act.
+	l.With(Context{Operation: "cycle"}).Log("an ordinary lifecycle record")
+
+	// Assert: durably recorded, and not mirrored.
+	if got := decode(t, file.String()).Operation; got != "cycle" {
+		t.Fatalf("the durable sink holds operation %q, want the caller's", got)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("an ordinary record reached the terminal under NewDurableOnly: %q", stderr.String())
+	}
+}
+
+// TestDurableOnlyStillNarratesAnEmergencyToTheTerminal covers the carve-out: a
+// failure OF the durable sink can only be reported through the terminal, so
+// withholding the ordinary stream must not close that channel.
+func TestDurableOnlyStillNarratesAnEmergencyToTheTerminal(t *testing.T) {
+	// Arrange.
+	stderr := &bytes.Buffer{}
+	l := NewDurableOnly(stderr, &bytes.Buffer{})
+	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
+	l.pid = func() int { return 4242 }
+	l.verbose = func() bool { return false }
+
+	// Act.
+	l.With(Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("store unreachable")
+
+	// Assert.
+	if got := decode(t, stderr.String()).Operation; got != "store-write" {
+		t.Fatalf("emergency record = %q, want the caller's operation on the terminal", got)
+	}
+}
