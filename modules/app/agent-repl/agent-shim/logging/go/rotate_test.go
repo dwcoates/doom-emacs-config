@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,40 @@ func TestRotatingFileRollsAtTheCap(t *testing.T) {
 	}
 	if got := readFile(t, path); got != "abcdefgh\n" {
 		t.Errorf("the current log holds %q, want only the record written after the roll", got)
+	}
+}
+
+func TestExplicitRollKeepsTheRetiredDescriptorOnItsGeneration(t *testing.T) {
+	// Arrange: a descriptor held by the process being replaced.
+	path := filepath.Join(t.TempDir(), "svc.log")
+	w := openForTest(t, path, 1<<20, 2)
+	mustWrite(t, w, "old\n")
+	held, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open the retiring process's descriptor: %v", err)
+	}
+	defer held.Close()
+
+	// Act: roll explicitly and write through the fresh generation.
+	if err := w.Roll(); err != nil {
+		t.Fatalf("Roll: %v", err)
+	}
+	mustWrite(t, w, "new\n")
+
+	// Assert: the held descriptor and generation retain the old bytes while
+	// the canonical path names only the fresh bytes.
+	heldBytes, err := io.ReadAll(held)
+	if err != nil {
+		t.Fatalf("read the retiring process's descriptor: %v", err)
+	}
+	if got := string(heldBytes); got != "old\n" {
+		t.Fatalf("the retiring descriptor reads %q, want the old generation", got)
+	}
+	if got := readFile(t, path+".1"); got != "old\n" {
+		t.Fatalf("generation .1 holds %q, want the old generation", got)
+	}
+	if got := readFile(t, path); got != "new\n" {
+		t.Fatalf("the current log holds %q, want the fresh generation", got)
 	}
 }
 

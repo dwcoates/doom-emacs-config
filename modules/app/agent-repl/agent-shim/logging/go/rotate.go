@@ -46,6 +46,15 @@ type RotatingFile struct {
 	size int64
 }
 
+// File answers the current generation's descriptor. The RotatingFile retains
+// ownership: callers may hand the descriptor to exec.Cmd.ExtraFiles, which
+// duplicates it into the child, but must never close it themselves.
+func (r *RotatingFile) File() *os.File {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.f
+}
+
 // OpenRotating opens (creating as needed) the log file at path, appending to
 // whatever is already there. A cap or backup count of zero takes the default;
 // a negative one is a programming error and is refused rather than clamped,
@@ -104,6 +113,20 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 	n, err := r.f.Write(p)
 	r.size += int64(n)
 	return n, err
+}
+
+// Roll explicitly closes the current generation, shifts the retained
+// generations, and opens a fresh descriptor. Size-triggered writers do not
+// need it; descriptor-inheriting writers use it only at process replacement,
+// so the retired child keeps its duplicated descriptor on the renamed inode
+// while the replacement child inherits the fresh one.
+func (r *RotatingFile) Roll() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.f == nil {
+		return fmt.Errorf("rotating log %q is closed", r.path)
+	}
+	return r.rollLocked()
 }
 
 // rollLocked closes the current generation, shifts the retained generations
