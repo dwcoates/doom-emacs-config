@@ -185,10 +185,12 @@ const BASH_DETACH = scenario({
   prompt: "!bash-detach",
   emits:
     "a `Bash` with `run_in_background`, `task_started`, `background_tasks_changed`, a result carrying only " +
-    "`backgroundTaskId`, then — after the turn — `task_updated` and a completed `task_notification`",
+    "`backgroundTaskId`, then — after the turn — `task_updated` and a completed `task_notification`. When " +
+    "`AGENT_REPL_FAKE_DETACH_GATE` names a path, the run PARKS after its first spool line until that path " +
+    "exists, so a test can observe the turn concluded and the detached work still going",
   writes:
     "the tool_use and tool_result lines, and `<spool-root>/<slug>/<session>/tasks/b<hex>.output` written " +
-    "INCREMENTALLY and terminated by `EXIT=0`",
+    "INCREMENTALLY (the first line before any detach gate, the rest after it) and terminated by `EXIT=0`",
   arms: "AgentBash detached_work + AgentBashUpdate deltas fed by the sidecar tailing the spool",
   async run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "bash-detach" }, "fake detached-bash turn");
@@ -208,7 +210,14 @@ const BASH_DETACH = scenario({
     conclude(ctx, "Backgrounded the command.");
     // Separate appends, each a growth event a tailer can observe. A single
     // whole-file write would leave the delta path unexercised.
-    for (const line of ["line-1", "line-2", "line-3"]) {
+    await ctx.tick();
+    spool.appendLine("line-1");
+    // THE DETACHED-WORK GATE. A no-op when unset, so an ungated run's timing
+    // is unchanged; when set, the remaining lines and the spool's EXIT
+    // terminator wait here, proving the detached work outlives the turn by
+    // more than a scheduler tick.
+    await ctx.awaitDetachGate();
+    for (const line of ["line-2", "line-3"]) {
       await ctx.tick();
       spool.appendLine(line);
     }

@@ -260,6 +260,14 @@ export interface ScenarioContext {
   /** Park until the turn is interrupted. */
   awaitInterrupt(): Promise<void>;
   /**
+   * Park detached work until `AGENT_REPL_FAKE_DETACH_GATE` names a path that
+   * exists. A no-op when the env is unset, so an ungated run's timing is
+   * byte-for-byte what it always was. There is no interrupt exit: the turn
+   * that started this detached work has already concluded, so a caller
+   * awaiting this is never a live turn a consumer could interrupt.
+   */
+  awaitDetachGate(): Promise<void>;
+  /**
    * Park until `backgroundTasks` moves this call to the background, then let
    * the caller emit the vendor's detachment record before that verb answers.
    *

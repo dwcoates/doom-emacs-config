@@ -124,9 +124,22 @@ export { FAIL_TURN_MARKER } from "./registry.js";
  * LEVEL condition. The watcher stays the fast path and settles in microseconds;
  * the re-check is only there so a lost event costs milliseconds instead of the
  * caller's whole budget.
+ *
+ * THE DETACHED-WORK GATE is the same idea, one turn later. `bash-detach`
+ * concludes its turn and then writes its whole spool across four scheduler
+ * ticks, so detached work lives for microseconds after the foreground frees
+ * up — no consumer can arrange "detached work is still running while the
+ * foreground is free" against that. `AGENT_REPL_FAKE_DETACH_GATE` names a
+ * path: once set, `bash-detach` appends its first spool line and then PARKS
+ * until that path exists before appending the rest and terminating the spool,
+ * using the identical level-then-edge wait `awaitTurnGate` uses (both share
+ * {@link awaitGateFile}). There is no interrupt exit here — the turn that
+ * started the detached work has already concluded, so there is nothing left
+ * to interrupt.
  */
 export const TURN_GATE_PATH_ENV = "AGENT_REPL_FAKE_TURN_GATE";
 export const TURN_GATE_TEXT_ENV = "AGENT_REPL_FAKE_TURN_GATE_TEXT";
+export const DETACH_GATE_PATH_ENV = "AGENT_REPL_FAKE_DETACH_GATE";
 /** Roots the spool tree; the default matches the vendor's `/tmp/claude-<uid>`. */
 export const SPOOL_ROOT_ENV = "AGENT_REPL_FAKE_SPOOL_ROOT";
 
@@ -179,8 +192,77 @@ function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string>
   return new Set(named);
 }
 
-/** How often a parked turn re-checks its gate when no edge has arrived. */
+/** How often a parked gate re-checks when no edge has arrived. */
 const GATE_REDRAIN_INTERVAL_MS = 20;
+
+/** One outstanding wait on {@link awaitGateFile}, cancellable before it settles. */
+interface GateFileWait {
+  /** Resolves once `path` exists. */
+  readonly promise: Promise<void>;
+  /** Tear down the watcher and re-check without resolving. A no-op once settled. */
+  cancel(): void;
+}
+
+/**
+ * THE SHARED FILE-WAIT CORE behind both gates. Resolves once `path` exists,
+ * LEVEL-then-EDGE: the file is checked first and the watch is only a wakeup,
+ * so a gate released before the wait started is not a missed edge.
+ *
+ * The edge alone is NOT ENOUGH, though. On macOS `fs.watch` rides FSEvents,
+ * which coalesces and can drop a notification outright; when it does, the wait
+ * does not fail, it HANGS, and the park shows up as an unrelated test timeout
+ * (the same flake bucket `test/integration-support/redrain.ts` exists for). So
+ * a coarse, unref'd re-check runs alongside the watcher and re-tests the same
+ * LEVEL condition. The watcher stays the fast path and settles in microseconds;
+ * the re-check is only there so a lost event costs milliseconds instead of the
+ * caller's whole budget. Both the watcher and the re-check are unref'd, so a
+ * wait parked here can never by itself hold the process open.
+ *
+ * ONE HELPER, TWO CALLERS, so the turn gate and the detach gate cannot drift:
+ * `awaitTurnGate` races this against an interrupt; the detach gate has no
+ * interrupt exit and awaits it directly.
+ */
+function awaitGateFile(path: string): GateFileWait {
+  if (existsSync(path)) return { promise: Promise.resolve(), cancel: () => {} };
+  let settled = false;
+  let watcher: FSWatcher | null = null;
+  let redrain: NodeJS.Timeout | null = null;
+  const teardown = (): void => {
+    watcher?.close();
+    if (redrain !== null) clearInterval(redrain);
+  };
+  const promise = new Promise<void>((resolve) => {
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
+      teardown();
+      resolve();
+    };
+    const release = (): void => {
+      if (settled || !existsSync(path)) return;
+      settle();
+    };
+    watcher = watch(dirname(path), release);
+    // Unref'd on every platform that offers it, so the watcher can never by
+    // itself hold the process open.
+    watcher.unref?.();
+    // The backstop for an FSEvents notification that never arrives. Unref'd, so
+    // it can never by itself hold the process open.
+    redrain = setInterval(release, GATE_REDRAIN_INTERVAL_MS);
+    redrain.unref();
+    // The gate can also be released between the check above and the watch's
+    // installation, which no edge would then report.
+    release();
+  });
+  return {
+    promise,
+    cancel: () => {
+      if (settled) return;
+      settled = true;
+      teardown();
+    },
+  };
+}
 
 /**
  * Park a turn on its gate until the gate appears OR the turn is interrupted.
@@ -199,21 +281,15 @@ function awaitTurnGate(text: string, awaitInterrupt: () => Promise<void>): Promi
   if (path === "" || gateText === "" || text.trim() !== gateText.trim()) return Promise.resolve();
   if (existsSync(path)) return Promise.resolve();
   LOGGER.log({ gate_path: path }, "fake turn PARKED on its gate");
+  const gate = awaitGateFile(path);
   return new Promise<void>((resolve) => {
     let settled = false;
-    let watcher: FSWatcher | null = null;
-    let redrain: NodeJS.Timeout | null = null;
     const settle = (why: string): void => {
       if (settled) return;
       settled = true;
-      watcher?.close();
-      if (redrain !== null) clearInterval(redrain);
+      gate.cancel();
       LOGGER.log({ gate_path: path, released_by: why }, "fake turn RELEASED by its gate");
       resolve();
-    };
-    const release = (): void => {
-      if (settled || !existsSync(path)) return;
-      settle("gate");
     };
     // THE KILL PATH. Resolved by `interrupt()`, whatever the gate does; the
     // caller then reads `interrupted` and emits the interrupt terminal, which
@@ -221,14 +297,25 @@ function awaitTurnGate(text: string, awaitInterrupt: () => Promise<void>): Promi
     void awaitInterrupt().then(() => {
       settle("interrupt");
     });
-    watcher = watch(dirname(path), release);
-    // The backstop for an FSEvents notification that never arrives. Unref'd, so
-    // it can never by itself hold the process open.
-    redrain = setInterval(release, GATE_REDRAIN_INTERVAL_MS);
-    redrain.unref();
-    // The gate can also be released between the check above and the watch's
-    // installation, which no edge would then report.
-    release();
+    void gate.promise.then(() => {
+      settle("gate");
+    });
+  });
+}
+
+/**
+ * Park detached work on its gate until the gate appears.
+ *
+ * NO INTERRUPT EXIT. The turn that started this detached work has already
+ * concluded — there is nothing live for an `interrupt()` to stop — so unlike
+ * {@link awaitTurnGate} this is a single wait, not a race.
+ */
+function awaitDetachGate(): Promise<void> {
+  const path = process.env[DETACH_GATE_PATH_ENV] ?? "";
+  if (path === "" || existsSync(path)) return Promise.resolve();
+  LOGGER.log({ gate_path: path }, "fake detached work PARKED on its gate");
+  return awaitGateFile(path).promise.then(() => {
+    LOGGER.log({ gate_path: path, released_by: "gate" }, "fake detached work RELEASED by its gate");
   });
 }
 
@@ -1053,6 +1140,7 @@ export function createFakeQuery(
     result,
     canUseTool,
     awaitInterrupt,
+    awaitDetachGate,
     awaitBackgrounded: (toolUseId) =>
       new Promise<() => void>((resolve) => {
         backgroundWaiters.set(toolUseId, resolve);
