@@ -63,6 +63,7 @@
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
 (declare-function agent-repl-host-faults "agent-repl-host" (ws))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm))
+(declare-function agent-repl-switch-to-project "commands" (&optional project))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-link-connect "agent-repl-daemon-link" ())
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
@@ -463,7 +464,8 @@ sentinel level, so a nil priority omits it from the request entirely."
                                              &key initial-prompt base-ref name
                                              merge-actions
                                              prompt finish self-certified add-to-merge-queue
-                                             parent fork model priority allow-ungated)
+                                             parent fork model priority allow-ungated
+                                             select)
   "Create a workspace in REPOSITORY under FORM.
 FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
 `:one-shot' -- and that arm\'s own fields ride as keyword arguments beside
@@ -491,8 +493,18 @@ fork fact lives inside the parent by construction, so there is no request
 that carries it alone -- encoding one would silently drop the fork and
 create a plain workspace the caller never asked for.
 
-Nothing happens on success: THE DAEMON names and creates everything, and
-the new workspace\'s tab arrives through the roster push."
+SELECT makes the new workspace CURRENT once the daemon answers.  The
+answer is the one place the minted identity exists before the roster push
+carries it: `CreateWorkspaceSuccess.workspace\' exists precisely because
+callers learn the identity from the response.  The selection is the SAME
+step `agent-repl-add-project-workspace\' takes after registering a
+directory -- `agent-repl-switch-to-project\' on the minted dir -- and
+reusing it is what keeps standing on a workspace you just made ONE
+behavior rather than two.  It is OFF by default because a one-shot is
+fire-and-forget and must not steal the user\'s place.
+
+Nothing else happens on success: THE DAEMON names and creates everything,
+and the new workspace\'s tab arrives through the roster push."
   (when (and fork (null parent))
     (agent-repl--error nil "elisp.verbs.create-fork-without-parent repository=%S form=%S"
                        repository form)
@@ -511,7 +523,27 @@ the new workspace\'s tab arrives through the roster push."
          :priority (agent-repl-verbs--level-arm priority)
          :allow-ungated allow-ungated)
    :op "create"
-   :on-success (lambda (_) (message "agent-repl: workspace requested"))))
+   :on-success
+   (lambda (success)
+     (message "agent-repl: workspace requested")
+     (when select
+       (agent-repl-verbs--select-created success)))))
+
+(defun agent-repl-verbs--select-created (success)
+  "Stand on the workspace CreateWorkspaceSuccess names.
+The ref's `dir\' is the minted worktree, which is exactly what
+`agent-repl-switch-to-project\' takes -- its argument is documented as a
+PROJECT ROOT PATH.  A success carrying no dir is REPORTED, never silently
+skipped: the decoder already refuses a success without the ref, so a
+missing dir is a contract breach and the user is owed the reason their
+new workspace did not come up."
+  (let ((dir (plist-get (plist-get success :workspace) :dir)))
+    (if (and dir (not (string-empty-p dir)))
+        (progn
+          (agent-repl--info nil "elisp.verbs.create-select dir=%s" dir)
+          (agent-repl-switch-to-project dir))
+      (agent-repl--error nil "elisp.verbs.create-select-no-dir success=%S" success)
+      (message "agent-repl: the created workspace carries no directory to switch to"))))
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
                                               merge-actions prompt finish
@@ -814,7 +846,11 @@ repo's main checkout.
 
 The name and the base ref are both optional: an absent name means the
 daemon mints one from the prompt, and an absent base ref means the repo's
-default branch resolution."
+default branch resolution.
+
+THE NEW WORKSPACE IS SELECTED.  Creating one is a statement about where
+you intend to work next, so this stands on it the moment the daemon
+answers -- the same step registering a directory takes."
   (interactive "P")
   (let* ((repository (agent-repl-verbs--read-repository))
          (prompt (agent-repl-verbs--read-prompt "Initial prompt: "))
@@ -829,12 +865,16 @@ default branch resolution."
      :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
      :base-ref base-ref
      :name name
-     :parent parent)))
+     :parent parent
+     :select t)))
 
 (defun agent-repl-fork-workspace ()
   "Create a CHILD workspace forking the current one's conversation.
 A fork without a parent is unrepresentable by construction, which is why
-this is its own command rather than a flag on the plain create."
+this is its own command rather than a flag on the plain create.
+
+THE FORK IS SELECTED, exactly as a plain create is: you forked in order
+to work in the fork."
   (interactive)
   (let* ((repository (agent-repl-verbs--read-repository))
          (prompt (agent-repl-verbs--read-prompt "Initial prompt: "))
@@ -843,7 +883,8 @@ this is its own command rather than a flag on the plain create."
     (agent-repl-verb-create
      repository :standard
      :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
-     :parent parent :fork t)))
+     :parent parent :fork t
+     :select t)))
 
 ;;;; ---- One-shots --------------------------------------------------------
 ;;
