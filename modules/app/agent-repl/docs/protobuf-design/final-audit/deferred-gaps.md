@@ -263,7 +263,7 @@ tolerant ("EMPTY rows means no init has landed yet"; "the daemon OMITS a row
 it has no value for"), and the panel splices account, model and permission
 mode from elsewhere. So it will not fail; it will quietly ship three spliced
 rows and a version, which no overhaul document predicts and which a
-playtest screenshot review would flag as a bug rather than as the settled
+screenshot review would flag as a bug rather than as the settled
 consequence of a deferral.
 
 ---

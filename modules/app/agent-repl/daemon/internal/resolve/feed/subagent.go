@@ -498,7 +498,7 @@ func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workI
 // its own to state. Left alone it kept the `running` arm it drew with and never
 // left it -- no later frame of the unit says the work moved, and the detached
 // run's terminal is addressed to the shell row -- so a backgrounded command drew
-// a card spinning forever above a row already reporting `exit 0` (playtest F43,
+// a card spinning forever above a row already reporting `exit 0` (observed
 // 2026-09-09).
 func (r *resolver) moveToolCard(s *wsState, at placement, unitID string, u *unitState) {
 	u.moved = true

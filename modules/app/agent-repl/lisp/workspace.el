@@ -2016,11 +2016,11 @@ the product."
   ;; intersects the two, the abandoned workspace's TAB SILENTLY VANISHES
   ;; while the roster keeps listing it.
   ;;
-  ;; Measured, in the playtest's K.63: a workspace created on the daemon's own
-  ;; repository drew its tab, and registering a second repository a moment
-  ;; later left the bar drawing [repo-turning self-repo] with the roster's own
-  ;; order still [repo-turning self-repo k63-merging] and the perspective
-  ;; cache reading [none self-repo repo-turning].
+  ;; Measured, in a headless run's K.63 case: a workspace created on the
+  ;; daemon's own repository drew its tab, and registering a second repository
+  ;; a moment later left the bar drawing [repo-turning self-repo] with the
+  ;; roster's own order still [repo-turning self-repo k63-merging] and the
+  ;; perspective cache reading [none self-repo repo-turning].
   ;;
   ;; `t' is the only value that cannot express the recycle: agent-repl owns
   ;; every workspace of its own, and none of them is ever a scratch one to be

@@ -246,7 +246,7 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 	// learn of it from deliverToSession, the roster read a live, idle session
 	// with no turn between the shim's SessionStarted and the hold's release
 	// and published `ready` for a workspace whose prompt the daemon had
-	// already taken. MEASURED in the playtest's cold start: the tab walked
+	// already taken. MEASURED in a headless run's cold start: the tab walked
 	// `none` -> `init` -> `ready` -> `submitting`. The link arm still
 	// outranks this while the route is coming up, so the walk is now
 	// `none` -> `init` -> `submitting` -> `thinking`.
