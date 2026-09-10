@@ -68,7 +68,10 @@ const BASH_HOLD = scenario({
   arms:
     "no terminal at all while it holds — the lever for DetachForeground's `unsupported` refusal, which needs a " +
     "GENUINELY LIVE foreground unit to refuse (`!bash` settles before the call can be made, so it answered " +
-    "`already_concluded` instead and the refusal under test was never reached)",
+    "`already_concluded` instead and the refusal under test was never reached). AT THE STOP the unit settles " +
+    "AgentBashInterrupted.cause=by_user, minted by the converter's own `cut` rather than by any vendor result: " +
+    "the vendor returns none for a call a stop landed inside, and a unit left on its running arm draws a live " +
+    "shell inside a turn that ended",
   async run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "bash-hold" }, "fake held foreground bash turn");
     // NO startTask AND NO run_in_background: the vendor has no background work

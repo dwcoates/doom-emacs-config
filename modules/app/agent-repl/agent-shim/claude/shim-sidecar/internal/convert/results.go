@@ -341,6 +341,17 @@ func stringList(raw any) []string {
 	return out
 }
 
+// bashMovedToBackground reports whether a shell receipt says the command LEFT
+// rather than ended.
+//
+// PRESENCE OF THE TASK ID IS THE WHOLE FACT: the vendor returns the same shape
+// for a command that finished and for one it launched into the background, and
+// only the id distinguishes them. Both of the vendor's spellings are read
+// because the disk carries both.
+func bashMovedToBackground(result map[string]any) bool {
+	return str(pick(result, "backgroundTaskId", "background_task_id")) != ""
+}
+
 // bashSuccess: a NONZERO EXIT IS STILL THIS ARM. The failure arm is for a call
 // that could not be performed; a command that ran and failed ran, and what it
 // printed is the answer the caller wanted.
@@ -491,8 +502,55 @@ func bashOutput(result map[string]any, block map[string]any) *conversationv1.Age
 		Stdout: str(result["stdout"]),
 		Stderr: str(result["stderr"]),
 	}
-	text.Extent = &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}}
+	applyBashTextExtent(text, result)
 	return &conversationv1.AgentBashOutput{Form: &conversationv1.AgentBashOutput_Text{Text: text}}
+}
+
+// applyBashTextExtent states whether everything the command printed is carried
+// inline.
+//
+// THIS PLANE MUST STATE THE TRUNCATION TOO, and that is why this exists. The
+// stream plane and this one convert the SAME tool result into the SAME unit
+// under one upsert key, so whichever arrives last is what the feed draws — and
+// a file-plane row claiming `whole` ERASED the truncation summary the stream
+// plane had already drawn. `!bash-spill` then reached the card as three lines
+// of `y` with nothing saying the other 200 kB ever existed
+// (e2e/detachedbash_e2e_test.go's TestBashPartialOutputWithSpill, red whenever
+// the sidecar's row landed second).
+//
+// The subtraction is the shim converter's, restated (convert/tools/bash.ts
+// `textExtent`): the vendor declares a TOTAL and the proto carries the OMITTED
+// figure, so it is derived once and clamped, so a total that trails the inline
+// bytes can never become a negative "fewer bytes not shown".
+func applyBashTextExtent(text *conversationv1.AgentBashOutputText, result map[string]any) {
+	if !has(result, "persistedOutputSize") {
+		text.Extent = &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}}
+		return
+	}
+	total := uint64(number(pick(result, "persistedOutputSize", "persisted_output_size")))
+	inline := uint64(len(text.GetStdout()) + len(text.GetStderr()))
+	var omitted uint64
+	if total > inline {
+		omitted = total - inline
+	}
+	text.Extent = &conversationv1.AgentBashOutputText_Partial{Partial: &conversationv1.AgentBashOutputPartial{
+		BytesOmitted: omitted,
+		Spilled:      bashSpilledOutput(result, total),
+	}}
+}
+
+// bashSpilledOutput names the file the WHOLE output was kept in, or nil when the
+// producer kept none.
+//
+// WITHOUT A PATH A TRUNCATION IS A DEAD END, and that is a real state the proto
+// spells as an unset field: the omitted bytes are simply gone, and inventing a
+// path would offer a reader a file that is not there.
+func bashSpilledOutput(result map[string]any, total uint64) *conversationv1.AgentBashSpilledOutput {
+	path := str(pick(result, "persistedOutputPath", "persisted_output_path"))
+	if path == "" {
+		return nil
+	}
+	return &conversationv1.AgentBashSpilledOutput{Path: path, SizeBytes: total}
 }
 
 // sendMessageSuccess states HOW the message got there: one costs nothing beyond

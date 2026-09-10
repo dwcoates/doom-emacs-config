@@ -82,7 +82,7 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 
 	settled := c.settledItem(kind, call, result, block, failed, env.timestampMs, at)
 	if settled == nil {
-		if settlesLater(kind) {
+		if settlesLater(kind, result) {
 			// Deliberate: this kind's unit settles on a later record, and its own
 			// branch has already logged which. Filing it as residue would report
 			// a perfectly-handled result as a mapping gap.
