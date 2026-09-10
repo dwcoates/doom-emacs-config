@@ -36,6 +36,8 @@ func TestAWorkflowPerAgentTranscriptLandsAsDeclaredWorkflowResidue(t *testing.T)
 
 	// Act: the meta lands first — a transcript without one is HELD, whatever
 	// directory it sits in — and then the agent's own transcript records.
+	anchor := newGrowingFile(t, tree.sessionPath(slug, session))
+	anchor.AppendLine(encodeRecord(t, map[string]any{"type": "queue-operation", "cwd": cwd, "sessionId": session}))
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	mustMkdirAll(t, runDir)
 	if err := os.WriteFile(filepath.Join(runDir, "agent-"+corpusSubagentID+".meta.json"),

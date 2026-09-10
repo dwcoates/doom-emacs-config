@@ -191,16 +191,15 @@ func TestACallersRequestIdReachesTheStoresRecords(t *testing.T) {
 	// Arrange: correlation across runtimes is the whole point, so the header a
 	// caller sends must appear as the top-level request_id — observed here
 	// black-box, over a real socket, rather than in-process.
-	store := startStore(t, storeOptions{})
+	store := startStore(t, storeOptions{verbose: true})
 	ctx, cancel := callContext(t)
 	defer cancel()
 	seedBook(ctx, t, streamProducer(store.client()), "main", "reqid")
 	mark := store.logMark()
 	const requestID = "req-itest-0f1e2d3c"
 
-	// OpenAgentSession is used because it writes a normal-verbosity record on
-	// the SUCCESS path — the hot per-record diagnostics are verbose by design,
-	// and this subject is about correlation, not about turning them on.
+	// OpenAgentSession writes its successful request boundary at debug, so this
+	// subject enables the debug threshold and observes that record directly.
 	req := connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID("main"), PageSize: 10})
 	req.Header().Set("X-Agent-Repl-Request-Id", requestID)
 

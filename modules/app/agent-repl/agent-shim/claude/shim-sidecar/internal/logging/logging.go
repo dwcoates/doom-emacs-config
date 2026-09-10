@@ -1,19 +1,18 @@
 // Package logging owns the shim-claude-sidecar diagnostic contract: one JSON
-// record per logged branch, on two emission levels (normal and verbose).
+// record per logged branch, filtered by the process-wide severity threshold.
 //
 // THE CORRELATION VOCABULARY IS THE CONTRACT. Every identifier a record names
 // lives in a DEDICATED context key, never only in the message text, so the
 // integration loop can join sidecar records against the store's and the shim's
-// by the same names. The keys that spelled the retired (session_id, seq)
-// addressing — `claude_session_id`, `seq`, `from_seq`, `replay_*_seq` — are
-// GONE from this package: the spine is agent-keyed now, and a record that still
-// named a session ordinal would be correlating against an address that no
-// longer exists.
+// by the same names. The keys that spelled the retired sequence addressing —
+// `seq`, `from_seq`, `replay_*_seq` — are gone. `claude_session_id` remains as
+// promoted vendor attribution, never as a store address.
 //
-// SELF-DIAGNOSTICS ARE LOGS AND NOTHING ELSE (R10). The sidecar's own
-// diagnostics used to be enqueued through this package and written to the store
-// as records; store.v1 has no home for a fact about the READER rather than the
-// read, so the sink is deleted rather than aimed at an approximate arm.
+// SELF-DIAGNOSTICS REMAIN IN THE GLOBAL ROTATING SINK until
+// agentrepl.v1.ClientLogRecord can name their runtime. The message has the
+// originating timestamp and verbose class but no runtime discriminator, and
+// the daemon currently labels every forwarded record as webapp. Forwarding a
+// sidecar record through that seam would therefore corrupt its identity.
 package logging
 
 import (
@@ -47,6 +46,12 @@ type Context struct {
 	// deliberately not an alternate logging API: callers still use Log or
 	// LogVerbose, but this record must not re-enter the failed durable sink.
 	SinkEmergency bool
+	// WorkspaceDir and WorkspaceID identify the workspace whose file produced
+	// this record. They are promoted top-level fields, never buried in context.
+	WorkspaceDir string
+	WorkspaceID  string
+	// ClaudeSessionID is the transcript file's vendor session identity.
+	ClaudeSessionID string
 
 	// --- the correlation vocabulary (BRIEF-COMMON) --------------------------
 
@@ -142,19 +147,21 @@ func BackoffMs(d time.Duration) *int64 {
 func Seq(v uint64) *uint64 { return &v }
 
 type record struct {
-	Timestamp string         `json:"timestamp"`
-	Runtime   string         `json:"runtime"`
-	PID       int            `json:"pid"`
-	Level     string         `json:"level"`
-	Verbosity string         `json:"verbosity"`
-	Operation string         `json:"operation"`
-	Message   string         `json:"message"`
-	RequestID string         `json:"request_id,omitempty"`
-	Context   map[string]any `json:"context"`
+	Timestamp       string         `json:"timestamp"`
+	Runtime         string         `json:"runtime"`
+	PID             int            `json:"pid"`
+	Level           string         `json:"level"`
+	Verbosity       string         `json:"verbosity"`
+	Operation       string         `json:"operation"`
+	Message         string         `json:"message"`
+	WorkspaceDir    string         `json:"workspace_dir,omitempty"`
+	WorkspaceID     string         `json:"workspace_id,omitempty"`
+	ClaudeSessionID string         `json:"claude_session_id,omitempty"`
+	RequestID       string         `json:"request_id,omitempty"`
+	Context         map[string]any `json:"context"`
 }
 
-// Logger writes the sidecar's records to its persistent log and to stderr.
-// Verbose records are emitted only when AGENT_REPL_LOG_VERBOSE is set.
+// Logger writes records at or above one process-wide severity threshold.
 type Logger struct {
 	stderr io.Writer
 	file   io.Writer
@@ -173,8 +180,9 @@ type Logger struct {
 	mu                    sync.Mutex
 	now                   func() time.Time
 	pid                   func() int
-	verbose               func() bool
+	minimumLevel          sharedlogging.Level
 	poisoned              error
+	files                 map[string]Context
 }
 
 // Bound is the runtime logger passed through sidecar packages.
@@ -183,18 +191,24 @@ type Bound struct {
 	context Context
 }
 
-// New constructs the sidecar's canonical logger. The caller must provide both
-// sinks so normal logging cannot silently lose either delivery target.
+// New constructs a debug-enabled logger for focused tests and foreground
+// harnesses. Production passes its parsed threshold through NewAtLevel.
 func New(stderr, file io.Writer) *Logger {
+	return NewAtLevel(stderr, file, sharedlogging.LevelDebug)
+}
+
+// NewAtLevel constructs the canonical logger at one explicit threshold.
+func NewAtLevel(stderr, file io.Writer, minimumLevel sharedlogging.Level) *Logger {
 	if stderr == nil || file == nil {
 		panic("sidecar logging requires stderr and persistent file sinks")
 	}
 	return &Logger{
-		stderr:  stderr,
-		file:    file,
-		now:     time.Now,
-		pid:     os.Getpid,
-		verbose: func() bool { return os.Getenv("AGENT_REPL_LOG_VERBOSE") != "" },
+		stderr:       stderr,
+		file:         file,
+		now:          time.Now,
+		pid:          os.Getpid,
+		minimumLevel: minimumLevel,
+		files:        map[string]Context{},
 	}
 }
 
@@ -207,7 +221,13 @@ func New(stderr, file io.Writer) *Logger {
 // run whose terminal is a person — and wrong under launchd, where the terminal
 // is an unbounded file nobody rolls.
 func NewDurableOnly(terminal, file io.Writer) *Logger {
-	l := New(terminal, file)
+	return NewDurableOnlyAtLevel(terminal, file, sharedlogging.LevelInfo)
+}
+
+// NewDurableOnlyAtLevel constructs the production logger at one explicit
+// severity threshold.
+func NewDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel sharedlogging.Level) *Logger {
+	l := NewAtLevel(terminal, file, minimumLevel)
 	l.terminalEmergencyOnly = true
 	return l
 }
@@ -228,6 +248,25 @@ func (b *Bound) With(ctx Context) *Bound {
 	return &Bound{logger: b.logger, context: mergeContext(b.context, ctx)}
 }
 
+// RegisterFile binds proven workspace/session attribution to one normalized
+// path so later high-level records naming only that path inherit it.
+func (b *Bound) RegisterFile(ctx Context) {
+	if b == nil {
+		panic("sidecar logging: RegisterFile called on nil Bound logger")
+	}
+	ctx = mergeContext(b.context, ctx)
+	if ctx.Path == "" || ctx.WorkspaceDir == "" || ctx.WorkspaceID == "" || ctx.ClaudeSessionID == "" {
+		panic("sidecar logging: registered file requires path, workspace_dir, workspace_id, and claude_session_id")
+	}
+	identity := Context{
+		Path: ctx.Path, WorkspaceDir: ctx.WorkspaceDir, WorkspaceID: ctx.WorkspaceID,
+		ClaudeSessionID: ctx.ClaudeSessionID,
+	}
+	b.logger.mu.Lock()
+	b.logger.files[ctx.Path] = identity
+	b.logger.mu.Unlock()
+}
+
 // Log records a normal diagnostic to the persistent log and stderr.
 func (b *Bound) Log(format string, args ...any) {
 	if b == nil {
@@ -236,8 +275,8 @@ func (b *Bound) Log(format string, args ...any) {
 	b.logger.write(false, b.context, format, args...)
 }
 
-// LogVerbose records a verbose diagnostic only when AGENT_REPL_LOG_VERBOSE is
-// enabled. Disabled verbose records reach neither the durable sink nor stderr.
+// LogVerbose records a debug-level verbose diagnostic. AGENT_REPL_LOG_LEVEL
+// decides whether the record reaches either sink.
 func (b *Bound) LogVerbose(format string, args ...any) {
 	if b == nil {
 		panic("sidecar logging: LogVerbose called on nil Bound logger")
@@ -300,19 +339,27 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 	if l == nil {
 		panic("sidecar logging: write called on nil Logger")
 	}
+	if ctx.Path != "" {
+		l.mu.Lock()
+		identity := l.files[ctx.Path]
+		l.mu.Unlock()
+		ctx = mergeContext(identity, ctx)
+	}
 	if ctx.Operation == "" {
 		panic("sidecar logging: operation is required")
 	}
 	level := ctx.Level
 	if level == "" {
-		level = "info"
+		if verbose {
+			level = "debug"
+		} else {
+			level = "info"
+		}
 	}
-	switch level {
-	case "debug", "info", "warn", "error":
-	default:
-		panic(fmt.Sprintf("sidecar logging: invalid level %q", level))
+	if (ctx.WorkspaceDir == "") != (ctx.WorkspaceID == "") {
+		panic("sidecar logging: workspace_dir and workspace_id must be set together")
 	}
-	if verbose && !l.verbose() {
+	if !l.minimumLevel.Allows(level) {
 		return
 	}
 	verbosity := "normal"
@@ -321,15 +368,18 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 	}
 	now := l.now().Local()
 	payload, err := json.Marshal(record{
-		Timestamp: sharedlogging.Timestamp(now),
-		Runtime:   "sidecar",
-		PID:       l.pid(),
-		Level:     level,
-		Verbosity: verbosity,
-		Operation: ctx.Operation,
-		Message:   fmt.Sprintf(format, args...),
-		RequestID: ctx.RequestID,
-		Context:   contextMap(ctx),
+		Timestamp:       sharedlogging.Timestamp(now),
+		Runtime:         "sidecar",
+		PID:             l.pid(),
+		Level:           level,
+		Verbosity:       verbosity,
+		Operation:       ctx.Operation,
+		Message:         fmt.Sprintf(format, args...),
+		WorkspaceDir:    ctx.WorkspaceDir,
+		WorkspaceID:     ctx.WorkspaceID,
+		ClaudeSessionID: ctx.ClaudeSessionID,
+		RequestID:       ctx.RequestID,
+		Context:         contextMap(ctx),
 	})
 	if err != nil {
 		panic(fmt.Sprintf("sidecar logging: encode record: %v", err))
@@ -401,6 +451,9 @@ func mergeContext(base, add Context) Context {
 		{&base.Operation, &add.Operation},
 		{&base.Level, &add.Level},
 		{&base.RequestID, &add.RequestID},
+		{&base.WorkspaceDir, &add.WorkspaceDir},
+		{&base.WorkspaceID, &add.WorkspaceID},
+		{&base.ClaudeSessionID, &add.ClaudeSessionID},
 		{&base.Producer, &add.Producer},
 		{&base.AgentID, &add.AgentID},
 		{&base.VendorSessionID, &add.VendorSessionID},
