@@ -324,7 +324,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// the whole test name, which blows that budget for the longer names in this
 	// suite. Everything the daemon opens a SOCKET under lives beneath a short
 	// root of its own; everything else stays under t.TempDir().
-	sockRoot := shortTempDir(t)
+	sockRoot := ShortTempDir(t)
 
 	d := &Daemon{
 		StateDir:           opts.StateDir,
@@ -594,10 +594,24 @@ func (d *Daemon) awaitServing() {
 	})
 }
 
-// shortTempDir mints a directory directly under /tmp, short enough that a
-// state root beneath it still fits a unix-domain socket path. t.TempDir()
-// cannot be used: it encodes the test's whole name.
-func shortTempDir(t *testing.T) string {
+// ShortTempDir mints a directory directly under /tmp, short enough that a
+// state root beneath it still fits a unix-domain socket path, and removes it
+// on cleanup.
+//
+// t.TempDir() CANNOT HOLD ANYTHING A SOCKET HANGS OFF. It encodes the whole
+// test name under the platform's temp root, and on macOS that root is itself
+// the per-user `/var/folders/<hash>/T` — 49 bytes before the test name is even
+// spelled. A shim socket lives at `<state root>/sock/<name>`, so a state root
+// named after a test like TestBootRefusesAnUnwritableStateRoot blows the
+// 103-byte sun_path budget and the daemon refuses to boot. A suite that only
+// passes under a TMPDIR override is a broken suite, so every state root in it
+// — the harness's own default and the ones tests build for themselves — hangs
+// off this instead, whose length is fixed and independent of the test's name.
+//
+// Non-socket paths (config roots, fake dists, prompt copies, repos) have no
+// such budget and stay under t.TempDir(), where a failed run's leftovers are
+// named after the test that left them.
+func ShortTempDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "ar")
 	if err != nil {
