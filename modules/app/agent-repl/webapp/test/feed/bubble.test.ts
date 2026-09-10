@@ -7,6 +7,7 @@ import { mountBubble } from "../../src/feed/bubble.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { installStylesheet } from "../stylesheet.js";
 import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
+import { TailFollow, feedReveal, type FeedReveal } from "../../src/scroll.js";
 import {
   Channel,
   harness,
@@ -43,6 +44,8 @@ function mount(
     composerFactory?: (host: HTMLElement) => Handle;
     /** What the head states about itself, per draw. */
     states?: (string | null)[];
+    /** The caret's view rule, for the suites that assert where it leaves the reader. */
+    scroll?: FeedReveal;
   } = {},
 ) {
   const heads: number[] = [];
@@ -69,6 +72,7 @@ function mount(
         ? undefined
         : (host) => opts.composerFactory!(host),
     initialFolded: opts.folded ?? true,
+    scroll: opts.scroll,
   });
   document.body.replaceChildren(bubble.element);
   return { bubble, h, heads };
@@ -703,5 +707,125 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     await settle();
     // Assert
     expect(panelOf(bubble).hidden).toBe(true);
+  });
+});
+
+/**
+ * WHERE THE CARET LEAVES THE READER.
+ *
+ * The defect, measured at a click: `below=208 scrollTop=40`. Expanding a fold
+ * grows the feed BELOW the fold, growth moves nothing on its own, and the
+ * sub-feed the reader just asked for unrolled entirely off the bottom of the
+ * screen. `TailFollow.release` had been written for this and nothing in
+ * production called it.
+ *
+ * JSDOM LAYS NOTHING OUT, so the two boxes the reveal compares are scripted
+ * here exactly as `test/integration/feed-tail.integration.test.ts` scripts the
+ * feed's own -- a `scrollTop` that clamps into range on write, a
+ * `scrollHeight` that GROWS by the panel's height when the panel is shown, and
+ * a panel whose rect is the empty box a hidden element really has. That is an
+ * environment substitution, not a seam: every number below is one a browser
+ * would have supplied.
+ */
+describe("mountBubble: the caret's own view rule", () => {
+  /** The scroll box's visible height, and the panel's, in one coordinate system. */
+  const BOX_HEIGHT = 300;
+  const PANEL_HEIGHT = 200;
+  /** The feed's height with the bubble SHUT: 1000 - 300 leaves a tail at 700. */
+  const CONTENT_HEIGHT = 1000;
+
+  /** A scripted scroll box, with the caret's view rule bound to it. */
+  function scrolling(opts: { scrollTop: number; panelTop: number }) {
+    const box = document.createElement("div");
+    let panel: HTMLElement | null = null;
+    let scrollTop = opts.scrollTop;
+    const shown = (): boolean => panel !== null && !panel.hidden;
+    Object.defineProperties(box, {
+      scrollHeight: { get: () => CONTENT_HEIGHT + (shown() ? PANEL_HEIGHT : 0) },
+      clientHeight: { get: () => BOX_HEIGHT },
+      scrollTop: {
+        get: () => scrollTop,
+        set: (next: number) => {
+          scrollTop = Math.max(0, Math.min(next, box.scrollHeight - BOX_HEIGHT));
+        },
+      },
+    });
+    box.getBoundingClientRect = () => rect(0, BOX_HEIGHT);
+    document.body.replaceChildren(box);
+    const tail = new TailFollow(box);
+    return {
+      box,
+      reveal: feedReveal(box, tail),
+      top: () => scrollTop,
+      /** Adopt a mounted bubble into the box, and script its panel's box. */
+      adopt(element: HTMLElement): void {
+        document.body.replaceChildren(box);
+        box.replaceChildren(element);
+        panel = element.querySelector<HTMLElement>("[data-subfeed]");
+        if (panel === null) throw new Error("the bubble mounted no sub-feed panel");
+        const p = panel;
+        p.getBoundingClientRect = () => (p.hidden ? rect(opts.panelTop, 0) : rect(opts.panelTop, PANEL_HEIGHT));
+      },
+    };
+  }
+
+  /** A DOMRect, as far as a reveal reads one. */
+  function rect(top: number, height: number): DOMRect {
+    return { top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top,
+      toJSON: () => ({}) };
+  }
+
+  /** Click the caret and let the open settle. */
+  async function click(bubble: { element: HTMLElement }): Promise<void> {
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+  }
+
+  it("scrolls the revealed sub-feed into view when the reader was not at the tail", async () => {
+    // Arrange -- the reader holds a place 40px down; the panel will hang from
+    // 250, so 150 of its 200px falls below the box's 300px fold.
+    const view = scrolling({ scrollTop: 40, panelTop: 250 });
+    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: view.reveal });
+    view.adopt(bubble.element);
+    // Act
+    await click(bubble);
+    // Assert -- moved by exactly the overhang, so the head stays on screen.
+    expect(view.top()).toBe(190);
+  });
+
+  it("re-lands the tail when the reader was following it before the click", async () => {
+    // Arrange -- parked at the tail: 1000 - 300 = 700.
+    const view = scrolling({ scrollTop: 700, panelTop: 250 });
+    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: view.reveal });
+    view.adopt(bubble.element);
+    // Act -- the expansion grows the feed by the panel's 200px.
+    await click(bubble);
+    // Assert -- the tail of the GROWN feed, not the position it was at.
+    expect(view.top()).toBe(900);
+  });
+
+  it("does not move the view when the panel it opened is already wholly on screen", async () => {
+    // Arrange -- the panel will hang from 100 and end at 300, the fold itself.
+    const view = scrolling({ scrollTop: 40, panelTop: 100 });
+    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: view.reveal });
+    view.adopt(bubble.element);
+    // Act
+    await click(bubble);
+    // Assert -- a reader who can already see what they opened is left alone.
+    expect(view.top()).toBe(40);
+  });
+
+  it("does not move the view when the caret COLLAPSES a bubble", async () => {
+    // Arrange -- opened, and the view settled wherever the open left it.
+    const view = scrolling({ scrollTop: 40, panelTop: 250 });
+    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: view.reveal });
+    view.adopt(bubble.element);
+    await click(bubble);
+    const settled = view.top();
+    // Act -- the second click, which shuts it.
+    await click(bubble);
+    // Assert -- a collapse takes content from BELOW the reader and moves them
+    // nowhere.
+    expect(view.top()).toBe(settled);
   });
 });
