@@ -26,6 +26,12 @@
 #
 # Three questions per system:
 #
+#   0. STALENESS — whether the `.source-tree` stamp beside the artifact names
+#      the source revision the checkout is standing at. This is the verdict;
+#      it is the same comparison build-frontend.sh rebuilds on, off the same
+#      stamp and the same shared pathspec table, so the report and the build
+#      cannot reach opposite answers.
+#
 #   1. DEPLOYED revision — read from the `.built-sha` stamp written beside the
 #      artifact by build-frontend.sh / deploy-all.sh. A missing stamp reports
 #      "unknown"; it is never inferred from mtimes or from repo HEAD, because a
@@ -62,12 +68,20 @@
 #     "systems": [ { "name": …, "deployed_sha": …|null, "deployed_dirty": bool,
 #                    "source_sha": …|null, "commits_behind": int|null,
 #                    "minutes_behind": int|null,
+#                    "built_tree": …|null, "source_tree": …|null,
+#                    "source_tree_stale": bool, "source_dirty": bool,
 #                    "running": { "pid": int, "started_at": …|null,
 #                                 "stale_binary": bool } | null,
 #                    "ready": bool, "error": … (only when something failed) } ] }
 #
-# `ready` is true when the deployed build carries every committed change to the
-# system AND no running process is serving a stale binary.
+# `ready` is true when the artifact's `.source-tree` stamp equals the source
+# revision the checkout is standing at AND no running process is serving a stale
+# binary. That first comparison is build-frontend.sh's own staleness rule, read
+# off the same stamp file, so a system this report calls not-ready is exactly a
+# system a plain (un-forced) build will rebuild. `commits_behind` is reported as
+# the human-facing distance but does NOT gate: a change and its revert count as
+# two commits with identical content, and failing on that would be a gate no
+# rebuild could clear.
 #
 # Cost: git plumbing and pgrep only, never a build. It is meant to be polled
 # (Emacs runs it every ~15s), so nothing here may block on the network, take a
@@ -133,14 +147,10 @@ REPO_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || {
 }
 
 # Where the module sits inside the checkout, derived rather than hardcoded as
-# "modules/app/agent-repl" for the same reason build-frontend.sh derives it:
-# the layout is the repo's to change, and a stale hardcoded prefix would make
-# every pathspec silently match nothing — which reads as "fully deployed".
-REL_ROOT="${ROOT#"$REPO_ROOT"/}"
-if [ "$REL_ROOT" = "$ROOT" ]; then
-    REL_ROOT=""
-fi
-prefix() { if [ -n "$REL_ROOT" ]; then printf '%s/%s' "$REL_ROOT" "$1"; else printf '%s' "$1"; fi; }
+# "modules/app/agent-repl": the layout is the repo's to change, and a stale
+# hardcoded prefix would make every pathspec silently match nothing — which
+# reads as "fully deployed".
+REL_ROOT="$(deploy_stamp_rel_root "$REPO_ROOT" "$ROOT")"
 
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 
@@ -178,34 +188,34 @@ system_stamp() {
     esac
 }
 
-# proto_paths — the proto tree as a BUILD input: the schemas minus the
-# review artifacts that live beside them. figma-idl-draft/ and the sketch are
-# design documents no build reads, so a commit touching only them must not
-# make any system read as behind — that state is undeployable by rebuilding,
-# because the staleness check (correctly) sees no buildable input change and
-# the stamp can never catch up to the gate.
-proto_paths() {
-    printf '%s %s %s' "$(prefix proto)" \
-        ":(exclude)$(prefix proto/figma-idl-draft)" \
-        ":(exclude)$(prefix proto/SKETCH-figma-idl.md)"
-}
-
-# system_paths NAME — repo-relative pathspec, space separated. No path in this
-# repo contains a space, and keeping them in one string is what lets bash 3.2
-# (still /bin/bash on macOS, no associative arrays) carry a per-system table.
-system_paths() {
+# system_tree_stamp NAME — path of the `.source-tree` stamp for NAME's
+# artifact: what build-frontend.sh recorded the artifact was BUILT FROM.
+#
+# It is the same file build-frontend.sh consults to decide whether to rebuild,
+# and this report's `ready` verdict is that same comparison. That is deliberate
+# and load-bearing. When the two questions were computed separately — the build
+# scanning a hand-listed set of mtimes, the report counting commits over a
+# pathspec — they could disagree, and on 2026-09-09 they did: the gate reported
+# the shim three commits behind while every un-forced build declared it fresh
+# and refused to rebuild it. A gate that no rebuild can clear is worse than no
+# gate. One stamp, one comparison, one answer.
+system_tree_stamp() {
     case "$1" in
-        daemon)              printf '%s %s %s' "$(prefix daemon)" "$(proto_paths)" "$(prefix agent-shim/logging)" ;;
-        shim)                printf '%s %s %s' "$(prefix agent-shim/claude/shim)" "$(proto_paths)" "$(prefix agent-shim/logging)" ;;
-        webapp)              printf '%s %s %s' "$(prefix webapp)" "$(proto_paths)" "$(prefix agent-shim/logging)" ;;
-        shim-store)          printf '%s %s %s' "$(prefix agent-shim/shim-store)" "$(prefix agent-shim/logging)" "$(proto_paths)" ;;
-        shim-claude-sidecar) printf '%s %s %s' "$(prefix agent-shim/claude/shim-sidecar)" "$(prefix agent-shim/logging)" "$(proto_paths)" ;;
-        # No proto: shim-lock speaks no wire at all. Its whole contract is argv,
-        # one stdout line, stdin's EOF and an exit code.
-        shim-lock)           printf '%s %s' "$(prefix agent-shim/shim-lock)" "$(prefix agent-shim/logging)" ;;
+        daemon)              printf '%s' "$ROOT/daemon/bin/.source-tree" ;;
+        shim)                printf '%s' "$ROOT/agent-shim/claude/shim/dist/.source-tree" ;;
+        webapp)              printf '%s' "$ROOT/webapp/dist/.source-tree" ;;
+        shim-store)          printf '%s' "$CACHE_BIN/.shim-store.source-tree" ;;
+        shim-claude-sidecar) printf '%s' "$CACHE_BIN/.shim-claude-sidecar.source-tree" ;;
+        shim-lock)           printf '%s' "$CACHE_BIN/.shim-lock.source-tree" ;;
         *) return 1 ;;
     esac
 }
+
+# system_paths NAME — repo-relative pathspec, space separated. Read from the
+# shared table in lib-deploy-stamp.sh, which is also what build-frontend.sh
+# builds its staleness answer from; a second copy here is exactly the drift the
+# shared table exists to prevent.
+system_paths() { deploy_stamp_system_paths "$1" "$REL_ROOT"; }
 
 # system_process_match NAME — the absolute binary path a live process for NAME
 # runs, or nothing when NAME has no single long-lived process.
@@ -286,8 +296,10 @@ emit_system() { # NAME
     local source_sha="" source_ct="" deployed_ct="" commits_behind="" minutes_behind=""
     local error="" ready=0
     local match pid="" started_epoch="" started_at="" stale=0 running_json="null"
+    local tree_stamp built_tree="" current_tree="" source_tree_stale=1 source_dirty=0
 
     stamp="$(system_stamp "$name")"
+    tree_stamp="$(system_tree_stamp "$name")"
     paths="$(system_paths "$name")"
 
     # 1. deployed revision, strictly from the stamp.
@@ -297,6 +309,11 @@ emit_system() { # NAME
         deployed_sha="$stamp_value"
         deployed_commit="$(built_sha_commit "$stamp_value")"
         if built_sha_is_dirty "$stamp_value"; then deployed_dirty=1; fi
+    else
+        # Reported here rather than at the end so that an artifact no stamping
+        # build ever touched is named by the stamp family a reader looks for
+        # first, instead of by whichever later check happened to fire.
+        error="no .built-sha stamp at $stamp; this artifact has not been built by a stamping build"
     fi
 
     # 2. newest commit touching the system, with its commit timestamp.
@@ -331,6 +348,32 @@ emit_system() { # NAME
         fi
     fi
 
+    # 3b. THE STALENESS VERDICT, read off the same stamp build-frontend.sh
+    # decides a rebuild from. `commits_behind` above is the human-facing
+    # distance and stays informational: it counts commits, so a change followed
+    # by its own revert reads as two commits behind while the source content is
+    # identical — a state no rebuild can clear, and therefore one this gate must
+    # not fail on. The stamp comparison answers the question that actually
+    # gates: is the artifact standing here built from the source standing here.
+    # shellcheck disable=SC2086
+    if ! current_tree="$(source_tree_id "$REPO_ROOT" $paths)"; then
+        current_tree=""
+        [ -n "$error" ] || error="the source set for this system could not be determined: $paths"
+    elif built_tree="$(read_source_tree "$tree_stamp")"; then
+        if source_tree_is_dirty "$current_tree"; then source_dirty=1; fi
+        # Bases, not full ids: an uncommitted edit makes the build stale (and
+        # build-frontend.sh does rebuild every time) but must not make the gate
+        # unpassable — see source_tree_base.
+        if [ "$(source_tree_base "$built_tree")" = "$(source_tree_base "$current_tree")" ]; then
+            source_tree_stale=0
+        else
+            [ -n "$error" ] || error="the artifact is built from source revision $built_tree, but the checkout is at $current_tree"
+        fi
+    else
+        built_tree=""
+        [ -n "$error" ] || error="no .source-tree stamp at $tree_stamp; this artifact has not been built by a stamping build"
+    fi
+
     # 4. running process, where one exists.
     match="$(system_process_match "$name")"
     if [ -n "$match" ]; then
@@ -361,11 +404,8 @@ emit_system() { # NAME
     fi
 
     # 5. verdict.
-    if [ -n "$commits_behind" ] && [ "$commits_behind" -eq 0 ] && [ "$stale" -eq 0 ]; then
+    if [ "$source_tree_stale" -eq 0 ] && [ "$stale" -eq 0 ]; then
         ready=1
-    fi
-    if [ -z "$deployed_sha" ] && [ -z "$error" ]; then
-        error="no .built-sha stamp at $stamp; this artifact has not been built by a stamping build"
     fi
 
     if [ "$name" = "$REQUIRED_SYSTEM" ]; then
@@ -375,13 +415,17 @@ emit_system() { # NAME
         GATE_ERROR="$error"
     fi
 
-    printf '    {"name": %s, "deployed_sha": %s, "deployed_dirty": %s, "source_sha": %s, "commits_behind": %s, "minutes_behind": %s, "running": %s, "ready": %s' \
+    printf '    {"name": %s, "deployed_sha": %s, "deployed_dirty": %s, "source_sha": %s, "commits_behind": %s, "minutes_behind": %s, "built_tree": %s, "source_tree": %s, "source_tree_stale": %s, "source_dirty": %s, "running": %s, "ready": %s' \
         "$(jstr "$name")" \
         "$(jstr_or_null "$deployed_sha")" \
         "$(jbool "$deployed_dirty")" \
         "$(jstr_or_null "$source_sha")" \
         "$(jnum_or_null "$commits_behind")" \
         "$(jnum_or_null "$minutes_behind")" \
+        "$(jstr_or_null "$built_tree")" \
+        "$(jstr_or_null "$current_tree")" \
+        "$(jbool "$source_tree_stale")" \
+        "$(jbool "$source_dirty")" \
         "$running_json" \
         "$(jbool "$ready")"
     if [ -n "$error" ]; then
