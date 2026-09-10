@@ -251,9 +251,10 @@ type pt16Placement struct {
 func TestPlaytest16SubagentPlacements(t *testing.T) {
 	t.Parallel()
 	s := newPlaytestScenario(t, "16-subagent-placements",
-		"Plan G50. The four detached placements a subagent bubble wears -- settled, failed, mid-flight "+
-			"with an utterance that must stay OFF the top level, and live with its own stop -- driven as "+
-			"one table against one accumulating feed.")
+		"Plan G50's placements. The three a subagent bubble wears in one accumulating feed -- settled, "+
+			"failed, and live with its own stop -- driven as one table. The fourth, the mid-flight "+
+			"utterance, is its own playbook (`16-subagent-utterance`): it is the only one whose subject "+
+			"is what the SUB-FEED carries, so it is the only one that has to be photographed open.")
 	p := s.Book
 
 	repository := s.repoAt(t, "repo")
@@ -280,7 +281,7 @@ func TestPlaytest16SubagentPlacements(t *testing.T) {
 			asserted: "a second `detachedSubagent` row was drawn and its head reached `data-state=\"failed\"` " +
 				"-- the failing notification's own arm, which is NOT the `lost` arm and must not read " +
 				"like one",
-			expected: "A THIRD subagent head, beneath the earlier two, with a RED error dot and the word " +
+			expected: "A SECOND subagent head, beneath the first, with a RED error dot and the word " +
 				"\"failed\". It must NOT read \"lost sight of\": losing sight of an agent and an agent " +
 				"failing are two different statements and the schema keeps them apart.",
 		},
