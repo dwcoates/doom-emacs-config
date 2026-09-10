@@ -170,6 +170,7 @@ async function cutWhenQuiet(socket: Socket, budgetMs: number): Promise<void> {
         budget_ms: budgetMs,
         pending_bytes: socket.writableLength,
         bytes_written: socket.bytesWritten,
+        detail: "the connection remained active until its exit budget expired",
       },
       "a connection never went quiet before the exit cut it; an answer may not have reached the daemon",
     );
@@ -254,7 +255,7 @@ export async function serve(
   const verdict = await probeSocket(socketPath);
   if (verdict === "live") {
     LOGGER.error(
-      { socket_path: socketPath },
+      { socket_path: socketPath, detail: "another live shim already owns the socket" },
       "refusing to bind: another shim is already listening on this socket",
     );
     throw new Error(
@@ -317,10 +318,12 @@ export async function serve(
   const h1 = http.createServer(handler);
   const h2 = http2.createServer(handler);
   h1.on("clientError", (err, socket) => {
+    // warn: a defect because a client connection failed before the server could identify its request.
     LOGGER.warn({ cause: err }, "an HTTP/1.1 client connection failed before a request was read");
     socket.destroy();
   });
   h2.on("sessionError", (err) => {
+    // warn: a defect because an h2c transport session failed while the listener continued serving.
     LOGGER.warn({ cause: err }, "an h2c session failed");
   });
   // EVERY STREAM THIS SERVER RESETS SAYS SO. Without this the shim was silent
@@ -333,7 +336,7 @@ export async function serve(
   h2.on("session", (session) => {
     session.on("frameError", (type, code, id) => {
       LOGGER.error(
-        { frame_type: type, error_code: code, stream_id: id },
+        { frame_type: type, error_code: code, stream_id: id, detail: "the h2c transport could not send a frame" },
         "an h2c frame could not be sent",
       );
     });
@@ -342,7 +345,7 @@ export async function serve(
       stream.once("close", () => {
         if (stream.rstCode === undefined || stream.rstCode === 0) return;
         LOGGER.error(
-          { stream_id: stream.id, rst_code: stream.rstCode, path },
+          { stream_id: stream.id, rst_code: stream.rstCode, path, detail: "the h2c stream ended before its response completed" },
           "an h2c stream ended with a reset code; whatever it was serving did not finish",
         );
       });
@@ -384,7 +387,7 @@ export async function serve(
         const timer = setTimeout(() => {
           quietWaiters.delete(settle);
           LOGGER.error(
-            { socket_path: socketPath, in_flight: inFlight, budget_ms: budgetMs },
+            { socket_path: socketPath, in_flight: inFlight, budget_ms: budgetMs, detail: "responses remained open when the quiet budget expired" },
             "gave up waiting for the wire to go quiet; ending the process with responses still open",
           );
           resolve();
@@ -535,7 +538,7 @@ export function flushStreamHead(request: StreamableRequest, response: Streamable
     const encoding = encodingAnnouncedBy(args);
     if (encoding !== undefined && encoding !== "identity") {
       LOGGER.error(
-        { content_type: contentType, content_encoding: encoding },
+        { content_type: contentType, content_encoding: encoding, detail: "the flushed response head omitted the adapter's later encoding" },
         "the adapter tried to announce a response encoding AFTER the stream head was flushed; the client cannot be told, so this stream would be undecodable",
       );
     }

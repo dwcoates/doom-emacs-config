@@ -29,7 +29,7 @@ const LOGGER = bindLog({
 function queryOf(call: PendingCall): conversationv1.AgentWebSearchQuery {
   const terms = str(call.input, "query");
   if (terms === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a web search call names no query; the unit's query cannot restate one",
     );
@@ -61,7 +61,7 @@ function resultsOf(
 ): conversationv1.AgentWebSearchResult[] {
   const entries = arr(output, "results");
   if (entries === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: toolUseId },
       "a settled web search stated no results array; the answer is recorded as empty",
     );
@@ -76,7 +76,7 @@ function resultsOf(
     const group = asRecord(entry);
     const hits = arr(group, "content");
     if (hits === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: toolUseId },
         "a web search result entry was neither a narration line nor a hit group; it is dropped",
       );
@@ -88,7 +88,7 @@ function resultsOf(
       if (url === undefined) {
         // A hit with no url is not a page anyone can open; a link row built
         // around an empty href would be a dead row drawn as a live one.
-        LOGGER.warn(
+        LOGGER.debug(
           { tool_use_id: toolUseId },
           "a web search hit named no url; it is dropped rather than drawn as a dead link",
         );
@@ -138,7 +138,7 @@ export const webSearchConverter: ToolConverter = {
     if (output === undefined) {
       // An empty success arm is the vendor's own "found nothing", so building
       // one from a missing output would state a fact the vendor never did.
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a settled web search carried no typed output; an empty answer would be a claim the vendor never made",
       );

@@ -315,6 +315,7 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     const [oldest] = facts.keys();
     if (oldest === undefined) return;
     facts.delete(oldest);
+    // warn: a defect because bounded task bookkeeping discarded facts needed to type a later notification.
     LOGGER.warn(
       { task_id: oldest },
       "the task-facts table is full; the oldest task's kind and cause are forgotten and its notification cannot be typed",
@@ -366,7 +367,7 @@ export function convertDetached(
 
   const taskId = raw.task_id;
   if (typeof taskId !== "string" || taskId === "") {
-    LOGGER.warn(
+    LOGGER.debug(
       { uuid, subtype: raw.subtype },
       "a task message named no task; nothing can be addressed by it",
     );
@@ -383,6 +384,7 @@ export function convertDetached(
         // NO ORIGINATING CALL AND NO PAYLOAD WE CAN BUILD: `created` needs a
         // DetachableWork describing the work, and nothing here states one. An
         // invented description would be worse than residue.
+        // warn: a defect because an unowned task start cannot be announced on the wire.
         LOGGER.warn(
           { uuid, task_id: taskId },
           "a task started with no originating call; it cannot be announced and lands as residue",
@@ -440,6 +442,7 @@ export function convertDetached(
         return [];
       }
       if (toolUseId === undefined || toolUseId === "") {
+        // warn: a defect because a hand-backgrounded task without an origin cannot update a unit.
         LOGGER.warn(
           { uuid, task_id: taskId },
           "a task was backgrounded by hand but names no originating call; nothing can be upserted",
@@ -482,6 +485,7 @@ export function convertDetached(
         );
       }
       if (toolUseId === undefined || toolUseId === "") {
+        // warn: a defect because an unowned task notification cannot settle its unit.
         LOGGER.warn(
           { uuid, task_id: taskId },
           "a task notification names no originating call; its unit cannot be settled",
@@ -504,7 +508,7 @@ export function convertDetached(
     }
 
     default:
-      LOGGER.warn(
+      LOGGER.debug(
         { uuid, subtype: raw.subtype },
         "no detached-work converter owns this task message; it lands as residue",
       );
@@ -554,7 +558,7 @@ function subagentTerminalEntries(
     ];
   }
   if (raw.status === "failed") {
-    LOGGER.warn({ task_id: raw.task_id }, "a detached run failed");
+    LOGGER.info({ task_id: raw.task_id }, "a detached run reached a failure terminal");
     return [
       activityEntry(
         context,
@@ -672,12 +676,13 @@ export function lostBashEntry(
   how: conversationv1.DetachedLost,
 ): PersistEntry | undefined {
   if (originalStart.command === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { run: run.value },
       "the recorded start for this shell run states no command; no terminal is produced",
     );
     return undefined;
   }
+  // warn: a defect because a shell run reached teardown without a success or failure outcome.
   LOGGER.warn(
     { run: run.value, how: how.how.case },
     "a detached shell run was concluded LOST: not known to have failed, not known to have finished",
@@ -729,6 +734,7 @@ export function lostSubagentEntry(
   spawn: conversationv1.AgentActivityId,
   how: conversationv1.DetachedLost,
 ): PersistEntry {
+  // warn: a defect because a detached spawn reached teardown without a success or failure outcome.
   LOGGER.warn(
     { spawn: spawn.value, how: how.how.case },
     "a detached spawn was concluded LOST: not known to have failed, not known to have finished",
@@ -772,6 +778,7 @@ export function lostAgentEntry(
   agentId: conversationv1.AgentId,
   how: conversationv1.DetachedLost,
 ): PersistEntry {
+  // warn: a defect because a detached agent reached teardown without a success or failure outcome.
   LOGGER.warn(
     { agent: agentId.value, how: how.how.case },
     "a detached agent was concluded LOST: not known to have failed, not known to have finished",

@@ -558,7 +558,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const name = reported.trim();
     if (name === "") return;
     if (name === SYNTHETIC_MODEL) {
-      LOGGER.warn(
+      LOGGER.debug(
         { reported: name },
         "the vendor reported the synthetic marker as its model; it is not a model and is not adopted",
       );
@@ -613,7 +613,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function asInt64(value: number, field: string): bigint {
     if (Number.isInteger(value)) return BigInt(value);
-    LOGGER.warn(
+    LOGGER.debug(
       { field, value },
       "the vendor reported a fractional value for an integer field; rounding it",
     );
@@ -1069,7 +1069,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       setClaudeSessionId(message.session_id);
       recordAgentBinaryVersion(message.claude_code_version);
       if (message.model.trim() === SYNTHETIC_MODEL) {
-        LOGGER.warn(
+        LOGGER.debug(
           {},
           "the vendor's init reported the synthetic marker as its model; keeping the model already in effect",
         );
@@ -1536,9 +1536,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const remediation = source.value.coldRemediation;
       const cold = judgeCold(facts, deps.nowMs(), requestedModel);
       if (cold !== undefined && remediation === undefined) {
-        LOGGER.warn(
+        LOGGER.debug(
           { vendor_session_id: vendorSessionId, reason: cold, context_tokens: facts.contextTokens },
-          "REFUSED a cold resume: the cost is stated and the caller must name a remediation",
+          "refused a cold resume because the caller named no remediation for its stated cost",
         );
         return startSessionRefused(
           { kind: "cold", cold: sessionCold(facts, cold, requestedModel) },
@@ -1562,9 +1562,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     try {
       releaseLock = await acquireLock(inForce);
     } catch (err) {
-      LOGGER.warn(
+      LOGGER.debug(
         { vendor_session_id: inForce, cause: err instanceof Error ? err.message : String(err) },
-        "REFUSED StartSession: another shim holds this conversation's session lock",
+        "refused StartSession: another shim holds this conversation's session lock",
       );
       return startSessionRefused(
         { kind: "conversationOwned" },
@@ -1581,13 +1581,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     } catch (err) {
       await releaseLock?.();
       releaseLock = undefined;
-      LOGGER.warn(
+      LOGGER.debug(
         {
           workspace_dir: deps.env.cwd,
           lock_path: workspaceLockPath(deps.env.cwd),
           cause: err instanceof Error ? err.message : String(err),
         },
-        "REFUSED StartSession: another shim holds this workspace's lock",
+        "refused StartSession: another shim holds this workspace's lock",
       );
       return startSessionRefused(
         { kind: "conversationOwned" },
@@ -1904,9 +1904,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         },
       },
     ]);
-    LOGGER.warn(
+    LOGGER.info(
       { turn_id: ended.id.value, cause: detail },
-      "concluded the open turn with a failure terminal: the vendor query died under it",
+      "concluded the open turn with a failure terminal after the vendor query died",
     );
   }
 
@@ -1962,7 +1962,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         },
       },
     ]);
-    LOGGER.warn(
+    LOGGER.info(
       { turn_id: ended.id.value, reason },
       "concluded the open turn as interrupted by host shutdown: the session is being torn down under it",
     );
@@ -2050,6 +2050,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       try {
         book = (await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE)).entries;
       } catch (err) {
+        // warn: a defect because reconciliation lost access to the durable book it must describe.
         LOGGER.warn(
           { cause: err instanceof Error ? err.message : String(err) },
           "the book could not be read for reconciliation; live work cannot be described",
@@ -2084,6 +2085,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       } catch (err) {
         // A vendor that cannot answer is not a vendor that said "gone": leaving
         // the item to be swept would close a run that may still be producing.
+        // warn: a defect because the vendor could not confirm ownership while reconciliation continued.
         LOGGER.warn(
           { work_id: work.value, cause: err instanceof Error ? err.message : String(err) },
           "the vendor could not be asked whether it still holds this work; treating it as surviving",
@@ -2115,7 +2117,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
       const recorded = findBashStart(book, run);
       if (recorded === undefined) {
-        LOGGER.warn(
+        LOGGER.debug(
           { work_id: work.value, kind: item?.case ?? "" },
           "the record holds no describable start for this live shell run; closing it as swept up with no command stated",
         );
@@ -2144,9 +2146,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       closing.push(closingAgentTerminal(subagentId(agent.value)));
     }
     if (open.liveWorkflows.length > 0) {
+      // warn: a decision because live workflow records cannot be adopted while workflow support is disabled.
       LOGGER.warn(
         { live_workflows: open.liveWorkflows.length },
-        "GetLiveWork reports live workflow runs; WORKFLOW IS KICKED this wave, so they are neither re-adopted nor closed",
+        "GetLiveWork reports live workflow runs while workflow support is disabled; they are neither adopted nor closed",
       );
     }
     if (closing.length > 0) deps.persistence.write(closing);
@@ -2278,9 +2281,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       BigInt(facts.contextTokens) > request.coldThresholdTokens &&
       request.coldRemediation === undefined
     ) {
-      LOGGER.warn(
+      LOGGER.debug(
         { model: model.name, context_tokens: facts.contextTokens },
-        "REFUSED SetSessionModel: switching model is a cold cache above the caller's threshold",
+        "refused SetSessionModel because switching models crosses the caller's cold-cache threshold",
       );
       return setSessionModelRefused(
         { kind: "cold", cold: sessionCold(facts, "model_switch", model.name) },
@@ -2482,9 +2485,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const announceable = live.announceable();
     const busy = open !== undefined || announceable.length > 0;
     if (busy && !request.force) {
-      LOGGER.warn(
+      LOGGER.debug(
         { turn_in_flight: open?.id.value ?? "", live_work: announceable.length },
-        "REFUSED KillSession: the session is live and force was not set",
+        "refused KillSession because the session is live and force was not set",
       );
       return killSessionRefused(
         { kind: "live", live: sessionLive() },
@@ -2520,7 +2523,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   function endProcess(): void {
     const code = lostRowsAtStandDown > 0 ? 1 : 0;
     if (deps.endProcess === undefined) {
-      LOGGER.warn(
+      LOGGER.info(
         { exit_code: code },
         "the session ended with no process to end; this build drives the engine in-process",
       );
@@ -2563,6 +2566,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       try {
         await active.interrupt();
       } catch (err) {
+        // warn: a defect because teardown continued after the vendor refused its interrupt.
         LOGGER.warn(
           { cause: err instanceof Error ? err.message : String(err) },
           "the vendor refused the interrupt during teardown; continuing",
@@ -2577,6 +2581,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         try {
           await active.stopTask(entry.taskId);
         } catch (err) {
+          // warn: a defect because teardown continued after a detached item could not be stopped.
           LOGGER.warn(
             { task_id: entry.taskId, cause: err instanceof Error ? err.message : String(err) },
             "could not stop a detached item during teardown; continuing",
@@ -2618,7 +2623,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     lostRowsAtStandDown = flushed.lostRows;
     if (flushed.lostRows > 0) {
       LOGGER.error(
-        { reason, lost_rows: flushed.lostRows },
+        { reason, lost_rows: flushed.lostRows, detail: "store writes remained unacknowledged at stand-down" },
         "stood the session down with rows the store never acked; the record is incomplete",
       );
     }
@@ -2654,7 +2659,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         // Tracked for liveness, addressable by nobody: there is no unit to
         // settle, and inventing one would put work on a stream that never
         // announced it.
-        LOGGER.warn(
+        LOGGER.debug(
           { task_id: entry.taskId },
           "a stopped detached item names no originating call; it has no unit to settle",
         );
@@ -2725,6 +2730,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         } catch (err) {
           // The head could not be read, so there is no pointer to conclude
           // through; ending the tail now is still better than cutting it later.
+          // warn: a defect because watcher conclusion continued without a durable book head.
           LOGGER.warn(
             { agent: entry.agent.value, cause: err instanceof Error ? err.message : String(err) },
             "could not read a book's head while concluding its watcher; ending the tail unbounded",
@@ -2825,7 +2831,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     try {
       const outcome = await Promise.race([work.then(() => "ended" as const), expiry]);
       if (outcome === "expired") {
-        LOGGER.error({ budget_ms: budgetMs }, complaint);
+        LOGGER.error({ budget_ms: budgetMs, detail: complaint }, complaint);
       }
     } finally {
       if (timer !== undefined) clearTimeout(timer);

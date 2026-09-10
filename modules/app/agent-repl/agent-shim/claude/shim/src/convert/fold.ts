@@ -226,7 +226,7 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // unmodelled: it has no identity for either plane to key on, so the two
       // planes could never collapse it into one row. That is a failure, and
       // `unparsed` is the arm that says so investigably.
-      LOGGER.warn(
+      LOGGER.debug(
         { sdk_message_type: type },
         "an attachment record carried no uuid; it cannot be keyed and lands unparsed",
       );
@@ -308,7 +308,7 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       };
 
     default:
-      LOGGER.warn(
+      LOGGER.debug(
         { sdk_message_type: type },
         "no converter owns this SDK message type; it lands as residue",
       );
@@ -382,6 +382,7 @@ function settleClear(
   if (pending === undefined) return [];
   const sessionId = (message as { session_id?: unknown }).session_id;
   if (typeof sessionId !== "string" || sessionId === "") {
+    // warn: a defect because a reset without its replacement session leaves the cut pending.
     LOGGER.warn(
       { uuid: pending.vendorUuid },
       "the init after a conversation reset named no session; the clear's cut is still held",
@@ -418,6 +419,7 @@ function settleCompaction(
       ? content
       : "";
   if (summary === "") {
+    // warn: a defect because a compaction without summary prose leaves the cut pending.
     LOGGER.warn(
       {},
       "the assistant message after a compaction boundary carried no prose; the cut is still held",
