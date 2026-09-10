@@ -441,6 +441,22 @@ type wsState struct {
 	// id, so a shell that DETACHES from a unit can be described from the unit
 	// it detached from (the announcement carries no command of its own).
 	bashUnits map[string]*shellRow
+	// retiredWork are the detached handles that have already reached a
+	// terminal, so a REPLAY of the run's opening frames cannot count it live
+	// again.
+	//
+	// WHY A SET AND NOT JUST THE MAP. A detached run's frames reach this
+	// daemon on BOTH books -- the spawning agent's, where the producer settles
+	// the unit, and the run's own, which the watcher opened at the
+	// announcement -- and the two deliveries are not ordered against each
+	// other. Measured in the G50 playbook: `AgentSubagent_Success` for a
+	// handle arrived on the caller's book and retired the row, and 80ms later
+	// the same handle's `AgentSubagent_Start` arrived on the run's own book
+	// and RE-OPENED it, so the ⚙ chip read 3 beside two settled placements and
+	// one live one, for the rest of the session. A handle is minted once and
+	// its terminal is final, so a start after a terminal is a second telling
+	// of a finished run rather than a new one.
+	retiredWork map[string]struct{}
 	// seq mints the panel orders so a row's place is its arrival order.
 	seq int
 }
@@ -466,6 +482,7 @@ func newWSState() *wsState {
 		tasks:       map[string]*taskRow{},
 		crons:       map[string]*cronRow{},
 		bashUnits:   map[string]*shellRow{},
+		retiredWork: map[string]struct{}{},
 		tok:         newTokenState(),
 	}
 }
