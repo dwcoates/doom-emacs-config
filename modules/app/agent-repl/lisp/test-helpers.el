@@ -269,6 +269,12 @@ advice's effect would be invisible)."
   (defun hack-dir-local-variables-non-file-buffer () "Stub." nil))
 (unless (boundp '+workspaces-switch-project-function)
   (defvar +workspaces-switch-project-function nil "Stub."))
+;; Doom's own default, stubbed at its own value rather than at nil: what
+;; `agent-repl--ws-install-persp-policy' has to overcome is precisely the
+;; `non-empty' recycle branch, so a stub starting anywhere else would let a
+;; test pass without the policy having changed anything.
+(unless (boundp '+workspaces-on-switch-project-behavior)
+  (defvar +workspaces-on-switch-project-behavior 'non-empty "Stub."))
 (unless (fboundp 'persp-contain-buffer-p)
   (defun persp-contain-buffer-p (_buf _persp) "Stub." nil))
 (unless (fboundp 'persp-remove-buffer)
