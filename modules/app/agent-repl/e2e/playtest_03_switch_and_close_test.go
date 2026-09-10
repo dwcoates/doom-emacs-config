@@ -317,6 +317,45 @@ func barFaceColors(t *testing.T, s *playtestScenario) string {
 		"`tab-bar` %s", parts[0], parts[2], parts[1], parts[3], parts[4])
 }
 
+// assertHighlightFollowsSelection requires the tab the bar draws with the
+// SELECTION face to be the one `agent-repl--ws-current-name` names, and every
+// other tab not to carry it.
+//
+// WHY IT IS WORTH ASSERTING, given the panel assertions beside it. Those read
+// which buffer a window holds, which is where the selection LANDED; this
+// reads which tab the bar drew as selected, which is what the user is told
+// about it. The two can disagree -- a bar rendered from a stale render key
+// would keep the highlight where it was -- and only this one would notice.
+//
+// IT ALSO SETTLES A MISREADING THAT COST A ROUND. A `:ready` or `:done` tab
+// is painted `agent-repl--color-done-green' (`#1a7a1a`) across its whole
+// unselected entry, and the SELECTED tab is painted Doom's own selection face
+// (`#b4eeb4` on this frame). Both are green, so a picture with an armed
+// unselected tab beside the selected one reads at a glance as two highlights,
+// and was filed as "the highlight follows the arm rather than the selection".
+// Measured off those very pixels it did not: the selection face sat on the
+// current workspace's tab throughout. An assertion on the FACE says which tab
+// the bar called selected without anyone having to tell two greens apart.
+func assertHighlightFollowsSelection(t *testing.T, s *playtestScenario, after string) {
+	t.Helper()
+	current := s.E.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
+	names := s.tabNames()
+	for _, name := range names {
+		selected := s.E.EvalBool(`(let* ((line (agent-repl-workspace-tabline-formatted))
+                                        (plain (substring-no-properties line))
+                                        (at (string-match (regexp-quote ` + elispString(name) + `) plain)))
+                                   (unless at (error "the drawn tabline does not carry %s" ` + elispString(name) + `))
+                                   (and (eq (get-text-property at 'face line)
+                                            (agent-repl--ws-tab-selected-face))
+                                        t))`)
+		if want := name == current; selected != want {
+			t.Fatalf("after %s the bar draws %q with selected=%v, want %v: "+
+				"`agent-repl--ws-current-name` is %q and the tab bar's selection face belongs to that "+
+				"tab and to no other. The bar drew %v.", after, name, selected, want, current, names)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // THE BAR MUST BE READABLE, AND THAT IS READ OFF THE PICTURE
 // ---------------------------------------------------------------------------
@@ -584,6 +623,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 	if len(names) != 2 {
 		t.Fatalf("the tab bar draws %v, want both workspaces", names)
 	}
+	assertHighlightFollowsSelection(t, s, "registering the second workspace")
 	twoTabsShot := p.capture("two-tabs", "a second repository registered through the same verb, and its panel opened",
 		fmt.Sprintf("`agent-repl--ws-tabline-names` is %v, `agent-repl--ws-current-name` is %q, and the "+
 			"panel's windows hold %q's own webview and composer buffers and NOT %q's, and that page's "+
@@ -617,6 +657,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 	awaitPanelFollows(t, s, firstName, secondName)
 	awaitPageIsForWorkspace(t, s, first.Dir)
 	awaitSidebarNamesCurrent(t, s, firstName)
+	assertHighlightFollowsSelection(t, s, "`agent-repl-switch-to-project`")
 	switchedBackShot := p.capture("switched-back", "`agent-repl-switch-to-project` back to the first workspace",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the panel's windows now hold %q's own webview "+
 			"and composer and NOT %q's, that webview's page is mounted (its feed host is drawn and its "+
@@ -644,6 +685,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 	awaitPanelFollows(t, s, secondName, firstName)
 	awaitPageIsForWorkspace(t, s, second.Dir)
 	awaitSidebarNamesCurrent(t, s, secondName)
+	assertHighlightFollowsSelection(t, s, "`SPC TAB R`")
 	switchedMostRecentShot := p.capture("switched-most-recent", "`SPC TAB R` (`agent-repl-open-most-recent-workspace`) pressed",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the panel's windows hold %q's own webview and "+
 			"composer and NOT %q's, that webview's page is mounted, and that page's sidebar draws %q's "+
