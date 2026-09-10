@@ -512,8 +512,12 @@ body::after {
   font-weight: 700;
 }
 #ws-sidebar .repo-head:hover { background: var(--card); }
-#ws-sidebar .repo-head .tri { transition: transform 0.12s; font-size: 1.05rem; line-height: 1; }
-#ws-sidebar .repo.folded .tri { transform: rotate(-90deg); }
+/* THE GLYPH IS THE DIRECTION. `paintTriangle` (sidebar/roster.ts) writes the
+   triangle itself -- ▸ folded, ▾ open -- so a CSS rotation on top of it turns
+   the folded ▸ a further quarter turn and draws ▲, which reads as "collapse
+   me" on a section that is already collapsed. One author for the direction,
+   and it is the element's own text. */
+#ws-sidebar .repo-head .tri { font-size: 1.05rem; line-height: 1; }
 #ws-sidebar .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
 #ws-sidebar .repo.folded .rows { display: none; }
 

@@ -10,6 +10,7 @@ import {
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { MERGED_FOLD_KEY, repoFoldKey, taskFoldKey } from "../../src/sidebar/context.js";
 import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
   appContext,
   memoryPrefs,
@@ -171,6 +172,33 @@ describe("recently merged", () => {
     expect(
       pane(drawn, "repository").querySelector(".merged-section")?.classList.contains("folded"),
     ).toBe(true);
+  });
+
+  it("points its folded triangle at the rows it is hiding", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(
+      pane(drawn, "repository").querySelector(".merged-section [data-section-fold]")?.textContent,
+    ).toBe("\u25b8");
+  });
+
+  it("lets the glyph state the fold, with no second turn from the stylesheet", () => {
+    // The glyph is written by `paintTriangle`; a CSS rotation on top of it
+    // turned the folded \u25b8 a further quarter turn and drew \u25b2, which
+    // reads as "collapse me" on a section already collapsed.
+    const teardown = installStylesheet();
+    try {
+      const rail = document.createElement("div");
+      rail.id = "ws-sidebar";
+      rail.appendChild(drawWorkspaceRoster(roster(), sidebarContext()));
+      document.body.appendChild(rail);
+      const triangle = rail.querySelector(
+        ".merged-section.folded [data-section-fold]",
+      ) as HTMLElement;
+      expect(cascadedValue(triangle, "transform")).toBe("none");
+      rail.remove();
+    } finally {
+      teardown();
+    }
   });
 
   it("remembers its fold under the one fixed key", async () => {
