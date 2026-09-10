@@ -729,6 +729,14 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	return h
 }
 
+// publishedWorkspaces answers the workspaces whose fresh views were published,
+// which is the last step of an adoption and therefore proof it ran to the end.
+func (h *harness) publishedWorkspaces() []ids.WorkspaceID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.published...)
+}
+
 // workspace registers one workspace served by this daemon, with a live shim.
 func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 	t.Helper()

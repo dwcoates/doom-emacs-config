@@ -682,7 +682,29 @@ NOTHING IS LEFT MOVED BY A FAILED ADOPT.  The old stream is kept standing
 on every failure path — a workspace whose old stream was dropped and
 whose adopt did not land would be served by nobody — and `:conn' and the
 webview are put back where they were, so a refusal or a transport failure
-leaves the workspace on the daemon that still serves it."
+leaves the workspace on the daemon that still serves it.
+
+A TRANSPORT FAILURE IS RETRIED, AND NOT RETRYING IT COST THE WHOLE
+ADOPTION WINDOW.  The adopt is an ordinary unary call under
+`agent-repl-connect-unary-timeout-seconds' (10s, connect.el), while the
+rendezvous it joins completes only when EVERY participant has called —
+so on a loaded box this call can expire on a rendezvous that is merely
+still waiting for the page, and a dropped socket does the same thing.
+Left there, the workspace was never adopted by anybody: the successor
+adopts headless workspaces itself and RETRIES them
+\(`daemon/internal/rollout/adopt.go', `retryHeadless'), but a workspace
+with participants has no retry of its own — the participant IS the retry.
+The outgoing daemon then waits out its full `DefaultAdoptionWindow' (30s)
+for it, which delays its exit, which delays the primary stream close
+Emacs promotes on — `TestEmacsHandoverTransfersAtFreeness' missing a 21s
+bound on a promotion healthy runs make in ~2s.
+
+So a failure re-walks the adopt after `agent-repl-host-handover-retry-delay',
+exactly as a `not_yet_adopted' refusal already does, and STOPS when the
+successor NEW is no longer the standing one: a promotion or a lost
+successor stream clears it, and there is then nothing left to adopt onto.
+A refusal is not retried here — the daemon answered, and its arms have
+their own walk."
   (let ((ref (agent-repl-host-ref ws))
         (address (agent-repl-connect-connection-address new))
         (old (agent-repl-host-conn ws)))
@@ -716,7 +738,14 @@ leaves the workspace on the daemon that still serves it."
          :on-failure
          (lambda (detail)
            (funcall restore)
-           (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S" ws detail)))))))
+           (if (eq new (agent-repl-link-successor))
+               (progn
+                 (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
+                                    ws detail)
+                 (run-at-time agent-repl-host-handover-retry-delay nil
+                              #'agent-repl-host--adopt-onto ws new))
+             (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil"
+                                ws detail))))))))
 
 (defun agent-repl-host--transferred (ws &optional _value)
   "Adopt WS onto the successor daemon after the old one released it.
