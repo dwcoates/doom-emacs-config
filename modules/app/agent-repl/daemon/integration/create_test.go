@@ -3,8 +3,10 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -306,6 +308,200 @@ func TestCreateWorkspaceForkPortsTheParentsTranscriptAndResumesIt(t *testing.T) 
 	if _, err := os.Stat(transcript); err != nil {
 		t.Fatalf("stat the parent's transcript %s: %v, want it left in place", transcript, err)
 	}
+}
+
+// TestCreateWorkspaceForkRemintsEveryIdentityInTheChildsTranscript covers the
+// fork's FILE PLANE. A fork mints a new AgentId, so the ported history must be
+// the child's own conversation: the sidecar keys rows out of the records
+// themselves (`activity:<tool_use_id>`, `terminal:<agent>:<record uuid>`), so a
+// byte copy would re-key the parent's rows under the child's book, the store
+// would refuse the batch ("would move the row from book A to book B"), and the
+// child's transcript would be parked instead of read.
+func TestCreateWorkspaceForkRemintsEveryIdentityInTheChildsTranscript(t *testing.T) {
+	t.Parallel()
+	// Arrange: a parent whose transcript carries the identity material the file
+	// plane keys on -- record uuids linked across records, an assistant message
+	// id, a tool_use settled by a tool_result -- plus the sidecar directory a
+	// spawned subagent leaves beside it.
+	f := newOpened(t, harness.Opts{})
+	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
+		t.Fatalf("the parent's StartSession = %v, want fresh", req)
+	}
+	vendorID := f.shim.Info().VendorSessionID
+	if vendorID == "" {
+		t.Fatal("the fake shim reports no vendor session id after StartSession(fresh)")
+	}
+	parentProject := createProjectDir(f.d.DefaultConfigDir, f.ws.GetDir())
+	if err := os.MkdirAll(parentProject, 0o755); err != nil {
+		t.Fatalf("mkdir the parent's project dir: %v", err)
+	}
+	transcript := filepath.Join(parentProject, vendorID+".jsonl")
+	parentBody := strings.Join([]string{
+		`{"type":"user","uuid":"` + forkRecordOne + `","sessionId":"` + vendorID + `","message":{"role":"user","content":"go"}}`,
+		`{"type":"assistant","uuid":"` + forkRecordTwo + `","parentUuid":"` + forkRecordOne + `","sessionId":"` + vendorID +
+			`","message":{"id":"` + forkMessageID + `","content":[{"type":"tool_use","id":"` + forkToolUseID + `","name":"Agent","input":{"subagent_type":"Explore"}}]}}`,
+		`{"type":"user","uuid":"` + forkRecordThree + `","parentUuid":"` + forkRecordTwo + `","sessionId":"` + vendorID +
+			`","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"` + forkToolUseID + `","content":"done"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcript, []byte(parentBody), 0o644); err != nil {
+		t.Fatalf("seed the parent's transcript: %v", err)
+	}
+	subagents := filepath.Join(parentProject, vendorID, "subagents")
+	if err := os.MkdirAll(subagents, 0o755); err != nil {
+		t.Fatalf("mkdir the parent's sidecar: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subagents, "agent-"+forkLocator+".meta.json"),
+		[]byte(`{"agentType":"Explore","description":"look","toolUseId":"`+forkToolUseID+`","spawnDepth":1}`), 0o644); err != nil {
+		t.Fatalf("seed the subagent meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subagents, "agent-"+forkLocator+".jsonl"),
+		[]byte(`{"type":"user","uuid":"`+forkRecordFour+`","agentId":"`+forkLocator+`","isSidechain":true,"sessionId":"`+vendorID+`"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("seed the subagent transcript: %v", err)
+	}
+	repository := createRepositoryRef(t, f.d, f.repo)
+
+	// Act
+	resp, err := f.d.Client().CreateWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
+		Parent: &agentreplv1.CreateWorkspaceParent{
+			Workspace: f.ws,
+			Fork:      &agentreplv1.CreateWorkspaceFork{},
+		},
+	}))
+
+	// Assert: the child came up on a conversation of its own.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(fork) = (%v, %v), want a success", resp, err)
+	}
+	child := resp.Msg.GetSuccess().GetWorkspace()
+	forked := f.d.Shim(child).ExpectStartSession().GetResume().GetVendorSessionId()
+	if forked == "" || forked == vendorID {
+		t.Fatalf("the forked child resumes %q, want a fresh vendor session id and never the parent's %q", forked, vendorID)
+	}
+
+	// Assert: NOTHING the parent was identified by survives into the child's
+	// files -- transcript or sidecar.
+	childProject := createProjectDir(f.d.DefaultConfigDir, child.GetDir())
+	childSidecar := filepath.Join(childProject, forked, "subagents")
+	ported := forkReadFile(t, filepath.Join(childProject, forked+".jsonl"))
+	locator := forkSubagentLocator(t, childSidecar)
+	portedMeta := forkReadFile(t, filepath.Join(childSidecar, "agent-"+locator+".meta.json"))
+	portedSubagent := forkReadFile(t, filepath.Join(childSidecar, "agent-"+locator+".jsonl"))
+	whole := ported + portedMeta + portedSubagent
+	for _, identity := range []string{
+		vendorID, forkRecordOne, forkRecordTwo, forkRecordThree, forkRecordFour,
+		forkMessageID, forkToolUseID, forkLocator,
+	} {
+		if strings.Contains(whole, identity) {
+			t.Fatalf("the child's ported conversation still carries the parent's identity %q:\n%s", identity, whole)
+		}
+	}
+
+	// Assert: the mapping was ONE mapping -- the links inside the history still
+	// point at each other, and the sidecar agrees with the transcript about
+	// which call spawned the subagent.
+	// The child's own session appends to the file it resumes (the fake shim
+	// lays down a session_started line, as the vendor CLI does), so the ported
+	// HISTORY is the leading three records.
+	lines := strings.Split(strings.TrimRight(ported, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("the ported transcript has %d lines, want at least the parent's 3:\n%s", len(lines), ported)
+	}
+	lines = lines[:3]
+	if got, want := forkField(t, lines[1], "parentUuid"), forkField(t, lines[0], "uuid"); got != want {
+		t.Fatalf("parentUuid = %q, want the re-minted uuid %q of the record it links to", got, want)
+	}
+	if got, want := forkField(t, lines[2], "parentUuid"), forkField(t, lines[1], "uuid"); got != want {
+		t.Fatalf("parentUuid = %q, want the re-minted uuid %q of the record it links to", got, want)
+	}
+	if got, want := forkField(t, lines[0], "sessionId"), forked; got != want {
+		t.Fatalf("sessionId = %q, want the child's own vendor session id %q", got, want)
+	}
+	call := forkBlockID(t, lines[1])
+	if got := forkField(t, lines[2], "message", "content", "0", "tool_use_id"); got != call {
+		t.Fatalf("the tool_result settles %q, want the re-minted call %q it was paired with", got, call)
+	}
+	if got := forkField(t, portedMeta, "toolUseId"); got != call {
+		t.Fatalf("the subagent meta names %q as its spawning call, want the transcript's own %q", got, call)
+	}
+	if got := forkField(t, portedSubagent, "agentId"); got != locator {
+		t.Fatalf("the subagent record states agentId %q, want its own file name's locator %q", got, locator)
+	}
+}
+
+// The parent identities the fork test seeds, all of which the child's files must
+// be free of.
+const (
+	forkRecordOne   = "11111111-1111-4111-8111-111111111111"
+	forkRecordTwo   = "22222222-2222-4222-8222-222222222222"
+	forkRecordThree = "33333333-3333-4333-8333-333333333333"
+	forkRecordFour  = "44444444-4444-4444-8444-444444444444"
+	forkMessageID   = "msg_01ForkParentMessage"
+	forkToolUseID   = "toolu_01ForkParentCall"
+	forkLocator     = "aef975b7bc3422d4b"
+)
+
+// forkReadFile reads one of the child's ported files.
+func forkReadFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) = %v, want the ported file", path, err)
+	}
+	return string(raw)
+}
+
+// forkSubagentLocator answers the re-minted `agent-<id>` the child's sidecar
+// filed its one subagent under.
+func forkSubagentLocator(t *testing.T, dir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s) = %v, want the ported sidecar", dir, err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "agent-") && strings.HasSuffix(entry.Name(), ".jsonl") {
+			return strings.TrimSuffix(strings.TrimPrefix(entry.Name(), "agent-"), ".jsonl")
+		}
+	}
+	t.Fatalf("the ported sidecar %s holds %v, want a subagent transcript", dir, entries)
+	return ""
+}
+
+// forkField walks one ported record to a string leaf; a numeric step indexes an
+// array.
+func forkField(t *testing.T, body string, steps ...string) string {
+	t.Helper()
+	var value any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &value); err != nil {
+		t.Fatalf("Unmarshal(%q) = %v", body, err)
+	}
+	for _, step := range steps {
+		switch typed := value.(type) {
+		case map[string]any:
+			value = typed[step]
+		case []any:
+			index, err := strconv.Atoi(step)
+			if err != nil || index >= len(typed) {
+				t.Fatalf("step %q does not index %v", step, typed)
+			}
+			value = typed[index]
+		default:
+			t.Fatalf("step %q has nothing to walk in %v", step, typed)
+		}
+	}
+	leaf, ok := value.(string)
+	if !ok {
+		t.Fatalf("%v is not a string leaf of %q", value, body)
+	}
+	return leaf
+}
+
+// forkBlockID answers the tool_use block's re-minted id.
+func forkBlockID(t *testing.T, line string) string {
+	t.Helper()
+	return forkField(t, line, "message", "content", "0", "id")
 }
 
 // ---- One-shot create ----
