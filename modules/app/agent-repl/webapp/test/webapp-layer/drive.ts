@@ -103,6 +103,25 @@ export async function awaitDrawn(
   predicate: () => boolean,
   budgetMs = TURN_BUDGET_MS,
 ): Promise<void> {
+  await awaitSettled(app, `${what} was never drawn`, predicate, budgetMs);
+}
+
+/**
+ * The settle loop `awaitDrawn` is made of, with the caller supplying the whole
+ * phrase rather than a row's name.
+ *
+ * SPLIT OUT rather than copied: `send` waits on the composer, which is not a
+ * row and does not read as "was never drawn", and a second hand-rolled loop is
+ * a second place for a sleep to appear later. The diagnostic is the same one
+ * either way — the round count and the drawn rows are what tell a starved page
+ * from an unanswered one, whichever wait timed out.
+ */
+async function awaitSettled(
+  app: MountedApp,
+  phrase: string,
+  predicate: () => boolean,
+  budgetMs: number,
+): Promise<void> {
   // Date.now() advances with real time here (`shouldAdvanceTime`), so this
   // measures the real budget rather than the page's own fake clock.
   const started = Date.now();
@@ -122,7 +141,7 @@ export async function awaitDrawn(
     if (predicate()) return;
     if (Date.now() >= deadline) {
       throw new Error(
-        `${what} was never drawn within ${budgetMs}ms ` +
+        `${phrase} within ${budgetMs}ms ` +
           `(${rounds} settle rounds in ${Date.now() - started}ms of wall clock; ` +
           `a low count for the budget means this page was starved of CPU rather than left unanswered); ` +
           `row kinds drawn: [${drawnKinds(app).join(", ")}]; ` +
@@ -155,12 +174,90 @@ export async function type(
   await app.settle();
 }
 
-/** Submit whatever is typed into the given composer. */
+/**
+ * How long the composer is given to be ready to take the next press.
+ *
+ * REUSED, NOT MINTED: what this waits out is the TAIL OF THE PREVIOUS
+ * SUBMISSION — `composer.ts` disables the button for the whole of its
+ * `SubmitPrompt` unary and re-enables it in that call's `finally` — so the
+ * thing being bounded is one real unary against a loopback daemon, which is
+ * strictly less than the turn TURN_BUDGET_MS already bounds. It takes that
+ * budget rather than inventing a third number.
+ *
+ * ON A HEALTHY CHAIN THIS WAIT IS ZERO ROUNDS: `driveTurn` only returns once
+ * the turn's own rows are drawn, and the unary answers long before them. It
+ * bounds a composer that is CLOSED (the footer reading merging, closing or
+ * disconnected), which is a fault to name rather than a press to drop.
+ */
+export const COMPOSER_READY_BUDGET_MS = TURN_BUDGET_MS;
+
+/**
+ * Submit whatever is typed into the given composer.
+ *
+ * THE PRESS IS WAITED FOR AND THEN PROVEN, because `composer.ts` DROPS a press
+ * it cannot take: `submit()` returns silently when the button is disabled,
+ * when a submission is still in flight, or when the box is empty. A dropped
+ * press sent nothing, so the turn it was for never started and the test that
+ * waited for its row failed five seconds later naming the ROW — a chain that
+ * was never asked anything read as a chain that never answered.
+ *
+ * MEASURED, on the run that produced this fix (`feed-families.layer.test.ts`,
+ * `!rotate`, 2026-09-10): the page completed 11514 settle rounds inside its 5s
+ * budget with NOTHING in flight, and the shim recorded no `StartTurn` at all
+ * between the previous turn's (16:32:39.258) and the NEXT test's
+ * (16:32:44.446). The press had been dropped: the harness's in-flight set
+ * clears when a response HEAD lands, while the composer stays `inFlight` until
+ * the whole unary resolves, so `settle()` could report the page quiet with the
+ * button still disabled.
+ *
+ * Two things close it, and both are here rather than in the app — a composer
+ * that ignores a press while one submission is in flight is what production
+ * WANTS:
+ *
+ *   * the press WAITS for a pressable button, so the window cannot be entered;
+ *   * the press is CHECKED, synchronously, before anything settles. `submit()`
+ *     disables the button in the click handler itself, so a button still
+ *     enabled on the next line means the press was dropped — and it is named
+ *     here, at the press, instead of surfacing as a missing row later.
+ */
 export async function send(
   app: MountedApp,
   host = '[data-component="composer"]',
 ): Promise<void> {
-  await app.click(`${host} [data-composer-send]`);
+  const selector = `${host} [data-composer-send]`;
+  const button = (): HTMLButtonElement | null =>
+    app.$(selector) as HTMLButtonElement | null;
+  if (button() === null) throw new Error(`no composer send button at ${selector}`);
+
+  await awaitSettled(
+    app,
+    `the composer send button at ${selector} never became pressable`,
+    () => button()?.disabled === false,
+    COMPOSER_READY_BUDGET_MS,
+  );
+
+  const pressed = button();
+  if (pressed === null) throw new Error(`the composer send button at ${selector} went away`);
+  // NOT `app.click`, which settles: the proof below must be read BEFORE the
+  // event loop turns, or the unary this press starts could already have
+  // answered and re-enabled the button.
+  pressed.click();
+  if (!pressed.disabled) {
+    throw new Error(
+      `the composer at ${selector} DROPPED the press and submitted nothing ` +
+        `(composer.ts returns silently when the box is empty, when the gate is ` +
+        `closed, or while a submission is in flight); ` +
+        `the box holds ${JSON.stringify(typedText(app, host))}; ` +
+        `refusal arms: [${app.refusalArms().join(", ")}]`,
+    );
+  }
+  await app.settle();
+}
+
+/** What is typed in a composer right now, for a diagnostic. */
+function typedText(app: MountedApp, host: string): string {
+  const input = app.$(`${host} textarea`) as HTMLTextAreaElement | null;
+  return input?.value ?? "";
 }
 
 /** Type and send one prompt through the app's own composer. */
