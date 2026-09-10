@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -191,6 +192,39 @@ func (s *playtestScenario) pt20Select(t *testing.T, dir, name string) {
 		func(raw json.RawMessage) bool { return decodeString(raw) == name })
 }
 
+// pt20RequireTabs holds the tab bar to the workspaces a picture is ABOUT,
+// and says WHERE a missing one was lost when it is not there.
+//
+// `agent-repl--ws-tabline-names` is an INTERSECTION -- the roster's own tab
+// order kept to the names the perspective layer and the module's registry
+// both know (`lisp/workspace.el`) -- so a name absent from the bar was
+// dropped by exactly one of two halves, and a count that merely came out
+// wrong says neither. K.63's merging workspace went missing from a run whose
+// daemon log showed the roster resolving its row a moment earlier, and the
+// assertion could only report the two names that survived. So both halves are
+// read back and reported.
+func (s *playtestScenario) pt20RequireTabs(t *testing.T, what string, want ...string) {
+	t.Helper()
+	got := s.tabNames()
+	missing := make([]string, 0, len(want))
+	for _, name := range want {
+		if !slices.Contains(got, name) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	order := s.E.EvalStrings(`(agent-repl-roster-tab-order)`)
+	known := s.E.EvalStrings(emGHIWorkspaceNamesForm)
+	persps := s.E.EvalStrings(`(if (boundp 'persp-names-cache) persp-names-cache nil)`)
+	t.Fatalf("the tab bar draws %v, and %s is missing %v: the roster's own tab order is %v, the names "+
+		"the module owns are %v, and the perspective layer's own cache is %v -- a name in the first "+
+		"two but not the third was lost by the perspective layer, and one absent from the order was "+
+		"never pushed",
+		got, what, missing, order, known, persps)
+}
+
 // pt20OpenPanelFor points the scenario at NAME and opens THAT workspace's
 // panel, in one step because the two cannot be separated.
 //
@@ -284,9 +318,7 @@ func TestPlaytestTwoWorkspacesThinkingAtOnce(t *testing.T) {
 			"workspaces park on the same text", secondName))
 
 	// Assert and capture: BOTH arms, re-read at one instant, in one picture.
-	if names := s.tabNames(); len(names) != 2 {
-		t.Fatalf("the tab bar draws %v, want both workspaces", names)
-	}
+	s.pt20RequireTabs(t, "the bar this step's picture is of", firstName, secondName)
 	s.pt20CaptureArms(t, "both-thinking",
 		"two workspaces each holding a turn parked on the fake's one gate",
 		[]pt20ArmClaim{{WS: firstName, Want: ":thinking"}, {WS: secondName, Want: ":thinking"}},
@@ -508,6 +540,17 @@ func TestPlaytestMergeBesideRunningTurn(t *testing.T) {
 		emGHIWorkspaceNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(before)+1 }))
 	merging := emHO40AddedName(t, before, after)
+	// THE TAB IS WAITED FOR HERE, not at the picture. A create's perspective
+	// switch is DEFERRED onto a timer inside `agent-repl-switch-to-project`
+	// (`playtest_02_create_and_fork_test.go` says so at its own create), so
+	// the registry carries the workspace before the perspective layer does
+	// and `agent-repl--ws-tabline-names` -- an intersection of the two --
+	// drops it in between. Waiting here is what distinguishes "the tab never
+	// arrived" from "the tab arrived and something later took it away", and
+	// the run that sent this playbook looking was the second kind.
+	s.E.AwaitEval(fmt.Sprintf("the tab bar to carry the created workspace %q", merging),
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return slices.Contains(decodeStrings(raw), merging) })
 	s.awaitArm(t, merging, "the merging workspace's opening turn to conclude", emGHISettledArms...)
 	mergingDir := e.EvalString(`(or (plist-get (agent-repl-host-ref ` + elispString(merging) + `) :dir) "")`)
 	if mergingDir == "" {
@@ -524,6 +567,11 @@ func TestPlaytestMergeBesideRunningTurn(t *testing.T) {
 	s.pt20OpenPanelFor(t, otherName)
 	s.submit(t, pt20GatedPrompt)
 	s.awaitArm(t, otherName, "the other workspace's turn to reach thinking", ":thinking")
+	// A THIRD WORKSPACE ARRIVING MUST NOT COST THE SECOND ITS TAB, and this
+	// section is the only one that can say so: every other owner registers
+	// one repository. It is checked HERE rather than only at the picture so a
+	// tab lost to this step is not reported against the merge two acts later.
+	s.pt20RequireTabs(t, "the bar after a second repository joined it", repoName, merging, otherName)
 	p.note("a second repository registered, its panel opened, and the gated prompt submitted in it",
 		fmt.Sprintf("%q's arm is `:thinking`, parked on the fake's turn gate", otherName))
 
@@ -544,9 +592,7 @@ func TestPlaytestMergeBesideRunningTurn(t *testing.T) {
 	// the merge gate -- while the other workspace is still thinking.
 	s.awaitArm(t, merging, "the merging workspace's arm to reach merging", pt20MergingArm)
 	s.awaitArm(t, otherName, "the other workspace's turn to still be thinking", ":thinking")
-	if names := s.tabNames(); len(names) < 3 {
-		t.Fatalf("the tab bar draws %v, want the repository, the merging workspace and the turning one", names)
-	}
+	s.pt20RequireTabs(t, "the bar this step's picture is of", repoName, merging, otherName)
 	s.pt20CaptureArms(t, "merging-beside-thinking",
 		"the merge enqueued through `agent-repl-merge-workspace` and parked on the scripted test gate, "+
 			"with the other workspace's turn still parked on the fake's turn gate",
