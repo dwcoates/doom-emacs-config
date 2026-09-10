@@ -179,14 +179,26 @@ describe("taskActConverter.settle — TaskCreate", () => {
     expect(act.state?.subject).toBe("from input");
   });
 
-  it("records an EMPTY subject when neither the tracker nor the input named one", () => {
+  it("leaves the subject UNSET when neither the tracker nor the input named one", () => {
     // Arrange, Act.
     const act = actOf(
       taskActConverter.settle(call("TaskCreate", { description: "d" }), outcome({ task: { id: "9" } })),
     );
 
     // Assert. The create still lands — an unnamed task is a real row, not a
-    // reason to drop the tracker's own identity.
+    // reason to drop the tracker's own identity — and the field carries
+    // presence, so "nobody named one" is UNSET rather than an empty subject a
+    // consumer would apply over the one it holds.
+    expect(act.state?.subject).toBeUndefined();
+  });
+
+  it("states a subject the caller named EMPTY, which is not the same as naming none", () => {
+    // Arrange, Act.
+    const act = actOf(
+      taskActConverter.settle(call("TaskCreate", { subject: "" }), outcome({ task: { id: "9" } })),
+    );
+
+    // Assert.
     expect(act.state?.subject).toBe("");
   });
 
@@ -283,6 +295,33 @@ describe("taskActConverter.settle — TaskUpdate", () => {
 
     // Assert.
     expect(act.state?.status.case).toBe("pending");
+  });
+
+  it("leaves the subject UNSET for an update that names only a status", () => {
+    // Arrange.
+    const structured = { success: true, taskId: "1", statusChange: { to: "completed" } };
+
+    // Act.
+    const act = actOf(
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1", status: "completed" }), outcome(structured)),
+    );
+
+    // Assert: the act says nothing about the subject, so a checklist keeps the
+    // one it holds instead of drawing a bare glyph.
+    expect(act.state?.subject).toBeUndefined();
+  });
+
+  it("leaves the description UNSET for an update that names none", () => {
+    // Arrange.
+    const structured = { success: true, taskId: "1", statusChange: { to: "completed" } };
+
+    // Act.
+    const act = actOf(
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1", status: "completed" }), outcome(structured)),
+    );
+
+    // Assert.
+    expect(act.state?.description).toBeUndefined();
   });
 
   it("leaves the status UNSET for an update that changed only the subject", () => {
