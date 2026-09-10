@@ -320,6 +320,39 @@ describe("the tail", () => {
     expect(second.page.entries).toHaveLength(1);
   });
 
+  it("ends at once when a catch-up open served the pointer the teardown concludes through", async () => {
+    // A WATCH OPENED BEHIND THE HEAD IS CAUGHT UP BY ITS OWN OPENING PAGE, and
+    // the teardown then concludes it through the book's HEAD. If the catch-up
+    // rows did not count as served, that conclusion would name a row the tail
+    // was still waiting for and `KillSession` would spend its whole
+    // WATCHER_CONCLUSION_BUDGET_MS on a stream that had already delivered
+    // everything the consumer was owed.
+    // Arrange.
+    const { plane } = await seeded("tail-conclude-catchup", 4);
+    const walked = await plane.openAgentPage(BOOK, 10);
+    walked.close();
+    const behind = walked.page.entries[2]?.at;
+    const head = walked.page.entries[0]?.at;
+    const session = await plane.openAgentPage(BOOK, 10, behind);
+    const iterator = session.tail[Symbol.asyncIterator]();
+
+    // Act. The open's page is the catch-up, so the head is already served.
+    expect(session.page.entries.map(unitOf)).toEqual(["unit-3", "unit-2"]);
+    session.concludeThrough(head);
+
+    // Assert.
+    await expect(
+      Promise.race([
+        iterator.next().then(() => "settled"),
+        // A HANG guard, not the mechanism of success. It is counted in
+        // MACROTASK TICKS rather than milliseconds on purpose: a wall-clock
+        // guard races the settle, so under machine load the guard can win and
+        // report a hang that never happened. A tick budget cannot.
+        hangGuard(),
+      ]),
+    ).resolves.toBe("settled");
+  });
+
   it("concludeThrough(undefined) ends the tail at once, with nothing left to wait for", async () => {
     const { plane } = await seeded("tail-conclude-unbounded", 1);
     const session = await plane.openAgentPage(BOOK, 10);
