@@ -121,6 +121,23 @@ push routinely lands in: the successor was announced and dialed, but its
 (defvar agent-repl-test-host--dialled nil
   "Addresses handed to the stubbed dial, newest first.")
 
+(defvar agent-repl-test-host--timers nil
+  "Timers this harness intercepted, newest first: (DELAY FN . ARGS).
+
+NO SCHEDULED WORK ESCAPES A SCENARIO.  Two of host.el\='s handover paths
+answer a refusal or a transport failure by SCHEDULING the retry rather
+than issuing it (`agent-repl-host--on-refused\=',
+`agent-repl-host--adopt-onto\='), and a real `run-at-time\=' from a batch
+scenario outlives it: the timer fires during whatever LATER test is
+inside an `accept-process-output\=', and re-walks an adopt against
+globals that scenario has rebound.  Measured: with the adopt\='s transport
+failure retrying for real, the full `test-agent-repl.el\=' run failed
+`agent-repl-itest-host-fault-kind-name-reaches-the-health-buffer\=' about
+one run in three, at an assertion rather than a bound and in 14ms, while
+the host suite alone passed every time.  So the harness records the
+schedule instead of arming it, and a test that wants the retry walked
+calls it itself.")
+
 (defvar agent-repl-test-host--dial-accepts t
   "When non-nil the stubbed dial is ACCEPTED at once and answers a conn.
 Nil models the real gate: the dial stands but is not accepted yet, so
@@ -161,6 +178,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--successor-pending nil)
          (agent-repl-test-host--walk nil)
          (agent-repl-test-host--dialled nil)
+         (agent-repl-test-host--timers nil)
          (agent-repl-test-host--dial-accepts t)
          (agent-repl-link-handover-functions nil)
          (agent-repl-test-host--register-answer
@@ -201,6 +219,9 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (stream)
                   (push stream agent-repl-test-host--cancelled)
                   (push :cancel agent-repl-test-host--walk)))
+               ((symbol-function 'run-at-time)
+                (lambda (delay _repeat fn &rest args)
+                  (push (cons delay (cons fn args)) agent-repl-test-host--timers)))
                ((symbol-function 'agent-repl-link-successor)
                 (lambda () agent-repl-test-host--successor))
                ((symbol-function 'agent-repl-link-successor-pending-p)
@@ -1363,14 +1384,11 @@ far too late."
           agent-repl-test-host--adopt-answer
           (list :failure (list :kind :timeout :message "no answer")))
     (agent-repl-test-host--subscribe "ws-1")
-    (let ((scheduled nil))
-      (cl-letf (((symbol-function 'run-at-time)
-                 (lambda (delay _repeat fn &rest args)
-                   (setq scheduled (cons delay (cons fn args))))))
-        ;; Act
-        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-        ;; Assert
-        (should (eq (nth 1 scheduled) #'agent-repl-host--adopt-onto))))))
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    ;; Assert
+    (should (eq (nth 1 (car agent-repl-test-host--timers))
+                #'agent-repl-host--adopt-onto))))
 
 (ert-deftest agent-repl-test-host-adopt-transport-failure-does-not-retry-a-gone-successor ()
   "A successor that is no longer standing has nothing left to adopt onto.
@@ -1382,22 +1400,18 @@ would adopt onto a connection the link has let go of."
           agent-repl-test-host--adopt-answer
           (list :failure (list :kind :transport :message "no route")))
     (agent-repl-test-host--subscribe "ws-1")
-    (let ((scheduled nil))
-      (cl-letf (((symbol-function 'run-at-time)
-                 (lambda (delay _repeat fn &rest args)
-                   (setq scheduled (cons delay (cons fn args)))))
-                ((symbol-function 'agent-repl-rpc-adopt-host-workspace)
-                 (lambda (_conn _request &rest keys)
-                   ;; The successor is let go of BEFORE the answer lands, which
-                   ;; is the order a promotion makes.
-                   (setq agent-repl-test-host--successor nil)
-                   (agent-repl-test-host--answer agent-repl-test-host--adopt-answer
-                                                 (plist-get keys :on-response)
-                                                 (plist-get keys :on-failure)))))
-        ;; Act
-        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-        ;; Assert
-        (should (null scheduled))))))
+    (cl-letf (((symbol-function 'agent-repl-rpc-adopt-host-workspace)
+               (lambda (_conn _request &rest keys)
+                 ;; The successor is let go of BEFORE the answer lands, which
+                 ;; is the order a promotion makes.
+                 (setq agent-repl-test-host--successor nil)
+                 (agent-repl-test-host--answer agent-repl-test-host--adopt-answer
+                                               (plist-get keys :on-response)
+                                               (plist-get keys :on-failure)))))
+      ;; Act
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+      ;; Assert
+      (should (null agent-repl-test-host--timers)))))
 
 (ert-deftest agent-repl-test-host-adopt-transport-failure-keeps-the-old-stream ()
   "A successor that cannot be reached is not a reason to strand a workspace."
