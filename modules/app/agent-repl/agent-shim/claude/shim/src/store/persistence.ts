@@ -265,6 +265,27 @@ export interface Persistence {
    * cold bring-up from probing the store for an answer it already has.
    */
   noteAgentMinted(agentValue: string): void;
+  /**
+   * The NEWEST page of one book, for a read that stands no tail.
+   *
+   * THE STORE IS ALWAYS ASKED. {@link Persistence.openAgentPage} may serve a
+   * minted-but-unwritten book WITHOUT asking, because what the open is worth is
+   * the tail it stands and the absence is this session's own fact. A one-shot
+   * read stands no tail, so the store's answer is the whole of what it has to
+   * say: asking is what separates the three outcomes such a read must tell
+   * apart — a page, an announced book with nothing in it yet, and a store that
+   * could not be reached or failed the read.
+   *
+   * `known` is the producer's own vouching, exactly as on `openAgentPage`: with
+   * it holding, the store's `unknown_agent` becomes the EMPTY page that a fresh
+   * session's book legitimately is. Every other refusal is surfaced as it
+   * stands, so an unreachable store is never served as an empty history.
+   */
+  readFirstPage(
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPage>;
   /** An OLDER page of one book, walking down from a pointer already served. */
   readAgentPage(
     agent: conversationv1.AgentId,
@@ -380,6 +401,7 @@ export function unavailablePersistence(): Persistence {
     flush: () => Promise.resolve({ lostRows: 0 }),
     openAgentPage: () => Promise.reject(refuse("openAgentPage")),
     noteAgentMinted: () => undefined,
+    readFirstPage: () => Promise.reject(refuse("readFirstPage")),
     readAgentPage: () => Promise.reject(refuse("readAgentPage")),
     liveWork: () => Promise.reject(refuse("liveWork")),
     openBashRun: () => Promise.reject(refuse("openBashRun")),

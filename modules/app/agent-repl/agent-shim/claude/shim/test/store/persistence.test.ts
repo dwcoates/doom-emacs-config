@@ -34,6 +34,12 @@ describe("unavailablePersistence", () => {
     });
   });
 
+  it("readFirstPage rejects with store_unavailable", async () => {
+    await expect(persistence.readFirstPage({} as never, 1)).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+
   it("readAgentPage rejects with store_unavailable", async () => {
     await expect(persistence.readAgentPage({} as never, 1, {} as never)).rejects.toMatchObject({
       kind: "store_unavailable",

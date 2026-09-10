@@ -1343,9 +1343,12 @@ describe("WatchBash's announcement predicate", () => {
 // plane failing in a way that is not a PersistenceError.
 // ---------------------------------------------------------------------------
 
-/** A record plane whose `openAgentPage` rejects with something that is not an Error. */
+/** A record plane whose page reads reject with something that is not an Error. */
 class NonErrorPageStore extends RecordingPersistence {
   override openAgentPage(): Promise<never> {
+    return Promise.reject("the store threw a string");
+  }
+  override readFirstPage(): Promise<never> {
     return Promise.reject("the store threw a string");
   }
 }
