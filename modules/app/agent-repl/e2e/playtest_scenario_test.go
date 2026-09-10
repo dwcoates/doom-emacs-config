@@ -355,14 +355,52 @@ func (s *playtestScenario) awaitInPageFor(t *testing.T, bound time.Duration, wha
 func (s *playtestScenario) clickInPage(t *testing.T, what, selector string) {
 	t.Helper()
 	s.awaitInPage(t, what+" to be there to click", `document.querySelector(`+jsString(selector)+`)`)
+	s.clickOnce(t, what, `document.querySelector(`+jsString(selector)+`)`)
+}
+
+// clickOnce issues ELEMENTEXPR's click through the probe and waits for its
+// answer, clicking EXACTLY ONCE however many polls the answer takes.
+func (s *playtestScenario) clickOnce(t *testing.T, what, elementExpr string) {
+	t.Helper()
 	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
 	s.E.AwaitEvalFor(playtestPageBound, "the click on "+what,
 		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+
-			elispString(pageYes(`(function () { var el = document.querySelector(`+jsString(selector)+`);
-                                                if (!el) { return false; }
-                                                el.click();
-                                                return true; })()`))+`)`,
+			elispString(pageYes(pageClickOnce(elementExpr)))+`)`,
 		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+}
+
+// playtestClickSeq mints one token per CLICK SITE, so two clicks on the same
+// element are two distinct acts rather than one remembered one.
+var playtestClickSeq atomic.Uint64
+
+// pageClickOnce wraps ELEMENTEXPR's click so re-issuing the script cannot
+// click twice.
+//
+// WHY, AND IT IS A MEASURED DEFECT RATHER THAN A PRECAUTION. The probe is two
+// evals (`playtestProbeSetup`): every poll RE-ISSUES the script and answers
+// what the previous issue's callback stored. A read-only predicate does not
+// care how often it runs; a click does. Measured in the permission-mode
+// picker's own playbook, from the page's own client log: the mode reveal
+// OPENED at 02:14:42.173 and CLOSED at 02:14:42.195 with no topbar push in
+// between -- the second poll had clicked the toggle again. Whether a toggle
+// ended open or closed therefore depended on how many polls the answer took,
+// which is a flake in every playbook that clicks a toggle, a checkbox or a
+// submit button.
+//
+// The token is written into the page only ONCE THE CLICK ACTUALLY HAPPENED,
+// so an issue that found nothing to click still clicks when the element
+// arrives.
+func pageClickOnce(elementExpr string) string {
+	token := fmt.Sprintf("playtest-click-%d", playtestClickSeq.Add(1))
+	return `(function () {
+                   var done = window.__playtestClicked || (window.__playtestClicked = {});
+                   if (done[` + jsString(token) + `]) { return true; }
+                   var el = ` + elementExpr + `;
+                   if (!el) { return false; }
+                   done[` + jsString(token) + `] = true;
+                   el.click();
+                   return true;
+                 })()`
 }
 
 // tabNames reads the names the tab bar DRAWS, in roster order.
