@@ -147,6 +147,7 @@ unary rpc can produce, which the contract never collapses into one."
   `(let ((agent-repl-host--by-name (make-hash-table :test 'equal))
          (agent-repl-host-last-selected-id nil)
          (agent-repl-host-reselect-pending nil)
+         (agent-repl--eager-open-in-progress nil)
          (agent-repl-host-update-functions nil)
          (agent-repl-test-host--streams nil)
          (agent-repl-test-host--cancelled nil)
@@ -351,6 +352,51 @@ unary rpc can produce, which the contract never collapses into one."
     (agent-repl-host-select "ws-unknown")
     ;; Assert
     (should (null agent-repl-test-host--calls))))
+
+(ert-deftest agent-repl-test-host-a-background-activation-selects-nothing ()
+  "A transiently activated BACKGROUND workspace is not a tab switch.
+`agent-repl--call-in-background-workspace' makes a background workspace's
+perspective active for the length of a mount; reporting that as a
+SelectWorkspace told the daemon the user had chosen a workspace they
+never looked at, and the roster push carrying that stamp took the frame
+off the one they were standing in."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1"
+          agent-repl-test-host--calls nil)
+    ;; Act
+    (let ((agent-repl--eager-open-in-progress t))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (null agent-repl-test-host--calls))))
+
+(ert-deftest agent-repl-test-host-an-ordinary-activation-still-selects ()
+  "An ordinary tab switch IS the SelectWorkspace, and stays one."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1"
+          agent-repl-test-host--calls nil)
+    ;; Act
+    (let ((agent-repl--eager-open-in-progress nil))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (equal (car (car agent-repl-test-host--calls)) "SelectWorkspace"))))
+
+(ert-deftest agent-repl-test-host-attaching-inside-a-background-activation-selects-nothing ()
+  "The attach's own selection asks the same question and needs the same answer.
+`--ws-current-name' answers the perspective active right now, which
+during a background mount is the BACKGROUND workspace's."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (let ((agent-repl--eager-open-in-progress t))
+      (agent-repl-test-host--subscribe "ws-1"))
+    ;; Assert
+    (should (null (seq-find (lambda (call) (equal (car call) "SelectWorkspace"))
+                            agent-repl-test-host--calls)))))
 
 (ert-deftest agent-repl-test-host-attaching-a-ref-selects-the-current-workspace ()
   "A newly registered workspace activates its perspective BEFORE the daemon

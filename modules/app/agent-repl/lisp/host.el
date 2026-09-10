@@ -74,6 +74,7 @@
 (declare-function agent-repl--live-ws-names "workspace" ())
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
+(defvar agent-repl--eager-open-in-progress)
 
 (declare-function agent-repl--notify "notifications" (ws title message &optional activate))
 (declare-function agent-repl--notification-activate "notifications" (ws))
@@ -362,10 +363,26 @@ workspace has no identity to select."
   "Select the newly activated perspective's workspace with the daemon.
 Registered on workspace.el's perspective-activation boundary: an ordinary
 tab switch IS the SelectWorkspace, and it is also what clears the
-workspace's attention marker."
-  (let ((ws (agent-repl--ws-current-name)))
-    (when (and ws (agent-repl-host--entry ws))
-      (agent-repl-host-select ws))))
+workspace's attention marker.
+
+A TRANSIENT BACKGROUND ACTIVATION IS NOT A TAB SWITCH, and reporting one
+as such told the daemon the user had chosen a workspace they never
+looked at.  `agent-repl--call-in-background-workspace' activates a
+workspace\='s perspective to build into its own frame -- the webview mount
+and the link-up re-point both go through it -- and binds
+`agent-repl--eager-open-in-progress\=' around the whole switch-in /
+build / switch-back.  Measured on the link-up edge: re-pointing the
+UNSELECTED workspace\='s webview activated its perspective, this hook
+selected it with the fresh daemon, the daemon stamped it `current\=',
+and the roster push carrying that stamp took the frame off the workspace
+the user was standing in.  It is the same flag the other two
+activation-reactive hooks consult for the same reason (see its
+docstring in `core.el\=')."
+  (if agent-repl--eager-open-in-progress
+      (agent-repl--log nil "elisp.host.select-skipped reason=background-activation")
+    (let ((ws (agent-repl--ws-current-name)))
+      (when (and ws (agent-repl-host--entry ws))
+        (agent-repl-host-select ws)))))
 
 ;;;; ---- Subscribe ----
 
@@ -396,7 +413,15 @@ costs a round trip and changes no view."
   (agent-repl-host--put ws :ref ref)
   (agent-repl-host--put ws :conn conn)
   (agent-repl--ws-put ws :ref ref)
-  (when (equal ws (agent-repl--ws-current-name))
+  ;; THE USER'S WORKSPACE, NOT A TRANSIENTLY ACTIVATED ONE.  `--ws-current-name'
+  ;; answers the perspective that is active right now, and
+  ;; `agent-repl--call-in-background-workspace' makes a BACKGROUND workspace's
+  ;; perspective active for the length of a mount, so an attach landing inside
+  ;; that window would report the user as having switched to a workspace they
+  ;; never looked at.  Same flag, same reason as
+  ;; `agent-repl-host--on-workspace-activated'.
+  (when (and (equal ws (agent-repl--ws-current-name))
+             (not agent-repl--eager-open-in-progress))
     (agent-repl-host-select ws)))
 
 (defun agent-repl-host-subscribe (conn ws ref)
