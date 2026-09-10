@@ -116,12 +116,21 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return fmt.Errorf("claude-repld: the state root cannot hold a shim socket: %w", err)
 	}
 
-	surfaces, err := dlog.OpenSurfaces(layout.RunLog(), false)
+	surfaces, err := dlog.OpenSurfaces(layout.RunLog())
 	if err != nil {
 		return fmt.Errorf("claude-repld: open the run log: %w", err)
 	}
 	defer surfaces.Close()
 	log := surfaces.Global()
+	joining := opts.joining != ""
+	log.Info("daemon.cmd.boot", "the daemon boot started", dlog.Context{
+		"joining":    joining,
+		"state_root": layout.Dir(),
+	})
+	defer log.Info("daemon.cmd.exit", "the daemon process ended", dlog.Context{
+		"joining":    joining,
+		"state_root": layout.Dir(),
+	})
 
 	// PPROF BEFORE ANY DEPENDENCY. A wildcard or routable bind is refused here
 	// rather than opened, and an empty setting is OFF, which is the default.
@@ -143,7 +152,6 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// the claim here: the incumbent that spawned it still holds it, and a
 	// successor racing for it would lose to its own predecessor and exit. It
 	// takes the claim when it advertises, which is when it has taken over.
-	joining := opts.joining != ""
 	bindClaim := daemonaddr.Bind
 	if joining {
 		bindClaim = daemonaddr.BindJoining
@@ -270,7 +278,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if err != nil {
 		return err
 	}
-	log.Debug("daemon.cmd.boot", "the boot reconciliation completed", dlog.Context{
+	log.Info("daemon.cmd.boot", "the boot reconciliation completed", dlog.Context{
 		"adopted":        len(report.Adopted),
 		"orphans_closed": len(report.Orphaned),
 		"holds_restored": report.HoldsRestored,
@@ -324,7 +332,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		defer joinQueueWork(built.DrainQueue, loopJoinBound, log)
 	}
 
-	log.Debug("daemon.cmd.serve", "serving", dlog.Context{
+	log.Info("daemon.cmd.serve", "serving", dlog.Context{
 		"address": claim.Address(),
 		"joining": joining,
 	})

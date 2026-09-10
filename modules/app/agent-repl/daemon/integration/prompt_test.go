@@ -1100,14 +1100,6 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 	// check would bounce the shim out from under the test.
 	f := newOpened(t, harness.Opts{ExtraEnv: []string{
 		"AGENT_REPL_DEPLOY_STAMP=" + harness.FakeShimDefaultBuildSHA}})
-	// A shim now genuinely SURVIVES this bounce: the successor probes the same
-	// kernel-lock directory its predecessor named, so the surviving shim's
-	// workspace lock reads held and the session is ADOPTED rather than
-	// respawned. A bounce that wrote no intent manifest therefore has a live
-	// session to account for, which the rollout reconciler states as a fault
-	// by design. The successor appends to the SAME run log, so this daemon's
-	// own log assertion reads the record too.
-	f.d.ExpectWarnings("daemon.rollout.reconcile")
 	feed := f.watchRootFeed()
 
 	// Act

@@ -136,6 +136,12 @@ func stringify(v any) string {
 
 // newRecord builds a record from an already-merged context.
 func newRecord(at time.Time, runtime, level, operation, message string, ctx Context, pid int) record {
+	return newRecordWithVerbosity(at, runtime, level, verbosityFor(level), operation, message, ctx, pid)
+}
+
+// newRecordWithVerbosity builds a record whose verbosity was stated by the
+// producer instead of inferred from the daemon's own level convention.
+func newRecordWithVerbosity(at time.Time, runtime, level, verbosity, operation, message string, ctx Context, pid int) record {
 	rest, ids := promote(ctx)
 	if rest == nil {
 		// context is a required field and must be an object, never null.
@@ -145,7 +151,7 @@ func newRecord(at time.Time, runtime, level, operation, message string, ctx Cont
 		Timestamp:          logging.Timestamp(at),
 		Runtime:            runtime,
 		Level:              level,
-		Verbosity:          verbosityFor(level),
+		Verbosity:          verbosity,
 		Operation:          operation,
 		Message:            message,
 		Context:            rest,

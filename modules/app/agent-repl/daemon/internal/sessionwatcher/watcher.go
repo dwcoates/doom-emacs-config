@@ -284,7 +284,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	}
 
 	w.mu.Lock()
-	w.log.Debug("daemon.sessionwatcher.start", "opening the session's watch fleet", dlog.Context{
+	w.log.Info("daemon.sessionwatcher.start", "opening the session's watch fleet", dlog.Context{
 		"vendor_session_id": session.Started.GetVendorSessionId(),
 		"turn_in_flight":    session.Started.GetTurnInFlight().GetValue(),
 		"live_work":         len(session.Started.GetLiveWork()),
@@ -491,7 +491,7 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 			"agent_id": prompt.GetAgent().GetValue(),
 		})
 	}
-	w.log.Debug("daemon.sessionwatcher.turn_opened", "the queue opened a turn", dlog.Context{
+	w.log.Info("daemon.sessionwatcher.turn_opened", "the queue opened a turn", dlog.Context{
 		"turn_id":  prompt.GetId().GetValue(),
 		"agent_id": prompt.GetAgent().GetValue(),
 		"entries":  len(page.GetEntries()),
@@ -537,7 +537,7 @@ func (w *watcher) Close() error {
 	w.gen++
 	w.failWaitersLocked()
 	closing := w.takeStreamsLocked()
-	w.log.Debug("daemon.sessionwatcher.close", "closing the session's watch fleet", dlog.Context{
+	w.log.Info("daemon.sessionwatcher.close", "closing the session's watch fleet", dlog.Context{
 		"streams": len(closing),
 	})
 	w.mu.Unlock()
@@ -693,7 +693,7 @@ func (w *watcher) setLinkLocked(state LinkState) {
 		})
 		return
 	}
-	w.log.Debug("daemon.sessionwatcher.link", "link state changed", dlog.Context{
+	w.log.Info("daemon.sessionwatcher.link", "link state changed", dlog.Context{
 		"previous": int(w.link), "link": int(state),
 	})
 	w.link = state

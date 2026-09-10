@@ -32,6 +32,9 @@ func TestStartOpensTheSessionAndMainWatches(t *testing.T) {
 	if h.mainReq.GetPageSize() == 0 {
 		t.Fatal("the main watch was opened with no page budget")
 	}
+	if !h.hasRecord("info", "daemon.sessionwatcher.start") {
+		t.Fatal("the watch-fleet bring-up has no info lifecycle record")
+	}
 }
 
 // TestStartCatchesUpFromThePersistedPointer covers the caller's persisted
@@ -603,6 +606,9 @@ func TestCloseClosesEveryStream(t *testing.T) {
 	if !bash.stream.isClosed() {
 		t.Fatal("the detached shell's stream was left open")
 	}
+	if !h.hasRecord("info", "daemon.sessionwatcher.close") {
+		t.Fatal("the watch-fleet shutdown has no info lifecycle record")
+	}
 }
 
 // TestCloseIsIdempotent covers the second call: a workspace teardown and a
@@ -835,6 +841,9 @@ func TestOnTurnOpenedRaisesTheFootersTurnOpenEdge(t *testing.T) {
 	if ev.detail != "turn-9" {
 		t.Fatalf("footer.OnTurnOpened turn = %q, want turn-9", ev.detail)
 	}
+	if !h.hasRecord("info", "daemon.sessionwatcher.turn_opened") {
+		t.Fatal("the turn start has no info lifecycle record")
+	}
 }
 
 // TestOnTurnOpenedRefusesAnotherWorkspacesTurn covers the invariant: a
@@ -958,7 +967,7 @@ func TestADeadLinkIsNeverWalkedBackToRedialing(t *testing.T) {
 	h.session.fail(errors.New("connection reset"))
 
 	// Assert.
-	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link")
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.link")
 	if got := h.w.Link(); got != shimclient.LinkDead {
 		t.Fatalf("the link after a post-death stream break = %v, want LinkDead", got)
 	}

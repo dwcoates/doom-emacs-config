@@ -226,6 +226,30 @@ func TestTransportClosedRecordsTheInfoShape(t *testing.T) {
 	}
 }
 
+// TestServerCloseRecordsTheLifecycleEdgeAtInfo pins that the serving surface's
+// shutdown remains visible at the default production threshold.
+func TestServerCloseRecordsTheLifecycleEdgeAtInfo(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{global: log}
+	})
+
+	// Act.
+	if err := h.Server.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	info := log.at("INFO")
+	if len(info) != 1 {
+		t.Fatalf("INFO records = %v, want exactly one", info)
+	}
+	if info[0].Operation != "daemon.server.close" {
+		t.Fatalf("operation = %q, want daemon.server.close", info[0].Operation)
+	}
+}
+
 // TestTransportClosedEmitsNoWarning pins the ruling's negative half: a
 // by-design transport-closed refusal is never warned as an unlanded arm.
 func TestTransportClosedEmitsNoWarning(t *testing.T) {

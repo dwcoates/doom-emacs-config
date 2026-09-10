@@ -24,7 +24,7 @@ type surfaces struct {
 	// where every workspace sink's daemon-owned target is minted.
 	logsDir string
 	mirror  *mirror
-	verbose bool
+	level   levelThreshold
 	pid     int
 	now     func() time.Time
 
@@ -56,19 +56,23 @@ type workspaceSinks struct {
 }
 
 // OpenSurfaces opens the daemon's log surfaces under the state root's logs
-// directory. runLog is the restart-scoped run log path; verbose gates the
-// terminal mirror for verbose records.
+// directory. AGENT_REPL_LOG_LEVEL governs both persistence and the terminal
+// mirror; an invalid setting is a boot failure.
 //
 // The run log's open failure is returned here and is a BOOT FATAL for the
 // caller: a daemon that cannot write its own narrative cannot report what it
 // then does wrong.
-func OpenSurfaces(runLog string, verbose bool) (Surfaces, error) {
-	return openSurfaces(runLog, verbose, os.Stderr)
+func OpenSurfaces(runLog string) (Surfaces, error) {
+	return openSurfaces(runLog, os.Getenv(LevelEnvironment), os.Stderr)
 }
 
 // openSurfaces is OpenSurfaces with the terminal injected, which is how the
 // mirror's decoupling is tested.
-func openSurfaces(runLogPath string, verbose bool, terminal interface{ Write([]byte) (int, error) }) (*surfaces, error) {
+func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write([]byte) (int, error) }) (*surfaces, error) {
+	level, err := parseLevel(configuredLevel)
+	if err != nil {
+		return nil, err
+	}
 	rl, err := openRunLog(runLogPath, RunLogBackups)
 	if err != nil {
 		return nil, fmt.Errorf("open the daemon run log (boot fatal): %w", err)
@@ -77,7 +81,7 @@ func openSurfaces(runLogPath string, verbose bool, terminal interface{ Write([]b
 		runLog:     rl,
 		logsDir:    filepath.Dir(runLogPath),
 		mirror:     newMirror(terminal, mirrorDepth),
-		verbose:    verbose,
+		level:      level,
 		pid:        os.Getpid(),
 		now:        time.Now,
 		workspaces: make(map[string]*workspaceSinks),
@@ -90,7 +94,7 @@ func openSurfaces(runLogPath string, verbose bool, terminal interface{ Write([]b
 	return s, nil
 }
 
-// Global is the service logger, backed by the restart-scoped run log. The
+// Global is the service logger, backed by the size-rotated run log. The
 // state root layout names no second global file, so the run log IS the global
 // sink. Only events with no conceptual workspace may use it.
 func (s *surfaces) Global() Logger {
@@ -180,6 +184,9 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	if rec.Operation == "" {
 		return fmt.Errorf("client record operation is empty")
 	}
+	if !s.level.enabled(rec.Level) {
+		return nil
+	}
 	ws, sk, err := s.resolve(dir, name)
 	if err != nil {
 		return err
@@ -199,14 +206,16 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	}
 	// pid is deliberately 0 (omitted): a forwarded record carries the sending
 	// runtime's identity, and the daemon's pid would misattribute it.
-	out := newRecord(at, runtime, rec.Level, rec.Operation, rec.Message, ctx, 0)
+	verbosity := VerbosityNormal
+	if rec.Verbose {
+		verbosity = VerbosityVerbose
+	}
+	out := newRecordWithVerbosity(at, runtime, rec.Level, verbosity, rec.Operation, rec.Message, ctx, 0)
 	line := out.marshal()
 	if err := sk.write(line); err != nil {
 		return err
 	}
-	if out.Verbosity != VerbosityVerbose || s.verbose {
-		s.mirror.enqueue(line)
-	}
+	s.mirror.enqueue(line)
 	return nil
 }
 
