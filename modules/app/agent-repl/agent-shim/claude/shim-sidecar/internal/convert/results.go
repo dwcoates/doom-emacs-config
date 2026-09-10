@@ -127,15 +127,25 @@ func writeSuccess(call openCall, result map[string]any, ts int64) *conversationv
 	return success
 }
 
-// writePatch prefers the patch the vendor STATED and falls back to diffing the
-// two versions it handed over — which is the whole story for a creation, whose
-// structured patch the vendor leaves empty.
+// writePatch DIFFS THE TWO VERSIONS, and does not prefer the patch the vendor
+// happened to state.
+//
+// agent_activity.proto is explicit on AgentWriteSuccess.patch: "The producer
+// diffs after the fact precisely so a card can show the CHANGE rather than the
+// whole file it was handed" — unconditionally, unlike AgentEditSuccess, whose
+// patch the vendor does state. Preferring `structuredPatch` here made this
+// plane disagree with the stream plane, which always diffs: the same write
+// drew "@@ -4,1 +4,2 @@" through one plane and "@@ -2,3 +2,4 @@" through the
+// other, and WHICH ONE a card showed was a race between the two producers
+// settling the unit. The file doc of diff.go states the guarantee this
+// restores — both planes mint the identical patch for one write.
+//
+// A result that states no content cannot be diffed at all; the vendor's own
+// stated patch is then the only account of the change there is, so it is kept
+// rather than dropped.
 func writePatch(result map[string]any) []*conversationv1.FilePatchHunk {
-	if stated := patchHunks(result["structuredPatch"]); len(stated) > 0 {
-		return stated
-	}
 	if !has(result, "content") {
-		return nil
+		return patchHunks(result["structuredPatch"])
 	}
 	return diffHunks(str(result["originalFile"]), str(result["content"]))
 }
