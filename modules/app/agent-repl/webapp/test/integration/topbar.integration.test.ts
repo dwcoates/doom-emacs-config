@@ -128,7 +128,7 @@ describe("the title and session line", () => {
   it("carries the rotated session identity into a reveal the reader already had open", async () => {
     // Arrange: the reader opens the session reveal on the session the page
     // booted with. This is the state a rotation actually finds a reader in,
-    // and it is the state playtest D28 photographs.
+    // and it is the state a real page shows.
     await withTopbar({ sessionLine: "vend-1 · ~/.claude · fake-opus-4-8" });
     await harness.click(".topbar-title");
     // Act: the vendor rotated its conversation, so the daemon pushes a whole
@@ -481,7 +481,7 @@ describe("the context chip", () => {
     // gets, and the two disagreed. A later same-specificity topbar-button rule
     // set `color: var(--muted)` on the figure, so the one colored number in the
     // strip came out GREY in the running application while every class
-    // assertion in this suite stayed green. A playtest capture of the topbar
+    // assertion in this suite stayed green. A screenshot of the real topbar
     // caught it; this is the assertion that keeps it caught.
     // Arrange
     const remove = installStylesheet();

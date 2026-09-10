@@ -3436,7 +3436,7 @@ type FeedSimpleToolCall_Moved struct {
 	// finishes. No output section, never a verdict — the detached shell row
 	// the daemon draws beneath it is the record of the run, and it alone
 	// settles. Without this arm a moved call sat on `running` forever above
-	// a row that had already reported `exit 0` (playtest F43, 2026-09-09).
+	// a row that had already reported `exit 0` (observed 2026-09-09).
 	Moved *FeedToolCallMoved `protobuf:"bytes,6,opt,name=moved,proto3,oneof"`
 }
 

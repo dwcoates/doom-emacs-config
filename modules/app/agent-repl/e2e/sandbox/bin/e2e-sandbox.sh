@@ -57,13 +57,9 @@ stage_context() {
   # file is copied from the live checkout on each build.
   local ctx=$1
   cp "$sandbox_dir/Dockerfile" "$ctx/"
-  mkdir -p "$ctx/bin" "$ctx/doom" "$ctx/fontconfig"
+  mkdir -p "$ctx/bin" "$ctx/doom"
   cp "$here/entrypoint.sh" "$ctx/bin/"
   cp "$sandbox_dir/doom/"*.el "$ctx/doom/"
-  # The color-emoji fallback rule. Without it a playtest's pictures carry
-  # tofu boxes where the metaprompt's tree glyphs and the tab-bar glyphs
-  # belong; see fontconfig/99-agent-repl-emoji.conf.
-  cp "$sandbox_dir/fontconfig/"*.conf "$ctx/fontconfig/"
 
   # The three files Doom's module loader resolves by exact path.
   mkdir -p "$ctx/module-loader-files"
@@ -439,16 +435,6 @@ emacs -Q --batch --eval '(unless (native-comp-available-p) (kill-emacs 1))' 2>/d
   || { echo "EMACS HAS NO NATIVE COMPILATION available at run time" >&2; fail=1; }
 command -v Xvfb >/dev/null 2>&1 \
   || { echo "MISSING BINARY: Xvfb (an xwidget frame needs a display)" >&2; fail=1; }
-# A COLOR EMOJI FONT, REACHABLE BY FALLBACK. A playtest photographs this
-# image, and the metaprompt's tree glyphs and the tab-bar glyphs are emoji:
-# without this the pictures carry tofu boxes and cannot be reviewed against
-# their manifests. Asserted in the Dockerfile too, and re-asserted here so
-# the property belongs to the IMAGE rather than to one build of it.
-emoji_family=$(fc-match --format='%{family}' emoji 2>/dev/null || echo unknown)
-case "$emoji_family" in
-  *"Noto Color Emoji"*) ;;
-  *) echo "NO COLOR EMOJI FONT: 'fc-match emoji' answered '$emoji_family'; playtest pictures would draw tofu" >&2; fail=1 ;;
-esac
 # `doom sync` must have been baked at build time: the profile's .local is
 # what proves it, and without it every Emacs test would pay the sync.
 if [ ! -d "$EMACSDIR/.local" ]; then
@@ -477,7 +463,7 @@ PROBE
   # that only works for non-login shells is caught here.
   "$rt" run --rm --network none --entrypoint /bin/bash "$IMAGE" -lc "$probe" \
     || die "image '$IMAGE' is missing required contents (see above)"
-  log "verified: image exists, carries emacs 30.2 (xwidgets + native-comp), Xvfb, a color emoji font, node/go/script/doom, a baked doom sync and baked node deps"
+  log "verified: image exists, carries emacs 30.2 (xwidgets + native-comp), Xvfb, node/go/script/doom, a baked doom sync and baked node deps"
 }
 
 # --- the concurrency gate -------------------------------------------------
@@ -739,13 +725,8 @@ do_run() {
   # whole environment into a sandbox whose entire point is that it carries
   # nothing of the host in with it. Unset stays unset, so the entrypoint's
   # defaults are untouched.
-  #
-  # AGENT_REPL_PLAYTEST_SETTLE_DIAG is on the list for the same reason: it is
-  # the playtest capture's own "say WHICH pixels are still moving" switch
-  # (e2e/playtest_capture_test.go), it is set by a human diagnosing a torn
-  # capture, and the only place it can be read is inside the container.
   local knob
-  for knob in SANDBOX_NODE_MODULES SANDBOX_SKIP_NPM AGENT_REPL_PLAYTEST_SETTLE_DIAG; do
+  for knob in SANDBOX_NODE_MODULES SANDBOX_SKIP_NPM; do
     if [[ -n ${!knob:-} ]]; then
       args+=(--env "$knob=${!knob}")
       log "forwarding $knob=${!knob} to the container"

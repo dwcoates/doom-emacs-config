@@ -238,13 +238,13 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate(t *tes
 // pins the STOP'S OWN COST after the shape every playbook ends in: a turn that
 // ran and concluded, with the session's watches still standing.
 //
-// It exists because a playtest reported `emacs phase daemon-exit took 6.04s
-// (bound 6s)` on every scenario that ran a turn, which reads as a daemon that
-// does not exit on the stop it acked. It is not: the bound belonged to the
-// e2e Emacs layer's own stray finder, which counted the SCENARIO'S OWN Xvfb
-// and sidecar and so could never come up empty. This is the assertion that
-// says so from the daemon's side, and the one that would fail first if the
-// exit ever did start riding a bound.
+// It exists because a headless run of the real editor reported `emacs phase
+// daemon-exit took 6.04s (bound 6s)` on every scenario that ran a turn, which
+// reads as a daemon that does not exit on the stop it acked. It is not: the
+// bound belonged to the e2e Emacs layer's own stray finder, which counted the
+// SCENARIO'S OWN Xvfb and sidecar and so could never come up empty. This is
+// the assertion that says so from the daemon's side, and the one that would
+// fail first if the exit ever did start riding a bound.
 func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session that has run one turn to its terminal, with the

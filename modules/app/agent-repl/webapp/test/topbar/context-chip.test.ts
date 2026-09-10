@@ -50,7 +50,7 @@ describe("drawTopbarContextChip", () => {
     // The class assertion above passed for as long as the stylesheet's shared
     // topbar-button rule carried `color: var(--muted)`: same specificity,
     // declared later, so the one colored number in the strip was drawn grey in
-    // every running page and only a playtest capture of the topbar saw it.
+    // every running page and only a screenshot of the real topbar saw it.
     // ARRANGE
     const remove = installStylesheet();
     const { host, tc } = topbarContext();

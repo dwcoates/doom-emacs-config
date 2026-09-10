@@ -319,10 +319,10 @@ func TestArtifactPublishAndList(t *testing.T) {
 
 // TestArtifactHeadingKeepsTheFavicon reads the published heading exactly.
 // #72 only asks that it is non-empty, which a heading that lost its glyph
-// satisfies — and the playtest photographed exactly that card, titled with no
-// favicon, against feed.proto's "favicon emoji + title". The fake's
-// `!artifact-publish` announces 📊 on the call and restates only the title on
-// the outcome, which is the shape every real publish has.
+// satisfies — and a screenshot of the real page caught exactly that card,
+// titled with no favicon, against feed.proto's "favicon emoji + title". The
+// fake's `!artifact-publish` announces 📊 on the call and restates only the
+// title on the outcome, which is the shape every real publish has.
 func TestArtifactHeadingKeepsTheFavicon(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -554,9 +554,9 @@ func TestPlanModeEnterExit(t *testing.T) {
 // TestPlanModeCoalescesOntoOneBubble is the SAME turn as #85 asked the other
 // way: feed.proto's FeedPlan says the daemon keys the enter and the exit onto
 // ONE FeedId, so a plan episode is ONE row in the feed no matter how many
-// plan-mode calls it took or how many planes reported them. The playtest's
-// picture of `!plan` showed the plan card drawn TWICE -- once where the enter
-// landed and once after the turn concluded -- which is invisible to #85,
+// plan-mode calls it took or how many planes reported them. A screenshot of
+// `!plan` showed the plan card drawn TWICE -- once where the enter landed and
+// once after the turn concluded -- which is invisible to #85,
 // since a duplicate satisfies "a planned row exists" perfectly.
 //
 // The count is read AFTER driveScenarioToCompletion, which waits for the
@@ -1206,7 +1206,7 @@ func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
 
 // TestWorktreeDiscardLineIsGrammatical reads the loud discard line the removal
 // composes. The fake's `!worktree-remove` discards THREE files and ONE commit,
-// and the playtest photographed that line as "3 files, 1 commits discarded" —
+// and a screenshot caught that line as "3 files, 1 commits discarded" —
 // the one figure a reader is most likely to be alarmed by, misspelled.
 func TestWorktreeDiscardLineIsGrammatical(t *testing.T) {
 	t.Parallel()

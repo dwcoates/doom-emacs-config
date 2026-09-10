@@ -179,8 +179,8 @@ func TestAnEpisodeReDeliveredDrawsOntoTheSameBubble(t *testing.T) {
 	// Act: the other plane delivers the same two calls.
 	episode("## the plan")
 
-	// Assert: ONE bubble. A second one is the duplicate plan card the playtest
-	// photographed, drawn from the same record twice.
+	// Assert: ONE bubble. A second one is the duplicate plan card a headless
+	// sandbox run photographed, drawn from the same record twice.
 	bubbles := 0
 	for _, row := range h.rows(rootFeed()) {
 		if row.GetActivity().GetPlan() != nil {

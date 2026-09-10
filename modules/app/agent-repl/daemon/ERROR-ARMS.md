@@ -136,7 +136,7 @@ EMPTY panel, which is the daemon stating there is no MCP server here.
 /status DEGRADES BY DESIGN (project lead): the vendor handshake is deferred, so
 the panel is the version row plus the spliced account/model/mode rows and
 nothing else. cwd, auth, plugins and memory return if the handshake deferral
-ever lands. A playtest seeing the thin panel is seeing the settled consequence.
+ever lands. A viewer seeing the thin panel is seeing the settled consequence.
 
 ## Proto proposals opened by the remediation pass — ALL LANDED (landing 7)
 

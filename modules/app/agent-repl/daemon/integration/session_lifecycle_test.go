@@ -2189,9 +2189,9 @@ func TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal(t *testing.
 // a stand-down produces is the shim link going dead — handed during the
 // hibernation's KillSession, BEFORE the sweep writes the session's hibernated
 // terminal. The row resolved on that event therefore reads `dead`, and in the
-// playtest world nothing republished afterwards: the daemon log's last
-// daemon.sidebar.row for the workspace said `dead`, and Emacs painted the tab
-// blue for a session the daemon had parked on purpose.
+// headless run of the real editor nothing republished afterwards: the daemon
+// log's last daemon.sidebar.row for the workspace said `dead`, and Emacs
+// painted the tab blue for a session the daemon had parked on purpose.
 //
 // The roster stream is opened AFTER the sweep's own hibernation record so the
 // first view it is served is one resolved from the parked record. A stream
@@ -2289,8 +2289,8 @@ func TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView(t *testing.T) {
 // as `disconnected · dead`, the topbar's indicator hollowed to the dead glyph,
 // and the webapp's composer gate IS the footer's word (webapp/src/main.ts — a
 // `disconnected` status closes the composer), so the page could not submit the
-// prompt that revives the session. Observed in the playtest world at
-// e2e/.playtest-out/playtest/05-tab-arms-lifecycle/15-arm-hibernated.
+// prompt that revives the session. Observed in a headless run of the real
+// editor, in the 05-tab-arms-lifecycle scenario's 15-arm-hibernated case.
 //
 // THE STREAMS ARE OPENED AFTER THE SWEEP'S OWN HIBERNATION RECORD, exactly as
 // the roster test above does and for the same measured reason. Both topics
@@ -2373,9 +2373,9 @@ func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T
 	})
 }
 
-// TestAPromptRevivesAWorkspaceWhoseShimWasKilled is the playtest defect end to
-// end. A workspace ran a turn to done, its shim was SIGKILLed out from under
-// the daemon, and the roster settled on `dead` — and the NEXT prompt was
+// TestAPromptRevivesAWorkspaceWhoseShimWasKilled is the headless-run defect
+// end to end. A workspace ran a turn to done, its shim was SIGKILLed out from
+// under the daemon, and the roster settled on `dead` — and the NEXT prompt was
 // delivered to the dead client rather than reviving the session: StartTurn
 // dialed a socket nothing was listening on, SubmitPrompt answered
 // `unavailable`, and the workspace stayed dead forever with the prompt held as
@@ -2399,7 +2399,7 @@ func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
 	}
 
 	// Arrange: one turn runs to done, so the session has a conversation to
-	// resume — the very state the playtest was in when the shim died.
+	// resume — the very state a headless run was in when the shim died.
 	f.submit("do the thing", "k-dead-revive-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
 	// The daemon's own opening of the turn, not merely the shim's receipt of

@@ -1132,7 +1132,7 @@ describe("a jump whose target is not drawn", () => {
 
 describe("the usage line the strip cannot fit", () => {
   /**
-   * The state playtest 11 photographs: both windows figured, the newest usage
+   * The state a real page shows: both windows figured, the newest usage
    * sample unreadable, so the caveat rides beside figures the daemon will not
    * clear. On the strip that is more line than the dock's one row can hold.
    */

@@ -26,7 +26,7 @@ import (
 // come from the daemon's own per-workspace conversation rows.
 
 // TestForkedWorkspaceFeedCarriesTheParentsQuestionAndAnswerBeforeItsOwn is the
-// defect (playtest section 2, A.6) as an assertion.
+// defect (a headless run's section 2, A.6) as an assertion.
 func TestForkedWorkspaceFeedCarriesTheParentsQuestionAndAnswerBeforeItsOwn(t *testing.T) {
 	t.Parallel()
 	// Arrange: a parent that was asked something and answered it, with the

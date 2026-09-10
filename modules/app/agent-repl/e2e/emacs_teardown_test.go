@@ -359,7 +359,7 @@ func awaitFindable(t *testing.T, root string, pid int) {
 // stopped by the test, and asserted alive at the end -- so a finder that
 // counts them can never come up empty, and `awaitDaemonExit`, whose whole job
 // is to wait for that set to empty, spent its entire 6s bound on every
-// scenario. MEASURED: 7 of 7 playtest observations reported `emacs phase
+// scenario. MEASURED: 7 of 7 sandbox observations reported `emacs phase
 // daemon-exit took 6.0Xs (bound 6s)` against a daemon a host e2e measures
 // leaving 5ms after the same stop; a world that started no daemon at all
 // reported the same 6s.

@@ -607,8 +607,8 @@ func TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage(t *testing.T) {
 }
 
 // TestRevivalRunsInTheSessionsModeNotTheSummarizers is the hibernation
-// contract's own posture clause, and it is here because a playtest of plan
-// B.15 photographed it broken: after an idle-cutoff park and a revival, the
+// contract's own posture clause, and it is here because a headless sandbox
+// run caught it broken: after an idle-cutoff park and a revival, the
 // topbar read `plan` and the revived turn ran under plan mode, which nobody
 // chose.
 //

@@ -406,7 +406,7 @@ the misread this color exists to prevent.")
 ;; of its pair: `:none', `:inactive' and the terminal merge arms take no
 ;; lifecycle color, and the tab was drawn by leaving background and foreground
 ;; `unspecified' — "whatever this frame's faces happen to resolve to".  Measured
-;; on the playtest's own frame that came out as a name run of BLACK glyphs on
+;; on a headless sandbox frame that came out as a name run of BLACK glyphs on
 ;; `#14141a' (about 1.06:1) and a bracket numeral of WHITE on the tab bar's own
 ;; `#d9d9d9' (about 1.3:1): a tab nobody could read, in two ways at once, and
 ;; both invisible to every assertion because the STRING was correct and only its
@@ -440,7 +440,7 @@ in a color one step off its own background — and every number above
 fails it by a wide margin.
 
 It is stated once, here, so the palette's rows, the faces built from
-them and the playtest that reads a pair off a photograph are all held to
+them and a reader that takes a pair off a screenshot are all held to
 ONE number rather than to three that could drift apart.")
 
 (defun agent-repl--relative-luminance (color)
@@ -465,7 +465,7 @@ exists to catch it."
 
 1.0 is two identical colors and 21.0 is black on white.  This is the
 module's own answer to \"can this be read?\", so the palette, the faces
-built from it and the playtest that reads a pair off a photograph all
+built from it and a reader that takes a pair off a screenshot all
 ask ONE function rather than each carrying its own arithmetic."
   (let* ((a (agent-repl--relative-luminance foreground))
          (b (agent-repl--relative-luminance background))

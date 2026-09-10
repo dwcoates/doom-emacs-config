@@ -617,7 +617,7 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
   // it: its `getComputedStyle` answers `none` for a `hidden` element whatever
   // the author sheet says (measured -- an author `.agent-panel { display: flex
   // }` over a hidden element still computes `none` there), so the browser's
-  // answer is asserted where the browser is, in the playtest's real webview,
+  // answer is asserted where the browser is, in a real webview,
   // and what is asserted HERE is the sheet the browser will read.
   //
   // THE SELECTOR COMES FROM THE PRODUCTION ELEMENT, never restated: the class

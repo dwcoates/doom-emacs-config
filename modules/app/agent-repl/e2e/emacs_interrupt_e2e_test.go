@@ -266,7 +266,7 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 // than the one that carried the ack, and nothing orders the two. So the gate
 // read the instant the restart is asked for must ALREADY be closed: a caller
 // that read `:open` here would submit a prompt the daemon refuses a few
-// hundred milliseconds later, which is what playtest F.42 hit.
+// hundred milliseconds later, which is what a headless sandbox run hit.
 func TestEmacsForcedRestartClosesTheComposerOnItsSend(t *testing.T) {
 	t.Parallel()
 	// Arrange.
