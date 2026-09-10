@@ -42,13 +42,15 @@ type Fields struct {
 	// Producer is the WriteBatch caller's self-declared name.
 	Producer string
 	// AgentID is a conversation.v1.AgentId.value.
-	AgentID string
+	AgentID  string
+	AgentIDs []string
 	// VendorSessionID is the vendor's own mutable session identity, when the
 	// record concerns one. It is an ATTRIBUTE, never an address.
 	VendorSessionID string
 	// BookAgentID is the agent whose book a page line belongs to
 	// (StorePageLine.page_agent_id.value). Empty for every never-served row.
-	BookAgentID string
+	BookAgentID  string
+	BookAgentIDs []string
 	// WriteID is StoreEntry.write_id — the replay-dedup identity of one write.
 	WriteID string
 	// UpsertKey is StoreEntry.upsert_key — the identity of the ROW a write
@@ -126,8 +128,8 @@ type record struct {
 	Context            map[string]any `json:"context"`
 }
 
-// Logger writes normal records to the persistent log and stderr. Verbose
-// records reach both sinks only when verbose mode is enabled.
+// Logger writes records at or above its configured AGENT_REPL_LOG_LEVEL to the
+// persistent log and, when configured, the interactive sink.
 type Logger struct {
 	file   io.Writer
 	stderr io.Writer
@@ -137,11 +139,11 @@ type Logger struct {
 	// owns nor can roll, so mirroring every record there is a second,
 	// unbounded copy of a log that is already durable and rotated.
 	terminalEmergencyOnly bool
-	verboseEnabled        bool
-	fields         Fields
-	state          *sinkState
-	clock          func() time.Time
-	pid            func() int
+	minimumLevel          sharedlogging.Level
+	fields                Fields
+	state                 *sinkState
+	clock                 func() time.Time
+	pid                   func() int
 }
 
 type sinkState struct {
@@ -149,19 +151,29 @@ type sinkState struct {
 	poisoned error
 }
 
-// New creates the shim-store logger. file is the durable sink and stderr is
-// the interactive sink. Both are required runtime dependencies.
+// New creates the shim-store logger. debugEnabled exists for focused tests and
+// foreground harnesses; production passes the parsed process threshold through
+// NewAtLevel. Both sinks are required runtime dependencies.
 func New(file, stderr io.Writer, verboseEnabled bool) *Logger {
+	level := sharedlogging.LevelInfo
+	if verboseEnabled {
+		level = sharedlogging.LevelDebug
+	}
+	return NewAtLevel(file, stderr, level)
+}
+
+// NewAtLevel creates the shim-store logger at one explicit severity threshold.
+func NewAtLevel(file, stderr io.Writer, minimumLevel sharedlogging.Level) *Logger {
 	if file == nil || stderr == nil {
 		panic("shim-store logging: nil output sink")
 	}
 	return &Logger{
-		file:           file,
-		stderr:         stderr,
-		verboseEnabled: verboseEnabled,
-		state:          &sinkState{},
-		clock:          time.Now,
-		pid:            os.Getpid,
+		file:         file,
+		stderr:       stderr,
+		minimumLevel: minimumLevel,
+		state:        &sinkState{},
+		clock:        time.Now,
+		pid:          os.Getpid,
 	}
 }
 
@@ -172,7 +184,17 @@ func New(file, stderr io.Writer, verboseEnabled bool) *Logger {
 // the caller's to manage and wrong under launchd, where the terminal is an
 // unbounded file nobody rolls.
 func NewDurableOnly(file, terminal io.Writer, verboseEnabled bool) *Logger {
-	l := New(file, terminal, verboseEnabled)
+	level := sharedlogging.LevelInfo
+	if verboseEnabled {
+		level = sharedlogging.LevelDebug
+	}
+	return NewDurableOnlyAtLevel(file, terminal, level)
+}
+
+// NewDurableOnlyAtLevel creates the production logger at one explicit
+// severity threshold.
+func NewDurableOnlyAtLevel(file, terminal io.Writer, minimumLevel sharedlogging.Level) *Logger {
+	l := NewAtLevel(file, terminal, minimumLevel)
 	l.terminalEmergencyOnly = true
 	return l
 }
@@ -190,16 +212,16 @@ func (l *Logger) With(fields Fields) *Logger {
 
 // Log records normal-priority diagnostic output to shim-store.log and stderr.
 func (l *Logger) Log(fields Fields, format string, args ...any) {
-	l.write("normal", fields, format, args, true)
+	l.write("normal", fields, format, args)
 }
 
-// LogVerbose records verbose diagnostic output to both sinks only when
-// AGENT_REPL_LOG_VERBOSE enabled verbose mode at startup.
+// LogVerbose records a debug-level verbose diagnostic. AGENT_REPL_LOG_LEVEL
+// decides whether the record reaches either sink.
 func (l *Logger) LogVerbose(fields Fields, format string, args ...any) {
-	l.write("verbose", fields, format, args, l.verboseEnabled)
+	l.write("verbose", fields, format, args)
 }
 
-func (l *Logger) write(verbosity string, fields Fields, format string, args []any, enabled bool) {
+func (l *Logger) write(verbosity string, fields Fields, format string, args []any) {
 	if l == nil {
 		panic("shim-store logging: nil logger")
 	}
@@ -209,14 +231,13 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 	}
 	level := merged.Level
 	if level == "" {
-		level = "info"
+		if verbosity == "verbose" {
+			level = "debug"
+		} else {
+			level = "info"
+		}
 	}
-	switch level {
-	case "debug", "info", "warn", "error":
-	default:
-		panic(fmt.Sprintf("shim-store logging: invalid level %q", level))
-	}
-	if !enabled {
+	if !l.minimumLevel.Allows(level) {
 		return
 	}
 	context := map[string]any{}
@@ -250,6 +271,12 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		if value != "" {
 			context[key] = value
 		}
+	}
+	if len(merged.AgentIDs) != 0 {
+		context["agent_ids"] = merged.AgentIDs
+	}
+	if len(merged.BookAgentIDs) != 0 {
+		context["book_agent_ids"] = merged.BookAgentIDs
 	}
 	if merged.WriteSeq != 0 {
 		context["write_seq"] = merged.WriteSeq
@@ -380,6 +407,12 @@ func merge(base, extra Fields) Fields {
 	}
 	if extra.WriteSeq != 0 {
 		base.WriteSeq = extra.WriteSeq
+	}
+	if len(extra.AgentIDs) != 0 {
+		base.AgentIDs = extra.AgentIDs
+	}
+	if len(extra.BookAgentIDs) != 0 {
+		base.BookAgentIDs = extra.BookAgentIDs
 	}
 	if extra.Offset != nil {
 		base.Offset = extra.Offset

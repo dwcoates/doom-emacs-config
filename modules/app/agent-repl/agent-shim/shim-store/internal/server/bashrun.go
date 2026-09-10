@@ -76,7 +76,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 	if terminated {
 		// The run is already over: it can never speak again, so the stream ends
 		// rather than standing open on it.
-		log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: terminalSeq},
+		log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: terminalSeq},
 			"bash run watch ended: the terminal row was already stored replayed=%d", len(replayed))
 		return nil
 	}
@@ -86,7 +86,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 	if err := s.openStream(ctx, log, "store.rpc.watch-bash-run"); err != nil {
 		return err
 	}
-	log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: replay.PinSeq},
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: replay.PinSeq},
 		"bash run watch live after replay replayed=%d", len(replay.Rows))
 
 	for {
@@ -102,7 +102,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 		case <-sub.overflow:
 			return s.endBashOverflowed(log, sub)
 		case <-s.done:
-			log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the store is shutting down")
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the store is shutting down")
 			return nil
 		case <-ctx.Done():
 			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the caller went away")
@@ -121,7 +121,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 				return err
 			}
 			if db.BashRowIsTerminal(row.Row) {
-				log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq},
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq},
 					"bash run watch ended: the run reached its terminal")
 				return nil
 			}
