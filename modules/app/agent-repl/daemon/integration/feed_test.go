@@ -1341,6 +1341,58 @@ func TestContextCutClearedDrawsASeparation(t *testing.T) {
 	}
 }
 
+// ONE CLEAR IS ONE DIVIDER, HOWEVER MANY PLANES DELIVER IT.
+//
+// A `/clear` is stated to BOTH producers: the shim reads the SDK's
+// `conversation_reset` and the sidecar reads the expanded `/clear` envelope out
+// of the transcript. They write ONE store row -- keyed
+// `session:context_cut:<the session the clear rotated to>`, the one identity
+// both planes can mint -- and every write of a row is delivered on the agent's
+// tail at that row's OWN position, so the daemon sees the cut twice at ONE
+// pointer. Playtest 9's D28 saw the two writes land as `context_cut:sip1-33`
+// and `context_cut:sip1-3k`: two rows, two positions, two dividers, the second
+// arriving after the turn had settled.
+func TestAClearDeliveredOnBothPlanesDrawsOneDivider(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-clear-two-planes", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	cleared := updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{
+			Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
+		}},
+	})
+
+	// Act: the stream plane's write, then the file plane's — the SAME row, so
+	// the SAME pointer, which is what an upsert that keeps its place means.
+	f.shim.PushAgentFrameAt(mainAgent, "one-clear", cleared)
+	f.shim.PushAgentFrameAt(mainAgent, "one-clear", cleared)
+	// A sentinel pushed AFTER both deliveries, on the same ordered stream: a
+	// page carrying it has necessarily routed both of them, which is how the
+	// census below is taken without waiting out a bound.
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("after-clear", "the plane landed")[0])
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("after-clear", "the plane landed")[1])
+
+	// Assert
+	page, _ := f.openFeedOnceCarrying("the row pushed after both planes' writes", func(p *frontendv1.FeedPage) bool {
+		for _, r := range p.GetSuccess().GetRows() {
+			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "the plane landed" {
+				return true
+			}
+		}
+		return false
+	})
+	drawn := 0
+	for _, r := range page.GetSuccess().GetRows() {
+		if r.GetSeparation().GetCleared() != nil {
+			drawn++
+		}
+	}
+	if drawn != 1 {
+		t.Fatalf("the page carries %d cleared dividers, want exactly 1: one cut is one divider however many planes deliver it", drawn)
+	}
+}
+
 func TestContextCutCompactedDrawsASeparationWithFormattedTokens(t *testing.T) {
 	t.Parallel()
 	// Arrange

@@ -686,27 +686,98 @@ describe("session facts", () => {
     expect(compacted.trigger.case).toBe("automatic");
   });
 
-  it("records a conversation reset as an identity rotation AND a cleared cut", () => {
+  /** The `conversation_reset` a `/clear` puts on the stream. */
+  function reset(): SdkMessage {
+    return {
+      type: "conversation_reset",
+      new_conversation_id: "announced-and-never-used",
+      uuid: "uuid-reset",
+      session_id: "session-1",
+    } as unknown as SdkMessage;
+  }
+
+  /** The `system:init` that follows a reset, naming the id it rotated TO. */
+  function initNaming(sessionId: string): SdkMessage {
+    return {
+      type: "system",
+      subtype: "init",
+      uuid: "uuid-init-2",
+      session_id: sessionId,
+    } as unknown as SdkMessage;
+  }
+
+  it("records a conversation reset as an identity rotation", () => {
     const fold = createFold();
 
-    const output = fold.onSdkMessage(
-      {
-        type: "conversation_reset",
-        new_conversation_id: "session-2",
-        uuid: "uuid-reset",
-        session_id: "session-1",
-      } as unknown as SdkMessage,
-      foldContext(),
-    );
+    const output = fold.onSdkMessage(reset(), foldContext());
 
     const rotated =
       output.entries[0]?.item.kind === "session_update" ? output.entries[0].item.update : undefined;
     expect(rotated?.update.case).toBe("identityRotated");
+  });
+
+  it("holds the clear's cut at the reset, which does not name the cut", () => {
+    // The reset carries only uuids the FILE plane never sees; the identity both
+    // planes can spell is the session it rotated to, and the reset does not
+    // state it.
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(reset(), foldContext());
+
+    expect(output.entries).toHaveLength(1);
+  });
+
+  it("cuts the conversation when the init names the session the clear rotated to", () => {
+    const fold = createFold();
+    fold.onSdkMessage(reset(), foldContext());
+
+    const output = fold.onSdkMessage(initNaming("session-2"), foldContext());
+
     const frame =
-      output.entries[1]?.item.kind === "frame" ? output.entries[1].item.frame : undefined;
+      output.entries.at(-1)?.item.kind === "frame"
+        ? (output.entries.at(-1)?.item as { frame: conversationv1.AgentFrame }).frame
+        : undefined;
     const cut = (frame?.result.value as conversationv1.AgentUpdate).update
       .value as conversationv1.ContextCut;
     expect(cut.cut.case).toBe("cleared");
+  });
+
+  it("keys the released clear on the session it rotated to, as the sidecar spells it", () => {
+    // ONE CLEAR IS ONE ROW. The sidecar reads the `/clear` envelope out of
+    // `<session-2>.jsonl` and keys `session:context_cut:session-2`; a key minted
+    // from this plane's own reset uuid could never collide with it, and the feed
+    // drew "context cleared" twice.
+    const fold = createFold();
+    fold.onSdkMessage(reset(), foldContext());
+
+    const output = fold.onSdkMessage(initNaming("session-2"), foldContext());
+
+    expect(output.entries.at(-1)?.upsertKey).toBe("session:context_cut:session-2");
+  });
+
+  it("holds the clear's cut when the init that follows names no session", () => {
+    // A row keyed on nothing would collide with every other unidentified cut,
+    // and the file plane still writes this clear from the envelope on disk.
+    const fold = createFold();
+    fold.onSdkMessage(reset(), foldContext());
+
+    const output = fold.onSdkMessage(initNaming(""), foldContext());
+
+    expect(output.entries.some((entry) => entry.upsertKey.startsWith("session:context_cut:"))).toBe(
+      false,
+    );
+  });
+
+  it("releases one held clear once, so a later init draws no second divider", () => {
+    const fold = createFold();
+    fold.onSdkMessage(reset(), foldContext());
+    fold.onSdkMessage(initNaming("session-2"), foldContext());
+
+    const output = fold.onSdkMessage(initNaming("session-2"), foldContext());
+
+    expect(output.entries.some((entry) => entry.upsertKey.startsWith("session:context_cut:"))).toBe(
+      false,
+    );
   });
 
   it("records the session's MCP servers from its opening record", () => {
