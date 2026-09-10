@@ -263,6 +263,8 @@ advice's effect would be invisible)."
   (defun projectile-add-known-project (_dir) "Stub." nil))
 (unless (fboundp 'doom-fallback-buffer)
   (defun doom-fallback-buffer () "Stub." (get-buffer-create " *test-fallback*")))
+(unless (fboundp 'doom-real-buffer-list)
+  (defun doom-real-buffer-list (&optional _buffer-list) "Stub." nil))
 (unless (fboundp 'hack-dir-local-variables-non-file-buffer)
   (defun hack-dir-local-variables-non-file-buffer () "Stub." nil))
 (unless (boundp '+workspaces-switch-project-function)

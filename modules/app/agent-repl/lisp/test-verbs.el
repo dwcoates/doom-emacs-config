@@ -620,6 +620,55 @@ the create selects it the same way registering a directory does."
       (should (equal agent-repl-test-verbs--selected
                      '("/tmp/agent-repl-test/fork"))))))
 
+(ert-deftest agent-repl-verbs-create-lands-on-the-panel-not-magit ()
+  "The workspace `SPC TAB n\' just made comes up on ITS OWN PANEL.
+The recorded selection runs the real landing policy, so a magit status
+opened over the new workspace\'s panel shows up here as a magit call."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
+    (let (magit-dirs)
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+                 (lambda () (agent-repl-test-verbs--repo-ref)))
+                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
+                ((symbol-function 'read-string) (lambda (&rest _) ""))
+                ((symbol-function 'agent-repl--ws-name-for-dir)
+                 (lambda (dir) (and (equal dir "/tmp/agent-repl-test/new") "new-ws")))
+                ((symbol-function 'doom-real-buffer-list) (lambda (&optional _b) nil))
+                ((symbol-function 'agent-repl--magit-status-same-window)
+                 (lambda (dir) (push dir magit-dirs)))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (dir)
+                   (push dir agent-repl-test-verbs--selected)
+                   (agent-repl--ws-switch-project-display dir))))
+        ;; Act.
+        (agent-repl-create-workspace nil)
+        ;; Assert.
+        (should-not magit-dirs)))))
+
+(ert-deftest agent-repl-verbs-fork-lands-on-the-panel-not-magit ()
+  "A fork comes up on its own panel too: the fork is where you meant to work."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
+    (let (magit-dirs)
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+                 (lambda () (agent-repl-test-verbs--repo-ref)))
+                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it"))
+                ((symbol-function 'agent-repl--ws-name-for-dir)
+                 (lambda (dir) (and (equal dir "/tmp/agent-repl-test/fork") "fork-ws")))
+                ((symbol-function 'doom-real-buffer-list) (lambda (&optional _b) nil))
+                ((symbol-function 'agent-repl--magit-status-same-window)
+                 (lambda (dir) (push dir magit-dirs)))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (dir)
+                   (push dir agent-repl-test-verbs--selected)
+                   (agent-repl--ws-switch-project-display dir))))
+        ;; Act.
+        (agent-repl-fork-workspace)
+        ;; Assert.
+        (should-not magit-dirs)))))
+
 (ert-deftest agent-repl-verbs-create-without-select-stands-still ()
   "A create that did not ask to be selected moves the user NOWHERE.
 `select' is off by default because a one-shot is fire-and-forget and must

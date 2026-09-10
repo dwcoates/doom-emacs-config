@@ -249,6 +249,36 @@ func playtestTabIDs(t *testing.T, s *playtestScenario, names []string) []string 
 	return ids
 }
 
+// playtestAwaitSelectedPanel waits until the SELECTED window shows one of
+// WS's OWN panel buffers -- its webview or its composer -- and answers the
+// buffer's name and major mode.
+//
+// WHAT THIS GUARDS. A create switches to the minted worktree through
+// projectile, and Doom then asks `+workspaces-switch-project-function` what
+// the new perspective should show. The module answers that question in
+// `agent-repl--ws-switch-project-display`: a workspace ALREADY OWNS ITS
+// DISPLAY, because the persp activation drains put its panel in the main
+// area. The panel's webview is deliberately not a `doom-real-buffer-list`
+// member, so an answer that did not recognize the workspace fell through to
+// the empty-project magit fallback and left magit status sitting where the
+// agent belongs -- which is the defect this readback fails on, by name.
+func playtestAwaitSelectedPanel(t *testing.T, s *playtestScenario, ws string) (string, string) {
+	t.Helper()
+	e := s.E
+	webview := e.EvalString(`(agent-repl--frontend-webview-buffer-name ` + elispString(ws) + `)`)
+	input := awaitInputBuffer(t, e, ws)
+	e.AwaitEvalFor(panelSettleBound,
+		fmt.Sprintf("the selected window to show %q's own panel", ws),
+		playtestSelectedBufferForm,
+		func(raw json.RawMessage) bool {
+			got := decodeString(raw)
+			return got == webview || got == input
+		})
+	name := e.EvalString(playtestSelectedBufferForm)
+	mode := e.EvalString(`(format "%s" (buffer-local-value 'major-mode (window-buffer (selected-window))))`)
+	return name, mode
+}
+
 // ---------------------------------------------------------------------------
 // A.4 -- ADD PROJECT FROM DIRECTORY
 // ---------------------------------------------------------------------------
@@ -415,9 +445,19 @@ func TestPlaytestNewWorkspaceAndChild(t *testing.T) {
 		t.Fatalf("creating %q left Emacs standing somewhere else: `SPC TAB n` must SELECT the workspace it "+
 			"just made, the way registering a directory does", createdName)
 	}
+	// AND WHAT IT IS STANDING ON IS THE AGENT, NOT MAGIT. Selecting the
+	// created workspace must land the main area on that workspace's own
+	// panel; a magit status buffer there is the switch-project fallback
+	// having overwritten the panel.
+	selected, mode := playtestAwaitSelectedPanel(t, s, createdName)
+	if strings.HasPrefix(mode, "magit-") {
+		t.Fatalf("creating %q left the selected window on %q in %s: the workspace it just made must come up "+
+			"on its OWN PANEL, not on magit status", createdName, selected, mode)
+	}
 	p.note("`SPC TAB n` answered and Emacs was asked what it is standing on",
-		fmt.Sprintf("`agent-repl--ws-current-name` is %q with no switch performed: the create SELECTED the "+
-			"workspace it made, so the child create below reads the right parent", createdName))
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q with no switch performed and the selected window "+
+			"shows that workspace's own panel %q: the create SELECTED the workspace it made and landed on "+
+			"its agent, so the child create below reads the right parent", createdName, selected))
 
 	// ---- the child create ------------------------------------------------
 	beforeChild := s.tabNames()
