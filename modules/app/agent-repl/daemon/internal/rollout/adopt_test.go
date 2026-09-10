@@ -636,3 +636,52 @@ func TestReclaimHeadlessRefusesAnAlreadyAdoptedWorkspace(t *testing.T) {
 		t.Fatalf("reclaimHeadless took a claim on a workspace that has already adopted")
 	}
 }
+
+// TestAnAdoptionOutLivesTheCallerThatCompletedIt pins the one edge that cost
+// the handover its whole adoption window: the participant whose call satisfied
+// the rendezvous gives up MID-ADOPTION, and the takeover must finish anyway.
+//
+// Emacs's adopt is an ordinary unary call under a 10s client timeout while the
+// steps of `adopt' are writes against a SQLite handle the outgoing daemon is
+// still writing; on a loaded box the client expires first. Run on the caller's
+// own context, the adoption then stopped half-done and settled the rendezvous
+// failed, and nothing anywhere tried again -- so the incumbent waited out its
+// full 30s window before exiting, which is the promotion Emacs never made.
+func TestAnAdoptionOutLivesTheCallerThatCompletedIt(t *testing.T) {
+	// Arrange: an adoption that is INSIDE its drain step when the caller
+	// gives up, and that reports the context it was actually handed.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var seen error
+	h := newHarness(t, func(deps *Deps) {
+		deps.DrainIntake = func(ctx context.Context, _ ids.WorkspaceID) error {
+			close(entered)
+			<-release
+			seen = ctx.Err()
+			return ctx.Err()
+		}
+	})
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+
+	// Act
+	go func() { done <- h.c.AdoptHost(ctx, ws) }()
+	<-entered
+	cancel()
+	close(release)
+	err := <-done
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AdoptHost = %v, want the adoption to complete after the caller gave up", err)
+	}
+	if seen != nil {
+		t.Fatalf("the adoption ran under a context the caller cancelled (%v), want one it cannot cancel", seen)
+	}
+	if got := h.publishedWorkspaces(); len(got) != 1 || got[0] != ws {
+		t.Fatalf("published views = %v, want the adoption to have finished for %q", got, ws)
+	}
+}
