@@ -319,6 +319,72 @@ this site has no display logic of its own to test."
       (should-error (agent-repl-add-project-workspace "/tmp/not-a-dir")
                     :type 'user-error))))
 
+(defmacro agent-repl-test-commands--registering (answer &rest body)
+  "Run BODY with `agent-repl-add-project-workspace' answered by ANSWER.
+ANSWER is the ref `agent-repl-host-register' hands its callback, or nil
+for a register the daemon refused."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
+               ((symbol-function 'agent-repl--ws-register-project) (lambda (_d) nil))
+               ((symbol-function 'agent-repl-link-primary) (lambda () 'conn))
+               ((symbol-function 'agent-repl--ws-current-name) (lambda () "elsewhere"))
+               ((symbol-function 'agent-repl--ws-current-log-name) (lambda () "elsewhere"))
+               ((symbol-function 'run-at-time) (lambda (&rest _) nil))
+               ((symbol-function 'message) (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl-host-register)
+                (lambda (_conn _dir on-done) (funcall on-done ,answer))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-add-project-arms-the-registered-panels ()
+  "Registering a directory arms the minted workspace to SHOW ITSELF.
+The switch waits for the answer, so by the time it runs the directory IS
+a workspace and the landing arm is no longer a no-op."
+  ;; Arrange
+  (agent-repl-test-commands--registering (list :id "new-id" :dir "/tmp/proj/")
+    (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir)
+               (lambda (dir) (and (equal dir "/tmp/proj/") "registered")))
+              ((symbol-function 'agent-repl--ws-switch-project) (lambda (_p) nil)))
+      ;; Act
+      (agent-repl-add-project-workspace "/tmp/proj")
+      ;; Assert
+      (should (agent-repl--ws-get "registered" :pending-show-panels)))))
+
+(ert-deftest agent-repl-test-commands-add-project-lands-on-the-panel-not-magit ()
+  "A registered workspace comes up on its own panel, never on magit status.
+The recorded switch runs the real landing policy, so a magit status
+opened over the new workspace's panel shows up here as a magit call."
+  ;; Arrange
+  (agent-repl-test-commands--registering (list :id "new-id" :dir "/tmp/proj/")
+    (let (magit-dirs)
+      (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir)
+                 (lambda (dir) (and (equal dir "/tmp/proj/") "registered")))
+                ((symbol-function 'doom-real-buffer-list) (lambda (&optional _b) nil))
+                ((symbol-function 'agent-repl--magit-status-same-window)
+                 (lambda (dir) (push dir magit-dirs)))
+                ((symbol-function 'agent-repl--ws-switch-project)
+                 (lambda (dir) (agent-repl--ws-switch-project-display dir))))
+        ;; Act
+        (agent-repl-add-project-workspace "/tmp/proj")
+        ;; Assert
+        (should-not magit-dirs)))))
+
+(ert-deftest agent-repl-test-commands-add-project-refused-arms-nothing ()
+  "A register the daemon REFUSED moves the user nowhere.
+There is no workspace to come up on, so nothing is switched to and
+nothing is armed."
+  ;; Arrange
+  (agent-repl-test-commands--registering nil
+    (let (switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) "registered"))
+                ((symbol-function 'agent-repl--ws-switch-project)
+                 (lambda (dir) (push dir switched))))
+        ;; Act
+        (agent-repl-add-project-workspace "/tmp/proj")
+        ;; Assert
+        (should-not switched)
+        (should-not (agent-repl--ws-get "registered" :pending-show-panels))))))
+
 ;;;; ---- Navigation over roster order ----
 
 (defun agent-repl-test-commands--row (name id at-ms &optional closed)

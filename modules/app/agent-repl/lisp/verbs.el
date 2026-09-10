@@ -529,21 +529,39 @@ and the new workspace\'s tab arrives through the roster push."
      (when select
        (agent-repl-verbs--select-created success)))))
 
-(defun agent-repl-verbs--select-created (success)
-  "Stand on the workspace CreateWorkspaceSuccess names.
-The ref's `dir\' is the minted worktree, which is exactly what
+(defun agent-repl-verbs-select-minted (ref)
+  "Stand on the workspace REF names, once the daemon has minted it.
+
+THE ANSWER IS WHEN THE WORKSPACE EXISTS.  A minted `WorkspaceRef\' is the
+one place the identity is known before the roster push carries it, so
+every verb that stands on a workspace it just asked for stands on it HERE
+-- `CreateWorkspaceSuccess.workspace\' for create and fork,
+`RegisterWorkspace\''s ref for onboarding a directory.  Standing on the
+directory any earlier is standing on a dir that is not a workspace yet:
+`agent-repl-switch-to-project\' finds nothing to arm and Doom\'s
+empty-project fallback lands the user on magit status instead of the
+workspace\'s own panel.
+
+The ref\'s `dir\' is the minted worktree, which is exactly what
 `agent-repl-switch-to-project\' takes -- its argument is documented as a
-PROJECT ROOT PATH.  A success carrying no dir is REPORTED, never silently
+PROJECT ROOT PATH.  A ref carrying no dir is REPORTED, never silently
 skipped: the decoder already refuses a success without the ref, so a
 missing dir is a contract breach and the user is owed the reason their
 new workspace did not come up."
-  (let ((dir (plist-get (plist-get success :workspace) :dir)))
+  (let ((dir (plist-get ref :dir)))
     (if (and dir (not (string-empty-p dir)))
         (progn
-          (agent-repl--info nil "elisp.verbs.create-select dir=%s" dir)
+          (agent-repl--info nil "elisp.verbs.select-minted dir=%s" dir)
           (agent-repl-switch-to-project dir))
-      (agent-repl--error nil "elisp.verbs.create-select-no-dir success=%S" success)
-      (message "agent-repl: the created workspace carries no directory to switch to"))))
+      (agent-repl--error nil "elisp.verbs.select-minted-no-dir ref=%S" ref)
+      (message "agent-repl: the new workspace carries no directory to switch to"))))
+
+(defun agent-repl-verbs--select-created (success)
+  "Stand on the workspace CreateWorkspaceSuccess names.
+The identity lives in the success\'s own ref, which is handed to
+`agent-repl-verbs-select-minted\' -- the one landing every minted
+workspace comes up through."
+  (agent-repl-verbs-select-minted (plist-get success :workspace)))
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
                                               merge-actions prompt finish
