@@ -137,11 +137,11 @@ export function createAgentIdentityStore(
             `shim identity: ${file} holds no original_vendor_session_id; refusing to mint a second identity for one conversation`,
           );
         }
-        LOGGER.log({ file, original_vendor_session_id: value }, "read the persisted main agent identity");
+        LOGGER.debug({ file, original_vendor_session_id: value }, "read the persisted main agent identity");
         return Promise.resolve(value);
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-          LOGGER.log({ file }, "no persisted main agent identity for this workspace");
+          LOGGER.debug({ file }, "no persisted main agent identity for this workspace");
           return Promise.resolve(undefined);
         }
         return Promise.reject(err instanceof Error ? err : new Error(String(err)));
@@ -154,13 +154,13 @@ export function createAgentIdentityStore(
         minted_at_ms: nowMs(),
       };
       atomicWriteJson(file, record);
-      LOGGER.log({ file, ...record }, "persisted the main agent identity");
+      LOGGER.debug({ file, ...record }, "persisted the main agent identity");
       return Promise.resolve();
     },
     forget(): Promise<void> {
       try {
         rmSync(file);
-        LOGGER.log({ file }, "removed the identity a failed start had minted");
+        LOGGER.debug({ file }, "removed the identity a failed start had minted");
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === "ENOENT") return Promise.resolve();
         return Promise.reject(err instanceof Error ? err : new Error(String(err)));
@@ -183,7 +183,7 @@ export function createAgentIdentityStore(
         ...link,
         original_vendor_session_id: parsed.original_vendor_session_id,
       });
-      LOGGER.log(
+      LOGGER.debug(
         { file: target, vendor_session_id: vendorSessionId, original_vendor_session_id: parsed.original_vendor_session_id },
         "wrote the vendor-session link the transcript files do not carry",
       );
@@ -244,7 +244,7 @@ export class SessionIdentity {
   static async fresh(store: AgentIdentityStore, mint: () => string = mintVendorSessionId): Promise<SessionIdentity> {
     const minted = mint();
     await store.write(minted);
-    LOGGER.log({ vendor_session_id: minted, binding: "fresh" }, "pre-minted the vendor session id and adopted it as the main AgentId (R9)");
+    LOGGER.debug({ vendor_session_id: minted, binding: "fresh" }, "pre-minted the vendor session id and adopted it as the main AgentId (R9)");
     return new SessionIdentity(minted, store);
   }
 
@@ -260,8 +260,8 @@ export class SessionIdentity {
   static async resume(store: AgentIdentityStore, resumeVendorSessionId: string): Promise<SessionIdentity> {
     const persisted = await store.read();
     if (persisted === undefined) {
-      LOGGER.log(
-        { level: "warn", vendor_session_id: resumeVendorSessionId, binding: "resume", rule: "absent_file_adopts_resume_id" },
+      LOGGER.warn(
+        { vendor_session_id: resumeVendorSessionId, binding: "resume", rule: "absent_file_adopts_resume_id" },
         "no persisted identity on resume: adopting the resume id as the ORIGINAL vendor session id (R9 resume rule)",
       );
       await store.write(resumeVendorSessionId);
@@ -270,7 +270,7 @@ export class SessionIdentity {
     }
     const identity = new SessionIdentity(persisted, store);
     identity.current = resumeVendorSessionId;
-    LOGGER.log(
+    LOGGER.debug(
       { original_vendor_session_id: persisted, vendor_session_id: resumeVendorSessionId, binding: "resume" },
       "resumed under the persisted main AgentId",
     );
@@ -298,9 +298,8 @@ export class SessionIdentity {
     const previous = this.current;
     this.current = newVendorSessionId;
     await this.store.link(newVendorSessionId);
-    LOGGER.log(
+    LOGGER.warn(
       {
-        level: "warn",
         previous_vendor_session_id: previous,
         vendor_session_id: newVendorSessionId,
         original_vendor_session_id: this.originalVendorSessionId,

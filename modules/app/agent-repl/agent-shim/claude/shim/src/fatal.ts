@@ -17,13 +17,8 @@ import { bindLog, emergencyStderr } from "./log.js";
 export const MAIN_LIFECYCLE_OPERATION = "shim.main.lifecycle";
 export const MAIN_FATAL_OPERATION = "shim.main.fatal";
 
-const LIFECYCLE_LOGGER = bindLog({ component: "shim-main", operation: MAIN_LIFECYCLE_OPERATION });
+export const MAIN_LIFECYCLE_LOGGER = bindLog({ component: "shim-main", operation: MAIN_LIFECYCLE_OPERATION });
 const FATAL_LOGGER = bindLog({ component: "shim-main", operation: MAIN_FATAL_OPERATION });
-
-/** Emit a lifecycle record at info unless the caller identifies an error. */
-export function logMainLifecycle(fields: Record<string, unknown>, message: string): void {
-  LIFECYCLE_LOGGER.log({ level: "info", ...fields }, message);
-}
 
 function fatalCause(err: unknown): string {
   if (err instanceof Error) return err.name.length === 0 ? "Error" : err.name;
@@ -34,9 +29,8 @@ function fatalCause(err: unknown): string {
 export function reportFatal(err: unknown): void {
   const message = `fatal: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`;
   try {
-    FATAL_LOGGER.log(
+    FATAL_LOGGER.error(
       {
-        level: "error",
         cause: err,
         cause_class: "unrecoverable_entrypoint_failure",
         cause_type: fatalCause(err),

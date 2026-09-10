@@ -51,8 +51,8 @@ function sendItem(
 function bodyOf(call: PendingCall): conversationv1.AgentSendMessageBody {
   const text = str(call.input, "message") ?? str(call.input, "body");
   if (text === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a send states no message text; the body is carried empty rather than the send being lost",
     );
   }
@@ -90,8 +90,8 @@ export const sendMessageConverter: ToolConverter = {
   start(call) {
     const addressedTo = str(call.input, "to");
     if (addressedTo === undefined) {
-      LOGGER.log(
-        { level: "warn", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a send addresses nobody; the recipient is carried empty",
       );
     }
@@ -120,8 +120,8 @@ export const sendMessageConverter: ToolConverter = {
       // NO SUCCESS FRAME. `recipient_agent_id` is not optional, and a send whose
       // recipient cannot be resolved would otherwise claim it reached an agent
       // nobody named.
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a send resolved no recipient identity; no success frame is produced",
       );
       return undefined;

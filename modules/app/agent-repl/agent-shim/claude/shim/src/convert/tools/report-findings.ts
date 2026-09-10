@@ -48,8 +48,8 @@ export function effortLevelOf(level: string | undefined): conversationv1.AgentEf
     case undefined:
       return conversationv1.AgentEffortLevel.UNSPECIFIED;
     default:
-      LOGGER.log(
-        { level: "warn", effort: level },
+      LOGGER.warn(
+        { effort: level },
         "a review named an effort level this vocabulary has no value for; the level is left unspecified",
       );
       return conversationv1.AgentEffortLevel.UNSPECIFIED;
@@ -66,8 +66,8 @@ function verdictOf(verdict: string | undefined): conversationv1.AgentFinding["ve
     case undefined:
       return { case: undefined };
     default:
-      LOGGER.log(
-        { level: "warn", verdict },
+      LOGGER.warn(
+        { verdict },
         "a finding carries a verdict this contract has no arm for; the verdict is left unset",
       );
       return { case: undefined };
@@ -89,8 +89,8 @@ function outcomeOf(outcome: string | undefined): conversationv1.AgentFinding["ou
     case undefined:
       return { case: undefined };
     default:
-      LOGGER.log(
-        { level: "warn", outcome },
+      LOGGER.warn(
+        { outcome },
         "a finding carries an outcome this contract has no arm for; the outcome is left unset",
       );
       return { case: undefined };
@@ -101,8 +101,8 @@ function outcomeOf(outcome: string | undefined): conversationv1.AgentFinding["ou
 function findingOf(entry: unknown): conversationv1.AgentFinding | undefined {
   const record = asRecord(entry);
   if (record === undefined) {
-    LOGGER.log(
-      { level: "warn" },
+    LOGGER.warn(
+      {},
       "a review reported a finding that is not an object; it is dropped rather than half-built",
     );
     return undefined;
@@ -146,15 +146,15 @@ export const reportFindingsConverter: ToolConverter = {
     const echoed = arr(structured, "findings");
     const entries = echoed ?? arr(call.input, "findings");
     if (entries === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a findings report listed no findings on either the result or the call; no frame is produced",
       );
       return undefined;
     }
     if (echoed === undefined) {
-      LOGGER.log(
-        { level: "warn", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a findings report echoed nothing; the findings are read back off the call",
       );
     }

@@ -55,8 +55,8 @@ export function rawStruct(record: unknown): JsonObject | undefined {
     }
     return cloned as JsonObject;
   } catch (error) {
-    LOGGER.log(
-      { level: "warn", detail: error instanceof Error ? error.message : String(error) },
+    LOGGER.warn(
+      { detail: error instanceof Error ? error.message : String(error) },
       "a vendor record could not be represented as a Struct; it lands unparsed instead",
     );
     return undefined;
@@ -86,8 +86,8 @@ export function unknownResidue(
   if (raw === undefined) {
     return unparsedResidue(discriminator, "the record could not be represented", record);
   }
-  LOGGER.log(
-    { level: "warn", discriminator, discriminator_field: discriminatorField },
+  LOGGER.warn(
+    { discriminator, discriminator_field: discriminatorField },
     "recording an unmodelled record as residue",
   );
   return create(storev1.StoreUnservedItemSchema, {
@@ -110,7 +110,7 @@ export function unparsedResidue(
   } catch {
     raw = String(record);
   }
-  LOGGER.log({ level: "error", source, parse_error: parseError }, "recording an unparsable record");
+  LOGGER.error({ source, parse_error: parseError }, "recording an unparsable record");
   return create(storev1.StoreUnservedItemSchema, {
     unservedItem: {
       case: "unparsed",
@@ -189,8 +189,8 @@ export function residueEntry(
   const upsertKey =
     vendorUuid === "" ? streamResidueUpsertKey(nextStreamResidue()) : residueUpsertKey(vendorUuid);
   if (vendorUuid === "") {
-    LOGGER.log(
-      { level: "warn", kind: residueKind(record), upsert_key: upsertKey },
+    LOGGER.warn(
+      { kind: residueKind(record), upsert_key: upsertKey },
       "the vendor stated no uuid for this record; its residue is keyed by this process's own stream sequence",
     );
   }

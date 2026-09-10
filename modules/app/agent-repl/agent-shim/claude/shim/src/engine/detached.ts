@@ -132,7 +132,7 @@ export class LiveWorkTable {
       ...(turnId === undefined ? {} : { turnId }),
     };
     this.entries.set(entry.taskId, entry);
-    LOGGER.log(
+    LOGGER.info(
       {
         task_id: entry.taskId,
         tool_use_id: entry.toolUseId ?? "",
@@ -149,8 +149,8 @@ export class LiveWorkTable {
   onTaskUpdated(message: SdkTaskUpdatedMessage): LiveWorkEntry | undefined {
     const existing = this.entries.get(message.task_id);
     if (existing === undefined) {
-      LOGGER.log(
-        { level: "warn", task_id: message.task_id },
+      LOGGER.warn(
+        { task_id: message.task_id },
         "task_updated for a task this shim never saw start; ignored",
       );
       return undefined;
@@ -172,7 +172,7 @@ export class LiveWorkTable {
     const existing = this.entries.get(message.task_id);
     this.entries.delete(message.task_id);
     this.retire(existing);
-    LOGGER.log(
+    LOGGER.info(
       { task_id: message.task_id, status: message.status, known: existing !== undefined },
       "a detached-work item concluded and left the live set",
     );
@@ -209,7 +209,7 @@ export class LiveWorkTable {
     for (const id of dropped) this.retire(this.entries.get(id));
     this.entries.clear();
     for (const [id, entry] of next) this.entries.set(id, entry);
-    LOGGER.log(
+    LOGGER.debug(
       { level_size: next.size, dropped: dropped.join(" ") },
       "applied the vendor's live-task LEVEL by replacement",
     );
@@ -255,8 +255,8 @@ export class LiveWorkTable {
     const ids: conversationv1.DetachedWorkId[] = [];
     for (const entry of entries) {
       if (entry.toolUseId === undefined || entry.toolUseId === "") {
-        LOGGER.log(
-          { level: "warn", task_id: entry.taskId },
+        LOGGER.warn(
+          { task_id: entry.taskId },
           "live work with no originating call has no wire handle; omitted from the named set",
         );
         continue;

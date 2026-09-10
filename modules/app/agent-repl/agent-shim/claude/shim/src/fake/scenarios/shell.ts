@@ -51,7 +51,7 @@ const BASH = scenario({
   arms: "AgentBash.start + AgentBashSuccess.outcome=completed how=exited(0)",
   run(ctx) {
     const command = ctx.args === "" ? "pwd; ls | head" : ctx.args;
-    ctx.log({ turn: ctx.turn, branch: "bash" }, "fake foreground bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash" }, "fake foreground bash turn");
     const call = ctx.toolUse("Bash", { command });
     ctx.toolResult(call, "one\ntwo\n", bashResult({ stdout: "one\ntwo\n" }));
     conclude(ctx, "Ran the command.");
@@ -73,7 +73,7 @@ const BASH_HOLD = scenario({
     "the vendor returns none for a call a stop landed inside, and a unit left on its running arm draws a live " +
     "shell inside a turn that ended",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-hold" }, "fake held foreground bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-hold" }, "fake held foreground bash turn");
     // NO startTask AND NO run_in_background: the vendor has no background work
     // for this call, which is the whole point — the unit is detachable IN KIND
     // and the pinned SDK offers no verb to initiate the detachment.
@@ -81,7 +81,7 @@ const BASH_HOLD = scenario({
     // Parked in the same synchronous run as the call above, so there is no
     // window in which the unit is live and a stop has nothing to resolve.
     await ctx.awaitInterrupt();
-    ctx.log({ turn: ctx.turn }, "fake held foreground bash turn released by an interrupt");
+    ctx.log.debug({ turn: ctx.turn }, "fake held foreground bash turn released by an interrupt");
     // No result and no explicit terminal: the engine emits the interrupt
     // terminal, which is the ONE place that shape is spelled.
   },
@@ -94,7 +94,7 @@ const BASH_FAIL = scenario({
   writes: "the tool_use line, the error tool_result line, the closing text line",
   arms: "AgentBashSuccess.outcome=completed how=exited(non-zero) — a non-zero exit is a completed run, not a failure",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-fail" }, "fake failing-bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-fail" }, "fake failing-bash turn");
     const call = ctx.toolUse("Bash", { command: "exit 3" });
     ctx.toolResult(
       call,
@@ -119,7 +119,7 @@ const BASH_TIMEOUT = scenario({
   writes: "the tool_use line, the tool_result line, an incremental spool with NO `EXIT=` line, the closing text line",
   arms: "AgentBashInterrupted.cause=timed_out; the run stays live as detached work",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-timeout" }, "fake timed-out bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-timeout" }, "fake timed-out bash turn");
     const call = ctx.toolUse("Bash", { command: "sleep 600", timeout: 120_000 });
     const taskId = ctx.mintShellTaskId();
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "sleep 600" });
@@ -149,7 +149,7 @@ const BASH_SPILL = scenario({
   writes: "the tool_use line, the tool_result line carrying `persistedOutputPath`/`persistedOutputSize`, the closing text line",
   arms: "AgentBashOutputPartial — the partial extent with the omitted byte count",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-spill" }, "fake spilled-output bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-spill" }, "fake spilled-output bash turn");
     const call = ctx.toolUse("Bash", { command: "yes | head -100000" });
     ctx.toolResult(
       call,
@@ -173,7 +173,7 @@ const BASH_IMAGE = scenario({
   writes: "the tool_use line, the image tool_result line, the closing text line",
   arms: "AgentBashOutput.form=image",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-image" }, "fake image-output bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-image" }, "fake image-output bash turn");
     const call = ctx.toolUse("Bash", { command: "screencapture -x -" });
     const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     ctx.toolResult(call, "", bashResult({ stdout: base64, isImage: true }), {
@@ -196,7 +196,7 @@ const BASH_DETACH = scenario({
     "INCREMENTALLY (the first line before any detach gate, the rest after it) and terminated by `EXIT=0`",
   arms: "AgentBash detached_work + AgentBashUpdate deltas fed by the sidecar tailing the spool",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-detach" }, "fake detached-bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-detach" }, "fake detached-bash turn");
     const command = ctx.args === "" ? "for i in 1 2 3; do echo line-$i; sleep 1; done" : ctx.args;
     const call = ctx.toolUse("Bash", { command, run_in_background: true });
     const taskId = ctx.mintShellTaskId();
@@ -283,7 +283,7 @@ const BASH_DETACH_POLL = scenario({
   writes: "the tool_use/tool_result lines for the background and for each poll, and the spool terminated by `EXIT=0`",
   arms: "AgentBash detached_work; the polls themselves reach no converter arm — `TaskOutput` is in `EXEMPT_TOOLS`, so each poll is dropped SILENTLY: no unit, no `AgentUnmodeled`, no unmodeled warning",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-detach-poll" }, "fake explicit-poll detached-bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-detach-poll" }, "fake explicit-poll detached-bash turn");
     const command = ctx.args === "" ? "tail -f build.log" : ctx.args;
     const call = ctx.toolUse("Bash", { command, run_in_background: true });
     const taskId = ctx.mintShellTaskId();
@@ -346,7 +346,7 @@ const BASH_DETACH_FAIL = scenario({
   writes: "the tool_use and tool_result lines, and a spool terminated by `EXIT=3`",
   arms: "AgentBash detached_work terminating in a non-zero exit",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-detach-fail" }, "fake failing detached-bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-detach-fail" }, "fake failing detached-bash turn");
     const call = ctx.toolUse("Bash", { command: "echo error && exit 3", run_in_background: true });
     const taskId = ctx.mintShellTaskId();
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "echo error and exit 3" });
@@ -381,7 +381,7 @@ const BASH_DETACH_LIVE = scenario({
   writes: "an unterminated spool with no `EXIT=` line — the corpus's `bash-midoutput.output` shape",
   arms: "AgentBash detached_work still live; what a fan-wide cancel and a StopBash act on",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "bash-detach-live" }, "fake never-ending detached-bash turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-detach-live" }, "fake never-ending detached-bash turn");
     const call = ctx.toolUse("Bash", { command: "sleep 100000", run_in_background: true });
     const taskId = ctx.mintShellTaskId();
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "sleep 100000" });
@@ -406,7 +406,7 @@ const VENDOR_BACKGROUNDED = scenario({
   writes: "the tool_use line, the tool_result line carrying `backgroundedByUser`, an unterminated spool",
   arms: "AgentBackgrounded — a vendor-backgrounded foreground unit",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "vendor-backgrounded" }, "fake vendor-backgrounded turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "vendor-backgrounded" }, "fake vendor-backgrounded turn");
     const call = ctx.toolUse("Bash", { command: "tail -f /var/log/system.log" });
     const taskId = ctx.mintShellTaskId();
     // Announced as a task BEFORE the detach so `backgroundTasks(toolUseId)` has
