@@ -2146,6 +2146,81 @@ The screen must only demote names that could not be routed at all."
         ;; Assert
         (should (equal switched "keeper"))))))
 
+(ert-deftest agent-repl-test-land-after-teardown-arms-the-landing-panels ()
+  "The workspace landed on is armed to SHOW ITSELF on arrival.
+Without it the switch restores whatever window configuration persp-mode
+saved for a workspace nobody had stood in, which is none: the frame came
+up empty — one window, no buffer content, no mode line, only the tab bar."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "gone"))
+              ((symbol-function 'agent-repl--ws-all-names) (lambda () '("keeper")))
+              ((symbol-function 'agent-repl--ws-list-names) (lambda () '("keeper")))
+              ((symbol-function 'agent-repl--ws-switch) (lambda (_ws &rest _) nil)))
+      ;; Act
+      (agent-repl--land-after-teardown "gone")
+      ;; Assert
+      (should (agent-repl--ws-get "keeper" :pending-show-panels)))))
+
+(ert-deftest agent-repl-test-land-after-teardown-arms-before-it-switches ()
+  "The arming happens BEFORE the switch, or the persp activation hook drains
+the flag on the way in and finds nothing set."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (armed-at-switch)
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "gone"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (_ws &rest _)
+                   (setq armed-at-switch
+                         (agent-repl--ws-get "keeper" :pending-show-panels)))))
+        ;; Act
+        (agent-repl--land-after-teardown "gone")
+        ;; Assert
+        (should armed-at-switch)))))
+
+(ert-deftest agent-repl-test-land-after-teardown-arms-nothing-when-nothing-survives ()
+  "A teardown with no survivor arms no workspace: there is nowhere to land,
+and a flag set on a name nothing will switch to would fire on some later,
+unrelated arrival."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "gone"))
+              ((symbol-function 'agent-repl--ws-all-names) (lambda () '("gone")))
+              ((symbol-function 'agent-repl--ws-list-names) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-switch) (lambda (_ws &rest _) nil)))
+      ;; Act
+      (agent-repl--land-after-teardown "gone")
+      ;; Assert
+      (should-not (agent-repl--ws-get "gone" :pending-show-panels)))))
+
+(ert-deftest agent-repl-test-land-after-teardown-arms-nothing-when-no-switch-is-made ()
+  "Tearing down some OTHER workspace leaves the user's frame alone, so the
+workspace they are already standing in is not re-shown: a user who
+dismissed their panels did not ask for them back."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "mine"))
+              ((symbol-function 'agent-repl--ws-all-names) (lambda () '("mine" "other")))
+              ((symbol-function 'agent-repl--ws-list-names) (lambda () '("mine" "other")))
+              ((symbol-function 'agent-repl--ws-switch) (lambda (_ws &rest _) nil)))
+      ;; Act
+      (agent-repl--land-after-teardown "other")
+      ;; Assert
+      (should-not (agent-repl--ws-get "mine" :pending-show-panels)))))
+
+(ert-deftest agent-repl-test-arm-landing-panels-ignores-a-nil-target ()
+  "There is nothing to arm when no landing target was found, and asking for
+one is a no-op rather than an error."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--arm-landing-panels nil))))
+
 (ert-deftest agent-repl-test-land-after-teardown-leaves-a-live-persp-alone ()
   "A teardown of some OTHER workspace does not move the user off theirs."
   ;; Arrange
