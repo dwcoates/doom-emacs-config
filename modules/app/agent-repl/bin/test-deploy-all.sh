@@ -217,6 +217,14 @@ EOF
 #!/usr/bin/env bash
 echo "git $*" >> "$STUB_LOG"
 case "$*" in
+    # The index listing the source-tree id is hashed from. Empty (the
+    # GIT_STUB_NO_LS_FILES case) stands for a pathspec that resolves to
+    # nothing, which must never be stamped as a known revision.
+    *"ls-files -s"*)
+        if [ -z "${GIT_STUB_NO_LS_FILES:-}" ]; then
+            printf '100644 %s 0\tsource.go\n' "${GIT_STUB_BLOB:-1111111111111111111111111111111111111111}"
+        fi
+        ;;
     *"rev-parse HEAD"*)     echo "${GIT_STUB_SHA:-deadbeefcafe}" ;;
     *"status --porcelain"*) printf '%s' "${GIT_STUB_DIRTY:-}" ;;
     *"diff --name-only"*)
@@ -284,7 +292,9 @@ if [ "$RC" -eq 0 ] \
    && log_before "load .*services.el" "runtime-restart" \
    && ! log_has "frontend-client.el" \
    && log_before "kickstart -k gui/.*shim-claude-sidecar" "runtime-restart" \
-   && log_has "readiness-report --require-ready webapp"; then
+   && log_has "readiness-report --require-ready webapp" \
+   && log_before "readiness-report --require-ready webapp" "kickstart -k gui/.*shim-store" \
+   && log_before "readiness-report --require-ready webapp" "runtime-restart"; then
     pass "fresh tree runs the full chain in dependency order"
 else
     fail "fresh tree runs the full chain in dependency order" "rc=$RC log: $(cat "$STUB_LOG")"
@@ -300,6 +310,61 @@ if [ "$RC" -eq 3 ] \
     pass "a webapp revision mismatch aborts deployment with both revisions in structured output"
 else
     fail "a webapp revision mismatch aborts deployment with both revisions in structured output" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 1f. deploy-all stamps the source tree of everything it builds itself ---
+# It builds the daemon and both services outside build-frontend.sh, and the
+# gate two steps later reads exactly these stamps. Writing only the built-sha
+# would leave those artifacts looking un-built to the very gate below.
+d="$TMP/t1f"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
+DAEMON_TREE="$d/tree/modules/app/agent-repl/daemon/bin/.source-tree"
+STORE_TREE="$d/h/.cache/agent-repl/bin/.shim-store.source-tree"
+if [ "$RC" -eq 0 ] && [ -s "$DAEMON_TREE" ] && [ -s "$STORE_TREE" ]; then
+    pass "the daemon and the services it builds itself get .source-tree stamps"
+else
+    fail "the daemon and the services it builds itself get .source-tree stamps" \
+         "rc=$RC daemon=$(cat "$DAEMON_TREE" 2>/dev/null) store=$(cat "$STORE_TREE" 2>/dev/null)"
+fi
+
+# --- 1g. an undeterminable source set leaves no stamp, never a stale one ----
+# A stamp that outlives the artifact it described is worse than none: the next
+# build compares against it and skips work it owes.
+d="$TMP/t1g"; mkdir -p "$d"
+PRE_RUN='mkdir -p modules/app/agent-repl/daemon/bin && printf "an-old-id\n" > modules/app/agent-repl/daemon/bin/.source-tree' \
+    RUN_ENV="GIT_STUB_NO_LS_FILES=1" run_deploy "$d"
+if [ ! -e "$d/tree/modules/app/agent-repl/daemon/bin/.source-tree" ]; then
+    pass "a source set that cannot be determined drops the stamp rather than leaving a guess"
+else
+    fail "a source set that cannot be determined drops the stamp rather than leaving a guess" \
+         "stamp=$(cat "$d/tree/modules/app/agent-repl/daemon/bin/.source-tree")"
+fi
+
+# --- 1d. a failing gate bounces NOTHING ------------------------------------
+# The gate used to run last, after both services were kickstarted and the daemon
+# restarted, so a stale artifact was already live by the time anyone was told
+# about it. A stale artifact must never be bounced into.
+d="$TMP/t1d"; mkdir -p "$d"
+RUN_ENV="READINESS_GATE_FAIL=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && ! log_has "kickstart" \
+   && ! log_has "runtime-restart" \
+   && grep -q "refusing to bounce" "$d/stderr"; then
+    pass "a failing revision gate kickstarts no service and restarts no daemon"
+else
+    fail "a failing revision gate kickstarts no service and restarts no daemon" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 1e. the gate is asserted even in pure-build mode ----------------------
+# --no-bounce still BUILDS every artifact, and an artifact built wrong is worth
+# knowing about at the moment it is built rather than at the next real deploy.
+d="$TMP/t1e"; mkdir -p "$d"
+RUN_ENV="READINESS_GATE_FAIL=1" run_deploy "$d" --no-bounce
+if [ "$RC" -eq 3 ] && ! log_has "kickstart"; then
+    pass "--no-bounce still asserts the revision gate"
+else
+    fail "--no-bounce still asserts the revision gate" \
          "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
@@ -457,10 +522,10 @@ fi
 d="$TMP/t6b"; mkdir -p "$d"; RUN_ENV="EC_STUB_RESTART_RESULT=runtime-restart-pending" run_deploy "$d"
 if [ "$RC" -eq 3 ] \
    && grep -q "no terminal completion" "$d/stderr" \
-   && ! log_has "readiness-report"; then
-    pass "a non-terminal restart result aborts before revision readiness"
+   && log_before "readiness-report" "runtime-restart"; then
+    pass "the revision gate is settled before the restart that can fail on it"
 else
-    fail "a non-terminal restart result aborts before revision readiness" \
+    fail "the revision gate is settled before the restart that can fail on it" \
          "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
