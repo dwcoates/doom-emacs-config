@@ -261,6 +261,18 @@ function accumulatedErrors(raw: RawResult): string[] {
 }
 
 /**
+ * Whether a result message is the USER'S OWN STOP.
+ *
+ * Exported because a stop has a consequence beyond the terminal itself: every
+ * tool call still open when it lands was cut by it, and nothing else in the
+ * fold can recognize the two reasons that mean "the user stopped this".
+ */
+export function isUserStop(message: Extract<SdkMessage, { type: "result" }>): boolean {
+  const reason = (message as unknown as RawResult).terminal_reason;
+  return reason === "aborted_streaming" || reason === "aborted_tools";
+}
+
+/**
  * The turn's terminal frame.
  *
  * `turnEnded` is set on the output because the ENGINE needs the same fact the
@@ -302,7 +314,7 @@ export function convertResult(
     return finish(context, origin, "agent_frame.success.completed", result);
   }
 
-  if (reason === "aborted_streaming" || reason === "aborted_tools") {
+  if (isUserStop(message)) {
     LOGGER.log({ turn: context.turnId?.value, reason }, "the turn was interrupted by a user stop");
     const result: conversationv1.AgentFrame["result"] = {
       case: "success",

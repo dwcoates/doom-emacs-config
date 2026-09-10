@@ -1155,6 +1155,65 @@ describe("KillTurn", () => {
     watch.close();
   });
 
+  test("the shell the stop landed inside SETTLES, interrupted by the user", async () => {
+    // WITHOUT THIS THE UNIT NEVER SETTLES. The vendor returns no `tool_result`
+    // for a call a stop landed inside — the captured `interrupt` session
+    // records the stop as a bare `[Request interrupted by user]` line and
+    // nothing else — so the card went on drawing a running shell inside a turn
+    // that had ended. Found by the F42 playbook photographing `!bash-hold`.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-hold" }));
+    // The call must be GENUINELY OPEN before the stop, or there is nothing for
+    // it to cut and the test would pass on an empty claim.
+    await watch.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      const update = agentFrame.result.value.update;
+      return (
+        update.case === "activity" &&
+        update.value.item.case === "bash" &&
+        update.value.item.value.result.case === "start"
+      );
+    });
+
+    await shim.clients.h1.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
+    );
+
+    const cut = await watch.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      const update = agentFrame.result.value.update;
+      return (
+        update.case === "activity" &&
+        update.value.item.case === "bash" &&
+        update.value.item.value.result.case === "success"
+      );
+    });
+    const frame = entryFrame(watchAgentEntry(cut));
+    if (frame?.result.case !== "update") throw new Error("the cut frame is not an update");
+    const update = frame.result.value.update;
+    if (update.case !== "activity" || update.value.item.case !== "bash") {
+      throw new Error("the cut frame is not the shell's");
+    }
+    const result = update.value.item.value.result;
+    if (result.case !== "success" || result.value.outcome.case !== "interrupted") {
+      throw new Error("the held shell did not settle on the interrupted arm");
+    }
+    // A STOP IS NOT A FAILURE OF THE CALL, so it rides the success arm, and the
+    // cause is the user rather than a timeout.
+    expect(result.value.outcome.value.cause.case).toBe("byUser");
+    expect(result.value.command?.line).toBe("tail -f /var/log/system.log");
+    watch.close();
+  });
+
   test("live detached work refuses, NAMING it", async () => {
     // The refusal set is transitive via the spawn-provenance map — the one
     // bounded piece of state the shim keeps, and only so this refusal can name
