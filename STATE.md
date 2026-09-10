@@ -1,19 +1,23 @@
-# Owner 4 (B11–13: thinking→done, attention on ask, attention on question) — stand-down state
+# Owner 4 (B11–13: thinking→done, attention on ask, attention on question) — live state
 
-Reconstructed by the lead from git at the 2026-09-09 stand-down; the owner
-left no STATE.md. Three commits ahead of overhaul/integration (tip b7dcdc6f5).
+Resumed 2026-09-09 as the opus-medium replacement. Rebased onto
+overhaul/integration; the untracked scratch diagnostic
+`e2e/playtest_zz_diag_test.go` is deleted (the substrate reconciliation it was
+characterizing has landed).
+
+## Run 1 (post-substrate)
+All three playbooks PASS. `run1.log` and `out-r1/` under the owner scratch dir.
+The B11 thinking picture now shows the CURRENT page — the staleness the previous
+owner recorded is gone with the paint gate.
 
 ## Landed on this branch
 - B12/B13: attention on a permission ask and on a question, answered from the card.
-- B11: photographs a page that has followed the turn; the B11 thinking picture records
-  that the webview in it is stale and where.
+- B11: photographs a page that has followed the turn.
+- The manifest sentences now describe the pictures the fixed substrate takes, and
+  every claim they make about the page is read off the DOM first.
 
-## Uncommitted
-- e2e/playtest_zz_diag_test.go — a scratch capture diagnostic marked NOT FOR COMMIT,
-  left untracked. It was hashing framebuffer reads to characterize the stale-webview
-  capture. Delete it once the substrate reconciliation (owner 7 paint gate, owner 1
-  settle, owner 6 settle window) lands, or keep what it proves as a real test.
+## Filed for others (do not fix here)
+- The UNSELECTED, UN-ARMED tab is illegible: its `[N]` numeral is #ffffff on the
+  tab bar's #d9d9d9, and its name region is #000000 on #14141a.
 
-## Open
-- B11's stale-webview capture is a substrate defect, not a B11 defect; blocked on the
-  substrate reconciliation above.
+## Last commit must delete this file.
