@@ -357,6 +357,36 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 	_ = got
 }
 
+// A STATUS-ONLY UPDATE MUST NOT BLANK THE CHECKLIST. `TaskUpdate` carries no
+// subject when it names only a status, so the act's state states an empty one
+// -- and applying that over the create's own subject drew every checklist row
+// as a bare glyph with no words beside it, which is what the G52 playbook
+// photographed. The same act states no STATUS either when the tracker has not
+// answered it, and reading that as `pending` knocked a running task back to
+// unstarted.
+func TestFooterChecklistKeepsWhatAnUpdateDidNotState(t *testing.T) {
+	t.Parallel()
+	// Arrange: a created task with a subject, moved to running.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "Land the converter", false)))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskRunning("task-2", "t-1")))
+
+	// Act: an update that names neither a subject nor a status -- the shape an
+	// announcement the tracker has not answered yet produces.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskUnstated("task-3", "t-1")))
+
+	// Assert: the row still says what it is and where it stands.
+	awaitFooter(t, f, footer, "the checklist row keeping its subject and its status", func(v *frontendv1.FooterView) bool {
+		rows := v.GetExpanded().GetTasks().GetRows()
+		if len(rows) != 1 {
+			return false
+		}
+		return rows[0].GetSubject().GetText() == "Land the converter" &&
+			rows[0].GetStatus().GetRunning() != nil
+	})
+}
+
 func TestFooterLiveWorkChipsAreUnsetWhenZero(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
@@ -1161,6 +1191,34 @@ func ftTaskActivity(activityIDValue, taskID, subject string, completed bool) *co
 			Task:  &conversationv1.AgentTaskId{Value: taskID},
 			Act:   &conversationv1.AgentTaskAct_Created{Created: &conversationv1.AgentTaskCreated{}},
 			State: state,
+		}},
+	}
+}
+
+// ftTaskRunning moves a task to running, naming NO subject -- which is what a
+// `TaskUpdate(status)` carries, the tracker echoing no subject of its own.
+func ftTaskRunning(activityIDValue, taskID string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: activityID(activityIDValue),
+		Item: &conversationv1.AgentActivity_TaskAct{TaskAct: &conversationv1.AgentTaskAct{
+			Task: &conversationv1.AgentTaskId{Value: taskID},
+			Act:  &conversationv1.AgentTaskAct_Changed{Changed: &conversationv1.AgentTaskChanged{}},
+			State: &conversationv1.AgentTaskState{
+				Status: &conversationv1.AgentTaskState_Running{Running: &conversationv1.AgentTaskRunning{}},
+			},
+		}},
+	}
+}
+
+// ftTaskUnstated is an act that says nothing about the task at all: the shape
+// an announcement the tracker has not answered yet produces.
+func ftTaskUnstated(activityIDValue, taskID string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: activityID(activityIDValue),
+		Item: &conversationv1.AgentActivity_TaskAct{TaskAct: &conversationv1.AgentTaskAct{
+			Task:  &conversationv1.AgentTaskId{Value: taskID},
+			Act:   &conversationv1.AgentTaskAct_Changed{Changed: &conversationv1.AgentTaskChanged{}},
+			State: &conversationv1.AgentTaskState{},
 		}},
 	}
 }
