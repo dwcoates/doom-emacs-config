@@ -1024,3 +1024,105 @@ func TestTheTerminalRowIsStampedWithItsTurn(t *testing.T) {
 		}
 	}
 }
+
+// TestATerminalDoesNotRestateTheApiFailureItEndedOn pins the fix for the race
+// the section-H playtest found: the SAME vendor failure reaches this resolver
+// twice — once as the sidecar's transcript-tailed mid-turn `system:api_error`,
+// once as the shim's own stream terminal — and whichever arrives first decided
+// whether the headline gained an evidence clause. Measured in one run of the
+// twelve `!api-*` arms, `api-429` lost that race by 17ms and `api-401` won it
+// by 3ms, so one run drew two headlines for one shape of failure.
+//
+// The evidence line's own words settle it: it says the turn WENT ON, which is
+// false of the failure that ended it.
+func TestATerminalDoesNotRestateTheApiFailureItEndedOn(t *testing.T) {
+	// Arrange: the vendor's own sentence, as both producers state it.
+	const message = "Authentication failed."
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "!api-401")
+	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
+		Message: message,
+	}, noAddress())
+
+	// Act: the turn then ends on THAT failure.
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+			ApiRequestFailed: &conversationv1.ApiRequestFailed{
+				Message: message,
+				Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{
+					AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{},
+				},
+			},
+		},
+	})
+
+	// Assert: the arm's sentence, and nothing appended to it.
+	headline := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
+	if headline != "the credential was rejected — sign in again" {
+		t.Fatalf("headline = %q, want the arm's sentence with no evidence clause", headline)
+	}
+}
+
+// TestATerminalRestatesNothingWhateverOrderTheTwoProducersArriveIn is the same
+// failure with the two producers REVERSED: the terminal first, the sidecar's
+// mid-turn record after. This is the ordering that was already green by
+// accident — evidence for a closed turn is dropped — and it is pinned so the
+// two orderings are held to ONE headline rather than to one code path.
+func TestATerminalRestatesNothingWhateverOrderTheTwoProducersArriveIn(t *testing.T) {
+	// Arrange
+	const message = "Authentication failed."
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "!api-401")
+
+	// Act: the terminal lands first, then the transcript's record.
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+			ApiRequestFailed: &conversationv1.ApiRequestFailed{
+				Message: message,
+				Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{
+					AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{},
+				},
+			},
+		},
+	})
+	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
+		Message: message,
+	}, noAddress())
+
+	// Assert: the same sentence the other ordering drew.
+	headline := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
+	if headline != "the credential was rejected — sign in again" {
+		t.Fatalf("headline = %q, want the arm's sentence with no evidence clause", headline)
+	}
+}
+
+// TestATerminalStatesAMidTurnApiFailureItDidNotDieOf is the specific negative
+// of the two above: dropping evidence is about the failure the turn ENDED ON,
+// never about api evidence as a class. A 429 the turn survived and a 500 it
+// then died of are two facts, and the reader wants both.
+func TestATerminalStatesAMidTurnApiFailureItDidNotDieOf(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
+		Message: "Rate limited; retry after 30 seconds.",
+	}, noAddress())
+
+	// Act
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+			ApiRequestFailed: &conversationv1.ApiRequestFailed{
+				Message: "The service raised.",
+				Kind: &conversationv1.ApiRequestFailed_Internal{
+					Internal: &conversationv1.ApiInternal{},
+				},
+			},
+		},
+	})
+
+	// Assert
+	headline := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
+	if !contains(headline, "Rate limited; retry after 30 seconds.") {
+		t.Fatalf("headline = %q, want the surviving mid-turn failure folded in as evidence", headline)
+	}
+}

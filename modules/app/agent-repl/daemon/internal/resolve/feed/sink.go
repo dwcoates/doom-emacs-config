@@ -204,18 +204,45 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	line := "a vendor request failed mid-turn and the turn went on"
-	if failed.GetMessage() != "" {
-		line = line + ": " + failed.GetMessage()
-	}
-	r.addEvidence(s, line)
+	r.addEvidence(s, apiErrorEvidence(failed.GetMessage()))
 	r.logger(ws).Warn("daemon.feed.api_error",
 		"a mid-turn vendor request failure was recorded as the turn's evidence",
 		dlog.Context{"agent": agent.GetValue(), "message": failed.GetMessage()})
 }
 
+// turnEvidenceLine is ONE line of a turn's evidence: the sentence the
+// terminal's headline carries, plus what recorded it.
+//
+// The origin is kept because a mid-turn api failure and the terminal a turn
+// died of can be THE SAME vendor failure arriving twice, and only the origin
+// lets the terminal recognise it (see erroredOutcome).
+type turnEvidenceLine struct {
+	// text is the sentence, as the headline states it.
+	text string
+	// apiFailure says this line was recorded by OnApiError -- a MID-TURN
+	// vendor request failure -- rather than by any other evidence source.
+	apiFailure bool
+	// apiMessage is that failure's own vendor sentence, which may be empty
+	// when the vendor stated none.
+	apiMessage string
+}
+
+// apiErrorEvidence words a mid-turn vendor failure as evidence.
+//
+// ONE SPELLING, and that is the point: the live sink and the history replay
+// both record this line, and two copies of the sentence would be two contracts
+// that could drift apart between a turn watched live and the same turn read
+// back.
+func apiErrorEvidence(message string) turnEvidenceLine {
+	line := "a vendor request failed mid-turn and the turn went on"
+	if message != "" {
+		line = line + ": " + message
+	}
+	return turnEvidenceLine{text: line, apiFailure: true, apiMessage: message}
+}
+
 // addEvidence attaches a line to the turn in flight, if one is.
-func (r *resolver) addEvidence(s *wsState, line string) {
+func (r *resolver) addEvidence(s *wsState, line turnEvidenceLine) {
 	if s.turnInFlight == nil {
 		return
 	}
