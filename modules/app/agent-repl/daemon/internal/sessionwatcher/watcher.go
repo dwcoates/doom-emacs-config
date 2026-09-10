@@ -643,6 +643,23 @@ func (w *watcher) setLinkLocked(state LinkState) {
 		})
 		return
 	}
+	// A FIRST-TIME DIAL CANNOT FOLLOW A CONNECTION. `LinkDialing` is the
+	// client's bring-up establishing its link for the first time, and this
+	// watcher exists only once that bring-up has SUCCEEDED -- it is born
+	// connected. The client's connectivity feed delivers every transition it
+	// published in order, so the first states a watcher reads are the
+	// bring-up's own `dialing` and `connected`, already outrun by the moment
+	// it was created. Applying that `dialing` walked the published link back
+	// to `init` for a workspace whose turn was already accepted -- MEASURED
+	// in the playtest's cold start, where the roster's arm went `submitting`
+	// -> `init` -> `submitting` within 1ms of the first StartTurn -- and a
+	// lost link is never spelled `dialing`: that is `redialing` or `dead`.
+	if state == shimclient.LinkDialing {
+		w.log.Debug("daemon.sessionwatcher.link_replay", "a first-dial transition is the bring-up's own replay; the watcher was born on the connected link", dlog.Context{
+			"held": int(w.link),
+		})
+		return
+	}
 	w.log.Debug("daemon.sessionwatcher.link", "link state changed", dlog.Context{
 		"previous": int(w.link), "link": int(state),
 	})
