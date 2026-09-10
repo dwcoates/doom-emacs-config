@@ -865,3 +865,62 @@ describe("a write of nothing at all", () => {
     expect(fake.writes()).toHaveLength(0);
   });
 });
+
+describe("which writes end a minted book's absence", () => {
+  /**
+   * One session-scoped row. It carries the MAIN agent in its envelope so it has
+   * a book to be filed under, and lands as a session row that registers nothing.
+   */
+  function sessionUpdateEntry(book: conversationv1.AgentId): PersistEntry {
+    return {
+      agentId: book,
+      upsertKey: "session-update-1",
+      source: { vendorUuid: "uuid-session-1", discriminator: "session_update" },
+      keepalive: false,
+      item: {
+        kind: "session_update",
+        update: create(conversationv1.SessionUpdateSchema, {
+          update: {
+            case: "identityRotated",
+            value: create(conversationv1.SessionIdentityRotatedSchema, {
+              previousVendorSessionId: "v-1",
+              vendorSessionId: "v-2",
+            }),
+          },
+        }),
+      },
+    };
+  }
+
+  it("a session update leaves the book absent, so the store is still not asked", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("minted-session-update");
+    plane.noteAgentMinted("book-1");
+    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    void session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    await plane.writeDurable([sessionUpdateEntry(BOOK)]);
+
+    // Assert. It registered no `agent` row, so the absence it would have ended
+    // was never over.
+    expect(fake.reads().filter((read) => read.rpc === "OpenAgentSession")).toHaveLength(0);
+    session.close();
+  });
+
+  it("a prompt ends the absence, and the store is asked once", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("minted-prompt");
+    plane.noteAgentMinted("book-1");
+    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    const first = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    await plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")]);
+    await first;
+
+    // Assert.
+    expect(fake.reads().filter((read) => read.rpc === "OpenAgentSession")).toHaveLength(1);
+    session.close();
+  });
+});
