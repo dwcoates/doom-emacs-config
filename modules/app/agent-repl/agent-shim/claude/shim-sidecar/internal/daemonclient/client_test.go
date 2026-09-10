@@ -57,7 +57,10 @@ func TestForwardSendsACompleteSidecarClientLogRequest(t *testing.T) {
 		Level: "warn", Verbose: true, Operation: "sidecar.tail.read",
 		Message: "the transcript could not be decoded", WorkspaceDir: "/work/repo",
 		WorkspaceID: "deadbeef", ClaudeSessionID: "claude-1",
-		Context: map[string]any{"path": "/work/repo/session.jsonl", "pid": 4242.0},
+		Context: map[string]any{
+			"path": "/work/repo/session.jsonl", "pid": 4242.0,
+			"write_ids": []string{"write-1", "write-2"},
+		},
 	}
 
 	// Act.
@@ -79,6 +82,10 @@ func TestForwardSendsACompleteSidecarClientLogRequest(t *testing.T) {
 	}
 	if got.GetRecord().GetContext().AsMap()["path"] != record.Context["path"] {
 		t.Fatalf("record context = %v, want path preserved", got.GetRecord().GetContext().AsMap())
+	}
+	writeIDs := got.GetRecord().GetContext().GetFields()["write_ids"].GetListValue().GetValues()
+	if len(writeIDs) != 2 || writeIDs[0].GetStringValue() != "write-1" || writeIDs[1].GetStringValue() != "write-2" {
+		t.Fatalf("record context.write_ids = %v, want the complete typed string list", writeIDs)
 	}
 }
 

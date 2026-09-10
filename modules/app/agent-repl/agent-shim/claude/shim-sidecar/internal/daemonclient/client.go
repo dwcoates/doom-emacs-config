@@ -62,7 +62,7 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	if err := validateAddress(address); err != nil {
 		return address, fmt.Errorf("daemon address %q from %s: %w", address, c.addrPath, err)
 	}
-	contextValue, err := structpb.NewStruct(record.Context)
+	contextValue, err := structpb.NewStruct(wireContext(record.Context))
 	if err != nil {
 		return address, fmt.Errorf("encode context for %s: %w", record.Operation, err)
 	}
@@ -95,6 +95,26 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	default:
 		return address, fmt.Errorf("ClientLog at %s returned neither success nor error", address)
 	}
+}
+
+// wireContext translates the logger's typed list values into Struct's JSON
+// value vocabulary. The logging contract keeps write_ids as []string inside Go;
+// structpb deliberately accepts only []any for a repeated JSON value.
+func wireContext(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		switch typed := value.(type) {
+		case []string:
+			values := make([]any, len(typed))
+			for i, item := range typed {
+				values[i] = item
+			}
+			out[key] = values
+		default:
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func validateAddress(address string) error {
