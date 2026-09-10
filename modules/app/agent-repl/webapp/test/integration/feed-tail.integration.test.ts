@@ -1,0 +1,97 @@
+/**
+ * THE FEED'S TAIL AGAINST THE DOCKED FOOTER — the occlusion, on the booted app.
+ *
+ * The progress footer is a flex sibling laid out BELOW `#feed-scroll`
+ * (index.html), so the scroll box's height is the window's minus whatever the
+ * footer currently occupies. The space is reserved by the layout and needs no
+ * padding; what went stale was the POSITION. A footer that appeared or grew
+ * AFTER the render that parked the tail shrank the box under a `scrollTop`
+ * nobody moved, and the last bubble was left that many pixels below the fold,
+ * clipped by the strip's top edge. It survived some runs and not others purely
+ * on the order the footer's first push and the feed's tail render landed in.
+ *
+ * `mountFeed` now subscribes the scroll box's own size to the tail owner
+ * (`observeScrollBox`), so these boot the WHOLE app and drive a real footer
+ * push through the fake daemon.
+ *
+ * TWO ENVIRONMENT FACTS SHAPE HOW THAT IS DRIVEN, and neither is a seam in the
+ * app: jsdom lays nothing out, so the scroll box's geometry is scripted here
+ * (as a browser's would be, `scrollTop` clamping into range on write), and the
+ * box-size notification is delivered by the harness's `ResizeObserver`
+ * substitution. `fireResize` throws when nothing is watching the element, so
+ * the fire is itself the check that the mount subscribed to `#feed-scroll`.
+ */
+import { afterEach, describe, expect, it } from "vitest";
+
+import { startHarness, type Harness } from "./harness";
+import { fireResize } from "../resize-observer";
+import { WORKSPACE_ID, footerView } from "./fixtures";
+
+let harness: Harness;
+
+afterEach(async () => {
+  await harness?.stop();
+});
+
+/** A scroll box the reader is parked at the tail of: 700 + 300 = 1000. */
+function scriptGeometry(box: HTMLElement) {
+  const scrollHeight = 1000;
+  let clientHeight = 300;
+  let scrollTop = 700;
+  Object.defineProperties(box, {
+    scrollHeight: { get: () => scrollHeight },
+    clientHeight: { get: () => clientHeight },
+    scrollTop: {
+      get: () => scrollTop,
+      set: (next: number) => {
+        scrollTop = Math.max(0, Math.min(next, scrollHeight - clientHeight));
+      },
+    },
+  });
+  return {
+    /** The footer settling or growing by PX: the box loses exactly that. */
+    footerTakes: (px: number) => {
+      clientHeight -= px;
+    },
+    top: () => scrollTop,
+  };
+}
+
+describe("the docked footer and the feed's tail", () => {
+  it("re-lands the tail when a footer push takes height from the scroll box", async () => {
+    // Arrange — booted with a bare footer, the reader following the tail.
+    harness = await startHarness({
+      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" })),
+    });
+    const geometry = scriptGeometry(harness.shell.feedScroll);
+    // The scroll event the browser dispatches for the reader's own arrival at
+    // the tail: the owner reconciles against the position it last knows about,
+    // and under jsdom the box only acquires one when this test scripts it.
+    harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
+    // Act — the footer changes state and grows; the box loses that height.
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" }));
+    await harness.settle();
+    geometry.footerTakes(48);
+    fireResize(harness.shell.feedScroll);
+    // Assert — the tail is the bottom of the SHRUNKEN viewport, so the last
+    // bubble sits above the strip instead of behind it.
+    expect(geometry.top()).toBe(748);
+  });
+
+  it("leaves a reader who scrolled up where they are when the footer grows", async () => {
+    // Arrange
+    harness = await startHarness({
+      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" })),
+    });
+    const geometry = scriptGeometry(harness.shell.feedScroll);
+    harness.shell.feedScroll.scrollTop = 200;
+    harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
+    // Act
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" }));
+    await harness.settle();
+    geometry.footerTakes(48);
+    fireResize(harness.shell.feedScroll);
+    // Assert — the reader owns the position; only they may leave it.
+    expect(geometry.top()).toBe(200);
+  });
+});
