@@ -556,12 +556,21 @@ func (s *playtestScenario) tabFaceFor(t *testing.T, ws string) string {
 //
 // WHAT THE PRODUCT ACTUALLY PAINTS, WHICH IS NOT A DISC. `agent-repl--render-tab`
 // draws each tab as a bracketed index -- `agent-repl-tab-bracket-format`, "[N]" --
-// followed by the workspace name, and it is the BRACKETED INDEX that carries the
-// arm's color, as the bracket run's BACKGROUND. The name beside it carries the
-// tab's own name face, which is Doom's selected-tab face on the selected tab, so
-// the name's color says which tab is selected and never which arm it is on. A
-// sentence promising a "status disc beside the name" sends a reviewer hunting a
-// glyph the module never draws, and every owner's manifest inherits this sentence.
+// followed by the workspace name, and it is the BRACKETED INDEX that always
+// carries the arm's color, as the bracket run's BACKGROUND. A sentence
+// promising a "status disc beside the name" sends a reviewer hunting a glyph
+// the module never draws, and every owner's manifest inherits this sentence.
+//
+// HOW FAR THE COLOR REACHES IS THE SELECTION'S ANSWER, and the sentence has
+// to give the reviewer the one they will see. `agent-repl--tab-face` hands
+// the SELECTED tab's name region Doom's selected-tab face -- so on that tab
+// the arm color is on the badge alone and the name is on the selection's own
+// ground -- while an UNSELECTED tab takes its palette row's `:bg`, which IS
+// the arm color, so its whole entry is painted with it. Measured on owner
+// 20's K.61: the unselected `:thinking` tab was `#cc3333` from its bracket
+// through the end of its name, under a sentence saying the name did not carry
+// the arm color, which is a manifest telling a reviewer the correct picture
+// is wrong.
 //
 // "none" is a real answer and not a missing one: the color table maps
 // `:none` and the whole merge family to it, and the index badge then carries
@@ -591,10 +600,19 @@ func armSentence(ws, arm, color, selectedBg string) string {
 			"is %s, which the module's own color table maps to no color, so the badge is drawn on "+
 			"%s and only the name beside it is faced.", ws, tabBadgeShape, arm, ground)
 	}
-	return fmt.Sprintf("The tab for %q is painted %s on its %s index badge, the bracketed number drawn "+
-		"BEFORE the workspace name: its arm is %s, and %s is the color the module's own table gives that "+
-		"arm, carried as the badge's background. The name beside the badge carries the tab's selection "+
-		"face, not the arm color.", ws, strings.ToUpper(color), tabBadgeShape, arm, color)
+	if selectedBg != "" {
+		return fmt.Sprintf("The tab for %q is the SELECTED one, and the arm color is on its %s index "+
+			"badge ALONE: the badge is painted %s -- its arm is %s, and %s is the color the module's "+
+			"own table gives that arm -- while the name beside it is drawn on the SELECTION's own "+
+			"ground, which is not the arm color. That is `agent-repl--tab-face` dimming the state to "+
+			"the badge on whichever tab is selected.",
+			ws, tabBadgeShape, strings.ToUpper(color), arm, color)
+	}
+	return fmt.Sprintf("The tab for %q is painted %s ACROSS THE WHOLE ENTRY -- its %s index badge and "+
+		"the workspace name beside it alike: its arm is %s, and %s is the color the module's own table "+
+		"gives that arm. It is not the selected tab, so nothing dims the state to the badge and the "+
+		"name region carries the arm color too.",
+		ws, strings.ToUpper(color), tabBadgeShape, arm, color)
 }
 
 // tabBadgeShape is the shape of the run the arm color lands on, spelled the
