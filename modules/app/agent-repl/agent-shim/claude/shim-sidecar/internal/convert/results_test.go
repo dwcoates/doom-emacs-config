@@ -832,6 +832,128 @@ func TestBashSuccessLeavesTerminationUnsetWhenNoStatusWasStated(t *testing.T) {
 	}
 }
 
+// THE TRUNCATION IS THIS PLANE'S TO STATE TOO. The stream plane and this one
+// write the same unit under one upsert key, so a file-plane row claiming `whole`
+// erases the truncation summary the other plane already drew.
+
+func TestBashSuccessStatesTheWholeExtentWhenTheVendorDeclaredNoTotal(t *testing.T) {
+	// Arrange: an ordinary result. Nothing was kept anywhere, so everything the
+	// command printed is right here.
+	call := openCall{input: map[string]any{"command": "echo hi"}}
+	result := map[string]any{"stdout": "hi\n"}
+
+	// Act
+	got := bashSuccess(call, result, nil, nil, 1000)
+
+	// Assert
+	completed := got.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
+	text := completed.Completed.GetOutput().GetText()
+	if _, ok := text.GetExtent().(*conversationv1.AgentBashOutputText_Whole); !ok {
+		t.Fatalf("Extent = %T, want AgentBashOutputText_Whole", text.GetExtent())
+	}
+}
+
+func TestBashSuccessSubtractsTheInlineBytesFromTheDeclaredTotal(t *testing.T) {
+	// Arrange: 200000 bytes were produced and 6 came back inline, so 199994 are
+	// the figure a reader is owed.
+	call := openCall{input: map[string]any{"command": "yes | head -100000"}}
+	result := map[string]any{"stdout": "y\ny\ny\n", "persistedOutputSize": float64(200_000)}
+
+	// Act
+	got := bashSuccess(call, result, nil, nil, 1000)
+
+	// Assert
+	partial := bashPartialOf(t, got)
+	if partial.GetBytesOmitted() != 199_994 {
+		t.Fatalf("BytesOmitted = %d, want 199994", partial.GetBytesOmitted())
+	}
+}
+
+func TestBashSuccessClampsAnOmittedFigureTheTotalCannotSupport(t *testing.T) {
+	// Arrange: a total that TRAILS the inline bytes. Subtracting it unclamped
+	// would draw "fewer bytes not shown", which is not a thing.
+	call := openCall{input: map[string]any{"command": "echo abcde"}}
+	result := map[string]any{"stdout": "abcde", "persistedOutputSize": float64(2)}
+
+	// Act
+	got := bashSuccess(call, result, nil, nil, 1000)
+
+	// Assert
+	partial := bashPartialOf(t, got)
+	if partial.GetBytesOmitted() != 0 {
+		t.Fatalf("BytesOmitted = %d, want 0", partial.GetBytesOmitted())
+	}
+}
+
+func TestBashSuccessNamesTheFileTheWholeOutputWasSpilledTo(t *testing.T) {
+	// Arrange: the producer kept the whole output, so the omitted bytes are
+	// still fetchable and the path is the only place that is stated.
+	call := openCall{input: map[string]any{"command": "yes | head -100000"}}
+	result := map[string]any{
+		"stdout":              "y\n",
+		"persistedOutputSize": float64(200_000),
+		"persistedOutputPath": "/spool/tool-results/spill.txt",
+	}
+
+	// Act
+	got := bashSuccess(call, result, nil, nil, 1000)
+
+	// Assert
+	spilled := bashPartialOf(t, got).GetSpilled()
+	if spilled.GetPath() != "/spool/tool-results/spill.txt" {
+		t.Fatalf("Path = %q, want the spill file", spilled.GetPath())
+	}
+	if spilled.GetSizeBytes() != 200_000 {
+		t.Fatalf("SizeBytes = %d, want the declared total 200000", spilled.GetSizeBytes())
+	}
+}
+
+func TestBashSuccessLeavesTheSpillUnsetWhenTheOmittedBytesAreGone(t *testing.T) {
+	// Arrange: a truncation with no path is a DEAD END, and the proto spells
+	// that as an unset field rather than as a path that is not there.
+	call := openCall{input: map[string]any{"command": "yes | head -100000"}}
+	result := map[string]any{"stdout": "y\n", "persistedOutputSize": float64(200_000)}
+
+	// Act
+	got := bashSuccess(call, result, nil, nil, 1000)
+
+	// Assert
+	if spilled := bashPartialOf(t, got).GetSpilled(); spilled != nil {
+		t.Fatalf("Spilled = %+v, want unset", spilled)
+	}
+}
+
+func TestBashSuccessReadsTheTotalUnderTheVendorsSnakeCaseSpelling(t *testing.T) {
+	// Arrange: the disk carries both spellings of one name, and reading only the
+	// camelCase one would draw a truncated output as whole.
+	call := openCall{input: map[string]any{"command": "yes | head -100000"}}
+	result := map[string]any{"stdout": "y\n", "persisted_output_size": float64(1_002)}
+
+	// Act
+	got := bashSuccess(call, result, nil, nil, 1000)
+
+	// Assert
+	if omitted := bashPartialOf(t, got).GetBytesOmitted(); omitted != 1_000 {
+		t.Fatalf("BytesOmitted = %d, want 1000", omitted)
+	}
+}
+
+// bashPartialOf answers a settled shell's PARTIAL text extent, failing loudly on
+// any other shape so a test never reads its figure off the wrong arm.
+func bashPartialOf(t *testing.T, success *conversationv1.AgentBashSuccess) *conversationv1.AgentBashOutputPartial {
+	t.Helper()
+	completed, ok := success.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
+	if !ok {
+		t.Fatalf("Outcome = %T, want AgentBashSuccess_Completed", success.GetOutcome())
+	}
+	text := completed.Completed.GetOutput().GetText()
+	partial, ok := text.GetExtent().(*conversationv1.AgentBashOutputText_Partial)
+	if !ok {
+		t.Fatalf("Extent = %T, want AgentBashOutputText_Partial", text.GetExtent())
+	}
+	return partial.Partial
+}
+
 func TestWakeupSuccessReadsTheStopsOwnReceipt(t *testing.T) {
 	// Arrange: `stopped` in the output is the receipt, whatever the input said.
 	call := openCall{input: map[string]any{}}
@@ -1046,6 +1168,58 @@ func TestSendMessageFailureCarriesTheRefusalProseIntoItsContent(t *testing.T) {
 	blocks := failure.GetError().GetContent().GetBlocks()
 	if len(blocks) != 1 || blocks[0].GetText().GetText() != prose {
 		t.Fatalf("failure content = %v, want the refusal prose %q verbatim", blocks, prose)
+	}
+}
+
+// A BACKGROUNDED COMMAND DID NOT END, IT MOVED. Both planes write this unit
+// under one upsert key, so a file-plane terminal arriving second replaced the
+// stream plane's LIVE card with a settled one carrying no output at all.
+
+func TestBashSettledProducesNoTerminalForACommandThatMovedToTheBackground(t *testing.T) {
+	// Arrange: the vendor's receipt for a launch -- empty output and a task id.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"command": "sleep 600"}}
+	result := map[string]any{"stdout": "", "backgroundTaskId": "b6d426ca0", "timedOutAfterMs": float64(120_000)}
+
+	// Act
+	got := c.settledItem(kindBash, call, result, nil, false, 1000, Attribution{})
+
+	// Assert: nothing at all. The detached-work frames naming this unit are
+	// what say where the work went.
+	if got != nil {
+		t.Fatalf("settledItem = %v, want no frame for a command that moved rather than ended", got)
+	}
+}
+
+func TestBashSettledReadsTheTaskIdUnderTheVendorsSnakeCaseSpelling(t *testing.T) {
+	// Arrange: the disk carries both spellings of one name, and reading only
+	// the camelCase one would settle a run that is still going.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"command": "sleep 600"}}
+	result := map[string]any{"stdout": "", "background_task_id": "b6d426ca0"}
+
+	// Act
+	got := c.settledItem(kindBash, call, result, nil, false, 1000, Attribution{})
+
+	// Assert
+	if got != nil {
+		t.Fatalf("settledItem = %v, want no frame for a command that moved rather than ended", got)
+	}
+}
+
+func TestBashSettledStillTerminatesACommandThatNamedNoBackgroundTask(t *testing.T) {
+	// Arrange: an ordinary foreground command. The silence above must not
+	// swallow the terminal every other shell result owes.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"command": "echo hi"}}
+	result := map[string]any{"stdout": "hi\n"}
+
+	// Act
+	got := c.settledItem(kindBash, call, result, nil, false, 1000, Attribution{})
+
+	// Assert
+	if got.GetBash().GetSuccess() == nil {
+		t.Fatalf("result = %T, want AgentBash_Success", got.GetBash().GetResult())
 	}
 }
 

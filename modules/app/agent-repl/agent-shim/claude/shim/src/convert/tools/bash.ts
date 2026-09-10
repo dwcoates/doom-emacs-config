@@ -33,7 +33,7 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
-import { startedAt } from "../entries.js";
+import { settledAt, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, bool, failureOf, num, resultText, settle, str, strOr, uint } from "./support.js";
 
@@ -386,6 +386,57 @@ export const bashConverter: ToolConverter = {
       case: "bash",
       value: create(conversationv1.AgentBashSchema, {
         result: { case: "progress", value: beat },
+      }),
+    };
+  },
+
+  /**
+   * A FOREGROUND COMMAND THE TURN'S STOP CUT SHORT.
+   *
+   * The vendor returns NO `tool_result` for the call a stop landed inside — the
+   * captured `interrupt` session records the stop as a bare
+   * `[Request interrupted by user]` user line and nothing else — so without this
+   * the unit never settles, and the card goes on drawing a running shell inside
+   * a turn that ended minutes ago.
+   *
+   * `AgentBashInterrupted.cause = by_user` is the arm the contract already has
+   * for exactly this, and this is what fills it on the stream plane: a stop is
+   * not a failure of the call, so it rides the SUCCESS arm, precisely as a
+   * vendor-reported `interrupted: true` result does.
+   *
+   * OUTPUT IS LEFT UNSET, deliberately. A foreground command's output arrives
+   * once, whole, at a return this call never reached; an empty text arm would
+   * tell the reader the command printed nothing, which is a different claim from
+   * never having been told what it printed.
+   */
+  cut(call, atMs) {
+    const line = requestedLine(call);
+    if (line === undefined) {
+      LOGGER.log(
+        { level: "error", tool_use_id: call.toolUseId },
+        "a stopped turn left a command open with no command line to restate; no terminal frame is produced",
+      );
+      return undefined;
+    }
+    return {
+      case: "bash",
+      value: create(conversationv1.AgentBashSchema, {
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentBashSuccessSchema, {
+            command: bashCommand(call, line),
+            outcome: {
+              case: "interrupted",
+              value: create(conversationv1.AgentBashInterruptedSchema, {
+                cause: {
+                  case: "byUser",
+                  value: create(conversationv1.AgentBashInterruptedByUserSchema, {}),
+                },
+              }),
+            },
+            settledAt: settledAt(atMs),
+          }),
+        },
       }),
     };
   },

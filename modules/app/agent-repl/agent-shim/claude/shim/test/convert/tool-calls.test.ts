@@ -19,6 +19,7 @@ import {
   EXEMPT_TOOLS,
   UNMODELED_KEY,
   createCallRegistry,
+  cutOpenCalls,
   dispositionOf,
   environmentOf,
   type PendingCall,
@@ -83,6 +84,78 @@ describe("the registry of calls in flight", () => {
     registry.peek("toolu_1");
 
     expect(registry.peek("toolu_1")).toBeDefined();
+  });
+
+  it("answers every call still in flight, which is what a STOP needs to know", () => {
+    // Arrange: the set matters only at the turn's end, and nothing else can ask
+    // which calls a stop cut.
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_1"));
+    registry.remember(call("toolu_2"));
+
+    // Act, Assert.
+    expect(registry.open().map((pending) => pending.toolUseId)).toEqual(["toolu_1", "toolu_2"]);
+  });
+});
+
+describe("the calls a stop cut short", () => {
+  // A stopped turn returns no `tool_result` for the call it landed inside, so
+  // these terminals are owed here or nowhere, and a unit left on its running
+  // arm draws a live tool inside a turn that has ended.
+  const stop = { vendorUuid: "vendor-result-uuid" };
+
+  it("settles a shell that was open when the stop landed", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600" } });
+
+    // Act
+    const entries = cutOpenCalls(TOOL_CONVERTERS, foldContext(), registry, stop);
+
+    // Assert
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.upsertKey).toBe("activity:toolu_bash");
+  });
+
+  it("takes the cut call OUT, so a late result cannot settle one unit twice", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600" } });
+
+    // Act
+    cutOpenCalls(TOOL_CONVERTERS, foldContext(), registry, stop);
+
+    // Assert
+    expect(registry.peek("toolu_bash")).toBeUndefined();
+  });
+
+  it("LEAVES a kind that states no cut alone, and leaves it remembered", () => {
+    // Arrange: a read has no vocabulary for being cut short, so retiring its
+    // unit into silence would be worse than the open unit it already had.
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_read", "Read"));
+
+    // Act
+    const entries = cutOpenCalls(TOOL_CONVERTERS, foldContext(), registry, stop);
+
+    // Assert
+    expect(entries).toHaveLength(0);
+    expect(registry.peek("toolu_read")).toBeDefined();
+  });
+
+  it("gives each cut frame its own block ordinal, so two cannot share a write id", () => {
+    // Arrange: the write id is minted from the source coordinates, and both
+    // frames derive from ONE vendor record — so without the ordinal the store
+    // would absorb the second as a duplicate of the first.
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_a", "Bash"), input: { command: "sleep 1" } });
+    registry.remember({ ...call("toolu_b", "Bash"), input: { command: "sleep 2" } });
+
+    // Act
+    const entries = cutOpenCalls(TOOL_CONVERTERS, foldContext(), registry, stop);
+
+    // Assert
+    expect(entries.map((entry) => entry.source.blockIndex)).toEqual([0, 1]);
   });
 });
 

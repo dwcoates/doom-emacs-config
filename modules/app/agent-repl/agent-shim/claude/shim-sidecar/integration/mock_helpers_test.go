@@ -1482,3 +1482,73 @@ func requireHeldTurnLandsWithoutAQuestion(t *testing.T, scenario string, tree *m
 		}
 	}
 }
+
+// requireBashPartialExtent: a settled shell whose output was TRUNCATED says so
+// on this plane too.
+//
+// The stream plane and the file plane convert the same tool result into the same
+// unit under one upsert key, so whichever row arrives last is what a reader
+// sees. A file-plane row claiming the `whole` extent therefore ERASED the
+// truncation summary the stream plane had already drawn, and `!bash-spill`
+// reached the card as three lines of `y` with nothing saying the other 200 kB
+// existed. This asserts the extent the sidecar states, not a merged view.
+func requireBashPartialExtent(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	settled := 0
+	for _, line := range pageLinesOf(entries) {
+		bash := activityOf(line).GetBash().GetSuccess()
+		if bash == nil {
+			continue
+		}
+		settled++
+		text := bash.GetCompleted().GetOutput().GetText()
+		partial := text.GetPartial()
+		if partial == nil {
+			t.Errorf("%s: the settled shell's output extent = %T, want the partial arm carrying the omitted byte count",
+				scenario, text.GetExtent())
+			continue
+		}
+		if partial.GetBytesOmitted() == 0 {
+			t.Errorf("%s: the settled shell's partial extent omits 0 bytes; the scenario declares a total far beyond what came back inline",
+				scenario)
+		}
+		if partial.GetSpilled().GetPath() == "" {
+			t.Errorf("%s: the settled shell's partial extent names no spill file, though the scenario's result declares `persistedOutputPath`",
+				scenario)
+		}
+	}
+	if settled == 0 {
+		t.Errorf("%s: no settled shell reached a page line; there is nothing to state an extent about", scenario)
+	}
+}
+
+// requireNoSettledShellForMovedWork: a command that MOVED to the background is
+// not settled by this plane.
+//
+// The vendor returns the SAME receipt for a command that finished and one it
+// launched -- empty output and a `backgroundTaskId` -- so a terminal built on it
+// says the work concluded when it had not. Both planes write the unit under one
+// upsert key, so a file-plane terminal arriving second REPLACED the stream
+// plane's live card with a settled one carrying no output: a timed-out
+// `sleep 600` drew as a command that ran and printed nothing while its own
+// detached row ticked beside it. Found by the F42 playbook.
+func requireNoSettledShellForMovedWork(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	started := 0
+	for _, line := range pageLinesOf(entries) {
+		bash := activityOf(line).GetBash()
+		if bash == nil {
+			continue
+		}
+		if bash.GetStart() != nil {
+			started++
+		}
+		if bash.GetSuccess() != nil || bash.GetFailure() != nil {
+			t.Errorf("%s: the file plane settled a shell whose work moved to the background: %v",
+				scenario, bash.GetResult())
+		}
+	}
+	if started == 0 {
+		t.Errorf("%s: no shell START reached a page line, so the negative above asserts nothing", scenario)
+	}
+}

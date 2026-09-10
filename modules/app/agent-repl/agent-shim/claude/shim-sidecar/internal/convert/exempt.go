@@ -51,6 +51,14 @@ const taskStopTool = "TaskStop"
 //   - A MONITOR is always detached; arming it does not end it. The result only
 //     acknowledges the arm, so the announcement stands and the watch's own end is
 //     what settles it.
-func settlesLater(kind toolKind) bool {
-	return kind == kindSkill || kind == kindMonitor
+//   - A SHELL THAT MOVED to the background did not end. The vendor returns the
+//     SAME receipt for a command that finished and for one it launched — empty
+//     output and a `backgroundTaskId` — so this one is decided from the RESULT
+//     rather than from the kind, and the detached-work frames naming the unit
+//     are what settle it. It is the stream plane's rule too
+//     (convert/tools/bash.ts): both planes write this unit under one upsert key,
+//     and a terminal from either of them says the work concluded when it had
+//     not.
+func settlesLater(kind toolKind, result map[string]any) bool {
+	return kind == kindSkill || kind == kindMonitor || (kind == kindBash && bashMovedToBackground(result))
 }

@@ -648,3 +648,65 @@ describe("bashConverter.progress", () => {
     expect((item?.value as conversationv1.AgentBash).result.case).toBe("progress");
   });
 });
+
+describe("bashConverter.cut", () => {
+  // THE STOP IS THE ONLY THING THAT WILL EVER SETTLE THESE. The vendor returns
+  // no `tool_result` for a call a stop landed inside, so without the cut the
+  // unit stays open forever and the card draws a running shell inside a turn
+  // that ended.
+  it("settles a held command on the interrupted arm, caused BY THE USER", () => {
+    // Arrange, Act.
+    const item = bashConverter.cut?.(
+      call({ command: "tail -f /var/log/system.log" }),
+      1_700_000_002_000,
+    );
+
+    // Assert.
+    const success = (item?.value as conversationv1.AgentBash).result
+      .value as conversationv1.AgentBashSuccess;
+    const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
+    expect(success.outcome.case).toBe("interrupted");
+    expect(interrupted.cause.case).toBe("byUser");
+  });
+
+  it("restates the command line the cut call was announced with", () => {
+    // Arrange, Act.
+    const item = bashConverter.cut?.(call({ command: "sleep 600" }), 1_700_000_002_000);
+
+    // Assert: every frame stands alone, a cut one included.
+    const success = (item?.value as conversationv1.AgentBash).result
+      .value as conversationv1.AgentBashSuccess;
+    expect(success.command?.line).toBe("sleep 600");
+  });
+
+  it("stamps the instant the stop landed, not the instant the call began", () => {
+    // Arrange, Act.
+    const item = bashConverter.cut?.(call({ command: "sleep 600" }), 1_700_000_002_000);
+
+    // Assert.
+    const success = (item?.value as conversationv1.AgentBash).result
+      .value as conversationv1.AgentBashSuccess;
+    expect(success.settledAt?.atMs).toBe(1_700_000_002_000n);
+  });
+
+  it("leaves the OUTPUT unset, because the call never reached its return", () => {
+    // Arrange, Act.
+    const item = bashConverter.cut?.(call({ command: "sleep 600" }), 1_700_000_002_000);
+
+    // Assert: an empty text arm would say the command printed nothing, which is
+    // a different claim from never having been told what it printed.
+    const success = (item?.value as conversationv1.AgentBash).result
+      .value as conversationv1.AgentBashSuccess;
+    const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
+    expect(interrupted.output).toBeUndefined();
+  });
+
+  it("produces NO frame for a call announced with no command line to restate", () => {
+    // Arrange: a malformed announcement. A frame with no command line states
+    // nothing a reader could act on, and the store refuses an unset arm.
+    const item = bashConverter.cut?.(call({}), 1_700_000_002_000);
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+});
