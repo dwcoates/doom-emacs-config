@@ -135,11 +135,25 @@ func TestPlaytestContextPrompts(t *testing.T) {
 	}
 	p.note("the context file opened in the module's editor popup",
 		"`agent-repl-popup-open` put "+playtestContextFileName+" in a live right-side window, and the panel's webview and composer are untouched")
-	e.Eval(`(with-current-buffer agent-repl-playtest08--context
+	// POINT IS MOVED IN THE WINDOW, not merely in the buffer. A
+	// `with-current-buffer' moves the BUFFER's point while the window keeps
+	// its own, and redisplay draws the WINDOW's -- so the reference the verb
+	// composed said line 3 while the picture showed the cursor sitting on
+	// line 1, and the manifest sentence and the photograph disagreed.
+	// `with-selected-window' is where a user invoking this stands, and it
+	// syncs the window's point on the way out.
+	e.Eval(`(with-selected-window (get-buffer-window agent-repl-playtest08--context)
               (goto-char (point-min))
               (forward-line 2)
               (call-interactively #'agent-repl-explain)
               t)`)
+	// THE DRAWN LINE IS AN ASSERTION, so a picture that disagrees with the
+	// sentence fails here rather than only under a reviewer's eye.
+	if got := e.EvalInt(`(with-current-buffer agent-repl-playtest08--context
+                            (line-number-at-pos
+                             (window-point (get-buffer-window agent-repl-playtest08--context))))`); got != 3 {
+		t.Fatalf("the popup window draws its point on line %d, want line 3", got)
+	}
 	lineRef := playtestContextFileName + ":3"
 	sent := awaitSubmissions(t, e, 1, "the line prompt to reach the RPC boundary")[0]
 	if sent.Origin != playtestExplainOriginContext {
@@ -167,7 +181,7 @@ func TestPlaytestContextPrompts(t *testing.T) {
 	// prompting verb, and the stub EDITS the initial text rather than
 	// replacing it, so the assertion proves the reference was the pre-fill.
 	const suffix = " -- what does this block do?"
-	e.Eval(`(with-current-buffer agent-repl-playtest08--context
+	e.Eval(`(with-selected-window (get-buffer-window agent-repl-playtest08--context)
               (let ((transient-mark-mode t))
                 (goto-char (point-min))
                 (forward-line 1)
