@@ -205,7 +205,17 @@ transaction that begins DEFERRED.
   pointer that names no row IN THAT BOOK is a stale-pointer refusal. No `seq`
   exists on any wire.
 - `OpenAgentSession` answers the page plus a store-minted `AgentSessionToken`
-  (128 random bits from `crypto/rand`, hex). The token is **SINGLE-USE**:
+  (128 random bits from `crypto/rand`, hex) — **UNLESS THE REQUEST SAID
+  `page_only`**, which is the caller stating that no watch follows: nothing is
+  minted and `watch` comes back UNSET. The caller has to state it because the
+  store cannot work it out — the rpc is unary and the service has no close, so
+  a token minted for a page that is then abandoned can never be reclaimed and
+  lives for the whole process lifetime (measured at two per turn, 2026-09-10;
+  every one-shot read in the shim — the turn's opening page, the teardown's
+  book head, the reconciliation read, the live-work re-announcement — now says
+  `page_only`). A watch attempted from such an open has no token to present and
+  meets the ordinary unknown/empty-token refusal; there is no arm of its own.
+  The token is **SINGLE-USE**:
   `WatchAgentSession` consumes it, and an unknown, consumed, or
   previous-process token is refused. Tokens live in memory and do not survive a
   restart — "you already used this" and "the store restarted" are the same
