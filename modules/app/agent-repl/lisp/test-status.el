@@ -2215,6 +2215,100 @@ called and verifies the advice runs cleanly."
               '((frame-a tab-bar-lines-keep-state t)
                 (frame-a tab-bar-lines 2)))))))
 
+(defmacro agent-repl-test-status--with-tabbar-frame (params &rest body)
+  "Run BODY with `frame-a' as the only graphical frame, parameterized by PARAMS.
+PARAMS is evaluated to an alist of frame parameters, bound in BODY as
+`frame-params'; reads and writes go through it.  BODY also sees
+`pinned', which collects each `agent-repl--tabbar-pin-frame' call so a
+test can assert the re-assertion left an already-correct frame alone."
+  (declare (indent 1))
+  `(let ((frame-params ,params)
+         (pinned nil))
+     (cl-letf (((symbol-function 'frame-list) (lambda () '(frame-a)))
+               ((symbol-function 'display-graphic-p) (lambda (_frame) t))
+               ((symbol-function 'frame-parameter)
+                (lambda (_frame parameter) (alist-get parameter frame-params)))
+               ((symbol-function 'agent-repl--tabbar-pin-frame)
+                (lambda (frame rows)
+                  (push (list frame rows) pinned)
+                  (setf (alist-get 'tab-bar-lines frame-params) rows
+                        (alist-get 'tab-bar-lines-keep-state frame-params) t)
+                  rows))
+               ((symbol-function 'agent-repl--ws-current-name) (lambda () nil))
+               ((symbol-function 'agent-repl--log) #'ignore))
+       ,@body)))
+
+(ert-deftest agent-repl-test-tabbar-reassert-repairs-startup-frame-reset ()
+  "A `frame-notice-user-settings'-style one-line frame is re-pinned to two."
+  ;; Arrange: startup applied `default-frame-alist' when it still said one line.
+  (let ((default-frame-alist '((tab-bar-lines . 1)
+                               (tab-bar-lines-keep-state . t))))
+    (agent-repl-test-status--with-tabbar-frame
+        '((tab-bar-lines . 1) (tab-bar-lines-keep-state . t))
+      ;; Act
+      (let ((repinned (agent-repl--tabbar-reassert-row-count)))
+        ;; Assert
+        (should (equal repinned '(frame-a)))
+        (should (= agent-repl--tabline-row-count
+                   (alist-get 'tab-bar-lines frame-params)))))))
+
+(ert-deftest agent-repl-test-tabbar-reassert-repairs-persp-hook-reset ()
+  "The persp hook's `default-frame-alist' clobber is undone for new frames."
+  ;; Arrange: `tab-bar--update-tab-bar-lines' with FRAMES = t rewrites the
+  ;; alist to one line, which `tab-bar-lines-keep-state' does not protect.
+  (let ((default-frame-alist '((tab-bar-lines . 1)
+                               (tab-bar-lines-keep-state . t))))
+    (agent-repl-test-status--with-tabbar-frame
+        (list (cons 'tab-bar-lines agent-repl--tabline-row-count)
+              (cons 'tab-bar-lines-keep-state t))
+      ;; Act
+      (agent-repl--tabbar-reassert-row-count)
+      ;; Assert
+      (should (= agent-repl--tabline-row-count
+                 (alist-get 'tab-bar-lines default-frame-alist)))
+      (should (eq t (alist-get 'tab-bar-lines-keep-state
+                               default-frame-alist))))))
+
+(ert-deftest agent-repl-test-tabbar-reassert-leaves-two-line-frame-alone ()
+  "An already-pinned frame is not pushed through the pin path again."
+  ;; Arrange
+  (let ((default-frame-alist
+         (list (cons 'tab-bar-lines agent-repl--tabline-row-count)
+               (cons 'tab-bar-lines-keep-state t))))
+    (agent-repl-test-status--with-tabbar-frame
+        (list (cons 'tab-bar-lines agent-repl--tabline-row-count)
+              (cons 'tab-bar-lines-keep-state t))
+      ;; Act
+      (let ((repinned (agent-repl--tabbar-reassert-row-count)))
+        ;; Assert
+        (should-not repinned)
+        (should-not pinned)))))
+
+(ert-deftest agent-repl-test-fixed-height-tab-bar-appends-reassert-hooks ()
+  "Installation appends the re-assertion after Doom's persp handler."
+  ;; Arrange
+  (defvar persp-activated-functions)
+  (let ((auto-resize-tab-bars t)
+        (tab-bar-auto-width t)
+        (default-frame-alist nil)
+        (frame-inhibit-implied-resize t)
+        (window-setup-hook nil)
+        (persp-activated-functions (list '+workspaces-load-tab-bar-data-h)))
+    (cl-letf (((symbol-function 'frame-list) (lambda () nil))
+              ((symbol-function 'display-graphic-p) (lambda (_frame) nil))
+              ((symbol-function 'tab-bar-mode) #'ignore)
+              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
+               (lambda () '(:timer-cancelled nil :hook-present nil)))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl--install-fixed-height-tab-bar)
+      ;; Assert
+      (should (equal window-setup-hook
+                     '(agent-repl--tabbar-reassert-row-count)))
+      (should (equal persp-activated-functions
+                     '(+workspaces-load-tab-bar-data-h
+                       agent-repl--tabbar-reassert-row-count))))))
+
 ;;;; ---- The hibernation split --------------------------------------------
 
 ;;;; ---- The two context cuts --------------------------------------------
