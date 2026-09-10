@@ -278,9 +278,13 @@ func countColorWithin(img *image.RGBA, want color.RGBA, tolerance uint8) int {
 // flight, and each of those reads is as still as the last. Only a window on
 // the glass itself catches that one.
 //
-// THE COST, STATED: +50ms on every capture that settles, and a whole playtest
-// takes about 250 of them — about 12.5s across the entire run, against
-// pictures a human is going to read and disbelieve if they are torn.
+// THE COST, STATED: at least +50ms on every capture that settles, and a
+// whole playtest takes about 250 of them — about 12.5s across the entire
+// run, against pictures a human is going to read and disbelieve if they are
+// torn. "At least", because the window closes on the grid of poll instants
+// `settleFrame` actually reads at and each of those reads drives a full
+// redisplay first, so a capture pays the redisplays the window spans as
+// well.
 //
 // `playtestSettleBound` still caps the whole wait, and the not-settled path
 // is unchanged: an animating surface runs the budget out and says so in the
