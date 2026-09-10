@@ -342,8 +342,52 @@ func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conver
 		})
 	}
 	w.reapEndedMonitorLocked(act)
+	w.routeDetachedSubagentLocked(agent, act)
 	w.watchSpawnedSubagentLocked(act)
 	w.notifyPushLocked(act)
+}
+
+// routeDetachedSubagentLocked routes a subagent frame that belongs to work
+// which has ALREADY LEFT THE TURN, addressed by its handle.
+//
+// WHY THE HANDLE AND NOT THE STREAM. A detached run's frames reach this daemon
+// on either book: the spawning agent's, when the producer settles the unit
+// there (a task notification does exactly that), or the run's own, which the
+// watcher opened at the announcement. The footer's chip counts LIVE runs, so it
+// must retire one at its terminal WHEREVER the terminal arrived — and the only
+// thing common to both deliveries is the work handle, which is why this routes
+// by identity rather than by which stream carried the frame.
+//
+// The handle is recovered two ways, and both are facts this watcher already
+// holds: the unit's own detachment (`facts[unit].work`, remembered when the
+// announcement resolved), and the watch the frame arrived on (`entry.work`,
+// set when the subagent's stream became detached work).
+func (w *watcher) routeDetachedSubagentLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
+	sub := act.GetSubagent()
+	if sub == nil {
+		return
+	}
+	work := w.detachedHandleForLocked(agent, act)
+	if work == nil {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.detached_subagent_frame", "a detached subagent frame was routed by its handle", dlog.Context{
+		"work_id": work.GetValue(), "agent_id": agent.GetValue(),
+		"activity_id": act.GetActivityId().GetValue(),
+	})
+	w.sinks.Footer.OnSubagent(w.ws, work, sub)
+}
+
+// detachedHandleForLocked answers the handle a subagent frame belongs to, or
+// nil when the run it names has not detached.
+func (w *watcher) detachedHandleForLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) *conversationv1.DetachedWorkId {
+	if fact, ok := w.facts[act.GetActivityId().GetValue()]; ok && fact.work != nil {
+		return fact.work
+	}
+	if entry, ok := w.agents[agent.GetValue()]; ok && entry.work != nil {
+		return entry.work
+	}
+	return nil
 }
 
 // notifyPushLocked raises the host notification a PushNotification send earns.
