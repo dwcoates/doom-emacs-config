@@ -55,15 +55,38 @@ func TestPlaytestArmSentenceNamesTheIndexBadgeAndNeverADisc(t *testing.T) {
 	}
 }
 
-// TestPlaytestAColoredArmSentenceSaysTheNameCarriesSelectionNotTheArm keeps
-// the half of the correction that stops a reviewer reading the NAME's color
-// as the arm's.
-func TestPlaytestAColoredArmSentenceSaysTheNameCarriesSelectionNotTheArm(t *testing.T) {
+// TestPlaytestASelectedColoredArmSentenceSaysTheNameCarriesSelectionNotTheArm
+// keeps the half of the correction that stops a reviewer reading the SELECTED
+// tab's name color as its arm's: `agent-repl--tab-face` hands that one name
+// region Doom's selected-tab face, so the arm reaches the badge and stops.
+func TestPlaytestASelectedColoredArmSentenceSaysTheNameCarriesSelectionNotTheArm(t *testing.T) {
+	got := armSentence("ws-a", ":idle", "green", "#c0c0c0")
+
+	if !strings.Contains(got, "SELECTION") {
+		t.Errorf("the selected colored-arm sentence says %q, and never tells the reviewer the name "+
+			"beside the badge carries the SELECTION rather than the arm color", got)
+	}
+}
+
+// TestPlaytestAnUnselectedColoredArmSentenceSaysTheWholeEntryCarriesTheArm is
+// the other half, and it is the one a reviewer was being lied to about.
+//
+// An UNSELECTED tab takes its palette row's `:bg`, which IS the arm color, so
+// `agent-repl--render-tab` paints its bracket AND its name region with it.
+// Measured off owner 20's K.61 capture at the tab bar's own scanline: the
+// unselected `:thinking` tab ran `#cc3333` unbroken from x=265 to x=378,
+// bracket through name, while the sentence said the name did not carry the arm
+// color -- a manifest telling a reviewer that the correct picture is a defect.
+func TestPlaytestAnUnselectedColoredArmSentenceSaysTheWholeEntryCarriesTheArm(t *testing.T) {
 	got := armSentence("ws-a", ":idle", "green", "")
 
-	if !strings.Contains(got, "selection") {
-		t.Errorf("the colored-arm sentence says %q, and never tells the reviewer the name beside the "+
-			"badge carries the SELECTION face rather than the arm color", got)
+	if !strings.Contains(got, "WHOLE ENTRY") {
+		t.Errorf("the unselected colored-arm sentence says %q, and never tells the reviewer the arm "+
+			"color reaches the name region too", got)
+	}
+	if strings.Contains(got, "SELECTED") {
+		t.Errorf("the unselected colored-arm sentence says %q; it describes a selected tab's dimming "+
+			"on a tab that is not selected", got)
 	}
 }
 
