@@ -303,7 +303,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.Serve
 // Close ends every open stream by cancelling the lifetime they hang off.
 func (s *server) Close() error {
 	s.cancel()
-	s.log.Debug("daemon.server.close", "every open stream was ended", nil)
+	s.log.Info("daemon.server.close", "every open stream was ended", nil)
 	return nil
 }
 

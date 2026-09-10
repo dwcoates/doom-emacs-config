@@ -558,7 +558,7 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 	switch {
 	case isMain && turn != nil:
 		how := turnCloseOf(success, failure)
-		w.log.Debug("daemon.sessionwatcher.turn_ended", "the turn closed", dlog.Context{
+		w.log.Info("daemon.sessionwatcher.turn_ended", "the turn closed", dlog.Context{
 			"turn_id": string(*turn), "close": int(how),
 		})
 		w.turnEndedLocked(*turn, how)

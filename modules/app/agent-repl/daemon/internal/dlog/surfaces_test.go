@@ -58,7 +58,7 @@ func hasOperation(records []map[string]any, operation string) bool {
 func testSurfaces(t *testing.T) (*surfaces, string) {
 	t.Helper()
 	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
-	s, err := openSurfaces(runLogPath, true, io.Discard)
+	s, err := openSurfaces(runLogPath, LevelDebug, io.Discard)
 	if err != nil {
 		t.Fatalf("openSurfaces: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestOpenSurfacesFailsWhenTheRunLogCannotBeOpened(t *testing.T) {
 	}
 
 	// Act.
-	s, err := openSurfaces(filepath.Join(blocker, "daemon.run.log"), false, io.Discard)
+	s, err := openSurfaces(filepath.Join(blocker, "daemon.run.log"), LevelDebug, io.Discard)
 
 	// Assert: the caller must treat this as a boot fatal, so it must be an
 	// error and not a degraded surface.
@@ -431,6 +431,68 @@ func TestClientLogStampsArrivalWhenTheClientSendsNoTimestamp(t *testing.T) {
 	}
 }
 
+func TestClientLogPersistsTheClientsVerboseClass(t *testing.T) {
+	tests := []struct {
+		name    string
+		verbose bool
+		want    string
+	}{
+		{name: "normal", verbose: false, want: VerbosityNormal},
+		{name: "verbose", verbose: true, want: VerbosityVerbose},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			dir := t.TempDir()
+
+			// Act.
+			if err := s.ClientLog(dir, ClientRecord{
+				ClientKind: RuntimeWebapp,
+				Level:      LevelInfo,
+				Operation:  "webapp.test.op",
+				Message:    "forwarded",
+				Verbose:    tc.verbose,
+			}); err != nil {
+				t.Fatalf("ClientLog: %v", err)
+			}
+
+			// Assert.
+			records := workspaceRecords(t, dir, "webapp")
+			if got := records[0]["verbosity"]; got != tc.want {
+				t.Fatalf("verbosity = %v, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClientLogFiltersBelowThresholdBeforePersistence(t *testing.T) {
+	// Arrange.
+	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
+	s, err := openSurfaces(runLogPath, LevelWarn, io.Discard)
+	if err != nil {
+		t.Fatalf("openSurfaces: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	dir := t.TempDir()
+
+	// Act.
+	err = s.ClientLog(dir, ClientRecord{
+		ClientKind: RuntimeWebapp,
+		Level:      LevelInfo,
+		Operation:  "webapp.test.filtered",
+		Message:    "filtered",
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+	if records := workspaceRecords(t, dir, "webapp"); len(records) != 0 {
+		t.Fatalf("webapp records = %v, want the INFO record filtered at WARN", records)
+	}
+}
+
 func TestClientLogRefusesAKindTheDaemonDoesNotOwn(t *testing.T) {
 	tests := []struct {
 		name string
@@ -601,7 +663,7 @@ func TestDurableWriteDoesNotWaitOnAStalledMirror(t *testing.T) {
 	// Arrange: the terminal wedges inside its first write.
 	terminal := newBlockingWriter()
 	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
-	s, err := openSurfaces(runLogPath, true, terminal)
+	s, err := openSurfaces(runLogPath, LevelDebug, terminal)
 	if err != nil {
 		t.Fatalf("openSurfaces: %v", err)
 	}
@@ -622,62 +684,6 @@ func TestDurableWriteDoesNotWaitOnAStalledMirror(t *testing.T) {
 	case <-terminal.release:
 		t.Fatalf("the test released the terminal early; the assertion proves nothing")
 	default:
-	}
-}
-
-func TestVerboseRecordIsPersistedButNotMirroredWhenQuiet(t *testing.T) {
-	// Arrange: verbose off.
-	terminal := newCollectingWriter()
-	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
-	s, err := openSurfaces(runLogPath, false, terminal)
-	if err != nil {
-		t.Fatalf("openSurfaces: %v", err)
-	}
-	log := s.Global()
-
-	// Act.
-	log.Debug("daemon.boot.branch", "the ordinary path", nil)
-	log.Info("daemon.boot.milestone", "a milestone", nil)
-	<-terminal.written
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	// Assert: both persisted, only the normal one mirrored.
-	records := readRecords(t, runLogPath)
-	if !hasOperation(records, "daemon.boot.branch") {
-		t.Fatalf("the verbose record was not persisted; verbosity gates only the terminal")
-	}
-	for _, line := range terminal.all() {
-		if strings.Contains(string(line), "daemon.boot.branch") {
-			t.Fatalf("the verbose record reached a quiet terminal")
-		}
-	}
-}
-
-func TestVerboseRecordIsMirroredWhenVerbose(t *testing.T) {
-	// Arrange.
-	terminal := newCollectingWriter()
-	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
-	s, err := openSurfaces(runLogPath, true, terminal)
-	if err != nil {
-		t.Fatalf("openSurfaces: %v", err)
-	}
-	defer s.Close()
-
-	// Act.
-	s.Global().Debug("daemon.boot.branch", "the ordinary path", nil)
-	<-terminal.written
-
-	// Assert.
-	var seen bool
-	for _, line := range terminal.all() {
-		if strings.Contains(string(line), "daemon.boot.branch") {
-			seen = true
-		}
-	}
-	if !seen {
-		t.Fatalf("the verbose record did not reach the verbose terminal")
 	}
 }
 
@@ -820,7 +826,7 @@ func TestAWorkspaceSinkTargetLivesUnderTheStateRootsLogsDirectory(t *testing.T) 
 	// Arrange.
 	stateRoot := t.TempDir()
 	logsDir := filepath.Join(stateRoot, "logs")
-	s, err := openSurfaces(filepath.Join(logsDir, "daemon.run.log"), false, io.Discard)
+	s, err := openSurfaces(filepath.Join(logsDir, "daemon.run.log"), LevelDebug, io.Discard)
 	if err != nil {
 		t.Fatalf("openSurfaces: %v", err)
 	}

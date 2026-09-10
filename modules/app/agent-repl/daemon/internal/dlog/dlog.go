@@ -36,7 +36,7 @@ type Logger interface {
 }
 
 // Surfaces is the set of sinks the daemon opens at boot and hands to every
-// component: the global service log, the restart-scoped run log, and the one
+// component: the global service log, the size-rotated run log, and the one
 // shared terminal mirror. A workspace-bound Logger comes from Workspace.
 //
 // ARCHITECTURE.md fixes the responsibilities but not the fields; the minimum
@@ -101,4 +101,7 @@ type ClientRecord struct {
 	// the daemon records around it. Empty means the client sent none and the
 	// daemon stamps its arrival instead, saying so in the record's context.
 	Timestamp string
+	// Verbose is the record's own verbosity class. It is independent of
+	// severity: a client may emit an informational record only while tracing.
+	Verbose bool
 }

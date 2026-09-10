@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -226,5 +227,107 @@ func TestClientLogPersistsToTheOwningWorkspace(t *testing.T) {
 	}
 	if got := h.Surfaces.clientRecords[0].Level; got != dlog.LevelWarn {
 		t.Fatalf("level = %q, want %q", got, dlog.LevelWarn)
+	}
+}
+
+func TestClientLogForwardsTheClientsTimestamp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	want := time.Date(2026, 9, 10, 12, 34, 56, 789000000, time.FixedZone("client", -4*60*60)).Format(time.RFC3339Nano)
+
+	// Act.
+	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: ref(),
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.render",
+			Message:   "rendered",
+			Timestamp: want,
+		},
+	})); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if got := h.Surfaces.clientRecords[0].Timestamp; got != want {
+		t.Fatalf("timestamp = %q, want %q", got, want)
+	}
+}
+
+func TestClientLogForwardsTheClientsVerboseClass(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: ref(),
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.trace",
+			Message:   "traced",
+			Verbose:   true,
+		},
+	})); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if !h.Surfaces.clientRecords[0].Verbose {
+		t.Fatal("verbose = false, want the client's true value")
+	}
+}
+
+func TestClientLogForwardsTheClientsNormalClass(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: ref(),
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.render",
+			Message:   "rendered",
+			Verbose:   false,
+		},
+	})); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if h.Surfaces.clientRecords[0].Verbose {
+		t.Fatal("verbose = true, want the client's false value")
+	}
+}
+
+func TestClientLogRecordsTheSuccessfulRequestBoundaryAtDebug(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{workspace: log}
+	})
+
+	// Act.
+	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: ref(),
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.render",
+			Message:   "rendered",
+		},
+	})); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	debug := log.at("DEBUG")
+	if len(debug) != 1 {
+		t.Fatalf("DEBUG records = %v, want exactly one", debug)
+	}
+	if debug[0].Operation != "daemon.server.client_log" {
+		t.Fatalf("operation = %q, want daemon.server.client_log", debug[0].Operation)
+	}
+	if debug[0].Context["operation"] != "webapp.render" {
+		t.Fatalf("context = %v, want the forwarded operation", debug[0].Context)
 	}
 }
