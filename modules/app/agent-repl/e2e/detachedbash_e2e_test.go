@@ -752,6 +752,30 @@ func TestBashHoldStaysForegroundUntilInterrupted(t *testing.T) {
 	if ended.GetInterrupted() == nil {
 		t.Fatalf("turn ended = %v, want turn_ended.interrupted: a held foreground bash concludes on nothing else", ended)
 	}
+
+	// Assert: AND THE CARD IS NO LONGER DRAWN RUNNING. The vendor returns no
+	// `tool_result` for the call a stop landed inside, so the shim's own cut is
+	// what settles the unit (convert/tools/bash.ts `cut`); without it this card
+	// went on drawing a live shell inside a turn that had ended, which is what
+	// the F42 playbook photographed.
+	settled := harness.AwaitView(t, ctx, stream, "the held Bash unit to settle once the stop cut it",
+		func(row *frontendv1.FeedRow) bool {
+			call := row.GetActivity().GetSimpleToolCall()
+			return call.GetName().GetText() == "Bash" &&
+				strings.Contains(call.GetInput().GetText(), "tail -f /var/log/system.log") &&
+				call.GetReturned() != nil
+		})
+	returned := settled.GetActivity().GetSimpleToolCall().GetReturned()
+	// A STOP IS NOT THE CALL BREAKING: AgentBashInterrupted nests inside
+	// AgentBashSuccess, so the badge reads succeeded and the body says how it
+	// was cut. The same shape TestInterruptAfterTextDelta already pins for a
+	// vendor-reported interrupt.
+	if returned.GetSucceeded() == nil {
+		t.Fatalf("the cut Bash call's verdict = %v, want succeeded", returned.GetVerdict())
+	}
+	if got := returned.GetText().GetText(); !strings.Contains(got, "interrupted by the user") {
+		t.Fatalf("the cut Bash call's output = %q, want it to say it was interrupted by the user", got)
+	}
 }
 
 // dbExpectNoDetachedShell drains the feed for one probe window and fails if a
