@@ -155,6 +155,21 @@ type Resolver interface {
 	MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, sub feedid.Feed, label string)
 }
 
+// PortedPrompt is one prompt a FORK carried over from its parent: a question
+// the parent was asked, under the child's own turn identity.
+//
+// It carries the text rather than composed content because that is what the
+// daemon's own record holds; the row is drawn through the same functions a
+// delivered prompt is drawn through.
+type PortedPrompt struct {
+	// Turn is the turn identity the row carries in the CHILD.
+	Turn string
+	// Text is the prompt's full text, as the parent recorded it.
+	Text string
+	// Origin is who the row is drawn as being from.
+	Origin conversationv1.PromptOrigin
+}
+
 // ImageResolver turns a record's image reference — a host path or a URL — into
 // a `src` a webview can load, plus the alt text. That resolution is the
 // daemon's and never the client's, and it is injected because how a host path
@@ -185,6 +200,14 @@ type Deps struct {
 	// ResolveImage turns an image reference into a drawable src. Required for
 	// prompt rows carrying images.
 	ResolveImage ImageResolver
+	// PortedPrompts answers the conversation a FORK carried over from its
+	// parent, oldest first. It is read at the opening history page and drawn
+	// ABOVE everything the workspace has of its own, which is what makes a
+	// forked feed the parent's conversation followed by the fork's.
+	//
+	// nil means no workspace ever carries a ported conversation, which is
+	// what a test that is not about forking wants.
+	PortedPrompts func(context.Context, ids.WorkspaceID) ([]PortedPrompt, error)
 	// Now is the resolver's clock, injected so tests never sleep. Defaults to
 	// time.Now.
 	Now func() time.Time
