@@ -157,8 +157,9 @@ describe("drawFeedSessionSeparation: the compaction", () => {
   // A FOLDED SUMMARY MUST ACTUALLY BE INVISIBLE, which the assertion above
   // does NOT establish: it reads the DOM property, and jsdom applies no
   // stylesheet, so `hidden` reads true while the real page drew the summary
-  // anyway. That is exactly what happened — the D30 playtest photographed a
-  // divider whose toggle said FOLDED with the summary sitting open beneath it.
+  // anyway. That is exactly what happened — a headless run of the real webview
+  // photographed a divider whose toggle said FOLDED with the summary sitting
+  // open beneath it.
   //
   // THE CAUSE IS SPECIFICITY, so this is pinned against the stylesheet rather
   // than against the DOM: the fold hides an element carrying `.bubble`,

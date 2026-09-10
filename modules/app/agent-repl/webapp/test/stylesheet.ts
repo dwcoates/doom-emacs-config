@@ -5,7 +5,7 @@
  * which is the right unit: the class is what the drawing code decides. But a
  * class only means something if the stylesheet lets it win, and the cascade is
  * decided by the WHOLE file rather than by the rule an author was looking at.
- * A playtest capture of the topbar caught exactly that gap — the context figure
+ * A screenshot of the real topbar caught exactly that gap — the context figure
  * carried `.tone-yellow` and was painted grey, because a later single-class
  * rule set `color` on the same element and the earlier tone rule lost. The
  * class assertion passed the whole time.

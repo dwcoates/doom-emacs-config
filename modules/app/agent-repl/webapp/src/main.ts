@@ -106,7 +106,7 @@ export async function boot(): Promise<void> {
     // `console.error`, and THE PAGE CAME UP EMPTY -- no stream opened, no
     // card shown, nothing said. It could never have booted at all.
     //
-    // Found by the playtest (e2e/PLAYTEST-SPEC.md), which is the first thing
+    // Found by a headless run of the real webview, which is the first thing
     // in this repo to look at the RUNNING webapp: `boot` has no test of its
     // own, and `test/setup.ts` installs a logger for every suite, so the one
     // condition this failed under is the only one no suite creates.
