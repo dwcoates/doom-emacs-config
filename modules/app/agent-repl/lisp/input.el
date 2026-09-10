@@ -285,6 +285,20 @@ the timer fires."
 
 ;;;; ---- Attachments -----------------------------------------------------
 
+(defconst agent-repl--input-image-marker-property 'agent-repl-image-marker
+  "Text property naming a span of composer text as an ATTACHMENT MARKER.
+Its value is the attached image's path.  `clipboard-image.el' puts it
+over the marker line it draws (and that line's newline), and
+`agent-repl--read-input-buffer' drops every span carrying it -- so the
+marker is DRAWN and never SENT.  The image travels as its own
+`ImageBlock'; a marker riding the words would leave the agent reading a
+filename it was never meant to see.
+
+Declared here, in the file that loads first and does the stripping, so
+one name serves both sides.  A TEXT PROPERTY rather than the thumbnail
+overlay: the overlay exists only when a thumbnail could be drawn, and a
+TTY frame gets none while still needing the marker stripped.")
+
 (defun agent-repl-input-attach-image (path media-type)
   "Register PATH (MIME MEDIA-TYPE) as an image attached to THIS composer.
 The ONE entry point that attaches an image: `clipboard-image.el' calls it
@@ -802,11 +816,39 @@ value Emacs constructs from a path."
 
 ;;;; ---- The send pipeline ------------------------------------------------
 
+(defun agent-repl--input-text-without-image-markers ()
+  "Return (TEXT . STRIPPED) for the current buffer, markers removed.
+TEXT is the buffer's contents with every span carrying
+`agent-repl--input-image-marker-property' dropped; STRIPPED is how many
+characters that cost.  The markers are DRAWN text, not composed text --
+see the property's own docstring."
+  (let ((pos (point-min))
+        (end (point-max))
+        (parts nil)
+        (stripped 0))
+    (while (< pos end)
+      (let ((next (next-single-property-change
+                   pos agent-repl--input-image-marker-property nil end)))
+        (if (get-text-property pos agent-repl--input-image-marker-property)
+            (setq stripped (+ stripped (- next pos)))
+          (push (buffer-substring-no-properties pos next) parts))
+        (setq pos next)))
+    (cons (apply #'concat (nreverse parts)) stripped)))
+
 (defun agent-repl--read-input-buffer (ws)
-  "Return the text contents of WS's input buffer, or nil."
+  "Return the text contents of WS's input buffer, or nil.
+The attachment markers `clipboard-image.el' draws are NOT part of that
+text: they are stripped here, which is the one place every send site and
+the history push alike read the composer through."
   (let ((buf (agent-repl--input-buffer ws)))
     (if buf
-        (with-current-buffer buf (buffer-string))
+        (with-current-buffer buf
+          (let* ((read (agent-repl--input-text-without-image-markers))
+                 (stripped (cdr read)))
+            (when (> stripped 0)
+              (agent-repl--log ws "elisp.input.image-markers-stripped ws=%s chars=%d"
+                               ws stripped))
+            (car read)))
       (agent-repl--log-verbose ws "elisp.input.read-no-buffer ws=%s" ws)
       nil)))
 
