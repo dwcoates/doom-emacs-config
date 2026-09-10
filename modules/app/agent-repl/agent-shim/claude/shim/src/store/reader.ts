@@ -640,6 +640,33 @@ export function createReader(options: ReaderOptions): Reader {
     let concluded = false;
     let concludeAt: conversationv1.HistoryPointer | undefined;
     let inner: AgentPageSession | undefined;
+    /**
+     * The newest pointer THIS WRAPPER has handed the consumer.
+     *
+     * IT IS TRACKED HERE BECAUSE THE INNER SESSION CANNOT SEE IT. The rows that
+     * landed while this book was deferred are served out of the real session's
+     * OPENING PAGE, by the loop below, so the inner session's own
+     * `servedThrough` never learns about them — and its `concludeThrough` ends
+     * the stream only when the pointer it is given is the one IT served. A
+     * teardown concluding through the book's head therefore matched nothing,
+     * the tail stood waiting for a row that had already gone out, and the
+     * shim's `KillSession` spent its whole `WATCHER_CONCLUSION_BUDGET_MS` on
+     * every session whose book was minted empty and then written to.
+     * MEASURED against the real quartet: 1.02s from the host's stop to the
+     * daemon's exit, against 5ms for the same stop on a session whose book was
+     * never deferred, with `the WatchAgent tail on <agent> did not end within
+     * its conclusion budget` at ERROR in the shim's log each time.
+     */
+    let served: conversationv1.HistoryPointer | undefined;
+
+    /**
+     * Whether the consumer has been handed everything the conclusion named.
+     *
+     * An unnamed pointer settles at once, exactly as the real session's own
+     * `concludeThrough` reads it: there is nothing left to wait for.
+     */
+    const settled = (): boolean =>
+      concluded && (concludeAt === undefined || concludeAt.value === served?.value);
 
     /** The real session, once the book exists. `undefined` if it never will. */
     const openWhenWritten = async (): Promise<AgentPageSession | undefined> => {
@@ -700,12 +727,31 @@ export function createReader(options: ReaderOptions): Reader {
           // opening page this consumer already has was empty, so the real
           // session's page is entirely news. It is newest-first; the tail is
           // write order.
-          for (const entry of [...session.page.entries].reverse()) yield entry;
+          for (const entry of [...session.page.entries].reverse()) {
+            served = entry.at;
+            yield entry;
+            // THE CONCLUSION IS HONORED BY WHOEVER SERVED THE ROW. These
+            // entries never pass through the inner session's tail, so only
+            // this loop can know the named pointer has been handed over.
+            if (settled()) {
+              session.close();
+              return;
+            }
+          }
+          if (settled()) {
+            session.close();
+            return;
+          }
           for (;;) {
             const next = await pending;
             if (next.done === true) return;
             pending = rows.next();
+            served = next.value.at;
             yield next.value;
+            if (settled()) {
+              session.close();
+              return;
+            }
           }
         },
       },
@@ -714,6 +760,14 @@ export function createReader(options: ReaderOptions): Reader {
         concludeAt = through;
         // Wake the wait so a teardown does not sit out the recheck cadence.
         agentRows.wake(agent.value);
+        // ALREADY SERVED IS ALREADY DONE, and the inner session cannot tell:
+        // a conclusion naming a pointer this wrapper handed out of the opening
+        // page leaves the inner tail parked on a row that will never come, so
+        // it is ENDED here rather than concluded.
+        if (settled()) {
+          inner?.close();
+          return;
+        }
         inner?.concludeThrough(through);
       },
       close() {
