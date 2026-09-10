@@ -219,8 +219,35 @@ func TestPlaytestPanelsOpenAndClose(t *testing.T) {
 func (s *playtestScenario) tabPaintOf(t *testing.T, ws string) string {
 	t.Helper()
 	arm, color := s.armPaint(t, ws)
-	return fmt.Sprintf("on arm %s (its table color: %s) with the drawn tabline carrying %s",
-		arm, color, s.tabFaceFor(t, ws))
+	return fmt.Sprintf("on arm %s (its table color: %s), and ITS OWN run of the drawn tabline -- from the "+
+		"`[` of its badge to the end of its name -- carries %s",
+		arm, color, s.tabRunFaceOf(t, ws))
+}
+
+// tabRunFaceOf answers the faces the drawn tabline carries over ONE
+// workspace's own tab, in order, from the `[` of its index badge through the
+// end of its name.
+//
+// The shared `tabFaceFor` answers the SET of faces in the whole line, which
+// cannot tell two tabs apart -- and two pictures of a bar whose face set is
+// identical can still draw a given tab differently, because what changed is
+// which run got which face. That is exactly what happened here, so the
+// manifest records the run rather than the set.
+func (s *playtestScenario) tabRunFaceOf(t *testing.T, ws string) string {
+	t.Helper()
+	return s.E.EvalString(`(let* ((line (agent-repl-workspace-tabline-formatted))
+                                  (at (string-match (regexp-quote ` + elispString(ws) + `) line)))
+                             (if (null at)
+                                 "<the drawn tabline does not carry this workspace's name at all>"
+                               (let* ((start (or (cl-position ?\[ line :end at :from-end t) at))
+                                      (end (+ at (length ` + elispString(ws) + `)))
+                                      (i start)
+                                      (out nil))
+                                 (while (< i end)
+                                   (let ((f (format "%S" (get-text-property i 'face line))))
+                                     (unless (equal f (car out)) (push f out)))
+                                   (setq i (1+ i)))
+                                 (mapconcat #'identity (nreverse out) " then "))))`)
 }
 
 // ---------------------------------------------------------------------------
