@@ -22,9 +22,10 @@ import (
 //     and the composer) opened into the main area, the composer focused,
 //     the plain close hiding both and leaving the tab order alone, and the
 //     toggle bringing them back.
-//   - I.54 TestPlaytestFullscreenToggleAndRestore: `SPC w f` from an
-//     ordinary work window maximizes it, and the same key restores the
-//     layout it replaced.
+//   - I.54 TestPlaytestFullscreenToggleAndRestore: both branches of
+//     `SPC w f` -- inside the panels it focuses the composer and maximizes
+//     nothing, and from an ordinary work window it maximizes that window and
+//     then restores the layout it replaced.
 //   - I.55 TestPlaytestReloadAndRescueWebview: `SPC o l` fetches the page
 //     again and the feed's rows come back; `SPC o L` leaves a page that is
 //     home alone and brings a page that navigated away back with its rows.
@@ -138,8 +139,8 @@ func TestPlaytestPanelsOpenAndClose(t *testing.T) {
 		"The frame is SPLIT between the two panel kinds, both in the main area: the WEBAPP inside "+
 			"the webview window -- workspace sidebar down one side, an empty feed, and the progress "+
 			"footer with a status word along its bottom -- and a separate composer window beneath or "+
-			"beside it. The tab bar across the top lists BOTH workspaces on two rows of the pinned "+
-			"height, the second one selected. THE WEBAPP MUST NOT BE A BLANK WHITE RECTANGLE.")
+			"beside it. The tab bar across the top lists BOTH workspaces, `[1]` then `[2]`, with the "+
+			"SECOND one selected. THE WEBAPP MUST NOT BE A BLANK WHITE RECTANGLE.")
 
 	// THE COMPOSER, FOCUSED. Select the webview's window first so the
 	// command has somewhere to move point FROM.
@@ -204,77 +205,132 @@ func TestPlaytestPanelsOpenAndClose(t *testing.T) {
 // I.54 -- FULLSCREEN TOGGLE AND RESTORE
 // ---------------------------------------------------------------------------
 
-// TestPlaytestFullscreenToggleAndRestore is plan I.54.
+// TestPlaytestFullscreenToggleAndRestore is plan I.54, and it follows BOTH
+// branches of the product's one fullscreen key.
 //
-// `agent-repl-fullscreen-and-focus` has two branches, and only the non-agent
-// one maximizes: from inside a panel buffer it moves point to the composer,
-// because the panels already fill the frame. So the press happens from an
-// ordinary work window split beside the panels, and what the first picture
-// shows is THAT window filling the frame with the panels gone; the second
-// shows the panels back.
+// `agent-repl-fullscreen-and-focus` maximizes only a NON-agent window: from
+// inside a panel buffer it moves point to the composer, because the panels
+// already fill the frame (fullscreen is the panels' sole display format).
+// So the playbook presses the key twice over, in the two places a user
+// presses it:
+//
+//   - from the webview, where it focuses the composer and maximizes nothing;
+//   - from an ordinary work window, where it maximizes and then restores.
+//
+// AND THE WORK LAYOUT IS ARRANGED BEFORE THE PANELS OPEN. A buffer opened
+// while the panels are visible CLOSES them -- `close-panels-on-open.el`
+// advises `switch-to-buffer', `pop-to-buffer-same-window' and `find-file'
+// so the panels get out of the way of the file a user just asked for -- so
+// "an ordinary work window beside the panels" is not a state a user can
+// reach, and a playbook that split one there would be photographing its own
+// arrangement rather than the product. Arranged first, the split IS the
+// layout the panels' open saves and the plain close restores.
 func TestPlaytestFullscreenToggleAndRestore(t *testing.T) {
 	t.Parallel()
 	s := newPlaytestScenario(t, "18-fullscreen",
-		"Plan I.54. `SPC w f` from an ordinary work window beside the panels maximizes that window; "+
-			"the same key restores the layout it replaced, panels included.")
+		"Plan I.54. `SPC w f` inside the panels focuses the composer and maximizes nothing; from an "+
+			"ordinary work window it maximizes that window, and the same key restores the layout it "+
+			"replaced.")
 	p, e := s.Book, s.E
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
+
+	const workA, workB = "*playtest-work-a*", "*playtest-work-b*"
+	e.Eval(`(progn
+              (delete-other-windows)
+              (switch-to-buffer (get-buffer-create ` + elispString(workA) + `))
+              (with-current-buffer ` + elispString(workA) + `
+                (erase-buffer)
+                (insert "WORK WINDOW A. The playtest maximizes B beside it with SPC w f.\n"))
+              (select-window (split-window))
+              (switch-to-buffer (get-buffer-create ` + elispString(workB) + `))
+              (with-current-buffer ` + elispString(workB) + `
+                (erase-buffer)
+                (insert "WORK WINDOW B. This is the window SPC w f maximizes.\n"))
+              t)`)
+	work := e.EvalStrings(`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`)
+	if len(work) != 2 {
+		t.Fatalf("the work layout holds %q, want the two ordinary windows a restore is observable from", work)
+	}
+	p.note("two ordinary work windows split on the frame, before any panel exists",
+		fmt.Sprintf("the frame holds exactly the two work windows: %q", work))
 
 	s.register(t, s.repoAt(t, "repo").Dir)
 	s.openPanel(t)
 	awaitPanelWindows(e, frontendPrefix, panelPrefix)
 	requirePanelsInMainArea(t, e, frontendPrefix, panelPrefix)
+	rows := requireTabBarHeightContract(t, e)
+	p.capture("panels-fill-the-frame", "`agent-repl-frontend-open-panel` over the work layout",
+		fmt.Sprintf("both panel kinds are on the frame in the main area, neither is a side window, and the "+
+			"frame's tab-bar-lines is the module's pinned %d", rows),
+		"The PANELS have taken the frame: the webapp in the webview window -- workspace sidebar down "+
+			"one side, an empty feed, the progress footer with a status word along its bottom -- and the "+
+			"composer window beneath it. Neither work window is visible. THE WEBAPP MUST NOT BE A BLANK "+
+			"WHITE RECTANGLE.")
 
-	// An ordinary, non-agent work window, selected, with something legible
-	// in it so the picture says which window survived.
-	const workBuffer = "*playtest-work*"
-	e.Eval(`(progn
-              (select-window (split-window (get-buffer-window (agent-repl--ws-get ` + elispString(s.Name) + ` :frontend-buffer))))
-              (switch-to-buffer (get-buffer-create ` + elispString(workBuffer) + `))
-              (with-current-buffer ` + elispString(workBuffer) + `
-                (erase-buffer)
-                (insert "This is the ordinary work window the playtest maximizes with SPC w f.\n"))
-              t)`)
-	if got := e.EvalString(`(buffer-name (window-buffer (selected-window)))`); got != workBuffer {
-		t.Fatalf("the selected window shows %q, want the work buffer %q", got, workBuffer)
-	}
-	before := e.EvalInt(`(length (window-list))`)
-	p.capture("work-window-beside-panels", "an ordinary work window split beside the panels and selected",
-		fmt.Sprintf("the selected window shows %q and the frame holds %d windows, both panel kinds among them", workBuffer, before),
-		"THREE main-area windows: the webapp in the webview window, the composer, and a plain text "+
-			"window carrying one sentence about SPC w f, which is the selected window.")
-
+	// BRANCH ONE: from a panel buffer the key focuses the composer, and
+	// maximizes nothing.
+	e.Eval(`(progn (select-window (get-buffer-window (agent-repl--ws-get ` + elispString(s.Name) + ` :frontend-buffer))) t)`)
 	if want, got := "agent-repl-fullscreen-and-focus", e.LeaderBinding("w f"); got != want {
 		t.Fatalf("SPC w f resolves to %q, want %q", got, want)
 	}
 	e.Leader("w f")
+	e.AwaitEvalFor(panelSettleBound, "the composer window to be selected",
+		`(buffer-name (window-buffer (selected-window)))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == s.Input })
+	if !e.EvalBool(`(null agent-repl--window-fullscreen-config)`) {
+		t.Fatal("`SPC w f` inside a panel buffer saved a window configuration; the panel branch maximizes nothing")
+	}
+	requirePanelsInMainArea(t, e, frontendPrefix, panelPrefix)
+	p.note("`SPC w f` (`agent-repl-fullscreen-and-focus`) pressed from the webview window",
+		fmt.Sprintf("point moved to the composer %q, `agent-repl--window-fullscreen-config` is still nil, and both panels are still on the frame", s.Input))
+
+	// BACK TO THE WORK LAYOUT, through the product's own plain close.
+	if want, got := "agent-repl-simple", e.LeaderBinding("o c"); got != want {
+		t.Fatalf("SPC o c resolves to %q, want %q", got, want)
+	}
+	e.Leader("o c")
+	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+		})
+	restored := e.EvalStrings(`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`)
+	if strings.Join(restored, "\x00") != strings.Join(work, "\x00") {
+		t.Fatalf("the plain close left %q on the frame, want the work layout it replaced, %q", restored, work)
+	}
+	p.capture("work-layout-restored", "`SPC o c` (`agent-repl-simple`), the plain close",
+		fmt.Sprintf("no panel window is on the frame and the work layout is back verbatim: %q", restored),
+		"TWO plain text windows, one above the other, carrying the sentences about WORK WINDOW A and "+
+			"WORK WINDOW B. No webapp and no composer. The tab bar across the top still lists the "+
+			"workspace.")
+
+	// BRANCH TWO: from an ordinary work window the key maximizes.
+	e.Eval(`(progn (select-window (get-buffer-window (get-buffer ` + elispString(workB) + `))) t)`)
+	e.Leader("w f")
 	e.AwaitTrue("the fullscreen configuration to be recorded",
 		`(and agent-repl--window-fullscreen-config t)`)
-	if got := e.EvalInt(`(length (window-list))`); got != 1 {
-		t.Fatalf("the frame holds %d windows after SPC w f, want exactly the maximized one", got)
+	maximized := e.EvalStrings(`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`)
+	if len(maximized) != 1 || maximized[0] != workB {
+		t.Fatalf("the frame holds %q after SPC w f, want exactly the maximized %q", maximized, workB)
 	}
-	if got := e.EvalString(`(buffer-name (window-buffer (selected-window)))`); got != workBuffer {
-		t.Fatalf("the surviving window shows %q, want the work buffer %q", got, workBuffer)
-	}
-	p.capture("work-window-fullscreen", "`SPC w f` (`agent-repl-fullscreen-and-focus`) from the work window",
-		fmt.Sprintf("`agent-repl--window-fullscreen-config` is non-nil and the frame holds ONE window, showing %q", workBuffer),
-		"ONE window fills the whole frame below the tab bar: the plain text window with its one "+
-			"sentence. The webapp and the composer are GONE from the frame.")
+	p.capture("work-window-fullscreen", "`SPC w f` pressed from the work window",
+		fmt.Sprintf("`agent-repl--window-fullscreen-config` is non-nil and the frame holds ONE window, showing %q", workB),
+		"ONE window fills the whole frame below the tab bar: the plain text window carrying the WORK "+
+			"WINDOW B sentence. Work window A is GONE from the frame.")
 
+	// AND THE SAME KEY RESTORES.
 	e.Leader("w f")
 	e.AwaitEval("the fullscreen configuration to be released",
 		`(and agent-repl--window-fullscreen-config t)`,
 		func(raw json.RawMessage) bool { return isJSONNull(raw) })
-	if got := e.EvalInt(`(length (window-list))`); got != before {
-		t.Fatalf("the frame holds %d windows after restoring, want the %d it started with", got, before)
+	after := e.EvalStrings(`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`)
+	if strings.Join(after, "\x00") != strings.Join(restored, "\x00") {
+		t.Fatalf("the frame holds %q after restoring, want the layout the maximize replaced, %q", after, restored)
 	}
-	requirePanelsInMainArea(t, e, frontendPrefix, panelPrefix)
-	s.awaitPageMounted(t)
 	p.capture("fullscreen-restored", "the same key again, restoring the layout",
-		fmt.Sprintf("`agent-repl--window-fullscreen-config` is nil, the frame holds its original %d windows, "+
-			"and both panel kinds are back in the main area with the page mounted", before),
-		"The three-window split of the first capture is back, unchanged: webapp, composer and the "+
-			"work window. The toggle RESTORED the layout rather than rebuilding some other one.")
+		fmt.Sprintf("`agent-repl--window-fullscreen-config` is nil and the frame shows the layout the maximize replaced, verbatim: %q", after),
+		"The two-window work layout of the previous picture is back, unchanged: WORK WINDOW A above "+
+			"WORK WINDOW B. The toggle RESTORED the layout rather than rebuilding some other one.")
 }
 
 // ---------------------------------------------------------------------------
@@ -316,7 +372,7 @@ func TestPlaytestReloadAndRescueWebview(t *testing.T) {
 		"the feed holds the prompt bubble and a settled response bubble, which is the state the reload must keep")
 
 	homeURI := s.webviewURI()
-	if !e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(homeURI) + `) t)`) {
+	if !e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(s.Name) + ` ` + elispString(homeURI) + `) t)`) {
 		t.Fatalf("the webview's own URI %q is not at home before anything was done to it", homeURI)
 	}
 
@@ -366,7 +422,7 @@ func TestPlaytestReloadAndRescueWebview(t *testing.T) {
 			return uri != "" && !strings.HasPrefix(uri, "http")
 		})
 	stray := s.webviewURI()
-	if e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(stray) + `) t)`) {
+	if e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(s.Name) + ` ` + elispString(stray) + `) t)`) {
 		t.Fatalf("the webview at %q still reads as home; the rescue would have nothing to do", stray)
 	}
 	p.note("the webview navigated to `about:blank`, the way an external hyperlink navigates it away",
@@ -374,7 +430,7 @@ func TestPlaytestReloadAndRescueWebview(t *testing.T) {
 
 	e.Leader("o L")
 	e.AwaitEvalFor(playtestPageBound, "the webview to be back at the daemon's origin",
-		`(and (agent-repl--frontend-webview-at-home-p (agent-repl--frontend-webview-current-uri `+elispString(s.Name)+`)) t)`,
+		`(and (agent-repl--frontend-webview-at-home-p `+elispString(s.Name)+` (agent-repl--frontend-webview-current-uri `+elispString(s.Name)+`)) t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 	s.awaitPageMounted(t)
 	s.awaitInPage(t, "the prompt bubble to be drawn again on the rescued page", promptRow)
@@ -411,7 +467,7 @@ func (s *playtestScenario) stampMarker(t *testing.T) {
 func (s *playtestScenario) requireHome(t *testing.T, homeURI string) {
 	t.Helper()
 	uri := s.webviewURI()
-	if !s.E.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(uri) + `) t)`) {
+	if !s.E.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(s.Name) + ` ` + elispString(uri) + `) t)`) {
 		t.Fatalf("the webview's URI %q is not at the daemon's origin", uri)
 	}
 	if got, want := originOf(uri), originOf(homeURI); got != want {
