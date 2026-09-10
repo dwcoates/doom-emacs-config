@@ -372,12 +372,27 @@ func TestPlaytestTabArmAttentionOnQuestion(t *testing.T) {
 	const option = `[data-feed-row] [data-question-option="New worktree off master"]`
 	s.awaitInPage(t, "the question card to be open in the asking workspace's webview",
 		`document.querySelector('`+option+`') && document.querySelector('[data-feed-row] [data-question-submit]')`)
+	// ALL FOUR CHIPS, AND THE FREE-TEXT ESCAPE. The manifest below promises a
+	// reviewer a four-option card with a `something else` field under it, so
+	// both are read here rather than left to the eye: a card drawn with three
+	// of the fake's four options, or one that dropped the escape the proto
+	// says every ask offers, is a defect a picture invites a reviewer to
+	// count their way past.
+	s.awaitInPage(t, "all four of the fake's option chips to be drawn, and the free-text escape beneath them",
+		`document.querySelectorAll('[data-feed-row] [data-question-option]').length === 4 &&
+         document.querySelector('[data-feed-row] [data-question-other]') !== null`)
 	s.captureArm(t, "selected-marker-cleared", a.askingName,
 		"the asking workspace selected, its panel showing the open question card",
 		":thinking",
 		fmt.Sprintf("%q is now the SELECTED tab and carries NO attention marker; its arm is still "+
 			"thinking, so the selected tab is painted RED. The webapp shows the OPEN question card "+
-			"headed `Setup` with four option chips and a submit button.", a.askingName))
+			"headed `Setup`, asking `How do you want the new branch set up?`, with the fake's four "+
+			"option chips each carrying its own description, a `something else` free-text field "+
+			"BENEATH them, and an `answer` button. The free-text field is there even though "+
+			"`!ask-single` offered only the four options, and that is the contract rather than a "+
+			"stray control: `AgentQuestionSelection.free_text` (conversation/v1/question.proto) "+
+			"says an ask ALWAYS offers a free-text escape whether or not the agent asked for one.",
+			a.askingName))
 
 	s.clickInPage(t, "the question's first option chip", option)
 	s.awaitInPage(t, "the option to read as checked", `document.querySelector('`+option+`').checked`)
@@ -385,10 +400,22 @@ func TestPlaytestTabArmAttentionOnQuestion(t *testing.T) {
 	s.awaitInPage(t, "the question card to settle as answered",
 		`document.querySelector('[data-feed-row] .question[data-state="answered"]')`)
 	done := s.awaitArm(t, a.askingName, "the turn to conclude once the question was answered", emGHISettledArms...)
+	// The answered card has PUT ITS CONTROLS AWAY, and the turn closed on
+	// prose. Both are the sentence's promise; a card left showing its chips
+	// beside an `answered` state would be an answer the user could still
+	// change, which is not what this picture says.
+	s.awaitInPage(t, "the answered card to have put its chips and its free-text escape away",
+		`document.querySelectorAll('[data-feed-row] [data-question-option]').length === 0 &&
+         document.querySelector('[data-feed-row] [data-question-other]') === null &&
+         document.querySelector('[data-feed-row] [data-question-submit]') === null`)
+	s.awaitInPage(t, "the closing prose answer to settle on the standing tail",
+		`document.querySelector('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]')`)
 	s.captureArm(t, "answered-done", a.askingName,
 		"the first option chosen, the card submitted, and the turn concluded",
 		done,
-		"The card carries the given answer `New worktree off master` and the feed carries the "+
-			"closing answer; the tab carries no marker.")
+		"The card has closed onto its answer -- the four chips, the free-text field and the "+
+			"`answer` button are gone, and the `Setup` header now carries `New worktree off "+
+			"master` on one line -- and the closing answer `The setup question was answered.` "+
+			"follows it. The tab carries no marker.")
 	p.note("teardown", "nothing is parked: the question was answered and the turn concluded, so the world shuts down on its own")
 }
