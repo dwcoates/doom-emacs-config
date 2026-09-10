@@ -122,9 +122,12 @@ Pixel-golden comparison is not attempted anywhere: it is brittle against font
 hinting, a scrollbar, a clock, and every other honest difference between two
 runs of the same product.
 
-### A capture is of a settled screen, and of a redrawn one
+### A capture is of a settled screen, of a redrawn one, and of the CURRENT DOM
 
-Two things happen before the picture is taken:
+Three things happen before the picture is taken, in this order: the frame is
+redrawn, the page's own frames are waited for and the frame is redrawn again,
+and only then is the framebuffer read until it settles. They are listed here
+smallest first.
 
 - **A redisplay is forced.** A user's Emacs redisplays constantly because a
   user generates events; this one is driven entirely over the server socket
@@ -134,15 +137,72 @@ Two things happen before the picture is taken:
   A capture asks for the redraw a user's keystrokes would have asked for.
   It only makes Emacs draw what it already decided — a tab bar still wrong
   afterwards is wrong in the product, and one is (see below).
-- **The framebuffer is read until two consecutive reads agree byte for
-  byte.** A screenshot of a frame mid-redraw is half of one state and half of
-  another. This is a PATIENCE BUDGET rather than an assertion: a surface that
+- **The framebuffer is read, a full redisplay apart, until it has held still
+  for a whole 50ms window.** A screenshot of a frame mid-redraw is half of
+  one state and half of another. Two agreeing reads are not enough for that,
+  twice over:
+
+  - Reads with nothing driven between them agree trivially about a screen
+    Emacs has simply not repainted. Measured, on the tab bar after a roster
+    push opened a new tab: with the redraws above already done, the bar still
+    showed the tab set from BEFORE the push in three registrations of four,
+    and one more `(redraw-frame) (redisplay t)` showed the new one every
+    time. So a full redisplay sits between the reads, each read follows an
+    eval of its own with the poll interval between them — on pgtk the pixels
+    reach the X server only when GTK's main loop runs, which is after an eval
+    has answered and never inside it — and the round count is logged.
+  - Reads a few milliseconds apart agree about a frame still ARRIVING at the
+    X server. Measured, in two real runs: `04-arm-link-severed` was declared
+    settled at 2ms carrying the webview alone with every piece of Emacs's own
+    chrome blank white, and `04-arm-detached-settled` at 5ms with a correctly
+    green tab bar over a webview still showing the previous state. Both were
+    whole on the glass about 22ms later. So the window is 50ms — three
+    periods of a 60Hz display frame — and any change restarts it.
+
+  This is a PATIENCE BUDGET rather than an assertion: a surface that
   is genuinely animating never settles, and refusing to photograph it would
   refuse exactly the states a playtest exists to show — so a capture that
   runs out its budget takes the last read and SAYS SO in the manifest. The
   cursor's own blink is switched off in the playbook's setup rather than
   waited out, because a blinking cursor alone would make every capture run
   its whole budget.
+
+  The window and the paint gate below are not the same gate wearing two
+  names. The gate proves the PAGE produced a frame for the DOM the step
+  asserted; the window proves the SCREEN then stopped changing. The blank
+  chrome above was Emacs's own drawing in flight, which no page-side gate can
+  see.
+- **The page's own frames are waited for, between the two redraws.** An
+  `xwidget-webkit` webview on X is OFFSCREEN-RENDERED: WebKit paints into a
+  GTK offscreen surface, and those pixels reach the glass only when Emacs's
+  redisplay copies that surface while drawing the xwidget's glyph. So a
+  redraw copies whatever the surface held at that instant, and if WebKit has
+  taken the DOM change but not yet produced a frame for it, the picture is of
+  the PREVIOUS page state under an assertion that legitimately passed —
+  while the frame WebKit produces a moment later raises a damage signal whose
+  INCREMENTAL redisplay swaps in a buffer carrying a current webview and none
+  of the chrome. Both were observed, in three runs of one owner's section: an
+  empty feed whose DOM held two settled bubbles, and a current webview with
+  no tab bar and no mode lines. Neither is a torn frame, which is why the
+  settle never caught them — the stale screen is perfectly still, so two
+  reads agree and the capture reports `settled=true` on a lie.
+
+  So a capture drives `requestAnimationFrame` twice through the page probe,
+  keyed by a token minted after the redraw was forced, and waits on the
+  layer's own `AwaitEval` polling until the page reports both frames
+  delivered. Two is the smallest count that proves anything: the first
+  callback runs BEFORE that frame is painted. Measured across owner 7's three
+  playbooks and this one, over three consecutive runs — twenty-one gates —
+  the gate answered in 44–144ms, mean 76ms, so a capture costs about a
+  fourteenth of its own 2s settle budget more than it did, and a whole
+  playbook a fraction of a second.
+  A workspace with no live webview answers its own word and the wait accepts
+  it, because several playbooks photograph a frame with no page in it.
+
+  `playtest_00_feed_tail_test.go`'s last step is this mechanism photographing
+  itself: the page appends a full-viewport magenta region, the DOM says so, a
+  capture is taken immediately, and the decoded pixels are counted —
+  957,676 of them exactly magenta with the gate, and zero without it.
 
 ## Driving the page
 
@@ -232,12 +292,17 @@ It is a permanent playbook rather than a one-off check: it is the thing that
 would go red first if the page ever again opens a stream off the client
 instead of the mux.
 
-## One open question this raised
+## One open question this raised, half of it since answered
 
-Clicking a subagent bubble's `[data-expand]` caret does not make the bubble
-read as open: `data-expanded` never becomes true and the bubble is still
-drawn collapsed, while a non-root feed container IS carrying rows. So the
-second tail is served and the toggle's own drawn state is a separate
-question, in the webapp's bubble rather than in the transport. It is
-recorded in `00-feed-tail`'s manifest rather than asserted, and owner 16
-(G49–52, subagents) inherits it.
+Clicking a subagent bubble's `[data-expand]` caret was reported here as not
+making the bubble read as open: `data-expanded` never became true and the
+bubble was *photographed still drawn collapsed*, while a non-root feed
+container WAS carrying rows.
+
+The photographed half was the capture's own staleness, not the product. With
+the paint gate above, the same step's picture shows the bubble drawn OPEN
+with its nested rows beneath the head. What remains open is only which
+attribute carries that state — `data-expanded` is not it — which is the
+webapp's own business in its bubble rather than anything about the
+transport. It stays recorded in `00-feed-tail`'s manifest rather than
+asserted, and owner 16 (G49–52, subagents) inherits that remainder.
