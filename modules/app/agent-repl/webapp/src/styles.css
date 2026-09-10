@@ -4624,6 +4624,19 @@ body.draining #composer-input::placeholder {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
+/* THE USAGE ROWS beneath the token figures (expanded.ts drawFooterUsageRows):
+   the account's allowances, the unread caveat in full, and the context-budget
+   sentence -- everything the strip's one line cannot fit. They wrap, because
+   the whole reason they are here is that a cut is what sent the reader looking
+   for them. */
+.footer-usage-row {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.footer-usage-unread,
+.footer-usage-context-budget { color: var(--muted); }
+.footer-usage-unread { font-style: italic; }
+
 /* The alarm line reports money already spent that the user would have wanted to
    prevent, so it keeps the error register the old expensive-turn row had. */
 .footer-token-alarm { color: var(--err); }
