@@ -17,8 +17,9 @@
  * the daemon's log proportional to what actually happened.
  *
  * THE LEVELS ARE THE PROTO'S ARMS. `ClientLogRecord.level` is a oneof of four
- * empty messages, so the arm IS the level; `debug` joins the three the old
- * WebSocket command carried.
+ * empty messages, so the arm IS the level. The public logger exposes exactly
+ * `debug`, `info`, `warn` and `error`, while `LogOptions.verbosity` carries the
+ * independent normal/verbose classification.
  *
  * A SINK FAILURE MUST NOT RECURSE. Logging a failed log would produce another
  * failed log, so a rejected `ClientLog` is counted (`sinkFailureCount`, which
@@ -35,6 +36,7 @@ import { logTimestamp } from "../../agent-shim/logging/ts/timestamp.js";
 
 /** The four arms of `ClientLogRecord.level`. */
 export type ClientLogLevel = "debug" | "info" | "warn" | "error";
+export type ClientLogVerbosity = "normal" | "verbose";
 
 /** Free-shape diagnostic evidence, as the call site composed it. */
 export type ClientLogContext = Record<string, unknown>;
@@ -44,6 +46,8 @@ export interface LogOptions {
   /** Stable machine-readable operation for this record ("rpc.unary-call"). */
   operation: string;
   context?: LogContext;
+  /** Classification orthogonal to severity. Omitted means normal. */
+  verbosity?: ClientLogVerbosity;
   dedupKey?: string;
   /** Emergency console-only path; the record is not forwarded. */
   localOnly?: boolean;
@@ -58,11 +62,11 @@ export interface RuntimeLogContext {
   request_id?: string;
 }
 
-interface WebappLogRecord {
+export interface WebappLogRecord {
   timestamp: string;
   runtime: "webapp";
   level: ClientLogLevel;
-  verbosity: "normal" | "verbose";
+  verbosity: ClientLogVerbosity;
   operation: string;
   message: string;
   context: Record<string, unknown>;
@@ -88,6 +92,20 @@ const LEVEL_ARM = {
   error: "error",
 } as const satisfies Record<ClientLogLevel, NonNullable<ClientLogRecord["level"]["case"]>>;
 
+const LEVEL_RANK = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+} as const satisfies Record<ClientLogLevel, number>;
+
+/** Parse the page-delivered `AGENT_REPL_LOG_LEVEL` value. */
+export function parseClientLogLevel(value: string | null): ClientLogLevel {
+  if (value === null) return "info";
+  if (value === "debug" || value === "info" || value === "warn" || value === "error") return value;
+  throw new Error(`the page address carries invalid log_level '${value}'`);
+}
+
 /**
  * The forwarding logger: console on the way past, `ClientLog` behind the
  * throttle.
@@ -104,29 +122,48 @@ export class ForwardingLogger {
   constructor(
     private readonly send: ClientLogSink,
     private readonly consoleFn: (level: ClientLogLevel, line: string) => void = defaultConsole,
-    throttleOptions: Omit<ClientLogThrottleOptions, "send"> = {},
+    throttleOptions: Omit<ClientLogThrottleOptions, "send" | "droppedRecord"> = {},
+    private readonly minimumLevel: ClientLogLevel = "info",
   ) {
+    requireLevel(minimumLevel);
     this.throttle = new ClientLogThrottle({
       ...throttleOptions,
-      send: (level, message, context) => this.forward(level, message, context ?? {}),
+      send: (record) => this.forward(record),
+      droppedRecord: (dropped, bufferBound) =>
+        buildClientLogRecord(
+          buildRecord(
+            "warn",
+            `client log forwarding dropped ${dropped} record(s) over its ${bufferBound}-record buffer bound`,
+            {
+              ...boundContext,
+              operation: "webapp.client-log-throttle-dropped",
+              dropped,
+              buffer_bound: bufferBound,
+            },
+            "normal",
+          ),
+        ),
     });
   }
 
+  /** Whether the configured `AGENT_REPL_LOG_LEVEL` admits LEVEL. */
+  enabled(level: ClientLogLevel): boolean {
+    return LEVEL_RANK[level] >= LEVEL_RANK[this.minimumLevel];
+  }
+
   /**
-   * Log one line. CONTEXT is the fully built record (the routing identities
-   * plus the call site's evidence); the console gets its JSON, because a
-   * console line is read by a human debugging this page.
+   * Log one line. RECORD is already timestamped at the call site. CONSOLE_LINE
+   * is the full JSON record a human debugging this page reads.
    */
   write(
-    level: ClientLogLevel,
-    message: string,
-    context: ClientLogContext,
-    consoleEnabled = true,
+    record: ClientLogRecord,
+    consoleLine: string,
     forward = true,
   ): void {
-    if (consoleEnabled) this.consoleFn(level, JSON.stringify(context));
+    const level = requireRecordLevel(record);
+    this.consoleFn(level, consoleLine);
     if (!forward) return;
-    this.throttle.write(level, message, context);
+    this.throttle.write(record);
   }
 
   /** Release the throttle's window now (a page about to be torn down). */
@@ -153,9 +190,12 @@ export class ForwardingLogger {
    * throttle, because re-queueing a record whose sink is down is how a broken
    * sink turns into an unbounded queue.
    */
-  private forward(level: ClientLogLevel, message: string, context: ClientLogContext): boolean {
-    const record = buildClientLogRecord(level, message, restampRecordIdentity(context));
-    void this.send(record).catch((err: unknown) => this.noteSinkFailure(err));
+  private forward(record: ClientLogRecord): boolean {
+    const restamped = create(ClientLogRecordSchema, {
+      ...record,
+      context: restampRecordIdentity(record.context ?? {}) as JsonObject,
+    });
+    void this.send(restamped).catch((err: unknown) => this.noteSinkFailure(err));
     return true;
   }
 
@@ -163,7 +203,7 @@ export class ForwardingLogger {
     this.sinkFailures += 1;
     if (this.announcedSinkFailure) return;
     this.announcedSinkFailure = true;
-    // THE DOCUMENTED LOGGER-SINK EMERGENCY PATH. Routing this through log()
+    // THE DOCUMENTED LOGGER-SINK EMERGENCY PATH. Routing this through `log`
     // would log the failure of logging, which fails, which logs. Once, direct,
     // and never again for the life of this logger.
     console.error(
@@ -173,24 +213,27 @@ export class ForwardingLogger {
 }
 
 /**
- * Assemble the proto record from a level, a sentence and the built context.
+ * Assemble the proto record from the complete client-side record.
  *
  * `ClientLogRecord.context` is a `google.protobuf.Struct`, which protobuf-es
  * represents as a plain `JsonObject` rather than a tree of `Value` messages —
- * the library does the Struct encoding at the wire. The context reaching here
- * has already been through `jsonSafe`, so every leaf is one of the five shapes
- * Struct can carry.
+ * the library does the Struct encoding at the wire. Only call-site evidence
+ * and logger-bound identities enter the Struct; the timestamp, level,
+ * verbosity, operation and message use their dedicated protobuf fields.
  */
-export function buildClientLogRecord(
-  level: ClientLogLevel,
-  message: string,
-  context: ClientLogContext,
-): ClientLogRecord {
+export function buildClientLogRecord(record: WebappLogRecord): ClientLogRecord {
+  const context: ClientLogContext = { ...record.context, connection_id: record.connection_id };
+  for (const identity of ["agent_repl_session_id", "claude_session_id", "request_id"] as const) {
+    const value = record[identity];
+    if (value !== undefined) context[identity] = value;
+  }
   return create(ClientLogRecordSchema, {
-    level: { case: LEVEL_ARM[level], value: {} },
-    operation: typeof context.operation === "string" ? context.operation : "",
-    message,
+    level: { case: LEVEL_ARM[record.level], value: {} },
+    operation: record.operation,
+    message: record.message,
     context: context as JsonObject,
+    timestamp: record.timestamp,
+    verbose: record.verbosity === "verbose",
   });
 }
 
@@ -212,25 +255,9 @@ function defaultConsole(level: ClientLogLevel, line: string): void {
 let active: ForwardingLogger | null = null;
 let boundContext: RuntimeLogContext = {};
 
-/**
- * Whether verbose records also reach the browser console.
- *
- * A MODULE FLAG, NOT localStorage. The localStorage verbose toggle is dead
- * with the overhaul (nothing is persisted client-side except the webview-local
- * view preferences), so the gate is a flag a developer flips from the console
- * or a test sets directly. Verbose records are PERSISTED either way — the gate
- * is console noise only.
- */
-let verboseConsole = false;
-
 /** Install (or clear, with null) the app-wide logger. */
 export function setLogger(logger: ForwardingLogger | null): void {
   active = logger;
-}
-
-/** Turn browser-console output for verbose records on or off. */
-export function setVerboseConsole(enabled: boolean): void {
-  verboseConsole = enabled;
 }
 
 /** Bind runtime identity included in every subsequent record. */
@@ -279,6 +306,12 @@ function requireString(context: Record<string, unknown>, field: string): string 
 function requireLevel(level: ClientLogLevel): ClientLogLevel {
   if (level === "debug" || level === "info" || level === "warn" || level === "error") return level;
   throw new Error(`webapp log record has invalid level ${String(level)}`);
+}
+
+function requireRecordLevel(record: ClientLogRecord): ClientLogLevel {
+  const level = record.level.case;
+  if (level === undefined) throw new Error("webapp log record requires a level");
+  return requireLevel(level);
 }
 
 /** Convert browser values into JSON-safe evidence before Struct encoding. */
@@ -340,11 +373,12 @@ function buildRecord(
   return record;
 }
 
-function emit(level: ClientLogLevel, message: string, options: LogOptions, verbose: boolean): void {
+function emit(level: ClientLogLevel, message: string, options: LogOptions): void {
+  if (active === null) throw new Error("the webapp logger is not installed");
+  if (!active.enabled(level)) return;
   if (options.dedupKey !== undefined) {
     if (dedupLast.get(options.dedupKey) === message) return;
   }
-  if (active === null) throw new Error("the webapp logger is not installed");
   const localContext = options.context ?? {};
   for (const identity of ["workspace_dir", "workspace_id", "connection_id", "agent_repl_session_id", "claude_session_id"] as const) {
     if (boundContext[identity] !== undefined && localContext[identity] !== undefined && boundContext[identity] !== localContext[identity]) {
@@ -352,27 +386,21 @@ function emit(level: ClientLogLevel, message: string, options: LogOptions, verbo
     }
   }
   if (localContext.operation !== undefined) throw new Error("webapp log context must not override operation");
-  const record = buildRecord(level, message, { ...boundContext, ...localContext, operation: options.operation }, verbose ? "verbose" : "normal");
-  active.write(
-    level,
-    message,
-    jsonSafe(record) as ClientLogContext,
-    !verbose || verboseConsole,
-    !options.localOnly,
-  );
+  const record = buildRecord(level, message, { ...boundContext, ...localContext, operation: options.operation }, options.verbosity ?? "normal");
+  active.write(buildClientLogRecord(record), JSON.stringify(jsonSafe(record)), !options.localOnly);
   // A failed write must not arm dedup and silently suppress a later attempt.
   if (options.dedupKey !== undefined) dedupLast.set(options.dedupKey, message);
 }
 
-/** Emit a normal diagnostic to the console and the daemon's durable log. */
-export function log(level: ClientLogLevel, message: string, options: LogOptions): void {
-  emit(level, message, options, false);
-}
+export type LogMethod = (message: string, options: LogOptions) => void;
 
-/** Emit a verbose diagnostic; persisted always, console gated by the flag. */
-export function logVerbose(level: ClientLogLevel, message: string, options: LogOptions): void {
-  emit(level, message, options, true);
-}
+/** The canonical app-wide logger: one method for each severity. */
+export const log = {
+  debug: (message, options) => emit("debug", message, options),
+  info: (message, options) => emit("info", message, options),
+  warn: (message, options) => emit("warn", message, options),
+  error: (message, options) => emit("error", message, options),
+} as const satisfies Record<ClientLogLevel, LogMethod>;
 
 /**
  * Per-key dedup for hot paths (per-push render guards, per-tick pollers): a
@@ -387,10 +415,9 @@ export function clearLogDedup(key: string): void {
   dedupLast.delete(key);
 }
 
-/** Test hook: drop the installed logger, the verbose gate and all dedup state. */
+/** Test hook: drop the installed logger, bound identities and all dedup state. */
 export function resetLoggingForTests(): void {
   active = null;
   boundContext = { connection_id: "test-connection" };
-  verboseConsole = false;
   dedupLast.clear();
 }

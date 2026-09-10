@@ -41,7 +41,7 @@ export interface LoginLink {
 export function connectLoginLink(ctx: AppContext): LoginLink {
   return {
     attach(signal: AbortSignal): AsyncIterable<LoginTerminalOutput> {
-      log("debug", "attaching to the login terminal", { operation: "login.attach" });
+      log.debug("attaching to the login terminal", { operation: "login.attach" });
       return strictFrames(
         ctx.streams.watch("loginTerminal", { workspace: ctx.workspace }, signal),
       );
@@ -61,7 +61,7 @@ export function connectLoginLink(ctx: AppContext): LoginLink {
     },
 
     sendResize(rows: number, cols: number): Promise<SendLoginInputResponse> {
-      log("debug", `reporting the login terminal geometry ${rows}x${cols}`, {
+      log.debug(`reporting the login terminal geometry ${rows}x${cols}`, {
         operation: "login.resize",
         context: { rows, cols },
       });

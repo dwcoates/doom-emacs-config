@@ -67,7 +67,7 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     requireMessage(u.closed, `${path}.closed`),
     `${path}.closed`,
   );
-  log("debug", "drawing a roster row", {
+  log.debug("drawing a roster row", {
     operation: "sidebar.row",
     context: {
       workspace: workspace.id,
@@ -186,7 +186,7 @@ export function drawRosterRowClosed(u: RosterRowClosed, path: string): boolean {
  */
 export function drawRosterRowAttention(u: RosterRowAttention, path: string): HTMLElement {
   void u;
-  log("debug", "drawing an attention marker", {
+  log.debug("drawing an attention marker", {
     operation: "sidebar.row.attention",
     context: { path },
   });
@@ -202,7 +202,7 @@ export function drawRosterRowPriorityBadge(
   u: RosterRowPriorityBadge,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a priority badge", {
+  log.debug("drawing a priority badge", {
     operation: "sidebar.row.priority",
     context: { path, label: u.label },
   });
@@ -228,7 +228,7 @@ export function drawRosterRowWhen(
   const when = document.createElement("span");
   when.className = "when";
   if (u.shown.case === undefined) {
-    log("debug", "drawing an empty when-column", {
+    log.debug("drawing an empty when-column", {
       operation: "sidebar.row.when-empty",
       context: { path },
     });
@@ -298,7 +298,7 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
     summary.textContent = drawRosterRowDetailSummary(u.summary, `${path}.summary`);
     detail.appendChild(summary);
   }
-  log("debug", "drawing a row's detail panel", {
+  log.debug("drawing a row's detail panel", {
     operation: "sidebar.row.detail",
     context: {
       path,
@@ -340,7 +340,7 @@ export function drawRosterRowDetailSummary(u: RosterRowDetailSummary, path: stri
  */
 export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement {
   const mark = rosterArmMark(arm);
-  log("debug", "drawing a row's status mark", {
+  log.debug("drawing a row's status mark", {
     operation: "sidebar.row.status",
     context: { path, arm, glyph: mark.glyph, tone: mark.toneClass },
   });
@@ -409,7 +409,7 @@ async function selectWorkspace(
   sc: SidebarContext,
   workspace: WorkspaceRef,
 ): Promise<void> {
-  log("info", "selecting a workspace from the rail", {
+  log.info("selecting a workspace from the rail", {
     operation: "sidebar.row.select",
     context: { workspace: workspace.id },
   });

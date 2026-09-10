@@ -39,7 +39,7 @@ import type { RowContext } from "./context.js";
 export function drawFeedHook(u: FeedHook, rc: RowContext): HTMLElement {
   const path = "FeedHook";
   const outcome = requireCase(u.outcome, `${path}.outcome`);
-  log("debug", "drawing a hook card", {
+  log.debug("drawing a hook card", {
     operation: "feed.cards.hook",
     context: { outcome: outcome.case },
   });
@@ -85,7 +85,7 @@ export function drawFeedHook(u: FeedHook, rc: RowContext): HTMLElement {
 
 /** The composed head line, verbatim. */
 export function drawFeedHookHeadline(u: FeedHookHeadline, path: string): HTMLElement {
-  log("debug", "drawing a hook headline", {
+  log.debug("drawing a hook headline", {
     operation: "feed.cards.hook.headline",
     context: { path },
   });
@@ -109,7 +109,7 @@ export function drawFeedHookGatedCall(
   path: string,
 ): HTMLElement {
   const row = requireMessage(u.row, `${path}.row`);
-  log("debug", "drawing a hook gated-call link", {
+  log.debug("drawing a hook gated-call link", {
     operation: "feed.cards.hook.gated-call",
     context: { path, row: row.value },
   });
@@ -144,7 +144,7 @@ async function reveal(rc: RowContext, row: FeedId, link: HTMLElement): Promise<v
   const reached = await rc.revealRow(row);
   if (reached) return;
   link.setAttribute("data-unreachable", "true");
-  log("warn", "the gated call's row could not be revealed", {
+  log.warn("the gated call's row could not be revealed", {
     operation: "feed.cards.hook.gated-call-unreachable",
     context: { row: row.value },
   });
@@ -157,7 +157,7 @@ async function reveal(rc: RowContext, row: FeedId, link: HTMLElement): Promise<v
  * prefixes it with a judgment of its own.
  */
 export function drawFeedHookBlocked(u: FeedHookBlocked, path: string): HTMLElement {
-  log("debug", "drawing a blocked hook reason", {
+  log.debug("drawing a blocked hook reason", {
     operation: "feed.cards.hook.blocked",
     context: { path },
   });
@@ -179,7 +179,7 @@ export function drawFeedHookFailed(
   u: FeedHookFailed,
   path: string,
 ): { chip: HTMLElement; output: HTMLElement | null } {
-  log("debug", "drawing a failed hook", {
+  log.debug("drawing a failed hook", {
     operation: "feed.cards.hook.failed",
     context: { path, exit_code: u.exitCode, output: u.output !== undefined },
   });
@@ -195,7 +195,7 @@ export function drawFeedHookFailed(
 
 /** The capped output text, verbatim. */
 export function drawFeedHookOutput(u: FeedHookOutput, path: string): HTMLElement {
-  log("debug", "drawing a hook output", {
+  log.debug("drawing a hook output", {
     operation: "feed.cards.hook.output",
     context: { path },
   });

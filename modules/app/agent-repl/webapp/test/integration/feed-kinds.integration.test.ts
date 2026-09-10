@@ -804,6 +804,8 @@ describe("the one separation renderer", () => {
       .map((child) => `${child.tagName}[${[...child.attributes].map((a) => a.name).sort().join(",")}]`)
       .join(">");
 
+  // The socket-backed per-arm redraw loop reached 936ms under concurrent
+  // integration load, so its host-contention budget is local to this test.
   it("draws every arm with identical element structure", async () => {
     // Arrange
     const shapes: string[] = [];
@@ -815,7 +817,7 @@ describe("the one separation renderer", () => {
     harness = await startHarness();
     // Assert: a per-arm divider renderer is a defect; only accent and text differ.
     expect(new Set(shapes).size).toBe(1);
-  });
+  }, 1_500);
 
   it("draws the worktree-removed outcome through the same renderer", async () => {
     // Arrange / Act

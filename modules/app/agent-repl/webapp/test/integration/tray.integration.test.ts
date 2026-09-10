@@ -145,6 +145,7 @@ describe("classification detail", () => {
     ).not.toBeNull();
   });
 
+  // This set assertion boots one real-socket harness per classification.
   it("draws every classification with a distinct rendering", async () => {
     // Arrange
     const rendered: string[] = [];
@@ -156,7 +157,7 @@ describe("classification detail", () => {
     harness = await startHarness();
     // Assert
     expect(new Set(rendered).size).toBe(HOLD_CLASSIFICATION_ARMS.length);
-  });
+  }, 1_500);
 });
 
 describe.each(HOLD_ARMS)("a %s hold reason", (hold) => {
@@ -169,6 +170,8 @@ describe.each(HOLD_ARMS)("a %s hold reason", (hold) => {
 });
 
 describe("hold reasons draw distinctly", () => {
+  // These socket-backed redraws reached 904-908ms under concurrent integration
+  // load, so keep their host-contention budget local to the two affected tests.
   it("gives every hold arm its own rendering", async () => {
     // Arrange
     const rendered: string[] = [];
@@ -180,14 +183,14 @@ describe("hold reasons draw distinctly", () => {
     harness = await startHarness();
     // Assert
     expect(new Set(rendered).size).toBe(HOLD_ARMS.length);
-  });
+  }, 1_500);
 
   it("draws the shutdown hold's own schedule id", async () => {
     // Arrange / Act
     await withTray({ items: [heldPromptItem({ hold: "shutdown" })] });
     // Assert
     expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.textContent).toContain("sched-1");
-  });
+  }, 1_500);
 });
 
 describe("the queued-at clock", () => {

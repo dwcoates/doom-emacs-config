@@ -97,7 +97,7 @@ async function bootMain(): Promise<void> {
   const logging = await import("../src/log.js");
   freshLog = logging.log;
   // test/setup.ts installed a logger into the PRE-RESET module instance, and
-  // `log()` throws without one -- the fresh graph gets the same quiet default
+  // the canonical `log` methods throw without one -- the fresh graph gets the same quiet default
   // so the boot's own first `shell.resolve` record has somewhere to go. The
   // boot replaces it with the ClientLog-forwarding one, which is the only
   // logger that reaches the mocked client.
@@ -146,7 +146,7 @@ async function bootMain(): Promise<void> {
       order.push("sidebar");
       // The logger must already be forwarding by the first mount: a component
       // that logs during its own mount is the case this proves.
-      freshLog("error", "the sidebar mounted", { operation: "main.test.sidebar-mounted" });
+      freshLog.error("the sidebar mounted", { operation: "main.test.sidebar-mounted" });
       return { dispose: vi.fn(), host };
     }),
   }));
@@ -259,6 +259,8 @@ afterEach(() => {
 });
 
 describe("the boot", () => {
+  // This first full-graph mount reached 872ms under coverage instrumentation;
+  // keep its host-contention budget local rather than raising the 850ms global.
   test("mounts every component on the shell element that names it", async () => {
     await bootMain();
 
@@ -268,11 +270,20 @@ describe("the boot", () => {
     expect(mounts.holdTray.mock.calls[0]?.[0]).toBe(document.getElementById("hold-tray"));
     expect(mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
     expect(mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
-  });
+  }, 1_500);
 
   test("has the ClientLog-forwarding logger installed before the first mount", async () => {
     await bootMain();
 
+    expect(clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
+  });
+
+  test("configures the logger from the page-delivered log level", async () => {
+    addressPage("?workspace=ws-1&dir=/tmp/ws-1&log_level=error");
+
+    await bootMain();
+
+    expect(clientLogs.map((call) => call.record.message)).not.toContain("the webapp booted");
     expect(clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
   });
 

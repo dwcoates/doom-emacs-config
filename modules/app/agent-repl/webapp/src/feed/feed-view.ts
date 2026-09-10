@@ -239,7 +239,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    */
   function applyPage(page: FeedPage, placement: "replace" | "prepend"): void {
     const result = requireCase(page.result, "FeedPage.result");
-    log("debug", `applying a ${placement} page as ${result.case}`, {
+    log.debug(`applying a ${placement} page as ${result.case}`, {
       operation: "feed.apply-page",
       context: { feed: feedName(), placement, arm: result.case },
     });
@@ -297,7 +297,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       default:
         unreachableArm("FeedPageError.kind", armName(kind));
     }
-    log("error", `a feed page could not be served: ${headline.text}`, {
+    log.error(`a feed page could not be served: ${headline.text}`, {
       operation: "feed.page-error",
       context: { feed: feedName(), arm: kind.case },
     });
@@ -308,7 +308,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function upsert(row: FeedRow): void {
     const id = requireMessage(row.id, "FeedRow.id").value;
     const known = states.has(id);
-    log("debug", `${known ? "replacing" : "appending"} feed row ${id}`, {
+    log.debug(`${known ? "replacing" : "appending"} feed row ${id}`, {
       operation: known ? "feed.row-replaced" : "feed.row-appended",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     });
@@ -540,7 +540,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
 
   /** The compact stand-in for a row this build could not draw. */
   function malformedPlaceholder(err: MalformedView, row: FeedRow): HTMLElement {
-    log("error", `a feed row could not be drawn: ${err.message}`, {
+    log.error(`a feed row could not be drawn: ${err.message}`, {
       operation: "feed.row-malformed",
       context: {
         feed: feedName(),
@@ -567,7 +567,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * walk standing is the daemon's refusal, drawn at this control.
    */
   async function loadOlder(): Promise<void> {
-    log("info", "walking one page older", {
+    log.info("walking one page older", {
       operation: "feed.load-older",
       context: { feed: feedName() },
     });

@@ -158,7 +158,7 @@ export type ComposerFactory = (host: HTMLElement, feed: FeedId) => Handle;
  * without changing every caller.
  */
 export function createRowRenderers(_ctx: AppContext): RowRenderers {
-  log("debug", "assembling the feed's row renderers", {
+  log.debug("assembling the feed's row renderers", {
     operation: "feed.renderers.assemble",
   });
   return {
@@ -298,7 +298,7 @@ export function arrangeSubfeedRows(host: HTMLElement, view: SubfeedView): void {
     }
     const container = placed.get(parent.value);
     if (container === undefined) {
-      log("warn", "a row names a container this feed has not drawn; placing it top-level", {
+      log.warn("a row names a container this feed has not drawn; placing it top-level", {
         operation: "feed.unknown-nesting-container",
         context: { row: row.id?.value ?? "unset", container: parent.value },
       });

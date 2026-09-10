@@ -99,7 +99,7 @@ export class AttentionRegistry {
   mark(id: string, element: HTMLElement): void {
     let entry = this.entries.get(id);
     if (entry === undefined) {
-      log("debug", "starting an attention blink", {
+      log.debug("starting an attention blink", {
         operation: "sidebar.attention.start",
         context: { workspace: id, phases: ATTENTION_PHASES, phase_ms: ATTENTION_PHASE_MS },
       });
@@ -119,7 +119,7 @@ export class AttentionRegistry {
   endPass(): void {
     for (const [id, entry] of [...this.entries]) {
       if (entry.seen) continue;
-      log("debug", "an attention marker was cleared", {
+      log.debug("an attention marker was cleared", {
         operation: "sidebar.attention.cleared",
         context: { workspace: id, phase: entry.phase },
       });

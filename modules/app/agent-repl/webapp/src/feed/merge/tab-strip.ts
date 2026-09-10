@@ -159,7 +159,7 @@ export function drawTabStateGlyph(tab: MergeTab): HTMLElement {
       return el;
     default:
       // Unreachable through `readMergeTab`, which validates the arm first.
-      log("warn", `a merge tab reports a state this build has no glyph for: ${tab.state}`, {
+      log.warn(`a merge tab reports a state this build has no glyph for: ${tab.state}`, {
         operation: "merge.unknown-tab-state",
         context: { state: tab.state, kind: tab.kind },
       });

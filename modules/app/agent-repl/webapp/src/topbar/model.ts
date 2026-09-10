@@ -85,7 +85,7 @@ export function offerableOptions(options: readonly ModelOption[]): ModelOption[]
   return options.filter((option, index) => {
     const model = requireMessage(option.model, `TopbarModelSelector.options[${index}].model`);
     if (model.name !== marker) return true;
-    log("warn", `the daemon served the ${marker} marker as a selectable model; skipping it`, {
+    log.warn(`the daemon served the ${marker} marker as a selectable model; skipping it`, {
       operation: "topbar.model-synthetic-option",
       context: { index },
     });
@@ -153,7 +153,7 @@ export function routeToColdGate(doc: Document): "gate" | "notice" {
   if (gate !== null) {
     gate.setAttribute(COLD_ATTENTION_ATTRIBUTE, COLD_ATTENTION_VALUE);
     revealNode(gate, "start");
-    log("info", "routed the reader to the cold gate row", {
+    log.info("routed the reader to the cold gate row", {
       operation: "topbar.model-cold-gate",
       context: { routed_to: "gate" },
     });
@@ -171,7 +171,7 @@ export function routeToColdGate(doc: Document): "gate" | "notice" {
   notice.setAttribute(COLD_NOTICE_ATTRIBUTE, COLD_ATTENTION_VALUE);
   notice.textContent = COLD_REFUSAL_SENTENCE;
   footer.append(notice);
-  log("info", "no cold gate row is drawn; noticed the gate on the footer", {
+  log.info("no cold gate row is drawn; noticed the gate on the footer", {
     operation: "topbar.model-cold-gate",
     context: { routed_to: "notice" },
   });
@@ -183,7 +183,7 @@ export function routeToColdGate(doc: Document): "gate" | "notice" {
  * the alternatives.
  */
 export function drawTopbarModelSelector(u: TopbarModelSelector, tc: TopbarContext): HTMLElement {
-  log("debug", "drawing the model selector", {
+  log.debug("drawing the model selector", {
     operation: "topbar.model-selector",
     context: { options: u.options.length, selected: u.selected !== undefined },
   });
@@ -356,7 +356,7 @@ export async function pickModel(
   row: HTMLButtonElement,
 ): Promise<void> {
   const model = requireMessage(option.model, "ModelOption.model");
-  log("info", `the reader picked the model ${model.name}`, {
+  log.info(`the reader picked the model ${model.name}`, {
     operation: "topbar.model-picked",
     context: { model: model.name },
   });

@@ -44,7 +44,7 @@ export interface Handle {
  * holds are the daemon's).
  */
 export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
-  log("debug", "mounting the hold tray", { operation: "tray.mount" });
+  log.debug("mounting the hold tray", { operation: "tray.mount" });
 
   /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
   let disposers: Array<() => void> = [];
@@ -76,7 +76,7 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
 
   return {
     dispose(): void {
-      log("debug", "disposing the hold tray", { operation: "tray.dispose" });
+      log.debug("disposing the hold tray", { operation: "tray.dispose" });
       stream.cancel();
       clear();
       host.replaceChildren();
@@ -87,7 +87,7 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
 /** The tray, whole: the daemon's heading over the held things in order. */
 export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElement {
   const path = "DaemonHoldTray";
-  log("debug", "drawing the hold tray", {
+  log.debug("drawing the hold tray", {
     operation: "tray.draw",
     context: { items: u.items.length },
   });
@@ -120,7 +120,7 @@ export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElem
 
 /** The heading, composed by the daemon, drawn verbatim. */
 export function drawDaemonHoldHeading(u: DaemonHoldHeading, path: string): HTMLElement {
-  log("debug", "drawing the hold tray heading", {
+  log.debug("drawing the hold tray heading", {
     operation: "tray.heading",
     context: { path },
   });
@@ -142,7 +142,7 @@ export function drawDaemonHoldItem(
   path: string,
 ): HTMLElement {
   const item = requireCase(u.item, `${path}.item`);
-  log("debug", "drawing a held item", {
+  log.debug("drawing a held item", {
     operation: "tray.item",
     context: { path, item: item.case },
   });

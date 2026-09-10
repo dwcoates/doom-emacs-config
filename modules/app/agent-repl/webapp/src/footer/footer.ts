@@ -66,7 +66,7 @@ export function buildWatchFooterRequest(ctx: AppContext): WatchFooterRequest {
 
 /** Mount the footer into HOST. */
 export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps): FooterHandle {
-  log("info", "mounting the footer", { operation: "footer.mount", context: {} });
+  log.info("mounting the footer", { operation: "footer.mount", context: {} });
   host.setAttribute("data-component", "footer");
 
   const statusListeners = new Set<(statusCase: string) => void>();
@@ -105,7 +105,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     dispose(): void {
       if (disposed) return;
       disposed = true;
-      log("info", "disposing the footer", { operation: "footer.dispose", context: {} });
+      log.info("disposing the footer", { operation: "footer.dispose", context: {} });
       watch.cancel();
       // Every clock this component started hangs off the host's subtree.
       stopTicking(host);
@@ -153,7 +153,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
    */
   function select(panel: FooterPanel): void {
     selection = selection === panel ? null : panel;
-    log("debug", `the footer panel selection is now ${selection ?? "none"}`, {
+    log.debug(`the footer panel selection is now ${selection ?? "none"}`, {
       operation: "footer.select-panel",
       context: { panel: selection },
     });
@@ -184,7 +184,7 @@ export function readSelection(ctx: AppContext): FooterPanel | null {
     const stored = window.localStorage.getItem(panelStorageKey(ctx.workspace.id));
     if (stored === null) return null;
     if (!FOOTER_PANELS.includes(stored as FooterPanel)) {
-      log("warn", `discarding an unrecognized stored footer panel: ${stored}`, {
+      log.warn(`discarding an unrecognized stored footer panel: ${stored}`, {
         operation: "footer.selection-unrecognized",
         context: { stored },
       });
@@ -192,7 +192,7 @@ export function readSelection(ctx: AppContext): FooterPanel | null {
     }
     return stored as FooterPanel;
   } catch (err) {
-    log("warn", `could not read the footer's panel preference: ${String(err)}`, {
+    log.warn(`could not read the footer's panel preference: ${String(err)}`, {
       operation: "footer.selection-read-failed",
       context: { cause: err },
     });
@@ -210,7 +210,7 @@ export function writeSelection(ctx: AppContext, selection: FooterPanel | null): 
     }
     window.localStorage.setItem(key, selection);
   } catch (err) {
-    log("warn", `could not store the footer's panel preference: ${String(err)}`, {
+    log.warn(`could not store the footer's panel preference: ${String(err)}`, {
       operation: "footer.selection-write-failed",
       context: { cause: err },
     });
