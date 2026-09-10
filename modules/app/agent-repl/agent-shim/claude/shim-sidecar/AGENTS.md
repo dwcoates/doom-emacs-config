@@ -586,6 +586,10 @@ pre-logger bootstrap failure and the sink-emergency path.
   `logging.New`'s two-sink mirroring stays for tests and foreground runs, where
   both sinks are the caller's to manage.
 
+Read sidecar records and harvest run windows through `../../../bin/logs.sh`;
+the full path, rotation, attribution, and level-switch table is in
+`../../../AGENTS.md`.
+
 ## Standing policies
 
 - NO BACKWARDS COMPATIBILITY, EVER: no migration code, no preserving stored

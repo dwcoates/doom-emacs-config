@@ -16,33 +16,54 @@ workspace:
 - `<workspace>/.claude/emacs/webapp.log`
 - `<workspace>/.claude/emacs/sidecar.log`
 
-Each link points to an external temporary file created and opened by the
-runtime that owns the sink. The runtime must never follow a workspace-provided
-regular file or symlink as its durable sink. Link replacement is atomic. An
-owned target is reused from the runtime's in-memory workspace map during that
-runtime lifetime. After a runtime restart, the runtime creates a new unique
-target under the operating system's temporary directory and atomically
+Each link points to an external runtime-owned file created and opened by the
+runtime that owns the sink. Emacs targets live under the operating system's
+temporary directory; daemon-owned targets live beside `daemon.run.log` under
+the daemon state root's `logs/` directory. The runtime must never follow a
+workspace-provided regular file or symlink as its durable sink. Link
+replacement is atomic. An owned target is reused from the runtime's in-memory
+workspace map during that runtime lifetime. After a runtime restart, the
+runtime creates a new unique target in its owned directory and atomically
 replaces the canonical link rather than trusting its old destination. An
-active target is truncated in place so readers holding the target open
-continue to observe the same inode.
+active target rotates at its byte cap. The current file moves to `.1`, the
+most recent prior generation; existing generations shift through `.5`, the
+oldest retained generation; and a new current file opens at the canonical
+target path. No runtime truncates and loses the only copy of earlier records.
+The canonical workspace symlink continues to name the current target, while
+the generations live beside that target rather than beside the symlink.
 
 The daemon opens its workspace targets with append semantics and manages a
-64 MiB cap for `daemon.log`, `shim.log`, `webapp.log`, and `sidecar.log`.
-Daemon-owned writes check the cap synchronously. A periodic daemon scan also
-checks direct shim writes made through inherited file descriptor `3`.
-Truncation first proves the canonical symlink still names the manager-owned
-inode, then clears that inode in place. A cap-maintenance failure is a
-workspace-attributed JSON error and poisons the affected sink.
+64 MiB cap plus five retained generations for `daemon.log`, `shim.log`,
+`webapp.log`, and `sidecar.log`. Daemon-owned writes check the cap
+synchronously. A periodic daemon scan also checks direct shim writes made
+through inherited file descriptor `3`. Rotation first proves the canonical
+symlink still names the manager-owned target, then rolls that target and its
+generations. A cap-maintenance failure is a workspace-attributed JSON error
+and poisons the affected sink.
+
+Every global durable sink follows the same 64 MiB, five-generation retention
+rule. Long-lived services append on open and rotate only at the byte cap, so a
+bounce loop cannot evict history merely by restarting. The daemon run log may
+start a fresh current generation at a run boundary and also rotates on size.
 
 Global service records use the runtime's canonical global log only when the
 record genuinely has no conceptual workspace or agent association. Failure to
 mechanically resolve a workspace for a workspace-owned record is a routing
 invariant violation, not permission to write the record globally.
 
-Operators resolve and query these paths through
-`scripts/agent-repl-log-discovery.sh`. The script can select a workspace or
-genuine global scope, narrow to one runtime, and filter strict JSONL by
-`agent_repl_session_id`, `claude_session_id`, or `pid`.
+Operators resolve and query these paths through `bin/logs.sh`. It resolves a
+workspace by daemon ID, canonical directory, or daemon display name; selects
+central records or every daemon-known workspace; includes all retained
+generations; merges records by timestamp; filters by time, minimum level, and
+runtime; follows active current generations; and emits either compact local
+time lines or original JSONL. A malformed selected line is reported with its
+file and line number and aborts the read. `--harvest <from> <to>` reads every
+workspace and central sink and groups every warning and error by workspace ID
+and directory, level, runtime, operation, and message.
+
+`scripts/agent-repl-log-discovery.sh` remains the focused identity and latency
+diagnostic for callers that need its session, process, span, or gap queries;
+it is not the canonical whole-system reader.
 
 ## JSONL schema
 
@@ -167,18 +188,19 @@ remains valid across daemon reconnects and is not duplicated onto
 
 ## Emission behavior
 
-Each runtime exposes one canonical API with normal and verbose public emission
-functions. Normal records use the runtime's canonical durable JSONL sink.
-Workspace-owned runtimes persist verbose records to that same sink while their
-verbose setting controls only terminal or console visibility.
+Each runtime exposes one canonical API with methods for `debug`, `info`,
+`warn`, and `error`. `AGENT_REPL_LOG_LEVEL` is the one process-startup level
+switch for every runtime. It accepts exactly `debug`, `info`, `warn`, or
+`error`, defaults to `info`, requires no rebuild, and persists records at or
+above the selected minimum to the runtime's canonical durable JSONL sink. An
+unrecognized value is a startup refusal, never an ignored setting or a
+substitute value. The record's `verbosity` field remains its diagnostic class;
+it does not create a second persistence switch.
 
-The global `shim-store` and `shim-claude-sidecar` services are different:
-`AGENT_REPL_LOG_VERBOSE` is a process-startup gate for both persistence and
-terminal emission of verbose records. Their global sinks have no workspace
-cap, so persisting hot successful per-event, per-batch, per-heartbeat, or
-per-file diagnostics while verbose mode is disabled is forbidden. Normal
-records continue to persist lifecycle transitions, invariant violations,
-bounded summaries, and owned failures.
+Hot successful per-event, per-batch, per-heartbeat, or per-file diagnostics
+are `debug`. Lifecycle transitions, invariant violations, named decisions,
+and owned failures retain their contract levels and remain governed by the
+same minimum-level switch.
 
 Every OS-process record includes the emitting process's `pid`. Multiple shim
 processes may share one workspace `shim.log`; `pid` and session identifiers

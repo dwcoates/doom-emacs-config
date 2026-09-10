@@ -165,6 +165,9 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   materially different outcome logs its selection; every error is logged
   exactly once by its owning layer with resolved inputs and cause. No direct
   `console.*` outside the documented pre-logger bootstrap path in `main.ts`.
+  Read forwarded webapp records and harvest run windows through
+  `../bin/logs.sh`; the full path, rotation, attribution, and level-switch
+  table is in `../AGENTS.md`.
 - **SEMANTIC COLOR** comes from `proto/vocab/render-colors.json` and
   `paint-classes.json` through `src/vocab.ts`, and every consumer asserts its
   table row for row against the file, so a new arm without a color fails loudly.

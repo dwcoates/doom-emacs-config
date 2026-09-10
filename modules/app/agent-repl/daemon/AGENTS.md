@@ -288,6 +288,9 @@ workspace is an invariant violation, never a global write. That canonical path
 is a SYMLINK, and its target is minted under `<state>/logs/`, never the OS temp
 dir — the state root owns the daemon's durable logs.
 
+Read daemon records and harvest run windows through `../bin/logs.sh`; the full
+path, rotation, attribution, and level-switch table is in `../AGENTS.md`.
+
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one
