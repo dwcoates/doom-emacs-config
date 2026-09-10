@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -73,28 +72,6 @@ func playtestShellBubbleJS(command string) string {
 	  }
 	  return null;
 	})()`
-}
-
-// readInPage answers a JavaScript expression's string value from the page.
-// It is the probe's two-eval shape with the answer itself returned, for
-// reading an attribute INTO a manifest sentence at capture time -- the same
-// reason `armPaint` exists beside `awaitArm`.
-func (s *playtestScenario) readInPage(t *testing.T, what, expression string) string {
-	t.Helper()
-	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
-	var answer string
-	s.E.AwaitEvalFor(playtestPageBound, what,
-		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+
-			elispString(`(function () { try { return "ok:" + String(`+expression+`); } catch (e) { return "no: " + e; } })()`)+`)`,
-		func(raw json.RawMessage) bool {
-			got := decodeString(raw)
-			if !strings.HasPrefix(got, "ok:") {
-				return false
-			}
-			answer = strings.TrimPrefix(got, "ok:")
-			return true
-		})
-	return answer
 }
 
 // playtestShellRow is one row of the foreground family's table.
