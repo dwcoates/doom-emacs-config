@@ -231,6 +231,34 @@ const pt10SummariesAllCarryText = `Array.prototype.every.call(
 const pt10ContextFigureDrawn = `document.querySelector(".topbar-context-figure") &&
          document.querySelector(".topbar-context-figure").textContent.trim() !== ""`
 
+// pt10ContextFigureIsTheContextRegister is the predicate for "the context
+// figure is PAINTED in the colour the context register is defined as".
+//
+// IT ASSERTS THE PRODUCT AGAINST THE PRODUCT, never against a literal colour:
+// the figure's computed colour is compared with `--async` — the token
+// `.tone-yellow` resolves to — as this theme resolves it, so a theme change
+// moves both sides at once and only a figure that stopped taking the register
+// fails.
+//
+// IT EXISTS BECAUSE THE CLASS WAS A LIE. `drawTopbarContextChip` put
+// `.tone-yellow` on the figure and every suite asserted the class, while
+// `styles.css` handed the same element `color: var(--muted)` from a later rule
+// of equal specificity — so the one coloured number in the strip was grey in
+// every running page and nothing red went off. The unit and integration tests
+// that now pin the cascade are in the webapp's own suites; this is the same
+// fact read off the REAL WebKit the picture is taken of.
+const pt10ContextFigureIsTheContextRegister = `(function () {
+                  var figure = document.querySelector(".topbar-context-figure");
+                  if (figure === null) return false;
+                  var probe = document.createElement("span");
+                  probe.style.color =
+                    getComputedStyle(document.documentElement).getPropertyValue("--async").trim();
+                  document.body.appendChild(probe);
+                  var register = getComputedStyle(probe).color;
+                  probe.remove();
+                  return register !== "" && getComputedStyle(figure).color === register;
+                })()`
+
 // pt10FastCell is the predicate for the fast-mode cell in one named state,
 // carrying that state's own label.
 //
@@ -400,11 +428,15 @@ func TestPlaytestFeedSession(t *testing.T) {
 				},
 				{"the compaction summary to say something rather than open onto nothing", pt10SummariesAllCarryText},
 				{"the topbar's context budget figure to be drawn", pt10ContextFigureDrawn},
+				{
+					"the context figure to be PAINTED in the context register rather than merely classed as it",
+					pt10ContextFigureIsTheContextRegister,
+				},
 			},
 			asserted: "a `[data-row-kind=\"separation\"][data-state=\"compacted\"]` row holding " +
 				"`.sep-compacted` is in the feed, its `.sep-label` opens with `" + pt10CompactRequestedLabel +
-				"`, `.topbar-context-figure` carries a figure, and the turn concluded with " +
-				"`" + pt10CompactSummary + "`",
+				"`, `.topbar-context-figure` carries a figure AND is painted in the same colour this " +
+				"theme resolves `--async` to, and the turn concluded with `" + pt10CompactSummary + "`",
 			expected: "A CONTEXT-CUT DIVIDER is drawn across the feed beneath the slash pairs: a coloured rule " +
 				"with a centred muted label under it READING `" + pt10CompactRequestedLabel + " · took …` " +
 				"-- the label says the compaction was ASKED FOR -- carrying the size change beside it as " +
@@ -412,7 +444,12 @@ func TestPlaytestFeedSession(t *testing.T) {
 				"a first draw). THE TOPBAR CARRIES A CONTEXT FIGURE at its right, and it is YELLOW -- " +
 				"the one coloured number in the strip, and the one thing on it a reader is meant to find " +
 				"without looking. A GREY figure there is a DEFECT: it was one, and the picture is what " +
-				"caught it. The divider must be VISIBLE, not merely present.",
+				"caught it. READ THE COLOUR OFF THE UNIT LETTER (`k`), not off the digits: in THIS IMAGE " +
+				"the digits are drawn from the container's colour-emoji font, which paints its own glyphs " +
+				"and ignores the page's colour, so every number in every playbook's captures comes out " +
+				"dark. That is a SANDBOX FONT defect filed against the substrate, not a fault in this " +
+				"strip -- the figure's painted colour is asserted programmatically above precisely " +
+				"because the picture cannot settle it. The divider must be VISIBLE, not merely present.",
 		},
 		{
 			name:    "compact-auto",
