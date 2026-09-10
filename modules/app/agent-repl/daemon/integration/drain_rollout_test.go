@@ -463,6 +463,54 @@ func TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause(t *te
 	}
 }
 
+// A SETTLED DETACHED RUN IS NOT SOMETHING TO WAIT FOR. The drain waits for
+// every workspace to fall free without interrupting anything, and freeness is
+// no turn in flight AND an empty live-work set. A detached subagent's own
+// stream carries no agent terminal, so before the live set retired the run at
+// its UNIT's terminal a workspace whose background agent had finished never
+// fell free again and the drain waited on it until its context died.
+func TestAScheduledDrainDoesNotWaitOnADetachedSubagentThatHasSettled(t *testing.T) {
+	t.Parallel()
+	// Arrange: a live session with one detached subagent, settled.
+	f := newOpened(t, harness.Opts{})
+	expectSessionKillRecords(f.d)
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.workspace.bring_up")
+	// THE SCHEDULE'S OWN HOLD, SEEN TWICE: Schedule() takes the drain hold on
+	// this workspace when the schedule is armed and fire() takes it again at
+	// the deadline, which is the state fire() explicitly anticipates.
+	f.d.ExpectWarnings("daemon.wsm.acquire_lease", "daemon.drain.fire")
+	f.shim.ExpectStartSession()
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
+	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
+	})
+	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9")))
+	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents() == nil
+	})
+	stream := f.d.WatchDaemonStream()
+
+	// Act: schedule a drain and wait out its deadline.
+	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+			AtMs: time.Now().Add(50 * time.Millisecond).UnixMilli(), Reason: drainReasonDeploy(),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
+	}
+
+	// Assert: the drain reaches its announcement rather than standing on the
+	// settled run, and the orderly exit that closes it runs.
+	harness.AwaitView(t, f.d.Ctx(), stream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced().GetCause().GetScheduledDrain() != nil
+	})
+	if code := f.d.AwaitExit(); code != 0 {
+		t.Fatalf("the daemon's exit code after a drain over a settled detached run = %d, want an orderly 0", code)
+	}
+}
+
 // ---- Drain intake and exit ----
 
 func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
