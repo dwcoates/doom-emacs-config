@@ -1108,7 +1108,17 @@ func SpareFromStrayReaping(t *testing.T, pid int) {
 	})
 }
 
-func isSparedFromStrayReaping(pid int) bool {
+// SparedFromStrayReaping answers whether a pid was declared the TEST's own
+// through SpareFromStrayReaping.
+//
+// IT IS EXPORTED SO THERE IS ONE REGISTRY, NOT TWO. The Emacs layer keeps a
+// reaper of its own (e2e/emacs_test.go's findStrays) because it keys on a
+// scenario ROOT rather than on a state directory, and that reaper also has to
+// know which processes belong to the test. A second list of exemptions would
+// drift from this one the moment either side gained a process, and the drift
+// is not visible as a failure: it shows up as a teardown WAIT that can never
+// come up empty, which is exactly what it did.
+func SparedFromStrayReaping(pid int) bool {
 	sparedMu.Lock()
 	defer sparedMu.Unlock()
 	return sparedFromReaping[pid]
@@ -1131,7 +1141,7 @@ func (d *Daemon) strayPIDs() []int {
 		}
 		fields := strings.Fields(line)
 		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid == self || isSparedFromStrayReaping(pid) {
+		if err != nil || pid == self || SparedFromStrayReaping(pid) {
 			continue
 		}
 		pids = append(pids, pid)
