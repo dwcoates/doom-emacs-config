@@ -41,6 +41,7 @@ import {
   FeedPageSchema,
   FeedRowSchema,
   FeedSubagentSchema,
+  FeedTurnEndedSchema,
   FeedUserPromptSchema,
   type FeedBreadcrumb,
   type FeedId,
@@ -252,14 +253,55 @@ export function userPromptRow(id: string, text: string, turn?: string): FeedRow 
 }
 
 /** An agent-prompt row. */
-export function agentPromptRow(id: string, address: string, text: string): FeedRow {
+export function agentPromptRow(
+  id: string,
+  address: string,
+  text: string,
+  turn?: string,
+): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
+    turn: turn === undefined ? undefined : create(TurnIdSchema, { value: turn }),
     row: {
       case: "agentPrompt",
       value: create(FeedAgentPromptSchema, {
         address: { text: address },
         body: { blocks: [{ block: { case: "text", value: { text } } }] },
+      }),
+    },
+  });
+}
+
+/**
+ * A turn_ended row: the terminal fact for TURN, drawn as the named outcome.
+ *
+ * The arm matters to what the row DRAWS; to everything that only asks whether
+ * the turn is over, its mere presence is the whole answer.
+ */
+export function turnEndedRow(
+  id: string,
+  turn: string,
+  outcome: "concluded" | "errored" | "interrupted" = "concluded",
+): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    turn: create(TurnIdSchema, { value: turn }),
+    row: {
+      case: "turnEnded",
+      value: create(FeedTurnEndedSchema, {
+        endedAtMs: 0n,
+        outcome:
+          outcome === "errored"
+            ? {
+                case: "errored",
+                value: {
+                  headline: { text: "the agent's stream ended without a close" },
+                  error: { case: "queryDied", value: {} },
+                },
+              }
+            : outcome === "interrupted"
+              ? { case: "interrupted", value: {} }
+              : { case: "concluded", value: {} },
       }),
     },
   });
