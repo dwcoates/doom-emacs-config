@@ -454,6 +454,99 @@ func distinctColors(img *image.RGBA) int {
 }
 
 // ---------------------------------------------------------------------------
+// WHERE A FRAME IS STILL CHANGING
+// ---------------------------------------------------------------------------
+
+// playtestSettleDiagEnv, when set to any non-empty value, makes every settle
+// round that saw the framebuffer change say WHERE it changed.
+//
+// It exists because "the screen was still changing" is not a diagnosis. A
+// capture that runs its whole patience budget out has learned only that two
+// reads differed, and the three candidate causes — an animating surface in
+// the page, a blinking piece of Emacs's own chrome, and the capture's own
+// forced redraw flipping the double buffer — are told apart by WHICH PIXELS
+// moved, not by how long the wait was. So a diagnostic run reports the
+// bounding box, and the box names the culprit: a small box on the sidebar's
+// age column is a clock, a box that is the whole frame is the buffer parity.
+const playtestSettleDiagEnv = "AGENT_REPL_PLAYTEST_SETTLE_DIAG"
+
+// xwdChangedBounds answers the bounding box of the pixels that differ
+// between two XWD dumps, and how many differ.
+//
+// It reads the raw dumps rather than two decoded images: the comparison
+// `settleFramebuffer` makes is over the bytes, so a diagnostic that decoded
+// first could report "nothing changed" for a difference that restarted the
+// window, and a full decode of two 5 MiB dumps per settle round would cost
+// more than the wait it is measuring.
+//
+// An empty rectangle means the two agree over their pixels.
+func xwdChangedBounds(prev, cur []byte) (image.Rectangle, int, error) {
+	geom := func(name string, body []byte) (w, h, stride, offset int, err error) {
+		if len(body) < xwdMinHeaderWords*4 {
+			return 0, 0, 0, 0, fmt.Errorf("the %s dump is %d bytes, under the %d of an XWD header",
+				name, len(body), xwdMinHeaderWords*4)
+		}
+		word := func(i int) int { return int(binary.BigEndian.Uint32(body[i*4:])) }
+		w, h = word(xwdPixmapWidth), word(xwdPixmapHeight)
+		stride = word(xwdBytesPerLine)
+		offset = word(xwdHeaderSize) + word(xwdNColors)*xwdColorEntry
+		if w <= 0 || h <= 0 {
+			return 0, 0, 0, 0, fmt.Errorf("the %s dump's geometry is %dx%d", name, w, h)
+		}
+		if stride < w*4 {
+			return 0, 0, 0, 0, fmt.Errorf("the %s dump's stride is %d, too small for %d pixels of 4 bytes",
+				name, stride, w)
+		}
+		if want := offset + stride*h; len(body) < want {
+			return 0, 0, 0, 0, fmt.Errorf("the %s dump is %d bytes, want at least %d for %dx%d at stride %d",
+				name, len(body), want, w, h, stride)
+		}
+		return w, h, stride, offset, nil
+	}
+
+	pw, ph, pstride, poffset, err := geom("earlier", prev)
+	if err != nil {
+		return image.Rectangle{}, 0, err
+	}
+	cw, ch, cstride, coffset, err := geom("later", cur)
+	if err != nil {
+		return image.Rectangle{}, 0, err
+	}
+	if pw != cw || ph != ch {
+		return image.Rectangle{}, 0, fmt.Errorf("the two dumps are %dx%d and %dx%d, so no per-pixel box exists",
+			pw, ph, cw, ch)
+	}
+
+	minX, minY, maxX, maxY, changed := cw, ch, -1, -1, 0
+	for y := 0; y < ch; y++ {
+		prow := prev[poffset+y*pstride:][:cw*4]
+		crow := cur[coffset+y*cstride:][:cw*4]
+		for x := 0; x < cw; x++ {
+			if string(prow[x*4:x*4+4]) == string(crow[x*4:x*4+4]) {
+				continue
+			}
+			changed++
+			if x < minX {
+				minX = x
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if y > maxY {
+				maxY = y
+			}
+		}
+	}
+	if changed == 0 {
+		return image.Rectangle{}, 0, nil
+	}
+	return image.Rect(minX, minY, maxX+1, maxY+1), changed, nil
+}
+
+// ---------------------------------------------------------------------------
 // UNIT TESTS FOR THE MECHANISM ITSELF
 // ---------------------------------------------------------------------------
 //
@@ -1189,10 +1282,24 @@ func (p *playbook) redrawFrame() {
 // playbook's business and not the window's.
 func (p *playbook) settleFrame() (body []byte, settled bool, took time.Duration, rounds int) {
 	p.t.Helper()
+	diag := os.Getenv(playtestSettleDiagEnv) != ""
+	var last []byte
 	redisplayAndRead := func() []byte {
 		rounds++
 		p.e.Eval(`(progn (redraw-frame) (redisplay t) t)`)
-		return p.readFramebuffer()
+		body := p.readFramebuffer()
+		if diag && last != nil {
+			box, changed, err := xwdChangedBounds(last, body)
+			switch {
+			case err != nil:
+				p.t.Logf("playtest settle diag round %d: %v", rounds, err)
+			case changed > 0:
+				p.t.Logf("playtest settle diag round %d: %d pixels changed in %v (%dx%d)",
+					rounds, changed, box, box.Dx(), box.Dy())
+			}
+		}
+		last = body
+		return body
 	}
 	body, settled, took = settleFramebuffer(redisplayAndRead, realSettleClock{})
 	return body, settled, took, rounds
@@ -1257,4 +1364,110 @@ func (p *playbook) readFramebuffer() []byte {
 		p.t.Fatalf("read the Xvfb framebuffer at %s: %v", p.e.Display.FramebufferPath, err)
 	}
 	return body
+}
+
+// TestPlaytestTheChangedBoxIsTheSmallestOneHoldingEveryMovedPixel is the
+// diagnostic's whole claim: a reviewer reads the culprit off the box, so the
+// box has to be the pixels that moved and nothing else.
+func TestPlaytestTheChangedBoxIsTheSmallestOneHoldingEveryMovedPixel(t *testing.T) {
+	t.Parallel()
+	// A 4x4 field with two pixels moved, at (1,1) and (2,3): the tight box
+	// is x in [1,3), y in [1,4), and a box that merely CONTAINED them would
+	// pass a looser assertion while naming the wrong surface on a real
+	// frame.
+	base := make([]uint32, 16)
+	moved := make([]uint32, 16)
+	copy(moved, base)
+	moved[1*4+1] = 0x00ff0000
+	moved[3*4+2] = 0x0000ff00
+
+	box, changed, err := xwdChangedBounds(buildXWD(t, 4, 4, nil, base), buildXWD(t, 4, 4, nil, moved))
+	if err != nil {
+		t.Fatalf("bound the change between two well-formed dumps: %v", err)
+	}
+	if changed != 2 {
+		t.Errorf("the diagnostic counted %d moved pixels, want the 2 that moved", changed)
+	}
+	if want := image.Rect(1, 1, 3, 4); box != want {
+		t.Errorf("the changed box is %v, want the tight %v", box, want)
+	}
+}
+
+// TestPlaytestTwoIdenticalFramesChangedNothing keeps the settled case honest:
+// a diagnostic that reported a box for a still screen would accuse a surface
+// that never moved.
+func TestPlaytestTwoIdenticalFramesChangedNothing(t *testing.T) {
+	t.Parallel()
+	pixels := []uint32{0x00ff0000, 0x0000ff00, 0x000000ff, 0x00ffffff}
+	body := buildXWD(t, 2, 2, nil, pixels)
+
+	box, changed, err := xwdChangedBounds(body, buildXWD(t, 2, 2, nil, pixels))
+	if err != nil {
+		t.Fatalf("bound the change between two identical dumps: %v", err)
+	}
+	if changed != 0 {
+		t.Errorf("the diagnostic counted %d moved pixels between two identical dumps, want 0", changed)
+	}
+	if !box.Empty() {
+		t.Errorf("the changed box for two identical dumps is %v, want an empty one", box)
+	}
+}
+
+// TestPlaytestPaddingBeyondTheRowIsNotAChange holds the diagnostic to the
+// PIXELS rather than to the bytes. A row's stride may exceed its pixels, and
+// whatever X leaves in that padding is not on the glass -- so a diagnostic
+// that compared whole rows would report a box for a frame nobody could see
+// move.
+func TestPlaytestPaddingBeyondTheRowIsNotAChange(t *testing.T) {
+	t.Parallel()
+	// Two 1x2 dumps at a stride of three pixels, agreeing on their one real
+	// pixel per row and differing in every padding word.
+	pad := func(fill uint32) []byte {
+		return buildXWD(t, 1, 2, func(h []uint32) { h[xwdBytesPerLine] = 3 * 4 },
+			[]uint32{0x00112233, fill, fill, 0x00445566, fill, fill})
+	}
+
+	box, changed, err := xwdChangedBounds(pad(0x00000000), pad(0x00ffffff))
+	if err != nil {
+		t.Fatalf("bound the change between two padded dumps: %v", err)
+	}
+	if changed != 0 {
+		t.Errorf("the diagnostic counted %d moved pixels, want 0: only the row padding differed", changed)
+	}
+	if !box.Empty() {
+		t.Errorf("the changed box is %v, want an empty one: only the row padding differed", box)
+	}
+}
+
+// TestPlaytestTwoGeometriesHaveNoBoxBetweenThem refuses rather than answers.
+// A run whose screen changed size has a fact about the harness in it, and a
+// per-pixel box invented across two geometries would bury it.
+func TestPlaytestTwoGeometriesHaveNoBoxBetweenThem(t *testing.T) {
+	t.Parallel()
+	_, _, err := xwdChangedBounds(buildXWD(t, 2, 2, nil, make([]uint32, 4)),
+		buildXWD(t, 3, 2, nil, make([]uint32, 6)))
+
+	if err == nil {
+		t.Fatal("two dumps of different geometry were bounded against each other; want a refusal")
+	}
+	if !strings.Contains(err.Error(), "2x2") || !strings.Contains(err.Error(), "3x2") {
+		t.Errorf("the refusal says %q, and never names both geometries", err)
+	}
+}
+
+// TestPlaytestATruncatedDumpIsRefusedByName keeps the diagnostic's own
+// failure legible: a short read of the framebuffer must say which of the two
+// dumps was short, not panic inside a slice.
+func TestPlaytestATruncatedDumpIsRefusedByName(t *testing.T) {
+	t.Parallel()
+	whole := buildXWD(t, 2, 2, nil, make([]uint32, 4))
+
+	_, _, err := xwdChangedBounds(whole, whole[:len(whole)-4])
+
+	if err == nil {
+		t.Fatal("a truncated dump was bounded; want a refusal")
+	}
+	if !strings.Contains(err.Error(), "later") {
+		t.Errorf("the refusal says %q, and never says WHICH of the two dumps was short", err)
+	}
 }
