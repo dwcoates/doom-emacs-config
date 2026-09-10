@@ -1171,6 +1171,58 @@ func TestSendMessageFailureCarriesTheRefusalProseIntoItsContent(t *testing.T) {
 	}
 }
 
+// A BACKGROUNDED COMMAND DID NOT END, IT MOVED. Both planes write this unit
+// under one upsert key, so a file-plane terminal arriving second replaced the
+// stream plane's LIVE card with a settled one carrying no output at all.
+
+func TestBashSettledProducesNoTerminalForACommandThatMovedToTheBackground(t *testing.T) {
+	// Arrange: the vendor's receipt for a launch -- empty output and a task id.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"command": "sleep 600"}}
+	result := map[string]any{"stdout": "", "backgroundTaskId": "b6d426ca0", "timedOutAfterMs": float64(120_000)}
+
+	// Act
+	got := c.settledItem(kindBash, call, result, nil, false, 1000, Attribution{})
+
+	// Assert: nothing at all. The detached-work frames naming this unit are
+	// what say where the work went.
+	if got != nil {
+		t.Fatalf("settledItem = %v, want no frame for a command that moved rather than ended", got)
+	}
+}
+
+func TestBashSettledReadsTheTaskIdUnderTheVendorsSnakeCaseSpelling(t *testing.T) {
+	// Arrange: the disk carries both spellings of one name, and reading only
+	// the camelCase one would settle a run that is still going.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"command": "sleep 600"}}
+	result := map[string]any{"stdout": "", "background_task_id": "b6d426ca0"}
+
+	// Act
+	got := c.settledItem(kindBash, call, result, nil, false, 1000, Attribution{})
+
+	// Assert
+	if got != nil {
+		t.Fatalf("settledItem = %v, want no frame for a command that moved rather than ended", got)
+	}
+}
+
+func TestBashSettledStillTerminatesACommandThatNamedNoBackgroundTask(t *testing.T) {
+	// Arrange: an ordinary foreground command. The silence above must not
+	// swallow the terminal every other shell result owes.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"command": "echo hi"}}
+	result := map[string]any{"stdout": "hi\n"}
+
+	// Act
+	got := c.settledItem(kindBash, call, result, nil, false, 1000, Attribution{})
+
+	// Assert
+	if got.GetBash().GetSuccess() == nil {
+		t.Fatalf("result = %T, want AgentBash_Success", got.GetBash().GetResult())
+	}
+}
+
 // imageResultBlock is a `tool_result` answering with one base64 image block.
 func imageResultBlock(mediaType, data string) map[string]any {
 	return map[string]any{"content": []any{
