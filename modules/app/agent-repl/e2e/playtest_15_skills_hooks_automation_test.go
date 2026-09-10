@@ -132,7 +132,9 @@ func TestPlaytestSkills(t *testing.T) {
 			predicate: p15NoRow("skill") + ` && of('[data-unit="response"][data-state="success"]') !== null`,
 			asserted:  "the turn drew a settled response and NO skill row: injected memory is a file-plane fact",
 			expected: "The `!memory` prompt bubble followed directly by a plain response bubble. NO card of any " +
-				"kind between them: the injected memory is written to the transcript and never streamed.",
+				"kind between them: the injected memory is written to the transcript and never streamed. The " +
+				"footer may still read `loading · memory` naming the CLAUDE.md it read -- footer.proto's " +
+				"MOMENTARY loading arm, retired by its own dwell, and not this row's subject.",
 		},
 		{
 			name:      "skills-injected-draws-nothing",
@@ -140,7 +142,8 @@ func TestPlaytestSkills(t *testing.T) {
 			predicate: p15NoRow("skill") + ` && of('[data-unit="response"][data-state="success"]') !== null`,
 			asserted:  "the turn drew a settled response and NO skill row: injected skills are a file-plane fact",
 			expected: "The `!skills-injected` prompt bubble followed directly by a plain response bubble, with no " +
-				"skill card between them. The two skill cards from the first two rows are still above.",
+				"skill card between them. The two skill cards from the first two rows are still above. As in the " +
+				"previous picture the footer may read `loading · listing · 2 skills`, the same momentary arm.",
 		},
 	})
 }
@@ -172,9 +175,14 @@ func TestPlaytestHooks(t *testing.T) {
 			predicate: `of('[data-unit="hook"][data-state="blocked"] .tool-hook-blocked') !== null &&
 			            of('[data-unit="hook"]').textContent.indexOf("the suite failed after the edit") >= 0`,
 			asserted: "the turn's hook row is in the `blocked` arm, wears the loud `.tool-hook-blocked` treatment, and carries the reason `the suite failed after the edit`",
-			expected: "A LOUD hook card -- visibly different from the ordinary grey tool cards -- whose headline " +
-				"says the PostToolUse:Edit hook blocked, with a `gated:` link to the Edit call's own card and the " +
-				"reason `the suite failed after the edit` beneath. The turn still concluded: the response bubble follows.",
+			expected: "A LOUD hook card -- red-ruled, visibly different from the ordinary grey tool cards -- " +
+				"headlined `hook blocked: PostToolUse:Edit (PostToolUse)` with the reason `the suite failed " +
+				"after the edit` beneath it. It sits directly under the Edit call's own errored card, which is " +
+				"where the firing arrived. NO `gated:` link is drawn, and its absence is the contract's: the " +
+				"vendor's `hook_started` names no tool call, so the join has no producer on the stream plane " +
+				"(convert/hooks.ts), and the transcript's `toolUseID` reaches the residue rather than the row " +
+				"(the 2026-09-04 ruling in shim-sidecar's convert/keys.go). The turn still concluded: the " +
+				"response bubble follows.",
 		},
 		{
 			name:   "hook-failed",
