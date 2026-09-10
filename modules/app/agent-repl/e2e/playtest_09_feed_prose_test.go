@@ -293,29 +293,37 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				// EMACS-LAYER-SPEC.md's contract -- so `SPC o C-c` with `C-u`
 				// is the act, and the command takes FORCE as its first
 				// documented argument.
+				// THE DOCUMENT IS STAMPED FIRST, because the restart's
+				// webview reload is ASYNCHRONOUS and lands well after the
+				// verb is acknowledged. Measured in run 7's own Emacs log:
+				// `elisp.verbs.ack op=restart` at 15.866, the arm at 15.869,
+				// and `elisp.host.reload-webapp` / `reload-webview:
+				// navigated` at 17.184 -- 1.3 seconds later, which is after
+				// every DOM assertion this row makes. The picture taken there
+				// was a BLANK WHITE window: a document navigated away from,
+				// with its replacement not yet painted, under assertions that
+				// had all legitimately passed against the OLD one.
+				//
+				// The stamp is page state, so the reload is what destroys it.
+				// Waiting for it to be GONE is therefore a wait on the new
+				// document existing, and it is structural rather than timed:
+				// nothing but a navigation can clear it.
+				s.awaitInPage(t, "the pre-restart document to be stamped",
+					`(function () {
+                       window.__p09Document = "pre-restart";
+                       return window.__p09Document === "pre-restart";
+                     })()`)
 				s.E.Eval(`(agent-repl-restart-workspace t ` + elispString(ws) + `)`)
 				s.awaitArm(t, ws, "the roster arm to settle interrupted", ":interrupted")
+				s.awaitInPage(t, "the restart's own webview reload to have replaced the stamped document",
+					`window.__p09Document === undefined &&
+                     document.querySelector('[data-feed="root"]') !== null`)
 
-				// THE RESTART BOUNCES THE WEBVIEW, so the page under the
-				// probe is a NEW one. Probing before it has mounted would
-				// read the old document or none at all, and the failure
-				// would look like a product that never draws an interrupted
-				// row.
-				//
-				// THE PANEL IS RE-OPENED, not merely re-probed. The restart
-				// destroys the webview and builds another, and
-				// `awaitPageMounted` alone proves only that the NEW page's
-				// DOM mounted -- it says nothing about which xwidget the
-				// panel's window is showing or whether the probe was ever
-				// installed in the new page. Run 6 photographed the
-				// consequence: every DOM assertion below passed and the
-				// picture was a BLANK WHITE window with 545 distinct colors,
-				// Emacs's own chrome drawn around nothing.
-				//
-				// Opening the panel is the act a reader performs after
-				// restarting a workspace, and it is also what re-asserts the
-				// live widget, re-binds the composer this row no longer types
-				// into, and re-installs the page probe.
+				// AND THE PANEL IS RE-OPENED ON THE NEW DOCUMENT, which is
+				// the act a reader performs after restarting a workspace and
+				// is also what re-asserts the live widget, re-binds the
+				// composer, and puts this row's assertions on the page the
+				// picture will be of.
 				s.openPanel(t)
 				s.awaitInPage(t, "the turn's end to be drawn as an INTERRUPTION rather than a conclusion",
 					`document.querySelector('`+p09TerminalRow+` [data-arm="interrupted"]')`)
