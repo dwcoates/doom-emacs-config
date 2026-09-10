@@ -112,19 +112,57 @@ EOF
 
     # kickstart of the store label creates the store socket (a real unix
     # socket, since deploy-all checks with -S) as the freshly-booted service
-    # would.
+    # would, and `print` answers with a pid as launchd does.
+    #
+    # STORE_STUB_MODE selects which BOOT a case is about. The slow modes count
+    # `print` calls rather than sleeping, so the socket's arrival is pinned to
+    # the deploy's own polling and no stub outlives the case that started it:
+    #   immediate (default) — the socket is there before the first poll
+    #   late      — the socket appears on the STORE_STUB_LATE_POLLS'th poll
+    #   dead      — no socket, and launchd reports no pid: it died on boot
+    #   wedged    — alive, silent, no socket
+    #   nuking    — alive, writing a nuke record on every poll, no socket
     cat > "$stubs/launchctl" <<'EOF'
 #!/usr/bin/env bash
 echo "launchctl $*" >> "$STUB_LOG"
+SOCK_DIR="$HOME/.cache/agent-repl/sock"
+SOCK="$SOCK_DIR/store.sock"
+LOG_DIR="$HOME/.cache/agent-repl/log"
+STORE_LOG="$LOG_DIR/shim-store.err.log"
+POLLS="$HOME/.store-stub-polls"
+
+bind_socket() {
+    mkdir -p "$SOCK_DIR"
+    rm -f "$SOCK"
+    python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$SOCK"
+}
+
 case "$*" in
-    *com.agentrepl.shim-store*)
-        mkdir -p "$HOME/.cache/agent-repl/sock"
-        rm -f "$HOME/.cache/agent-repl/sock/store.sock"
-        python3 - <<'PY'
-import os, socket
-p = os.path.expanduser("~/.cache/agent-repl/sock/store.sock")
-socket.socket(socket.AF_UNIX).bind(p)
-PY
+    kickstart*com.agentrepl.shim-store*)
+        mkdir -p "$SOCK_DIR" "$LOG_DIR"
+        rm -f "$SOCK"
+        printf '0' > "$POLLS"
+        case "${STORE_STUB_MODE:-immediate}" in
+            immediate) bind_socket ;;
+        esac
+        ;;
+    print*com.agentrepl.shim-store*)
+        polls=$(( $(cat "$POLLS" 2>/dev/null || echo 0) + 1 ))
+        printf '%s' "$polls" > "$POLLS"
+        case "${STORE_STUB_MODE:-immediate}" in
+            dead)
+                printf 'com.agentrepl.shim-store = {\n\tstate = not running\n}\n'
+                exit 0
+                ;;
+            late)
+                if [ "$polls" -ge "${STORE_STUB_LATE_POLLS:-2}" ]; then bind_socket; fi
+                ;;
+            nuking)
+                mkdir -p "$LOG_DIR"
+                echo "on-disk schema does not match this binary — the store is nuked, never migrated ($polls)" >> "$STORE_LOG"
+                ;;
+        esac
+        printf 'com.agentrepl.shim-store = {\n\tpid = 4242\n\tstate = running\n}\n'
         ;;
 esac
 EOF
@@ -207,6 +245,10 @@ run_deploy() {
     STUB_LOG="$dir/log"
     : > "$STUB_LOG"
     set +e
+    # RUN_ENV is a space-separated list of NAME=VALUE assignments and is
+    # deliberately word-split into `env`'s arguments; quoting it would pass the
+    # whole list as one assignment.
+    # shellcheck disable=SC2086
     env PATH="$dir/stubs:/usr/bin:/bin" HOME="$dir/h" STUB_LOG="$STUB_LOG" \
         AGENT_REPL_STORE_SOCK_TIMEOUT=2 AGENT_REPL_EMACSCLIENT=emacsclient \
         ${RUN_ENV:-} \
@@ -691,6 +733,68 @@ if [ "$RC" -eq 3 ] && grep -q "heartbeat assertion returned an unrecognized resu
 else
     fail "an unrecognized heartbeat-assertion result fails the deploy rather than passing silently" \
          "rc=$RC stderr: $(cat "$d/stderr")"
+fi
+
+# --- 29. the socket arrives late, but inside the bound ---------------------
+# A boot slower than one poll is not a failure. The old wait was a flat
+# stopwatch and could not tell a slow boot from a dead one; this one waits on
+# the service.
+d="$TMP/t29"; mkdir -p "$d"
+RUN_ENV="STORE_STUB_MODE=late STORE_STUB_LATE_POLLS=3" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && grep -q "store: socket appeared .*s after kickstart" "$d/stdout" \
+   && log_has "kickstart -k gui/.*shim-claude-sidecar" \
+   && log_has "runtime-restart"; then
+    pass "a store socket that appears late but within the bound completes the deploy"
+else
+    fail "a store socket that appears late but within the bound completes the deploy" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr")"
+fi
+
+# --- 30. the store dies before the socket appears --------------------------
+# The failure that matters is told apart from a slow boot by launchd's pid, and
+# it stops the deploy where it stands: a sidecar kickstarted against a store
+# that is not there recovers its link cold, which is a silent full re-read.
+d="$TMP/t30"; mkdir -p "$d"
+RUN_ENV="STORE_STUB_MODE=dead" run_deploy "$d"
+if [ "$RC" -eq 1 ] \
+   && grep -q "the store died before" "$d/stderr" \
+   && grep -q "The sidecar was NOT kickstarted" "$d/stderr" \
+   && ! log_has "kickstart -k gui/.*shim-claude-sidecar" \
+   && ! log_has "runtime-restart"; then
+    pass "a store that dies before its socket appears fails the deploy without kickstarting the sidecar"
+else
+    fail "a store that dies before its socket appears fails the deploy without kickstarting the sidecar" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 31. a store that is alive and silent is wedged ------------------------
+d="$TMP/t31"; mkdir -p "$d"
+RUN_ENV="STORE_STUB_MODE=wedged" run_deploy "$d"
+if [ "$RC" -eq 1 ] \
+   && grep -q "has written nothing for 2s" "$d/stderr" \
+   && ! log_has "kickstart -k gui/.*shim-claude-sidecar"; then
+    pass "a store that is alive but writing nothing fails the wait as wedged"
+else
+    fail "a store that is alive but writing nothing fails the wait as wedged" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 32. a boot that keeps working past the upper bound --------------------
+# Progress keeps the stall budget alive indefinitely, so the wait needs a stated
+# ceiling of its own — and the nuke, the one slow boot with a known cause, is
+# named rather than left looking like a hang.
+d="$TMP/t32"; mkdir -p "$d"
+RUN_ENV="STORE_STUB_MODE=nuking AGENT_REPL_STORE_SOCK_MAX=3" run_deploy "$d"
+if [ "$RC" -eq 1 ] \
+   && grep -q "did not appear within the 3s upper bound" "$d/stderr" \
+   && grep -q "the database is being replaced" "$d/stdout" \
+   && ! log_has "kickstart -k gui/.*shim-claude-sidecar" \
+   && ! log_has "runtime-restart"; then
+    pass "a store still working past the upper bound fails loudly and names the schema nuke"
+else
+    fail "a store still working past the upper bound fails loudly and names the schema nuke" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr")"
 fi
 
 echo
