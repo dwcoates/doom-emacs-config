@@ -276,6 +276,47 @@ func TestFooterTokensCellVerdictIsIncompleteWhenAResponseCarriedNoUsage(t *testi
 	}
 }
 
+func TestFooterTokensCellVerdictIsCompleteWhenTheUsageRodeAnEarlierUnitOfTheSameResponse(t *testing.T) {
+	t.Parallel()
+	// Arrange: the ordinary prose turn. One API response is written as several
+	// units and its usage rides the FIRST — here the reasoning block that
+	// opened it — so the response unit that settles carries none of its own.
+	// Absent usage means "not the carrying unit", never "free", and this turn
+	// reconciles CLEANLY.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.submit("go", "k-tok-complete", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("resp-block-0"),
+		Usage:      ftUsage(0, 1000, 0),
+		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
+			Result: &conversationv1.AgentThinking_Success{Success: &conversationv1.AgentThinkingSuccess{
+				Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
+			}},
+		}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("resp-block-1"),
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
+			Result: &conversationv1.AgentResponse_Success{Success: &conversationv1.AgentResponseSuccess{
+				Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
+			}},
+		}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("resp-block-1")))
+
+	// Assert
+	got := awaitFooter(t, f, footer, "idle.done with the reconciled verdict", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
+	})
+	if got.GetStrip().GetTokens().GetVerdict().GetComplete() == nil {
+		t.Fatalf("tokens cell verdict = %v, want complete: the response's usage rode the unit that opened it",
+			got.GetStrip().GetTokens().GetVerdict())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Footer: live-work chips
 // ---------------------------------------------------------------------------

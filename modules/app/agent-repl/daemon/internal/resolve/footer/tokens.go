@@ -8,6 +8,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"claude-repld/internal/apiresponses"
 	"claude-repld/internal/figures"
 )
 
@@ -24,8 +25,12 @@ import (
 type tokenState struct {
 	// usage is the last usage seen for each unit that carried any.
 	usage map[string]*conversationv1.TokenUsage
-	// responses are the response units settled this turn.
-	responses map[string]bool
+	// responses files this turn's units under the API RESPONSE each arrived
+	// in, and is the verdict's denominator. THE RECONCILIATION IS PER API
+	// RESPONSE, NEVER PER UNIT: usage rides exactly one unit per API response,
+	// so counting usage-carrying units against settled response units compares
+	// two different key spaces and calls an ordinary prose turn incomplete.
+	responses *apiresponses.Ledger
 	// contradictions are the reconciliation problems observed this turn.
 	contradictions []string
 	// settled reports whether the turn has concluded, which is when a verdict
@@ -49,7 +54,7 @@ type tokenState struct {
 func newTokenState() tokenState {
 	return tokenState{
 		usage:         map[string]*conversationv1.TokenUsage{},
-		responses:     map[string]bool{},
+		responses:     apiresponses.New(),
 		responseStart: map[string]time.Time{},
 	}
 }
@@ -137,7 +142,7 @@ func (t *tokenState) reconcile() (verdict, string) {
 		sort.Strings(problems)
 		return verdictInvalid, strings.Join(problems, "; ")
 	}
-	missing := len(t.responses) - len(t.usage)
+	missing := t.responses.Unaccounted()
 	if missing > 0 {
 		return verdictIncomplete, fmt.Sprintf("%s missing usage", plural(missing, "response"))
 	}

@@ -35,6 +35,19 @@ func responseFrame(unit, stage string, u *conversationv1.TokenUsage) *conversati
 	}
 }
 
+// thinkingFrame is one settled thinking unit, optionally carrying the API
+// response's usage — which is where usage rides whenever the response's first
+// content block is a reasoning block.
+func thinkingFrame(unit string, u *conversationv1.TokenUsage) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Usage:      u,
+		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
+			Result: &conversationv1.AgentThinking_Success{Success: &conversationv1.AgentThinkingSuccess{}},
+		}},
+	}
+}
+
 func TestTheCellShowsTheUncachedInputFigure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -125,9 +138,11 @@ func TestAResponseWithNoUsageReconcilesIncomplete(t *testing.T) {
 	connected(h)
 	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", usage(0, 100, 0, 0, 0)))
+	// Two responses settle before any usage is ever seen — nothing accounts for
+	// the API response they arrived in — and a later one carries its own.
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", nil))
 	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-2", "success", nil))
-	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-3", "success", nil))
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-3", "success", usage(0, 100, 0, 0, 0)))
 
 	// Act
 	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
@@ -136,6 +151,70 @@ func TestAResponseWithNoUsageReconcilesIncomplete(t *testing.T) {
 	line := h.view(t).GetExpanded().GetTokens().GetVerdict().GetIncomplete()
 	if line.GetText() != "2 responses missing usage" {
 		t.Fatalf("evidence = %q, want the count of responses with no usage", line.GetText())
+	}
+}
+
+func TestAResponseWhoseUsageRodeTheThinkingUnitThatOpenedItReconcilesComplete(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	// The ordinary prose turn: usage rides block 0 — the reasoning block — and
+	// the response unit that follows carries none of its own.
+	h.r.OnActivity(testWS, mainAgent, thinkingFrame("unit-0", usage(0, 100, 0, 0, 0)))
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", nil))
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	if h.view(t).GetStrip().GetTokens().GetVerdict().GetComplete() == nil {
+		t.Fatalf("verdict = %+v, want complete: absent usage means \"not the carrying unit\", never \"free\"",
+			h.view(t).GetStrip().GetTokens().GetVerdict())
+	}
+}
+
+func TestTwoResponseUnitsOfOneApiResponseShareItsSingleUsageStamp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	// One API response written [text, tool_use, text]: two response units, one
+	// usage stamp, which accounts for both.
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-0", "success", usage(0, 100, 0, 0, 0)))
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-2", "success", nil))
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	if h.view(t).GetStrip().GetTokens().GetVerdict().GetComplete() == nil {
+		t.Fatalf("verdict = %+v, want complete: one API response's usage accounts for every unit it produced",
+			h.view(t).GetStrip().GetTokens().GetVerdict())
+	}
+}
+
+func TestUsageArrivingAfterTheTurnSettledCorrectsTheVerdict(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", nil))
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+	if h.view(t).GetStrip().GetTokens().GetVerdict().GetIncomplete() == nil {
+		t.Fatalf("a settled turn with no usage at all reconciles incomplete until some lands")
+	}
+
+	// Act: the response's usage upserts onto the unit it was already filed under.
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", usage(0, 100, 0, 0, 0)))
+
+	// Assert
+	if h.view(t).GetStrip().GetTokens().GetVerdict().GetComplete() == nil {
+		t.Fatalf("verdict = %+v, want complete once the late usage lands",
+			h.view(t).GetStrip().GetTokens().GetVerdict())
 	}
 }
 
