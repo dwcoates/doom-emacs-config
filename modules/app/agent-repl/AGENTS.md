@@ -55,6 +55,14 @@ The gate counts what is actually running, claiming slots as directories via
 pid is gone. It is the same mechanism as the sandbox's container gate in
 `e2e/sandbox/bin/e2e-sandbox.sh`, for the same reason.
 
+**IT NESTS.** A slot is held by a process TREE, so wrapping a script that
+wraps its own children is safe: the holder exports
+`AGENT_REPL_SUITE_SLOT_HELD`, and an inner invocation that sees it runs
+straight through with one line saying so. Without that, `bin/suite-slot.sh
+bin/e2e-repeat.sh ...` deadlocked — every per-run acquisition queued behind the
+outer holder that was waiting for those very runs to finish, 6000s of "still
+waiting" with nothing running.
+
 Do NOT gate on the load average instead. It is a decaying mean, so it keeps
 climbing for a minute after the work stops, and every waiter reads the same
 number and starts at the same instant — a thundering herd that recreates the
