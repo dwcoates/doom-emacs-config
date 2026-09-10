@@ -445,6 +445,70 @@ this site has no display logic of its own to test."
             ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil)))
     (should-error (agent-repl-switch-to-project) :type 'user-error)))
 
+;;;; ---- A project switch lands on the workspace's own panel ----
+
+(ert-deftest agent-repl-test-commands-switch-to-project-arms-the-targets-panels ()
+  "A switch to a workspace's directory arms that workspace to SHOW ITSELF.
+The gui pre-creates a page without displaying it, so the view arrives
+only through the `:pending-show-panels' drain -- and `SPC TAB n', which
+stands on the workspace it just made by switching to the minted
+worktree, otherwise landed the user on an empty frame."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) "made"))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "elsewhere"))
+              ((symbol-function 'agent-repl--ws-current-log-name) (lambda () "elsewhere"))
+              ((symbol-function 'agent-repl--ws-switch-project) (lambda (_p) nil)))
+      ;; Act
+      (agent-repl--switch-project-arm-panels "/tmp/made/")
+      ;; Assert
+      (should (agent-repl--ws-get "made" :pending-show-panels)))))
+
+(ert-deftest agent-repl-test-commands-switch-to-project-arms-before-it-switches ()
+  "The arming happens BEFORE the switch, or the persp activation hook
+schedules its drain and finds nothing set."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (armed-at-switch)
+      (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) "made"))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "elsewhere"))
+                ((symbol-function 'agent-repl--ws-current-log-name) (lambda () "elsewhere"))
+                ((symbol-function 'run-at-time) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-switch-project)
+                 (lambda (_p)
+                   (setq armed-at-switch
+                         (agent-repl--ws-get "made" :pending-show-panels)))))
+        ;; Act
+        (agent-repl-switch-to-project "/tmp/made/")
+        ;; Assert
+        (should armed-at-switch)))))
+
+(ert-deftest agent-repl-test-commands-switch-to-project-arms-nothing-off-a-workspace ()
+  "A plain project directory has no panel to show, so nothing is armed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) nil))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "elsewhere"))
+              ((symbol-function 'agent-repl--ws-current-log-name) (lambda () "elsewhere")))
+      ;; Act
+      (agent-repl--switch-project-arm-panels "/tmp/plain/")
+      ;; Assert
+      (should-not (agent-repl--ws-get "elsewhere" :pending-show-panels)))))
+
+(ert-deftest agent-repl-test-commands-switch-to-project-arms-nothing-when-already-there ()
+  "Switching to the workspace you are ALREADY standing in activates no
+perspective, so no drain is coming: a flag left standing would re-show
+panels the user had dismissed the next time they arrived."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) "mine"))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "mine"))
+              ((symbol-function 'agent-repl--ws-current-log-name) (lambda () "mine")))
+      ;; Act
+      (agent-repl--switch-project-arm-panels "/tmp/mine/")
+      ;; Assert
+      (should-not (agent-repl--ws-get "mine" :pending-show-panels)))))
+
 ;;;; ---- The most-recent-file cache ----
 
 (ert-deftest agent-repl-test-commands-most-recent-file-prefers-the-cache ()
