@@ -82,6 +82,7 @@
 (declare-function agent-repl--ws-frontend "frontends" (ws))
 (declare-function agent-repl-frontend-kill-fn "frontends" (frontend))
 (declare-function agent-repl--kill-workspace-buffers "agent-repl-commands" (ws))
+(declare-function agent-repl-window--delete-buffer-windows "window" (buf &rest keys))
 (declare-function +workspace-exists-p "ext:persp-mode" (name))
 (declare-function +workspace/kill "ext:persp-mode" (name))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
@@ -1799,6 +1800,35 @@ user on the same empty frame."
     (agent-repl--log target "arm-landing-panels: ws=%s" target)
     (agent-repl--ws-put target :pending-show-panels t)))
 
+(defun agent-repl--ws-retire-persp-windows (ws)
+  "Retire every window displaying a buffer of perspective WS.
+
+RUN BEFORE `persp-kill', and it is what makes that kill possible at all.
+`persp-kill' removes each of the persp's buffers, and persp-mode retires
+a removed buffer from the windows showing it with `set-window-buffer'
+(`persp-set-another-buffer-for-window').  A STRONGLY dedicated window
+refuses that call and signals \"Window is dedicated to ...\", and
+agent-repl's own panels are precisely strongly dedicated
+(`agent-repl-window--harden').  So a workspace killed while its panels
+were on screen -- which is every workspace the user was STANDING ON, the
+merged child among them -- aborted the kill mid-walk: the persp survived,
+its tab stayed on the bar, and the signal escaped the roster push that
+asked for the teardown.
+
+The windows go through the module's own retire recipe
+(`agent-repl-window--delete-buffer-windows'), which deletes each one or,
+when it is the frame's last, switches it to the fallback buffer.  Either
+way the dying workspace stops being displayed BEFORE persp-mode reaches
+for the window, so the signal is not caught -- it is not raised.
+
+No-op when persp-mode is not loaded or WS has no live persp."
+  (when-let* ((persp (agent-repl--ws-resolve-persp ws))
+              (bufs (agent-repl--ws-buffers persp)))
+    (agent-repl--log ws "ws-retire-persp-windows: ws=%s buffers=%d" ws (length bufs))
+    (dolist (buf bufs)
+      (when (buffer-live-p buf)
+        (agent-repl-window--delete-buffer-windows buf :ws ws)))))
+
 (defun agent-repl--ws-persp-kill (ws)
   "Kill the perspective named WS via the low-level `persp-kill'.
 No-op when `persp-kill' is unbound.  Distinct from `--ws-kill'
@@ -1811,8 +1841,14 @@ tab bar, so its roster row is gone and the webview should say so now.
 
 This is the persp-mode low-level kill boundary owned by `workspace.el'.
 Callers must use this function instead of calling `persp-kill' directly
-or wrapping it themselves with `fboundp'."
+or wrapping it themselves with `fboundp'.
+
+The persp's windows are retired FIRST
+(`agent-repl--ws-retire-persp-windows'): persp-mode's own buffer removal
+cannot retire a strongly dedicated window, and agent-repl's panels are
+exactly that -- see that function's docstring."
   (when (fboundp 'persp-kill)
+    (agent-repl--ws-retire-persp-windows ws)
     (prog1 (persp-kill ws)
       (agent-repl--ws-repaint-sidebar ws "persp-kill"))))
 

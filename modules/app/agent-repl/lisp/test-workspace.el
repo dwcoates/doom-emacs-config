@@ -1662,6 +1662,77 @@ transiently activated workspace while eager-open is in progress."
       (fmakunbound 'persp-kill)
       (should-not (agent-repl--ws-persp-kill "doomed")))))
 
+(ert-deftest agent-repl-test-ws-persp-kill-retires-the-windows-first ()
+  "The persp's windows are retired BEFORE `persp-kill' walks its buffers.
+persp-mode retires a removed buffer from its window with
+`set-window-buffer', which a strongly dedicated agent panel window
+refuses -- so a kill that reached persp-mode first aborted mid-walk and
+left the workspace's tab on the bar."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((order nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                ((symbol-function 'agent-repl--ws-buffers)
+                 (lambda (_persp) (list (current-buffer))))
+                ((symbol-function 'agent-repl-window--delete-buffer-windows)
+                 (lambda (&rest _) (push 'retire order)))
+                ((symbol-function 'persp-kill) (lambda (_ws) (push 'kill order))))
+        ;; Act
+        (agent-repl--ws-persp-kill "doomed")
+        ;; Assert
+        (should (equal (nreverse order) '(retire kill)))))))
+
+;;;; ---- Tests: --ws-retire-persp-windows ----
+
+(ert-deftest agent-repl-test-ws-retire-persp-windows-retires-each-live-buffer ()
+  "Every live buffer of the persp has its windows retired."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((buf-a (generate-new-buffer " *retire-a*"))
+          (buf-b (generate-new-buffer " *retire-b*"))
+          (retired nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                    ((symbol-function 'agent-repl--ws-buffers)
+                     (lambda (_persp) (list buf-a buf-b)))
+                    ((symbol-function 'agent-repl-window--delete-buffer-windows)
+                     (lambda (buf &rest _) (push buf retired))))
+            ;; Act
+            (agent-repl--ws-retire-persp-windows "doomed")
+            ;; Assert
+            (should (equal (nreverse retired) (list buf-a buf-b))))
+        (kill-buffer buf-a)
+        (kill-buffer buf-b)))))
+
+(ert-deftest agent-repl-test-ws-retire-persp-windows-skips-a-dead-buffer ()
+  "A buffer persp-mode still lists but that is already killed is skipped."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((dead (generate-new-buffer " *retire-dead*"))
+          (retired nil))
+      (kill-buffer dead)
+      (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                ((symbol-function 'agent-repl--ws-buffers) (lambda (_persp) (list dead)))
+                ((symbol-function 'agent-repl-window--delete-buffer-windows)
+                 (lambda (buf &rest _) (push buf retired))))
+        ;; Act
+        (agent-repl--ws-retire-persp-windows "doomed")
+        ;; Assert
+        (should-not retired)))))
+
+(ert-deftest agent-repl-test-ws-retire-persp-windows-noop-without-a-persp ()
+  "A name with no live perspective retires nothing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((retired nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-window--delete-buffer-windows)
+                 (lambda (buf &rest _) (push buf retired))))
+        ;; Act
+        (agent-repl--ws-retire-persp-windows "doomed")
+        ;; Assert
+        (should-not retired)))))
+
 ;;;; ---- Tests: --ws-remove-buffer ----
 
 (ert-deftest agent-repl-test-ws-remove-buffer-delegates-when-bound ()
