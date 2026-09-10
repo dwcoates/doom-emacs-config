@@ -20,7 +20,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_client_log.proto.
  */
 export const file_agentrepl_v1_endpoint_client_log: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xpZW50X2xvZy5wcm90bxIMYWdlbnRyZXBsLnYxInAKEENsaWVudExvZ1JlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhItCgZyZWNvcmQYAiABKAsyHS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVjb3JkIrQCCg9DbGllbnRMb2dSZWNvcmQSMgoFZGVidWcYASABKAsyIS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxEZWJ1Z0gAEjAKBGluZm8YAiABKAsyIC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxJbmZvSAASMAoEd2FybhgDIAEoCzIgLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbFdhcm5IABIyCgVlcnJvchgEIAEoCzIhLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbEVycm9ySAASEQoJb3BlcmF0aW9uGAUgASgJEg8KB21lc3NhZ2UYBiABKAkSKAoHY29udGV4dBgHIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3RCBwoFbGV2ZWwiFQoTQ2xpZW50TG9nTGV2ZWxEZWJ1ZyIUChJDbGllbnRMb2dMZXZlbEluZm8iFAoSQ2xpZW50TG9nTGV2ZWxXYXJuIhUKE0NsaWVudExvZ0xldmVsRXJyb3IifwoRQ2xpZW50TG9nUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLmFnZW50cmVwbC52MS5DbGllbnRMb2dTdWNjZXNzSAASLQoFZXJyb3IYAiABKAsyHC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nRXJyb3JIAEIICgZyZXN1bHQiEgoQQ2xpZW50TG9nU3VjY2VzcyIQCg5DbGllbnRMb2dFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_google_protobuf_struct]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xpZW50X2xvZy5wcm90bxIMYWdlbnRyZXBsLnYxInAKEENsaWVudExvZ1JlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhItCgZyZWNvcmQYAiABKAsyHS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVjb3JkItgCCg9DbGllbnRMb2dSZWNvcmQSMgoFZGVidWcYASABKAsyIS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxEZWJ1Z0gAEjAKBGluZm8YAiABKAsyIC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxJbmZvSAASMAoEd2FybhgDIAEoCzIgLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbFdhcm5IABIyCgVlcnJvchgEIAEoCzIhLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbEVycm9ySAASEQoJb3BlcmF0aW9uGAUgASgJEg8KB21lc3NhZ2UYBiABKAkSKAoHY29udGV4dBgHIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEQoJdGltZXN0YW1wGAggASgJEg8KB3ZlcmJvc2UYCSABKAhCBwoFbGV2ZWwiFQoTQ2xpZW50TG9nTGV2ZWxEZWJ1ZyIUChJDbGllbnRMb2dMZXZlbEluZm8iFAoSQ2xpZW50TG9nTGV2ZWxXYXJuIhUKE0NsaWVudExvZ0xldmVsRXJyb3IifwoRQ2xpZW50TG9nUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLmFnZW50cmVwbC52MS5DbGllbnRMb2dTdWNjZXNzSAASLQoFZXJyb3IYAiABKAsyHC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nRXJyb3JIAEIICgZyZXN1bHQiEgoQQ2xpZW50TG9nU3VjY2VzcyIQCg5DbGllbnRMb2dFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_google_protobuf_struct]);
 
 /**
  * @generated from message agentrepl.v1.ClientLogRequest
@@ -109,6 +109,28 @@ export type ClientLogRecord = Message<"agentrepl.v1.ClientLogRecord"> & {
    * @generated from field: google.protobuf.Struct context = 7;
    */
   context?: JsonObject | undefined;
+
+  /**
+   * The instant the CLIENT wrote the record, RFC 3339 with offset. UNSET =
+   * the daemon stamps its own arrival clock and says so
+   * (`timestamp_source: daemon_arrival`); SET = the daemon persists this
+   * instant, so a record is ordered by when it happened, not by when the
+   * rpc landed (measured 2026-09-10: every webapp record persisted with the
+   * arrival clock because nothing carried the client's).
+   *
+   * @generated from field: string timestamp = 8;
+   */
+  timestamp: string;
+
+  /**
+   * The record's own verbosity class: false = normal (the run's story);
+   * true = verbose (wanted only when tracing). The daemon persists it as
+   * stated rather than recomputing it from the level, so a client's verbose
+   * info record stays verbose on disk.
+   *
+   * @generated from field: bool verbose = 9;
+   */
+  verbose: boolean;
 };
 
 /**
