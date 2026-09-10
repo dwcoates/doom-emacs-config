@@ -393,6 +393,15 @@ ARG TARGETARCH
 # and files it with the failure artifacts. Emacs is compiled here without
 # `-g`, so the frames carry function names from the symbol table rather than
 # source lines -- enough to name the loop, which is what the wedge needs.
+#
+# `xclip` is the clipboard reader the composer's clipboard-image verb uses on
+# Linux. This image runs its Emacs against `Xvfb`, so the display server is
+# X11 and `xclip -selection clipboard -t image/png -o` is the reader
+# `lisp/clipboard-image.el` selects here (a Wayland host would get
+# `wl-paste`; there is no Wayland in this image). Without the package the
+# verb has no reader at all and REPORTS that -- the failure is loud rather
+# than silent, which is exactly why the sandbox must carry the tool the
+# scenarios exercise instead of asserting the refusal path forever.
 COPY --from=emacs-builder /emacs-runtime-pkgs.txt /tmp/emacs-runtime-pkgs.txt
 RUN set -eux; \
     apt-get -o Acquire::Check-Valid-Until=false update; \
@@ -407,6 +416,7 @@ RUN set -eux; \
         rsync \
         util-linux \
         xauth \
+        xclip \
         xvfb \
         xz-utils \
         $(tr '\n' ' ' < /tmp/emacs-runtime-pkgs.txt); \
@@ -418,6 +428,7 @@ RUN set -eux; \
     command -v gcc; \
     command -v gdb; \
     command -v Xvfb; \
+    command -v xclip; \
     if dpkg -s systemd >/dev/null 2>&1; then \
       echo "sandbox: systemd got pulled in after all; dbus-x11 no longer heads off the dconf/dbus-user-session chain" >&2; \
       exit 1; \
