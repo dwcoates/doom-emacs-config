@@ -2,9 +2,12 @@ package account_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/account"
@@ -45,6 +48,11 @@ func TestTranscriptPath(t *testing.T) {
 		t.Fatalf("TranscriptPath() = %q, want %q", got, want)
 	}
 }
+
+// identitylessRecord is a well-formed vendor record with NO identity in it, so
+// a fork's re-minting pass carries it through byte for byte and a test about
+// WHERE a transcript lands can still assert on its exact bytes.
+const identitylessRecord = `{"type":"summary"}`
 
 // transcriptFixture is one test's pair of config roots plus a workspace dir.
 type transcriptFixture struct {
@@ -92,10 +100,11 @@ func plantTranscript(t *testing.T, configDir, ws, sessionID, body string) string
 func plantSidecar(t *testing.T, transcriptPath, name, body string) string {
 	t.Helper()
 	dir := transcriptPath[:len(transcriptPath)-len(".jsonl")]
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("MkdirAll() = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile() = %v", err)
 	}
 	return dir
@@ -219,7 +228,7 @@ func TestFindTranscriptRejectsEmptyWorkspaceDir(t *testing.T) {
 func TestPortTranscriptCopiesAndLeavesTheSourceInPlace(t *testing.T) {
 	// Arrange: a fork — the parent keeps its own conversation.
 	f := newTranscriptFixture(t)
-	src := plantTranscript(t, f.def, f.ws, "uuid-1", "body")
+	src := plantTranscript(t, f.def, f.ws, "uuid-1", identitylessRecord)
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
@@ -229,8 +238,8 @@ func TestPortTranscriptCopiesAndLeavesTheSourceInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PortTranscript() = %v, want nil", err)
 	}
-	assertFileBody(t, account.TranscriptPath(f.multi, child, "uuid-2"), "body")
-	assertFileBody(t, src, "body")
+	assertFileBody(t, account.TranscriptPath(f.multi, child, "uuid-2"), identitylessRecord)
+	assertFileBody(t, src, identitylessRecord)
 }
 
 // TestPortTranscriptFilesTheCopyUnderTheChildsOwnVendorSessionId covers the
@@ -240,7 +249,7 @@ func TestPortTranscriptCopiesAndLeavesTheSourceInPlace(t *testing.T) {
 func TestPortTranscriptFilesTheCopyUnderTheChildsOwnVendorSessionId(t *testing.T) {
 	// Arrange.
 	f := newTranscriptFixture(t)
-	src := plantTranscript(t, f.def, f.ws, "parent-uuid", "body")
+	src := plantTranscript(t, f.def, f.ws, "parent-uuid", identitylessRecord)
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
@@ -250,18 +259,18 @@ func TestPortTranscriptFilesTheCopyUnderTheChildsOwnVendorSessionId(t *testing.T
 	if err != nil {
 		t.Fatalf("PortTranscript() = %v, want nil", err)
 	}
-	assertFileBody(t, account.TranscriptPath(f.multi, child, "child-uuid"), "body")
+	assertFileBody(t, account.TranscriptPath(f.multi, child, "child-uuid"), identitylessRecord)
 	if _, err := os.Stat(account.TranscriptPath(f.multi, child, "parent-uuid")); err == nil {
 		t.Fatal("the copy was also filed under the parent's id, want only the child's")
 	}
-	assertFileBody(t, src, "body")
+	assertFileBody(t, src, identitylessRecord)
 }
 
 func TestPortTranscriptCarriesTheSidecarDirectory(t *testing.T) {
 	// Arrange.
 	f := newTranscriptFixture(t)
-	src := plantTranscript(t, f.def, f.ws, "uuid-1", "body")
-	plantSidecar(t, src, "note.json", "sidecar")
+	src := plantTranscript(t, f.def, f.ws, "uuid-1", identitylessRecord)
+	plantSidecar(t, src, "note.json", `{"note":"sidecar"}`)
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
@@ -272,7 +281,101 @@ func TestPortTranscriptCarriesTheSidecarDirectory(t *testing.T) {
 		t.Fatalf("PortTranscript() = %v, want nil", err)
 	}
 	dest := account.TranscriptPath(f.multi, child, "uuid-2")
-	assertFileBody(t, filepath.Join(dest[:len(dest)-len(".jsonl")], "note.json"), "sidecar")
+	assertFileBody(t, filepath.Join(dest[:len(dest)-len(".jsonl")], "note.json"), `{"note":"sidecar"}`)
+}
+
+// TestPortTranscriptRemintsTheSidecarsSubagentRecordsUnderTheSameMapping covers
+// the half of a fork that lives beside the transcript: a subagent's AgentId is
+// the tool_use_id of the call that spawned it, stated in the parent's transcript
+// AND in the sidecar's `agent-<id>.meta.json`, with the `agent-<id>` file name
+// and the sidechain records' `agentId` naming the same agent. One mapping has to
+// move all of them, or the child's history points at agents it does not have.
+func TestPortTranscriptRemintsTheSidecarsSubagentRecordsUnderTheSameMapping(t *testing.T) {
+	// Arrange.
+	f := newTranscriptFixture(t)
+	src := plantTranscript(t, f.def, f.ws, "parent-uuid",
+		`{"type":"assistant","uuid":"u1","sessionId":"parent-uuid","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"subagent_type":"Explore"}}]}}`+"\n")
+	plantSidecar(t, src, filepath.Join("subagents", "agent-loc1.meta.json"),
+		`{"agentType":"Explore","description":"look","toolUseId":"toolu_1","spawnDepth":1}`)
+	plantSidecar(t, src, filepath.Join("subagents", "agent-loc1.jsonl"),
+		`{"type":"user","uuid":"s1","agentId":"loc1","isSidechain":true,"sessionId":"parent-uuid"}`+"\n")
+	child := filepath.Join(t.TempDir(), "child-ws")
+
+	// Act.
+	err := f.r.PortTranscript(context.Background(), src, f.multi, child, "child-uuid")
+
+	// Assert: the locator moved with the records that name it, and the meta's
+	// toolUseId is the very id the ported transcript's spawning call now carries.
+	if err != nil {
+		t.Fatalf("PortTranscript() = %v, want nil", err)
+	}
+	dest := account.TranscriptPath(f.multi, child, "child-uuid")
+	subagents := filepath.Join(strings.TrimSuffix(dest, ".jsonl"), "subagents")
+	entries, err := os.ReadDir(subagents)
+	if err != nil {
+		t.Fatalf("ReadDir(%s) = %v", subagents, err)
+	}
+	locator := ""
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".jsonl") {
+			locator = strings.TrimSuffix(strings.TrimPrefix(entry.Name(), "agent-"), ".jsonl")
+		}
+	}
+	if locator == "" || locator == "loc1" {
+		t.Fatalf("the ported sidecar holds %v, want a subagent transcript under a re-minted locator", entries)
+	}
+	transcriptBody := readBody(t, dest)
+	metaBody := readBody(t, filepath.Join(subagents, "agent-"+locator+".meta.json"))
+	subagentBody := readBody(t, filepath.Join(subagents, "agent-"+locator+".jsonl"))
+	spawned := jsonField(t, transcriptBody, "message", "content", "0", "id")
+	if got := jsonField(t, metaBody, "toolUseId"); got != spawned {
+		t.Fatalf("the meta names %q as the spawning call, want the transcript's own %q", got, spawned)
+	}
+	if got := jsonField(t, subagentBody, "agentId"); got != locator {
+		t.Fatalf("the subagent record states agentId %q, want the file name's %q", got, locator)
+	}
+	if strings.Contains(transcriptBody+metaBody+subagentBody, "toolu_1") {
+		t.Fatal("the ported conversation still carries the parent's tool_use id")
+	}
+}
+
+// readBody reads one ported file.
+func readBody(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) = %v", path, err)
+	}
+	return string(raw)
+}
+
+// jsonField walks one JSON document to a string leaf; a numeric step indexes an
+// array.
+func jsonField(t *testing.T, body string, steps ...string) string {
+	t.Helper()
+	var value any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &value); err != nil {
+		t.Fatalf("Unmarshal(%q) = %v", body, err)
+	}
+	for _, step := range steps {
+		switch typed := value.(type) {
+		case map[string]any:
+			value = typed[step]
+		case []any:
+			index, err := strconv.Atoi(step)
+			if err != nil || index >= len(typed) {
+				t.Fatalf("step %q does not index %v", step, typed)
+			}
+			value = typed[index]
+		default:
+			t.Fatalf("step %q has nothing to walk in %v", step, typed)
+		}
+	}
+	leaf, ok := value.(string)
+	if !ok {
+		t.Fatalf("%v is not a string leaf", value)
+	}
+	return leaf
 }
 
 func TestMoveTranscriptWithinOneFilesystemRemovesTheSource(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/remint"
 )
 
 // projectsDir is the vendor CLI's own subdirectory of a config root under
@@ -183,6 +184,14 @@ func sidecarDir(transcriptPath string) string {
 // PortTranscript implements Resolver: a COPY into the child's root, for a fork.
 // The parent keeps its own conversation, which is the whole point of a fork.
 func (r *resolver) PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir, childVendorSessionID string) error {
+	// EVERY IDENTITY IN THE PORTED HISTORY IS RE-MINTED, under one mapping
+	// shared by the transcript and its sidecar directory. A byte copy would
+	// hand the file plane the parent's own record uuids, message ids and
+	// tool_use ids under the CHILD's book, and the store refuses that outright
+	// ("would move the row from book A to book B") and parks the file. The
+	// parent's vendor session id is seeded to the child's, so every reference
+	// to the conversation the child resumes is the child's own.
+	parentVendorSessionID := strings.TrimSuffix(filepath.Base(transcriptPath), transcriptExt)
 	return r.transfer(ctx, transferSpec{
 		operation:  "daemon.account.port_transcript",
 		source:     transcriptPath,
@@ -191,6 +200,7 @@ func (r *resolver) PortTranscript(ctx context.Context, transcriptPath, childConf
 		destID:     childVendorSessionID,
 		removeSrc:  false,
 		verbMoving: "copying",
+		remint:     remint.New(parentVendorSessionID, childVendorSessionID, nil),
 	})
 }
 
@@ -217,8 +227,12 @@ type transferSpec struct {
 	// destID renames the transcript on the way: the destination is
 	// `<destID>.jsonl` (and its sidecar `<destID>/`). Empty keeps the
 	// source's own name, which every transfer but a fork wants.
-	destID     string
-	removeSrc  bool
+	destID    string
+	removeSrc bool
+	// remint, when set, RE-MINTS every identity the transfer carries rather
+	// than copying the bytes. Only a fork wants it: an account switch moves one
+	// conversation between roots and must keep every id it had.
+	remint     *remint.Mapper
 	verbMoving string
 }
 
@@ -298,19 +312,147 @@ func (r *resolver) transfer(ctx context.Context, spec transferSpec) error {
 		return wrapped
 	}
 
-	if err := carryFile(spec.source, dest, spec.removeSrc); err != nil {
+	if err := spec.carryTranscript(dest); err != nil {
 		r.log.Error(spec.operation, "transcript "+spec.verbMoving+" failed", withBranch(logCtx, "transfer-error", err))
 		return err
 	}
 	if haveSidecar {
-		if err := carryTree(srcSidecar, destSidecar, spec.removeSrc); err != nil {
+		if err := spec.carrySidecar(srcSidecar, destSidecar); err != nil {
 			r.log.Error(spec.operation, "transcript sidecar "+spec.verbMoving+" failed", withBranch(logCtx, "sidecar-transfer-error", err))
 			return err
 		}
 	}
 
 	logCtx["has_sidecar"] = haveSidecar
+	logCtx["reminted"] = spec.remint != nil
 	r.log.Debug(spec.operation, "transcript transferred", withBranch(logCtx, "transferred", nil))
+	return nil
+}
+
+// carryTranscript carries the transcript itself: re-minted for a fork, byte for
+// byte otherwise.
+func (spec transferSpec) carryTranscript(dest string) error {
+	if spec.remint != nil {
+		return remintFile(spec.source, dest, spec.remint)
+	}
+	return carryFile(spec.source, dest, spec.removeSrc)
+}
+
+// carrySidecar carries the transcript's sidecar directory under the SAME
+// mapping the transcript was carried under, which is what keeps a subagent's
+// `agent-<id>` file name and the `agentId` its parent's records state pointing
+// at each other.
+func (spec transferSpec) carrySidecar(source, dest string) error {
+	if spec.remint != nil {
+		return remintTree(source, dest, spec.remint)
+	}
+	return carryTree(source, dest, spec.removeSrc)
+}
+
+// remintFile writes a re-minted copy of one transcript to dest.
+func remintFile(source, dest string, mapper *remint.Mapper) error {
+	raw, err := os.ReadFile(source) //nolint:gosec // daemon-derived path
+	if err != nil {
+		return fmt.Errorf("account: reading %s: %w", source, err)
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return fmt.Errorf("account: stat %s: %w", source, err)
+	}
+	converted, err := mapper.Lines(raw)
+	if err != nil {
+		return fmt.Errorf("account: re-minting %s: %w", source, err)
+	}
+	return writeFileAtomic(dest, converted, info.Mode().Perm())
+}
+
+// remintTree copies a sidecar tree, re-minting every record it carries and
+// every identity its path names.
+//
+// A `.jsonl` file is a record stream and a `.json` file is one document (the
+// subagent's `agent-<id>.meta.json`, whose `toolUseId` IS that agent's
+// identity); anything else is carried unchanged. A malformed one is an ERROR:
+// porting it as it stands would file the parent's identity in the child's book,
+// which is the exact failure this pass exists to prevent.
+func remintTree(source, dest string, mapper *remint.Mapper) error {
+	return filepath.WalkDir(source, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("account: walking %s: %w", path, err)
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return fmt.Errorf("account: relativizing %s against %s: %w", path, source, err)
+		}
+		target := filepath.Join(dest, filepath.FromSlash(mapper.PathRel(filepath.ToSlash(rel))))
+		switch {
+		case d.IsDir():
+			if err := os.MkdirAll(target, 0o700); err != nil {
+				return fmt.Errorf("account: creating %s: %w", target, err)
+			}
+			return nil
+		case d.Type().IsRegular():
+			return remintSidecarFile(path, target, mapper)
+		default:
+			return fmt.Errorf("account: %s is neither a regular file nor a directory (%s)", path, d.Type())
+		}
+	})
+}
+
+// remintSidecarFile carries one file out of a sidecar tree.
+func remintSidecarFile(source, dest string, mapper *remint.Mapper) error {
+	switch {
+	case strings.HasSuffix(source, ".jsonl"):
+		return remintFile(source, dest, mapper)
+	case strings.HasSuffix(source, ".json"):
+		raw, err := os.ReadFile(source) //nolint:gosec // daemon-derived path
+		if err != nil {
+			return fmt.Errorf("account: reading %s: %w", source, err)
+		}
+		info, err := os.Stat(source)
+		if err != nil {
+			return fmt.Errorf("account: stat %s: %w", source, err)
+		}
+		converted, err := mapper.Document(raw)
+		if err != nil {
+			return fmt.Errorf("account: re-minting %s: %w", source, err)
+		}
+		return writeFileAtomic(dest, converted, info.Mode().Perm())
+	default:
+		return copyFileAtomic(source, dest)
+	}
+}
+
+// writeFileAtomic writes data through a temporary in dest's directory, fsyncs
+// it, and renames it into place — the same durability the copy path has.
+func writeFileAtomic(dest string, data []byte, mode fs.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return fmt.Errorf("account: creating %s: %w", filepath.Dir(dest), err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".port-"+filepath.Base(dest)+"-*")
+	if err != nil {
+		return fmt.Errorf("account: creating a temporary beside %s: %w", dest, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) //nolint:errcheck // best-effort cleanup of a named temporary
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("account: writing %s: %w", tmpName, err)
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("account: setting the mode of %s: %w", tmpName, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("account: fsyncing %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("account: closing %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, dest); err != nil {
+		return fmt.Errorf("account: renaming %s to %s: %w", tmpName, dest, err)
+	}
 	return nil
 }
 
