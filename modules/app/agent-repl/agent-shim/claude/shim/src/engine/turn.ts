@@ -936,16 +936,18 @@ export class TurnEngine {
       // announced whose first row has not landed has an EMPTY past, not an
       // unknown one — a keep-alive-only session writes nothing to any book, and
       // refusing there told a consumer its own agent did not exist.
-      const opened = await this.session.persistence.openAgentPage(
-        target,
-        request.pageSize,
-        undefined,
-        () => this.session.knowsAgent(target),
+      //
+      // READ, NOT WATCH: this verb serves one page and stands no tail, so it
+      // goes through the reader that ALWAYS ASKS THE STORE. The watch-side open
+      // may serve a minted-but-unwritten book without asking — sound there,
+      // because the value of that open is the tail — but here the ask is the
+      // only thing that tells an empty book apart from a store that is down or
+      // failing reads, and this endpoint owes a typed refusal for both.
+      return readHistoryPage(
+        await this.session.persistence.readFirstPage(target, request.pageSize, () =>
+          this.session.knowsAgent(target),
+        ),
       );
-      // ReadHistory is one page and no tail; the reading session opened to get
-      // the page is closed at once rather than leaked for a tail nobody reads.
-      opened.close();
-      return readHistoryPage(opened.page);
     } catch (err) {
       if (err instanceof PersistenceError) {
         const kind =
