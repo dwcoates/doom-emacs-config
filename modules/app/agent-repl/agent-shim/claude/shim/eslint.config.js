@@ -2,6 +2,27 @@ import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+const warnJustificationRule = {
+  meta: {
+    type: "problem",
+    docs: { description: "require an adjacent defect or decision justification for every warning" },
+    schema: [],
+    messages: {
+      missing: "A shim warning must be preceded by `// warn: a defect because …` or `// warn: a decision because …`.",
+    },
+  },
+  create(context) {
+    return {
+      "CallExpression[callee.type='MemberExpression'][callee.property.name='warn']"(node) {
+        const prior = context.sourceCode.getCommentsBefore(node).at(-1);
+        const adjacent = prior?.loc?.end.line === node.loc.start.line - 1;
+        const justified = prior?.type === "Line" && /^ warn: (?:a defect|a decision) because \S/.test(prior.value);
+        if (!adjacent || !justified) context.report({ node, messageId: "missing" });
+      },
+    };
+  },
+};
+
 /**
  * The shim's linter. Type-aware ON PURPOSE, and for the same reason as the
  * webapp's: this package converts the SDK's untyped stream into typed protobuf
@@ -130,7 +151,13 @@ export default tseslint.config(
   // failure, whether its receiver is the canonical logger or a bound child.
   {
     files: ["src/**/*.ts"],
+    plugins: {
+      "shim-logging": {
+        rules: { "warn-justification": warnJustificationRule },
+      },
+    },
     rules: {
+      "shim-logging/warn-justification": "error",
       "no-restricted-syntax": [
         "error",
         {
