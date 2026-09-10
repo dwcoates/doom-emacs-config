@@ -33,6 +33,13 @@ mkdir -p "$bin" "$home" "$state/logs" "$cache/agent-repl/log" "$runtime_tmp" \
     "$targets" "$workspace_a/.claude/emacs" "$workspace_b/.claude/emacs"
 : >"$state/wsm.db"
 
+make_empty_workspace_sink() {
+    local workspace="$1" label="$2" runtime="$3" target
+    target="$targets/$label-$runtime.log"
+    : >"$target"
+    ln -s "$target" "$workspace/.claude/emacs/$runtime.log"
+}
+
 cat >"$bin/sqlite3" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -61,11 +68,17 @@ EOF
 ln -s "$targets/alpha-daemon.log" "$workspace_a/.claude/emacs/daemon.log"
 ln -s "$targets/alpha-shim.log" "$workspace_a/.claude/emacs/shim.log"
 ln -s "$targets/alpha-webapp.log" "$workspace_a/.claude/emacs/webapp.log"
+make_empty_workspace_sink "$workspace_a" alpha emacs
+make_empty_workspace_sink "$workspace_a" alpha sidecar
 
 cat >"$targets/beta-daemon.log" <<EOF
 {"timestamp":"2026-09-10T10:04:00.000000Z","runtime":"daemon","pid":20,"level":"warn","verbosity":"normal","operation":"daemon.beta","message":"beta warning","context":{},"workspace_dir":"$workspace_b","workspace_id":"ws-b"}
 EOF
 ln -s "$targets/beta-daemon.log" "$workspace_b/.claude/emacs/daemon.log"
+make_empty_workspace_sink "$workspace_b" beta emacs
+make_empty_workspace_sink "$workspace_b" beta shim
+make_empty_workspace_sink "$workspace_b" beta webapp
+make_empty_workspace_sink "$workspace_b" beta sidecar
 
 cat >"$state/logs/daemon.run.log" <<'EOF'
 {"timestamp":"2026-09-10T10:00:30.000000Z","runtime":"daemon","pid":30,"level":"info","verbosity":"normal","operation":"daemon.boot","message":"daemon central","context":{}}
@@ -73,6 +86,7 @@ EOF
 cat >"$cache/agent-repl/log/shim-store.log" <<'EOF'
 {"timestamp":"2026-09-10T10:05:00.000000Z","runtime":"store","pid":40,"level":"error","verbosity":"normal","operation":"store.failure","message":"store failed","context":{"cause":"fixture"}}
 EOF
+: >"$cache/agent-repl/log/shim-claude-sidecar.log"
 emacs_global="$runtime_tmp/emacs-global.log"
 cat >"$emacs_global" <<'EOF'
 {"timestamp":"2026-09-10T10:00:15.000000Z","runtime":"emacs","pid":50,"level":"info","verbosity":"normal","operation":"emacs.ready","message":"emacs central","context":{}}
@@ -297,18 +311,103 @@ test_malformed_line() {
     fi
 }
 
-test_absent_selected_log() {
-    local workspace="$TMP/workspaces/no-logs" rc
-    mkdir -p "$workspace"
+run_sink_finding_case() {
+    local label="$1" shape="$2" broken_runtime="$3" mode="$4" expected_rc="$5" description="$6"
+    local workspace case_rows canonical target out err
+    local runtime current_target rc finding_file continuation_ok=1 attribution_ok=1 failure_ok=1
+    local continuation_operation="fixture.$label.readable"
+    workspace="$TMP/workspaces/$label"
+    case_rows="$TMP/$label-workspaces.tsv"
+    target="$targets/$label-$broken_runtime.log"
+    out="$TMP/$label.out"
+    err="$TMP/$label.err"
+
+    # Arrange
+    mkdir -p "$workspace/.claude/emacs"
+    workspace="$(cd "$workspace" && pwd -P)"
+    canonical="$workspace/.claude/emacs/$broken_runtime.log"
+    for runtime in emacs daemon shim webapp sidecar; do
+        current_target="$targets/$label-$runtime.log"
+        if [ "$runtime" = "$broken_runtime" ]; then
+            case "$shape" in
+                dangling)
+                    ln -s "$current_target.missing" "$workspace/.claude/emacs/$runtime.log"
+                    ;;
+                unreadable)
+                    : >"$current_target"
+                    chmod 000 "$current_target"
+                    ln -s "$current_target" "$workspace/.claude/emacs/$runtime.log"
+                    ;;
+                directory)
+                    mkdir "$workspace/.claude/emacs/$runtime.log"
+                    ;;
+                absent) ;;
+                *) fail "unknown sink fixture shape: $shape"; return ;;
+            esac
+        else
+            cat >"$current_target" <<EOF
+{"timestamp":"2026-09-10T10:07:00.000000Z","runtime":"$runtime","pid":80,"level":"warn","verbosity":"normal","operation":"$continuation_operation","message":"readable companion","context":{},"workspace_dir":"$workspace","workspace_id":"ws-$label"}
+EOF
+            ln -s "$current_target" "$workspace/.claude/emacs/$runtime.log"
+        fi
+    done
+    printf 'ws-%s\t%s\t%s\n' "$label" "$workspace" "$label" >"$case_rows"
+
+    # Act
     set +e
-    run_logs --workspace "$workspace" --runtime daemon --json >"$TMP/absent.out" 2>"$TMP/absent.err"
+    if [ "$mode" = harvest ]; then
+        AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$case_rows" \
+            run_logs --harvest 2026-09-10T10:00:00Z 2026-09-10T10:10:00Z >"$out" 2>"$err"
+    elif [ "$mode" = zero ]; then
+        run_logs --workspace "$workspace" --runtime "$broken_runtime" --json >"$out" 2>"$err"
+    else
+        run_logs --workspace "$workspace" --runtime "$broken_runtime,shim" --json >"$out" 2>"$err"
+    fi
     rc=$?
     set -e
-    if [ "$rc" -ne 0 ] && grep -q 'none of the selected log files or rotation generations exists' "$TMP/absent.err"; then
-        pass "an absent selected log fails instead of reporting an empty read"
-    else
-        fail "an absent selected log fails instead of reporting an empty read"
+    if [ "$shape" = unreadable ]; then
+        chmod 0600 "$target"
     fi
+
+    # Assert
+    local finding_pattern
+    case "$shape" in
+        dangling) finding_pattern="sink absent: $canonical -> $target.missing" ;;
+        unreadable) finding_pattern="sink unreadable: $canonical -> $target:" ;;
+        directory) finding_pattern="sink not a symlink: $canonical" ;;
+        absent) finding_pattern="sink absent: $canonical" ;;
+    esac
+    finding_file="$err"
+    if [ "$mode" = harvest ]; then
+        finding_file="$out"
+        grep -Eq "ws-$label +$workspace +finding +$broken_runtime +logs.sink" "$out" || attribution_ok=0
+    fi
+    if [ "$shape" != absent ]; then
+        grep -q "$continuation_operation" "$out" || continuation_ok=0
+    fi
+    if [ "$expected_rc" -ne 0 ]; then
+        grep -q 'none of the selected log sinks could be read' "$err" || failure_ok=0
+    fi
+    if [ "$rc" -eq "$expected_rc" ] && grep -Fq "$finding_pattern" "$finding_file" &&
+        [ "$continuation_ok" -eq 1 ] && [ "$attribution_ok" -eq 1 ] && [ "$failure_ok" -eq 1 ]; then
+        pass "$description"
+    else
+        fail "$description"
+        sed -n '1,40p' "$out" >&2
+        sed -n '1,40p' "$err" >&2
+    fi
+}
+
+test_sink_findings() {
+    local label shape runtime mode expected_rc description
+    while IFS='|' read -r label shape runtime mode expected_rc description; do
+        run_sink_finding_case "$label" "$shape" "$runtime" "$mode" "$expected_rc" "$description"
+    done <<'EOF'
+dangling|dangling|sidecar|harvest|0|a dangling symlink is attributed while the rest is harvested
+unreadable|unreadable|daemon|json|0|an unreadable target is reported while another sink is read
+directory|directory|daemon|json|0|a directory at a canonical sink is reported as not a symlink
+zero-readable|absent|daemon|zero|2|zero readable sinks reports the finding and exits non-zero
+EOF
 }
 
 wait_for_pattern() {
@@ -376,7 +475,7 @@ test_harvest
 test_empty_harvest_window
 test_harvest_incomplete_workspace_attribution
 test_malformed_line
-test_absent_selected_log
+test_sink_findings
 test_follow
 
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
