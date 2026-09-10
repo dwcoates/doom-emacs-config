@@ -481,6 +481,76 @@ func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
 	}
 }
 
+// TestEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout is scenario 18's
+// other half: the ORDINARY window key, pressed over the panels.
+//
+// `delete-other-windows` is not the module's close. Pressed from the
+// composer it takes the webview window, and the composer -- delete-protected
+// so a stray sweep cannot strand the pair -- survives it alone. The frame
+// then holds half a mount: `agent-repl--panels-visible-p` answers nil, so no
+// close path runs and the workspace's `:fullscreen-config`, recorded against
+// the landing this scenario arranges, is left standing behind whatever the
+// user does next.
+//
+// The panels come back on their own from there -- the window-change
+// reconciler repairs exactly this half-a-pair state
+// (`agent-repl-window--ensure-layout`) by remounting the workspace's own show
+// -- and it is that remount which must record the frame it is ACTUALLY
+// covering. Kept, the landing-era configuration made the next close restore
+// the LANDING over the user's own window, which then had no window at all.
+func TestEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout(t *testing.T) {
+	t.Parallel()
+	w, _ := emacsPanelWorld(t, 1)
+	e := w.Emacs
+	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
+	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
+
+	const landing, work = "*e2e-dow-landing*", "*e2e-dow-work*"
+
+	// The landing the panels are opened over: this is what the open saves.
+	e.Eval(`(progn (delete-other-windows)
+                   (switch-to-buffer (get-buffer-create ` + elispString(landing) + `))
+                   t)`)
+
+	openPanel(e)
+	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+
+	// ACT, as one user gesture: the ordinary sweep from the composer, and
+	// then the buffer the user opens on the frame it leaves behind. One
+	// `Eval` because the reconciler's repair runs from a timer -- split in
+	// two, the repair could land between them and there would be no
+	// half-torn frame for the user to open a buffer onto.
+	e.Eval(`(progn (select-window (get-buffer-window (agent-repl--ws-get ` + elispString(current) + ` :input-buffer)))
+                   (delete-other-windows)
+                   (switch-to-buffer (get-buffer-create ` + elispString(work) + `))
+                   t)`)
+
+	// The panels come back through the module's own repair.
+	e.AwaitEvalFor(panelSettleBound, "the panels to come back over the user's window",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) >= 2
+		})
+
+	// And the plain close puts them away again.
+	e.Leader("o c")
+	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+		})
+
+	// ASSERT: the user's own buffer still has a window, and the landing the
+	// panels were first opened over did not come back over it.
+	after := windowBuffers(e)
+	if !e.EvalBool(`(and (get-buffer-window (get-buffer ` + elispString(work) + `)) t)`) {
+		t.Fatalf("the user's work buffer %q has no window after the close; the frame holds %q", work, after)
+	}
+	if e.EvalBool(`(and (get-buffer-window (get-buffer ` + elispString(landing) + `)) t)`) {
+		t.Fatalf("the close restored the landing %q over the user's own window; the frame holds %q", landing, after)
+	}
+}
+
 // TestEmacsOpenProgressLadderReachesRendered is scenario 19: the blessed
 // host-native progress ladder walks its stages and ends on a NON-terminal
 // phase.

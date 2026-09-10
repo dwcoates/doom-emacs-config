@@ -57,6 +57,7 @@
 (declare-function agent-repl-window--delete-or-neutralize "window")
 (declare-function agent-repl-window--delete-where "window")
 (declare-function agent-repl-window--ensure-layout "window")
+(declare-function agent-repl-window--panel-buffer "window")
 (declare-function agent-repl-window--panel-window "window")
 (declare-function agent-repl-window--panels-restorable-p "window")
 (declare-function agent-repl-window--side-window-p "window")
@@ -1332,9 +1333,66 @@ If the agent isn't running, start it (same as `agent-repl')."
       (when-let ((win (get-buffer-window (agent-repl--ws-get ws :input-buffer))))
         (select-window win))))))
 
+(defun agent-repl--panels-cover-frame-p (ws)
+  "Return non-nil when WS's own panels are all this frame's main area holds.
+
+That is the state a `:fullscreen-config' is recorded FOR: the mount
+covers the frame whole (fullscreen is the sole display format), so the
+saved layout is the one underneath it and restoring the layout is how
+the panels come down.  Side windows are exempt because the mount
+preserves them and the saved layout carries them too
+\(`agent-repl--clear-main-area-for-panels').
+
+Any OTHER window on the frame says the frame has moved on from what the
+configuration describes."
+  (let ((view  (agent-repl-window--panel-buffer :view ws))
+        (input (agent-repl-window--panel-buffer :input ws)))
+    (cl-every (lambda (win)
+                (or (agent-repl-window--side-window-p win ws)
+                    (memq (window-buffer win) (list view input))))
+              (window-list))))
+
+(defun agent-repl--fullscreen-config-stale-p (ws)
+  "Return non-nil when WS's `:fullscreen-config' no longer describes this frame.
+
+`:fullscreen-config' is the frame WITHOUT WS's panels, recorded the
+moment those panels take it whole.  It stays true for exactly as long
+as they still hold it (`agent-repl--panels-cover-frame-p'), because
+restoring it is HOW they come down.
+
+A bare `delete-other-windows' from the composer breaks that: it takes
+the webview window while the composer, being delete-protected
+\(`no-delete-other-windows'), survives alone.  `agent-repl--panels-visible-p'
+then answers nil, so no close path runs and the landing-era
+configuration stands while the user builds a frame of their own on top
+of it.  Restoring it later would put the LANDING's windows back over
+that work — the windows the user had would simply have none.  So a
+configuration whose frame carries windows that are not this
+workspace's panels is stale: it is DROPPED rather than restored here,
+and REPLACED rather than kept by the next mount
+\(`agent-repl--frontend-display-webview').
+
+A frame holding only the remains of the mount is NOT stale — the
+window-change reconciler repairs exactly that state
+\(`agent-repl-window--ensure-layout'), and the layout underneath is
+still the one the configuration was recorded from.
+
+The judgement needs a webview to judge: a workspace whose view buffer
+was never created or has been KILLED (a vterm workspace, a webview lost
+to a crash) is left alone here, since its configuration is the only
+teardown its close has."
+  (let ((webview (and ws (agent-repl--ws-get ws :frontend-buffer))))
+    (and (buffer-live-p webview)
+         (not (agent-repl--panels-cover-frame-p ws))
+         t)))
+
 (defun agent-repl--restore-fullscreen-config (ws)
   "Restore WS's saved pre-panel layout, clearing `:fullscreen-config'.
-Returns non-nil when a restore happened, nil when WS had no saved config.
+Returns non-nil when a restore happened, nil when WS had no saved
+config, and nil when the saved config is stale
+\(`agent-repl--fullscreen-config-stale-p') — which DROPS it, so the
+caller falls back to closing the panel windows one by one instead of
+restoring the landing over the user's own work.
 
 `:fullscreen-config' is the window layout captured the moment the
 frame-filling panels were opened (fullscreen is the sole display
@@ -1344,9 +1402,14 @@ work windows the panels covered come back rather than the close
 stranding a panel onscreen.  Only the saved-config case is handled: a
 frame with no `:fullscreen-config' has no layout to restore to."
   (when-let ((saved (and ws (agent-repl--ws-get ws :fullscreen-config))))
-    (set-window-configuration saved)
-    (agent-repl--ws-put ws :fullscreen-config nil)
-    t))
+    (if (agent-repl--fullscreen-config-stale-p ws)
+        (progn
+          (agent-repl--ws-put ws :fullscreen-config nil)
+          (agent-repl--log ws "restore-fullscreen-config: dropped stale config ws=%s" ws)
+          nil)
+      (set-window-configuration saved)
+      (agent-repl--ws-put ws :fullscreen-config nil)
+      t)))
 
 (defvar agent-repl--window-fullscreen-config nil
   "Saved window configuration for non-agent fullscreen toggle.
