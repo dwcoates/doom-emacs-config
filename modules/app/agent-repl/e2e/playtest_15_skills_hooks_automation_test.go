@@ -71,6 +71,16 @@ func p15RunFamily(t *testing.T, s *playtestScenario, rows []p15Row) {
 		s.submit(t, row.prompt)
 		arm := s.awaitArm(t, s.Name, "the turn for "+row.prompt+" to settle", emGHISettledArms...)
 		s.awaitInPage(t, row.prompt+": "+row.asserted, p15Scoped(row.predicate))
+		// THE PICTURE IS OF THE ROW THIS STEP IS ABOUT. Every family here
+		// submits row after row into ONE feed, so from the first row whose
+		// content overflows the viewport onward, the card a step just asserted
+		// is in the picture only if the feed followed its tail. Run 1 caught
+		// exactly that: `03-findings` was pixel-identical to `02-plan` -- the
+		// findings card was in the DOM, the predicate passed, and the screen
+		// still showed the previous row. So the tail being ON SCREEN and clear
+		// of the progress footer is asserted before every capture, which makes
+		// a stale picture a red step rather than a review of the wrong card.
+		s.awaitTailClearsFooter(t)
 		s.Book.capture(row.name, "`"+row.prompt+"` submitted with composer RET, and the turn settled on "+arm,
 			row.asserted+" (asserted inside the page, scoped to this turn's own `data-turn`, after its `turnEnded` row was drawn)",
 			row.expected)
@@ -205,8 +215,9 @@ func TestPlaytestAutomation(t *testing.T) {
 			name:   "plan",
 			prompt: "!plan",
 			predicate: `of('[data-unit="plan"][data-state="planned"] .plan-planned .plan-prose') !== null &&
-			            of('[data-unit="plan"] .plan-edit') !== null`,
-			asserted: "the turn's plan row is in the `planned` arm and carries the rendered plan prose and an edit affordance",
+			            of('[data-unit="plan"] .plan-edit') !== null &&
+			            document.querySelectorAll('[data-feed-row][data-unit="plan"]').length === 1`,
+			asserted: "the turn's plan row is in the `planned` arm, carries the rendered plan prose and an edit affordance, and is the feed's ONLY plan row -- feed.proto: the enter and the exit coalesce onto ONE FeedId",
 			expected: "ONE plan card (the enter and exit calls coalesce onto it) with a green `plan` badge, the " +
 				"three-step plan rendered as a markdown list, and an edit link to the plan file under it. " +
 				"The prose written under plan mode and the response bubble sit around it.",
@@ -227,8 +238,8 @@ func TestPlaytestAutomation(t *testing.T) {
 		{
 			name:   "worktree-keep",
 			prompt: "!worktree-keep",
-			predicate: `document.querySelector('[data-row-kind="separation"][data-arm="worktreeEntered"] .sep-worktree') !== null &&
-			            document.querySelector('[data-row-kind="separation"][data-arm="worktreeLeft"] .sep-worktree[data-left="kept"]') !== null`,
+			predicate: `document.querySelector('[data-row-kind="separation"][data-state="worktreeEntered"] .sep-worktree') !== null &&
+			            document.querySelector('[data-row-kind="separation"][data-state="worktreeLeft"] .sep-worktree[data-left="kept"]') !== null`,
 			asserted: "the feed carries a `worktreeEntered` divider and a `worktreeLeft` divider whose outcome is `kept`",
 			expected: "TWO horizontal dividers in the worktree accent: the first labelled as entering " +
 				"`/w/worktrees/experiment` on `offline/experiment`, the second as leaving it with the path " +
@@ -238,7 +249,7 @@ func TestPlaytestAutomation(t *testing.T) {
 		{
 			name:      "worktree-remove",
 			prompt:    "!worktree-remove",
-			predicate: `document.querySelector('[data-row-kind="separation"][data-arm="worktreeLeft"] .sep-worktree[data-left="removed"] .sep-discarded') !== null`,
+			predicate: `document.querySelector('[data-row-kind="separation"][data-state="worktreeLeft"] .sep-worktree[data-left="removed"] .sep-discarded') !== null`,
 			asserted:  "the feed carries a `worktreeLeft` divider whose outcome is `removed`, with the discard line drawn",
 			expected: "Two more worktree dividers: entering `/w/worktrees/throwaway`, then leaving it with a LOUD " +
 				"discard line stating the 3 files and 1 commit thrown away, and no path link -- there is nowhere " +
