@@ -330,9 +330,14 @@ func TestWriteCreatedAndUpdated(t *testing.T) {
 			wantAdded: 1,
 		},
 		{
+			// THE PRODUCER'S OWN DIFF, not the patch the fixture states.
+			// agent_activity.proto: "The producer diffs after the fact
+			// precisely so a card can show the CHANGE". Both planes diff, so
+			// this hunk is the same whichever of them settles the unit --
+			// which is what stops the drawn card from depending on a race.
 			name:      "updated",
 			scenario:  "write-update",
-			wantLines: []string{"@@ -4,1 +4,2 @@", "  export const four = 4;", "  export const five = 5;"},
+			wantLines: []string{"@@ -2,3 +2,4 @@", "export const two = 2;", "export const three = 3;", "export const four = 4;", "export const five = 5;"},
 			wantAdded: 1,
 		},
 	}
