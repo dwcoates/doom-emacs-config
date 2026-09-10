@@ -18,7 +18,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { installClickExpand } from "../expand.js";
-import { TailFollow, revealNode } from "../scroll.js";
+import { TailFollow, observeScrollBox, revealNode } from "../scroll.js";
 import {
   OpenFeedResponseSchema,
   type OpenFeedResponse,
@@ -88,6 +88,12 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
 
   const scrollBox = deps.scrollBox ?? host.parentElement ?? null;
   const tail = scrollBox === null ? null : new TailFollow(scrollBox);
+  // The tail owner's OTHER two inputs, which only a mount holding the real
+  // element can give it: the box's scroll events and the box's size changes.
+  // The size half is the footer occlusion (see `observeScrollBox`) — the
+  // docked footer settling after a render shrinks this box, and a tail parked
+  // before that shrink is left below the fold with the last bubble clipped.
+  const unobserve = scrollBox === null || tail === null ? null : observeScrollBox(scrollBox, tail);
   let watch: StreamHandle | null = null;
   let disposed = false;
 
@@ -363,6 +369,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     if (disposed) return;
     disposed = true;
     watch?.cancel();
+    unobserve?.();
     root.dispose();
   }
 }
