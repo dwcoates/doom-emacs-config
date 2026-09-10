@@ -51,8 +51,8 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	sort.Slice(repos, func(i, j int) bool { return repos[i] < repos[j] })
 	// THE RUN LOG CARRIES THE RECOVERY ITSELF. Each merge's own fate is a
 	// workspace-scoped record, but "this boot reconciled the merge queues" is a
-	// fact about the restart, and the restart-scoped log is where the daemon's
-	// boot sequence is read.
+	// fact about the restart, and the durable run log is where each daemon
+	// process's boot sequence is read.
 	o.deps.Log.Global().Info(op, "recovering the merge queues", dlog.Context{
 		"repositories": len(repos), "entries": total})
 
@@ -155,7 +155,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "error": decodeErr.Error()}
 		log.Error(op, "refusing the boot: a merge's creation_jobs row will not decode", fields)
 		// AND IN THE RUN LOG: a boot that refuses is a fact about the restart,
-		// and the restart-scoped log is where the boot sequence is read.
+		// and the durable run log is where the boot sequence is read.
 		o.deps.Log.Global().Error(op, "refusing the boot: a merge's creation_jobs row will not decode", fields)
 		return fmt.Errorf("merge: recover %q: %w", ws, decodeErr)
 	}

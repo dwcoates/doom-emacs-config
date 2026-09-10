@@ -179,9 +179,16 @@ func (s *server) ClientLog(
 		Operation:  record.GetOperation(),
 		Message:    record.GetMessage(),
 		Context:    dlog.Context(record.GetContext().AsMap()),
+		Timestamp:  record.GetTimestamp(),
+		Verbose:    record.GetVerbose(),
 	}); err != nil {
 		return nil, fail(subject.Log, rpc, fmt.Errorf("persist a client record: %w", err))
 	}
+	subject.Log.Debug("daemon.server.client_log", "persisted a forwarded client record", dlog.Context{
+		"client_kind": dlog.RuntimeWebapp,
+		"operation":   record.GetOperation(),
+		"verbose":     record.GetVerbose(),
+	})
 	resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 	return connect.NewResponse(resp), nil
 }

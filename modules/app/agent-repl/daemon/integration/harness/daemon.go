@@ -464,6 +464,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 
 	env := append(os.Environ(),
 		"AGENT_REPL_STATE_DIR="+d.StateDir,
+		// The integration suite asserts debug request and transition records.
+		// Production's empty setting is info; the suite states debug explicitly.
+		"AGENT_REPL_LOG_LEVEL=debug",
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		"AGENT_REPL_LOCK_DIR="+d.LockDir,
 		"AGENT_REPL_STORE_SOCKET="+filepath.Join(sockRoot, "unused-store.sock"),
