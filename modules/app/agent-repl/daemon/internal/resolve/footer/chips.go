@@ -130,6 +130,13 @@ func (r *resolver) applyHook(s *wsState, hook *conversationv1.AgentHook) {
 func (r *resolver) applySubagent(s *wsState, unit string, sub *conversationv1.AgentSubagent) {
 	switch item := sub.GetResult().(type) {
 	case *conversationv1.AgentSubagent_Start:
+		// A SPAWN UNIT REPLAYED AFTER ITS RUN SETTLED IS THE SAME REPLAY
+		// OnSubagent guards against, arriving on the CALLER's stream instead:
+		// the handle and the spawn unit are one value, so a start naming a
+		// retired handle re-opened a row the terminal had already taken away.
+		if _, done := s.retiredWork[unit]; done {
+			return
+		}
 		row, ok := s.agents[unit]
 		if !ok {
 			row = &agentRow{spawnUnit: unit, order: s.nextOrder()}
