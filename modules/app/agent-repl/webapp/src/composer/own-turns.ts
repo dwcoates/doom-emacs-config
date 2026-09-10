@@ -27,7 +27,7 @@ const own = new Set<string>();
 /** Remember a turn `SubmitPrompt` minted for this page. */
 export function rememberOwnTurn(turn: TurnId): void {
   own.add(turn.value);
-  log("debug", `this page minted turn ${turn.value}`, {
+  log.debug(`this page minted turn ${turn.value}`, {
     operation: "composer.own-turn",
     context: { turn: turn.value, held: own.size },
   });

@@ -70,7 +70,7 @@ export function foldSection(spec: {
 
   toggle.addEventListener("click", () => {
     const next = toggle.getAttribute(FOLD_STATE_ATTRIBUTE) !== "true";
-    log("debug", `the reader ${next ? "folded" : "unfolded"} a card section`, {
+    log.debug(`the reader ${next ? "folded" : "unfolded"} a card section`, {
       operation: "feed.cards.fold-toggled",
       context: { fold: spec.name, folded: next },
     });

@@ -246,7 +246,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
     const frame = response.frame;
     switch (frame.case) {
       case "attached":
-        log("info", "the page's one standing stream is attached", {
+        log.info("the page's one standing stream is attached", {
           operation: "rpc.page-attached",
           context: { page },
         });
@@ -258,7 +258,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
           // A push for a subscription this page has already dropped. It is the
           // ordinary race between `UnsubscribePage` and the frames already on
           // the wire, not a fault: the daemon stops on its own.
-          log("debug", "a push arrived for a subscription this page had already ended", {
+          log.debug("a push arrived for a subscription this page had already ended", {
             operation: "rpc.page-push-unclaimed",
             context: { page, subscription: frame.value.subscription },
           });
@@ -276,7 +276,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
           // id leaves this map BEFORE the verb is sent, so its `unsubscribed`
           // frame always lands here. Nothing is drawn and nothing above debug
           // is said, because nothing happened that a reader did not ask for.
-          log("debug", "an ending arrived for a subscription this page had already dropped", {
+          log.debug("an ending arrived for a subscription this page had already dropped", {
             operation: "rpc.page-ended-unclaimed",
             context: { page, subscription: ended.subscription, how: String(ended.how.case) },
           });
@@ -286,7 +286,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
           case "unsubscribed":
             // This page asked for it. It reaches a queue only when the ending
             // raced the drop, and it is still the end this page wanted.
-            log("debug", "a page subscription ended at this page's own request", {
+            log.debug("a page subscription ended at this page's own request", {
               operation: "rpc.page-subscription-unsubscribed",
               context: { page, subscription: ended.subscription },
             });
@@ -297,7 +297,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
             // subscription's iterable ends without an error, which is exactly
             // what a dedicated `Watch*` stream concluding cleanly gave its
             // caller — and what the caller does with that is unchanged.
-            log("info", "a page subscription's source finished", {
+            log.info("a page subscription's source finished", {
               operation: "rpc.page-subscription-source-ended",
               context: { page, subscription: ended.subscription },
             });
@@ -323,7 +323,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
               );
             }
             const failure = new ConnectError(ended.how.value.message, code);
-            log("error", `a page subscription failed: ${ended.how.value.message}`, {
+            log.error(`a page subscription failed: ${ended.how.value.message}`, {
               operation: "rpc.page-subscription-failed",
               context: {
                 page,
@@ -418,7 +418,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
       // The page is going away, or already has. It is RECORDED and not
       // reported: the daemon drops every subscription a departed page held, so
       // there is nothing here for a user to see or for this page to fix.
-      log("debug", "a page subscription could not be ended on the daemon", {
+      log.debug("a page subscription could not be ended on the daemon", {
         operation: "rpc.page-unsubscribe-failed",
         context: { page, subscription: id, cause: String(err) },
       });

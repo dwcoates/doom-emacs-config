@@ -77,7 +77,7 @@ export interface EditorLinkSpec {
 export function renderExternalLink(ctx: AppContext, spec: ExternalLinkSpec): HTMLElement {
   const label = spec.text === "" ? spec.url : spec.text;
   if (!LINKABLE_SCHEME.test(spec.url)) {
-    log("warn", `refusing to link a non-http(s) destination; drawing it as text`, {
+    log.warn(`refusing to link a non-http(s) destination; drawing it as text`, {
       operation: "link.unlinkable-scheme",
       context: { url: spec.url },
     });
@@ -166,7 +166,7 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
       (result.value).cause,
       EXTERNAL_SENTENCES,
     );
-    log("warn", `OpenExternal refused ${url}`, {
+    log.warn(`OpenExternal refused ${url}`, {
       operation: "link.open-external-refused",
       context: { url, arm },
     });
@@ -177,7 +177,7 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
       return;
     }
     drawTransportRefusal(refusalHost(anchor));
-    log("error", `OpenExternal failed for ${url}: ${String(err)}`, {
+    log.error(`OpenExternal failed for ${url}: ${String(err)}`, {
       operation: "link.open-external-failed",
       context: { url, cause: err },
     });
@@ -207,7 +207,7 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
       (result.value).cause,
       EDITOR_SENTENCES,
     );
-    log("warn", `OpenInEditor refused ${spec.path}`, {
+    log.warn(`OpenInEditor refused ${spec.path}`, {
       operation: "link.open-in-editor-refused",
       context: { path: spec.path, line: spec.line, arm },
     });
@@ -216,7 +216,7 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
       return;
     }
     drawTransportRefusal(refusalHost(anchor));
-    log("error", `OpenInEditor failed for ${spec.path}: ${String(err)}`, {
+    log.error(`OpenInEditor failed for ${spec.path}: ${String(err)}`, {
       operation: "link.open-in-editor-failed",
       context: { path: spec.path, line: spec.line, cause: err },
     });

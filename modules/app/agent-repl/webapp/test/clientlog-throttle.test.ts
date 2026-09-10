@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
+import { create } from "@bufbuild/protobuf";
 
 import { ClientLogThrottle, type ClientLogSend } from "../src/clientlog-throttle.js";
-import type { ClientLogContext } from "../src/log.js";
 import type { ClientLogLevel } from "../src/log.js";
+import {
+  ClientLogRecordSchema,
+  type ClientLogRecord,
+} from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
-interface SentRecord {
-  level: ClientLogLevel;
-  message: string;
-  context?: ClientLogContext;
+function record(level: ClientLogLevel, message: string): ClientLogRecord {
+  return create(ClientLogRecordSchema, {
+    level: { case: level, value: {} },
+    operation: "test.throttle",
+    message,
+    context: {},
+    timestamp: "2026-09-10T12:00:00.000000-04:00",
+    verbose: false,
+  });
 }
 
 /** A manual timer, so every flush deadline in these tests is fired explicitly. */
@@ -38,19 +47,28 @@ class ManualTimer {
 function harness(options: { accept?: boolean; maxBatch?: number; maxBuffer?: number } = {}): {
   throttle: ClientLogThrottle;
   timer: ManualTimer;
-  sent: SentRecord[];
+  sent: ClientLogRecord[];
   setAccept: (accept: boolean) => void;
 } {
-  const sent: SentRecord[] = [];
+  const sent: ClientLogRecord[] = [];
   let accept = options.accept ?? true;
   const timer = new ManualTimer();
-  const send: ClientLogSend = (level, message, context) => {
+  const send: ClientLogSend = (entry) => {
     if (!accept) return false;
-    sent.push({ level, message, context });
+    sent.push(entry);
     return true;
   };
   const throttle = new ClientLogThrottle({
     send,
+    droppedRecord: (dropped, bufferBound) =>
+      create(ClientLogRecordSchema, {
+        level: { case: "warn", value: {} },
+        operation: "webapp.client-log-throttle-dropped",
+        message: `client log forwarding dropped ${dropped} record(s) over its ${bufferBound}-record buffer bound`,
+        context: { dropped, buffer_bound: bufferBound },
+        timestamp: "2026-09-10T12:00:00.000000-04:00",
+        verbose: false,
+      }),
     intervalMs: 2000,
     maxBatch: options.maxBatch ?? 50,
     maxBuffer: options.maxBuffer ?? 500,
@@ -66,7 +84,7 @@ describe("ClientLogThrottle", () => {
     const { throttle, sent } = harness();
 
     // Act.
-    throttle.write("info", "one");
+    throttle.write(record("info", "one"));
 
     // Assert.
     expect(sent).toEqual([]);
@@ -78,9 +96,9 @@ describe("ClientLogThrottle", () => {
     const { throttle, sent } = harness({ maxBatch: 3 });
 
     // Act.
-    throttle.write("info", "one");
-    throttle.write("info", "two");
-    throttle.write("info", "three");
+    throttle.write(record("info", "one"));
+    throttle.write(record("info", "two"));
+    throttle.write(record("info", "three"));
 
     // Assert.
     expect(sent.map((r) => r.message)).toEqual(["one", "two", "three"]);
@@ -90,7 +108,7 @@ describe("ClientLogThrottle", () => {
   it("flushes buffered records when the interval deadline fires", () => {
     // Arrange.
     const { throttle, timer, sent } = harness();
-    throttle.write("info", "one");
+    throttle.write(record("info", "one"));
     expect(sent).toEqual([]);
 
     // Act.
@@ -103,10 +121,10 @@ describe("ClientLogThrottle", () => {
   it("flushes immediately on an error, carrying the buffered records ahead of it", () => {
     // Arrange.
     const { throttle, sent } = harness();
-    throttle.write("info", "earlier");
+    throttle.write(record("info", "earlier"));
 
     // Act.
-    throttle.write("error", "boom");
+    throttle.write(record("error", "boom"));
 
     // Assert.
     expect(sent.map((r) => r.message)).toEqual(["earlier", "boom"]);
@@ -115,11 +133,11 @@ describe("ClientLogThrottle", () => {
   it("refuses and counts a record that arrives with the buffer bound already full", () => {
     // Arrange.
     const { throttle } = harness({ maxBatch: 50, maxBuffer: 2 });
-    throttle.write("info", "one");
-    throttle.write("info", "two");
+    throttle.write(record("info", "one"));
+    throttle.write(record("info", "two"));
 
     // Act.
-    const accepted = throttle.write("info", "three");
+    const accepted = throttle.write(record("info", "three"));
 
     // Assert.
     expect(accepted).toBe(false);
@@ -130,14 +148,14 @@ describe("ClientLogThrottle", () => {
   it("reports the drop count as its own record ahead of the next flush", () => {
     // Arrange.
     const { throttle, timer, sent } = harness({ maxBuffer: 1 });
-    throttle.write("info", "kept");
-    throttle.write("info", "lost");
+    throttle.write(record("info", "kept"));
+    throttle.write(record("info", "lost"));
 
     // Act.
     timer.fire();
 
     // Assert.
-    expect(sent[0].level).toBe("warn");
+    expect(sent[0].level.case).toBe("warn");
     expect(sent[0].message).toContain("dropped 1 record(s)");
     expect(sent[0].context?.dropped).toBe(1);
     expect(sent.map((r) => r.message.includes("kept"))).toContain(true);
@@ -149,9 +167,9 @@ describe("ClientLogThrottle", () => {
     const { throttle, timer, sent } = harness({ maxBatch: 2, maxBuffer: 10 });
 
     // Act.
-    throttle.write("info", "one");
-    throttle.write("info", "two");
-    throttle.write("info", "three");
+    throttle.write(record("info", "one"));
+    throttle.write(record("info", "two"));
+    throttle.write(record("info", "three"));
 
     // Assert.
     expect(sent.map((r) => r.message)).toEqual(["one", "two"]);
@@ -162,8 +180,8 @@ describe("ClientLogThrottle", () => {
   it("retains a refused record at the head so the next flush retries it in order", () => {
     // Arrange: the transport is down when the deadline fires.
     const { throttle, timer, sent, setAccept } = harness({ accept: false });
-    throttle.write("info", "one");
-    throttle.write("info", "two");
+    throttle.write(record("info", "one"));
+    throttle.write(record("info", "two"));
     timer.fire();
     expect(sent).toEqual([]);
 
@@ -180,8 +198,8 @@ describe("ClientLogThrottle: a refused drop summary", () => {
   it("keeps owing the count when the summary itself is refused", () => {
     // Arrange: one record fits, the second is dropped and counted.
     const { throttle, setAccept, sent } = harness({ maxBuffer: 1 });
-    throttle.write("info", "kept");
-    throttle.write("info", "lost");
+    throttle.write(record("info", "kept"));
+    throttle.write(record("info", "lost"));
     setAccept(false);
 
     // Act: the refused flush must not forget the drop.
@@ -198,8 +216,8 @@ describe("ClientLogThrottle: a refused drop summary", () => {
   it("reports the drop exactly once across the two flushes", () => {
     // Arrange.
     const { throttle, setAccept, sent } = harness({ maxBuffer: 1 });
-    throttle.write("info", "kept");
-    throttle.write("info", "lost");
+    throttle.write(record("info", "kept"));
+    throttle.write(record("info", "lost"));
     setAccept(false);
 
     // Act.

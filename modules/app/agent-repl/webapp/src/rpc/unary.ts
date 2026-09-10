@@ -58,13 +58,13 @@ export async function callUnary<Res extends Message>(
     // would spend a round trip to be told the same thing by a daemon that has
     // already released it.
     const refused = new ConnectError(QUIESCED_MESSAGE, Code.Unavailable);
-    log("warn", `${name} was not sent: ${QUIESCED_MESSAGE}`, {
+    log.warn(`${name} was not sent: ${QUIESCED_MESSAGE}`, {
       operation: "rpc.unary-quiesced",
       context: { rpc: name },
     });
     throw refused;
   }
-  log("debug", `calling ${name}`, { operation: "rpc.unary-call", context: { rpc: name } });
+  log.debug(`calling ${name}`, { operation: "rpc.unary-call", context: { rpc: name } });
   let response: Res;
   try {
     response = await fn(ctx.client);
@@ -73,7 +73,7 @@ export async function callUnary<Res extends Message>(
     // once, by the layer that owns the call; rethrown as ConnectError so every
     // caller has one type to catch regardless of what the fetch threw.
     const connectError = ConnectError.from(err);
-    log("error", `${name} failed at the transport: ${connectError.message}`, {
+    log.error(`${name} failed at the transport: ${connectError.message}`, {
       operation: "rpc.unary-transport-failure",
       context: { rpc: name, code: connectError.code, cause: connectError.rawMessage },
     });
@@ -81,7 +81,7 @@ export async function callUnary<Res extends Message>(
   }
   assertNoUnknownFields(schema, response);
   const arm = outcomeArm(schema, response, name);
-  log("debug", `${name} answered ${arm}`, {
+  log.debug(`${name} answered ${arm}`, {
     operation: "rpc.unary-answered",
     context: { rpc: name, outcome: arm },
   });

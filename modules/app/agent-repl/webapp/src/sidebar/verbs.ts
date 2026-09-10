@@ -134,7 +134,7 @@ const PRIORITY_LABELS: Readonly<Record<PriorityChoice, string>> = {
  * class, and it opens DOWNWARD from the control, clamped inside the rail.
  */
 export function drawRowMenu(target: VerbTarget): HTMLElement {
-  log("debug", "drawing a roster row's verb menu", {
+  log.debug("drawing a roster row's verb menu", {
     operation: "sidebar.verbs.menu",
     context: { workspace: target.workspace.id },
   });
@@ -404,7 +404,7 @@ export function fillAssignSubmenu(submenu: HTMLElement, target: VerbTarget): voi
     { id: "", label: "Unassign" },
     ...target.sc.tasks,
   ];
-  log("debug", "filling the assign-task submenu", {
+  log.debug("filling the assign-task submenu", {
     operation: "sidebar.verbs.assign-choices",
     context: { workspace: target.workspace.id, choices: choices.length },
   });
@@ -512,7 +512,7 @@ export async function runVerb<Res extends VerbResponse>(
       crossCuttingSentence(spec.rpc, cause) ??
       spec.refusalText?.(cause) ??
       unreachableArm(`${spec.rpc}Error.cause`, cause.case);
-    log("warn", `${spec.rpc} was refused`, {
+    log.warn(`${spec.rpc} was refused`, {
       operation: "sidebar.verbs.refused",
       context: { rpc: spec.rpc, arm: cause.case, sentence: say },
     });
@@ -525,7 +525,7 @@ export async function runVerb<Res extends VerbResponse>(
     // sent something this build cannot read, and it travels up loudly rather
     // than being drawn as "could not be reached", which would be a lie.
     if (isMalformedView(err)) throw err;
-    log("error", `${spec.rpc} failed at the transport: ${String(err)}`, {
+    log.error(`${spec.rpc} failed at the transport: ${String(err)}`, {
       operation: "sidebar.verbs.failed",
       context: { rpc: spec.rpc, cause: err },
     });

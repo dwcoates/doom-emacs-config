@@ -41,7 +41,7 @@ const PATH = "FeedUserPrompt";
  * (`markWorkingPrompts` in feed-view.ts) and this stamps only the phase.
  */
 export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
-  log("debug", "drawing a user prompt row", {
+  log.debug("drawing a user prompt row", {
     operation: "feed.draw-user-prompt",
     context: { arm: msg.result.case ?? "unset" },
   });

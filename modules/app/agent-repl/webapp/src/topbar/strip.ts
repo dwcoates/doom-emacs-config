@@ -40,7 +40,7 @@ export function asAnchor(element: HTMLElement, name: string): HTMLElement {
  */
 export function drawTopbarAccount(u: TopbarAccount, tc: TopbarContext): HTMLElement {
   const state = requireCase(u.state, "TopbarAccount.state");
-  log("debug", "drawing the topbar account", {
+  log.debug("drawing the topbar account", {
     operation: "topbar.account",
     context: { arm: state.case },
   });
@@ -65,7 +65,7 @@ export function drawTopbarAccount(u: TopbarAccount, tc: TopbarContext): HTMLElem
       button.textContent = "logged out";
       button.title = "this session's account root has no login; click to log in";
       button.addEventListener("click", () => {
-        log("info", "the reader opened the login from the account chip", {
+        log.info("the reader opened the login from the account chip", {
           operation: "topbar.account-login-clicked",
         });
         // The chip is the call site: its refusal renders on the chip.
@@ -138,7 +138,7 @@ export function drawTopbarSessionLine(u: TopbarSessionLine): HTMLElement {
  */
 export function drawTopbarConnectivity(u: TopbarConnectivity): HTMLElement {
   const color = topbarTone(u.tone);
-  log("debug", "drawing the topbar connectivity glyph", {
+  log.debug("drawing the topbar connectivity glyph", {
     operation: "topbar.connectivity",
     context: { tone: u.tone },
   });

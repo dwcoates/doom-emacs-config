@@ -951,16 +951,17 @@ never that the subroutine itself does the right thing with a directory."
             (when (buffer-live-p buf) (kill-buffer buf)))
           (delete-directory dir t))))))
 
-(ert-deftest agent-repl-itest-host-webview-url-carries-only-workspace-and-dir ()
-  "The webview URL is EXACTLY http://<owning daemon>/?workspace=<id>&dir=<dir>.
+(ert-deftest agent-repl-itest-host-webview-url-carries-workspace-dir-and-log-level ()
+  "The URL carries workspace identity plus the page's logging threshold.
 Kickoff ruling: \"The webview URL is `http://<daemon.addr>/?workspace=<id>
-&dir=<dir>'.\"  fanout §12: \"Nothing else rides the URL\" — no `composer'
-flag and nothing else, ever, in this suite's non-dev-mode mount."
+&dir=<dir>'.\"  Logging adds `log_level'; no `composer' flag or other view
+state rides this suite's non-dev-mode mount."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
       (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
       (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--frontend-getenv) (lambda (_name) nil))
                 ;; The xwidget itself is an external boundary and this test is
                 ;; about the URL the mount asks for, not the widget behind it.
                 ((symbol-function 'agent-repl--frontend-webview-live-widget)
@@ -973,7 +974,7 @@ flag and nothing else, ever, in this suite's non-dev-mode mount."
         (agent-repl-itest--wait-until (lambda () agent-repl-itest-webview-urls) nil
                                       "the webview mount to record a URL")
         (should (equal agent-repl-itest-webview-urls
-                       (list (format "http://%s/?workspace=%s&dir=%s"
+                       (list (format "http://%s/?workspace=%s&dir=%s&log_level=info"
                                     (agent-repl-itest-daemon-address daemon)
                                     (url-hexify-string (plist-get ref :id))
                                     (url-hexify-string (plist-get ref :dir))))))))))
@@ -1582,6 +1583,7 @@ was asked for."
                          (lambda () successor-conn))
                         ((symbol-function 'agent-repl--frontend-xwidget-available-p)
                          (lambda () t))
+                        ((symbol-function 'agent-repl--frontend-getenv) (lambda (_name) nil))
                         ((symbol-function 'agent-repl--frontend-webview-live-widget)
                          (lambda (&rest _) 'fake-widget))
                         ;; The mount arms the load watcher on whatever the live
@@ -1603,7 +1605,7 @@ was asked for."
                                               "the webview redial")
                 (should (equal 1 (length navigated)))
                 (should (equal (car navigated)
-                               (format "http://%s/?workspace=%s&dir=%s"
+                               (format "http://%s/?workspace=%s&dir=%s&log_level=info"
                                        (agent-repl-itest-daemon-address successor)
                                        (url-hexify-string (plist-get ref :id))
                                        (url-hexify-string (plist-get ref :dir)))))

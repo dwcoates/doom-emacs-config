@@ -48,7 +48,7 @@ export async function guardMalformed(
     return false;
   } catch (err) {
     if (!isMalformedView(err)) throw err;
-    log("error", `the daemon's answer could not be read: ${err.message}`, {
+    log.error(`the daemon's answer could not be read: ${err.message}`, {
       operation: `${operation}-undecodable`,
       context: { path: err.path, cause: err.detail },
     });

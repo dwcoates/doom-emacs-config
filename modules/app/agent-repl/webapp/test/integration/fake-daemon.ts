@@ -339,6 +339,8 @@ export interface FakeDaemon {
    * entries for one document means the mux opened a second stream.
    */
   attachedPages(): string[];
+  /** Resolve once PAGE no longer holds its `WatchPage` stream. */
+  awaitPageDetached(page: string): Promise<void>;
   /**
    * The live subscription ids on PAGE, in the order they were subscribed.
    *
@@ -966,6 +968,14 @@ export function createFakeDaemon(): FakeDaemon {
   }
 
   const pageStates = new Map<string, PageState>();
+  const pageDetachWaiters = new Map<string, Array<() => void>>();
+
+  /** Wake tests waiting for the server-side `WatchPage` finally to finish. */
+  const notifyPageDetached = (page: string): void => {
+    const waiters = pageDetachWaiters.get(page) ?? [];
+    pageDetachWaiters.delete(page);
+    for (const resolve of waiters) resolve();
+  };
 
   /**
    * The page a control is about.
@@ -1400,7 +1410,10 @@ export function createFakeDaemon(): FakeDaemon {
           // for a reader that no longer exists.
           for (const [, controller] of state.subscriptions) controller.abort();
           state.subscriptions.clear();
-          if (pageStates.get(page) === state) pageStates.delete(page);
+          if (pageStates.get(page) === state) {
+            pageStates.delete(page);
+            notifyPageDetached(page);
+          }
         }
       },
       subscribePage(request) {
@@ -1746,6 +1759,14 @@ export function createFakeDaemon(): FakeDaemon {
     },
     attachedPages() {
       return [...pageStates.keys()];
+    },
+    awaitPageDetached(page) {
+      if (!pageStates.has(page)) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        const waiters = pageDetachWaiters.get(page) ?? [];
+        waiters.push(resolve);
+        pageDetachWaiters.set(page, waiters);
+      });
     },
     pageSubscriptions(page) {
       return [...requirePage(page, "pageSubscriptions").subscriptions.keys()];

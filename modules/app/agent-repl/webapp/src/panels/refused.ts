@@ -41,7 +41,7 @@ export function drawFeedCommandRefused(u: FeedCommandRefused, rc: RowContext): H
   const path = "FeedCommandRefused";
   const command = requireMessage(u.command, `${path}.command`);
   const reason = requireMessage(u.reason, `${path}.reason`);
-  log("debug", "drawing a command-refused card", {
+  log.debug("drawing a command-refused card", {
     operation: "panels.command-refused",
     context: { command: command.text, offer: u.addSupport !== undefined },
   });
@@ -68,7 +68,7 @@ export function drawFeedCommandRefusedCommand(
   u: FeedCommandRefusedCommand,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a refused command", {
+  log.debug("drawing a refused command", {
     operation: "panels.command-refused.command",
     context: { path, command: u.text },
   });
@@ -84,7 +84,7 @@ export function drawFeedCommandRefusedReason(
   u: FeedCommandRefusedReason,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a refusal reason", {
+  log.debug("drawing a refusal reason", {
     operation: "panels.command-refused.reason",
     context: { path },
   });
@@ -106,7 +106,7 @@ export function drawFeedCommandAddSupportOffer(
   command: string,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing an add-support offer", {
+  log.debug("drawing an add-support offer", {
     operation: "panels.command-refused.offer",
     context: { path, command },
   });
@@ -157,7 +157,7 @@ async function requestSupport(
       note.setAttribute("data-support-note", "");
       note.textContent = "support workspace created";
       row.appendChild(note);
-      log("info", `RequestCommandSupport created a workspace for ${command}`, {
+      log.info(`RequestCommandSupport created a workspace for ${command}`, {
         operation: "panels.command-refused.support-created",
         context: { command },
       });
@@ -171,7 +171,7 @@ async function requestSupport(
     );
     const say = crossCuttingSentence("RequestCommandSupport", cause) ?? requestCommandSupportRefusal(cause);
     drawRefusal(row, cause.case, say);
-    log("warn", `RequestCommandSupport refused ${command}`, {
+    log.warn(`RequestCommandSupport refused ${command}`, {
       operation: "panels.command-refused.support-refused",
       context: { command, arm: cause.case, sentence: say },
     });
@@ -181,7 +181,7 @@ async function requestSupport(
     // being unreachable; it travels up rather than being mislabelled.
     if (isMalformedView(err)) throw err;
     drawRefusal(row, "error", "the daemon could not be reached");
-    log("error", `RequestCommandSupport failed for ${command}: ${String(err)}`, {
+    log.error(`RequestCommandSupport failed for ${command}: ${String(err)}`, {
       operation: "panels.command-refused.support-failed",
       context: { command, cause: err },
     });

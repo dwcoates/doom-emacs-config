@@ -85,7 +85,7 @@ export function mountLoginOverlay(
   ctx: AppContext,
   deps: LoginOverlayDeps = {},
 ): LoginHandle {
-  log("debug", "mounting the login overlay", { operation: "login.mount" });
+  log.debug("mounting the login overlay", { operation: "login.mount" });
   const terminalFactory = deps.terminalFactory ?? xtermFactory;
   const link = deps.link ?? connectLoginLink(ctx);
 
@@ -147,7 +147,7 @@ export function mountLoginOverlay(
     if (session !== null || opening) {
       // Per-account idempotent daemon-side, and idempotent here too: a second
       // click while one login is up must not build a second terminal over it.
-      log("debug", "a login overlay is already open; the click joins it", {
+      log.debug("a login overlay is already open; the click joins it", {
         operation: "login.open-already",
       });
       return;
@@ -189,7 +189,7 @@ export function mountLoginOverlay(
       void start(control);
     },
     dispose(): void {
-      log("debug", "disposing the login overlay", { operation: "login.dispose" });
+      log.debug("disposing the login overlay", { operation: "login.dispose" });
       teardown();
       host.hidden = true;
       host.replaceChildren();
@@ -202,7 +202,7 @@ export function mountLoginOverlay(
  * when it refused — the refusal is already stated in the header.
  */
 export async function openLogin(ctx: AppContext, header: HTMLElement): Promise<string | null> {
-  log("info", "opening the account login", { operation: "login.open" });
+  log.info("opening the account login", { operation: "login.open" });
   let response;
   try {
     response = await callUnary(
@@ -240,7 +240,7 @@ export async function closeLogin(
   header: HTMLElement,
   hide: () => void,
 ): Promise<void> {
-  log("info", "closing the account login", { operation: "login.close" });
+  log.info("closing the account login", { operation: "login.close" });
   let response;
   try {
     response = await callUnary(
@@ -312,7 +312,7 @@ export async function pump(
   } catch (err) {
     if (controller.signal.aborted) return;
     const cause = err instanceof Error ? err.message : String(err);
-    log("error", `the login terminal stream failed: ${cause}`, {
+    log.error(`the login terminal stream failed: ${cause}`, {
       operation: "login.stream-failed",
       context: { cause },
     });
@@ -324,7 +324,7 @@ export async function pump(
   if (!concluded) {
     // The producer ended without saying the child exited. That is not a login
     // that finished; it is a link that went away mid-login.
-    log("error", "the login terminal stream ended without a closed frame", {
+    log.error("the login terminal stream ended without a closed frame", {
       operation: "login.stream-ended-early",
     });
     ctx.failures.report(controlPlaneFailed("login terminal", "the stream ended without a closed frame"));
@@ -340,7 +340,7 @@ export function handleFrame(frame: LoginTerminalOutput, terminal: LoginTerminalV
       terminal.write(output.value.data);
       return false;
     case "closed":
-      log("info", "the login child exited; closing the overlay", {
+      log.info("the login child exited; closing the overlay", {
         operation: "login.child-exited",
       });
       return true;

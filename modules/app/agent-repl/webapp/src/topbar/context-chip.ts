@@ -43,7 +43,7 @@ const DEPTH_INDENT_REM = 0.75;
  */
 export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): HTMLElement {
   const breakdown = requireMessage(u.breakdown, "TopbarContextChip.breakdown");
-  log("debug", "drawing the context chip", {
+  log.debug("drawing the context chip", {
     operation: "topbar.context-chip",
     context: { sections: breakdown.sections.length },
   });

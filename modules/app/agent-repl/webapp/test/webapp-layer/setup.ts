@@ -17,7 +17,7 @@ installResizeObserver();
  * before any runtime work" invariant in a `beforeEach`, which is early enough
  * for a suite that mounts inside `it`. This layer mounts ONCE per file in
  * `beforeAll` — one real daemon, one page, many scenarios — and `beforeAll`
- * runs before any `beforeEach`, so without this the very first `log()` on the
+ * runs before any `beforeEach`, so without this the first canonical log call on the
  * boot path throws "the webapp logger is not installed".
  *
  * THIS PROJECT DOES NOT LOAD `test/setup.ts` (see
@@ -53,12 +53,8 @@ installResizeObserver();
  *   all eleven                4775ms       7147ms   (+50%)
  *   the Go areas, wall         14.1s        19.1s   (+35%)
  *
- * Every file got slower and the two heaviest gained ~0.5s and ~0.9s, against a
- * 900ms per-test bound this layer does not widen. It is the same term
- * `test/integration/client-log.integration.test.ts` measured against the fake
- * daemon (a boot alone emits ~56 records, each its own unary round trip) —
- * smaller here, because this layer is eleven serial files rather than 1600
- * tests, but not small enough to spend on every file for nothing. So:
+ * Every file got slower and the two heaviest gained ~0.5s and ~0.9s. The cost
+ * comes from each admitted record being its own unary round trip. So:
  * forwarding is per-file and opt-in, and `client-log.layer.test.ts` — the file
  * that proves a browser record reaches the daemon's `webapp.log` carrying its
  * correlation identity — is the file that takes it.

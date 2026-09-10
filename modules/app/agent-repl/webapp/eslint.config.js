@@ -181,6 +181,29 @@ export default tseslint.config(
     rules: { "no-console": "off" },
   },
 
+  // ---- the one logger boundary ---------------------------------------
+  {
+    // main.ts owns the sanctioned `ClientLog` sink and log.ts owns every
+    // record. Everywhere else a direct rpc call or the retired generic
+    // `log(level, ...)` spelling bypasses the one-method-per-level API.
+    files: ["src/**/*.ts"],
+    ignores: ["src/log.ts", "src/main.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.type='Identifier'][callee.name='log']",
+          message: "Use log.debug/info/warn/error from src/log.ts.",
+        },
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.property.name='clientLog']",
+          message: "ClientLog is owned by the sink in src/main.ts; emit through src/log.ts.",
+        },
+      ],
+    },
+  },
+
   // ---- the build/test configuration at the package root ---------------
   {
     // These are outside tsconfig.json's program, so they get the syntax-level

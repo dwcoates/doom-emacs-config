@@ -86,9 +86,13 @@ Emacs (lisp)
   from a diagnostic that must be a record.
 - the six rungs stay as thin wrappers, but one function builds every record.
 
-Webapp
-- send the client instant and verbosity class on every forwarded record
-  (proto landed); remove the dead localStorage verbose toggle.
+Webapp (closed 2026-09-10)
+- forwarded records carry the client's RFC 3339 instant and verbosity class;
+  protobuf context contains call-site evidence and bound identities rather
+  than a nested copy of the whole record.
+- one `log` object exposes one method per level. The retired client-only
+  verbose-console switch is gone, and the existing webview URL boot seam
+  delivers `AGENT_REPL_LOG_LEVEL` as `log_level` without a rebuild.
 
 Reader and docs
 - `bin/logs.sh` as specified; the module AGENTS.md "Logs" section (path,

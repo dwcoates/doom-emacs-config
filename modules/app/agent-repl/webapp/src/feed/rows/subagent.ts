@@ -116,7 +116,7 @@ export function drawFeedDetachedSubagent(
 /** The head line. */
 export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement {
   const state = requireCase(msg.state, `${PATH}.state`);
-  log("debug", `drawing a subagent head as ${state.case}`, {
+  log.debug(`drawing a subagent head as ${state.case}`, {
     operation: "feed.draw-subagent",
     context: { arm: state.case, detached: isDetachedRow(rc) },
   });
@@ -260,7 +260,7 @@ function drawStopControl(rc: RowContext): HTMLElement {
 async function stop(rc: RowContext, wrap: HTMLElement): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearOutcome(wrap);
-  log("info", "stopping a detached subagent", {
+  log.info("stopping a detached subagent", {
     operation: "feed.subagent-stop",
     context: { row: id.value },
   });

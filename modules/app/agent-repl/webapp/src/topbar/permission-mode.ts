@@ -48,7 +48,7 @@ export function drawTopbarPermissionModePicker(
   tc: TopbarContext,
 ): HTMLElement {
   const current = requireMessage(u.current, "TopbarPermissionModePicker.current");
-  log("debug", "drawing the permission-mode picker", {
+  log.debug("drawing the permission-mode picker", {
     operation: "topbar.permission-mode",
     context: { mode: current.mode, options: u.options.length },
   });
@@ -113,7 +113,7 @@ export async function pickPermissionMode(
   button: HTMLButtonElement,
   row: HTMLButtonElement,
 ): Promise<void> {
-  log("info", `the reader picked the permission mode ${option.mode}`, {
+  log.info(`the reader picked the permission mode ${option.mode}`, {
     operation: "topbar.permission-mode-picked",
     context: { mode: option.mode },
   });

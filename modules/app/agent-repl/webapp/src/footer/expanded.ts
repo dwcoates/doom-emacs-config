@@ -118,7 +118,7 @@ export function drawFooterExpanded(
 ): HTMLElement | null {
   if (selection === null) return null;
   const path = "FooterExpanded";
-  log("debug", `drawing the expanded footer panel: ${selection}`, {
+  log.debug(`drawing the expanded footer panel: ${selection}`, {
     operation: "footer.expanded",
     context: { panel: selection },
   });
@@ -722,7 +722,7 @@ async function jump(row: HTMLElement, target: FeedId, deps: ExpandedDeps): Promi
   note.className = "footer-row-unreachable";
   note.textContent = "not on screen";
   row.appendChild(note);
-  log("warn", "a footer jump target could not be revealed", {
+  log.warn("a footer jump target could not be revealed", {
     operation: "footer.expanded.jump-unreachable",
     context: { target: target.value },
   });

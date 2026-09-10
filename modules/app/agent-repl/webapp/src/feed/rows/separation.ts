@@ -66,7 +66,7 @@ export function drawFeedSessionSeparation(
   rc: RowContext,
 ): HTMLElement {
   const kind = requireCase(msg.kind, `${PATH}.kind`);
-  log("debug", `drawing a separation row as ${kind.case}`, {
+  log.debug(`drawing a separation row as ${kind.case}`, {
     operation: "feed.draw-separation",
     context: { arm: kind.case, has_tokens: msg.tokens !== undefined },
   });
@@ -175,7 +175,7 @@ export function drawFeedContextCutCompacted(
   apply(folded);
   toggle.addEventListener("click", () => {
     const next = toggle.getAttribute("data-folded") !== "true";
-    log("debug", `the reader ${next ? "folded" : "unfolded"} a compaction summary`, {
+    log.debug(`the reader ${next ? "folded" : "unfolded"} a compaction summary`, {
       operation: "feed.separation-fold-toggled",
       context: { folded: next },
     });
@@ -207,7 +207,7 @@ export function drawFeedContextCutColdRead(coldRead: FeedContextCutColdRead): HT
   el.className = "sep-cold-read";
   el.setAttribute("data-cold-read", "true");
   el.textContent = `read cold: ${evidence.uncachedInputTokens.toString()} uncached input tokens`;
-  log("warn", "a compaction re-read the whole conversation at the uncached rate", {
+  log.warn("a compaction re-read the whole conversation at the uncached rate", {
     operation: "feed.separation-cold-read",
     context: { uncached_input_tokens: evidence.uncachedInputTokens.toString() },
   });
@@ -230,7 +230,7 @@ export function drawFeedContextCutCompactionFailed(
   el.className = "sep-compaction-failed";
   el.setAttribute("data-compaction-failed", "true");
   el.textContent = failed.error;
-  log("warn", "a compaction was offered and did not happen", {
+  log.warn("a compaction was offered and did not happen", {
     operation: "feed.separation-compaction-failed",
     context: { error: failed.error },
   });

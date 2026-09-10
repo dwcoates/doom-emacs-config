@@ -69,7 +69,7 @@ export function drawTopbarFastMode(
     }
   }
 
-  log("debug", "drawing the fast-mode cell", {
+  log.debug("drawing the fast-mode cell", {
     operation: "topbar.fast-mode",
     context: { state: state.case },
   });

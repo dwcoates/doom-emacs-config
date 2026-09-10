@@ -85,7 +85,7 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
     const tabs = mergeTabsOf(view.rows());
     releasePickOnNewTab(tabs);
     const active = tabs.find((t) => t.id === picked) ?? autoSelectedTab(tabs);
-    log("debug", "drawing a merge bubble body", {
+    log.debug("drawing a merge bubble body", {
       operation: "merge.draw-body",
       context: { tabs: tabs.length, active: active?.kind ?? "none", picked: picked ?? "auto" },
     });
@@ -151,7 +151,7 @@ export function drawLooseRows(
     if (row.row.case === "mergeTab") continue;
     const parent = row.parent?.row?.value;
     if (parent !== undefined && placed.has(parent)) continue;
-    log("warn", "a merge sub-feed row names no drawn tab; drawing it beneath the strip", {
+    log.warn("a merge sub-feed row names no drawn tab; drawing it beneath the strip", {
       operation: "merge.unplaced-row",
       context: { row: row.id?.value ?? "unset", parent: parent ?? "none" },
     });

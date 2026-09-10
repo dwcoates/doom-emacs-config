@@ -7,7 +7,7 @@
  * going wrong.
  *
  * THE ORDER IS FORCED, not chosen, and the forcing constraint is that
- * `log()` REFUSES to emit without an installed sink:
+ * the canonical `log` methods REFUSE to emit without an installed sink:
  *   1. the page address, because everything below is addressed to a workspace
  *      and a page without one has nothing to show — and it logs nothing;
  *   2. the transport and client, because the LOGGER's sink is an rpc on that
@@ -96,7 +96,8 @@ export async function boot(): Promise<void> {
     // THE LOGGER GOES IN BEFORE THE FIRST THING THAT LOGS, AND THAT ORDER IS
     // THE WHOLE OF THIS BLOCK'S SHAPE.
     //
-    // `log()` REFUSES to emit without an installed sink -- `emit` throws "the
+    // The canonical `log` methods REFUSE to emit without an installed sink --
+    // `emit` throws "the
     // webapp logger is not installed" rather than discarding the record --
     // and TWO of the boot's own steps log as their first statement:
     // `shellElements` announces the shell it is resolving, and
@@ -128,7 +129,14 @@ export async function boot(): Promise<void> {
       workspace_id: workspace.id,
       workspace_dir: workspace.dir,
     });
-    setLogger(new ForwardingLogger(clientLogSink(() => client, workspace)));
+    setLogger(
+      new ForwardingLogger(
+        clientLogSink(() => client, workspace),
+        undefined,
+        {},
+        address.logLevel,
+      ),
+    );
 
     // AND THE SHELL IS RESOLVED INSIDE THE TRY, not above it, because it
     // logs and therefore has to come after the sink. Its failure now goes
@@ -150,7 +158,7 @@ export async function boot(): Promise<void> {
       page: connectionId,
     });
     opened = ctx;
-    log("info", "the webapp booted", {
+    log.info("the webapp booted", {
       operation: "main.boot",
       context: {
         connection_id: connectionId,
@@ -241,14 +249,14 @@ export async function boot(): Promise<void> {
  *
  * The overlay when it exists, and the emergency console path when it does not
  * — which is the case for a failure in the page address or the transport,
- * before there is any surface at all. Logging through `log()` is not available
+ * before there is any surface at all. Logging through `log.error()` is not available
  * either: the logger's own sink is built inside the block that just threw.
  */
 function reportBootFailure(err: unknown, overlay: FailureOverlayHandle | null): void {
   const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
   if (overlay !== null) {
     overlay.report(bootFailed(cause));
-    log("error", `the webapp failed to boot: ${cause}`, {
+    log.error(`the webapp failed to boot: ${cause}`, {
       operation: "main.boot-failed",
       context: { cause },
     });

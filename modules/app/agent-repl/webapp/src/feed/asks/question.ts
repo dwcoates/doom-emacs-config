@@ -78,7 +78,7 @@ export const QUESTION_STATE_ARMS: readonly string[] = ["open", "answered", "expi
 /** The question card. */
 export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
   const state = requireCase(u.state, `${PATH}.state`);
-  log("debug", "drawing a question card", {
+  log.debug("drawing a question card", {
     operation: "feed.asks.question",
     context: { state: state.case, questions: u.questions.length },
   });
@@ -133,7 +133,7 @@ export function drawFeedQuestionItem(
 ): { el: HTMLElement; collect: QuestionCollector } {
   const options = requireCase(u.options, `${path}.options`);
   const text = requireMessage(u.text, `${path}.text`);
-  log("debug", "drawing a question item", {
+  log.debug("drawing a question item", {
     operation: "feed.asks.question.item",
     context: { path, mode: options.case, options: options.value.options.length },
   });
@@ -212,7 +212,7 @@ export function drawFeedQuestionHeader(
   u: FeedQuestionHeader,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a question header chip", {
+  log.debug("drawing a question header chip", {
     operation: "feed.asks.question.header",
     context: { path },
   });
@@ -224,7 +224,7 @@ export function drawFeedQuestionHeader(
 
 /** The question text, drawn verbatim (and echoed verbatim by the answer). */
 export function drawFeedQuestionText(u: FeedQuestionText, path: string): HTMLElement {
-  log("debug", "drawing a question's text", {
+  log.debug("drawing a question's text", {
     operation: "feed.asks.question.text",
     context: { path },
   });
@@ -247,7 +247,7 @@ export function drawFeedQuestionOption(
   path: string,
 ): { el: HTMLElement; input: HTMLInputElement } {
   const label = requireMessage(u.label, `${path}.label`);
-  log("debug", "drawing a question option", {
+  log.debug("drawing a question option", {
     operation: "feed.asks.question.option",
     context: { path, description: u.description !== undefined },
   });
@@ -282,7 +282,7 @@ export function drawFeedQuestionAnswered(
   rc: RowContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing an answered question card", {
+  log.debug("drawing an answered question card", {
     operation: "feed.asks.question.answered",
     context: { path, answers: u.answers.length },
   });
@@ -300,7 +300,7 @@ export function drawFeedQuestionGivenAnswer(
   u: FeedQuestionGivenAnswer,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a given answer", {
+  log.debug("drawing a given answer", {
     operation: "feed.asks.question.given",
     context: { path, chosen: u.chosen.length, other: u.otherText !== undefined },
   });
@@ -332,7 +332,7 @@ export function drawFeedQuestionExpired(
   rc: RowContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing an expired question card", {
+  log.debug("drawing an expired question card", {
     operation: "feed.asks.question.expired",
     context: { path },
   });
@@ -379,7 +379,7 @@ async function send(
   const missing = collected.filter((one) => one.answer === undefined);
   if (missing.length > 0) {
     for (const one of missing) one.note.hidden = false;
-    log("info", "a question batch was submitted with unanswered questions", {
+    log.info("a question batch was submitted with unanswered questions", {
       operation: "feed.asks.question.incomplete",
       context: { row: id.value, missing: missing.length, of: collected.length },
     });
@@ -387,7 +387,7 @@ async function send(
   }
 
   const answers = collected.map((one) => one.answer as QuestionAnswer);
-  log("info", "answering a question batch", {
+  log.info("answering a question batch", {
     operation: "feed.asks.question.answer",
     context: { row: id.value, answers: answers.length },
   });
