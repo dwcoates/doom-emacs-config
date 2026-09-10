@@ -14,6 +14,7 @@ import (
 const (
 	OpPushSessionUpdate = "push_session_update"
 	OpPushAgentFrame    = "push_agent_frame"
+	OpPushUserPrompt    = "push_user_prompt"
 	OpPushBash          = "push_bash"
 	OpAnswer            = "answer"
 	OpExpect            = "expect"
@@ -110,6 +111,10 @@ func ParseCommand(line []byte) (Command, error) {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}
 	case OpPushAgentFrame:
+		if c.Payload == "" {
+			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
+		}
+	case OpPushUserPrompt:
 		if c.Payload == "" {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}
