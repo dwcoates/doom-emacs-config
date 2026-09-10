@@ -66,12 +66,14 @@ import (
 // The strip says which window and that the figures are stale; the sheet says
 // everything.
 //
-// SO IS `resets in 0m`. catalogs.ts fixes the sampled windows at absolute
-// instants in 2026-08-29 / 2026-09-02, which are now in the past, so a
-// countdown drawn off the SAMPLE reads `0m` while one drawn off a rate-limit
-// EVENT (minted at `now + 3600s`) counts down properly. Also filed: it is
-// the fake's fixture, and its determinism is what the golden conformance
-// corpora rest on.
+// `resets in 0m` WAS filed here and is now FIXED at the source. catalogs.ts
+// used to fix the sampled windows at absolute instants in 2026-08-29 /
+// 2026-09-02, so a countdown drawn off the SAMPLE read `0m` while one drawn
+// off a rate-limit EVENT (minted at `now + 3600s`) counted down properly. The
+// fixture now states both reset instants as OFFSETS from the fake's own clock
+// (five hours and seven days), so a sampled countdown is always in the future
+// and stays deterministic under an injected clock. The unread-arm section
+// below asserts the drawn countdown is not `0m`, so the rot cannot return.
 
 // fsRow is one row of a footer-and-sidebar table: what the user submits,
 // the DRAWN fact the capture waits on, and what the picture must show.
@@ -165,6 +167,24 @@ func fsJoin(prompts []string) string {
 func fsPercent(allowance string) string {
 	return `(function () { var el = document.querySelector('.footer-allowance[data-allowance="` + allowance + `"] [data-datum="percent"]');
                          return el ? el.textContent : ""; })()`
+}
+
+// fsCountdown is the JavaScript for one allowance cell's drawn countdown, or
+// "" when that allowance is not drawn.
+//
+// A SAMPLED window's countdown is what caught the fixture rot: catalogs.ts
+// used to fix its reset instants absolutely, so this read ` · resets in 0m`
+// while a rate-limit EVENT's countdown ran. The fixture now states the reset
+// as an offset from the fake's own clock, and fsRunningCountdown pins that.
+func fsCountdown(allowance string) string {
+	return `(function () { var el = document.querySelector('.footer-allowance[data-allowance="` + allowance + `"] [data-countdown]');
+                         return el ? el.textContent : ""; })()`
+}
+
+// fsRunningCountdown holds when one allowance's countdown is drawn AND has not
+// run out -- the sampled window resets in the future, never at `0m`.
+func fsRunningCountdown(allowance string) string {
+	return fsCountdown(allowance) + ` !== "" && ` + fsCountdown(allowance) + ` !== " \u00b7 resets in 0m"`
 }
 
 // fsAllowanceArm is the JavaScript for one allowance cell's status arm, or
@@ -395,17 +415,19 @@ func TestPlaytestFooterUsageOutcomes(t *testing.T) {
 	unread := func(sample, sentence string) string {
 		return fsUnread + ` === "` + sample + `" && ` + fsUnreadText + ` === "` + fsMarkerWording + `" && ` +
 			fsUnreadTitle + `.indexOf("` + sentence + `") === 0 && ` + fsUnreadOnGlass + ` && ` +
-			fsPercent("session") + ` === "` + fsStandingSession + `" && ` + fsPercent("weekly") + ` === "` + fsStandingWeekly + `"`
+			fsPercent("session") + ` === "` + fsStandingSession + `" && ` + fsPercent("weekly") + ` === "` + fsStandingWeekly + `" && ` +
+			fsRunningCountdown("session") + ` && ` + fsRunningCountdown("weekly")
 	}
 	beside := func(sentence string) string {
-		return "The footer's activity cell reads `session 41% · resets in 0m` in the plain tone (41% is not " +
+		return "The footer's activity cell reads `session 41% · resets in 4h 59m` in the plain tone (41% is not " +
 			"newsworthy, so nothing is bold) and ENDS AT THE CELL'S RIGHT with `| usage unread` in the muted italic " +
 			"caveat register. The marker is ON THE GLASS -- this step measures its box inside the strip's visible " +
 			"width -- and `weekly 63%` is what the cell gave up instead, asserted in the DOM here. The caveat's own " +
 			"words, `" + sentence + "`, are the marker's hover title (asserted verbatim here) and a row of the tokens " +
-			"sheet. The `0m` is the fake's own fixed reset instant, now in the past, and remains this section's filed " +
-			"finding. What the picture must show is the figures STANDING (the caveat never replaced them) and the " +
-			"marker drawn whole rather than cut."
+			"sheet. The countdown is LIVE and runs off the fake's sampled window, which resets five hours after the " +
+			"fake's own now, so the exact minutes depend on when the capture was taken. What the picture must show is " +
+			"the figures STANDING (the caveat never replaced them), a countdown that is NOT `0m`, and the marker " +
+			"drawn whole rather than cut."
 	}
 
 	s.run(t, []fsRow{

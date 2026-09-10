@@ -602,6 +602,35 @@ describe("session facts with no message behind them", () => {
     watch.close();
   });
 
+  test("!usage-full's sampled five-hour window resets AFTER the sample was taken", async () => {
+    // The fixture's reset instants are stated as OFFSETS from the fake's own
+    // clock. They used to be absolute instants in the past, which made every
+    // countdown drawn off a SAMPLE read `resets in 0m` while one drawn off a
+    // rate-limit EVENT counted down — so this asserts the ordering the drawn
+    // countdown depends on, against the sample's own stamp rather than the
+    // wall clock.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!usage-full" }));
+    const frame = await watch.until((f) => {
+      const update = sessionUpdate(f);
+      return (
+        update.update.case === "accountUsage" && update.update.value.outcome.case === "available"
+      );
+    });
+
+    const update = sessionUpdate(frame);
+    if (update.update.case !== "accountUsage") throw new Error("expected account_usage");
+    const sample = update.update.value;
+    if (sample.outcome.case !== "available") throw new Error("expected the available arm");
+    expect(
+      Number(sample.outcome.value.fiveHour?.resetsAtMs ?? 0n) - Number(sample.observedAtMs),
+    ).toBeGreaterThan(0);
+    watch.close();
+  });
+
   // The four unavailable shapes are DISTINCT on the wire (rate_limits null, a
   // null WINDOW, a null utilization inside a present window, behaviors null),
   // so each is its own test rather than one "unavailable" assertion.
