@@ -109,6 +109,7 @@
 (defvar persp-set-frame-buffer-predicate)
 (defvar persp-autokill-buffer-on-remove)
 (defvar +workspaces-switch-project-function)
+(defvar +workspaces-on-switch-project-behavior)
 
 (cl-defstruct agent-repl-instantiation
   "Per-environment session state for a Agent REPL workspace.
@@ -1931,11 +1932,47 @@ magit status when it has none."
       (agent-repl--log nil "ws-switch-project-display: dir=%s branch=magit-status" dir)
       (agent-repl--magit-status-same-window dir)))))
 
-(with-eval-after-load 'persp-mode
+(defun agent-repl--ws-install-persp-policy ()
+  "Install agent-repl's persp-mode policy into persp-mode's own variables.
+
+A NAMED FUNCTION rather than a bare `with-eval-after-load\=' body, because
+the policy is a claim about how the module behaves and a claim nothing
+can call is a claim nothing can check: this is the one place the settings
+are written, and `lisp/test-workspace.el\=' exercises it directly instead
+of arranging for persp-mode to load inside a batch Emacs.
+
+Run from the `persp-mode\=' after-load below, which is the only caller in
+the product."
   ;; What a project switch lands on -- a workspace's own panel, or magit
   ;; for a plain project with nothing open.  See the function's docstring.
   (setq +workspaces-switch-project-function
         #'agent-repl--ws-switch-project-display)
+  ;; A PROJECT SWITCH ALWAYS MAKES ITS OWN WORKSPACE, AND NEVER RECYCLES THE
+  ;; ONE IT LEAVES.  This is the second half of the fact the line above is the
+  ;; first half of: the panel is a webview buffer and is deliberately not a
+  ;; `doom-real-buffer-list' member, so an agent-repl workspace showing its
+  ;; agent looks EMPTY to Doom.
+  ;;
+  ;; Under the `non-empty' default, `+workspaces-switch-to-project-h' reads
+  ;; that emptiness as "nothing here worth keeping" and takes its recycle
+  ;; branch, which `+workspace-rename's the workspace being LEFT to the name
+  ;; of the project being entered.  The renamed persp then leaves
+  ;; `persp-names-cache' under its old name while `agent-repl--workspaces' and
+  ;; the daemon's roster still carry it, and since `--ws-tabline-names'
+  ;; intersects the two, the abandoned workspace's TAB SILENTLY VANISHES
+  ;; while the roster keeps listing it.
+  ;;
+  ;; Measured, in the playtest's K.63: a workspace created on the daemon's own
+  ;; repository drew its tab, and registering a second repository a moment
+  ;; later left the bar drawing [repo-turning self-repo] with the roster's own
+  ;; order still [repo-turning self-repo k63-merging] and the perspective
+  ;; cache reading [none self-repo repo-turning].
+  ;;
+  ;; `t' is the only value that cannot express the recycle: agent-repl owns
+  ;; every workspace of its own, and none of them is ever a scratch one to be
+  ;; taken over.  Doom's protected main workspace already forced this branch
+  ;; for itself, so what changes is exactly the agent workspaces.
+  (setq +workspaces-on-switch-project-behavior t)
   ;; persp-mode's own session persistence is disabled — agent-repl is the
   ;; single source of truth for workspace save/restore via its snapshot
   ;; mechanism.  -1 disables auto-resume; 0 disables auto-save on kill.
@@ -1945,6 +1982,9 @@ magit status when it has none."
   (setq persp-kill-foreign-buffer-behaviour 'kill)
   ;; Only show current-workspace buffers in buffer lists (SPC ,).
   (setq persp-set-frame-buffer-predicate t))
+
+(with-eval-after-load 'persp-mode
+  (agent-repl--ws-install-persp-policy))
 
 (defun agent-repl--record-workspace-history (&rest _)
   "Record the current workspace at the front of `agent-repl--workspace-history'.
