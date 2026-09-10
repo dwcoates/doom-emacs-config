@@ -91,6 +91,19 @@
     (agent-repl--history-on-change)
     (should (= agent-repl--history-index 3))))
 
+(ert-deftest agent-repl-test-history-on-change-logs-the-buffer-owner ()
+  "Composer edits carry the workspace that owns the edited buffer."
+  ;; Arrange.
+  (agent-repl-test--with-temp-buffer " *test-hist-owner*"
+    (setq-local agent-repl--owning-workspace "owner-ws")
+    (let (logged-workspace)
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (ws &rest _args) (setq logged-workspace ws))))
+        ;; Act.
+        (agent-repl--history-on-change)
+        ;; Assert.
+        (should (equal logged-workspace "owner-ws"))))))
+
 ;;;; ---- Tests: history edge cases ----
 
 (ert-deftest agent-repl-test-history-prev-empty-list ()
@@ -1022,13 +1035,16 @@ silently start round-tripping back onto disk."
                  12)))
 
 (ert-deftest agent-repl-test-with-error-logging-calls-log-on-error ()
-  "with-error-logging calls `agent-repl--log' with label on error."
-  (let ((logged-msg nil))
+  "with-error-logging marks its process-wide state-write error as central."
+  (let ((logged-msg nil)
+        (logged-workspace nil))
     (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args)
-                 (setq logged-msg (apply #'format fmt args)))))
+               (lambda (ws fmt &rest args)
+                 (setq logged-workspace ws
+                       logged-msg (apply #'format fmt args)))))
       (agent-repl--with-error-logging "my-label"
         (error "kaboom"))
+      (should (eq logged-workspace agent-repl--global-log-scope))
       (should (stringp logged-msg))
       (should (string-match-p "my-label" logged-msg)))))
 
@@ -1547,4 +1563,3 @@ been killed (both the ws plist and the existing file lack the field)."
               (insert-file-contents (agent-repl--state-file tmpdir))
               (should-not (search-forward "e6cb9929-c4bd-4164-b5d1-7fd3bc743bc7" nil t))))
         (delete-directory tmpdir t)))))
-

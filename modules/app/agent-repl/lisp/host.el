@@ -75,6 +75,7 @@
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
 (defvar agent-repl--eager-open-in-progress)
+(defvar agent-repl--global-log-scope)
 
 (declare-function agent-repl--notify "notifications" (ws title message &optional activate))
 (declare-function agent-repl--notification-activate "notifications" (ws))
@@ -147,6 +148,18 @@ registered on the current daemon yet."
 (defun agent-repl-host-state (ws)
   "Return the last decoded `HostWorkspace' pushed for WS, or nil."
   (plist-get (agent-repl-host--entry ws) :host))
+
+(defun agent-repl-host-session-id (ws)
+  "Return WS's daemon-minted agent-repl session id, or nil.
+The id is an echo token published on the `existing' session arm.  Nil is the
+ordinary state before the first host push and when WS has no session."
+  ;; Called while every workspace log record is being constructed.  Logging
+  ;; here would recurse, and this path can fire more than once per second.
+  (let* ((host (agent-repl-host-state ws))
+         (session (plist-get host :session)))
+    (when (eq (plist-get session :arm) :existing)
+      (let ((id (plist-get (plist-get (plist-get session :value) :id) :value)))
+        (unless (equal id "") id)))))
 
 (defun agent-repl-host--live (ws)
   "Return WS's `HostSessionLive' plist, or nil when the session is not live.
@@ -1096,7 +1109,11 @@ nothing."
     (dolist (ws names)
       (let ((dir (agent-repl--ws-get ws :project-dir)))
         (if (null dir)
-            (agent-repl--warn ws "elisp.host.link-up-skipped ws=%s reason=no-dir" ws)
+            ;; A name with no registered project directory owns no durable
+            ;; workspace sink.  This refusal belongs to process-wide link
+            ;; repair; preserve the candidate name in the record body.
+            (agent-repl--warn agent-repl--global-log-scope
+                              "elisp.host.link-up-skipped ws=%s reason=no-dir" ws)
           (agent-repl-host-register
            conn dir
            (lambda (ref)

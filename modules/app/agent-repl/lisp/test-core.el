@@ -24,14 +24,14 @@
   (let ((agent-repl--warn-once-fingerprints (make-hash-table :test 'equal))
         (agent-repl--warn-once-order nil)
         (warnings nil))
-    (cl-letf (((symbol-function 'agent-repl--warn)
-               (lambda (ws fmt &rest args)
+    (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+               (lambda (ws _level _verbosity fmt args &rest _)
                  (push (list ws (apply #'format fmt args)) warnings))))
       (should (agent-repl--warn-once "ws" "api-message=m payload=abc"
                                      "response warning api_message_id=%s" "m"))
       (should-not (agent-repl--warn-once "ws" "api-message=m payload=abc"
                                          "response warning api_message_id=%s" "m"))
-      (should (equal warnings '(("ws" "response warning api_message_id=m")))))))
+      (should (equal warnings '(("ws" "WARNING: response warning api_message_id=m")))))))
 
 (ert-deftest agent-repl-test-warn-once-fifo-bound-makes-evicted-key-observable ()
   "A full warning cache evicts FIFO state without retaining unbounded entries."
@@ -39,13 +39,15 @@
         (agent-repl--warn-once-fingerprints (make-hash-table :test 'equal))
         (agent-repl--warn-once-order nil)
         (warnings nil))
-    (cl-letf (((symbol-function 'agent-repl--warn)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+    (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+               (lambda (_ws _level _verbosity fmt args &rest _)
+                 (push (apply #'format fmt args) warnings))))
       (dolist (fingerprint '("first" "second" "third" "first"))
         (should (agent-repl--warn-once "ws" fingerprint "warning=%s" fingerprint)))
       (should (= (hash-table-count agent-repl--warn-once-fingerprints) 2))
       (should (equal (nreverse warnings)
-                     '("warning=first" "warning=second" "warning=third" "warning=first"))))))
+                     '("WARNING: warning=first" "WARNING: warning=second"
+                       "WARNING: warning=third" "WARNING: warning=first"))))))
 
 (ert-deftest agent-repl-test-warn-once-rejects-empty-causal-fingerprint ()
   "A missing causal identity signals before warning-state mutation."
@@ -136,6 +138,289 @@ tabs permanently drawn as though the panels were closed."
     (should (agent-repl--agent-view-buffer-p))))
 
 ;;;; ---- Tests: Logging ----
+
+(defun agent-repl-test--production-lisp-files ()
+  "Return the hand-written production Elisp files subject to source lints."
+  (seq-filter
+   (lambda (path)
+     (not (string-prefix-p "test-" (file-name-nondirectory path))))
+   (directory-files agent-repl-test--module-dir t "\\.el\\'")))
+
+(defun agent-repl-test--walk-executable-form (form file owner visit)
+  "Call VISIT for executable list forms within FORM from FILE and OWNER.
+Quoted data, function argument lists, and variable binding names are not
+executable forms and are deliberately excluded."
+  (cond
+   ((atom form))
+   ((memq (car form) '(quote function declare-function)))
+   ((memq (car form) '(defun defmacro cl-defun cl-defmacro))
+    (dolist (body-form (cdddr form))
+      (agent-repl-test--walk-executable-form
+       body-form file (cadr form) visit)))
+   ((eq (car form) 'lambda)
+    (dolist (body-form (cddr form))
+      (agent-repl-test--walk-executable-form body-form file owner visit)))
+   ((memq (car form) '(let let*))
+    (dolist (binding (cadr form))
+      (when (consp binding)
+        (dolist (initializer (cdr binding))
+          (agent-repl-test--walk-executable-form initializer file owner visit))))
+    (dolist (body-form (cddr form))
+      (agent-repl-test--walk-executable-form body-form file owner visit)))
+   (t
+    (funcall visit file owner form)
+    (let ((tail form))
+      (while (consp tail)
+        (agent-repl-test--walk-executable-form (car tail) file owner visit)
+        (setq tail (cdr tail)))
+      (when tail
+        (agent-repl-test--walk-executable-form tail file owner visit))))))
+
+(defun agent-repl-test--production-source-calls (callees)
+  "Return production calls whose head is one of CALLEES.
+Each result is `(RELATIVE-FILE OWNER FORM)'."
+  (let (calls)
+    (dolist (file (agent-repl-test--production-lisp-files))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (condition-case nil
+            (while t
+              (agent-repl-test--walk-executable-form
+               (read (current-buffer)) file nil
+               (lambda (source owner form)
+                 (when (memq (car form) callees)
+                   (push (list (file-relative-name source agent-repl-test--module-dir)
+                               owner form)
+                         calls)))))
+          (end-of-file nil))))
+    (nreverse calls)))
+
+(defun agent-repl-test--source-format-prefix (form)
+  "Return FORM's statically knowable leading format text, or nil."
+  (cond
+   ((stringp form) form)
+   ((and (consp form) (eq (car form) 'concat))
+    (let ((parts (cdr form))
+          (prefix ""))
+      (while (and parts (stringp (car parts)))
+        (setq prefix (concat prefix (pop parts))))
+      (unless (string-empty-p prefix) prefix)))))
+
+(ert-deftest agent-repl-test-logging-has-one-record-builder-and-writer ()
+  "Only the canonical emitter may build a record or call the file writer."
+  ;; Arrange / Act
+  (let ((calls (agent-repl-test--production-source-calls
+                '(agent-repl--log-record agent-repl--do-log-to-file
+                  write-region))))
+    ;; Assert
+    (should
+     (equal
+      (mapcar (lambda (call) (list (car call) (cadr call) (car (nth 2 call))))
+              calls)
+      '(("core.el" agent-repl--do-log-to-file write-region)
+        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
+        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
+        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
+        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file))))))
+
+(ert-deftest agent-repl-test-every-logging-rung-calls-the-canonical-emitter ()
+  "Every public severity wrapper is a thin call into one emitter."
+  ;; Arrange / Act
+  (let* ((rungs '(agent-repl--log agent-repl--log-verbose agent-repl--info
+                  agent-repl--warn agent-repl--warn-once agent-repl--error
+                  agent-repl--fatal))
+         (calls (agent-repl-test--production-source-calls
+                 '(agent-repl--emit-log-record)))
+         (owners (delete-dups (mapcar #'cadr calls))))
+    ;; Assert
+    (dolist (rung rungs)
+      (should (memq rung owners)))))
+
+(ert-deftest agent-repl-test-nil-workspace-log-sites-have-a-central-reason ()
+  "Every literal nil workspace site is classified when no runtime scope exists."
+  ;; Arrange
+  (let ((print-length nil)
+        (print-level nil)
+        (rungs '(agent-repl--log agent-repl--log-verbose agent-repl--info
+                 agent-repl--warn agent-repl--warn-once agent-repl--error
+                 agent-repl--fatal))
+        missing)
+    ;; Act
+    (dolist (call (agent-repl-test--production-source-calls rungs))
+      (let ((form (nth 2 call)))
+        (when (null (nth 1 form))
+          (let* ((fmt (nth (if (eq (car form) 'agent-repl--warn-once) 3 2)
+                           form))
+                 (prefix (agent-repl-test--source-format-prefix fmt)))
+            (unless (and prefix (agent-repl--central-log-reason prefix))
+              (push (list (car call) (cadr call) fmt) missing))))))
+    ;; Assert
+    (should (null (nreverse missing)))))
+
+(defconst agent-repl-test--user-facing-message-sites
+  '(("clipboard-image.el" agent-repl-attach-clipboard-image
+     "agent-repl: attached image %s"
+     "confirms the interactive attachment command")
+    ("commands.el" agent-repl-copy-reference "Copied: %s"
+     "confirms an interactive clipboard write")
+    ("commands.el" agent-repl-copy-workspace-name "Copied workspace name: %s"
+     "confirms an interactive clipboard write")
+    ("commands.el" agent-repl-open-most-recent-workspace
+     "All workspaces visited -- cycle reset"
+     "reports the interactive workspace-cycle boundary")
+    ("commands.el" agent-repl-switch-to-workspace
+     "[agent-repl] No workspace tabs on the bar"
+     "explains why the requested interactive switch did nothing")
+    ("commands.el" agent-repl-switch-to-workspace
+     "[agent-repl] No workspace tab %d -- the bar draws %d"
+     "explains why the requested interactive switch did nothing")
+    ("core.el" agent-repl--migrate-legacy-state
+     "[agent-repl] migrated state %s -> %s"
+     "announces an on-disk state migration")
+    ("core.el" agent-repl--migrate-legacy-state
+     "[agent-repl] WARNING: state migration %s -> %s failed: %S"
+     "warns that on-disk state still needs user attention")
+    ("core.el" agent-repl--do-log-to-file
+     "[agent-repl] LOG SINK FAILURE path=%s error=%S"
+     "the failed sink cannot persist its own emergency")
+    ("core.el" agent-repl--emit-message "%s"
+     "the canonical presentation boundary intentionally owns all log echoes")
+    ("core.el" agent-repl-toggle-debug "[agent-repl] debug logging: %s"
+     "confirms the interactive visibility toggle")
+    ("core.el" agent-repl-set-log-file-level
+     "[agent-repl] durable log level: %s"
+     "confirms the interactive durability threshold")
+    ("core.el" agent-repl-toggle-verbose-to-disk
+     "[agent-repl] verbose logging to disk: %s%s"
+     "confirms the interactive verbose-record toggle")
+    ("core.el" agent-repl-print-git-branch
+     "agent-repl loaded on branch: %s"
+     "answers the interactive branch-report command")
+    ("daemon.el" agent-repl-daemon--report-build-failure "agent-repl: %s"
+     "surfaces a daemon build failure that blocks the requested start")
+    ("daemon.el" agent-repl-daemon--report-launch-failure "agent-repl: %s"
+     "surfaces a daemon launch failure that blocks the requested start")
+    ("daemon.el" agent-repl-frontend-daemon-ensure "agent-repl: %s"
+     "surfaces a daemon readiness failure to the requesting user")
+    ("daemon.el" agent-repl-frontend-daemon-stop
+     "agent-repl: no daemon link to stop"
+     "explains why the interactive stop did nothing")
+    ("daemon.el" agent-repl-frontend-daemon-stop
+     "agent-repl: daemon shutting down"
+     "confirms acceptance of the interactive stop")
+    ("daemon.el" agent-repl-frontend-daemon-stop
+     "agent-repl: daemon refused the shutdown"
+     "reports refusal of the interactive stop")
+    ("daemon.el" agent-repl-frontend-daemon-stop
+     "agent-repl: could not reach the daemon to stop it"
+     "reports failure of the interactive stop")
+    ("daemon.el" agent-repl-frontend-daemon-restart
+     "agent-repl: the daemon did not accept the stop; not restarting"
+     "reports why the interactive restart aborted")
+    ("emoji.el" agent-repl-install-commit-emoji-hook
+     "Backed up existing hook to %s"
+     "reports the backup made by the interactive installer")
+    ("emoji.el" agent-repl-install-commit-emoji-hook
+     "Installed prepare-commit-msg hook to %s"
+     "confirms the interactive installer")
+    ("find-file-workspace.el" agent-repl-find-file-workspace-reset
+     "agent-repl: find-file routing reset"
+     "confirms the interactive routing reset")
+    ("find-file-workspace.el" agent-repl--ffw-acquire
+     "agent-repl: could not open the workspace for %s; opening the file here"
+     "warns the user that file placement differs from the request")
+    ("history.el" agent-repl-history-search
+     "[agent-repl] input history is empty"
+     "answers the interactive history search")
+    ("input.el" agent-repl--input-on-bubble-refusal
+     "agent-repl: the prompt was refused for this agent (%S)"
+     "reports a prompt refusal requiring user action")
+    ("input.el" agent-repl--input-on-bubble-refusal
+     "agent-repl: refused -- %s%s"
+     "reports a prompt refusal requiring user action")
+    ("input.el" agent-repl--input-on-error
+     "agent-repl: refused -- a merge is in flight for this workspace"
+     "reports why the user's prompt was not accepted")
+    ("input.el" agent-repl--input-on-error
+     "agent-repl: this submission's key was already accepted; the earlier submission stands"
+     "reports idempotent acceptance to the submitting user")
+    ("input.el" agent-repl--input-on-error
+     "agent-repl: submission refused (%S)"
+     "reports why the user's prompt was not accepted")
+    ("input.el" agent-repl--input-on-failure
+     "agent-repl: the daemon did not answer; the prompt is held"
+     "tells the user their submitted text remains queued")
+    ("keybindings.el" agent-repl-reload-config "[agent-repl] Reloaded %s"
+     "confirms the interactive source reload")
+    ("magit.el" +dwc/magit-toggle-tags-in-log "magit commit-list tags %s"
+     "confirms the interactive Magit display toggle")
+    ("magit.el" +dwc/magit-copy-commit-link
+     "GitHub commit link copied to clipboard: %s"
+     "confirms an interactive clipboard write")
+    ("magit.el" +dwc/open-workspace-pr-in-browser "Opened PR: %s"
+     "confirms the interactive browser action")
+    ("panels.el" agent-repl-workspace-push-to-back
+     "Pushed '%s' to the back; switched to '%s'."
+     "confirms the interactive tab reorder and selection")
+    ("panels.el" agent-repl-workspace-push-to-back "Pushed '%s' to the back."
+     "confirms the interactive tab reorder")
+    ("prompt-queue.el" agent-repl-queue-deferred-prompt
+     "agent-repl: no input to queue"
+     "explains why the interactive queue command did nothing")
+    ("prompt-queue.el" agent-repl-queue-deferred-prompt
+     "agent-repl: queued prompt #%d for %s (fires when the turn settles)"
+     "confirms the interactive queue command")
+    ("roster.el" agent-repl-roster-echo-finished
+     "Agent finished in workspace: %s"
+     "is the configured user-facing completion notification")
+    ("status.el" agent-repl-tabbar-apply-row-count
+     "agent-repl: tab-bar set to %d line%s on this frame"
+     "confirms the interactive tab-bar layout command")
+    ("verbs.el" agent-repl-verbs--on-refusal "%s refused: %s%s"
+     "reports a workspace command refusal to its user")
+    ("verbs.el" agent-repl-verbs--send
+     "agent-repl: %s failed -- the daemon did not answer"
+     "reports failure of the user's workspace command")
+    ("verbs.el" agent-repl-verb-close "close blocked -- %s"
+     "reports why the user's close command was refused")
+    ("verbs.el" agent-repl-verb-open "agent-repl: opening %s"
+     "confirms the user's open command")
+    ("verbs.el" agent-repl-verb-merge "merge enqueued"
+     "confirms the user's merge command")
+    ("verbs.el" agent-repl-verb-restart "agent-repl: restart %s"
+     "confirms the user's restart command")
+    ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
+     "confirms the user's priority command")
+    ("verbs.el" agent-repl-verb-create "agent-repl: workspace requested"
+     "confirms the user's create command")
+    ("verbs.el" agent-repl-verbs-select-minted
+     "agent-repl: the new workspace carries no directory to switch to"
+     "reports why the requested new workspace cannot be selected")
+    ("verbs.el" agent-repl-verb-shutdown-schedule "agent-repl: shutdown %s"
+     "confirms the user's shutdown-schedule command")
+    ("verbs.el" agent-repl-verbs--merge-queue-on-error
+     "merge-queue refused: the daemon's registry does not hold repository %S"
+     "reports why the user's merge-queue command was refused")
+    ("verbs.el" agent-repl-verb-merge-queue "agent-repl: merge queue %s"
+     "confirms the user's merge-queue command"))
+  "Every permitted production `message' call and its user-facing reason.")
+
+(ert-deftest agent-repl-test-message-sites-are-explicitly-user-facing ()
+  "No diagnostic may use `message' unless this audit names its user purpose."
+  ;; Arrange / Act
+  (let ((actual
+         (mapcar (lambda (call)
+                   (list (car call) (cadr call) (nth 1 (nth 2 call))))
+                 (agent-repl-test--production-source-calls '(message))))
+        (allowed
+         (mapcar (lambda (entry)
+                   (should (and (stringp (nth 3 entry))
+                                (not (string-empty-p (nth 3 entry)))))
+                   (cl-subseq entry 0 3))
+                 agent-repl-test--user-facing-message-sites)))
+    ;; Assert
+    (should (equal actual allowed))))
 
 (ert-deftest agent-repl-test-log-respects-debug-flag ()
   "When `agent-repl-debug' is nil, `agent-repl--log' should NOT call `message'.
@@ -720,16 +1005,20 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
 (ert-deftest agent-repl-test-fatal-persists-record-at-level-error ()
   "`agent-repl--fatal' records at level \"error\" before it signals."
   (let ((captured nil))
-    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
-               (lambda (_ws level _verbosity _fmt _args &optional _op) (setq captured level))))
+    (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+               (lambda (_ws level _verbosity _fmt _args &rest _options)
+                 (setq captured level)
+                 (error "boom"))))
       (should-error (agent-repl--fatal nil "boom"))
       (should (equal captured "error")))))
 
 (ert-deftest agent-repl-test-fatal-persists-before-signalling ()
   "The record is written BEFORE the signal, so the failure is never lost."
   (let ((order nil))
-    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
-               (lambda (&rest _) (push 'persisted order))))
+    (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+               (lambda (&rest _)
+                 (push 'persisted order)
+                 (error "boom"))))
       (ignore-errors (agent-repl--fatal nil "boom"))
       (push 'unwound order))
     (should (equal (nreverse order) '(persisted unwound)))))
@@ -785,8 +1074,9 @@ one to its caller.  A caller that must abort signals for itself."
   "The persisted JSONL record carries `level' = \"error\" per logging-contract.md."
   (let ((captured nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
-              ((symbol-function 'agent-repl--persist-log-record)
-               (lambda (_ws level _verbosity _fmt _args &optional _op) (setq captured level))))
+              ((symbol-function 'agent-repl--emit-log-record)
+               (lambda (_ws level _verbosity _fmt _args &rest _options)
+                 (setq captured level))))
       (agent-repl--error nil "boom")
       (should (equal captured "error")))))
 
@@ -794,8 +1084,9 @@ one to its caller.  A caller that must abort signals for itself."
   "The persisted record is `normal' verbosity, so the durable sink keeps it."
   (let ((captured nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
-              ((symbol-function 'agent-repl--persist-log-record)
-               (lambda (_ws _level verbosity _fmt _args &optional _op) (setq captured verbosity))))
+              ((symbol-function 'agent-repl--emit-log-record)
+               (lambda (_ws _level verbosity _fmt _args &rest _options)
+                 (setq captured verbosity))))
       (agent-repl--error nil "boom")
       (should (equal captured "normal")))))
 
@@ -808,6 +1099,27 @@ one to its caller.  A caller that must abort signals for itself."
   (should (agent-repl--log-record-displays-p "error" "normal")))
 
 ;;;; ---- Tests: runtime log-verbosity controls ----
+
+(ert-deftest agent-repl-test-log-level-environment-accepts-the-shared-vocabulary ()
+  "The process switch accepts every contract level and defaults to info."
+  (dolist (case '((nil . info)
+                  ("debug" . debug)
+                  ("info" . info)
+                  ("warn" . warn)
+                  ("error" . error)))
+    ;; Arrange
+    (let ((process-environment (copy-sequence process-environment)))
+      (setenv "AGENT_REPL_LOG_LEVEL" (car case))
+      ;; Act / Assert
+      (should (eq (agent-repl--log-level-from-environment) (cdr case))))))
+
+(ert-deftest agent-repl-test-log-level-environment-rejects-an-unknown-value ()
+  "A misspelled process threshold aborts instead of changing log volume."
+  ;; Arrange
+  (let ((process-environment (copy-sequence process-environment)))
+    (setenv "AGENT_REPL_LOG_LEVEL" "verbose")
+    ;; Act / Assert
+    (should-error (agent-repl--log-level-from-environment) :type 'error)))
 
 (ert-deftest agent-repl-test-toggle-debug-turns-visibility-on ()
   "`agent-repl-toggle-debug' turns *Messages* visibility on from nil."
@@ -863,6 +1175,15 @@ one to its caller.  A caller that must abort signals for itself."
       (should-error (agent-repl-set-log-file-level 'chatty) :type 'error)
       (should (eq agent-repl-log-file-level 'debug)))))
 
+(ert-deftest agent-repl-test-set-log-file-level-rejects-verbose-as-a-level ()
+  "Verbose is a record class, not a value in the shared level vocabulary."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    ;; Arrange
+    (let ((agent-repl-log-file-level 'info))
+      ;; Act / Assert
+      (should-error (agent-repl-set-log-file-level 'verbose) :type 'error)
+      (should (eq agent-repl-log-file-level 'info)))))
+
 (ert-deftest agent-repl-test-set-log-file-level-leaves-debug-visibility-alone ()
   "Changing durable volume does not change *Messages* visibility."
   (cl-letf (((symbol-function 'message) #'ignore))
@@ -876,25 +1197,25 @@ one to its caller.  A caller that must abort signals for itself."
   (should (commandp 'agent-repl-set-log-file-level)))
 
 (ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-on ()
-  "The verbose-to-disk toggle raises the durable threshold to verbose."
+  "The verbose-to-disk toggle lowers the durable threshold to debug."
   (cl-letf (((symbol-function 'message) #'ignore))
-    (let ((agent-repl-log-file-level 'debug))
-      (agent-repl-toggle-verbose-to-disk)
-      (should (eq agent-repl-log-file-level 'verbose)))))
-
-(ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-off ()
-  "The verbose-to-disk toggle drops back to debug from verbose."
-  (cl-letf (((symbol-function 'message) #'ignore))
-    (let ((agent-repl-log-file-level 'verbose))
+    (let ((agent-repl-log-file-level 'info))
       (agent-repl-toggle-verbose-to-disk)
       (should (eq agent-repl-log-file-level 'debug)))))
 
-(ert-deftest agent-repl-test-toggle-verbose-to-disk-from-a-quieter-rung-goes-verbose ()
-  "From a rung above debug the toggle still turns verbose ON, never off."
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-off ()
+  "The verbose-to-disk toggle restores info from debug."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-file-level 'info)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-from-a-quieter-rung-goes-debug ()
+  "From a rung above debug the toggle still enables debug persistence."
   (cl-letf (((symbol-function 'message) #'ignore))
     (let ((agent-repl-log-file-level 'warn))
       (agent-repl-toggle-verbose-to-disk)
-      (should (eq agent-repl-log-file-level 'verbose)))))
+      (should (eq agent-repl-log-file-level 'debug)))))
 
 (ert-deftest agent-repl-test-toggle-verbose-to-disk-leaves-the-buffer-level-alone ()
   "The verbose-to-disk toggle affects the FILE only, not the log buffers."
@@ -1180,10 +1501,7 @@ one to its caller.  A caller that must abort signals for itself."
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-workspace-record-attributes-known-sessions ()
-  "Workspace JSONL records expose the DURABLE conversation id, and only it.
-The daemon session id is ephemeral — it dies with the daemon process, so
-a log line carrying one cannot be correlated after a bounce, while the
-workspace beside it can."
+  "Workspace JSONL records expose both known session identifiers."
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-identity-log-" t))
            (ws "identity-ws")
@@ -1194,6 +1512,8 @@ workspace beside it can."
             (agent-repl--ws-put ws :project-dir project)
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'message) #'ignore)
+                        ((symbol-function 'agent-repl-host-session-id)
+                         (lambda (_) "agent-session-1"))
                         ((symbol-function 'agent-repl-host--live)
                          (lambda (_) '(:vendor-info (:arm :claude :value (:session-id "claude-session-1"))))))
                 (agent-repl--log ws "identity test")))
@@ -1201,9 +1521,24 @@ workspace beside it can."
                    (record (with-temp-buffer
                              (insert-file-contents target)
                              (json-parse-string (buffer-string) :object-type 'alist))))
-              (should-not (assoc 'agent_repl_session_id record))
+              (should (equal (alist-get 'agent_repl_session_id record)
+                             "agent-session-1"))
               (should (equal (alist-get 'claude_session_id record) "claude-session-1"))))
         (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-record-carries-the-edge-request-id ()
+  "A request edge's dynamic identity is serialized into its nested records."
+  (agent-repl-test--with-temp-logfile path
+    ;; Arrange
+    (cl-letf (((symbol-function 'message) #'ignore))
+      ;; Act
+      (agent-repl--with-log-context
+       agent-repl--global-log-scope "request-1"
+       (lambda () (agent-repl--info nil "elisp.roster.push: correlated")))
+      ;; Assert
+      (let ((record (json-parse-string (agent-repl-test--read-file path)
+                                       :object-type 'alist)))
+        (should (equal (alist-get 'request_id record) "request-1"))))))
 
 (ert-deftest agent-repl-test-log-session-identity-does-not-reenter-persistence ()
   "Resolving a session identity while logging produces exactly one record."
@@ -1212,8 +1547,8 @@ workspace beside it can."
            (ws "nonrecursive-ws")
            (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
-           (original-persist (symbol-function 'agent-repl--persist-log-record))
-           (persist-calls 0))
+           (original-builder (symbol-function 'agent-repl--log-record))
+           (builder-calls 0))
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
@@ -1221,12 +1556,12 @@ workspace beside it can."
             (agent-repl--ws-put ws :bare-metal
                                 (make-agent-repl-instantiation :session-id "claude-session-1"))
             (let ((agent-repl-log-to-file t))
-              (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+              (cl-letf (((symbol-function 'agent-repl--log-record)
                          (lambda (&rest args)
-                           (cl-incf persist-calls)
-                           (apply original-persist args))))
+                           (cl-incf builder-calls)
+                           (apply original-builder args))))
                 (agent-repl--log ws "one record")
-                (should (= persist-calls 1)))))
+                (should (= builder-calls 1)))))
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-workspace-record-omits-missing-session-identities ()
@@ -1245,7 +1580,8 @@ workspace beside it can."
                    (record (with-temp-buffer
                              (insert-file-contents target)
                              (json-parse-string (buffer-string) :object-type 'alist))))
-              (should-not (assoc 'claude_session_id record))))
+              (should-not (assoc 'claude_session_id record))
+              (should-not (assoc 'agent_repl_session_id record))))
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-workspace-invalid-session-identity-fails-before-write ()
@@ -1274,7 +1610,7 @@ workspace beside it can."
          (agent-repl-debug nil)
          ;; Opened so the assertion is about verbosity persisting independently
          ;; of `agent-repl-debug', not about the durable threshold's gate.
-         (agent-repl-log-file-level 'verbose)
+         (agent-repl-log-file-level 'debug)
          (message-called nil))
     (unwind-protect
         (cl-letf (((symbol-function 'message) (lambda (&rest _) (setq message-called t))))
@@ -1287,17 +1623,8 @@ workspace beside it can."
             (should (equal (alist-get 'message record) "timer tick"))))
       (delete-directory dir t))))
 
-(ert-deftest agent-repl-test-log-workspace-without-directory-routes-globally ()
-  "A non-nil workspace without a registered directory routes to the global sink.
-
-This test previously asserted the opposite — that the write was REFUSED and
-the caller signalled.  That contract could not hold: a workspace's worktree
-can be deleted while Emacs is running, at which point its owner is still
-correct to log about it and no call site can prevent the condition.  Making
-it fatal aborted `doom-init-ui-hook' and the startup snapshot restore.
-
-The coverage is kept, not dropped: the same input is still exercised, and
-the record must still be persisted rather than silently discarded."
+(ert-deftest agent-repl-test-log-workspace-without-directory-records-routing-error ()
+  "An unroutable workspace writes only a central routing error and aborts."
   (agent-repl-test--with-clean-state
     (let* ((dir (make-temp-file "agent-repl-routing-error-" t))
            (global (expand-file-name "global.log" dir))
@@ -1305,12 +1632,13 @@ the record must still be persisted rather than silently discarded."
            (agent-repl-log-file-name global)
            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
       (unwind-protect
-          (cl-letf (((symbol-function 'message) #'ignore))
-            (agent-repl--log "missing-ws" "must still route")
+          (cl-letf (((symbol-function 'display-warning) #'ignore))
+            (should-error (agent-repl--log "missing-ws" "must not reroute"))
             (should (file-exists-p global))
             (with-temp-buffer
               (insert-file-contents global)
-              (should (string-match-p "must still route" (buffer-string)))))
+              (should (string-match-p "log-routing-error" (buffer-string)))
+              (should-not (string-match-p "must not reroute" (buffer-string)))))
         (delete-directory dir t)))))
 
 (ert-deftest agent-repl-test-workspace-log-replaces-hostile-canonical-symlink ()
@@ -1486,50 +1814,21 @@ the record must still be persisted rather than silently discarded."
             (should-not (file-exists-p (expand-file-name ".claude/emacs/emacs.log" project))))
         (delete-directory sandbox t)))))
 
-(ert-deftest agent-repl-test-workspace-truncation-record-includes-identity ()
-  "A workspace truncation warning includes the owning workspace identity."
-  (agent-repl-test--with-clean-state
-    (let* ((project (make-temp-file "agent-repl-truncate-ws-" t))
-           (ws "truncate-ws")
-           (agent-repl-log-to-file nil)
-           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put ws :project-dir project)
-            (let ((agent-repl-log-to-file t))
-              (agent-repl--log ws "seed"))
-            (let* ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
-              (with-temp-file target (insert (make-string 5000 ?x)))
-              (agent-repl--log-truncate target (file-attribute-size (file-attributes target)) ws)
-              (let* ((lines (with-temp-buffer (insert-file-contents target) (split-string (buffer-string) "\n" t)))
-                     (record (json-parse-string (car (last lines)) :object-type 'alist)))
-                (should (equal (alist-get 'workspace_dir record) (directory-file-name (file-truename project))))
-                (should (stringp (alist-get 'workspace_id record))))))
-        (delete-directory project t)))))
-
-(ert-deftest agent-repl-test-log-maybe-truncate-signals-sink-emergency ()
-  "A truncation failure reports its emergency and signals to the caller."
+(ert-deftest agent-repl-test-log-rotation-failure-is-visible-and-fatal ()
+  "A generation-rotation failure emits the sink emergency and signals."
+  ;; Arrange
   (let ((emergency nil))
-    (cl-letf (((symbol-function 'agent-repl--log-truncate)
-               (lambda (&rest _) (error "simulated truncate failure")))
-              ((symbol-function 'message)
-               (lambda (fmt &rest args) (setq emergency (apply #'format fmt args)))) )
+    (agent-repl-test--with-temp-logfile path
       (let ((agent-repl-log-size-cap-bytes 1))
-        (agent-repl-test--with-temp-logfile path
-          (write-region "xx" nil path)
-          (should-error (agent-repl--log-maybe-truncate path) :type 'agent-repl-log-truncate-failure)
-          (should (string-match-p "LOG SINK FAILURE operation=truncate" emergency)))))))
-
-(ert-deftest agent-repl-test-log-truncate-preserves-open-target-inode ()
-  "Truncation rewrites the active external target without replacing its inode."
-  (let ((path (make-temp-file "agent-repl-truncate-inode-")))
-    (unwind-protect
-        (progn
-          (with-temp-file path (insert (make-string 5000 ?x)))
-          (let ((inode (file-attribute-file-identifier (file-attributes path))))
-            (agent-repl--log-truncate path (file-attribute-size (file-attributes path)) )
-            (should (equal inode (file-attribute-file-identifier (file-attributes path))))))
-      (delete-file path))))
+        (write-region "x" nil path)
+        (cl-letf (((symbol-function 'agent-repl--log-rotate-generations)
+                   (lambda (&rest _) (error "simulated rotation failure")))
+                  ((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (setq emergency (apply #'format fmt args)))))
+          ;; Act / Assert
+          (should-error (agent-repl--do-log-to-file "record"))
+          (should (string-match-p "LOG SINK FAILURE" emergency)))))))
 
 ;;;; ---- Tests: dir-has-git-p ----
 
@@ -2318,20 +2617,25 @@ format string\" seen when running `agent-repl-reset-sentinel-watchers'."
   "Bind a fresh per-test logfile path to SYM and route agent-repl writes to it.
 The temp file is deleted after BODY runs.  `agent-repl-log-to-file' is
 forced on inside BODY (test-helpers globally turns it off to keep other
-tests pollution-free), and the write counter is reset so size-cap tests
-do not pick up state from earlier tests."
+tests pollution-free).  Every retained generation is removed afterwards."
   (declare (indent 1))
   `(let ((,sym (make-temp-file "agent-repl-test-log-")))
      (unwind-protect
          (let ((agent-repl-log-to-file t)
                (agent-repl-log-file-name ,sym)
-               (agent-repl--log-write-counter 0))
+               (agent-repl-log-file-level 'debug))
            ,@body)
        (when (file-exists-p ,sym) (delete-file ,sym))
-       (when (file-exists-p (concat ,sym ".prev"))
-         (delete-file (concat ,sym ".prev")))
-       (when (file-exists-p (concat ,sym ".trunc-tmp"))
-         (delete-file (concat ,sym ".trunc-tmp"))))))
+       (dotimes (index agent-repl-log-generation-count)
+         (let ((generation (agent-repl--log-generation-path ,sym (1+ index))))
+           (when (file-exists-p generation)
+             (delete-file generation)))))))
+
+(defun agent-repl-test--read-file (path)
+  "Return PATH's complete contents for logging assertions."
+  (with-temp-buffer
+    (insert-file-contents path)
+    (buffer-string)))
 
 (ert-deftest agent-repl-test-log-always-writes-file-when-debug-off ()
   "`agent-repl--log' must write to file even when `agent-repl-debug' is nil.
@@ -2364,7 +2668,7 @@ the separate knob that decides whether this rung is written at all."
   (agent-repl-test--with-temp-logfile path
     (cl-letf (((symbol-function 'message) #'ignore))
       (let ((agent-repl-debug nil)
-            (agent-repl-log-file-level 'verbose))
+            (agent-repl-log-file-level 'debug))
         (agent-repl--log-verbose nil "verbose-line")
         (should (> (nth 7 (file-attributes path)) 0))))))
 
@@ -2375,7 +2679,7 @@ decoupling from `agent-repl-debug' rather than the threshold's own gate."
   (agent-repl-test--with-temp-logfile path
     (cl-letf (((symbol-function 'message) #'ignore))
       (let ((agent-repl-debug t)
-            (agent-repl-log-file-level 'verbose))
+            (agent-repl-log-file-level 'debug))
         (agent-repl--log-verbose nil "verbose-line")
         (should (> (nth 7 (file-attributes path)) 0))))))
 
@@ -2387,7 +2691,7 @@ second one not blocking the first."
   (agent-repl-test--with-temp-logfile path
     (cl-letf (((symbol-function 'message) #'ignore))
       (let ((agent-repl-debug 'verbose)
-            (agent-repl-log-file-level 'verbose))
+            (agent-repl-log-file-level 'debug))
         (agent-repl--log-verbose nil "verbose-line")
         (should (file-exists-p path))
         (with-temp-buffer
@@ -2420,160 +2724,46 @@ The master kill-switch overrides the always-on file-write decoupling."
             (should (= initial-size (nth 7 (file-attributes path))))))
       (when (file-exists-p path) (delete-file path)))))
 
-(ert-deftest agent-repl-test-log-disabled-sinks-do-not-resolve-workspace ()
-  "Disabled persistence sinks do not demand a workspace routing identity."
-  (let ((agent-repl-log-to-file nil)
-        (agent-repl--workspace-log-buffer-enabled nil)
-        (identity-calls 0))
-    (cl-letf (((symbol-function 'agent-repl--workspace-log-identity)
-               (lambda (&rest _)
-                 (cl-incf identity-calls)
-                 (error "identity resolver must remain idle")))
-              ((symbol-function 'message) #'ignore))
-      (agent-repl--log "workspace-without-state" "persistence disabled")
-      (should (zerop identity-calls)))))
+;;;; ---- Tests: size-capped generations ----
 
-;;;; ---- Tests: startup rollover ----
-
-(ert-deftest agent-repl-test-rotate-renames-existing-log-to-prev ()
-  "Rollover renames an existing logfile to `<path>.prev'."
+(ert-deftest agent-repl-test-log-write-rotates-before-crossing-cap ()
+  "The record crossing the cap starts a fresh active generation whole."
+  ;; Arrange
   (agent-repl-test--with-temp-logfile path
-    (write-region "old session line\n" nil path)
-    (agent-repl--rotate-log-on-startup)
-    (let ((prev (concat path ".prev")))
-      (should (file-exists-p prev))
-      (should-not (file-exists-p path))
-      (with-temp-buffer
-        (insert-file-contents prev)
-        (should (string-match-p "old session line" (buffer-string)))))))
+    (let ((agent-repl-log-size-cap-bytes 8))
+      (write-region "1234567" nil path)
+      ;; Act
+      (agent-repl--do-log-to-file "new")
+      ;; Assert
+      (should (equal (agent-repl-test--read-file path) "new\n"))
+      (should (equal (agent-repl-test--read-file (concat path ".1")) "1234567")))))
 
-(ert-deftest agent-repl-test-rotate-overwrites-existing-prev ()
-  "Rollover clobbers an existing `<path>.prev' (only one prior session is kept)."
+(ert-deftest agent-repl-test-log-generations-retain-five-newest ()
+  "Generation shifting retains `.1' through `.5' and deletes the oldest."
+  ;; Arrange
   (agent-repl-test--with-temp-logfile path
-    (let ((prev (concat path ".prev")))
-      (write-region "ancient prev\n" nil prev)
-      (write-region "current session\n" nil path)
-      (agent-repl--rotate-log-on-startup)
-      (should (file-exists-p prev))
-      (with-temp-buffer
-        (insert-file-contents prev)
-        ;; The ancient one is gone; the rotated one is the new content.
-        (should-not (string-match-p "ancient prev" (buffer-string)))
-        (should (string-match-p "current session" (buffer-string)))))))
+    (let ((agent-repl-log-generation-count 5))
+      (write-region "active" nil path)
+      (dotimes (index 5)
+        (write-region (format "generation-%d" (1+ index)) nil
+                      (agent-repl--log-generation-path path (1+ index))))
+      ;; Act
+      (agent-repl--log-rotate-generations path)
+      ;; Assert
+      (should (equal (agent-repl-test--read-file (concat path ".1")) "active"))
+      (should (equal (agent-repl-test--read-file (concat path ".5")) "generation-4"))
+      (should-not (file-exists-p (concat path ".6"))))))
 
-(ert-deftest agent-repl-test-rotate-noop-when-log-absent ()
-  "Rollover is a no-op when the current logfile does not exist yet."
+(ert-deftest agent-repl-test-log-write-keeps-an-oversize-record-whole ()
+  "One record larger than the cap remains whole in the active file."
+  ;; Arrange / Act
   (agent-repl-test--with-temp-logfile path
     (delete-file path)
-    (let ((prev (concat path ".prev")))
-      ;; Should not error and should not create prev out of nothing.
-      (agent-repl--rotate-log-on-startup)
-      (should-not (file-exists-p prev))
-      (should-not (file-exists-p path)))))
-
-(ert-deftest agent-repl-test-rotate-resets-write-counter ()
-  "Rollover resets the write counter so size accounting starts fresh."
-  (agent-repl-test--with-temp-logfile path
-    (write-region "x\n" nil path)
-    (setq agent-repl--log-write-counter 12345)
-    (agent-repl--rotate-log-on-startup)
-    (should (zerop agent-repl--log-write-counter))))
-
-(ert-deftest agent-repl-test-rotate-noop-when-log-to-file-off ()
-  "Rollover does nothing when `agent-repl-log-to-file' is nil."
-  (let ((path (make-temp-file "agent-repl-test-log-")))
-    (unwind-protect
-        (let ((agent-repl-log-to-file nil)
-              (agent-repl-log-file-name path))
-          (write-region "stays-put\n" nil path)
-          (agent-repl--rotate-log-on-startup)
-          (should (file-exists-p path))
-          (should-not (file-exists-p (concat path ".prev"))))
-      (when (file-exists-p path) (delete-file path)))))
-
-;;;; ---- Tests: size cap and truncation ----
-
-(ert-deftest agent-repl-test-truncate-keeps-last-20-percent-line-aligned ()
-  "`agent-repl--log-truncate' keeps the last ~20% of the file, aligned to a newline."
-  (agent-repl-test--with-temp-logfile path
-    ;; Build a file with 100 fixed-width lines so we can assert which survive.
-    (with-temp-buffer
-      (dotimes (i 100)
-        (insert (format "line-%03d-padding-to-make-it-wider\n" i)))
-      (write-region (point-min) (point-max) path))
-    (let ((size (nth 7 (file-attributes path))))
-      (agent-repl--log-truncate path size)
-      (with-temp-buffer
-        (insert-file-contents path)
-        (let ((content (buffer-string)))
-          ;; First lines must be gone.
-          (should-not (string-match-p "line-000-" content))
-          (should-not (string-match-p "line-010-" content))
-          ;; Last lines must survive.
-          (should (string-match-p "line-099-" content))
-          ;; A JSON warning record was appended.
-          (should (string-match-p "agent-repl.log.truncate" content))
-          ;; The file must start on a clean line boundary, not mid-line.
-          (should (string-match-p "\\`line-[0-9][0-9][0-9]-" content)))))))
-
-(ert-deftest agent-repl-test-truncate-appends-json-warning ()
-  "Truncation appends a schema-valid warning record with size evidence."
-  (agent-repl-test--with-temp-logfile path
-    (write-region (make-string 5000 ?x) nil path)
-    (let ((size (nth 7 (file-attributes path))))
-      (agent-repl--log-truncate path size)
-      (with-temp-buffer
-        (insert-file-contents path)
-        (let ((content (buffer-string)))
-          (let* ((lines (split-string content "\n" t))
-                 (warning (json-parse-string (car (last lines)) :object-type 'alist))
-                 (context (alist-get 'context warning)))
-             (should (equal (alist-get 'level warning) "warn"))
-             (should (numberp (alist-get 'cap_bytes context)))
-             (should (numberp (alist-get 'kept_bytes context))))))
-    (should (= (logand (file-modes path) #o777) #o600)))))
-
-(ert-deftest agent-repl-test-size-check-fires-every-interval ()
-  "`--do-log-to-file' invokes `--log-maybe-truncate' on the Nth write."
-  (agent-repl-test--with-temp-logfile path
-    (let ((check-calls 0)
-          (agent-repl-log-size-check-interval 5))
-      (cl-letf (((symbol-function 'agent-repl--log-maybe-truncate)
-                 (lambda (&rest _args) (cl-incf check-calls))))
-        (dotimes (_ 12)
-          (agent-repl--do-log-to-file "line"))
-        ;; 12 writes with interval=5 → checks at 5 and 10 → 2 fires.
-        (should (= 2 check-calls))))))
-
-(ert-deftest agent-repl-test-size-check-noop-when-under-cap ()
-  "`--log-maybe-truncate' is a no-op when the file is under the cap."
-  (agent-repl-test--with-temp-logfile path
-    (write-region "small file\n" nil path)
-    (let ((agent-repl-log-size-cap-bytes (* 1024 1024)))
-      (let ((truncate-called nil))
-        (cl-letf (((symbol-function 'agent-repl--log-truncate)
-                   (lambda (&rest _) (setq truncate-called t))))
-          (agent-repl--log-maybe-truncate path)
-          (should-not truncate-called))))))
-
-(ert-deftest agent-repl-test-size-check-triggers-truncate-when-over-cap ()
-  "`--log-maybe-truncate' fires `--log-truncate' when the file exceeds the cap."
-  (agent-repl-test--with-temp-logfile path
-    (write-region (make-string 4096 ?x) nil path)
-    (let ((agent-repl-log-size-cap-bytes 1024)
-          (truncate-args nil))
-      (cl-letf (((symbol-function 'agent-repl--log-truncate)
-                 (lambda (&rest args) (setq truncate-args args))))
-        (agent-repl--log-maybe-truncate path)
-        (should (equal (car truncate-args) path))
-        (should (>= (cadr truncate-args) 4096))))))
-
-(ert-deftest agent-repl-test-write-counter-increments-per-write ()
-  "Every successful file-write bumps `agent-repl--log-write-counter'."
-  (agent-repl-test--with-temp-logfile path
-    (dotimes (_ 7)
-      (agent-repl--do-log-to-file "x"))
-    (should (= 7 agent-repl--log-write-counter))))
+    (let ((agent-repl-log-size-cap-bytes 4))
+      (agent-repl--do-log-to-file "oversize")
+      ;; Assert
+      (should (equal (agent-repl-test--read-file path) "oversize\n"))
+      (should-not (file-exists-p (concat path ".1"))))))
 
 ;;;; ---- Tests: buffer-owner accessor ----
 
@@ -2859,62 +3049,118 @@ ladder made a debug line abort `doom-init-ui-hook'."
           (insert-file-contents path)
           (should (string-match-p "placeholder probe" (buffer-string))))))))
 
-;;;; ---- Tests: unroutable workspaces degrade instead of signalling ----
+(ert-deftest agent-repl-test-frame-lifecycle-formats-have-central-reasons ()
+  "Workspace-free frame lifecycle records have documented central ownership."
+  ;; Arrange.
+  (let ((cases
+         '(("before-persp-deactivate: entry ws=nil cache=nil"
+            . "perspective deactivation can precede workspace selection")
+           ("persp-frame-save-state failed for ws=nil: boom"
+            . "perspective teardown can run without an agent workspace")
+           ("on-window-change"
+            . "frame-wide window reconciliation can run without an agent workspace")
+           ("sync-panels: entry windows=1"
+            . "frame-wide orphan-panel reconciliation spans workspaces")
+           ("elisp.notes.popup-predicate: buffer=\"notes\" file=nil match=nil"
+            . "popup classification is process-wide"))))
+    ;; Act / Assert.
+    (dolist (case cases)
+      (should (equal (agent-repl--central-log-reason (car case))
+                     (cdr case))))))
 
-(ert-deftest agent-repl-test-deleted-worktree-does-not-abort-its-caller ()
-  "A registered workspace whose worktree vanished must not signal.
-No call site can prevent this: the caller legitimately owns the workspace
-and the directory was deleted underneath it.  Signalling here aborted the
-whole snapshot restore at startup."
+;;;; ---- Tests: unroutable workspaces fail loudly ----
+
+(ert-deftest agent-repl-test-log-resolves-a-nil-site-from-the-buffer-owner ()
+  "A nil logger argument inherits its owning composer or panel workspace."
+  ;; Arrange
+  (let ((agent-repl--log-context-workspace nil)
+        (agent-repl-log-to-file t))
+    (with-temp-buffer
+      (setq-local agent-repl--owning-workspace "buffer-ws")
+      (cl-letf (((symbol-function 'agent-repl--ws-log-routable-p)
+                 (lambda (ws) (equal ws "buffer-ws"))))
+        ;; Act / Assert
+        (should (equal (agent-repl--resolve-log-workspace nil "workspace event")
+                       '(:workspace "buffer-ws")))))))
+
+(ert-deftest agent-repl-test-log-resolves-a-nil-site-from-the-current-workspace ()
+  "A nil logger argument outside an owned buffer inherits the active workspace."
+  ;; Arrange
+  (let ((agent-repl--log-context-workspace nil)
+        (agent-repl-log-to-file t)
+        (agent-repl--owning-workspace nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-log-name)
+               (lambda () "current-ws"))
+              ((symbol-function 'agent-repl--ws-log-routable-p)
+               (lambda (ws) (equal ws "current-ws"))))
+      ;; Act / Assert
+      (should (equal (agent-repl--resolve-log-workspace nil "workspace event")
+                     '(:workspace "current-ws"))))))
+
+(ert-deftest agent-repl-test-deleted-worktree-aborts-its-caller ()
+  "A workspace whose sink vanished is a routing invariant violation."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       (let ((project (make-temp-file "agent-repl-vanished-" t))
             (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
         (agent-repl--ws-put "vanished-ws" :project-dir project)
         (delete-directory project t)
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "vanished-ws" "line after the worktree went away"))))))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          (should-error
+           (agent-repl--log "vanished-ws" "line after the worktree went away")))))))
 
-(ert-deftest agent-repl-test-unroutable-workspace-record-reaches-global-sink ()
-  "The record is written, not dropped, when its workspace cannot be routed."
+(ert-deftest agent-repl-test-unroutable-workspace-original-does-not-reach-global-sink ()
+  "Only the routing error is central; the workspace-owned record is dropped."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "no-such-ws" "must still be recorded"))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          (should-error (agent-repl--log "no-such-ws" "owned secret payload")))
         (with-temp-buffer
           (insert-file-contents path)
-          (should (string-match-p "must still be recorded" (buffer-string))))))))
+          (should (string-match-p "log-routing-error" (buffer-string)))
+          (should-not (string-match-p "owned secret payload" (buffer-string))))))))
 
-(ert-deftest agent-repl-test-unroutable-workspace-is-named-in-a-warning ()
-  "The degraded routing is announced loudly enough to grep for."
+(ert-deftest agent-repl-test-unroutable-workspace-error-keeps-the-request-id ()
+  "A routing failure remains correlated to the request edge that exposed it."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
-      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "no-such-ws" "probe"))
-        (with-temp-buffer
-          (insert-file-contents path)
-          (should (string-match-p "unroutable log workspace" (buffer-string)))
-          (should (string-match-p "no-such-ws" (buffer-string))))))))
+      ;; Arrange
+      (let ((agent-repl--log-context-request-id "request-1")
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (should-error (agent-repl--log "no-such-ws" "owned event")))
+        ;; Assert
+        (let ((record (json-parse-string (agent-repl-test--read-file path)
+                                         :object-type 'alist)))
+          (should (equal (alist-get 'request_id record) "request-1")))))))
+
+(ert-deftest agent-repl-test-unroutable-workspace-is-named-in-a-user-warning ()
+  "The routing failure is visible and names the workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (warning nil))
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (_type text &rest _) (setq warning text))))
+          (should-error (agent-repl--log "no-such-ws" "probe")))
+        (should (string-match-p "no-such-ws" warning))))))
 
 (ert-deftest agent-repl-test-unroutable-workspace-warns-only-once ()
-  "A hot path must not flood the sink with the same routing complaint."
+  "Repeated routing failures signal every time but display one warning."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
-      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (dotimes (_ 5) (agent-repl--log "no-such-ws" "repeated probe")))
-        ;; Counted per RECORD, not per occurrence: each JSONL line carries the
-        ;; text twice, once as `message' and once inside `context.format'.
-        (with-temp-buffer
-          (insert-file-contents path)
-          (should (= 1 (cl-count-if
-                        (lambda (l) (string-match-p "unroutable log workspace" l))
-                        (split-string (buffer-string) "\n" t)))))))))
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (warnings 0))
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _) (cl-incf warnings))))
+          (dotimes (_ 5)
+            (should-error (agent-repl--log "no-such-ws" "repeated probe"))))
+        (should (= warnings 1))))))
 
 (ert-deftest agent-repl-test-routable-workspace-still-uses-its-own-target ()
-  "Degrading an unroutable workspace must not disturb a routable one."
+  "The hard routing invariant does not disturb a routable workspace."
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-still-routed-" t))
            (agent-repl-log-to-file nil)
@@ -3099,16 +3345,20 @@ log at 71,425 records."
       ;; `agent-repl--buffer-name' reports on the verbose rung, so the durable
       ;; threshold is opened: the subject is the sink's self-silencing, not the
       ;; level gate.
-      (let ((agent-repl-log-file-level 'verbose)
+      (let ((agent-repl-log-file-level 'debug)
             (project (make-temp-file "agent-repl-still-logs-" t)))
         (unwind-protect
             (progn
               (agent-repl--ws-put "named-ws" :project-dir project)
               (cl-letf (((symbol-function 'message) #'ignore))
                 (agent-repl--buffer-name "-view" "named-ws"))
-              (with-temp-buffer
-                (insert-file-contents path)
-                (should (string-match-p "buffer-name: suffix=-view" (buffer-string)))))
+              (let ((workspace-path
+                     (plist-get (agent-repl--workspace-log-target-entry "named-ws")
+                                :target)))
+                (with-temp-buffer
+                  (insert-file-contents workspace-path)
+                  (should (string-match-p "buffer-name: suffix=-view"
+                                          (buffer-string))))))
           (delete-directory project t))))))
 
 ;;;; ---- Tests: keyed timer registry ----
@@ -3428,26 +3678,26 @@ survives into the rest of the batch run."
        ,@body)
      writes))
 
-(ert-deftest agent-repl-test-log-file-level-drops-verbose-by-default ()
-  "The default threshold keeps hot-path chatter out of the durable sink."
+(ert-deftest agent-repl-test-log-file-level-info-drops-verbose ()
+  "The info threshold drops debug-level verbose records."
   ;; Arrange / Act
-  (let ((writes (agent-repl-test--with-captured-file-writes 'debug
+  (let ((writes (agent-repl-test--with-captured-file-writes 'info
                   (agent-repl--log-verbose nil "chatter %s" "x"))))
     ;; Assert
     (should (= writes 0))))
 
-(ert-deftest agent-repl-test-log-file-level-keeps-debug-at-the-default ()
-  "The default threshold still records ordinary debug lines."
+(ert-deftest agent-repl-test-log-file-level-debug-keeps-debug ()
+  "The debug threshold records ordinary debug lines."
   ;; Arrange / Act
   (let ((writes (agent-repl-test--with-captured-file-writes 'debug
                   (agent-repl--log nil "ordinary %s" "x"))))
     ;; Assert
     (should (= writes 1))))
 
-(ert-deftest agent-repl-test-log-file-level-verbose-restores-old-behavior ()
-  "Setting the threshold to verbose writes the chatter again."
+(ert-deftest agent-repl-test-log-file-level-debug-persists-verbose ()
+  "Verbose records persist with every other debug record."
   ;; Arrange / Act
-  (let ((writes (agent-repl-test--with-captured-file-writes 'verbose
+  (let ((writes (agent-repl-test--with-captured-file-writes 'debug
                   (agent-repl--log-verbose nil "chatter %s" "x"))))
     ;; Assert
     (should (= writes 1))))
@@ -3468,17 +3718,16 @@ survives into the rest of the batch run."
     ;; Assert
     (should (= writes 1))))
 
-(ert-deftest agent-repl-test-log-file-level-ranks-unknown-levels-at-the-top ()
-  "An unrecognized level is never what a threshold silently discards."
-  ;; Arrange / Act / Assert — ranked with `error', so it clears every setting.
-  (should (agent-repl--log-record-persists-p "no-such-level" "normal")))
+(ert-deftest agent-repl-test-log-file-level-rejects-an-unknown-record-level ()
+  "An unrecognized record level fails instead of acquiring an implicit rank."
+  ;; Arrange / Act / Assert
+  (should-error
+   (agent-repl--log-record-persists-p "no-such-level" "normal") :type 'error))
 
-(ert-deftest agent-repl-test-log-file-level-verbose-outranks-its-carried-level ()
-  "A verbose record ranks by its verbosity, not by the level it carries."
-  ;; Arrange / Act / Assert — `agent-repl--log-verbose' stamps records `debug',
-  ;; so ranking by level alone would let all the chatter through at the default.
+(ert-deftest agent-repl-test-log-file-level-verbose-follows-its-carried-level ()
+  "Durable filtering uses level and never drops a debug verbose record."
   (let ((agent-repl-log-file-level 'debug))
-    (should-not (agent-repl--log-record-persists-p "debug" "verbose"))))
+    (should (agent-repl--log-record-persists-p "debug" "verbose"))))
 
 (ert-deftest agent-repl-test-log-file-level-leaves-messages-visibility-alone ()
   "The durable threshold does not change what reaches *Messages*."
@@ -3655,8 +3904,8 @@ that froze Emacs; this pins the equivalence the bound relies on."
   "A phase transition reaches the durable sink at the info rung."
   ;; Arrange
   (let (records)
-    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
-               (lambda (ws level verbosity fmt args)
+    (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+               (lambda (ws level verbosity fmt args &rest _options)
                  (push (list ws level verbosity fmt args) records)))
               ((symbol-function 'agent-repl--emit-message) #'ignore))
       ;; Act
@@ -3669,7 +3918,7 @@ that froze Emacs; this pins the equivalence the bound relies on."
   "A phase transition is echoed loudly, not filed quietly like other chatter."
   ;; Arrange
   (let (emitted)
-    (cl-letf (((symbol-function 'agent-repl--persist-log-record) #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
               ((symbol-function 'agent-repl--emit-message)
                (lambda (text &optional echo) (setq emitted (cons text echo)))))
       ;; Act
@@ -3677,131 +3926,19 @@ that froze Emacs; this pins the equivalence the bound relies on."
       ;; Assert
       (should (equal emitted (cons "agent-repl: daemon up (pid 41)" t))))))
 
-;;;; ---- Tests: the registration window is classified, not warned about ----
-;;
-;; A workspace is created before it is registered, and its creator logs
-;; throughout that window.  Those records correctly name a workspace that owns
-;; no sink yet, so a perfectly normal creation used to warn about its own
-;; prologue.  The window is declared by its creator and classified here.
+;;;; ---- Tests: registration does not bypass sink ownership ----
 
-(ert-deftest agent-repl-test-preregistration-record-emits-no-warning ()
-  "A record inside the declared registration window is not an anomaly."
+(ert-deftest agent-repl-test-preregistration-record-fails-routing ()
+  "A declared creation window cannot reroute a workspace-owned record."
+  ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-logfile path
-      ;; Arrange
-      (let ((agent-repl--log-preregistration-workspace "being-created")
-            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
-            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
-        ;; Act
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "being-created" "creation prologue probe"))
-        ;; Assert
-        (with-temp-buffer
-          (insert-file-contents path)
-          (should-not (string-match-p "unroutable log workspace" (buffer-string))))))))
-
-(ert-deftest agent-repl-test-preregistration-record-reaches-the-global-sink ()
-  "Classifying the attribution must not drop the record."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-logfile path
-      ;; Arrange
-      (let ((agent-repl--log-preregistration-workspace "being-created")
-            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
-        ;; Act
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "being-created" "must still be recorded"))
-        ;; Assert
-        (with-temp-buffer
-          (insert-file-contents path)
-          (should (string-match-p "must still be recorded" (buffer-string))))))))
-
-(ert-deftest agent-repl-test-preregistration-window-is-announced-once ()
-  "The window is announced, and only once, so the sink question has an answer."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-logfile path
-      ;; Arrange
-      (let ((agent-repl--log-preregistration-workspace "being-created")
-            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
-        ;; Act
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (dotimes (_ 5) (agent-repl--log "being-created" "repeated probe")))
-        ;; Assert — counted per RECORD; each JSONL line carries the text twice.
-        (with-temp-buffer
-          (insert-file-contents path)
-          (should (= 1 (cl-count-if
-                        (lambda (l) (string-match-p "pre-registration log workspace" l))
-                        (split-string (buffer-string) "\n" t)))))))))
-
-(ert-deftest agent-repl-test-preregistration-announcement-is-not-a-warning ()
-  "The global sink is where these records BELONG, so this is info, not warn."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-logfile path
-      ;; Arrange
-      (let ((agent-repl--log-preregistration-workspace "being-created")
-            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
-        ;; Act
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "being-created" "probe"))
-        ;; Assert
-        (with-temp-buffer
-          (insert-file-contents path)
-          (let ((line (car (cl-remove-if-not
-                            (lambda (l) (string-match-p "pre-registration log workspace" l))
-                            (split-string (buffer-string) "\n" t)))))
-            (should line)
-            (should (string-match-p "\"level\":\"info\"" line))))))))
-
-(ert-deftest agent-repl-test-preregistration-window-covers-only-its-own-name ()
-  "An unrelated unregistered workspace still warns while a window is open."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-logfile path
-      ;; Arrange
-      (let ((agent-repl--log-preregistration-workspace "being-created")
-            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
-            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
-        ;; Act
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "some-other-ws" "probe"))
-        ;; Assert
-        (with-temp-buffer
-          (insert-file-contents path)
-          (should (string-match-p "unroutable log workspace" (buffer-string))))))))
-
-(ert-deftest agent-repl-test-record-after-the-window-closes-still-warns ()
-  "The classification lasts exactly as long as the creator holds the binding."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-logfile path
-      ;; Arrange
-      (let ((agent-repl--log-preregistration-workspace nil)
-            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
-            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
-        ;; Act
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "being-created" "probe after the window"))
-        ;; Assert
-        (with-temp-buffer
-          (insert-file-contents path)
-          (should (string-match-p "unroutable log workspace" (buffer-string))))))))
-
-(ert-deftest agent-repl-test-registered-workspace-ignores-an-open-window ()
-  "A workspace that owns a sink routes to it, window open or not."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let* ((project (make-temp-file "agent-repl-window-routed-" t))
-           (agent-repl-log-to-file nil)
-           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "routed-ws" :project-dir project)
-            ;; Act
-            (let ((agent-repl-log-to-file t)
-                  (agent-repl--log-preregistration-workspace "routed-ws"))
-              (cl-letf (((symbol-function 'message) #'ignore))
-                (agent-repl--log "routed-ws" "owned line")))
-            ;; Assert
-            (should (plist-get (agent-repl--workspace-log-target-entry "routed-ws")
-                               :target)))
-        (delete-directory project t)))))
+    (let ((agent-repl--log-preregistration-workspace "being-created")
+          (agent-repl--log-context-workspace nil)
+          (agent-repl--workspace-log-buffer-enabled t))
+      (cl-letf (((symbol-function 'display-warning) #'ignore))
+        ;; Act / Assert
+        (should-error
+         (agent-repl--log "being-created" "creation prologue probe"))))))
 
 ;;;; ---- Tests: user-facing minibuffer copy ----
 ;;
@@ -4244,19 +4381,20 @@ workspace name rather than to a second, unroutable spelling."
                             (file-name-as-directory project)))))
         (delete-directory project t)))))
 
-(ert-deftest agent-repl-test-unknown-directory-still-warns-as-unroutable ()
-  "Canonicalization must not silence a genuinely unknown name."
+(ert-deftest agent-repl-test-unknown-directory-still-fails-as-unroutable ()
+  "Canonicalization must not accept a genuinely unknown directory."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
         ;; Act
-        (cl-letf (((symbol-function 'message) #'ignore))
-          (agent-repl--log "/no/such/worktree/anywhere" "probe"))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          (should-error
+           (agent-repl--log "/no/such/worktree/anywhere" "probe")))
         ;; Assert
         (with-temp-buffer
           (insert-file-contents path)
-          (should (string-match-p "unroutable log workspace" (buffer-string))))))))
+          (should (string-match-p "log-routing-error" (buffer-string))))))))
 
 (ert-deftest agent-repl-test-tombstoned-workspace-dir-is-not-adopted ()
   "A dead workspace's preserved directory must not claim the record.
@@ -4268,8 +4406,7 @@ gone cannot silently swallow a directory-spelled record."
       (agent-repl--ws-put "dirkey-tomb-ws" :project-dir project)
       (delete-directory project t)
       ;; Act / Assert
-      (should-not (equal "dirkey-tomb-ws"
-                         (agent-repl--log-sink-workspace project))))))
+      (should-error (agent-repl--log-sink-workspace project)))))
 
 ;;;; ---- Tests: one directory owns one durable target and one canonical link ----
 ;;

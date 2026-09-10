@@ -345,6 +345,23 @@ layout."
         (agent-repl--on-window-change))
       (should-not calls))))
 
+(ert-deftest agent-repl-test-panels-on-window-change-binds-central-scope-without-workspace ()
+  "A frame-wide window callback gives every nested record a central scope."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((captured 'unset))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+                ((symbol-function 'agent-repl--with-log-context)
+                 (lambda (workspace _request-id function)
+                   (setq captured workspace)
+                   (funcall function)))
+                ((symbol-function 'agent-repl--sync-panels) #'ignore)
+                ((symbol-function 'agent-repl-window--ensure-layout) #'ignore))
+        ;; Act.
+        (agent-repl--on-window-change))
+      ;; Assert.
+      (should (eq captured agent-repl--global-log-scope)))))
+
 ;;;; ---- Tests: Defcustom defaults ----
 
 ;;;; ---- Tests: drain-pending-show-panels ----
@@ -3335,6 +3352,25 @@ rather than booting a session as a side effect."
       (agent-repl--before-persp-deactivate)
       (should-not (agent-repl--ws-get "ws1" :panels-were-visible)))))
 
+(ert-deftest agent-repl-test-panels-before-persp-deactivate-binds-central-scope-without-workspace ()
+  "A workspace-free perspective callback gives nested records central scope."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((captured 'unset))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+                ((symbol-function 'agent-repl--with-log-context)
+                 (lambda (workspace _request-id function)
+                   (setq captured workspace)
+                   (funcall function)))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
+                ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore))
+        ;; Act.
+        (agent-repl--before-persp-deactivate))
+      ;; Assert.
+      (should (eq captured agent-repl--global-log-scope)))))
+
 ;;;; ---- Tests: before-persp-deactivate log routing ----
 
 (ert-deftest agent-repl-test-panels-before-persp-deactivate-placeholder-logs-globally ()
@@ -3423,6 +3459,21 @@ owns a `:project-dir', so a record attributed to one is unroutable and
         (agent-repl--on-workspace-switch "main"))
       ;; Assert
       (should-not unroutable))))
+
+(ert-deftest agent-repl-test-panels-on-workspace-switch-placeholder-binds-central-scope ()
+  "A pseudo-perspective switch gives every nested record a central scope."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((captured 'unset))
+      (cl-letf (((symbol-function 'agent-repl--with-log-context)
+                 (lambda (workspace _request-id function)
+                   (setq captured workspace)
+                   (funcall function)))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+        ;; Act.
+        (agent-repl--on-workspace-switch "main"))
+      ;; Assert.
+      (should (eq captured agent-repl--global-log-scope)))))
 
 (ert-deftest agent-repl-test-panels-on-workspace-switch-routable-ws-keeps-attribution ()
   "Activating a REAL workspace still attributes its records to that workspace.

@@ -8,6 +8,7 @@
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--warn "core")
 (declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--buffer-owner "core")
 (declare-function agent-repl--ws-current-log-name "workspace")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-dir "status")
@@ -70,6 +71,8 @@ Same fallback semantics as `agent-repl--legacy-history-filename'.")
 
 ;;;; Error handling
 
+(defvar agent-repl--global-log-scope)
+
 (defmacro agent-repl--with-error-logging (label &rest body)
   "Execute BODY, logging any error with LABEL prefix.
 Catches errors and displays a user-visible warning via
@@ -78,8 +81,10 @@ Catches errors and displays a user-visible warning via
   `(condition-case err
        (progn ,@body)
      (error
-      (agent-repl--warn nil "%s error: %S" ,label err)
-      (agent-repl--log nil (concat ,label " error: %S") err))))
+      (agent-repl--warn agent-repl--global-log-scope "%s error: %S" ,label err)
+      (agent-repl--log agent-repl--global-log-scope
+                       (concat ,label " error: %S") err)
+      nil)))
 
 ;;;; File I/O helpers
 
@@ -494,7 +499,7 @@ Signals an error with a descriptive message when validation fails."
   "Save TEXT (or current buffer text) to history.
 Skips empty strings and duplicates of the most recent entry."
   (let ((text (string-trim (or text (buffer-string))))
-        (ws (agent-repl--ws-current-name)))
+        (ws (agent-repl--buffer-owner (current-buffer))))
     (cond
      ((string-empty-p text)
       (agent-repl--log ws "history-push: skipped empty input ws=%s history-count=%d" ws (length agent-repl--input-history)))
@@ -506,7 +511,8 @@ Skips empty strings and duplicates of the most recent entry."
 
 (defun agent-repl--history-reset ()
   "Reset history browsing index to the default (not browsing) state."
-  (agent-repl--log-verbose (agent-repl--ws-current-log-name) "history-reset: index=%d -> -1" agent-repl--history-index)
+  (agent-repl--log-verbose (agent-repl--buffer-owner (current-buffer))
+                           "history-reset: index=%d -> -1" agent-repl--history-index)
   (setq agent-repl--history-index -1))
 
 (defun agent-repl--history-replace-buffer-text (text)
@@ -519,7 +525,8 @@ Binds `agent-repl--history-navigating' to suppress `history-on-change'."
 (defun agent-repl--history-show-entry (index)
   "Display the history entry at INDEX, or the stash when INDEX is negative.
 Updates `agent-repl--history-index' and replaces the buffer contents."
-  (agent-repl--log (agent-repl--ws-current-log-name) "history-show-entry: index=%d history-count=%d source=%s"
+  (agent-repl--log (agent-repl--buffer-owner (current-buffer))
+                   "history-show-entry: index=%d history-count=%d source=%s"
                    index (length agent-repl--input-history) (if (< index 0) :stash :history))
   (setq agent-repl--history-index index)
   (agent-repl--history-replace-buffer-text
@@ -530,7 +537,7 @@ Updates `agent-repl--history-index' and replaces the buffer contents."
 (defun agent-repl--history-prev ()
   "Navigate to the previous (older) history entry."
   (interactive)
-  (let ((ws (agent-repl--ws-current-name))
+  (let ((ws (agent-repl--buffer-owner (current-buffer)))
         (history-count (length agent-repl--input-history)))
     (cond
      ((zerop history-count)
@@ -548,7 +555,7 @@ Updates `agent-repl--history-index' and replaces the buffer contents."
 (defun agent-repl--history-next ()
   "Navigate to the next (newer) history entry, or restore stashed text."
   (interactive)
-  (let ((ws (agent-repl--ws-current-name)))
+  (let ((ws (agent-repl--buffer-owner (current-buffer))))
     (if (>= agent-repl--history-index 0)
         (let ((next-index (1- agent-repl--history-index)))
           (agent-repl--log ws "history-next: showing ws=%s from-index=%d to-index=%d history-count=%d" ws agent-repl--history-index next-index (length agent-repl--input-history))
@@ -557,7 +564,7 @@ Updates `agent-repl--history-index' and replaces the buffer contents."
 
 (defun agent-repl--history-on-change (&rest _)
   "Reset history browsing when the user edits the buffer directly."
-  (let* ((ws (agent-repl--ws-current-name))
+  (let* ((ws (agent-repl--buffer-owner (current-buffer)))
          (index agent-repl--history-index)
          (reset-p (and (not agent-repl--history-navigating) (>= index 0))))
     (when reset-p

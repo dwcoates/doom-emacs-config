@@ -30,13 +30,15 @@
 ;; area, on purpose: a failure to load core.el breaks the whole logging
 ;; system, which is exactly the genuine fatal condition the user must see.
 
+(defvar agent-repl--global-log-scope)
+
 (defun agent-repl--boot-info (fmt &rest args)
   "Emit a bootstrap-phase notice for FMT and ARGS to the QUIET sink.
 Delegates to `agent-repl--info' once core.el has defined it.  Before then,
 falls back to a `message' quieted with `inhibit-message', so the line still
 lands in *Messages* but never flashes in the echo area."
   (if (fboundp 'agent-repl--info)
-      (apply #'agent-repl--info nil fmt args)
+      (apply #'agent-repl--info agent-repl--global-log-scope fmt args)
     (let ((inhibit-message t))
       (apply #'message (concat "[agent-repl] " fmt) args))))
 
@@ -50,7 +52,7 @@ that DOES reach the echo area: core.el is the one module whose load
 failure leaves the ladder undefined, and a broken logging system is a
 genuine fatal condition the user must see immediately."
   (if (fboundp 'agent-repl--warn)
-      (apply #'agent-repl--warn nil fmt args)
+      (apply #'agent-repl--warn agent-repl--global-log-scope fmt args)
     (apply #'message (concat "[agent-repl] WARNING: " fmt) args)))
 
 (agent-repl--boot-info "Loading Agent-Repl package...")
