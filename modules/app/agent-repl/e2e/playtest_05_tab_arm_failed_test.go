@@ -221,6 +221,10 @@ func TestPlaytestTabArmHibernated(t *testing.T) {
 	// that sentence a claim rather than a description.
 	s.awaitInPage(t, "the pre-park compaction's own row in the feed",
 		`document.querySelector('[data-fold="compaction-summary"]')`)
+	// THE OCCLUSION THIS PICTURE ONCE CAUGHT, now a claim rather than a look:
+	// the revived turn's last bubble must sit clear of the progress footer,
+	// and the footer settles around this very moment.
+	s.awaitTailClearsFooter(t)
 	s.captureArm(t, "arm-revived", name,
 		"a second prose prompt submitted with composer RET revived the parked session and its turn concluded",
 		revived,

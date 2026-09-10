@@ -1,3 +1,9 @@
+// @vitest-environment jsdom
+//
+// The pure decisions in this module need no dom, but `observeScrollBox` is the
+// one DOM-facing thing in it: it subscribes a real element's scroll events and
+// a real `ResizeObserver` to the tail owner, and the subscription being wired
+// to THAT element is half of what the footer-occlusion cases assert.
 import { describe, expect, it } from "vitest";
 import {
   EDGE_PX,
@@ -20,7 +26,9 @@ import {
   type RevealBlock,
   type RevealTarget,
   revealNode,
+  observeScrollBox,
 } from "../src/scroll.js";
+import { fireResize } from "./resize-observer.js";
 
 /** Fake ancestor-chain node: the shape innerScrollerAt walks. */
 interface FakeNode {
@@ -1010,5 +1018,113 @@ describe("restoreFeedAnchor key escaping", () => {
     // Assert
     expect(seen).toEqual(['[data-key="a\\"b"]']);
     expect(placed).toEqual([480]);
+  });
+});
+
+
+/**
+ * `observeScrollBox` — THE FOOTER OCCLUSION, at its source.
+ *
+ * The docked progress footer is laid out BELOW the scroll box, so the box's
+ * height is already the window's minus the footer's: the space is reserved by
+ * the layout and never needed reserving again. What went stale was the
+ * POSITION — a footer that appeared or grew AFTER the render that parked the
+ * tail shrank the box under a `scrollTop` nobody moved, leaving the last bubble
+ * that many pixels below the fold and clipped by the footer's top edge.
+ *
+ * These drive a real element with scripted geometry, because the subscription
+ * being wired to THAT element is half of what is under test.
+ */
+describe("observeScrollBox", () => {
+  /**
+   * A real element that answers scroll geometry, since jsdom lays nothing out.
+   * `scrollTop` clamps into the scrollable range on write, as a browser's does
+   * — which is what turns `parkAtTail`'s "assign scrollHeight" into the bottom.
+   */
+  function scrollBox(init: { scrollHeight: number; clientHeight: number; scrollTop: number }) {
+    const element = document.createElement("div");
+    const scrollHeight = init.scrollHeight;
+    let clientHeight = init.clientHeight;
+    let scrollTop = init.scrollTop;
+    Object.defineProperties(element, {
+      scrollHeight: { get: () => scrollHeight },
+      clientHeight: { get: () => clientHeight },
+      scrollTop: {
+        get: () => scrollTop,
+        set: (next: number) => {
+          scrollTop = Math.max(0, Math.min(next, scrollHeight - clientHeight));
+        },
+      },
+    });
+    return {
+      element,
+      /** The footer appearing or growing by PX: the box loses that height. */
+      loseHeight: (px: number) => {
+        clientHeight -= px;
+      },
+      top: () => scrollTop,
+    };
+  }
+
+  it("re-lands the tail on the shrunken viewport when the footer takes height", () => {
+    // Arrange — a reader parked at the tail: 700 + 300 viewport = 1000.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    // Act — the footer settles after the render and eats 48px of the box.
+    box.loseHeight(48);
+    fireResize(box.element);
+    // Assert — the tail is the new bottom, so the last bubble clears the strip.
+    expect(box.top()).toBe(748);
+  });
+
+  it("re-lands by exactly the height the footer took", () => {
+    // Arrange — the same box, so the delta is the only thing being read.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const before = box.top();
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    // Act
+    box.loseHeight(48);
+    fireResize(box.element);
+    // Assert — the reservation IS the footer's height, not an approximation.
+    expect(box.top() - before).toBe(48);
+  });
+
+  it("leaves a reader who scrolled away exactly where they are", () => {
+    // Arrange — the reader left the tail, so nothing may pull them back.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    box.element.scrollTop = 200;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Act
+    box.loseHeight(48);
+    fireResize(box.element);
+    // Assert
+    expect(box.top()).toBe(200);
+  });
+
+  it("hears the box's own scroll events, so a gesture ends the follow", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    // Act — the reader scrolls up and the browser dispatches the event.
+    box.element.scrollTop = 400;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect(tail.isFollowing()).toBe(false);
+  });
+
+  it("stops observing the box when its unsubscriber is called", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    const unobserve = observeScrollBox(box.element, tail);
+    // Act
+    unobserve();
+    // Assert — nothing watches it any more, so a fire finds no observer.
+    expect(() => fireResize(box.element)).toThrow(/no ResizeObserver/);
   });
 });
