@@ -256,6 +256,37 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 	emGHIAwaitHeldPrompts(t, e, ws, "no prompt to be held after a forced restart", 0)
 }
 
+// TestEmacsForcedRestartClosesTheComposerOnItsSend holds the ONE edge that
+// closes the composer.
+//
+// RestartWorkspace is sent asynchronously and answers success once the daemon
+// has taken the work on; the bounce it schedules — prelaunch, stand-down,
+// reap, relaunch — runs after that answer again. The `restarting` composer arm
+// therefore arrives later still, over the WatchHostWorkspace stream rather
+// than the one that carried the ack, and nothing orders the two. So the gate
+// read the instant the restart is asked for must ALREADY be closed: a caller
+// that read `:open` here would submit a prompt the daemon refuses a few
+// hundred milliseconds later, which is what playtest F.42 hit.
+func TestEmacsForcedRestartClosesTheComposerOnItsSend(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	w, e := emGHIWorld(t)
+	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-restart-gate")
+	emGHISelect(t, e, dir, ws)
+	emGHIOpenPanel(t, e)
+	emGHISubmit(t, e, ws, emGHIParkedPrompt)
+	emGHIAwaitStatus(t, e, ws, "the turn to be running before the interrupt", emGHIRunningArms...)
+
+	// Act.
+	e.Eval(`(agent-repl-restart-workspace t ` + elispString(ws) + `)`)
+
+	// Assert: read with no wait at all — a wait would hide the race by giving
+	// the daemon's own push time to land.
+	if got := e.EvalString(`(symbol-name (agent-repl-host-composer-gate ` + elispString(ws) + `))`); got != ":restarting" {
+		t.Fatalf("the composer gate reads %s the instant the forced restart is asked for, want :restarting: a prompt sent now is refused by the bounce", got)
+	}
+}
+
 // TestEmacsGracefulRestartHoldsPromptsMeanwhile is scenario 36.
 //
 // The claim under test is that Emacs HOLDS rather than refuses: undelivered
