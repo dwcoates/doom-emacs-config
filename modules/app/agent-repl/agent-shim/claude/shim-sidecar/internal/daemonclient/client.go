@@ -1,7 +1,8 @@
 // Package daemonclient owns the shim-claude-sidecar's ClientLog integration
 // boundary. It resolves the daemon's current loopback address from the shared
-// state root for every forwarded record, so a daemon handover changes the
-// destination without restarting the launchd-managed sidecar.
+// state root and idempotently registers the workspace directory for every
+// forwarded record, so a daemon handover changes both the destination and the
+// daemon-minted workspace ref without restarting the launchd-managed sidecar.
 package daemonclient
 
 import (
@@ -80,8 +81,26 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	client := agentreplv1connect.NewAgentReplClient(c.http, "http://"+address)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
+	registered, err := client.RegisterWorkspace(ctx, connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{
+		Dir: record.WorkspaceDir,
+	}))
+	if err != nil {
+		return address, fmt.Errorf("RegisterWorkspace at %s: %w", address, err)
+	}
+	var workspace *workspacev1.WorkspaceRef
+	switch registered.Msg.GetResult().(type) {
+	case *agentreplv1.RegisterWorkspaceResponse_Success:
+		workspace = registered.Msg.GetSuccess().GetWorkspace()
+		if workspace.GetId() == "" || workspace.GetDir() == "" {
+			return address, fmt.Errorf("RegisterWorkspace at %s returned an incomplete workspace ref", address)
+		}
+	case *agentreplv1.RegisterWorkspaceResponse_Error:
+		return address, fmt.Errorf("RegisterWorkspace at %s was refused", address)
+	default:
+		return address, fmt.Errorf("RegisterWorkspace at %s returned neither success nor error", address)
+	}
 	response, err := client.ClientLog(ctx, connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: &workspacev1.WorkspaceRef{Id: record.WorkspaceID, Dir: record.WorkspaceDir},
+		Workspace: workspace,
 		Record:    requestRecord,
 	}))
 	if err != nil {

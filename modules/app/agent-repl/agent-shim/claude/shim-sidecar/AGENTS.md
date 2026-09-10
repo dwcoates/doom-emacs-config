@@ -7,10 +7,10 @@ and writes it to the store as `store.v1.StoreEntry` batches with the reader
 position riding the same transaction.
 
 It is a COPIER. It has no view of process liveness, no session semantics, and
-owns no database. Its only daemon call is `ClientLog` for file-scoped
+owns no database. Its daemon calls are the idempotent `RegisterWorkspace`
+lookup needed to obtain a daemon-minted ref and `ClientLog` for file-scoped
 diagnostics; the daemon persists those records into workspace `sidecar.log`.
-The only thing it concludes on its own is that it STOPPED SEEING a detached
-run.
+The only thing it concludes on its own is that it STOPPED SEEING a detached run.
 
 Dual-plane relationship with the shim: `StoreEntry.plane` names the producer.
 The SHIM (stream plane) watches the SDK live — first to know, authoritative for
@@ -583,8 +583,9 @@ foreground harnesses may use `logging.NewAtLevel`.
 - FILE-SCOPED DIAGNOSTICS GO THROUGH `agentrepl.v1.AgentRepl.ClientLog` with
   the `sidecar` runtime arm, the sidecar's timestamp and verbosity class, its
   PID and Claude session in context, and the complete daemon-minted workspace
-  ref. The daemon address is re-read from `<state-dir>/daemon.addr` for every
-  record so handover changes the destination without a sidecar restart.
+  ref returned by idempotent `RegisterWorkspace(dir)`. The daemon address is
+  re-read from `<state-dir>/daemon.addr` for every record so handover changes
+  the destination without a sidecar restart.
 - GENUINELY GLOBAL SERVICE RECORDS stay in the global rotating sink only. A
   forwarding failure writes one global error per daemon address and outage
   window and never fails the file-plane operation that produced the diagnostic.
