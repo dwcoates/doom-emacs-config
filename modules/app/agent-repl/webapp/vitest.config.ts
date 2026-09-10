@@ -51,7 +51,15 @@ export default defineConfig({
     // (vitest.webapp-layer.config.ts) is excluded for a stronger reason: it
     // needs the REAL daemon the Go e2e world spawns, and refuses to run
     // without it, so riding along here would fail every unit run.
-    exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**", "test/webapp-layer/**"],
+    //
+    // THE LAYER EXCLUSION IS BY FILE SUFFIX, NOT BY DIRECTORY. `.layer.test.ts`
+    // is already the layer's own name for "a file the Go world drives" — the
+    // scenario-matrix check reads the directory by that exact suffix
+    // (e2e/scenariomatrix_test.go, deriveWebappCoverage) — and the directory
+    // also holds the layer's HELPERS (drive.ts, perf.ts, real-daemon.ts),
+    // which need no daemon and whose own tests belong in the fast run like any
+    // other unit test. Excluding the whole directory left them untestable.
+    exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**", "test/webapp-layer/**/*.layer.test.ts"],
     // TIGHT ON PURPOSE, RE-MEASURED after the 300ms bound tripped three times
     // under load on otherwise-passing tests (question.test.ts, shell.test.ts,
     // feed.test.ts). Four `npx vitest run --reporter=json` passes (2 quiet, 2

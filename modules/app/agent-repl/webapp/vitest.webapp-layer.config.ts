@@ -49,7 +49,12 @@ export default defineConfig({
     // earlier and leaves the mount's logger alone, so it is the whole setup
     // here.
     setupFiles: ["./test/webapp-layer/setup.ts"],
-    include: ["test/webapp-layer/**/*.test.ts"],
+    // `.layer.test.ts`, NOT every `*.test.ts` in the directory: the layer's
+    // helpers live here too, and a unit test OF a helper (test/webapp-layer/
+    // drive.test.ts) must run in the fast unit suite, where there is no daemon
+    // to demand. The suffix is the same one the Go scenario-matrix check reads
+    // the directory by (e2e/scenariomatrix_test.go, deriveWebappCoverage).
+    include: ["test/webapp-layer/**/*.layer.test.ts"],
     env: { AGENT_REPL_FORBID_VENDOR_CALLS: "1" },
     css: true,
     // NOT WIDENED FROM THE INTEGRATION PROJECT. 900ms is the measured bound
