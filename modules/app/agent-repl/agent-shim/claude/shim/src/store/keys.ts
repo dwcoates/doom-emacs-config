@@ -225,26 +225,35 @@ export function contextBudgetWarningUpsertKey(vendorRecordUuid: string): string 
 }
 
 /**
- * A CONTEXT CUT — a `/clear` or a compaction — keyed by the vendor record that
- * stated it.
+ * A CONTEXT CUT — a `/clear` or a compaction — keyed by WHAT THE CUT IS, in the
+ * one spelling BOTH PLANES can reach.
  *
- * THE SAME RULING AS THE BUDGET WARNING ABOVE, and for the same reason. Both
- * planes produce this fact from ONE vendor record: the stream carries the
- * `compact_boundary` (or the `conversation_reset`) and the transcript carries
- * the identical record, uuid and all — `testdata/captures/compaction-directed`
- * has the two spellings of one boundary sharing uuid `b14c2f08-…`. write_id
- * dedup collapses the two writes into one row only if the key BYTES match, and
- * the sidecar mints `session:context_cut:<uuid>` (its `SessionKey`, pinned by
- * `internal/convert/entry_test.go` and its own AGENTS.md).
+ * THE SAME RULING AS THE BUDGET WARNING ABOVE, and for the same reason. write_id
+ * dedup collapses two writes into one row only if the key BYTES match, and the
+ * sidecar mints `session:context_cut:<id>` (its `SessionKey`, pinned by
+ * `internal/convert/entry_test.go` and its own AGENTS.md). Where the keys did
+ * not match, the store held TWO entries at TWO positions for ONE cut, and the
+ * daemon — which keys the separation divider on the store position precisely so
+ * a second delivery upserts the first's row — drew the divider TWICE, the second
+ * copy from whichever plane's frame was less complete.
  *
- * This plane spelled it `cut:<uuid>` instead. The keys never collided, so the
- * store held TWO entries at TWO positions for one compaction, and the daemon —
- * which keys the separation divider on the store position precisely so a second
- * delivery upserts the first's row — drew the divider TWICE, the second copy
- * from whichever plane's frame was less complete.
+ * WHAT THE IDENTITY IS DEPENDS ON WHAT THE VENDOR GIVES THE TWO PLANES:
+ *
+ *   - a COMPACTION is ONE vendor record on both planes — the stream's
+ *     `compact_boundary` and the transcript's carry the SAME uuid
+ *     (`testdata/captures/compaction-directed`, `b14c2f08-…`) — so the identity
+ *     is that uuid;
+ *   - a CLEAR is TWO DISJOINT records. `testdata/captures/identity-rotation-clear`
+ *     has the stream's `conversation_reset` at `cc07c2a0-…` and the file plane's
+ *     only evidence, the expanded `/clear` command envelope, at `04f97c00-…` in
+ *     a transcript the reset never names; `new_conversation_id` is a third uuid
+ *     nothing ever uses. The one fact both planes hold is THE SESSION THE CLEAR
+ *     ROTATED TO — the sidecar's transcript file is named for it, and the
+ *     `system:init` that follows the reset states it — so THAT is the identity.
+ *     `PendingClear` in `convert/session-updates.ts` is why the row waits for it.
  */
-export function contextCutUpsertKey(vendorRecordUuid: string): string {
-  return sessionUpsertKey("context_cut", vendorRecordUuid);
+export function contextCutUpsertKey(cutIdentity: string): string {
+  return sessionUpsertKey("context_cut", cutIdentity);
 }
 
 /**
