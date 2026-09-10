@@ -270,3 +270,23 @@ func TestClosedTurnMemoryIsBounded(t *testing.T) {
 		t.Fatalf("closedTurns holds %d turns, want the bounded %d", held, closedTurnMemory)
 	}
 }
+
+// TestAwaitFreeIsReleasedByADetachedSubagentSettling covers freeness over a
+// DETACHED RUN: the run's settle arrives as its spawn unit's terminal arm and
+// nowhere else, so that frame has to be what releases a standing waiter.
+func TestAwaitFreeIsReleasedByADetachedSubagentSettling(t *testing.T) {
+	// Arrange.
+	h := detachedSubagentHarness(t)
+	ch, standing, err := h.w.registerFreeWaiter()
+	if !standing {
+		t.Fatalf("a detached subagent is live but the wait did not stand (err %v)", err)
+	}
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("spawn-1", false)))))
+
+	// Assert.
+	if err := <-ch; err != nil {
+		t.Fatalf("the freeness waiter = %v, want nil once the detached run settled", err)
+	}
+}
