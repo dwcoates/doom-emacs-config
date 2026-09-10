@@ -335,6 +335,18 @@ describe("StartSession, fresh", () => {
     expect(h.queries[0]?.spec.binding.kind).toBe("fresh");
   });
 
+  it("declares the pre-minted AgentId absent from the store, so no book is asked for", async () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    await started(h);
+
+    // Assert. The id is a uuid minted moments ago; the store cannot hold a book
+    // for it until this session's first write lands.
+    expect(h.persistence.mintedAgents).toEqual([h.persistence.producer]);
+  });
+
   it("adopts the pre-minted id as the main AgentId (R9)", async () => {
     const h = harness();
     const response = await started(h);
@@ -704,6 +716,21 @@ describe("StartSession, resume", () => {
     (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
 
     expect((await pending).result.case).toBe("success");
+  });
+
+  it("does NOT declare the AgentId minted here, because an earlier session may have written under it", async () => {
+    // Arrange.
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act.
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    // Assert. Claiming absence here would serve an empty opening page over a
+    // book that holds the whole conversation.
+    expect(h.persistence.mintedAgents).toEqual([]);
   });
 
   it("binds resume, not fresh", async () => {
@@ -4400,6 +4427,24 @@ describe("the teardown's tails", () => {
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
 
     expect(h.persistence.concludedThrough).toContain("p-9");
+  });
+
+  it("VOUCHES for the agent when reading the head, so a book never written is not asked for", async () => {
+    // Arrange. A session killed before its first turn has an agent with no book,
+    // and asking the store for one earns an `unknown_agent` refusal on every
+    // such teardown.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+    await watching.next();
+
+    // Act.
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert. The head read carried the producer's own answer, and it holds.
+    expect(h.persistence.lastKnownAgent?.()).toBe(true);
   });
 
   it("concludes NOTHING for a tail that already ended on its own", async () => {

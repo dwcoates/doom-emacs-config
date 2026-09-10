@@ -212,6 +212,28 @@ const defaultSleep = (ms: number): Promise<void> =>
  * Build the whole record plane: this write half, plus the reader and the
  * reconciler, behind the one {@link Persistence} seam.
  */
+/**
+ * The agents a batch REGISTERS a book for — not every agent it NAMES.
+ *
+ * THE STORE REGISTERS A BOOK ON A PAGE LINE AND ON NOTHING ELSE (its
+ * `applyServeableFrameLifecycle` calls `ensureAgent` for a prompt and for a
+ * frame, and for nothing else). A session update is a fact about the SESSION
+ * that carries the main agent in its envelope purely so it has a book to be
+ * filed under, and a keep-alive lands as an unserved item — neither creates the
+ * `agent` row, so a watcher woken on one goes straight back into the refusal it
+ * was blocked on, and a caller that concluded the absence was over from one
+ * would ask the store for a book that still does not exist.
+ */
+function booksRegisteredBy(entries: readonly PersistEntry[]): Set<string> {
+  const books = new Set<string>();
+  for (const entry of entries) {
+    if (entry.keepalive) continue;
+    if (entry.item.kind !== "prompt" && entry.item.kind !== "frame") continue;
+    books.add(entry.agentId.value);
+  }
+  return books;
+}
+
 export function createPersistence(options: PersistenceOptions): Persistence {
   const retry: PersistenceRetryPolicy = options.retry ?? DEFAULT_RETRY_POLICY;
   const sleep = options.sleep ?? defaultSleep;
@@ -451,7 +473,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         // WOKEN ONLY ONCE THE ROWS ARE DURABLE: a `WatchAgent` that opened
         // before this book existed is blocked on the store holding a row, so
         // waking it on the enqueue would send it back into the same refusal.
-        reader.noteAgentRows(new Set(batch.entries.map((entry) => entry.agentId.value)));
+        reader.noteAgentRows(booksRegisteredBy(batch.entries));
         closeDegraded();
         LOGGER.logVerbose(
           { entries: batch.entries.length, attempts: batch.attempts },
@@ -497,7 +519,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     batch.attempts += 1;
     const failure = await attempt(batch.entries);
     if (failure === null) {
-      reader.noteAgentRows(new Set(batch.entries.map((entry) => entry.agentId.value)));
+      reader.noteAgentRows(booksRegisteredBy(batch.entries));
       closeDegraded();
       LOGGER.logVerbose({ entries: batch.entries.length, attempts: batch.attempts }, "batch is durable");
       return true;
@@ -643,6 +665,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       known?: () => boolean,
     ): Promise<AgentPageSession> {
       return reader.openAgentPage(agent, pageSize, knownThrough, known);
+    },
+
+    noteAgentMinted(agentValue: string): void {
+      reader.noteAgentMinted(agentValue);
     },
 
     readAgentPage(

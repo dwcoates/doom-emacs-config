@@ -1547,3 +1547,184 @@ describe("the deferred book's own waiting", () => {
     expect(unitOf(first.value as conversationv1.HistoryEntryAt)).toBe("unit-a");
   });
 });
+
+describe("a book whose id this shim minted", () => {
+  /**
+   * An open that refuses `unknown_agent`, as the store does for a book it holds
+   * no row for. A minted id must never reach it at all.
+   */
+  function refusingOpen(): storev1.OpenAgentSessionResponse {
+    return create(storev1.OpenAgentSessionResponseSchema, {
+      result: {
+        case: "failure",
+        value: create(storev1.OpenAgentSessionFailureSchema, {
+          detail: "no agent row",
+          kind: {
+            case: "unknownAgent",
+            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+          },
+        }),
+      },
+    });
+  }
+
+  it("opens without asking the store at all", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return refusingOpen();
+      },
+    });
+    reader.noteAgentMinted("book-1");
+
+    // Act.
+    await reader.openAgentPage(BOOK, 10, undefined, () => true);
+
+    // Assert.
+    expect(opens).toBe(0);
+  });
+
+  it("serves an empty opening page at the floor", async () => {
+    // Arrange.
+    const reader = readerOver({ openAgentSession: async () => refusingOpen() });
+    reader.noteAgentMinted("book-1");
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    session.close();
+
+    // Assert.
+    expect([session.page.entries.length, session.page.boundary.case]).toEqual([0, "floor"]);
+  });
+
+  it("stands its tail without asking the store while no row has landed", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return refusingOpen();
+      },
+    });
+    reader.noteAgentMinted("book-1");
+    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+
+    // Act. The tail is pulled and left standing well past the recheck cadence.
+    const outcome = await Promise.race([
+      session.tail[Symbol.asyncIterator]().next().then(() => "served"),
+      hangGuard(),
+    ]);
+    session.close();
+
+    // Assert.
+    expect([outcome, opens]).toEqual(["hung", 0]);
+  });
+
+  it("asks the store once the write that registers the book has landed", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+    reader.noteAgentMinted("book-1");
+    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const first = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    reader.noteAgentRows(["book-1"]);
+    const served = await first;
+    session.close();
+
+    // Assert. The rows that landed while it waited come out as tail entries.
+    expect([opens, unitOf(served.value as conversationv1.HistoryEntryAt)]).toEqual([1, "unit-a"]);
+  });
+
+  it("asks the store when the producer no longer vouches for the id", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return refusingOpen();
+      },
+    });
+    reader.noteAgentMinted("book-1");
+
+    // Act, Assert. A withdrawn announcement is owed the store's own refusal.
+    await expect(reader.openAgentPage(BOOK, 10, undefined, () => false)).rejects.toMatchObject({
+      kind: "unknown_agent",
+    });
+    expect(opens).toBe(1);
+  });
+
+  it("asks the store for an id it was never told was minted", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return refusingOpen();
+      },
+    });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    session.close();
+
+    // Assert. Nothing declared this book absent, so the store is the authority.
+    expect(opens).toBe(1);
+  });
+
+  it("records nothing for an empty agent id", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return refusingOpen();
+      },
+    });
+
+    // Act.
+    reader.noteAgentMinted("");
+    const session = await reader.openAgentPage(agent(""), 10, undefined, () => true);
+    session.close();
+
+    // Assert. An empty id names no agent, so nothing was declared absent for it
+    // and the store is still asked.
+    expect(opens).toBe(1);
+  });
+
+  it("stops believing the book absent once an open for it succeeded", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+    reader.noteAgentMinted("book-1");
+    const first = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    // The deferred session only asks once its tail is pulled; the row landing is
+    // what lets that ask happen.
+    const pulled = first.tail[Symbol.asyncIterator]().next();
+    reader.noteAgentRows(["book-1"]);
+    await pulled;
+    first.close();
+
+    // Act.
+    const second = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    second.close();
+
+    // Assert. The second open went straight to the store rather than deferring.
+    expect([opens, second.page.entries.length]).toEqual([2, 1]);
+  });
+});
