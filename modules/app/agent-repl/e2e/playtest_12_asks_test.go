@@ -183,9 +183,10 @@ func TestPlaytestPermissionAllowFamily(t *testing.T) {
 	runPermissionFamily(t, s, []permissionRow{
 		{
 			prompt: "!perm-allow-once", answer: "allowOnce", standing: true, verdict: "allowedOnce", toolRan: true,
-			open: "A PENDING permission card at the bottom of the feed: a headline naming the gated Bash call, " +
+			open: "A PENDING permission card at the end of the feed: a headline naming the gated Bash call, " +
 				"its argument line, a ticking `waiting` clock, and THREE buttons in this order: `allow once`, " +
-				"`always allow`, `deny`, with a `why not (optional)` text field beside them.",
+				"`always allow`, `deny`, with a `why not (optional)` text field beside them. The gated `git " +
+				"status` call it is about is drawn UNDER it, still running.",
 			settled: "The same card RESOLVED: the buttons are gone and an OK-colored badge reads `allowed once`. " +
 				"Beneath it the gated tool call has run to success and the turn concluded with prose.",
 		},
@@ -235,7 +236,8 @@ func TestPlaytestPermissionDenyFamily(t *testing.T) {
 			prompt: "!perm-deny-policy", verdict: "deniedByPolicy", toolRan: false,
 			settled: "A SECOND permission card that was NEVER open: no buttons, an ERROR-colored badge whose " +
 				"wording is the daemon's own policy sentence (it names the deny rule, and must NOT read " +
-				"`denied by user`). The gated call beneath it is drawn denied; the turn concluded.",
+				"`denied by user`). The gated call is drawn denied ABOVE it rather than under it -- with no " +
+				"ask to wait on, the call's own row was pushed first -- and the turn concluded.",
 		},
 		{
 			prompt: "!perm-undecidable", verdict: "deniedUndecidable", toolRan: false,
@@ -287,7 +289,8 @@ func TestPlaytestPermissionHoldSurvivesASwitch(t *testing.T) {
 	p.capture("hold-open", "`!perm-hold` submitted; its ask is open and the turn parks on it",
 		"the feed carries a `.permission[data-state=\"open\"]` card and the roster arm is a running one",
 		fmt.Sprintf("The feed of %q carries a PENDING permission card for a `sleep 600` Bash call with its three "+
-			"buttons and a ticking `waiting` clock. The tab bar shows both workspaces with %q selected.", askingName, askingName))
+			"buttons and a ticking `waiting` clock. The tab bar carries BOTH workspaces, and the sidebar's "+
+			"selected row is %q.", askingName, askingName))
 
 	e.Eval(`(agent-repl-switch-to-project ` + elispString(second.Dir) + `)`)
 	e.AwaitEval("the other workspace to become the selected one",
@@ -299,8 +302,9 @@ func TestPlaytestPermissionHoldSurvivesASwitch(t *testing.T) {
 		`document.querySelectorAll('[data-feed-row][data-row-kind="permission"]').length === 0`)
 	p.capture("hold-switched-away", "`agent-repl-switch-to-project` to the other workspace, and its panel opened",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q and its page carries NO permission row", otherName),
-		fmt.Sprintf("The webview is %q's own: an EMPTY feed with no card in it. The tab bar shows %q selected, "+
-			"and %q — which still holds the open ask — is the other tab.", otherName, otherName, askingName))
+		fmt.Sprintf("The webview is %q's own: an EMPTY feed with no card in it, and the footer reads `idle "+
+			"ready`. The sidebar's selected row is %q, while %q — which still holds the open ask — keeps its "+
+			"own attention dot. Both workspaces are still in the tab bar.", otherName, otherName, askingName))
 
 	e.Eval(`(agent-repl-switch-to-project ` + elispString(first.Dir) + `)`)
 	e.AwaitEval("the asking workspace to be the selected one again",
@@ -315,7 +319,7 @@ func TestPlaytestPermissionHoldSurvivesASwitch(t *testing.T) {
 	p.capture("hold-switched-back", "switched back to the asking workspace, and its panel opened",
 		"the card is still `.permission[data-state=\"open\"]` and the roster arm is still a running one",
 		fmt.Sprintf("The SAME pending permission card as the first picture, still with its three buttons and its "+
-			"clock now further along; nothing answered it. %q is selected again.", askingName))
+			"clock now further along; nothing answered it. The sidebar's selected row is %q again.", askingName))
 
 	// Teardown hygiene, not an assertion: a parked ask must not outlive the
 	// playbook, or the world's own shutdown waits on an answer nobody will
@@ -378,8 +382,8 @@ func TestPlaytestQuestionFamily(t *testing.T) {
 			settledArm: "answered",
 			open: "A question card with the chip `Setup`, the question `How do you want the new branch set up?`, " +
 				"FOUR radio options (`New worktree off master`, `Switch this checkout`, `Reuse the existing " +
-				"branch`, `Do not branch`) each with a description under it, a `something else` text field, " +
-				"and a submit button.",
+				"branch`, `Do not branch`) each with its description in smaller type BESIDE the label, a " +
+				"`something else` text field, and an `answer` button.",
 			settled: "The same card RESOLVED: the options are gone and one verdict line carries the chip `Setup` " +
 				"and the chosen label `New worktree off master`. The turn concluded beneath it.",
 		},
