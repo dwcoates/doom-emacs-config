@@ -191,6 +191,10 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 		for _, entry := range page.GetEntries() {
 			if prompt := entry.GetEntry().GetUserPrompt(); prompt != nil {
 				w.adoptMainAgentLocked(prompt.GetAgent(), "history_page")
+				// A PAGE OWES THE VIEWS NO TURN-OPEN EDGE — it is newest
+				// first and opens nothing — so the naming is the whole
+				// precondition and the held terminal goes now.
+				w.releaseHeldTerminalLocked()
 				break
 			}
 		}
@@ -233,6 +237,9 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 				"turn_id": string(turn), "agent_id": prompt.GetAgent().GetValue(),
 			})
 		}
+		// The turn this prompt opened is recorded, so a terminal held for the
+		// naming can be replayed against it.
+		w.releaseHeldTerminalLocked()
 	}
 	w.log.Debug("daemon.sessionwatcher.prompt", "prompt routed to the feed", dlog.Context{
 		"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(),
@@ -488,6 +495,9 @@ func (w *watcher) releaseHeldTerminalLocked() {
 		"agent_id": held.agent.GetValue(), "turn_id": turnValue(w.turn),
 	})
 	w.routeTerminalLocked(w.mainWatchLocked(), held.agent, held.success, held.failure)
+	// OFF THE CALLER'S GOROUTINE. See flushTurnEndsAsync: the naming arrives on
+	// the prompt queue's own call, and the turn end goes back to that queue.
+	w.flushTurnEndsAsync()
 }
 
 // flushHeldTerminalLocked routes a still-held terminal on the edges that settle
