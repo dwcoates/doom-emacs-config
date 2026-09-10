@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -238,6 +239,18 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 	if err != nil {
 		return Disposition{}, err
 	}
+	// THE ROSTER TAKES THE TURN THE MOMENT IT IS ACCEPTED, not when the
+	// revival delivers it. The rpc answers with a minted TurnId right here,
+	// and sidebar.proto's `submitting` is "the turn is accepted and the shim
+	// has not acked it" -- which this turn is for the whole bring-up. Left to
+	// learn of it from deliverToSession, the roster read a live, idle session
+	// with no turn between the shim's SessionStarted and the hold's release
+	// and published `ready` for a workspace whose prompt the daemon had
+	// already taken. MEASURED in the playtest's cold start: the tab walked
+	// `none` -> `init` -> `ready` -> `submitting`. The link arm still
+	// outranks this while the route is coming up, so the walk is now
+	// `none` -> `init` -> `submitting` -> `thinking`.
+	q.deps.Sidebar.SetTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
 	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, log)
 	return disposition, nil
 }
@@ -332,6 +345,10 @@ func (q *queue) dropRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dl
 	if dropped == 0 {
 		return
 	}
+	// The turn the roster took at acceptance is never going to run: the row
+	// falls back to whatever the route reports, which is the bring-up's own
+	// fault arm, rather than standing at `submitting` for a dropped prompt.
+	q.deps.Sidebar.SetTurn(ws, nil)
 	if err := q.pushTray(ctx, ws, log); err != nil {
 		return
 	}

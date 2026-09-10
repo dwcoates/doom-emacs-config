@@ -446,15 +446,46 @@ func TestABringUpLinkReplayWithEveryStreamStandingDoesNotReopen(t *testing.T) {
 	h.quiet()
 
 	// Act: the bring-up transitions arrive after the watcher already exists.
+	// Neither publishes a link: the replayed dial is refused as stale and the
+	// `connected` that follows is the state already held, so the replay is
+	// observed through the watcher's own record of refusing it.
 	h.client.links <- shimclient.LinkDialing
-	h.rec.until(t, "sidebar.OnLink")
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link_replay")
 	h.client.links <- shimclient.LinkConnected
-	h.rec.until(t, "sidebar.OnLink")
+	h.quiet()
 
 	// Assert.
 	h.client.noAgentOpen(t)
 	if h.hasRecord("warn", "daemon.sessionwatcher.reopen") {
 		t.Fatal("the fleet was re-opened on a link replay with every stream standing")
+	}
+}
+
+// TestABringUpLinkReplayNeverWalksTheLinkBackToDialing pins the other half of
+// the replay: the watcher is born on the connected link, so the bring-up's
+// own `dialing` arriving late must not be published as a transition. It was,
+// and the roster painted `init` over a workspace whose turn was already
+// accepted (the playtest's cold start measured `submitting` -> `init` ->
+// `submitting` within 1ms of the first StartTurn).
+func TestABringUpLinkReplayNeverWalksTheLinkBackToDialing(t *testing.T) {
+	// Arrange: a started session, already published as connected.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: the bring-up's own first dial arrives after the fact.
+	h.client.links <- shimclient.LinkDialing
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link_replay")
+	events := h.quietAll()
+
+	// Assert: no sink was told the link went anywhere, and the watcher still
+	// answers connected.
+	for _, e := range events {
+		if e.method == "OnLink" {
+			t.Fatalf("%s published link %d on a stale first-dial replay; the link must stay as it was", e.name(), e.link)
+		}
+	}
+	if !h.w.Connected() {
+		t.Fatalf("Link() = %d after a stale first-dial replay, want connected", h.w.Link())
 	}
 }
 
@@ -970,13 +1001,18 @@ func TestADeadLinkWithNoDecodedExitRaisesNoExitCode(t *testing.T) {
 
 // TestTheLinkComingBackRaisesNoFault pins that only a LOST link is evidence: a
 // link that connects is the ordinary path.
+//
+// The loss is spelled `redialing`, which is how a client that has already
+// connected reports a link it is re-establishing. It was `dialing` here, and
+// that only ever passed because the watcher applied a first-time dial it had
+// already outrun -- the replay `setLinkLocked` now refuses.
 func TestTheLinkComingBackRaisesNoFault(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 
 	// Act.
-	h.client.links <- shimclient.LinkDialing
+	h.client.links <- shimclient.LinkRedialing
 	h.client.links <- shimclient.LinkConnected
 
 	// Assert: the connected edge reaches the views, and no fault rides with it.

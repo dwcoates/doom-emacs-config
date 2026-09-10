@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
@@ -303,6 +304,60 @@ func TestSubmitAnswersARevivalAtOnceRatherThanAwaitingTheBringUp(t *testing.T) {
 	}
 	if got.Held == nil || *got.Held != wsm.HoldSessionStarting {
 		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
+	}
+}
+
+// TestARevivalPendingHoldRaisesTheRostersTurnAtAcceptance pins that the roster
+// takes the accepted turn when the rpc mints it, not when the revival delivers
+// it: between the shim's SessionStarted and the hold's release the roster
+// otherwise reads a live idle session and paints `ready` over a workspace whose
+// prompt the daemon has already taken.
+func TestARevivalPendingHoldRaisesTheRostersTurnAtAcceptance(t *testing.T) {
+	// Arrange: a bring-up that has not finished while the test looks.
+	h := newHarness(t)
+	h.noSession = true
+	release := make(chan struct{})
+	h.reviveHook = func() { <-release }
+	t.Cleanup(func() { close(release); h.waitRevivals() })
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit during a bring-up = %v, want an answer", err)
+	}
+
+	// Assert: the roster holds a prompt turn before any delivery happened.
+	turns := h.sidebar.rosterTurns()
+	if len(turns) != 1 || turns[0] == nil {
+		t.Fatalf("roster turns = %+v, want exactly one accepted prompt turn at acceptance", turns)
+	}
+	if turns[0].Act != footer.ActPrompt {
+		t.Fatalf("roster turn act = %d, want a prompt", turns[0].Act)
+	}
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started turns = %d, want none while the bring-up still runs", len(got))
+	}
+}
+
+// TestAFailedRevivalClearsTheRostersTurn pins the exit: a dropped
+// revival-pending hold takes the roster's turn down with it, so the row falls
+// back to the route's own fault arm rather than standing at `submitting` for a
+// prompt that will never run.
+func TestAFailedRevivalClearsTheRostersTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveErr = errors.New("the shim would not spawn")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert: accepted, then cleared, in that order.
+	turns := h.sidebar.rosterTurns()
+	if len(turns) != 2 || turns[0] == nil || turns[1] != nil {
+		t.Fatalf("roster turns = %+v, want the accepted turn followed by its clearing", turns)
 	}
 }
 
