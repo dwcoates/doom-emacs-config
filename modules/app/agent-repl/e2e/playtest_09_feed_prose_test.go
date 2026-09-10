@@ -249,8 +249,8 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				"The bubble is CUT OFF mid-tree with its own scrollbar down the right edge, and that is " +
 				"the product: a bubble stops at 25 of its own lines (`--feed-cap-lines`) and scrolls " +
 				"past that, so the showcase's closing line is below the cap rather than missing. The " +
-				"root line's tree emoji draws as a TOFU BOX; the sandbox image ships no emoji font, and " +
-				"that is the image rather than the product.",
+				"root line's tree emoji draws as an emoji where the image has an emoji font and as a " +
+				"TOFU BOX where it does not; either way that is the image rather than the product.",
 		},
 		{
 			name:    "interrupt",
