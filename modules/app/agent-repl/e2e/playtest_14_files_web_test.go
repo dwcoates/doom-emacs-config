@@ -115,7 +115,6 @@ const (
 	noDiagnostics   = `card.querySelector(".tool-diagnostics") === null`
 	hasDiagnostics  = `card.querySelectorAll(".tool-diagnostic").length > 0`
 	noOutputBody    = `card.querySelector("[data-output-body]") === null`
-	hasOmitted      = `card.querySelector(".tool-omitted") !== null && card.querySelector(".tool-omitted").textContent.indexOf("showing") === 0`
 	hasCodeSpans    = `card.querySelectorAll(".tool-read-output .hljs span").length > 0`
 	hasTextOutput   = `card.querySelector(".tool-output") !== null && card.querySelector(".tool-output").textContent.trim() !== ""`
 	hasLinkRows     = `card.querySelectorAll(".tool-link-row").length > 0`
@@ -129,13 +128,13 @@ var playtestFileRows = []playtestToolRow{
 		asserted: "the code output carries paint spans and NO omitted line (a whole read has nothing further to fetch)",
 		expected: "A grey `Read` card: its input line is a muted file path, and below the dashed divider the whole file's lines are drawn as highlighted code with NO 'showing N of M lines' footer. The tab is settled and the closing prose bubble sits beneath the card."},
 	{scenario: "read-head", tool: "Read", form: "code",
-		extra:    hasCodeSpans + " && " + hasOmitted,
-		asserted: "the code output carries paint spans and an omitted line beginning 'showing'",
-		expected: "A grey `Read` card whose code block holds the file's first lines, and beneath the block a muted 'showing N of M lines' footer stating the cut."},
+		extra:    hasCodeSpans + " && " + omittedText("showing 2 of 4 lines"),
+		asserted: "the omitted line reads exactly 'showing 2 of 4 lines' -- the HEAD extent's own wording, a count of what was shown against the total",
+		expected: "A grey `Read` card whose code block holds the file's first two lines, and beneath the block a muted footer reading exactly 'showing 2 of 4 lines'."},
 	{scenario: "read-range", tool: "Read", form: "code",
-		extra:    hasCodeSpans + " && " + hasOmitted,
-		asserted: "the code output carries paint spans and an omitted line beginning 'showing'",
-		expected: "A grey `Read` card whose code block holds a middle slice of the file (lines 2-3), and beneath it a muted 'showing N of M lines' footer stating the extent."},
+		extra:    hasCodeSpans + " && " + omittedText("lines 2-3 of 4"),
+		asserted: "the omitted line reads exactly 'lines 2-3 of 4' -- a RANGE names the window it read, which is a different claim from a head's count and is worded differently on purpose",
+		expected: "A grey `Read` card whose code block holds the middle slice of the file (`export const two` and `export const three`), and beneath it a muted footer reading exactly 'lines 2-3 of 4'."},
 	{scenario: "read-truncated", tool: "Read", form: "code",
 		extra:    hasCodeSpans + " && " + omittedText("showing 2 of 4 lines"),
 		asserted: "the omitted line reads exactly 'showing 2 of 4 lines', composed from the head's total_lines",
@@ -165,9 +164,9 @@ var playtestFileRows = []playtestToolRow{
 		asserted: "the diff output carries diff lines AND a diagnostics section with at least one diagnostic row hangs off this card NAMED Write",
 		expected: "A grey `Write` card (NOT an Edit card): an all-additions DIFF, and UNDER it a diagnostics box listing the IDE's typescript error. The diagnostics hang off the Write -- this is the arm a production defect once folded onto Edit."},
 	{scenario: "grep-content", tool: "Grep", form: "lines",
-		extra:    hasTextOutput + " && " + hasOmitted,
-		asserted: "the lines output is non-empty and an omitted floor beginning 'showing' is drawn (2 of 5 lines came back)",
-		expected: "A grey `Grep` card whose input line is the pattern in accent monospace without a '$', matched lines below the divider, and a muted 'showing N of M ...' footer."},
+		extra:    hasTextOutput + " && " + omittedText("3 more lines not shown"),
+		asserted: "the lines output is non-empty and the omitted line reads exactly '3 more lines not shown' -- the EXACT remainder the shim subtracted (5 total, 2 returned)",
+		expected: "A grey `Grep` card whose input line is the pattern in accent monospace without a '$', two matched lines below the divider, and a muted footer reading exactly '3 more lines not shown'."},
 	{scenario: "grep-files", tool: "Grep", form: "lines",
 		extra:    hasTextOutput + " && " + noOmitted,
 		asserted: "the lines output is non-empty and NO omitted floor is drawn (every matched file is present)",
@@ -177,9 +176,9 @@ var playtestFileRows = []playtestToolRow{
 		asserted: "the text output is a non-empty composed count",
 		expected: "A grey `Grep` card whose output is a single plain summary line stating the match count, and nothing else below the divider."},
 	{scenario: "glob", tool: "Glob", form: "lines",
-		extra:    hasTextOutput + " && " + hasOmitted,
-		asserted: "the lines output is non-empty and an omitted floor beginning 'showing' is drawn (2 of 7 paths)",
-		expected: "A grey `Glob` card whose input line is the pattern, two matched paths below the divider, and a muted 'showing 2 of 7 ...' footer."},
+		extra:    hasTextOutput + " && " + omittedText("5 more paths not shown"),
+		asserted: "the omitted line reads exactly '5 more paths not shown' -- the EXACT arm, not the 'at least' floor, because the fake reports countIsComplete",
+		expected: "A grey `Glob` card whose input line is the pattern `**/*.ts`, two matched paths below the divider, and a muted footer reading exactly '5 more paths not shown' -- NOT 'at least 5 more'."},
 }
 
 // playtestWebRows is plan F.45: the web tools, one row per fake scenario.
