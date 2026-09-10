@@ -37,6 +37,13 @@ type fakeStream[T any] struct {
 	errs   chan error
 	closed chan struct{}
 	once   sync.Once
+	// drained is closed when Recv has answered io.EOF, which is the exact
+	// moment the watcher's reader for this stream has finished routing
+	// everything it was given: the loop only returns to Recv after routing and
+	// its off-lock flush are done. It is how a test bounds a frame that reaps
+	// its own stream -- see routeReaping.
+	drained     chan struct{}
+	drainedOnce sync.Once
 	// blockClose, when non-nil, holds Close until it is closed. It stands for
 	// the real transport's Close, which drains the response body and does not
 	// return until the SERVER ends the stream.
@@ -45,9 +52,10 @@ type fakeStream[T any] struct {
 
 func newFakeStream[T any]() *fakeStream[T] {
 	return &fakeStream[T]{
-		frames: make(chan T),
-		errs:   make(chan error, 1),
-		closed: make(chan struct{}),
+		frames:  make(chan T),
+		errs:    make(chan error, 1),
+		closed:  make(chan struct{}),
+		drained: make(chan struct{}),
 	}
 }
 
@@ -60,6 +68,7 @@ func (s *fakeStream[T]) Recv() (T, error) {
 	case err := <-s.errs:
 		return zero, err
 	case <-s.closed:
+		s.drainedOnce.Do(func() { close(s.drained) })
 		return zero, io.EOF
 	}
 }
@@ -86,6 +95,18 @@ func (s *fakeStream[T]) send(t *testing.T, frame T) {
 
 // fail ends the stream with a transport error.
 func (s *fakeStream[T]) fail(err error) { s.errs <- err }
+
+// awaitDrained waits until the watcher's reader for this stream has answered
+// io.EOF, which it can only do once it has finished routing every frame it was
+// handed.
+func (s *fakeStream[T]) awaitDrained(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.drained:
+	case <-time.After(waitDeadline):
+		t.Fatal("the watcher never finished the reaped stream")
+	}
+}
 
 // isClosed reports whether the watcher closed this stream.
 func (s *fakeStream[T]) isClosed() bool {
@@ -1435,15 +1456,26 @@ func assertPerAgentOrder(t *testing.T, got []event, agent string, frames int) {
 	}
 }
 
-// routeReaping sends a frame that REAPS its own stream, and is bounded by the
-// live-work republication the reap ends with.
+// routeReaping sends a frame that REAPS its own stream and returns exactly the
+// sink calls it provoked.
 //
-// A sentinel cannot be used here: the reap closes the very stream the sentinel
-// would ride, so the send would block on a stream nobody is reading any more.
+// A SENTINEL CANNOT BE USED HERE, and using one is a real flake rather than a
+// theoretical one. The reap closes the very stream the sentinel would ride
+// (reapAgentLocked hands the stream to `go stream.Close()`), so the sentinel
+// send races that goroutine: on a quiet box the reader is back in Recv first
+// and takes the frame, and under load the close wins, Recv answers io.EOF, the
+// reader exits, and the send blocks until the failure deadline.
+//
+// The bound is the stream's OWN END instead. The reader returns to Recv only
+// after routing and its off-lock flush have finished, so an io.EOF answered
+// there means every sink call this frame provoked is already recorded -- which
+// makes the drain below both complete AND exhaustive, so an unexpected extra
+// call still fails the assertion.
 func (h *harness) routeReaping(stream *fakeStream[*shimResponse], frame *shimResponse) []event {
 	h.t.Helper()
 	stream.send(h.t, frame)
-	return h.rec.until(h.t, "lifecycle.OnLiveWorkChanged")
+	stream.awaitDrained(h.t)
+	return h.drainNow()
 }
 
 // awaitLinkFault reads events until the lifecycle sink's lost-link evidence
