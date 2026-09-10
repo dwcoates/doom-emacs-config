@@ -19,7 +19,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import { COMPOSER_READY_BUDGET_MS, send } from "./drive";
+import { COMPOSER_READY_BUDGET_MS, press, send } from "./drive";
 
 const HOST = '[data-component="composer"]';
 
@@ -190,5 +190,27 @@ describe("HOST", () => {
     // what every layer file relies on when it calls `send(app)`.
     const page = stubPage();
     expect(document.querySelector(`${HOST} [data-composer-send]`)).toBe(page.button);
+  });
+});
+
+describe("press", () => {
+  it("answers true when the composer took the press", async () => {
+    // Arrange
+    const page = stubPage();
+    page.button.addEventListener("click", () => {
+      page.button.disabled = true;
+    });
+
+    // Act / Assert
+    await expect(press(page.app)).resolves.toBe(true);
+  });
+
+  it("answers false when the composer dropped the press", async () => {
+    // Arrange — an empty box, which `composer.ts` returns on before it
+    // disables anything.
+    const page = stubPage({ text: "" });
+
+    // Act / Assert — dropped, and NOT a fault: §F8 #33 presses expecting this.
+    await expect(press(page.app)).resolves.toBe(false);
   });
 });

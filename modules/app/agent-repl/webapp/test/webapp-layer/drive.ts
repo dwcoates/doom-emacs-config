@@ -224,6 +224,29 @@ export async function send(
   app: MountedApp,
   host = '[data-component="composer"]',
 ): Promise<void> {
+  const typed = typedText(app, host);
+  if (await press(app, host)) return;
+  throw new Error(
+    `the composer at ${host} DROPPED the press and submitted nothing ` +
+      `(composer.ts returns silently when the box is empty, when the gate is ` +
+      `closed, or while a submission is in flight); ` +
+      `the box held ${JSON.stringify(typed)}; ` +
+      `refusal arms: [${app.refusalArms().join(", ")}]`,
+  );
+}
+
+/**
+ * Press Send and answer whether the composer TOOK the press, for the one
+ * caller that presses expecting nothing to happen.
+ *
+ * `send` is this plus "and it must have been taken", which is what every
+ * scenario that drives a turn wants. §F8 #33 — the empty box — wants the other
+ * half: the control pressed, and honestly nothing submitted.
+ */
+export async function press(
+  app: MountedApp,
+  host = '[data-component="composer"]',
+): Promise<boolean> {
   const selector = `${host} [data-composer-send]`;
   const button = (): HTMLButtonElement | null =>
     app.$(selector) as HTMLButtonElement | null;
@@ -238,20 +261,13 @@ export async function send(
 
   const pressed = button();
   if (pressed === null) throw new Error(`the composer send button at ${selector} went away`);
-  // NOT `app.click`, which settles: the proof below must be read BEFORE the
+  // NOT `app.click`, which settles: the answer below must be read BEFORE the
   // event loop turns, or the unary this press starts could already have
   // answered and re-enabled the button.
   pressed.click();
-  if (!pressed.disabled) {
-    throw new Error(
-      `the composer at ${selector} DROPPED the press and submitted nothing ` +
-        `(composer.ts returns silently when the box is empty, when the gate is ` +
-        `closed, or while a submission is in flight); ` +
-        `the box holds ${JSON.stringify(typedText(app, host))}; ` +
-        `refusal arms: [${app.refusalArms().join(", ")}]`,
-    );
-  }
+  const taken = pressed.disabled;
   await app.settle();
+  return taken;
 }
 
 /** What is typed in a composer right now, for a diagnostic. */
