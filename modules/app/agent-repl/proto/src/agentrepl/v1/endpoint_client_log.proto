@@ -54,7 +54,18 @@ message ClientLogRecord {
   // stated rather than recomputing it from the level, so a client's verbose
   // info record stays verbose on disk.
   bool verbose = 9;
+  // WHICH CLIENT RUNTIME wrote the record, so the daemon files it in that
+  // runtime's per-workspace sink (`webapp.log` or `sidecar.log`, per the
+  // logging contract). UNSET = the webapp, the only forwarder before the
+  // sidecar's diagnostics were routed (measured 2026-09-10: the daemon
+  // hardcoded the webapp and `sidecar.log` was never written).
+  oneof runtime {
+    ClientLogRuntimeWebapp webapp = 10;
+    ClientLogRuntimeSidecar sidecar = 11;
+  }
 }
+message ClientLogRuntimeWebapp {}
+message ClientLogRuntimeSidecar {}
 message ClientLogLevelDebug {}
 message ClientLogLevelInfo {}
 message ClientLogLevelWarn {}
