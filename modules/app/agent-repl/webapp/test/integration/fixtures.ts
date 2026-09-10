@@ -244,10 +244,10 @@ export const responseRow = (
 
 // ---- FeedSimpleToolCall ---------------------------------------------------
 
-export const TOOL_OUTPUT_FORMS = ["text", "code", "diff", "lines", "links", "none"] as const;
+export const TOOL_OUTPUT_FORMS = ["text", "code", "diff", "lines", "links", "image", "none"] as const;
 export type ToolOutputForm = (typeof TOOL_OUTPUT_FORMS)[number];
 
-/** The output forms that carry an omission note; `text`/`diff`/`none` do not. */
+/** The output forms that carry an omission note; `text`/`diff`/`image`/`none` do not. */
 export const TOOL_OUTPUT_FORMS_WITH_OMISSION = ["code", "lines", "links"] as const;
 
 /**
@@ -298,6 +298,12 @@ type ToolOutputFormInit = NonNullable<
   Extract<ToolCallOutcome, { case: "returned" }>["value"]["form"]
 >;
 
+/** The src the image output fixture carries; suites assert it verbatim. */
+export const TOOL_IMAGE_SRC = "data:image/png;base64,iVBORw0KGgo=";
+
+/** The alt the image output fixture carries; suites assert it verbatim. */
+export const TOOL_IMAGE_ALT = "screenshot.png";
+
 const toolOutputForm = (form: ToolOutputForm): ToolOutputFormInit => {
   switch (form) {
     case "text":
@@ -334,6 +340,15 @@ const toolOutputForm = (form: ToolOutputForm): ToolOutputFormInit => {
           ],
           omitted: { text: "1 more link" },
         },
+      };
+    case "image":
+      // A call that answered with a PICTURE rather than characters — a
+      // screenshot, a rendered chart. The `src` is the daemon's resolution of
+      // the record's reference, so the fixture states one a browser could
+      // actually load rather than a placeholder path.
+      return {
+        case: "image" as const,
+        value: { src: TOOL_IMAGE_SRC, alt: TOOL_IMAGE_ALT },
       };
     case "none":
       // A call that returned nothing to show. The card still draws its input

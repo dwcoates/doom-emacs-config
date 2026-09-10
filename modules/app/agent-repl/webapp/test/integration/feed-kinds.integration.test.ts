@@ -59,6 +59,8 @@ import {
   SHELL_OUTCOMES,
   SKILL_OUTCOMES,
   SUBAGENT_OUTCOMES,
+  TOOL_IMAGE_ALT,
+  TOOL_IMAGE_SRC,
   TOOL_INPUT_FORMS,
   TOOL_OUTPUT_FORMS,
   TOOL_OUTPUT_FORMS_WITH_OMISSION,
@@ -412,6 +414,50 @@ describe.each(TOOL_OUTPUT_FORMS)("a returned tool call with %s output", (form) =
     // Assert: only the capped forms carry an omission field.
     const expected = (TOOL_OUTPUT_FORMS_WITH_OMISSION as readonly string[]).includes(form);
     expect(/omitted|more/.test(row.textContent ?? "")).toBe(expected);
+  });
+});
+
+describe("a tool call that answered with an image", () => {
+  it("carries the image form", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("image")));
+    // Assert
+    expect(row.querySelector('[data-output-form="image"]')).not.toBeNull();
+  });
+
+  it("draws the picture as an image element", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("image")));
+    // Assert
+    expect(row.querySelector("img.prompt-block-image")).not.toBeNull();
+  });
+
+  it("loads the daemon's resolved src verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("image")));
+    // Assert
+    expect(row.querySelector("img.prompt-block-image")?.getAttribute("src")).toBe(TOOL_IMAGE_SRC);
+  });
+
+  it("names the picture with the daemon's resolved alt", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("image")));
+    // Assert
+    expect(row.querySelector("img.prompt-block-image")?.getAttribute("alt")).toBe(TOOL_IMAGE_ALT);
+  });
+
+  it("sits in the card's output section like every other form", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("image")));
+    // Assert
+    expect(row.querySelector("[data-output-body] img.prompt-block-image")).not.toBeNull();
+  });
+
+  it("still draws its verdict when the call failed", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(toolCallReturnedUnit("image", "failed")));
+    // Assert
+    expect(row.querySelector('[data-verdict="failed"]')).not.toBeNull();
   });
 });
 
