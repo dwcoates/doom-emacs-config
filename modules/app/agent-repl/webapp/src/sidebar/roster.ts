@@ -215,7 +215,18 @@ export function drawRosterTaskKey(u: RosterTaskKey, path: string): string {
   return u.taskId;
 }
 
-/** The recently-merged band: settled merges, hoisted out of both groupings. */
+/**
+ * The recently-merged band: settled merges, hoisted out of both groupings.
+ *
+ * A BAND WITH NO MERGES IS NOT DRAWN. The wire always carries the section --
+ * the roster's `recently_merged` is a plain field with a resolver-composed
+ * heading, and its absence would be a contract breach, not an empty band -- so
+ * the emptiness is answered HERE, where the box is made: a heading over no
+ * rows is a fold toggle onto nothing, and it says a workspace merged when none
+ * has. A REPOSITORY section still draws with no rows, because the grouping
+ * would flicker as its last workspace merged; the merged band has no place to
+ * keep, so it goes away entire until a merge lands.
+ */
 export function drawRosterMergedSection(
   u: RosterMergedSection,
   sc: SidebarContext,
@@ -223,16 +234,27 @@ export function drawRosterMergedSection(
 ): HTMLElement {
   const section = sectionBox(MERGED_FOLD_KEY, sc, true);
   section.classList.add("merged-section");
+  const rows = requireMessage(u.rows, `${path}.rows`);
+  const header = requireMessage(u.header, `${path}.header`);
+  if (rows.rows.length === 0) {
+    // Validated whole first, then left undrawn: a malformed empty section is
+    // still a contract breach, and skipping the checks would hide it until the
+    // first merge landed.
+    drawRosterLabel(requireMessage(header.label, `${path}.header.label`), `${path}.header.label`);
+    section.hidden = true;
+    section.setAttribute("data-merged-empty", "true");
+    return section;
+  }
   section.appendChild(
     drawRosterSectionHeader(
-      requireMessage(u.header, `${path}.header`),
+      header,
       section,
       sc,
       MERGED_FOLD_KEY,
       `${path}.header`,
     ),
   );
-  section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`));
+  section.appendChild(drawRosterRows(rows, sc, `${path}.rows`));
   return section;
 }
 
