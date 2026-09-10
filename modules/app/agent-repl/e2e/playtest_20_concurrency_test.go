@@ -164,6 +164,18 @@ func (s *playtestScenario) pt20CaptureArms(t *testing.T, name, act string, claim
 	if len(claims) == 0 {
 		t.Fatalf("pt20CaptureArms(%s) was given no arm to be about", name)
 	}
+	// EVERY CLAIMED TAB MUST BE ON THE BAR. A sentence describing a tab is a
+	// sentence a reviewer looks for, and an arm read back from the roster
+	// says nothing about whether the tab bar still draws it: K.63's merged
+	// workspace answered `:merged` at capture time with its tab already gone,
+	// so the manifest sent a reviewer hunting a tab that was not in the
+	// picture. The claim is held to the bar before the shutter opens.
+	want := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		want = append(want, claim.WS)
+	}
+	s.pt20RequireTabs(t, "the bar "+name+"'s sentences describe", want...)
+
 	var asserted, sentences []string
 	for _, claim := range claims {
 		arm, color := s.armPaint(t, claim.WS)
@@ -610,11 +622,25 @@ func TestPlaytestMergeBesideRunningTurn(t *testing.T) {
 		t.Fatalf("the merge for %q ended on %s, want :merged: the scripted gate passes and no conflict "+
 			"was scripted, so any other terminal arm is a real failure", merging, mergeArm)
 	}
+	// A LANDED MERGE TAKES ITS WORKSPACE OFF THE BAR, and this is asserted
+	// rather than assumed because the next step's picture is of a bar that no
+	// longer has it. The roster's own walk is what moves it: the daemon stops
+	// listing the workspace among its repository's rows once the merge lands.
+	e.AwaitEval(fmt.Sprintf("the merged workspace %q to leave the tab bar", merging),
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return !slices.Contains(decodeStrings(raw), merging) })
+	p.note("the merge gate opened, so the parked merge ran its test gate and landed",
+		fmt.Sprintf("%q's arm is %s, and its tab has left the bar -- `agent-repl--ws-tabline-names` "+
+			"no longer carries it, while the roster's own order is now %v", merging, mergeArm,
+			s.E.EvalStrings(`(agent-repl-roster-tab-order)`)))
+
 	pt20OpenGate(t, turnGate)
 	turnArm := s.awaitArm(t, otherName, "the other workspace's turn to settle", emGHISettledArms...)
 	s.pt20CaptureArms(t, "both-settled",
 		"the merge gate opened and then the turn gate, so each side was released by its own",
-		[]pt20ArmClaim{{WS: merging, Want: mergeArm}, {WS: otherName, Want: turnArm}},
-		"Both pipelines are done. EACH SETTLED ON ITS OWN ARM and from its own gate: the merge "+
-			"landed and the turn concluded, and neither finish moved the other's tab.")
+		[]pt20ArmClaim{{WS: otherName, Want: turnArm}},
+		fmt.Sprintf("Both pipelines are done, and they ended DIFFERENTLY. The turn concluded and its "+
+			"workspace kept its tab; the merge landed and %q's tab is GONE from the bar entirely -- "+
+			"the picture must show the merging workspace's tab absent, not merely recolored. Neither "+
+			"finish moved the other's tab.", merging))
 }
