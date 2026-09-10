@@ -1,5 +1,14 @@
 import { beforeAll } from "vitest";
 import { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } from "../../src/log.js";
+import { installResizeObserver } from "../resize-observer.js";
+
+/**
+ * jsdom implements no `ResizeObserver` (it performs no layout), and the feed
+ * mount subscribes one to its scroll box so a footer settling after a render
+ * cannot leave the tail below the fold. This project does not load
+ * `test/setup.ts`, so it installs the same environment substitution itself.
+ */
+installResizeObserver();
 
 /**
  * THE LOGGER, INSTALLED BEFORE THE FIRST `beforeAll` MOUNTS.
