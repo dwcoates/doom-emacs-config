@@ -59,6 +59,13 @@ const (
 // `!` prefix, so the fake SDK answers it with its default prose scenario.
 const playtestParentPrompt = "recount the harbor lantern story for the playtest"
 
+// playtestParentEcho is the ANSWER the fake SDK gives that prompt: its prose
+// scenario's conclusion is `echo: <prompt> [mode=...] [model=...]`
+// (agent-shim/claude/shim/src/fake/scenarios/prose.ts), so this prefix
+// identifies the PARENT's own settled response wherever it is drawn -- and it
+// is drawn on the FORK's feed, which is what the fork's readback measures.
+const playtestParentEcho = "echo: " + playtestParentPrompt
+
 // ---------------------------------------------------------------------------
 // SHARED READBACKS
 // ---------------------------------------------------------------------------
@@ -607,42 +614,53 @@ func TestPlaytestForkWorkspaceAndConversation(t *testing.T) {
 		`document.querySelector('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]')`)
 	s.awaitArm(t, forkName, "the fork's own initial turn to settle", emGHISettledArms...)
 
-	// AND WHAT IS NOT THERE, RECORDED RATHER THAN ASSERTED, which is the
-	// pattern `playtest_00_feed_tail_test.go` uses for the open question it
-	// inherited.
+	// WHAT OF THE PARENT'S TURN IS THERE, and it is HALF of it -- which is
+	// the finding this step exists to pin, and it is measured rather than
+	// narrated on both sides.
 	//
 	// PLAYTEST-PLAN.md A.6 asks for "parent history in feed". MEASURED here:
-	// the fork's feed carries FOUR rows and none of them is the parent's --
-	// the last unsatisfied probe read
-	// "rows=4 ... Workspace brief / trace the lantern", the fork's own prompt
-	// and its answer, with no bubble carrying the parent's text at all.
+	// the fork's feed carries the parent's settled ANSWER ("echo: recount the
+	// harbor lantern story ...", the fake SDK's own conclusion for the
+	// parent's prompt) and does NOT carry the parent's QUESTION -- no
+	// `userPrompt` bubble on the fork's feed says what was asked. The
+	// picture below shows exactly that, and a manifest sentence claiming the
+	// parent's turn is absent WHOLE would send a reviewer looking for an
+	// absence the screen contradicts.
 	//
-	// THE CAUSE IS STRUCTURAL AND IS NOT A BUG IN THIS PLAYBOOK.
-	// `verbs.forkTranscript` (daemon/internal/workspace/create.go:329) ports
-	// the parent's VENDOR JSONL transcript into the child's config root under
-	// a fresh vendor session id and the child resumes it, so the AGENT holds
-	// the parent's context -- but the feed is composed from the daemon's OWN
-	// conversation rows, which are keyed by workspace id and are not ported,
-	// inherited or unioned anywhere: nothing under `daemon/internal` that
-	// resolves a feed knows what a fork is. Making the parent's history
-	// visible in the child's feed is therefore a decision about whose rows a
-	// forked feed shows, not a leaf fix, so it is FILED for the lead and
-	// nothing here invents an answer.
+	// THE ASYMMETRY IS STRUCTURAL, and it is why this is FILED rather than
+	// fixed here. `verbs.forkTranscript`
+	// (daemon/internal/workspace/create.go:329) ports the parent's VENDOR
+	// JSONL transcript into the child's config root under a fresh vendor
+	// session id and the child resumes it; the assistant lines in that
+	// transcript reach the child's feed through the store, while the
+	// `userPrompt` bubbles are composed from the daemon's OWN conversation
+	// rows, which are keyed by workspace id and are neither ported nor
+	// unioned anywhere. So one half of the parent's turn travels and the
+	// other does not. Which rows a forked feed should show is a decision
+	// about the product, not a leaf fix, so nothing here invents an answer.
 	//
-	// THE ABSENCE IS ASSERTED, not merely narrated: a playbook that only
-	// described the gap would go on passing silently on the day the product
-	// closed it, and this open question must be reopened when that happens.
-	forkRows, carriesParent := s.forkFeedFacts(t)
-	if carriesParent {
+	// BOTH HALVES ARE ASSERTED, not merely narrated: a playbook that only
+	// described the state of things would go on passing silently on the day
+	// the product changed either half, and this open question must be
+	// reopened when that happens.
+	forkRows, carriesParentPrompt, carriesParentAnswer := s.forkFeedFacts(t)
+	if carriesParentPrompt {
 		t.Fatalf("the fork's feed now carries the parent's prompt %q: PLAYTEST-PLAN.md A.6's "+
-			"\"parent history in feed\" is satisfied, so this playbook's recorded open question is stale "+
-			"and must become an assertion", playtestParentPrompt)
+			"\"parent history in feed\" is satisfied on the question as well as the answer, so this "+
+			"playbook's recorded open question is stale and must become an assertion", playtestParentPrompt)
 	}
-	p.note("the fork's own feed read for the PARENT's history",
-		fmt.Sprintf("the fork's feed carries %d rows and NONE of them carries the parent's prompt text %q: "+
-			"the ported artifact is the vendor transcript, not the daemon's own conversation rows "+
-			"(daemon/internal/workspace/create.go:329) -- FILED, not fixed here",
-			forkRows, playtestParentPrompt))
+	if !carriesParentAnswer {
+		t.Fatalf("the fork's feed no longer carries the parent's answer %q: the ported vendor transcript "+
+			"used to reach the child's feed through the store, so the forked-feed question this playbook "+
+			"records has changed shape and its manifest sentence is now wrong", playtestParentEcho)
+	}
+	p.note("the fork's own feed read for the PARENT's turn",
+		fmt.Sprintf("the fork's feed carries %d rows: the parent's settled ANSWER %q is among them and the "+
+			"parent's QUESTION %q is on none of them -- the ported artifact is the vendor transcript, whose "+
+			"assistant lines reach the feed through the store, while the prompt bubbles come from the "+
+			"daemon's own per-workspace conversation rows (daemon/internal/workspace/create.go:329) -- "+
+			"FILED, not fixed here",
+			forkRows, playtestParentEcho, playtestParentPrompt))
 
 	// THE FORK'S TAB FOLLOWS ITS PARENT'S, which is the same depth-first
 	// nesting A.5 asserts. It is a FUNCTIONAL assertion with a note rather
@@ -674,47 +692,75 @@ func TestPlaytestForkWorkspaceAndConversation(t *testing.T) {
 	p.capture("forked-feed", "the fork made current and its panel opened",
 		fmt.Sprintf("the fork's OWN prompt bubble (%q) and a SETTLED response bubble are on its standing tail, "+
 			"and its roster arm has settled", playtestForkPrompt),
-		fmt.Sprintf("The panel shows the FORK's own conversation: the prompt bubble reading %q with a prose "+
-			"response settled beneath it, and the sidebar drawing %q nested under its parent %q. "+
-			"WHAT THIS PICTURE DOES NOT SHOW, and the plan's A.6 asked for: the PARENT's own prompt %q "+
-			"and its answer are NOT in this feed. The fork resumes the parent's ported vendor transcript, "+
-			"so the agent has the context, but the daemon's own conversation rows are keyed by workspace "+
-			"and are neither ported nor inherited, so the child's feed starts at its own first turn. That "+
-			"is an OPEN QUESTION for the lead, recorded here rather than asserted.",
-			playtestForkPrompt, forkName, parentName, playtestParentPrompt))
+		fmt.Sprintf("The panel shows the FORK's own conversation: a prompt bubble reading %q with a prose "+
+			"response settled beneath it (%q), and the sidebar drawing %q nested under its parent %q. "+
+			"HALF OF THE PARENT'S TURN IS ALSO ON THIS FEED, and the plan's A.6 asked for all of it: the "+
+			"parent's own ANSWER %q is drawn here as an ordinary response bubble, while the parent's "+
+			"QUESTION %q appears NOWHERE -- there is no prompt bubble carrying it. So the feed shows an "+
+			"answer to a question it does not show. The fork resumes the parent's ported vendor "+
+			"transcript, whose assistant lines reach the feed through the store, but prompt bubbles come "+
+			"from the daemon's per-workspace conversation rows, which are not ported. THE VERTICAL ORDER "+
+			"OF THOSE PARENT ROWS AGAINST THE FORK'S OWN IS NOT STABLE run to run, for the same reason: "+
+			"they arrive by a different route than the fork's own prompt. Both are an OPEN QUESTION for "+
+			"the lead; this playbook asserts the two halves it measured and invents no answer.",
+			playtestForkPrompt, "echo: "+playtestForkPrompt, forkName, parentName,
+			playtestParentEcho, playtestParentPrompt))
 }
 
-// forkFeedFacts answers how many rows the current workspace's feed is drawing
-// and whether any of them carries the PARENT's prompt text.
+// forkFeedFacts answers how many rows the current workspace's feed is drawing,
+// whether any of them is the PARENT's own prompt bubble, and whether any of
+// them is the PARENT's own settled answer.
 //
-// The two facts travel together because they are read in ONE probe: asking
+// THE THREE FACTS TRAVEL TOGETHER because they are read in ONE probe: asking
 // twice would let the page change between the count the note states and the
-// absence the assertion makes, and a note that disagreed with its own
+// presences the assertions make, and a note that disagreed with its own
 // assertion is exactly the kind of evidence a reviewer cannot use.
-func (s *playtestScenario) forkFeedFacts(t *testing.T) (rows int, carriesParent bool) {
+//
+// The parent's prompt and the parent's answer are asked SEPARATELY because
+// the product answers them differently, and that split is the whole finding:
+// the answer is there and the question is not.
+func (s *playtestScenario) forkFeedFacts(t *testing.T) (rows int, carriesParentPrompt, carriesParentAnswer bool) {
 	t.Helper()
 	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
 	script := `(function () {
                      var all = document.querySelectorAll('[data-feed-row]');
-                     var carries = Array.prototype.some.call(
+                     var prompt = Array.prototype.some.call(
                        document.querySelectorAll('[data-feed-row][data-row-kind="userPrompt"]'),
                        function (row) { return row.textContent.indexOf(` + jsString(playtestParentPrompt) + `) !== -1; });
-                     return all.length + ":" + (carries ? "parent" : "no-parent");
+                     var answer = Array.prototype.some.call(all,
+                       function (row) { return row.textContent.indexOf(` + jsString(playtestParentEcho) + `) !== -1; });
+                     return all.length + ":" + (prompt ? "prompt" : "no-prompt") + ":" + (answer ? "answer" : "no-answer");
                    })()`
-	raw := s.E.AwaitEvalFor(playtestPageBound, "the fork's feed row count and whether it carries the parent's prompt",
+	raw := s.E.AwaitEvalFor(playtestPageBound, "the fork's feed row count and which of the parent's turn it carries",
 		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+elispString(script)+`)`,
-		func(raw json.RawMessage) bool { return strings.Contains(decodeString(raw), ":") })
+		func(raw json.RawMessage) bool { return strings.Count(decodeString(raw), ":") == 2 })
 	answer := decodeString(raw)
-	var marker string
-	if _, err := fmt.Sscanf(answer, "%d:%s", &rows, &marker); err != nil {
-		t.Fatalf("the page answered %q for its feed facts, want \"<count>:<parent|no-parent>\": %v", answer, err)
+	var promptMarker, answerMarker string
+	if _, err := fmt.Sscanf(answer, "%d:%s", &rows, &promptMarker); err != nil {
+		t.Fatalf("the page answered %q for its feed facts, want \"<count>:<prompt|no-prompt>:<answer|no-answer>\": %v", answer, err)
 	}
-	switch marker {
-	case "parent":
-		return rows, true
-	case "no-parent":
-		return rows, false
+	// `%s` swallows the rest of the word, so the two markers are split back
+	// out here rather than scanned as separate verbs.
+	parts := strings.Split(promptMarker, ":")
+	if len(parts) != 2 {
+		t.Fatalf("the page answered %q for its feed facts, want \"<count>:<prompt|no-prompt>:<answer|no-answer>\"", answer)
 	}
-	t.Fatalf("the page answered %q for its feed facts: %q is neither \"parent\" nor \"no-parent\"", answer, marker)
-	return 0, false
+	promptMarker, answerMarker = parts[0], parts[1]
+	switch {
+	case promptMarker == "prompt":
+		carriesParentPrompt = true
+	case promptMarker == "no-prompt":
+		carriesParentPrompt = false
+	default:
+		t.Fatalf("the page answered %q for its feed facts: %q is neither \"prompt\" nor \"no-prompt\"", answer, promptMarker)
+	}
+	switch {
+	case answerMarker == "answer":
+		carriesParentAnswer = true
+	case answerMarker == "no-answer":
+		carriesParentAnswer = false
+	default:
+		t.Fatalf("the page answered %q for its feed facts: %q is neither \"answer\" nor \"no-answer\"", answer, answerMarker)
+	}
+	return rows, carriesParentPrompt, carriesParentAnswer
 }
