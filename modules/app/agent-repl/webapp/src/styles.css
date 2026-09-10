@@ -1168,12 +1168,13 @@ pre {
 }
 /* A HIDDEN BUBBLE MUST ACTUALLY BE HIDDEN. The rule above sets `display`, and a
    class selector outranks the user-agent stylesheet's own `[hidden]` rule — so
-   `el.hidden = true` on a bubble did NOTHING. Caught by the D30 playtest: a
-   compaction divider drew its `summary` toggle in the FOLDED state with the
-   summary body sitting open underneath it, so the fold hid nothing it claimed
-   to hide. Every other place in this sheet that sets `display` already pairs it
-   with this guard (#ws-sidebar, #account-menu, #login-overlay, #composer, the
-   sidebar panes and the create forms); this one was missed. */
+   `el.hidden = true` on a bubble did NOTHING. Caught by a headless run of the
+   real webview: a compaction divider drew its `summary` toggle in the FOLDED
+   state with the summary body sitting open underneath it, so the fold hid
+   nothing it claimed to hide. Every other place in this sheet that sets
+   `display` already pairs it with this guard (#ws-sidebar, #account-menu,
+   #login-overlay, #composer, the sidebar panes and the create forms); this
+   one was missed. */
 .bubble[hidden] { display: none; }
 .bubble-body { flex: 1; min-width: 0; }
 .bubble.user {
@@ -5339,7 +5340,7 @@ body.draining #composer-input::placeholder {
    thousands of lines EARLIER, so this rule won the cascade and THE ONE COLORED
    NUMBER IN THE STRIP WAS PAINTED GREY in every running page. The class was on
    the element the whole time, which is why the unit test asserting the class
-   passed straight over it; a playtest capture of the topbar is what saw it. So
+   passed straight over it; a screenshot of the real topbar is what saw it. So
    the controls that ARE quiet say so here, and the figure's color is left to
    the tone it carries. */
 .topbar-model-button,
@@ -5808,69 +5809,4 @@ body.draining #composer-input::placeholder {
 .footer-allowance-unread {
   color: var(--muted);
   font-style: italic;
-}
-
-/* ---------------------------------------------------------------------------
-   MOTION HELD: `data-motion="paused"` on the root element
-   ---------------------------------------------------------------------------
-
-   THE PAGE'S RESTING ANIMATIONS FREEZE WHERE THEY STAND, for as long as the
-   attribute is set. It is a photographer's flag, and the only thing that sets
-   it is a driver OUTSIDE the page that is about to take the page's picture:
-   the headless playtest (e2e/PLAYTEST-SPEC.md) sets it around one capture and
-   removes it after. Nothing in this app's own code sets it, and a page nobody
-   photographs never carries it — so this rule cannot change what a user sees.
-
-   WHY IT EXISTS. Several of this sheet's animations run FOREVER and by
-   design: the prompt bubble's `bubble-wave`, the sidebar's `ws-pulse` state
-   dots, the footer's breath, a running tool's arc. A screenshot must wait for
-   the screen to stop changing before it fires — a frame caught mid-redraw is
-   half of one state and half of another — and against an animation that never
-   stops, that wait can only run its whole budget out and photograph a torn
-   frame anyway. MEASURED, one full playbook run: 10 of 10 captures ran the
-   full 2s budget, and every persistent change was inside a `.bubble.user`
-   fill, one box per prompt bubble in the scrollback.
-
-   `animation-play-state: paused`, NOT `animation: none`. A stopped animation
-   is a DIFFERENT PICTURE: `animation: none` snaps every animated property back
-   to its unanimated value, so a running tool's arc would lose the fade-in that
-   makes it visible at all and the wave would park its band at the fill's
-   edge. Pausing holds every element exactly where the animation had already
-   carried it, so the photograph shows the page as the eye had it a frame
-   earlier — which is the whole point of taking one.
-
-   The pseudo-elements are named because two of the animations live on them
-   (`.animated-ellipsis::after`, the compaction sweep), and `!important` is
-   here because the declarations it overrides are shorthand `animation`
-   properties spread across a hundred rules, several of them more specific
-   than anything a single selector could outrank. */
-:root[data-motion="paused"],
-:root[data-motion="paused"] *,
-:root[data-motion="paused"] *::before,
-:root[data-motion="paused"] *::after {
-  animation-play-state: paused !important;
-}
-
-/* THE ONE ANIMATION PAUSING ALONE CANNOT PHOTOGRAPH: a running tool's arc.
-   `.tool-spinner` is laid out from the start at `opacity: 0` and made
-   visible ONLY by `tool-run-appear`, whose 1s delay is the whole mechanic —
-   an arc appears for a call the user actually waits on, and nothing else.
-   Pausing that animation DURING its delay freezes the opacity at 0 and never
-   lets it out, so the flag does not hold the arc where the eye had it: it
-   holds it where the eye never sees it settle.
-
-   AND EVERY RUNNING CARD IS PHOTOGRAPHED INSIDE THAT SECOND. A playbook
-   asserts `data-state="running"` and captures on the next step, and a
-   rewrite (a tool-use-progress update, the input→running flip) restarts the
-   delay, so the delay is running at capture time essentially always.
-   MEASURED, owner 13's `13-shell` and `13-detached-shell` runs: all six
-   `running…` badges across both playbooks drew a reserved but EMPTY box
-   inside the pill, in every capture of two separate green runs.
-
-   So the flag lands the arc where the delay was carrying it. This is a
-   photographer's rule like the one above it — nothing in this app's own code
-   sets `data-motion`, so it cannot change what a user sees, and between
-   captures the arc fades in on its own delay exactly as it always did. */
-:root[data-motion="paused"] .tool-spinner {
-  opacity: 1;
 }
