@@ -111,13 +111,16 @@ func TestOpenCreatesEveryDeclaredTable(t *testing.T) {
 	}
 }
 
+// TestOpenRefusesAForeignLayoutVersion covers the layouts this build cannot
+// interpret. An OLDER layout is NOT among them any more: it is migrated
+// forward (migrate_test.go), because the workspace state is the user's data.
 func TestOpenRefusesAForeignLayoutVersion(t *testing.T) {
 	tests := []struct {
 		name    string
 		version int
 	}{
 		{name: "newer than this build", version: LayoutVersion + 1},
-		{name: "older than this build", version: LayoutVersion - 1},
+		{name: "older than any migration reaches", version: 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
