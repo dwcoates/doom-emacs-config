@@ -482,6 +482,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	t.Cleanup(e.reapStrays)
 
 	e.writeSettings(opts)
+	prewarmTrampolines(t, box)
 	staged := time.Now()
 	e.stageEmacsDir()
 	e.record("stage-emacs-dir", time.Since(staged))
@@ -505,6 +506,10 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	env := append([]string{
 		"HOME=" + root,
 		"EMACSDIR=" + e.EmacsDir,
+		// THE SHARED TRAMPOLINE CACHE. See prewarmTrampolines: this is what
+		// puts the prewarmed `.eln' files on `native-comp-eln-load-path', so
+		// `comp-trampoline-search' finds them and this boot compiles nothing.
+		"EMACSNATIVELOADPATH=" + trampolineCacheDir,
 		"AGENT_REPL_E2E_EMACS=1",
 		"AGENT_REPL_E2E_SERVER=" + e.ServerSocket,
 		"AGENT_REPL_E2E_READY=" + e.ReadyStamp,
@@ -615,6 +620,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	e.awaitServer()
 	e.record("server-answers", time.Since(serverStarted))
 	e.armHeartbeat()
+	e.assertTrampolinesWerePrewarmed()
 	t.Cleanup(e.reportPhases)
 	return e
 }
@@ -727,6 +733,184 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 	if err := os.WriteFile(e.settingsPath(), []byte(src), 0o644); err != nil {
 		e.t.Fatalf("write e2e-settings.el: %v", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// SUBR TRAMPOLINES ARE BUILT ONCE PER CONTAINER, NEVER PER SCENARIO.
+// ---------------------------------------------------------------------------
+//
+// MEASURED, and it is the whole of a four-scenario flake. Redefining a
+// PRIMITIVE -- which every `advice-add' on a subr does, and this module does
+// nine times between its own `lisp/' and Doom's own `map!' -- makes Emacs
+// synthesize a "subr trampoline" so natively compiled callers see the
+// redefinition too. Synthesizing one is `comp-trampoline-compile', and that
+// is a SYNCHRONOUS `call-process' of a whole second Emacs:
+//
+//	pid=22091 state=R /usr/local/bin/emacs -no-comp-spawn -Q --batch \
+//	  -l /tmp/emacs-int-comp-subr--trampoline-646566696e652d6b6579_define_key_0...
+//
+// with the booting Emacs blocked in `read' on its pipe until it finishes.
+// `sandbox/doom/init.el' turns JIT compilation off, and that does NOT cover
+// this: trampoline synthesis is governed by `native-comp-enable-subr-trampolines'
+// and happens whether or not the JIT is armed.
+//
+// The image's `doom sync --aot' never produces these, because none of the
+// advice runs during a sync -- so EVERY scenario compiled all nine into its
+// own throwaway `~/.emacs.d' cache, forty-five times a run, concurrently.
+// On 2026-09-10 four scenarios died of it in one run: Doom's 3.5s boot bound
+// missed with the breadcrumb stopping at "init.el finished", `emacsclient'
+// then failing with "exit status 1" because the server that boot had not
+// reached yet could not answer, and the scenario reported as a wedge.
+//
+// TURNING TRAMPOLINES OFF IS NOT THE FIX, and would be a hole in the layer
+// rather than a speedup: `lisp/status.el' advises `modify-frame-parameters'
+// and `lisp/close-panels-on-open.el' advises `set-window-buffer', so an Emacs
+// without trampolines is one where THIS MODULE'S OWN production advice is
+// bypassed by every natively compiled caller. The layer would go on passing
+// while testing something the user never runs.
+//
+// So they are compiled ONCE, ahead of every scenario, into a container-wide
+// directory that `EMACSNATIVELOADPATH' puts on `native-comp-eln-load-path'.
+// `comp-trampoline-search' consults that path BEFORE compiling, so every
+// scenario boot finds all nine already built and compiles nothing.
+const trampolineCacheDir = "/tmp/agent-repl-e2e-trampolines"
+
+// emacsAdvisedPrimitives is every primitive a scenario's Emacs redefines, as
+// OBSERVED: it is the key set of `comp-installed-trampolines-h' after a boot,
+// not a reading of the sources. Six come from this module (`status.el',
+// `close-panels-on-open.el', `find-file-workspace.el'), `define-key' from
+// Doom's `general-auto-unbind-keys', and `yes-or-no-p' from the unanswerable
+// -prompt guard the harness itself installs in e2e-settings.el.
+//
+// A NAME MISSING FROM THIS LIST CANNOT ROT SILENTLY: assertTrampolinesWerePrewarmed
+// fails the scenario that installs one from anywhere but this cache.
+var emacsAdvisedPrimitives = []string{
+	"define-key",
+	"modify-frame-parameters",
+	"read-key-sequence",
+	"read-key-sequence-vector",
+	"select-window",
+	"set-window-buffer",
+	"use-global-map",
+	"use-local-map",
+	"yes-or-no-p",
+}
+
+// trampolinePrewarmBound bounds the one prewarm. It is nine `call-process'
+// compilations of a second Emacs each, run serially. MEASURED at 887ms for
+// all nine on a cold container with the machine otherwise idle, which is
+// what it always is here: the prewarm runs holding a parallelism slot,
+// before any scenario's Emacs exists. The bound is that measurement's own
+// order of magnitude over again, for a box under other agents' load.
+const trampolinePrewarmBound = 20 * time.Second
+
+var trampolinePrewarm struct {
+	sync.Once
+	err  error
+	took time.Duration
+}
+
+// prewarmTrampolines builds every subr trampoline this layer needs, once per
+// test binary, before any scenario's Emacs starts.
+//
+// It is called with a parallelism slot already held, so the compilations get
+// the machine to themselves rather than racing the boots they exist to spare.
+// A failure here fails EVERY caller, not only the first: an unwarmed cache is
+// the flake this exists to remove, and a silent fallback to per-scenario
+// compilation would hide it again.
+func prewarmTrampolines(t *testing.T, box sandbox) {
+	t.Helper()
+	trampolinePrewarm.Do(func() {
+		started := time.Now()
+		form := fmt.Sprintf(`(progn
+  (require 'comp)
+  (require 'comp-run)
+  (let ((native-compile-target-directory %q))
+    (dolist (subr '(%s))
+      (unless (comp--trampoline-search subr)
+        (comp-trampoline-compile subr)))))`,
+			trampolineCacheDir+"/", strings.Join(emacsAdvisedPrimitives, " "))
+		ctx, cancel := context.WithTimeout(context.Background(), trampolinePrewarmBound)
+		defer cancel()
+		out, err := box.Exec(ctx, "env", "EMACSNATIVELOADPATH="+trampolineCacheDir,
+			"emacs", "-Q", "--batch", "--eval", form)
+		trampolinePrewarm.took = time.Since(started)
+		if err != nil {
+			trampolinePrewarm.err = fmt.Errorf("compile the subr trampolines into %s: %w\n%s",
+				trampolineCacheDir, err, out)
+		}
+	})
+	if trampolinePrewarm.err != nil {
+		t.Fatalf("the shared subr-trampoline cache could not be built, and every "+
+			"scenario boot would otherwise compile all %d of them itself: %v",
+			len(emacsAdvisedPrimitives), trampolinePrewarm.err)
+	}
+	t.Logf("subr trampolines prewarmed in %s (bound %s)", trampolinePrewarm.took.Round(time.Millisecond), trampolinePrewarmBound)
+}
+
+// assertTrampolinesWerePrewarmed proves this boot compiled no trampoline.
+//
+// It reads where each installed trampoline was LOADED FROM rather than merely
+// which ones exist, because that is the difference the bound is spent on: a
+// trampoline already on disk costs a `native-elisp-load', and one that is not
+// costs a whole child Emacs inside Doom's 3.5s boot.
+//
+// TWO DIRECTORIES ARE LEGITIMATE, and the second is why this is a stat rather
+// than a prefix test. Four of the nine come from the shared prewarm cache.
+// The other five are already in the image's own Doom eln cache -- `doom sync
+// --aot' happens to produce them -- and reach the boot through the staged
+// copy of it, so they load from a path under THIS scenario's `~/.emacs.d'
+// that is nonetheless not this scenario's work. A staged copy is told from a
+// fresh compilation by asking whether the same file exists in the image the
+// staging copied from.
+//
+// Any primitive advised in future that nobody added to emacsAdvisedPrimitives
+// therefore fails HERE, named, on its first scenario -- instead of returning
+// as a boot-bound flake on a busy machine.
+func (e *Emacs) assertTrampolinesWerePrewarmed() {
+	e.t.Helper()
+	loaded := e.EvalStrings(`(let (r)
+  (maphash (lambda (name trampoline)
+             (push (format "%s %s" name
+                           (native-comp-unit-file
+                            (subr-native-comp-unit trampoline)))
+                   r))
+           comp-installed-trampolines-h)
+  r)`)
+	image := os.Getenv("EMACSDIR")
+	if image == "" {
+		image = imageEmacsDir
+	}
+	var strays []string
+	for _, entry := range loaded {
+		name, file, ok := strings.Cut(entry, " ")
+		if ok && e.trampolineWasOnDiskBeforeThisBoot(file, image) {
+			continue
+		}
+		strays = append(strays, fmt.Sprintf("%s (from %s)", name, file))
+	}
+	if len(strays) > 0 {
+		e.t.Fatalf("this boot built %d subr trampoline(s) itself instead of finding one "+
+			"already on disk: %s\nAdd the name(s) to emacsAdvisedPrimitives so the prewarm "+
+			"builds them once into %s, rather than every scenario paying a child Emacs "+
+			"inside Doom's %s boot bound.",
+			len(strays), strings.Join(strays, ", "), trampolineCacheDir, doomBootBound)
+	}
+}
+
+// trampolineWasOnDiskBeforeThisBoot reports whether the trampoline loaded
+// from file predates this scenario: it is either in the shared prewarm cache,
+// or it is a staged copy of one the image already carried.
+func (e *Emacs) trampolineWasOnDiskBeforeThisBoot(file, image string) bool {
+	if strings.HasPrefix(file, trampolineCacheDir+"/") {
+		return true
+	}
+	staged, err := filepath.Rel(e.EmacsDir, file)
+	if err != nil || strings.HasPrefix(staged, "..") {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(image, staged))
+	return err == nil
 }
 
 // imageEmacsDir is the image's own Doom install -- `doom install` + `doom
