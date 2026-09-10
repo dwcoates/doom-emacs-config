@@ -183,7 +183,7 @@ func sidecarDir(transcriptPath string) string {
 
 // PortTranscript implements Resolver: a COPY into the child's root, for a fork.
 // The parent keeps its own conversation, which is the whole point of a fork.
-func (r *resolver) PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir, childVendorSessionID string) error {
+func (r *resolver) PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir, childVendorSessionID string) (RemintedID, error) {
 	// EVERY IDENTITY IN THE PORTED HISTORY IS RE-MINTED, under one mapping
 	// shared by the transcript and its sidecar directory. A byte copy would
 	// hand the file plane the parent's own record uuids, message ids and
@@ -192,7 +192,8 @@ func (r *resolver) PortTranscript(ctx context.Context, transcriptPath, childConf
 	// parent's vendor session id is seeded to the child's, so every reference
 	// to the conversation the child resumes is the child's own.
 	parentVendorSessionID := strings.TrimSuffix(filepath.Base(transcriptPath), transcriptExt)
-	return r.transfer(ctx, transferSpec{
+	mapper := remint.New(parentVendorSessionID, childVendorSessionID, nil)
+	if err := r.transfer(ctx, transferSpec{
 		operation:  "daemon.account.port_transcript",
 		source:     transcriptPath,
 		destRoot:   childConfigDir,
@@ -200,8 +201,11 @@ func (r *resolver) PortTranscript(ctx context.Context, transcriptPath, childConf
 		destID:     childVendorSessionID,
 		removeSrc:  false,
 		verbMoving: "copying",
-		remint:     remint.New(parentVendorSessionID, childVendorSessionID, nil),
-	})
+		remint:     mapper,
+	}); err != nil {
+		return nil, err
+	}
+	return mapper.ID, nil
 }
 
 // MoveTranscript implements Resolver: a MOVE into the other root, for an

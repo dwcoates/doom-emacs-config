@@ -32,16 +32,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		// The main agent's prompt, or any prompt while a lease holder's output
 		// address is in force: one user-prompt row, placed by the address.
 		at := r.place(s, recipient)
-		row := &frontendv1.FeedRow{
-			Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: turn.GetValue()}),
-			Turn: turn,
-			Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
-				Author: &frontendv1.FeedUserPromptAuthor{Label: AuthorLabel(prompt.GetOrigin())},
-				Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
-					Body: &frontendv1.FeedUserPromptBody{Blocks: blocks},
-				}},
-			}},
-		}
+		row := r.userPromptRow(s, at, turn, prompt.GetOrigin(), blocks)
 		// THE TURN THE SESSION IS RUNNING, learned from the prompt that opened
 		// it: every later row this turn produces is stamped with it, and its
 		// terminal row is what clears it.
@@ -93,6 +84,62 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		dlog.Context{"turn": turn.GetValue(), "sender_feed": senderFeedKey, "recipient_feed": subFeedKey})
 	r.upsert(s, placement{feed: senderAddr}, outgoing, true)
 	r.upsert(s, placement{feed: recipientFeed}, delivered, true)
+}
+
+// userPromptRow composes THE user-prompt row. It is one function because the
+// same row is drawn from three places — a delivered prompt, a replayed one,
+// and a fork's ported parent conversation — and three spellings of one row
+// would let them disagree about its identity or its author.
+func (r *resolver) userPromptRow(
+	s *wsState,
+	at placement,
+	turn *conversationv1.TurnId,
+	origin conversationv1.PromptOrigin,
+	blocks []*frontendv1.FeedUserPromptBlock,
+) *frontendv1.FeedRow {
+	return &frontendv1.FeedRow{
+		Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: turn.GetValue()}),
+		Turn: turn,
+		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
+			Author: &frontendv1.FeedUserPromptAuthor{Label: AuthorLabel(origin)},
+			Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
+				Body: &frontendv1.FeedUserPromptBody{Blocks: blocks},
+			}},
+		}},
+	}
+}
+
+// drawPortedPrompt draws one row of a FORK'S PORTED CONVERSATION: a question
+// the PARENT was asked, carried over under the child's own turn id.
+//
+// IT NEVER OPENS A TURN. A delivered prompt teaches the resolver which turn
+// the session is running; a ported one is history that was settled in another
+// workspace, and treating it as in flight would leave the child stamping its
+// own rows with a turn that ended before it existed.
+func (r *resolver) drawPortedPrompt(s *wsState, prompt PortedPrompt) {
+	turn := &conversationv1.TurnId{Value: prompt.Turn}
+	at := r.place(s, nil)
+	blocks := r.drawUserBlocks(s, SaidText(prompt.Text).GetContent())
+	row := r.userPromptRow(s, at, turn, prompt.Origin, blocks)
+	r.logger(s.id).Debug("daemon.feed.ported_prompt",
+		"a prompt ported from the parent workspace was drawn on the fork's feed",
+		dlog.Context{"turn": prompt.Turn, "origin": prompt.Origin.String(), "blocks": len(blocks)})
+	r.upsert(s, at, row, true)
+}
+
+// SaidText composes the one canonical prompt form from plain text. A ported
+// row carries the text the parent recorded and nothing else, so the content it
+// is drawn from is built here rather than stored twice.
+func SaidText(text string) *conversationv1.UserSaid {
+	return &conversationv1.UserSaid{
+		Content: &conversationv1.UserContent{
+			Blocks: []*conversationv1.UserContentBlock{{
+				Block: &conversationv1.UserContentBlock_Text{
+					Text: &conversationv1.TextBlock{Text: text},
+				},
+			}},
+		},
+	}
 }
 
 // feedLabel names a feed for an address line: a sub-feed by its bubble's
