@@ -298,8 +298,8 @@ export class TurnEngine {
     }
     const open = this.session.openTurn();
     if (open !== undefined) {
-      LOGGER.log(
-        { level: "warn", open_turn: open.id.value, requested_turn: request.turn?.value ?? "" },
+      LOGGER.warn(
+        { open_turn: open.id.value, requested_turn: request.turn?.value ?? "" },
         "REFUSED a second StartTurn: one turn is in flight and the daemon is the only queue",
       );
       return startTurnRefused(
@@ -331,8 +331,8 @@ export class TurnEngine {
       // replays transiently, opens a degraded window, raises store_unreachable,
       // and -- if it never lands -- drops loudly naming the key. The write id
       // is deterministic, so a partially-landed batch absorbs the replay.
-      LOGGER.log(
-        { level: "error", turn_id: turn.value, upsert_key: promptRow.upsertKey, cause: err.message },
+      LOGGER.error(
+        { turn_id: turn.value, upsert_key: promptRow.upsertKey, cause: err.message },
         "the prompt row could not be made durable before the turn; re-queued it behind the retry buffer",
       );
       this.session.persistence.write([promptRow]);
@@ -354,10 +354,10 @@ export class TurnEngine {
     } catch (err) {
       this.session.setOpenTurn(undefined);
       const detail = err instanceof Error ? err.message : String(err);
-      LOGGER.log({ level: "error", turn_id: turn.value, cause: detail }, "the vendor refused the prompt");
+      LOGGER.error({ turn_id: turn.value, cause: detail }, "the vendor refused the prompt");
       return startTurnRefused({ kind: "vendorRefused" }, detail);
     }
-    LOGGER.log(
+    LOGGER.info(
       { turn_id: turn.value, origin: request.origin, page_entries: page.entries.length },
       "opened a turn, delivered its prompt, and painted the opening page",
     );
@@ -387,8 +387,8 @@ export class TurnEngine {
       return await this.session.persistence.readFirstPage(agent, pageSize, knownThrough);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      LOGGER.log(
-        { level: "warn", agent_id: agent.value, cause: detail },
+      LOGGER.warn(
+        { agent_id: agent.value, cause: detail },
         "the opening page could not be read; answering an empty page rather than failing a turn that is running",
       );
       return emptyOpeningPage();
@@ -452,7 +452,7 @@ export class TurnEngine {
       // interrupt and wedges the vendor.
       this.session.gate.standDown("the main agent was stopped");
       await query.interrupt();
-      LOGGER.log({ agent_id: target.value }, "interrupted the main agent");
+      LOGGER.debug({ agent_id: target.value }, "interrupted the main agent");
       return updateAgentDelivered();
     }
     // ONE HANDLE, NO VENDOR IDS. A subagent's `AgentId` on the wire is the
@@ -468,7 +468,7 @@ export class TurnEngine {
       );
     }
     await query.stopTask(entry.taskId);
-    LOGGER.log({ agent_id: target.value, task_id: entry.taskId }, "stopped a subagent by its task id");
+    LOGGER.info({ agent_id: target.value, task_id: entry.taskId }, "stopped a subagent by its task id");
     return updateAgentDelivered();
   }
 
@@ -578,8 +578,8 @@ export class TurnEngine {
       busy !== undefined &&
       (busy.taskType === undefined || busy.taskType === "" || busy.taskType === "local_agent")
     ) {
-      LOGGER.log(
-        { level: "warn", agent_id: target.value, task_id: busy.taskId },
+      LOGGER.warn(
+        { agent_id: target.value, task_id: busy.taskId },
         "REFUSED UpdateAgent.prompt to a subagent whose own turn is already running",
       );
       return Promise.resolve(
@@ -590,8 +590,8 @@ export class TurnEngine {
         ),
       );
     }
-    LOGGER.log(
-      { level: "warn", agent_id: target.value, gap: "no_declared_subagent_prompt_route" },
+    LOGGER.warn(
+      { agent_id: target.value, gap: "no_declared_subagent_prompt_route" },
       "REFUSED UpdateAgent.prompt to a subagent: the pinned SDK declares no route that delivers a prompt to a named agent",
     );
     // NOT `nothingRunning`: that is a claim about the AGENT'S STATE, and it
@@ -639,8 +639,8 @@ export class TurnEngine {
     const spawned = this.session.live.spawnedBy(open.id.value);
     const announceable = spawned.filter((entry) => !entry.skipTranscript);
     if (!request.force && announceable.length > 0) {
-      LOGGER.log(
-        { level: "warn", turn_id: open.id.value, live: announceable.length },
+      LOGGER.warn(
+        { turn_id: open.id.value, live: announceable.length },
         "REFUSED KillTurn: the turn still has live work and force was not set",
       );
       return killTurnRefused(
@@ -672,7 +672,7 @@ export class TurnEngine {
               }),
             },
     });
-    LOGGER.log({ turn_id: open.id.value, stopped: spawned.length }, "killed a turn and everything it spawned");
+    LOGGER.info({ turn_id: open.id.value, stopped: spawned.length }, "killed a turn and everything it spawned");
     return killTurnKilled(killed);
   }
 
@@ -687,7 +687,7 @@ export class TurnEngine {
   private async awaitStartOf(turn: string): Promise<void> {
     const starting = this.starting;
     if (starting === undefined || starting.turn !== turn || turn === "") return;
-    LOGGER.log(
+    LOGGER.debug(
       { turn_id: turn },
       "KillTurn names the turn whose StartTurn is still being processed; waiting for the start to settle",
     );
@@ -698,8 +698,8 @@ export class TurnEngine {
     try {
       const outcome = await Promise.race([starting.settled.then(() => "settled" as const), expired]);
       if (outcome === "expired") {
-        LOGGER.log(
-          { level: "error", turn_id: turn, budget_ms: KILL_AWAITS_START_BUDGET_MS },
+        LOGGER.error(
+          { turn_id: turn, budget_ms: KILL_AWAITS_START_BUDGET_MS },
           "a KillTurn waited out its budget for a StartTurn that never settled; killing against the session as it stands",
         );
       }
@@ -722,8 +722,8 @@ export class TurnEngine {
   ): Promise<shimv1.KillTurnResponse> {
     const announceable = spawned.filter((entry) => !entry.skipTranscript);
     if (!force && announceable.length > 0) {
-      LOGGER.log(
-        { level: "warn", turn_id: turnId, live: announceable.length },
+      LOGGER.warn(
+        { turn_id: turnId, live: announceable.length },
         "REFUSED KillTurn: the turn has closed but still has live work and force was not set",
       );
       return killTurnRefused(
@@ -741,7 +741,7 @@ export class TurnEngine {
       for (const entry of spawned) await query.stopTask(entry.taskId);
     }
     this.session.concludeStoppedRuns(spawned);
-    LOGGER.log(
+    LOGGER.info(
       { turn_id: turnId, stopped: spawned.length },
       "killed the live work a closed turn left running",
     );
@@ -832,8 +832,8 @@ export class TurnEngine {
     // (it arrives on a later `background_tasks_changed`), so requiring it too
     // refused detachments the vendor had already made.
     if (!live && verdict.kind === "live_detachable") {
-      LOGGER.log(
-        { level: "warn", unit, gap: "no_declared_detach_verb" },
+      LOGGER.warn(
+        { unit, gap: "no_declared_detach_verb" },
         "REFUSED DetachForeground: the unit is detachable in kind and live, but the pinned SDK offers no verb to initiate a detachment",
       );
       return detachForegroundRefused(
@@ -843,7 +843,7 @@ export class TurnEngine {
           "(reported as a contract gap)",
       );
     }
-    LOGGER.log({ unit }, "reported a foreground unit as detached: the vendor holds live background work for it");
+    LOGGER.info({ unit }, "reported a foreground unit as detached: the vendor holds live background work for it");
     return detachForegroundDetached();
   }
 
@@ -891,8 +891,8 @@ export class TurnEngine {
     // carries — so the refusal closes the stream at the transport.
     if (opened.page.entries.length === 0 && !this.session.knowsAgent(target)) {
       opened.close();
-      LOGGER.log(
-        { level: "warn", agent_id: target.value },
+      LOGGER.warn(
+        { agent_id: target.value },
         "REFUSED WatchAgent: the record holds no rows for this target and this shim never announced it",
       );
       throw notFound(
@@ -955,7 +955,7 @@ export class TurnEngine {
             : err.kind === "stale_pointer"
               ? ({ kind: "stalePointer" } as const)
               : ({ kind: "storeUnavailable" } as const);
-        LOGGER.log({ level: "warn", agent_id: target.value, kind: err.kind }, "ReadHistory refused");
+        LOGGER.warn({ agent_id: target.value, kind: err.kind }, "ReadHistory refused");
         if (kind.kind === "storeUnavailable") {
           this.session.reportStoreUnreachable(`ReadHistory(${target.value}): ${err.message}`);
         }
@@ -998,8 +998,8 @@ export class TurnEngine {
       }
     } catch (err) {
       if (err instanceof PersistenceError) {
-        LOGGER.log(
-          { level: "warn", work_id: work.value, kind: err.kind },
+        LOGGER.warn(
+          { work_id: work.value, kind: err.kind },
           "WatchBash refused",
         );
         throw notFound(`WatchBash(${work.value}): ${err.message}`);
@@ -1023,13 +1023,13 @@ export class TurnEngine {
       // the table watched RETIRE names a shell that ended, which is what
       // `already_ended` says; a handle it never knew names nothing at all.
       if (this.session.live.retired(work.value)) {
-        LOGGER.log({ level: "warn", work_id: work.value }, "StopBash refused: the shell already ended");
+        LOGGER.warn({ work_id: work.value }, "StopBash refused: the shell already ended");
         return stopBashRefused(
           { kind: "alreadyEnded" },
           `the shell addressed by ${JSON.stringify(work.value)} has already ended`,
         );
       }
-      LOGGER.log({ level: "warn", work_id: work.value }, "StopBash refused: no live shell carries this handle");
+      LOGGER.warn({ work_id: work.value }, "StopBash refused: no live shell carries this handle");
       return stopBashRefused(
         { kind: "unknownWork" },
         `no live detached work is addressed by ${JSON.stringify(work.value)}`,
@@ -1046,7 +1046,7 @@ export class TurnEngine {
     // `interrupted.by_user` states. The row shares the run's terminal upsert
     // key, so a sidecar row for the same run supersedes rather than duplicates.
     this.session.concludeStoppedRuns([entry]);
-    LOGGER.log({ work_id: work.value }, "stopped a detached shell run");
+    LOGGER.info({ work_id: work.value }, "stopped a detached shell run");
     return stopBashStopped();
   }
 }

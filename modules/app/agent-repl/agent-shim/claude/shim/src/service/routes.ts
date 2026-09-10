@@ -44,7 +44,7 @@ const LOGGER = bindLog({ component: "shim-routes", operation: "shim.service.rout
 
 /** Record that a verb was entered, before anything can refuse it. */
 function entered(rpc: string): void {
-  LOGGER.logVerbose({ rpc }, `serving shim.v1.${rpc}`);
+  LOGGER.logVerbose({ rpc, boundary: "entered" }, `serving shim.v1.${rpc}`);
 }
 
 /**
@@ -57,7 +57,9 @@ function entered(rpc: string): void {
  */
 async function answering<T>(rpc: string, act: () => Promise<T>): Promise<T> {
   try {
-    return await act();
+    const response = await act();
+    LOGGER.logVerbose({ rpc, boundary: "completed" }, `completed shim.v1.${rpc}`);
+    return response;
   } catch (error) {
     throw reportUnhandled(rpc, error);
   }
@@ -73,6 +75,7 @@ async function answering<T>(rpc: string, act: () => Promise<T>): Promise<T> {
 async function* streaming<T>(rpc: string, frames: () => AsyncIterable<T>): AsyncIterable<T> {
   try {
     yield* frames();
+    LOGGER.logVerbose({ rpc, boundary: "completed" }, `completed shim.v1.${rpc} stream`);
   } catch (error) {
     throw reportUnhandled(rpc, error);
   }
@@ -82,9 +85,8 @@ async function* streaming<T>(rpc: string, frames: () => AsyncIterable<T>): Async
 function reportUnhandled(rpc: string, error: unknown): unknown {
   const mapped = internalFromUnknown(rpc, error);
   if (mapped !== error) {
-    LOGGER.log(
+    LOGGER.error(
       {
-        level: "error",
         rpc,
         detail: mapped.rawMessage,
         stack: error instanceof Error ? error.stack : undefined,
@@ -200,20 +202,20 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
        */
       getWorkflow() {
         entered("GetWorkflow");
-        LOGGER.log({ level: "warn", rpc: "GetWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
+        LOGGER.warn({ rpc: "GetWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
         throw unimplemented("GetWorkflow");
       },
 
       // eslint-disable-next-line require-yield
       async *watchWorkflow() {
         entered("WatchWorkflow");
-        LOGGER.log({ level: "warn", rpc: "WatchWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
+        LOGGER.warn({ rpc: "WatchWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
         throw unimplemented("WatchWorkflow");
       },
 
       stopWorkflow() {
         entered("StopWorkflow");
-        LOGGER.log({ level: "warn", rpc: "StopWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
+        LOGGER.warn({ rpc: "StopWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
         throw unimplemented("StopWorkflow");
       },
 

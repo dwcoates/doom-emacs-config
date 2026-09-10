@@ -32,9 +32,9 @@ const ROTATE = scenario({
     "no closing record of any kind",
   arms: "SessionIdentityRotated + AgentUpdate.context_cut(ContextCleared)",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "rotate" }, "fake identity-rotation turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "rotate" }, "fake identity-rotation turn");
     const next = ctx.rotate();
-    ctx.log({ new_claude_session_id: next }, "fake vendor minted a new conversation identity");
+    ctx.log.debug({ new_claude_session_id: next }, "fake vendor minted a new conversation identity");
     conclude(ctx, "Cleared the conversation.");
   },
 });
@@ -48,7 +48,7 @@ const SLASH_LOCAL = scenario({
   writes: "a `system:local_command` line and a `command_permissions` attachment line",
   arms: "the vendor-answered slash-command family — no agent activity beyond the answer, and NO reasoning",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "slash" }, "fake vendor-answered slash-command turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "slash" }, "fake vendor-answered slash-command turn");
     const output = "Session: offline\nModel: fake-opus-4-8\nPermission mode: default";
     ctx.systemMessage("local_command_output", { content: output });
     ctx.files.transcript.append({
@@ -91,7 +91,7 @@ const SLASH_SHAPE_A = scenario({
   arms: "none in this converter — this record is what the DAEMON's own history classifier reads directly off the transcript; the shim ships it unclassified",
   run(ctx) {
     const name = ctx.args === "" ? "compact" : ctx.args;
-    ctx.log({ turn: ctx.turn, branch: "slash-shape-a", command: name }, "fake Shape-A slash-command bookkeeping turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "slash-shape-a", command: name }, "fake Shape-A slash-command bookkeeping turn");
     // A KNOB, not a fixed value: `ctx.newUuid()` is deterministic in the test
     // harness, so a caller can name exactly which `promptId` this record will
     // carry without the scenario hard-coding one.
@@ -115,7 +115,7 @@ const SLASH_SHAPE_A_UNNAMED = scenario({
   writes: "one `user` transcript line carrying a fresh `promptId`, then the ordinary prompt line and the turn record",
   arms: "none in this converter — a record naming no command, which is the negative `slash-shape-a` exists to prove",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "slash-shape-a-unnamed" }, "fake Shape-A withheld-unnamed bookkeeping turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "slash-shape-a-unnamed" }, "fake Shape-A withheld-unnamed bookkeeping turn");
     ctx.files.transcript.append({
       promptId: ctx.newUuid(),
       type: "user",
@@ -142,7 +142,7 @@ const CONTEXT_USAGE_DRIFT = scenario({
   writes: "the assistant line, the prompt line and the turn record",
   arms: "SessionContextUsage — the same arm twice with DIFFERENT figures, which is what a re-render tests",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "context-usage-drift" }, "fake context-usage drift turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "context-usage-drift" }, "fake context-usage drift turn");
     ctx.setContextUsageDrift(true);
     conclude(ctx, "The context-usage answer now grows with every turn.");
   },
@@ -159,7 +159,7 @@ const MODEL_FALLBACK = scenario({
   writes: "a `system:model_refusal_fallback` line, the fallback-model assistant line, the prompt line and the turn record",
   arms: "SessionModelChanged with no SetSessionModel behind it — the vendor's own decision, not a confirmed request",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "model-fallback" }, "fake unsolicited model-fallback turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "model-fallback" }, "fake unsolicited model-fallback turn");
     const original = ctx.model;
     const fallback = original === "fake-sonnet-5" ? "fake-haiku-4-5" : "fake-sonnet-5";
     const content = `Switched to ${fallback} for the rest of this session.`;
@@ -218,7 +218,7 @@ function fastModeScenario(name: string, state: "on" | "off" | "cooldown", reason
     writes: "the assistant line, the prompt line and the turn record",
     arms: `SessionFastMode.state=${state}`,
     run(ctx) {
-      ctx.log({ turn: ctx.turn, branch: name, fast_mode_state: state }, "fake fast-mode turn");
+      ctx.log.debug({ turn: ctx.turn, branch: name, fast_mode_state: state }, "fake fast-mode turn");
       ctx.setFastMode(state, reason);
       const conclusion = `Fast mode is ${state}.`;
       // `[thinking, text]`, like every capture's closing API response — this one
@@ -250,7 +250,7 @@ const MCP_ALL = scenario({
   writes: "the assistant line, the prompt line and the turn record",
   arms: "SessionMcpServer.health=connected/failed/needs_auth/pending/disabled",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "mcp-all" }, "fake mcp catalog (all healths) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "mcp-all" }, "fake mcp catalog (all healths) turn");
     ctx.setMcpArm("all");
     conclude(ctx, "Every MCP health is now reported.");
   },
@@ -263,7 +263,7 @@ const MCP_HEALTHY = scenario({
   writes: "the assistant line, the prompt line and the turn record",
   arms: "SessionMcpServer.health=connected only — the change is what a push tests",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "mcp-healthy" }, "fake mcp catalog (healthy only) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "mcp-healthy" }, "fake mcp catalog (healthy only) turn");
     ctx.setMcpArm("healthy");
     conclude(ctx, "Only the healthy MCP server is now reported.");
   },
@@ -278,7 +278,7 @@ function usageScenario(name: string, arm: AccountUsageArm, armDoc: string) {
     writes: "the assistant line, the prompt line and the turn record",
     arms: armDoc,
     run(ctx) {
-      ctx.log({ turn: ctx.turn, branch: name, usage_arm: arm }, "fake account-usage arm switched");
+      ctx.log.debug({ turn: ctx.turn, branch: name, usage_arm: arm }, "fake account-usage arm switched");
       ctx.setAccountUsageArm(arm);
       conclude(ctx, `The account-usage probe now answers with the ${arm} shape.`);
     },
@@ -337,7 +337,7 @@ const RATE_LIMIT = scenario({
   writes: "the assistant line, the prompt line and the turn record",
   arms: "SessionAccountUsage from the rate-limit event, plus the usage-warning synthesized notice",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "rate-limit" }, "fake rate-limit-event turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "rate-limit" }, "fake rate-limit-event turn");
     ctx.emit({
       type: "rate_limit_event",
       rate_limit_info: {
@@ -379,7 +379,7 @@ function rateLimitWindowScenario(
     writes: "the assistant line, the prompt line and the turn record",
     arms: `SessionRateLimitStatus.rate_limit_type=${arm}`,
     run(ctx) {
-      ctx.log({ turn: ctx.turn, branch: name, rate_limit_type: vendorWindow }, "fake rate-limit-window turn");
+      ctx.log.debug({ turn: ctx.turn, branch: name, rate_limit_type: vendorWindow }, "fake rate-limit-window turn");
       ctx.emit({
         type: "rate_limit_event",
         rate_limit_info: {
@@ -432,7 +432,7 @@ const CONTEXT_TIP = scenario({
   writes: "a `context_tip` attachment line",
   arms: "residue `attachment/context_tip` — the tip is recorded as itself, unconverted, and reaches no arm",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "context-tip" }, "fake generic context-tip turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "context-tip" }, "fake generic context-tip turn");
     ctx.attachment({
       type: "context_tip",
       tip: {
@@ -457,7 +457,7 @@ const TOKENS_REMINDER = scenario({
   writes: "a `total_tokens_reminder` attachment line",
   arms: "residue `attachment/total_tokens_reminder` — recorded as itself, unconverted, and reaching no arm",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "tokens-reminder" }, "fake total-tokens-reminder turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "tokens-reminder" }, "fake total-tokens-reminder turn");
     ctx.attachment({
       type: "total_tokens_reminder",
       // VERBATIM SHAPE from the capture: one `text` field, the count inside a
@@ -482,7 +482,7 @@ const CONTEXT_BUDGET_WARNING = scenario({
   writes: "a `context_budget_warning` attachment line",
   arms: "AgentUpdate.update=contextBudgetWarning(ContextBudgetWarning) — UNGROUNDED, invented; see MANIFEST.md",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "context-budget-warning" }, "fake INVENTED context-budget-warning turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "context-budget-warning" }, "fake INVENTED context-budget-warning turn");
     ctx.attachment({
       type: "context_budget_warning",
       content: "The conversation is approaching its context window budget.",
@@ -564,7 +564,7 @@ const COMPACT = scenario({
   arms: "SessionCompacting + AgentUpdate.context_cut(ContextCompacted) with trigger=requested",
   run(ctx) {
     const summary = ctx.args === "" ? "Compacted the conversation." : ctx.args;
-    ctx.log({ turn: ctx.turn, branch: "compact", summary }, "fake compaction turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "compact", summary }, "fake compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
     const preserved = preservedUuids(ctx, ctx.files.transcript.chainHead ?? ctx.newUuid());
     const boundaryUuid = ctx.systemRecord(
@@ -610,7 +610,7 @@ const COMPACT_AUTO = scenario({
   writes: "a `system:compact_boundary` line with `compactMetadata.trigger: \"auto\"`",
   arms: "AgentUpdate.context_cut(ContextCompacted) with trigger=automatic",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "compact-auto" }, "fake auto-compaction turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "compact-auto" }, "fake auto-compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
     const preserved = preservedUuids(ctx, ctx.files.transcript.chainHead ?? ctx.newUuid());
     const boundaryUuid = ctx.systemRecord(
@@ -658,7 +658,7 @@ const COMPACT_FAILED = scenario({
   writes: "nothing but the prompt line and the turn record — a failed compaction cut nothing",
   arms: "AgentUpdate.context_cut(ContextCompactionFailed)",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "compact-failed" }, "fake failed-compaction turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "compact-failed" }, "fake failed-compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
     ctx.systemMessage("status", {
       status: null,
@@ -676,7 +676,7 @@ const AWAY_SUMMARY = scenario({
   writes: "a `system:away_summary` line",
   arms: "vendor_specific residue — `system/away_summary`, which no conversation.v1 arm models",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "away-summary" }, "fake away-summary turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "away-summary" }, "fake away-summary turn");
     // BOTH PLANES, ONE UUID (`systemRecord`): the vendor's recap is a stream
     // message AND a transcript line, and residue keyed `residue:<uuid>` is what
     // collapses the sidecar's row and the shim's into one. Appending only the
@@ -699,7 +699,7 @@ const RESIDUE = scenario({
     "NONE — these are `StoreUnservedItem.vendor_specific{kind:\"attachment/deferred_tools_delta\"}` and " +
     "`attachment/agent_listing_delta`, dropped from every page by both planes",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "residue" }, "fake vendor-residue turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "residue" }, "fake vendor-residue turn");
     ctx.attachment({
       type: "deferred_tools_delta",
       addedNames: ["WebFetch", "WebSearch"],
@@ -730,7 +730,7 @@ const COLD_SEED = scenario({
   writes: "the ASSISTANT line (with its usage) and the turn_duration line, both carrying a two-hour-old `timestamp`",
   arms: "SessionColdLapsed on the NEXT resume — this scenario only seeds the condition",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "cold-seed" }, "fake cold-context seeding turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "cold-seed" }, "fake cold-context seeding turn");
     const twoHoursAgo = new Date(ctx.nowMs() - 2 * 60 * 60 * 1_000).toISOString();
     // THE LINE THE COLD GATE ACTUALLY READS is the last ASSISTANT line: its
     // `message.usage` is the context size and its `timestamp` is the request

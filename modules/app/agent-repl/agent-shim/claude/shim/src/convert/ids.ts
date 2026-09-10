@@ -23,7 +23,7 @@ const LOGGER = bindLog({ component: "shim-convert-ids", operation: "shim.convert
 function requireVendorValue(value: string, what: string): string {
   if (value === "") {
     const message = `shim identities: ${what} is empty; an identity is never the empty string`;
-    LOGGER.log({ level: "error", what }, message);
+    LOGGER.error({ what }, message);
     throw new Error(message);
   }
   return value;
@@ -83,7 +83,7 @@ export function blockActivityId(
   requireVendorValue(messageId, "the api message id");
   if (!Number.isInteger(blockIndex) || blockIndex < 0) {
     const message = `shim identities: block index ${String(blockIndex)} is not a 0-based integer`;
-    LOGGER.log({ level: "error", message_id: messageId, block_index: blockIndex }, message);
+    LOGGER.error({ message_id: messageId, block_index: blockIndex }, message);
     throw new Error(message);
   }
   return create(conversationv1.AgentActivityIdSchema, { value: `${messageId}:${blockIndex}` });

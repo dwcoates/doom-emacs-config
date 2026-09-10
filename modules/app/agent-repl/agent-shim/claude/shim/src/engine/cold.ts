@@ -105,7 +105,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     contents = readFileSync(file, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      LOGGER.log({ file }, "no transcript for this vendor session id");
+      LOGGER.debug({ file }, "no transcript for this vendor session id");
       return undefined;
     }
     throw err;
@@ -147,8 +147,8 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     }
   }
   if (skipped > 0) {
-    LOGGER.log(
-      { level: "warn", file, skipped_lines: skipped },
+    LOGGER.warn(
+      { file, skipped_lines: skipped },
       "skipped unparsable transcript lines while reading the cold-gate facts",
     );
   }
@@ -159,7 +159,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     ...(lastModel === undefined ? {} : { lastModel }),
     ...(lastPermissionMode === undefined ? {} : { lastPermissionMode }),
   };
-  LOGGER.log({ file, ...facts }, "read the cold-gate facts from the transcript");
+  LOGGER.debug({ file, ...facts }, "read the cold-gate facts from the transcript");
   return facts;
 }
 

@@ -473,8 +473,8 @@ export class PermissionGate {
     if (vendorAgentId === undefined || vendorAgentId === "") return this.deps.mainAgentId();
     const resolved = this.deps.agentFor(vendorAgentId);
     if (resolved !== undefined) return resolved;
-    LOGGER.log(
-      { level: "warn", vendor_agent_id: vendorAgentId },
+    LOGGER.warn(
+      { vendor_agent_id: vendorAgentId },
       "the vendor raised an ask under an agent this session never announced; it lands on the main agent",
     );
     return this.deps.mainAgentId();
@@ -563,8 +563,8 @@ export class PermissionGate {
     const openOfKind = [...this.pendingByToolUse.values()].some(
       (pending) => pending.kind === kind,
     );
-    LOGGER.log(
-      { level: "warn", ask_kind: kind, ask_id: id, another_open: openOfKind },
+    LOGGER.warn(
+      { ask_kind: kind, ask_id: id, another_open: openOfKind },
       openOfKind
         ? "REFUSED an answer naming an ask the shim is not holding while another of its kind is open"
         : "an answer arrived for an ask that is not open",
@@ -612,7 +612,7 @@ export class PermissionGate {
           }),
         }),
       ]);
-      LOGGER.log(
+      LOGGER.debug(
         { tool_use_id: options.toolUseID, questions: batch.questions.length },
         "opened a question and BLOCKED the vendor until it is answered",
       );
@@ -630,8 +630,8 @@ export class PermissionGate {
     }
     const problem = validateAnswers(pending.batch, answers);
     if (problem !== undefined) {
-      LOGGER.log(
-        { level: "warn", question_id: ask.value, problem },
+      LOGGER.warn(
+        { question_id: ask.value, problem },
         "REFUSED an answer whose echo does not match the open question",
       );
       return "answer_mismatch";
@@ -642,7 +642,7 @@ export class PermissionGate {
       behavior: "allow",
       updatedInput: { ...pending.input, answers: toVendorAnswers(answers) },
     });
-    LOGGER.log({ question_id: ask.value, answers: answers.answers.length }, "delivered the user's answers to the vendor");
+    LOGGER.debug({ question_id: ask.value, answers: answers.answers.length }, "delivered the user's answers to the vendor");
     return "delivered";
   }
 
@@ -730,7 +730,7 @@ export class PermissionGate {
           }),
         }),
       ]);
-      LOGGER.log(
+      LOGGER.debug(
         { tool_use_id: options.toolUseID, tool_name: toolName, offered_standing: offeredStanding !== undefined },
         "opened a permission gate and BLOCKED the vendor until it is decided",
       );
@@ -750,7 +750,7 @@ export class PermissionGate {
         if (scope.case === "standing") {
           const standing = scope.value.standing;
           if (standing === undefined) {
-            LOGGER.log({ level: "warn", permission_id: askId }, "a standing allow carries no standing");
+            LOGGER.warn({ permission_id: askId }, "a standing allow carries no standing");
             return "answer_mismatch";
           }
           // THE STANDING IS A TYPED ECHO TOKEN, VALIDATED LIKE ANY OTHER ECHO.
@@ -765,9 +765,8 @@ export class PermissionGate {
             pending.offeredStanding === undefined ||
             !equals(conversationv1.AgentPermissionStandingSchema, pending.offeredStanding, standing)
           ) {
-            LOGGER.log(
+            LOGGER.warn(
               {
-                level: "warn",
                 permission_id: askId,
                 offered: pending.offeredStanding !== undefined,
               },
@@ -795,7 +794,7 @@ export class PermissionGate {
               this.deps.onPermissionModeSet(change.change.value.mode);
             }
           }
-          LOGGER.log({ permission_id: askId, scope: "standing" }, "allowed a tool call with a standing grant");
+          LOGGER.debug({ permission_id: askId, scope: "standing" }, "allowed a tool call with a standing grant");
           return "delivered";
         }
         this.pendingByToolUse.delete(askId);
@@ -806,7 +805,7 @@ export class PermissionGate {
           }),
         });
         pending.resolve({ behavior: "allow" });
-        LOGGER.log({ permission_id: askId, scope: "once" }, "allowed a tool call once");
+        LOGGER.debug({ permission_id: askId, scope: "once" }, "allowed a tool call once");
         return "delivered";
       }
       case "denied": {
@@ -819,11 +818,11 @@ export class PermissionGate {
           }),
         });
         pending.resolve({ behavior: "deny", message });
-        LOGGER.log({ permission_id: askId }, "denied a tool call by the user");
+        LOGGER.debug({ permission_id: askId }, "denied a tool call by the user");
         return "delivered";
       }
       default:
-        LOGGER.log({ level: "warn", permission_id: askId }, "a permission decision carries no arm");
+        LOGGER.warn({ permission_id: askId }, "a permission decision carries no arm");
         return "answer_mismatch";
     }
   }
@@ -883,8 +882,8 @@ export class PermissionGate {
       ask.resolve({ behavior: "deny", message: reason });
     }
     if (pending.length > 0) {
-      LOGGER.log(
-        { level: "warn", reason, resolved: pending.length },
+      LOGGER.warn(
+        { reason, resolved: pending.length },
         "resolved every pending permission callback as DENIED before tearing down; an unresolved one wedges the vendor",
       );
     }

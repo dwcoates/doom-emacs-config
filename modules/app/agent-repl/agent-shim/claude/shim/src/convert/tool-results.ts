@@ -83,8 +83,8 @@ export function convertUserRecord(
   for (const block of results) {
     const toolUseId = block.tool_use_id;
     if (typeof toolUseId !== "string" || toolUseId === "") {
-      LOGGER.log(
-        { level: "error", uuid: message.uuid },
+      LOGGER.warn(
+        { uuid: message.uuid },
         "a tool_result block names no call; nothing can be settled by it",
       );
       entries.push(
@@ -110,7 +110,7 @@ export function convertUserRecord(
     // MODEL was shown (`toolUseResult` is a bare "Error: …" string there, not
     // the tool's Output object), which is why neither is carried.
     if (context.deniedCall(toolUseId)) {
-      LOGGER.log(
+      LOGGER.debug(
         { tool_use_id: toolUseId, uuid: message.uuid },
         "a denied call retires its unit: settling failure with no content, drawn denied via its permission unit",
       );
@@ -196,8 +196,8 @@ function skillDocumentEntry(
             .join("")
         : "";
   if (markdown === "") {
-    LOGGER.log(
-      { level: "warn", tool_use_id: sourceToolUseId },
+    LOGGER.warn(
+      { tool_use_id: sourceToolUseId },
       "a skill document record carried no markdown; the skill unit stays open",
     );
     return [];
@@ -211,8 +211,8 @@ function skillDocumentEntry(
     context.nowMs(),
   );
   if (item === undefined) {
-    LOGGER.log(
-      { level: "error", tool_use_id: sourceToolUseId },
+    LOGGER.warn(
+      { tool_use_id: sourceToolUseId },
       "a skill document names no skill; the settle frame is skipped rather than written with no arm",
     );
     return [];

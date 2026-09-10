@@ -24,7 +24,7 @@ const TASK_CREATE = scenario({
   writes: "the tool_use and tool_result lines for all three calls, the closing text line",
   arms: "AgentTaskAct.act=created (twice) with the DAG edge",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "task-create" }, "fake task-create turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "task-create" }, "fake task-create turn");
     const first = ctx.toolUse("TaskCreate", { subject: "Land the converter", description: "the fold" });
     ctx.toolResult(first, "Created task 1", { task: { id: "1", subject: "Land the converter" } });
     const second = ctx.toolUse("TaskCreate", { subject: "Land the store writer", description: "rows" });
@@ -42,7 +42,7 @@ const TASK_CHANGE = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentTaskAct.act=changed with status pending→running",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "task-change" }, "fake task-change turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "task-change" }, "fake task-change turn");
     const call = ctx.toolUse("TaskUpdate", { taskId: "1", status: "in_progress" });
     ctx.toolResult(call, "Updated task 1", {
       success: true,
@@ -61,7 +61,7 @@ const TASK_REJECT = scenario({
   writes: "the tool_use line, the error tool_result line, the closing text line",
   arms: "AgentTaskAct.act=rejected",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "task-reject" }, "fake task-reject turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "task-reject" }, "fake task-reject turn");
     const call = ctx.toolUse("TaskUpdate", { taskId: "9", status: "completed" });
     ctx.toolResult(
       call,
@@ -80,7 +80,7 @@ const SEND_MESSAGE_QUEUED = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentSendMessage.delivery=queued_to_live",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "send-message-queued" }, "fake send-message (queued) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "send-message-queued" }, "fake send-message (queued) turn");
     const call = ctx.toolUse("SendMessage", { to: "a1234567890abcde", summary: "check the branch" });
     ctx.toolResult(call, "Message queued for the running agent.", {
       success: true,
@@ -100,7 +100,7 @@ const SEND_MESSAGE_RESUMED = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentSendMessage.delivery=resumed_recipient",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "send-message-resumed" }, "fake send-message (resumed) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "send-message-resumed" }, "fake send-message (resumed) turn");
     const agentId = ctx.mintAgentTaskId();
     const call = ctx.toolUse("SendMessage", { to: agentId, summary: "resume the sweep" });
     ctx.toolResult(call, "Agent resumed from transcript.", {
@@ -123,7 +123,7 @@ const SEND_MESSAGE_REFUSED = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentSendMessageFailure",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "send-message-refused" }, "fake send-message (refused) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "send-message-refused" }, "fake send-message (refused) turn");
     const call = ctx.toolUse("SendMessage", { to: "a85a6434719755df1", summary: "continue" });
     ctx.toolResult(
       call,

@@ -127,9 +127,8 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
   try {
     normalized = normalizeApiUsage(usage);
   } catch (error) {
-    LOGGER.log(
+    LOGGER.error(
       {
-        level: "error",
         detail: error instanceof Error ? error.message : String(error),
         field_path: error instanceof InvalidModeledUsageError ? error.fieldPath : undefined,
       },
@@ -139,8 +138,8 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
   }
   const unknownFields = Object.keys(normalized.unknownUsageFields);
   if (unknownFields.length > 0) {
-    LOGGER.log(
-      { level: "warn", unmodeled_usage_fields: unknownFields },
+    LOGGER.warn(
+      { unmodeled_usage_fields: unknownFields },
       "the vendor's usage block carries fields this contract cannot express",
     );
   }
@@ -227,7 +226,7 @@ export function convertStreamEvent(
     case "message_start": {
       const id = event.message?.id;
       if (typeof id !== "string" || id === "") {
-        LOGGER.log({ level: "error" }, "a message_start named no message id; no block can be identified");
+        LOGGER.warn({}, "a message_start named no message id; no block can be identified");
         return [];
       }
       beginMessage(state, id);
@@ -239,7 +238,7 @@ export function convertStreamEvent(
       const index = event.index ?? 0;
       const messageId = state.messageId;
       if (messageId === undefined) {
-        LOGGER.log({ level: "warn" }, "a content block opened with no message_start seen; skipped");
+        LOGGER.warn({}, "a content block opened with no message_start seen; skipped");
         return [];
       }
       // Keep the counter ahead of the stream's own numbering, so an assistant
@@ -374,8 +373,8 @@ export function convertStreamEvent(
       return [];
 
     default:
-      LOGGER.log(
-        { level: "warn", event_type: event.type },
+      LOGGER.warn(
+        { event_type: event.type },
         "no converter owns this stream event; it lands as residue",
       );
       return [residueEntry(context, message, residueForMessage(message), "unknown.stream_event")];
@@ -498,8 +497,8 @@ export function convertAssistantMessage(
   const api = message.message as unknown as RawAssistantMessage;
   const messageId = api.id;
   if (typeof messageId !== "string" || messageId === "") {
-    LOGGER.log(
-      { level: "error", uuid: message.uuid },
+    LOGGER.warn(
+      { uuid: message.uuid },
       "an assistant message named no id; its blocks have no identity and produce no frames",
     );
     return [residueEntry(context, message, residueForMessage(message, "assistant message has no id"), "residue.unparsed")];
@@ -608,8 +607,8 @@ export function convertAssistantMessage(
       const toolUseId = typeof block.id === "string" ? block.id : "";
       const toolName = typeof block.name === "string" ? block.name : "";
       if (toolUseId === "" || toolName === "") {
-        LOGGER.log(
-          { level: "error", message_id: messageId, index },
+        LOGGER.warn(
+          { message_id: messageId, index },
           "a tool_use block named no id or no tool; no unit can be identified",
         );
         continue;
@@ -639,8 +638,8 @@ export function convertAssistantMessage(
       continue;
     }
 
-    LOGGER.log(
-      { level: "warn", message_id: messageId, index, block_type: kind },
+    LOGGER.warn(
+      { message_id: messageId, index, block_type: kind },
       "no converter owns this assistant content block; it lands as residue",
     );
     entries.push(residueEntry(context, block, residueForMessage(block), `unknown.content_block.${String(kind)}`));
@@ -671,8 +670,8 @@ export function convertModelRefusal(
     typeof stated === "string" && stated !== ""
       ? create(conversationv1.AgentResponseRefusalExplanationSchema, { text: stated })
       : undefined;
-  LOGGER.log(
-    { level: "warn", uuid: message.uuid, explained: explanation !== undefined },
+  LOGGER.warn(
+    { uuid: message.uuid, explained: explanation !== undefined },
     "the model REFUSED and no fallback is configured; settling the response as a refusal",
   );
   return [
@@ -724,8 +723,8 @@ export function convertThinkingTokens(
 ): readonly PersistEntry[] {
   const activityId = state.openThinking;
   if (activityId === undefined) {
-    LOGGER.log(
-      { level: "warn" },
+    LOGGER.warn(
+      {},
       "a thinking-token estimate arrived with no open reasoning block; nothing to upsert",
     );
     return [];

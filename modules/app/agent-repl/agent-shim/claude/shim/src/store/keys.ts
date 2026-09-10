@@ -37,7 +37,7 @@ const LOGGER = bindLog({ component: "shim-store-keys", operation: "shim.store.ke
 function requireValue(value: string, what: string): string {
   if (value === "") {
     const message = `shim store keys: ${what} is empty; a key built on an empty identity would collide with every other`;
-    LOGGER.log({ level: "error", what }, message);
+    LOGGER.error({ what }, message);
     throw new Error(message);
   }
   return value;

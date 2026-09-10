@@ -82,7 +82,7 @@ function stopScenario(spec: {
     writes: "the assistant lines for the work it did reach, the prompt line and the turn record",
     arms: `AgentThinking + AgentResponse, then ${spec.arms}`,
     run(ctx) {
-      ctx.log(
+      ctx.log.debug(
         { turn: ctx.turn, branch: spec.name, terminal_reason: spec.terminalReason },
         "fake failing turn",
       );
@@ -271,7 +271,7 @@ const FAIL_CONTINUATION_PREVENTED = scenario({
     "is UNSETTLED and UNGROUNDED: no `TerminalReason` names it, so the two declared prevent-continuation signals " +
     "ride the nearest terminal and nothing produces the continuation_prevented arm",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "fail-continuation-prevented" }, "fake continuation-prevented turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "fail-continuation-prevented" }, "fake continuation-prevented turn");
     ctx.systemMessage("informational", {
       content: "Execution stopped: continuation was prevented.",
       level: "warning",
@@ -326,7 +326,7 @@ function apiErrorScenario(spec: {
     writes: "a `system:api_error` line, the prompt line and the turn record",
     arms: `AgentUpdate.api_error mid-turn, then AgentFailure.api_request_failed → ${spec.arm}`,
     run(ctx) {
-      ctx.log(
+      ctx.log.debug(
         { turn: ctx.turn, branch: spec.name, api_error_status: spec.status ?? 0 },
         "fake api-error turn",
       );
@@ -486,7 +486,7 @@ const MAX_TOKENS = scenario({
   writes: "the truncated assistant line, the prompt line and the turn record",
   arms: "AgentResponseFailure.reason=max_tokens — the text is kept, the answer is incomplete",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "max-tokens" }, "fake max-output-tokens turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "max-tokens" }, "fake max-output-tokens turn");
     ctx.assistant([{ type: "text", text: "The answer begins and then stops mid-" }], {
       stopReason: "max_tokens",
     });
@@ -507,7 +507,7 @@ const REFUSAL_FALLBACK = scenario({
   writes: "the fallback assistant line, a `system:model_refusal_fallback` line, the answer line, the turn record",
   arms: "AgentResponseFailure.reason=refused, then a fresh AgentResponse from the fallback model",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "refusal-fallback" }, "fake model-refusal (with fallback) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "refusal-fallback" }, "fake model-refusal (with fallback) turn");
     const refused = ctx.assistant([{ type: "fallback", from: { model: ctx.model }, to: { model: "fake-sonnet-5" } }], {
       stopReason: "refusal",
     });
@@ -574,7 +574,7 @@ const REFUSAL_NO_FALLBACK = scenario({
   writes: "a `system:model_refusal_no_fallback` line, the prompt line and the turn record",
   arms: "AgentResponseFailure.reason=refused with no recovery",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "refusal-no-fallback" }, "fake model-refusal (no fallback) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "refusal-no-fallback" }, "fake model-refusal (no fallback) turn");
     ctx.emit({
       type: "system",
       subtype: "model_refusal_no_fallback",
@@ -625,8 +625,8 @@ const FAULT_CONVERTER = scenario({
     "SessionFault.converter_defect with an OPEN SessionDegradedWindow — the diagnostics arm, reached without any " +
     "rpc failing. The malformed message itself reaches NO conversation.v1 arm, which is the point",
   run(ctx) {
-    ctx.log(
-      { level: "warn", turn: ctx.turn, branch: "fault-converter" },
+    ctx.log.warn(
+      { turn: ctx.turn, branch: "fault-converter" },
       "fake turn carrying ONE malformed vendor message",
     );
     // `hook_id` is what `AgentHook`'s activity identity IS — the firing has no
@@ -651,7 +651,7 @@ const FAULT_RECOVER = scenario({
     "AgentHook.result=succeeded, and the diagnostics returning to HEALTHY with the degraded window CLOSED " +
     "carrying the dropped count the fault left behind",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "fault-recover" }, "fake recovery turn; every message converts");
+    ctx.log.debug({ turn: ctx.turn, branch: "fault-recover" }, "fake recovery turn; every message converts");
     const hookId = ctx.newUuid();
     ctx.systemMessage("hook_started", { hook_id: hookId, ...FAULT_HOOK });
     ctx.systemMessage("hook_response", {
@@ -674,7 +674,7 @@ const CONTEXT_WINDOW_EXCEEDED = scenario({
   writes: "the prompt line and the turn record",
   arms: "AgentResponseFailure.reason=context_window_exceeded and AgentFailure.prompt_too_long",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "context-window" }, "fake context-window-exceeded turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "context-window" }, "fake context-window-exceeded turn");
     ctx.systemMessage("informational", {
       content: "The conversation exceeds this model's context window. Compact or clear it to continue.",
       level: "warning",
@@ -701,7 +701,7 @@ export const FAIL_MARKER = scenario({
   writes: "the prompt line and the turn record",
   arms: "AgentFailure.execution_error",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "fail-marker" }, "fake e2e failure-marker turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "fail-marker" }, "fake e2e failure-marker turn");
     ctx.result({
       subtype: "error_during_execution",
       terminalReason: "api_error",

@@ -25,7 +25,7 @@ const PLAN_MODE = scenario({
   writes: "the tool_use and tool_result lines for both calls, a `plan_mode_exit` attachment line, the closing text line",
   arms: "AgentPlanMode.act=enter/exit with AgentPlanModeEntered and AgentPlanModeExited",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "plan" }, "fake plan-mode turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "plan" }, "fake plan-mode turn");
     const enter = ctx.toolUse("EnterPlanMode", {});
     ctx.toolResult(enter, "Entered plan mode.", { message: "Entered plan mode." });
     ctx.assistant([{ type: "text", text: "Drafting the plan without touching anything." }]);
@@ -47,7 +47,7 @@ const REPORT_FINDINGS = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentReportFindings.start + Success with verdict=confirmed/plausible and outcome=fixed/skipped/no_change_needed",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "findings" }, "fake report-findings turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "findings" }, "fake report-findings turn");
     const findings = [
       {
         file: "src/convert/fold.ts",
@@ -89,7 +89,7 @@ const WORKTREE_KEEP = scenario({
   writes: "the tool_use and tool_result lines for both calls, the closing text line",
   arms: "AgentWorktree.act=enter/exit with outcome=kept",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "worktree-keep" }, "fake worktree (keep) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "worktree-keep" }, "fake worktree (keep) turn");
     const enter = ctx.toolUse("EnterWorktree", { branch: "offline/experiment" });
     ctx.toolResult(enter, "Entered the worktree.", {
       worktreePath: "/w/worktrees/experiment",
@@ -115,7 +115,7 @@ const WORKTREE_REMOVE = scenario({
   writes: "the tool_use and tool_result lines, the closing text line",
   arms: "AgentWorktree.act=exit with outcome=removed",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "worktree-remove" }, "fake worktree (remove) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "worktree-remove" }, "fake worktree (remove) turn");
     const enter = ctx.toolUse("EnterWorktree", { branch: "offline/throwaway" });
     ctx.toolResult(enter, "Entered the worktree.", {
       worktreePath: "/w/worktrees/throwaway",
@@ -143,7 +143,7 @@ const CRON = scenario({
   writes: "the tool_use and tool_result lines for all three calls, the closing text line",
   arms: "AgentCron.act=create/list/delete with created/listed/deleted",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "cron" }, "fake cron turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "cron" }, "fake cron turn");
     const create = ctx.toolUse("CronCreate", { cron: "0 9 * * 1", prompt: "weekly standup" });
     ctx.toolResult(create, "Created job cron-1.", {
       id: "cron-1",
@@ -183,7 +183,7 @@ function pushScenario(
     writes: "the tool_use line, the tool_result line, the closing text line",
     arms: arm,
     run(ctx) {
-      ctx.log({ turn: ctx.turn, branch: name }, "fake push-notification turn");
+      ctx.log.debug({ turn: ctx.turn, branch: name }, "fake push-notification turn");
       const call = ctx.toolUse("PushNotification", { message: "The offline run finished." });
       ctx.toolResult(call, outcome.pushSent ? "Sent." : "Not sent.", {
         message: "The offline run finished.",
@@ -221,7 +221,7 @@ const MONITOR_DEADLINE = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line; the monitor stays in the live set",
   arms: "AgentMonitor.lifetime=deadline",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "monitor-deadline" }, "fake deadline-monitor turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "monitor-deadline" }, "fake deadline-monitor turn");
     // MonitorInput (sdk-tools.d.ts) declares `description`, `timeout_ms` and
     // `persistent` REQUIRED on the tool's own input — the shim reads the watch's
     // lifetime and its footer text off the call, never off the task record.
@@ -246,7 +246,7 @@ const MONITOR_PERSISTENT = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line; the monitor stays in the live set",
   arms: "AgentMonitor.lifetime=persistent",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "monitor-persistent" }, "fake persistent-monitor turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "monitor-persistent" }, "fake persistent-monitor turn");
     // `timeout_ms` is required even when `persistent` ignores it, and the
     // source is a `ws` object — `server`/`tool` are on no declared input.
     const call = ctx.toolUse("Monitor", {
@@ -270,7 +270,7 @@ const WAKEUP_SCHEDULE = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentScheduleWakeup.act=schedule outcome=scheduled",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "wakeup-schedule" }, "fake schedule-wakeup turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "wakeup-schedule" }, "fake schedule-wakeup turn");
     const call = ctx.toolUse("ScheduleWakeup", { delaySeconds: 1_200 });
     ctx.toolResult(call, "Scheduled.", {
       scheduledFor: ctx.nowMs() + 1_200_000,
@@ -288,7 +288,7 @@ const WAKEUP_STOP = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentScheduleWakeup.act=stop outcome=stopped",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "wakeup-stop" }, "fake stop-wakeup turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "wakeup-stop" }, "fake stop-wakeup turn");
     const call = ctx.toolUse("ScheduleWakeup", { stop: true });
     ctx.toolResult(call, "Stopped.", {
       scheduledFor: 0,
@@ -308,7 +308,7 @@ const ARTIFACT_PUBLISH = scenario({
   writes: "the tool_use line, the tool_result line, and a `frame-link` metadata line, the closing text line",
   arms: "AgentArtifact.act=publish outcome=published",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "artifact-publish" }, "fake artifact-publish turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "artifact-publish" }, "fake artifact-publish turn");
     const call = ctx.toolUse("Artifact", { file_path: "/tmp/offline-report.html", favicon: "📊" });
     const url = "https://claude.ai/code/artifact/00000000-0000-4000-8000-000000000000";
     ctx.toolResult(call, url, {
@@ -338,7 +338,7 @@ const ARTIFACT_LIST = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentArtifact.act=list outcome=listed",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "artifact-list" }, "fake artifact-list turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "artifact-list" }, "fake artifact-list turn");
     const call = ctx.toolUse("Artifact", { action: "list", scope: "all" });
     ctx.toolResult(call, "Two artifacts.", {
       artifacts: [
@@ -368,7 +368,7 @@ const UNMODELED_MCP = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentUnmodeled, with `mcp_server` stated from the vendor's own field rather than parsed out of the name",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "unmodeled" }, "fake unmodeled-MCP-tool turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "unmodeled" }, "fake unmodeled-MCP-tool turn");
     const call = ctx.toolUse("mcp__echo__echo", { text: "hello from the offline session" });
     ctx.toolResult(call, "hello from the offline session", {
       content: [{ type: "text", text: "hello from the offline session" }],

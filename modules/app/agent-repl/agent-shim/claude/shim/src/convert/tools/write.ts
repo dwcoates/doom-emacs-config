@@ -60,16 +60,16 @@ function writeSuccess(
 ): conversationv1.AgentWriteSuccess | undefined {
   const record = asRecord(outcome.structured);
   if (record === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a write settled with no typed output; no success frame is produced",
     );
     return undefined;
   }
   const path = str(record, "filePath") ?? requestedPath(call);
   if (path === undefined) {
-    LOGGER.log(
-      { level: "error", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a write settled with no path at all; no success frame is produced",
     );
     return undefined;
@@ -79,16 +79,16 @@ function writeSuccess(
     // WITHOUT THIS ARM A CREATION IS DRAWN AS A REWRITE OF NOTHING. Guessing
     // it from a null `originalFile` would be the producer inventing the
     // distinction the vendor is supposed to state.
-    LOGGER.log(
-      { level: "error", tool_use_id: call.toolUseId, write_type: str(record, "type") ?? "unstated" },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId, write_type: str(record, "type") ?? "unstated" },
       "a write stated neither create nor update; no success frame is produced",
     );
     return undefined;
   }
   const content = str(record, "content");
   if (content === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a write stated no written content, so nothing can be diffed; no success frame is produced",
     );
     return undefined;
@@ -113,8 +113,8 @@ export const writeConverter: ToolConverter = {
   start(call) {
     const path = requestedPath(call);
     if (path === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a write was announced with no file path; no start frame is produced",
       );
       return undefined;

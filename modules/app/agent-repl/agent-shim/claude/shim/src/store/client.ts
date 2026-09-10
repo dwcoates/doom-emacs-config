@@ -99,7 +99,7 @@ function createStoreTransportClient(socketPath: string): GeneratedStoreClient {
   if (socketPath === "") {
     throw new Error("shim store client: a store socket path is required");
   }
-  LOGGER.log({ store_socket: socketPath }, "creating the store.v1 client over its unix socket");
+  LOGGER.debug({ store_socket: socketPath }, "creating the store.v1 client over its unix socket");
   return createClient(
     storev1.ShimStore,
     createConnectTransport({

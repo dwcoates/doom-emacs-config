@@ -66,8 +66,8 @@ function contentMatches(
   const content = str(record, "content");
   const numLines = uint(record, "numLines");
   if (content === undefined || numLines === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a content-mode search stated no content or no line count; no success frame is produced",
     );
     return undefined;
@@ -101,8 +101,8 @@ function fileMatches(
 ): conversationv1.AgentGrepSuccess["matches"] | undefined {
   const numFiles = uint(record, "numFiles");
   if (numFiles === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a filenames-mode search stated no file count; no success frame is produced",
     );
     return undefined;
@@ -139,8 +139,8 @@ function countMatches(
 ): conversationv1.AgentGrepSuccess["matches"] | undefined {
   const matches = uint(record, "numMatches");
   if (matches === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a count-mode search stated no match count; no success frame is produced",
     );
     return undefined;
@@ -159,8 +159,8 @@ function grepSuccess(
 ): conversationv1.AgentGrepSuccess | undefined {
   const record = asRecord(outcome.structured);
   if (record === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a search settled with no typed output; no success frame is produced",
     );
     return undefined;
@@ -178,8 +178,8 @@ function grepSuccess(
       matches = countMatches(call, record);
       break;
     default:
-      LOGGER.log(
-        { level: "warn", tool_use_id: call.toolUseId, mode },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId, mode },
         "a search stated an output mode this contract has no shape for; no success frame is produced",
       );
       return undefined;
@@ -200,8 +200,8 @@ export const grepConverter: ToolConverter = {
   start(call) {
     const pattern = requestedPattern(call);
     if (pattern === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a search was announced with no pattern; no start frame is produced",
       );
       return undefined;
@@ -235,8 +235,8 @@ export const grepConverter: ToolConverter = {
     }
     const pattern = requestedPattern(call);
     if (pattern === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a search settled with no pattern to restate; no success frame is produced",
       );
       return undefined;

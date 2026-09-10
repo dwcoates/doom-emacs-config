@@ -33,8 +33,8 @@ const LOGGER = bindLog({ component: "shim-validate", operation: "shim.service.va
 
 /** Record a refusal once, at the boundary that made it, then rethrow. */
 function refuse(rpc: string, err: unknown): never {
-  LOGGER.log(
-    { level: "warn", rpc, cause: err },
+  LOGGER.warn(
+    { rpc, cause: err },
     `refused a ${rpc} request that violates the validation invariant`,
   );
   throw err;

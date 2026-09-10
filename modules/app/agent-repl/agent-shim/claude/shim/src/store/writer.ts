@@ -257,7 +257,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     if (producer === undefined || producer === "") {
       const message =
         "shim store writer: a row was produced before StartSession named the conversation; write ids would land in a namespace no replay can absorb";
-      LOGGER.log({ level: "error" }, message);
+      LOGGER.error({}, message);
       throw new PersistenceError("store_unavailable", message);
     }
     return producer;
@@ -317,8 +317,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     degradedSince = options.nowMs();
     degradedReason = reason;
     droppedWhileDegraded = 0n;
-    LOGGER.log(
-      { level: "warn", reason },
+    LOGGER.warn(
+      { reason },
       "the store is unreachable; writes are buffering and a degraded window is open",
     );
     // THE WINDOW IS ANNOUNCED BEFORE THE FAULT. A fault restates the session's
@@ -350,7 +350,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     degradedSince = undefined;
     degradedReason = "";
     droppedWhileDegraded = 0n;
-    LOGGER.log(
+    LOGGER.debug(
       { dropped_count: dropped.toString(), reason },
       "the store answered again; the degraded window is closed",
     );
@@ -437,8 +437,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
    */
   const reportFailure = (failure: BatchFailure): void => {
     if (failure.converterDefect) {
-      LOGGER.log(
-        { level: "error", detail: failure.detail },
+      LOGGER.error(
+        { detail: failure.detail },
         "the converter produced a row the store plane cannot carry; the store is not at fault",
       );
       emitFault("converter_defect", failure.detail);
@@ -452,8 +452,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     const lost = batch.entries.map((entry) => entry.upsertKey);
     droppedWhileDegraded += BigInt(lost.length);
     lostRows += lost.length;
-    LOGGER.log(
-      { level: "error", attempts: batch.attempts, detail, lost_upsert_keys: lost },
+    LOGGER.error(
+      { attempts: batch.attempts, detail, lost_upsert_keys: lost },
       "DROPPING store writes: the retry schedule is exhausted and there is no spill",
     );
   };
@@ -494,8 +494,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         return false;
       }
       const backoff = retry.backoffMs[Math.min(batch.attempts - 1, retry.backoffMs.length - 1)] ?? 0;
-      LOGGER.log(
-        { level: "warn", attempt: batch.attempts, backoff_ms: backoff, detail: failure.detail },
+      LOGGER.warn(
+        { attempt: batch.attempts, backoff_ms: backoff, detail: failure.detail },
         "the store refused a batch; replaying it from the retry buffer",
       );
       await sleep(backoff);
@@ -573,8 +573,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         // THE ORIGINAL ID NEVER CHANGES. A second, different name means the
         // caller mistook a ROTATED id for the original one, which would split
         // this conversation's write-id namespace at the rotation.
-        LOGGER.log(
-          { level: "error", producer, next },
+        LOGGER.error(
+          { producer, next },
           "refusing to re-key the producer: a conversation has exactly one original vendor session id",
         );
         throw new PersistenceError(
@@ -583,7 +583,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         );
       }
       producer = next;
-      LOGGER.log({ producer: next }, "named this writer from the conversation's original vendor session id");
+      LOGGER.debug({ producer: next }, "named this writer from the conversation's original vendor session id");
     },
 
     clearProducer(): void {
@@ -592,8 +592,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         // A name a row already carries cannot be taken back: the write ids are
         // derived from it, and a later name would put one conversation's rows
         // in two namespaces that can never absorb each other.
-        LOGGER.log(
-          { level: "error", producer },
+        LOGGER.error(
+          { producer },
           "refusing to un-name the producer: rows have already been written under it",
         );
         throw new PersistenceError(
@@ -601,7 +601,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
           `the producer ${JSON.stringify(producer)} has already written rows and cannot be un-named`,
         );
       }
-      LOGGER.log({ producer }, "un-named the writer: the attempt that named it was abandoned before writing");
+      LOGGER.debug({ producer }, "un-named the writer: the attempt that named it was abandoned before writing");
       producer = undefined;
     },
 

@@ -70,8 +70,8 @@ export function imageBlock(block: VendorBlock): conversationv1.ImageBlock | unde
       mediaType,
     });
   }
-  LOGGER.log(
-    { level: "warn", source_type: source.type },
+  LOGGER.warn(
+    { source_type: source.type },
     "an image block names no location this contract can carry",
   );
   return undefined;
@@ -92,8 +92,8 @@ export function toolResultBlock(block: VendorBlock): conversationv1.ToolResultCo
       });
     }
   }
-  LOGGER.log(
-    { level: "warn", block_type: block.type },
+  LOGGER.warn(
+    { block_type: block.type },
     "a tool result block's kind is not modelled; it is kept whole as unsupported",
   );
   return create(conversationv1.ToolResultContentBlockSchema, {
@@ -119,8 +119,8 @@ export function toolResultContent(content: unknown): conversationv1.ToolResultCo
     });
   }
   if (!Array.isArray(content)) {
-    LOGGER.log(
-      { level: "warn", content_type: typeof content },
+    LOGGER.warn(
+      { content_type: typeof content },
       "a tool result's content is neither a string nor a block array",
     );
     return undefined;
@@ -145,8 +145,8 @@ export function userContentBlock(block: VendorBlock): conversationv1.UserContent
       });
     }
   }
-  LOGGER.log(
-    { level: "warn", block_type: block.type },
+  LOGGER.warn(
+    { block_type: block.type },
     "a user content block's kind is not modelled; it is kept whole as unsupported",
   );
   return create(conversationv1.UserContentBlockSchema, {

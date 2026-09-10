@@ -190,8 +190,8 @@ export function readFailure(failure: TypedReadFailure): PersistenceError {
     case "storageFailure":
       return new PersistenceError("store_unavailable", failure.detail);
     default:
-      LOGGER.log(
-        { level: "error", detail: failure.detail },
+      LOGGER.error(
+        { detail: failure.detail },
         "the store refused a read and named no reason; treated as unavailable",
       );
       return new PersistenceError("store_unavailable", failure.detail);
@@ -471,8 +471,8 @@ export function createReader(options: ReaderOptions): Reader {
         }),
       );
     } catch (error) {
-      LOGGER.log(
-        { level: "error", agent: agent.value, detail: String(error) },
+      LOGGER.error(
+        { agent: agent.value, detail: String(error) },
         "the store could not be reached to open an agent's book",
       );
       throw transportFailure(error);
@@ -480,8 +480,8 @@ export function createReader(options: ReaderOptions): Reader {
     const result = response.result;
     if (result.case === "success") return result.value;
     if (result.case === "failure") {
-      LOGGER.log(
-        { level: "warn", agent: agent.value, detail: result.value.detail },
+      LOGGER.warn(
+        { agent: agent.value, detail: result.value.detail },
         "the store refused to open an agent's book",
       );
       throw readFailure(result.value);
@@ -510,7 +510,7 @@ export function createReader(options: ReaderOptions): Reader {
     // belief must not outlive the answer that disproved it.
     booksMinted.delete(agent.value);
     const page = toHistoryPage(opened.page);
-    LOGGER.log(
+    LOGGER.debug(
       { agent: agent.value, page_size: pageSize, entries: page.entries.length },
       "opened an agent's book and pinned its tail",
     );
@@ -596,8 +596,8 @@ export function createReader(options: ReaderOptions): Reader {
             // forgot the session (a restart, a consumed token). Re-open from
             // the last pointer actually served — the only thing that makes
             // the recovery lossless — and carry on.
-            LOGGER.log(
-              { level: "warn", agent: agent.value, served_through: servedThrough?.value },
+            LOGGER.warn(
+              { agent: agent.value, served_through: servedThrough?.value },
               "the store refused the watch token; re-opening the book from the last served pointer",
             );
             const reopened = await openSession(agent, CATCHUP_PAGE_SIZE, servedThrough);
@@ -611,8 +611,8 @@ export function createReader(options: ReaderOptions): Reader {
             // it carries is newer than what was served and must be yielded
             // before the tail continues.
             if (reopened.page?.boundary.case === "more") {
-              LOGGER.log(
-                { level: "error", agent: agent.value, budget: CATCHUP_PAGE_SIZE },
+              LOGGER.error(
+                { agent: agent.value, budget: CATCHUP_PAGE_SIZE },
                 "the gap since the last served pointer exceeds the catch-up budget; entries were skipped",
               );
             }
@@ -840,7 +840,7 @@ export function createReader(options: ReaderOptions): Reader {
     // refusal in the store's log on a bring-up going exactly as the contract
     // says it should — the store is right to refuse, so it is not asked.
     if (known !== undefined && known() && booksMinted.has(agent.value)) {
-      LOGGER.log(
+      LOGGER.debug(
         { agent: agent.value },
         "this agent's id was minted here and nothing is written under it yet, so no book was asked for; serving an empty page and standing the tail on its first row",
       );
@@ -851,7 +851,7 @@ export function createReader(options: ReaderOptions): Reader {
     } catch (error) {
       if (known === undefined || !(error instanceof PersistenceError)) throw error;
       if (error.kind !== "unknown_agent" || !known()) throw error;
-      LOGGER.log(
+      LOGGER.debug(
         { agent: agent.value },
         "the store holds no rows for this announced agent yet; serving an empty page and standing the tail on its first row",
       );
@@ -895,7 +895,7 @@ export function createReader(options: ReaderOptions): Reader {
     } catch (error) {
       if (known === undefined || !(error instanceof PersistenceError)) throw error;
       if (error.kind !== "unknown_agent" || !known()) throw error;
-      LOGGER.log(
+      LOGGER.debug(
         { agent: agent.value },
         "the store holds no rows for this announced agent yet; serving an empty page for a read that stands no tail",
       );
@@ -938,16 +938,16 @@ export function createReader(options: ReaderOptions): Reader {
           }),
         );
       } catch (error) {
-        LOGGER.log(
-          { level: "error", agent: agent.value, detail: String(error) },
+        LOGGER.error(
+          { agent: agent.value, detail: String(error) },
           "the store could not be reached to read an older page",
         );
         throw transportFailure(error);
       }
       const result = response.result;
       if (result.case === "failure") {
-        LOGGER.log(
-          { level: "warn", agent: agent.value, detail: result.value.detail },
+        LOGGER.warn(
+          { agent: agent.value, detail: result.value.detail },
           "the store refused an older page",
         );
         throw readFailure(result.value);
@@ -958,7 +958,7 @@ export function createReader(options: ReaderOptions): Reader {
           "the store answered ReadAgentPage with no result arm set",
         );
       }
-      LOGGER.log(
+      LOGGER.debug(
         { agent: agent.value, entries: result.value.lines.length },
         "served an older page of an agent's book",
       );
@@ -989,7 +989,7 @@ export function createReader(options: ReaderOptions): Reader {
       // same path whether this shim wrote the rows or the sidecar did.
       const run = create(conversationv1.AgentActivityIdSchema, { value: runValue });
       const abort = new AbortController();
-      LOGGER.log({ run: runValue, work: work.value }, "following a shell run's stored rows");
+      LOGGER.debug({ run: runValue, work: work.value }, "following a shell run's stored rows");
       let opened = false;
       let concludedSince: number | undefined;
       return {
@@ -1055,8 +1055,8 @@ export function createReader(options: ReaderOptions): Reader {
               // announcement reached us before the run's first row did. It is
               // an `unknown_work` refusal, not a transport failure, so the
               // caller can say so rather than reporting the store as broken.
-              LOGGER.log(
-                { level: "warn", run: runValue, work: work.value },
+              LOGGER.warn(
+                { run: runValue, work: work.value },
                 "the store holds no rows for this shell run yet",
               );
               throw new PersistenceError(

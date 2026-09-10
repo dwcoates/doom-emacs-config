@@ -8,7 +8,7 @@
  */
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Engine } from "../../src/engine/engine.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { shimRoutes } from "../../src/service/routes.js";
@@ -290,6 +290,55 @@ describe("shimRoutes stream completion", () => {
 
     // Assert.
     expect(frames).toHaveLength(1);
+  });
+});
+
+describe("shimRoutes debug request boundaries", () => {
+  let written: string[] = [];
+
+  beforeEach(() => {
+    written = [];
+    process.env.AGENT_REPL_LOG_VERBOSE = "1";
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  afterEach(() => {
+    delete process.env.AGENT_REPL_LOG_VERBOSE;
+  });
+
+  function boundaries(rpc: string): string[] {
+    return written
+      .map((line) => JSON.parse(line) as { level: string; context: Record<string, unknown> })
+      .filter((record) => record.context.rpc === rpc)
+      .map((record) => `${record.level}:${String(record.context.boundary)}`);
+  }
+
+  it("records both boundaries of a successful unary request at debug", async () => {
+    // Arrange.
+    const { engine } = recordingEngine();
+
+    // Act.
+    await clientFor(engine).startSession(requests.startSessionRequest());
+
+    // Assert.
+    expect(boundaries("StartSession")).toEqual(["debug:entered", "debug:completed"]);
+  });
+
+  it("records stream completion only after the engine stream ends", async () => {
+    // Arrange.
+    const { engine } = recordingEngine();
+
+    // Act.
+    const stream = clientFor(engine).watchSession(requests.watchSessionRequest());
+    for await (const _frame of stream) {
+      // Drain the stream so its completion boundary is reached.
+    }
+
+    // Assert.
+    expect(boundaries("WatchSession")).toEqual(["debug:entered", "debug:completed"]);
   });
 });
 
