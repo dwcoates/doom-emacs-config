@@ -303,6 +303,9 @@ explicitly counted bootstrap, terminal-mirror self-report, and injected CLI
 reporting sites. New diagnostics go through `internal/dlog`, never by growing
 that allowlist.
 
+Read daemon records and harvest run windows through `../bin/logs.sh`; the full
+path, rotation, attribution, and level-switch table is in `../AGENTS.md`.
+
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one

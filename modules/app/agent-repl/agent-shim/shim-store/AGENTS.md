@@ -433,6 +433,10 @@ arms are derived from, and each one is logged once with `refusal_site`.
   statement would put session content into the global log. A malformed
   threshold aborts `db.Open`.
 
+Read store records and harvest run windows through `../../bin/logs.sh`; the
+full path, rotation, attribution, and level-switch table is in
+`../../AGENTS.md`.
+
 ## Suites
 
 ```bash

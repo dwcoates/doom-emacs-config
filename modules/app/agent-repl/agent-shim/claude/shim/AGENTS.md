@@ -430,6 +430,10 @@ at build time and is not a vendor import site.
   `src/log.ts`.
 - The full contract is `modules/app/agent-repl/logging-contract.md`.
 
+Read shim records and harvest run windows through `../../../bin/logs.sh`; the
+full path, rotation, attribution, and level-switch table is in
+`../../../AGENTS.md`.
+
 ### Standing streams
 
 Two rules exist because a Go client cannot tell a QUIET stream from a REFUSED

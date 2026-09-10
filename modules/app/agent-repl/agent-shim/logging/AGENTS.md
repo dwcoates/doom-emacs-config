@@ -45,3 +45,7 @@ New Go packages here are registered as the `logging` component in
 `bin/report-nonlisp-coverage.sh`, `bin/report-logging-density.sh` and
 `bin/test-all.sh`, and as a service prerequisite in `bin/build-frontend.sh` and
 `bin/readiness-report.sh`.
+
+Read the records produced through this shared contract with `../../bin/logs.sh`;
+the full path, rotation, attribution, and level-switch table is in
+`../../AGENTS.md`.

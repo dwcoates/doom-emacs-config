@@ -319,6 +319,64 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## Logs
+
+`bin/logs.sh` is the one reader for persisted agent-repl records. It resolves a
+workspace by daemon ID, absolute directory, or daemon display name; reads the
+current file plus rotation generations `.1` (newest) through `.5` (oldest);
+merges every selected runtime by timestamp; and fails with the source path and
+line number when any selected JSONL line is malformed. Its default output is a
+compact local-time line. Use `--json` when another program will consume the
+records.
+
+| evidence | path, including retained generations | writer process | format | select a run window | attribution | level switch |
+|---|---|---|---|---|---|---|
+| Emacs echo-area history | `*Messages*`; this is a live buffer, not a log and has no rotation files | Emacs | Emacs buffer text | read the live buffer, then delimit the relevant timestamps manually | buffer and message text only | none; this is not the durable logger |
+| workspace Emacs | `<workspace>/.claude/emacs/emacs.log`; canonical symlink to its runtime-owned target, with `.1` through `.5` beside that target | Emacs | contract JSONL | `bin/logs.sh --workspace <id\|dir\|name> --runtime emacs --since <RFC3339\|duration> --until <RFC3339>` | `workspace_id`, `workspace_dir`, session and request fields when known | `AGENT_REPL_LOG_LEVEL` |
+| workspace daemon | `<workspace>/.claude/emacs/daemon.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | `claude-repld` | contract JSONL | the workspace recipe above with `--runtime daemon` | `workspace_id`, `workspace_dir`, session and request fields when known | `AGENT_REPL_LOG_LEVEL` |
+| workspace shim | `<workspace>/.claude/emacs/shim.log`; canonical symlink to the daemon-owned target written through inherited file descriptor `3`, with target `.1` through `.5` | `claude-shim` | contract JSONL | the workspace recipe above with `--runtime shim` | `workspace_id`, `workspace_dir`, `agent_repl_session_id`, `claude_session_id`, `pid`, and `request_id` when known | `AGENT_REPL_LOG_LEVEL` |
+| workspace webapp | `<workspace>/.claude/emacs/webapp.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | browser forwards; `claude-repld` persists | contract JSONL | the workspace recipe above with `--runtime webapp` | `workspace_id`, `workspace_dir`, `connection_id`, and session/request fields when known | `AGENT_REPL_LOG_LEVEL` |
+| workspace sidecar | `<workspace>/.claude/emacs/sidecar.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | `shim-claude-sidecar` forwards; `claude-repld` persists | contract JSONL | the workspace recipe above with `--runtime sidecar` | `workspace_id`, `workspace_dir`, `claude_session_id`, `pid`, and file context | `AGENT_REPL_LOG_LEVEL` |
+| central Emacs | `$TMPDIR/doom-agent-repl-<uid>/doom-agent-repl.log` and `.1` through `.5`; `AGENT_REPL_EMACS_GLOBAL_LOG` names a customized live path | Emacs | contract JSONL | `bin/logs.sh --central --runtime emacs --since <RFC3339\|duration> --until <RFC3339>` | genuine global records have no workspace; `pid` and known session/request fields remain | `AGENT_REPL_LOG_LEVEL` |
+| central daemon run | `~/.claude-emacs/logs/daemon.run.log` and `.1` through `.5`; `$AGENT_REPL_STATE_DIR/logs/` replaces the default root | `claude-repld` | contract JSONL | the central recipe above with `--runtime daemon` | genuine global records have no workspace; `pid` and `request_id` remain when known | `AGENT_REPL_LOG_LEVEL` |
+| central store | `~/.cache/agent-repl/log/shim-store.log` and `.1` through `.5`; `$XDG_CACHE_HOME/agent-repl/log/` replaces the default root | `shim-store` | contract JSONL | the central recipe above with `--runtime store` | `pid`, `request_id`, `agent_id`, and book keys when known | `AGENT_REPL_LOG_LEVEL` |
+| central sidecar | `~/.cache/agent-repl/log/shim-claude-sidecar.log` and `.1` through `.5`; `$XDG_CACHE_HOME/agent-repl/log/` replaces the default root | `shim-claude-sidecar` | contract JSONL | the central recipe above with `--runtime sidecar` | genuine global records have no workspace; `pid`, agent, and file keys remain when known | `AGENT_REPL_LOG_LEVEL` |
+
+Read `*Messages*` from the GUI Emacs through its application binary and the
+server socket under `$TMPDIR/emacs501/`:
+
+```sh
+/Applications/Emacs.app/Contents/MacOS/bin/emacsclient \
+  --socket-name "${TMPDIR}emacs501/server" \
+  --eval '(with-current-buffer "*Messages*" (buffer-substring-no-properties (point-min) (point-max)))'
+```
+
+Deploy stamps are evidence, not logs. `~/.cache/agent-repl/bin/` contains the
+installed `shim-store`, `shim-claude-sidecar`, and `shim-lock` binaries plus
+their `.<name>.built-sha`, `.<name>.source-tree`, and `.<name>.deployed`
+one-line stamps. `bin/build-frontend.sh` writes build/source stamps;
+`bin/deploy-all.sh` writes deployed fingerprints after the corresponding
+service is installed or bounced. They have no timestamps, rotations,
+workspace attribution, severity, or `AGENT_REPL_LOG_LEVEL` behavior; use
+`bin/readiness-report.sh` to compare them with the source tree and running
+artifacts.
+
+To harvest the realtest remediation window, record RFC3339 instants immediately
+before and after the run, then ask for every warning and error across every
+daemon-known workspace and central sink:
+
+```sh
+from="2026-09-10T14:00:00-04:00"
+to="2026-09-10T14:30:00-04:00"
+modules/app/agent-repl/bin/logs.sh --harvest "$from" "$to"
+```
+
+The harvest table groups by workspace ID and directory, level, runtime,
+operation, and message, with a count. Genuine central records are labelled
+`central` with directory `-`. An empty window still prints the header and exits
+zero. For exploratory reading use `--all`, `--level`, comma-separated
+`--runtime`, `--follow`, and `--json`; `bin/logs.sh --help` is authoritative.
+
 ## Purple means the vendor, blue means the local environment, teal means nothing is wrong
 
 Every surface that carries color here — the Emacs tab-bar, the sidebar dots,
