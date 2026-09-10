@@ -100,6 +100,87 @@ func TestPlaytestSandboxGenericFamiliesFallBackToTheColorEmojiFont(t *testing.T)
 	}
 }
 
+// TestPlaytestSandboxGenericFamiliesResolveToATextFace is the other side of
+// the fallback, and it is the one the shipped rule got wrong.
+//
+// A fallback is only a fallback if it LOSES to the text faces ahead of it.
+// The rule bound Noto Color Emoji into each generic family with
+// `binding="same"` -- strong, for a family an application names -- while the
+// distro's DejaVu entries in those lists are weak, and a strong family match
+// outranks a weak one. So `fc-match sans-serif` answered "Noto Color Emoji"
+// and every renderer in the image took a color emoji font as its text font.
+func TestPlaytestSandboxGenericFamiliesResolveToATextFace(t *testing.T) {
+	// Arrange: the same three generics the fallback check walks -- the
+	// webapp's CSS stacks end in one of them and the Emacs frame's default
+	// face is the third.
+	tests := []struct {
+		name    string
+		generic string
+	}{
+		{"the webapp's prose", "sans-serif"},
+		{"a serif stack", "serif"},
+		{"the Emacs frame's own family", "monospace"},
+	}
+
+	requireSandbox(t)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := strings.TrimSpace(fcMatch(t, "--format=%{family}", tc.generic))
+
+			// Assert.
+			if strings.Contains(got, emojiFontFamily) {
+				t.Errorf("`fc-match %s` answered %q: the color emoji font is being PREFERRED for the "+
+					"generic family rather than kept as a last resort, so every glyph it happens to "+
+					"carry -- the digits and the space -- is drawn from a color bitmap. See "+
+					"e2e/sandbox/fontconfig/99-agent-repl-emoji.conf", tc.generic, got)
+			}
+		})
+	}
+}
+
+// TestPlaytestSandboxATextCodepointResolvesToATextFace is the defect at its
+// narrowest: the codepoints Noto Color Emoji carries that are NOT emoji.
+//
+// Its charset is the emoji plus U+0020, U+0023, U+002A and U+0030-U+0039 --
+// the pieces a keycap sequence is composed from. A renderer looking for a
+// face that has one of those asks fontconfig with the codepoint in the
+// pattern's charset, which is what these queries are, and the answer must be
+// the text face every letter beside it came from.
+func TestPlaytestSandboxATextCodepointResolvesToATextFace(t *testing.T) {
+	// Arrange: one query per codepoint the emoji font overlaps text on, plus
+	// a letter it does not carry as the control.
+	tests := []struct {
+		name    string
+		pattern string
+	}{
+		{"a digit", "sans-serif:charset=0030"},
+		{"a space", "sans-serif:charset=0020"},
+		{"a hash", "sans-serif:charset=0023"},
+		{"an asterisk", "sans-serif:charset=002a"},
+		{"a letter, which the emoji font never carried", "sans-serif:charset=006b"},
+		{"a digit in the frame's monospace", "monospace:charset=0030"},
+		{"a space in the frame's monospace", "monospace:charset=0020"},
+	}
+
+	requireSandbox(t)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := strings.TrimSpace(fcMatch(t, "--format=%{family}", tc.pattern))
+
+			// Assert.
+			if strings.Contains(got, emojiFontFamily) {
+				t.Errorf("`fc-match %s` answered %q, want the text face: this codepoint is in the emoji "+
+					"font's charset for keycap sequences only, and drawing it from there makes it "+
+					"uncolorable and laid out on an emoji advance", tc.pattern, got)
+			}
+		})
+	}
+}
+
 // fcMatch runs fc-match and fails the test loudly if it cannot.
 func fcMatch(t *testing.T, args ...string) string {
 	t.Helper()
