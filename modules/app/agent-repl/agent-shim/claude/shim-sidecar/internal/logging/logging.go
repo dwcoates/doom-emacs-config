@@ -112,7 +112,18 @@ type Context struct {
 	// WriteIDs lists the write_ids of a whole refused batch. A batch is refused
 	// WHOLE, so naming one of its records would misreport what was rejected.
 	WriteIDs []string
+	// Repeat is how many times the SAME condition has now been observed for
+	// the same subject, when a record stands in for more occurrences than the
+	// one that produced it. A repeating condition is restated logarithmically
+	// rather than per occurrence, so a defect that never stops being true
+	// stays visible without being the log's entire content — and the reader
+	// can tell "seen once" from "seen ten thousand times" without counting
+	// records that were deliberately not written.
+	Repeat *int
 }
+
+// Repeat boxes an occurrence count for Context.Repeat.
+func Repeat(v int) *int { return &v }
 
 // Off boxes a byte offset for Context.Offset, so an unset offset is genuinely
 // absent rather than a zero that reads as "the start of the file".
@@ -273,6 +284,9 @@ func contextMap(ctx Context) map[string]any {
 	if ctx.Attempt != nil {
 		out["attempt"] = *ctx.Attempt
 	}
+	if ctx.Repeat != nil {
+		out["repeat_count"] = *ctx.Repeat
+	}
 	if ctx.BackoffMs != nil {
 		out["backoff_ms"] = *ctx.BackoffMs
 	}
@@ -422,6 +436,9 @@ func mergeContext(base, add Context) Context {
 	}
 	if add.Attempt != nil {
 		base.Attempt = add.Attempt
+	}
+	if add.Repeat != nil {
+		base.Repeat = add.Repeat
 	}
 	if add.BackoffMs != nil {
 		base.BackoffMs = add.BackoffMs
