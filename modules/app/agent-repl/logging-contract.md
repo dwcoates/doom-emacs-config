@@ -16,23 +16,38 @@ workspace:
 - `<workspace>/.claude/emacs/webapp.log`
 - `<workspace>/.claude/emacs/sidecar.log`
 
-Each link points to an external temporary file created and opened by the
-runtime that owns the sink. The runtime must never follow a workspace-provided
+Each link points to an external target created and opened by the runtime that
+owns the sink. Daemon targets live under the daemon state root's `logs/`
+directory. The runtime must never follow a workspace-provided
 regular file or symlink as its durable sink. Link replacement is atomic. An
 owned target is reused from the runtime's in-memory workspace map during that
 runtime lifetime. After a runtime restart, the runtime creates a new unique
-target under the operating system's temporary directory and atomically
-replaces the canonical link rather than trusting its old destination. An
-active target is truncated in place so readers holding the target open
-continue to observe the same inode.
+target and atomically replaces the canonical link rather than trusting its old
+destination.
 
 The daemon opens its workspace targets with append semantics and manages a
 64 MiB cap for `daemon.log`, `shim.log`, `webapp.log`, and `sidecar.log`.
-Daemon-owned writes check the cap synchronously. A periodic daemon scan also
-checks direct shim writes made through inherited file descriptor `3`.
-Truncation first proves the canonical symlink still names the manager-owned
-inode, then clears that inode in place. A cap-maintenance failure is a
-workspace-attributed JSON error and poisons the affected sink.
+For daemon-owned writes (`daemon.log`, `webapp.log`, and `sidecar.log`), the
+daemon uses `agentrepl/logging.OpenRotating`: it rotates synchronously before a
+record would cross the cap and retains `logging.DefaultBackups` generations as
+`<target>.1` through `<target>.N`. After a roll it atomically refreshes the
+canonical symlink onto the fresh current target. A reader that already holds
+the retired target open keeps reading that inode as generation `.1`.
+
+`shim.log` is different because the shim writes through inherited descriptor
+`3` and never receives a path. A periodic daemon scan marks the target when it
+reaches 64 MiB. At the next shim process roll—an ordinary bounce or restart,
+or the stale-bundle turn-boundary roll—the daemon moves the old target into
+the retained generations, opens a fresh current target, atomically refreshes
+the canonical symlink, and gives only the fresh descriptor to the replacement
+shim. Until that roll, the hard ceiling is 110% of the cap: daemon-controlled
+writes are refused beyond it, the daemon records exactly one
+`daemon.dlog.shim_hard_ceiling` error, and it asks the ordinary rollout engine
+to force a roll at the next free turn boundary. The old shim is never given a
+path and its open descriptor is never renamed and reopened underneath it.
+
+A cap-maintenance failure is a workspace-attributed JSON error and poisons the
+affected sink. Reaching a cap is ordinary rotation state, not poison.
 
 Global service records use the runtime's canonical global log only when the
 record genuinely has no conceptual workspace or agent association. Failure to

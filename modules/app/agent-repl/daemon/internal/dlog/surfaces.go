@@ -45,6 +45,7 @@ type surfaces struct {
 	stop      chan struct{}
 	stopOnce  sync.Once
 	scanDone  chan struct{}
+	shimRolls chan ShimRollRequest
 }
 
 // workspaceSinks are one workspace's durable sinks, opened lazily: a
@@ -89,6 +90,7 @@ func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write(
 		scanEvery:  scanInterval,
 		stop:       make(chan struct{}),
 		scanDone:   make(chan struct{}),
+		shimRolls:  make(chan ShimRollRequest, 128),
 	}
 	go s.scanLoop()
 	return s, nil
@@ -159,15 +161,29 @@ func (s *surfaces) ShimSink(dir string) (Borrowed, error) {
 	if err != nil {
 		return nil, err
 	}
-	if poison := sk.poisoned(); poison != nil {
-		return nil, poison
+	rolled, err := sk.rotateShim()
+	if err != nil {
+		return nil, err
 	}
 	warnLog, err := s.Workspace(ws.dir)
 	if err != nil {
 		return nil, err
 	}
-	return &borrowed{f: sk.file(), log: warnLog, name: "shim.log"}, nil
+	if rolled {
+		warnLog.Info("daemon.dlog.shim_rotated", "rotated shim.log while rolling the workspace's shim", Context{
+			"target":     sk.target,
+			"generation": sk.target + ".1",
+		})
+	}
+	f, err := sk.borrowFile()
+	if err != nil {
+		return nil, err
+	}
+	return &borrowed{f: f, log: warnLog, name: "shim.log"}, nil
 }
+
+// ShimRollRequests exposes the hard-ceiling requests emitted by the cap scan.
+func (s *surfaces) ShimRollRequests() <-chan ShimRollRequest { return s.shimRolls }
 
 // ClientLog persists a console-less client's diagnostic record into that
 // client's sink inside the owning workspace. The record keeps the client's
@@ -349,9 +365,60 @@ func (s *surfaces) scanOnce() {
 	}
 	s.mu.Unlock()
 	for _, e := range entries {
-		if err := e.sk.scan(); err != nil {
+		result, err := e.sk.scan()
+		if err != nil {
 			s.reportSinkFailure(e.ws, e.name, err)
+			continue
 		}
+		if result.marked {
+			s.reportShimMarked(e.ws, e.sk, result.size)
+		}
+		if result.hardFirst {
+			log, err := s.reportShimHardCeiling(e.ws, e.sk, result.size)
+			if err != nil {
+				e.sk.retryHardReport()
+				continue
+			}
+			s.enqueueShimRoll(ShimRollRequest{
+				Dir:       e.ws.dir,
+				LogID:     e.ws.id,
+				SizeBytes: result.size,
+				HardBytes: hardCap(e.sk.cap),
+				Log:       log,
+			})
+		}
+	}
+}
+
+func (s *surfaces) reportShimMarked(ws *workspaceSinks, sk *sink, size int64) {
+	log, err := s.Workspace(ws.dir)
+	if err != nil {
+		emergency(err, nil)
+		return
+	}
+	log.Info("daemon.dlog.shim_rotation_marked", "marked shim.log to rotate with the workspace's next shim process", Context{
+		"target": sk.target, "size_bytes": size, "cap_bytes": sk.cap,
+	})
+}
+
+func (s *surfaces) reportShimHardCeiling(ws *workspaceSinks, sk *sink, size int64) (Logger, error) {
+	log, err := s.Workspace(ws.dir)
+	if err != nil {
+		emergency(err, nil)
+		return nil, fmt.Errorf("bind the hard-ceiling record to workspace %q: %w", ws.dir, err)
+	}
+	log.Error("daemon.dlog.shim_hard_ceiling", "shim.log reached its hard ceiling; forcing a shim roll at the next free turn boundary", Context{
+		"target": sk.target, "size_bytes": size, "cap_bytes": sk.cap, "hard_ceiling_bytes": hardCap(sk.cap),
+	})
+	return log, nil
+}
+
+// enqueueShimRoll never drops a hard-ceiling request. Close unblocks a scan
+// whose consumer has already stopped, so shutdown cannot hang behind logging.
+func (s *surfaces) enqueueShimRoll(req ShimRollRequest) {
+	select {
+	case s.shimRolls <- req:
+	case <-s.stop:
 	}
 }
 

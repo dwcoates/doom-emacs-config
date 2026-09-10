@@ -96,7 +96,8 @@ func (s *stubSurfaces) Workspace(dir string) (dlog.Logger, error) {
 	return s.logger.With(dlog.Context{"dir": dir}), nil
 }
 
-func (s *stubSurfaces) ShimSink(string) (dlog.Borrowed, error) { return nil, errStub }
+func (s *stubSurfaces) ShimSink(string) (dlog.Borrowed, error)        { return nil, errStub }
+func (s *stubSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 func (s *stubSurfaces) ClientLog(string, dlog.ClientRecord) error { return errStub }
 

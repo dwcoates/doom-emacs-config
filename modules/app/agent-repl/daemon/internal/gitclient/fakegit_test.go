@@ -414,6 +414,7 @@ func (s *testSurfaces) Workspace(string) (dlog.Logger, error) {
 func (s *testSurfaces) ShimSink(string) (dlog.Borrowed, error) {
 	panic("gitclient must never borrow a shim sink")
 }
+func (s *testSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 func (s *testSurfaces) ClientLog(string, dlog.ClientRecord) error {
 	panic("gitclient must never persist a client record")

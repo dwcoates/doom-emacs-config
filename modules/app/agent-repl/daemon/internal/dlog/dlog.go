@@ -56,6 +56,10 @@ type Surfaces interface {
 	// passed as the spawned shim's fd 3. The handle is non-closeable by the
 	// borrower; the surfaces own its lifetime.
 	ShimSink(dir string) (Borrowed, error)
+	// ShimRollRequests carries one request when a shim target first reaches its
+	// hard ceiling. The consumer relaunches that workspace's shim through the
+	// ordinary turn-boundary roll; no request is repeated for the same target.
+	ShimRollRequests() <-chan ShimRollRequest
 	// ClientLog persists a console-less client's diagnostic record into that
 	// workspace's durable sink (the ClientLog rpc's landing place).
 	ClientLog(dir string, record ClientRecord) error
@@ -65,6 +69,20 @@ type Surfaces interface {
 	Evict(dir string) error
 	// Close flushes and closes every sink the daemon opened.
 	Close() error
+}
+
+// ShimRollRequest asks the daemon's session owner to replace a shim whose log
+// target reached the hard ceiling. Dir is the registry lookup key; the log id
+// is included for diagnostics and never substituted for a workspace id.
+type ShimRollRequest struct {
+	Dir       string
+	LogID     string
+	SizeBytes int64
+	HardBytes int64
+	// Log is already bound to the owning workspace. The consumer must use it
+	// for every result so a failed registry lookup cannot misroute the error to
+	// the global run log.
+	Log Logger
 }
 
 // Borrowed is a non-closeable handle on a sink the surfaces own. Close is a
