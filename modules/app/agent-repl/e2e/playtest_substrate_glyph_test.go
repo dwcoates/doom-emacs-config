@@ -68,19 +68,21 @@ const glyphFontSizePx = 120
 
 // glyphInkFloor is the fewest marker pixels a drawn 120px glyph may carry.
 //
-// It is deliberately far under what a 120px glyph actually inks (the run
-// that landed this file logs every count), because what it separates is not
-// one glyph from another -- it is a glyph DRAWN IN THE PAGE'S COLOR from one
-// drawn as a color bitmap that ignores it, and the latter inks none at all.
+// MEASURED on the image this landed with: "3" inks 1795 marker pixels and
+// "k" 1699. The floor is an order of magnitude under the smaller of those,
+// because what it separates is not one glyph from another -- it is a glyph
+// DRAWN IN THE PAGE'S COLOR from one drawn as a color bitmap that ignores
+// it, and the latter inks none at all. Every count is logged, so a run that
+// drifts toward the floor says so before it crosses it.
 const glyphInkFloor = 200
 
 // glyphEmojiColorMargin is how many more distinct colors the screen must
 // carry with a color emoji on it than with nothing on it.
 //
-// A color bitmap glyph is a photograph, so one of them adds far more colors
-// than this to a blank page (the run logs the gain it measured). A tofu box
-// would add one and a monochrome outline a handful, so the margin separates
-// "the color font was used" from either.
+// A color bitmap glyph is a photograph: MEASURED, 🎯 alone took the screen
+// from 166 distinct colors to 1684, a gain of 1518. A tofu box would add one
+// and a monochrome outline a handful, so a margin two orders of magnitude
+// under the measured gain separates "the color font was used" from either.
 const glyphEmojiColorMargin = 32
 
 // TestPlaytestSandboxDrawsTextGlyphsFromATextFace is the pixel half of the
@@ -151,7 +153,8 @@ func TestPlaytestSandboxDrawsTextGlyphsFromATextFace(t *testing.T) {
 			glyphFontSizePx, one, two, spaced, letterAdvance, spaceAdvance)
 
 		// Assert: in any text face a space is NARROWER than a lowercase "a"
-		// (DejaVu Sans: 0.318em against 0.613em). The emoji font's advance
+		// (DejaVu Sans: 0.318em against 0.613em, and MEASURED here at 38px
+		// against 74px at a font-size of 120). The emoji font's advance
 		// is about 1.275em, so a space drawn from it is twice the letter --
 		// which is the doubled inter-word spacing owner 5 photographed
 		// across every line of webapp prose.
