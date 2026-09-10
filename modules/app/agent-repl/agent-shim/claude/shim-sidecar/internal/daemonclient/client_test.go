@@ -11,21 +11,39 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 )
 
 type clientLogServer struct {
-	response *agentreplv1.ClientLogResponse
-	request  *agentreplv1.ClientLogRequest
+	response            *agentreplv1.ClientLogResponse
+	workspace           *workspacev1.WorkspaceRef
+	registrationRequest *agentreplv1.RegisterWorkspaceRequest
+	request             *agentreplv1.ClientLogRequest
 }
 
 func serveClientLog(t *testing.T, response *agentreplv1.ClientLogResponse) (*Client, *clientLogServer) {
 	t.Helper()
 	stateDir := t.TempDir()
-	recorder := &clientLogServer{response: response}
+	recorder := &clientLogServer{
+		response: response,
+		workspace: &workspacev1.WorkspaceRef{
+			Id: "daemon-workspace-id", Dir: "/work/repo",
+		},
+	}
 	mux := http.NewServeMux()
+	mux.Handle(agentreplv1connect.AgentReplRegisterWorkspaceProcedure,
+		connect.NewUnaryHandler(agentreplv1connect.AgentReplRegisterWorkspaceProcedure,
+			func(_ context.Context, req *connect.Request[agentreplv1.RegisterWorkspaceRequest]) (*connect.Response[agentreplv1.RegisterWorkspaceResponse], error) {
+				recorder.registrationRequest = proto.Clone(req.Msg).(*agentreplv1.RegisterWorkspaceRequest)
+				return connect.NewResponse(&agentreplv1.RegisterWorkspaceResponse{
+					Result: &agentreplv1.RegisterWorkspaceResponse_Success{Success: &agentreplv1.RegisterWorkspaceSuccess{
+						Workspace: proto.Clone(recorder.workspace).(*workspacev1.WorkspaceRef),
+					}},
+				}), nil
+			}))
 	mux.Handle(agentreplv1connect.AgentReplClientLogProcedure,
 		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure,
 			func(_ context.Context, req *connect.Request[agentreplv1.ClientLogRequest]) (*connect.Response[agentreplv1.ClientLogResponse], error) {
@@ -71,8 +89,11 @@ func TestForwardSendsACompleteSidecarClientLogRequest(t *testing.T) {
 		t.Fatalf("Forward returned %v", err)
 	}
 	got := server.request
-	if got.GetWorkspace().GetId() != "deadbeef" || got.GetWorkspace().GetDir() != "/work/repo" {
-		t.Fatalf("workspace ref = %v, want the sidecar's complete ref", got.GetWorkspace())
+	if server.registrationRequest.GetDir() != record.WorkspaceDir {
+		t.Fatalf("RegisterWorkspace dir = %q, want %q", server.registrationRequest.GetDir(), record.WorkspaceDir)
+	}
+	if got.GetWorkspace().GetId() != "daemon-workspace-id" || got.GetWorkspace().GetDir() != "/work/repo" {
+		t.Fatalf("workspace ref = %v, want the daemon-minted complete ref", got.GetWorkspace())
 	}
 	if got.GetRecord().GetSidecar() == nil || got.GetRecord().GetWarn() == nil {
 		t.Fatalf("record arms = runtime %T level %T, want sidecar/warn", got.GetRecord().GetRuntime(), got.GetRecord().GetLevel())
