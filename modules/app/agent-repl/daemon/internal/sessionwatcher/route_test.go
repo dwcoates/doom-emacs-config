@@ -121,6 +121,95 @@ func TestRoutePermission(t *testing.T) {
 	}
 }
 
+// TestAnsweredPermissionRetiresTheAttentionMarker covers the user's own
+// answer: the ask that raised the marker is settled, so the notification is
+// SEEN and the marker is cleared without waiting for a workspace switch.
+func TestAnsweredPermissionRetiresTheAttentionMarker(t *testing.T) {
+	// Arrange: the ask is open, so the marker stands.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameUpdate("main-1", permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file"))))
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", permissionSettledUpdate("p-1", allowedOnce()))))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnAsksSettled"); !ok {
+		t.Fatalf("the answered ask did not clear the attention marker: %v", names(got))
+	}
+}
+
+// TestPolicyDeniedPermissionRetiresTheAttentionMarker covers a gate DECIDED
+// without the user: a deny rule settles the open ask, and an ask nobody can
+// answer any more is no longer something unseen.
+func TestPolicyDeniedPermissionRetiresTheAttentionMarker(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameUpdate("main-1", permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file"))))
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", permissionSettledUpdate("p-1", deniedByPolicy()))))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnAsksSettled"); !ok {
+		t.Fatalf("the policy-decided ask did not clear the attention marker: %v", names(got))
+	}
+}
+
+// TestAnOpenAskKeepsTheAttentionMarker covers two asks with one answered: the
+// marker names UNSEEN notifications, and the second ask is still one.
+func TestAnOpenAskKeepsTheAttentionMarker(t *testing.T) {
+	// Arrange: two asks open.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameUpdate("main-1", permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file"))))
+	h.route(h.main, entryFrame(frameUpdate("main-1", permissionUpdate("p-2", "act-2", "Claude wants to read bar.txt", "Read file"))))
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", permissionSettledUpdate("p-1", allowedOnce()))))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnAsksSettled"); ok {
+		t.Fatalf("the marker was cleared with an ask still open: %v", names(got))
+	}
+}
+
+// TestASettleForAnAskThatNeverOpenedClearsNothing covers the policy denial
+// that never had an open ask: it raised no marker, so its settle must not
+// retire one another ask raised.
+func TestASettleForAnAskThatNeverOpenedClearsNothing(t *testing.T) {
+	// Arrange: one ask open, and a second call denied without ever asking.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameUpdate("main-1", permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file"))))
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", permissionSettledUpdate("p-2", deniedByPolicy()))))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnAsksSettled"); ok {
+		t.Fatalf("a settle for an ask that never opened cleared the marker: %v", names(got))
+	}
+}
+
+// TestAnsweredQuestionRetiresTheAttentionMarker covers the question ask, which
+// gets a permission ask's attention treatment and must lose it the same way.
+func TestAnsweredQuestionRetiresTheAttentionMarker(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameUpdate("main-1", questionUpdate("q-1", "Pick a branch", "Which branch should I cut from?"))))
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", questionSettledUpdate("q-1"))))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnAsksSettled"); !ok {
+		t.Fatalf("the answered question did not clear the attention marker: %v", names(got))
+	}
+}
+
 // TestPermissionToolNameComesFromTheGatedCall covers the tool name's best
 // source: the permission names an ACTIVITY it gates, and that unit's own
 // recorded tool is the real name — the vendor's display name is a phrase.
