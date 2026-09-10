@@ -26,6 +26,9 @@
  *     a shell unit as a subagent;
  *   - ONE pending COMPACTION, because `ContextCompacted.summary` is not optional
  *     and the vendor states the boundary before the summary;
+ *   - ONE pending CLEAR, because a cut's upsert key must be the one spelling the
+ *     FILE plane can also reach — the session the clear rotated to — and the
+ *     `conversation_reset` does not name it; the init that follows does;
  *   - the LAST TOP-LEVEL RESPONSE unit, because `AgentCompleted.answer` names it
  *     and only the fold has seen which one it was;
  *   - the LAST VENDOR API ERROR of the turn, because the result record states
@@ -72,8 +75,10 @@ import {
 import { convertPermissionDenied } from "./permission.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import {
+  clearedCutEntry,
   compactionEntry,
   convertSessionMessage,
+  type PendingClear,
   type PendingCompaction,
 } from "./session-updates.js";
 import {
@@ -145,6 +150,7 @@ interface FoldState {
   readonly hooks: HookRegistry;
   readonly taskKinds: TaskKindRegistry;
   pendingCompaction?: PendingCompaction;
+  pendingClear?: PendingClear;
   lastAnswer?: conversationv1.AgentActivityId;
   vendorApiError?: VendorApiError;
 }
@@ -290,8 +296,16 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       return { entries: convertSystemMessage(message, context, state) };
 
     case "rate_limit_event":
-    case "conversation_reset":
       return { entries: convertSessionMessage(message, context) };
+
+    case "conversation_reset":
+      // THE CLEAR'S CUT IS HELD HERE and released by the init that names the
+      // session it rotated to — the only identity both planes can spell.
+      return {
+        entries: convertSessionMessage(message, context, undefined, (pending) => {
+          state.pendingClear = pending;
+        }),
+      };
 
     default:
       LOGGER.log(
@@ -335,11 +349,47 @@ function convertSystemMessage(
       // wait, and the terminal has no other source for either.
       rememberVendorApiError(message, state);
       return convertSessionMessage(message, context);
-    default:
-      return convertSessionMessage(message, context, (pending) => {
+    default: {
+      const entries = convertSessionMessage(message, context, (pending) => {
         state.pendingCompaction = pending;
       });
+      return message.subtype === "init"
+        ? [...entries, ...settleClear(message, context, state)]
+        : entries;
+    }
   }
+}
+
+/**
+ * The clear's cut row, once the init that names the rotated-to session arrives.
+ *
+ * ONE HELD RESET, RELEASED BY THE VERY NEXT INIT. The vendor states the reset
+ * and then, milliseconds later, a `system:init` carrying the id the session
+ * actually moved to — the same id the sidecar reads off the transcript file the
+ * `/clear` envelope lands in, and therefore the one upsert key both planes can
+ * mint for one cut.
+ *
+ * AN INIT THAT NAMES NO SESSION KEEPS THE CUT HELD rather than writing a row
+ * keyed on nothing: an empty key would collide with every other unidentified
+ * cut, and the file plane still writes this clear from the envelope on disk.
+ */
+function settleClear(
+  message: Extract<SdkMessage, { type: "system" }>,
+  context: FoldContext,
+  state: FoldState,
+): readonly PersistEntry[] {
+  const pending = state.pendingClear;
+  if (pending === undefined) return [];
+  const sessionId = (message as { session_id?: unknown }).session_id;
+  if (typeof sessionId !== "string" || sessionId === "") {
+    LOGGER.log(
+      { level: "warn", uuid: pending.vendorUuid },
+      "the init after a conversation reset named no session; the clear's cut is still held",
+    );
+    return [];
+  }
+  state.pendingClear = undefined;
+  return [clearedCutEntry(context, pending, sessionId)];
 }
 
 /**

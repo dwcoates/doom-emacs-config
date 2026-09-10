@@ -42,7 +42,7 @@ func TestAClearEnvelopeLandsAsAClearedCutAndAQuotedClearDoesNot(t *testing.T) {
 	clear := retargetSession(t, corpusRecord(t, "transcript-lines/user-clear-command.jsonl", 0), session, cwd)
 	clearUUID, _ := clear["uuid"].(string)
 	if clearUUID == "" {
-		t.Fatalf("the captured clear record carries no uuid, which is what its cut is keyed by: %v", clear)
+		t.Fatalf("the captured clear record carries no uuid, so the quoted twin below cannot be given one of its own: %v", clear)
 	}
 
 	// The same real record, with prose wrapped around the SAME envelope. It is
@@ -61,9 +61,11 @@ func TestAClearEnvelopeLandsAsAClearedCutAndAQuotedClearDoesNot(t *testing.T) {
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert: the real envelope produced ONE cut, on the cleared arm, keyed by
-	// the record's own uuid, in the main agent's book.
+	// THE SESSION THE CLEAR ROTATED TO — this transcript's own session uuid,
+	// which is the one identity the STREAM plane can also mint for the same cut
+	// — in the main agent's book.
 	entries := fake.Entries()
-	wantKey := "session:context_cut:" + clearUUID
+	wantKey := "session:context_cut:" + session
 	e := entryByUpsertKey(entries, wantKey)
 	if e == nil {
 		t.Fatalf("the clear envelope produced no cut under %q; the keys written were %v", wantKey, upsertKeysOf(entries))
@@ -80,13 +82,12 @@ func TestAClearEnvelopeLandsAsAClearedCutAndAQuotedClearDoesNot(t *testing.T) {
 		t.Fatalf("a /clear produces the CLEARED arm — history discarded outright, no token delta — not %v", cut.GetCut())
 	}
 
-	// And the prose that merely quotes the command produced none.
-	quotedKey := "session:context_cut:quoted-" + clearUUID
-	if entryByUpsertKey(entries, quotedKey) != nil {
-		t.Errorf("a prompt that merely QUOTES the /clear envelope was read as an invocation of it; a pasted transcript must not cut a conversation")
-	}
+	// And the prose that merely quotes the command produced none. THE COUNT IS
+	// WHAT SAYS SO, not a second key: every clear in one session now keys on
+	// that session, so a wrongly-detected quote would land as a SECOND entry
+	// under the same key rather than under one of its own.
 	if n := countCuts(entries); n != 1 {
-		t.Errorf("the file produced %d context cuts, wanted exactly the one real /clear", n)
+		t.Errorf("the file produced %d context cuts, wanted exactly the one real /clear: a prompt that merely QUOTES the envelope must not cut a conversation", n)
 	}
 }
 
