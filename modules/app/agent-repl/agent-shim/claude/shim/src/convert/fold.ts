@@ -84,9 +84,9 @@ import {
   convertThinkingTokens,
   type BlockState,
 } from "./stream-events.js";
-import { convertResult, type VendorApiError } from "./terminals.js";
+import { convertResult, isUserStop, type VendorApiError } from "./terminals.js";
 import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
-import { createCallRegistry, type CallRegistry } from "./tool-calls.js";
+import { createCallRegistry, cutOpenCalls, type CallRegistry } from "./tool-calls.js";
 import { TOOL_CONVERTERS } from "./tools/registry.js";
 
 const LOGGER = bindLog({ component: "shim-convert-fold", operation: "shim.convert.fold" });
@@ -269,7 +269,16 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // this turn's vendor never stated.
       const vendorApiError = state.vendorApiError ?? {};
       state.vendorApiError = undefined;
-      return convertResult(message, context, state.lastAnswer, vendorApiError);
+      const output = convertResult(message, context, state.lastAnswer, vendorApiError);
+      if (!isUserStop(message)) return output;
+      // A STOP CUTS WHAT WAS OPEN, and the calls it cut get no `tool_result` of
+      // their own — so their terminals are owed here or nowhere, and a unit left
+      // on its running arm draws a live tool inside a turn that has ended. The
+      // cut frames come FIRST so the terminal is still the turn's last word.
+      const cut = cutOpenCalls(TOOL_CONVERTERS, context, state.calls, {
+        vendorUuid: message.uuid,
+      });
+      return cut.length === 0 ? output : { ...output, entries: [...cut, ...output.entries] };
     }
 
     case "tool_progress":
