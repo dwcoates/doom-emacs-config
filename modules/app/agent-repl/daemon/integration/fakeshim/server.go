@@ -79,6 +79,9 @@ type agentFrame struct {
 	agent  string
 	frame  *conversationv1.AgentFrame
 	prompt *conversationv1.AgentPrompt
+	// pointer, when set, is the HistoryPointer this frame is delivered at
+	// instead of the stream's next minted one — see Command.Pointer.
+	pointer string
 }
 
 // entry renders the pushed arm as the history entry WatchAgent delivers.
@@ -557,9 +560,13 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 				continue
 			}
 			seq++
+			at := f.pointer
+			if at == "" {
+				at = pointerAt(target, seq)
+			}
 			if err := stream.Send(&shimv1.WatchAgentResponse{
 				Frame: &shimv1.WatchAgentResponse_Entry{Entry: &conversationv1.HistoryEntryAt{
-					At:    &conversationv1.HistoryPointer{Value: pointerAt(target, seq)},
+					At:    &conversationv1.HistoryPointer{Value: at},
 					Entry: f.entry(),
 				}},
 			}); err != nil {
