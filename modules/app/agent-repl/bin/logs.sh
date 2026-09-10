@@ -28,10 +28,13 @@ Filters:
   --json             emit the original JSONL instead of the compact human format
 
 Harvest:
-  --harvest FROM TO  count every warn/error across --all in the inclusive RFC3339 window
+  --harvest FROM TO  count every warn/error and sink finding across --all in the inclusive RFC3339 window
 
 Every selected log includes its current file and rotation generations .1 through .5.
 Malformed JSONL is an error naming the file and line; it is never skipped.
+Absent or unreadable sinks and workspace sinks that are not symlinks are findings.
+Harvest prints attributed finding rows; other modes summarize findings on stderr.
+Sink findings do not fail a read unless none of the selected sinks can be read.
 EOF
 }
 
@@ -198,26 +201,33 @@ read_workspace_rows() {
 }
 
 resolve_workspace() {
-    local selector="$1" rows id dir name id_match="" name_match="" name_count=0
+    local selector="$1" rows id dir name id_match="" id_match_dir=""
+    local name_match="" name_match_id="" name_count=0
+    resolved_workspace_id=""
+    resolved_workspace_dir=""
     if [ -d "$selector" ]; then
-        (cd "$selector" && pwd -P)
+        resolved_workspace_dir="$(cd "$selector" && pwd -P)"
         return 0
     fi
     rows="$(read_workspace_rows)"
     while IFS=$'\t' read -r id dir name; do
         [ -n "$id" ] || continue
         if [ "$id" = "$selector" ]; then
-            id_match="$dir"
+            id_match="$id"
+            id_match_dir="$dir"
         fi
         if [ "$name" = "$selector" ]; then
             name_match="$dir"
+            name_match_id="$id"
             name_count=$((name_count + 1))
         fi
     done <<<"$rows"
     if [ -n "$id_match" ]; then
-        printf '%s\n' "$id_match"
+        resolved_workspace_id="$id_match"
+        resolved_workspace_dir="$id_match_dir"
     elif [ "$name_count" -eq 1 ]; then
-        printf '%s\n' "$name_match"
+        resolved_workspace_id="$name_match_id"
+        resolved_workspace_dir="$name_match"
     elif [ "$name_count" -gt 1 ]; then
         fail "workspace name is ambiguous in daemon state: $selector"
     else
@@ -226,31 +236,50 @@ resolve_workspace() {
 }
 
 workspace_dirs=()
+workspace_ids=()
 if [ "$scope" = workspace ]; then
-    workspace_dirs+=("$(resolve_workspace "$workspace_selector")")
+    resolve_workspace "$workspace_selector"
+    workspace_dirs+=("$resolved_workspace_dir")
+    workspace_ids+=("$resolved_workspace_id")
 elif [ "$scope" = all ]; then
     rows="$(read_workspace_rows)"
     while IFS=$'\t' read -r id dir name; do
         [ -n "$id" ] || continue
         [ -n "$dir" ] || fail "daemon workspace $id has an empty directory"
         workspace_dirs+=("$dir")
+        workspace_ids+=("$id")
     done <<<"$rows"
 fi
 
 bases=()
+base_runtimes=()
+base_workspace_ids=()
+base_workspace_dirs=()
+base_kinds=()
+
+add_base() {
+    bases+=("$1")
+    base_runtimes+=("$2")
+    base_workspace_ids+=("$3")
+    base_workspace_dirs+=("$4")
+    base_kinds+=("$5")
+}
+
 if [ "$scope" = central ] || [ "$scope" = all ]; then
-    runtime_requested emacs && bases+=("$emacs_global_log")
-    runtime_requested daemon && bases+=("$state_root/logs/daemon.run.log")
-    runtime_requested store && bases+=("$cache_root/log/shim-store.log")
-    runtime_requested sidecar && bases+=("$cache_root/log/shim-claude-sidecar.log")
+    runtime_requested emacs && add_base "$emacs_global_log" emacs "" "" file
+    runtime_requested daemon && add_base "$state_root/logs/daemon.run.log" daemon "" "" file
+    runtime_requested store && add_base "$cache_root/log/shim-store.log" store "" "" file
+    runtime_requested sidecar && add_base "$cache_root/log/shim-claude-sidecar.log" sidecar "" "" file
 fi
 if [ "$scope" = workspace ] || [ "$scope" = all ]; then
-    for workspace_dir in "${workspace_dirs[@]}"; do
-        runtime_requested emacs && bases+=("$workspace_dir/.claude/emacs/emacs.log")
-        runtime_requested daemon && bases+=("$workspace_dir/.claude/emacs/daemon.log")
-        runtime_requested shim && bases+=("$workspace_dir/.claude/emacs/shim.log")
-        runtime_requested webapp && bases+=("$workspace_dir/.claude/emacs/webapp.log")
-        runtime_requested sidecar && bases+=("$workspace_dir/.claude/emacs/sidecar.log")
+    for workspace_index in "${!workspace_dirs[@]}"; do
+        workspace_dir="${workspace_dirs[$workspace_index]}"
+        workspace_id="${workspace_ids[$workspace_index]}"
+        runtime_requested emacs && add_base "$workspace_dir/.claude/emacs/emacs.log" emacs "$workspace_id" "$workspace_dir" symlink
+        runtime_requested daemon && add_base "$workspace_dir/.claude/emacs/daemon.log" daemon "$workspace_id" "$workspace_dir" symlink
+        runtime_requested shim && add_base "$workspace_dir/.claude/emacs/shim.log" shim "$workspace_id" "$workspace_dir" symlink
+        runtime_requested webapp && add_base "$workspace_dir/.claude/emacs/webapp.log" webapp "$workspace_id" "$workspace_dir" symlink
+        runtime_requested sidecar && add_base "$workspace_dir/.claude/emacs/sidecar.log" sidecar "$workspace_id" "$workspace_dir" symlink
     done
 fi
 
@@ -287,8 +316,14 @@ helper_args=(--mode "$format" --level "$level")
 if [ "$harvest" -eq 1 ]; then
     helper_args+=(--harvest-from "$harvest_from" --harvest-to "$harvest_to")
 fi
-for base in "${bases[@]}"; do
-    helper_args+=(--base "$base")
+for base_index in "${!bases[@]}"; do
+    helper_args+=(
+        --base "${bases[$base_index]}"
+        --base-runtime "${base_runtimes[$base_index]}"
+        --base-workspace-id "${base_workspace_ids[$base_index]}"
+        --base-workspace-dir "${base_workspace_dirs[$base_index]}"
+        --base-kind "${base_kinds[$base_index]}"
+    )
 done
 
 exec "$binary" "${helper_args[@]}"
