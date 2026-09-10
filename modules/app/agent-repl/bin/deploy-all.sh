@@ -146,6 +146,37 @@ done
 
 log() { echo "[deploy-all] $*"; }
 
+# The control-plane files step 5 loads into the running Emacs, in load order.
+# `load` here is NOT no-error: a name that is not on disk signals, and the
+# deploy fails. This list is the one place the names live, so the preload form
+# and the pre-flight below can never name different files — for a while they
+# did not have to: the form still loaded lisp/frontend-client.el after the
+# module was deleted, and every deploy died on it AFTER both services had been
+# kickstarted.
+PRELOAD_FILES=(lisp/daemon.el lisp/services.el)
+
+# FAIL ON A BROKEN PRELOAD BEFORE ANYTHING MOVES. A preload naming a file this
+# checkout does not have cannot be recovered from later in the run: by the time
+# step 5 discovers it, the store and the sidecar have already been bounced and
+# the deploy exits with the stack half-deployed. So the names are proved first,
+# while the only cost of being wrong is an early exit.
+verify_preload_files() {
+    local missing=() rel
+    for rel in "${PRELOAD_FILES[@]}"; do
+        [ -f "$ROOT/$rel" ] || missing+=("$rel")
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "[deploy-all] the runtime control-plane preload names ${#missing[@]} file(s) this checkout does not have: ${missing[*]}" >&2
+        echo "[deploy-all] refusing to deploy: nothing was built, no service was kickstarted, and the runtime was not bounced" >&2
+        exit 3
+    fi
+}
+
+# A bounce-less run never reaches the preload, so it is not held to it.
+if [ "$NO_BOUNCE" -eq 0 ] && [ "$NO_DAEMON_BOUNCE" -eq 0 ]; then
+    verify_preload_files
+fi
+
 verify_webapp_revision() {
     local report
     if ! report="$("$READINESS_REPORT" --require-ready webapp)"; then
@@ -421,7 +452,11 @@ else
     # folds into the same REPORTED shim-changed signal (this script stops
     # nothing — the incoming daemon bounces each stale shim itself).
     ROOT_B64="$(printf '%s' "$ROOT" | base64 | tr -d '\n')"
-    PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root))) (load (expand-file-name \"lisp/daemon.el\" root) nil t) (load (expand-file-name \"lisp/frontend-client.el\" root) nil t) (load (expand-file-name \"lisp/services.el\" root) nil t) (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
+    PRELOAD_LOADS=""
+    for rel in "${PRELOAD_FILES[@]}"; do
+        PRELOAD_LOADS="$PRELOAD_LOADS (load (expand-file-name \"$rel\" root) nil t)"
+    done
+    PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root)))$PRELOAD_LOADS (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
     PRELOAD_OUT="$("$EMACSCLIENT" --eval "$PRELOAD_FORM" 2>&1)" || {
         echo "[deploy-all] daemon control-plane preload failed: $PRELOAD_OUT" >&2
         exit 3
