@@ -149,7 +149,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - priority ordering: rows sort P05 < P1 < P2 < P3 < unprioritized;
   SetWorkspacePriority reorders and carries the badge label; clearing
   removes the badge
-- attention marker set on a notification push, cleared by SelectWorkspace
+- attention marker set on a notification push, cleared by SelectWorkspace and
+  by the last open ask settling
 - closed workspace draws `closed:true`; nuked workspace leaves the roster
 - recently_merged lists a merged workspace with `when.merged`
 - task view: CreateTask/UpdateTask/AssignWorkspaceTask group rows under the
