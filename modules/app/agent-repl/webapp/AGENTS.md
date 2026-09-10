@@ -84,6 +84,7 @@ and are contract on the same terms:
 | `data-query-cause` | the line under a `queryDied` turn error | `unexpectedEof` \| `iteratorFailure` (absent when the cause is unset) | 10 |
 | `data-attention` | the cold gate row the model picker routed to | `coldGate` | 10 |
 | `data-footer-notice` | the footer notice drawn when no cold gate row is on the page | `coldGate` | 10 |
+| `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` (absent on every settled, failed, interrupted or turnless prompt) | int-fix-bubble-wave |
 
 ## Commands
 

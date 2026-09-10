@@ -69,6 +69,7 @@ import { drawFeedTurnEnded } from "./rows/turn-ended.js";
 import { drawFeedSessionSeparation } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
+import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../breathing.js";
 
 /** A bubble, as the controller holds it: an element plus its own lifecycle. */
 export interface BubbleLike extends Handle {
@@ -224,6 +225,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function announce(): void {
     for (const fn of [...listeners]) fn();
     markLatestPrompt();
+    markWorkingPrompts();
     followTail();
   }
 
@@ -645,6 +647,52 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       if (el !== latest) el.removeAttribute("data-latest-prompt");
     }
     latest?.setAttribute("data-latest-prompt", "true");
+  }
+
+  /**
+   * THE THINKING WAVE, on the working prompt and on no other.
+   *
+   * The wave says "the daemon has this prompt and is still on it". Which prompt
+   * that is, this feed already knows and has always known: a row names its turn
+   * (`FeedRow.turn`), and a turn's `turn_ended` row is the terminal fact whose
+   * ABSENCE is what "live" means (feed.proto, FeedRow.turn_ended). So the mark
+   * is that absence, read off the rows already held — no new signal, no second
+   * notion of liveness to drift from the one the rest of the feed uses.
+   *
+   * A PROMPT WITH NO TURN NEVER WAVES. `turn` is optional, and a prompt row
+   * that carries none belongs to no turn this feed can watch conclude; waving
+   * it would be a band that could never stop.
+   *
+   * FAILURE AND INTERRUPTION SETTLE IT LIKE CONCLUSION DOES. All three are
+   * `turn_ended` arms — the turn is over however it ended — so this asks only
+   * whether the row is there, never which arm it drew.
+   *
+   * IT TOUCHES ONLY THE ATTRIBUTE. The bubble element is the one the row's last
+   * draw produced and it is left standing: nothing here marks a row dirty or
+   * redraws a body, so a turn settling stops the band with the prompt's own
+   * text untouched beneath it.
+   */
+  function markWorkingPrompts(): void {
+    const ended = new Set<string>();
+    for (const id of order) {
+      const state = states.get(id);
+      if (state === undefined) continue;
+      if (state.row.row.case !== "turnEnded") continue;
+      if (state.row.turn !== undefined) ended.add(state.row.turn.value);
+    }
+    for (const id of order) {
+      const state = states.get(id);
+      if (state === undefined) continue;
+      if (state.row.row.case !== "userPrompt" && state.row.row.case !== "agentPrompt") continue;
+      const bubble = state.element.querySelector<HTMLElement>(".bubble.user");
+      if (bubble === null) continue;
+      const turn = state.row.turn;
+      if (turn !== undefined && !ended.has(turn.value)) {
+        bubble.setAttribute(PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING);
+      } else {
+        bubble.removeAttribute(PROMPT_WAVE_ATTRIBUTE);
+      }
+    }
   }
 
   // ---- lookups ----------------------------------------------------------
