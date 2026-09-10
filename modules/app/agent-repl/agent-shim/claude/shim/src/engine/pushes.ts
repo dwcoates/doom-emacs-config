@@ -117,11 +117,24 @@ export class SessionPushes {
   // `fastMode` is replayed for the same reason the model is: it is a LEVEL the
   // session is in, not an event, and a consumer that attached after the vendor
   // last stated it would otherwise draw the toggle from nothing.
+  //
+  // `accountUsage` is the same kind of level, and it was the one missing here.
+  // The session PROBES it once at StartSession (session.ts, the
+  // `void pushAccountUsage()` beside the keepalive cadence), while the daemon
+  // opens its standing WatchSession only AFTER StartSession has answered — so
+  // that first sample was fanned out to nobody and the footer held no
+  // allowance figure at all until a turn closed and reprobed. MEASURED in a
+  // playtest run: the sample went out at 37.494 to the bring-up's stream, the
+  // daemon's own watch opened at 37.503, and the footer's first sighting of
+  // any account usage was the turn-close reprobe 41ms later. The dedup above
+  // suppresses nothing real: every sample carries its own `observed_at_ms`,
+  // so two samples are never byte-identical.
   private static readonly REPLAYED = [
     "contextUsage",
     "modelChanged",
     "permissionModeChanged",
     "fastMode",
+    "accountUsage",
   ];
 
   /**
