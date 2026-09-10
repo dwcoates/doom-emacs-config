@@ -32,6 +32,21 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'seq)
+
+(defconst agent-repl-test-declarations--optional
+  '(agent-repl--sidebar-push)
+  "Our own symbols a source may declare WITHOUT this tree defining them.
+
+Exactly one kind of entry belongs here: a declare for an OPTIONAL
+integration whose module is not part of this tree, where every call site
+guards on `fboundp\=' and has a defined behavior for the absent case.
+`agent-repl--sidebar-push\=' is that: sidebar.el is not in `lisp/\=', and
+`agent-repl--ws-repaint-sidebar\=' logs \"sidebar not loaded\" and returns
+rather than calling it.
+
+An entry here is a claim about a guard, so adding one means pointing at
+the guard.  A declare that is merely stale is a defect, not an entry.")
 
 (defconst agent-repl-test-declarations--own-prefixes '("agent-repl" "+dwc/")
   "Prefixes marking a symbol this tree is responsible for defining.
@@ -51,10 +66,17 @@ Captured at LOAD time: `load-file-name' is unbound by the time ERT runs a
 test body, so resolving it there would answer nil and scan nothing.")
 
 (defun agent-repl-test-declarations--files ()
-  "Return every elisp file in `lisp/', sources and suites alike.
-Suites are scanned too: a suite that declares a deleted function is the
-same broken promise, and it silences the same warning."
-  (directory-files agent-repl-test-declarations--lisp-dir t "\\.el\\'"))
+  "Return every non-test elisp source in `lisp/'.
+
+Suites are out of scope, and not for convenience: a suite declares its own
+batch-only helpers (`agent-repl-itest--script' lives in
+test-integration-helpers.el, which only the integration suites load), so
+`fboundp' under THIS suite\='s load would call a perfectly-good declare
+broken.  A source, by contrast, is loaded in full by test-helpers.el, which
+is what makes `fboundp' the whole answer below."
+  (seq-remove (lambda (file)
+                (string-prefix-p "test-" (file-name-nondirectory file)))
+              (directory-files agent-repl-test-declarations--lisp-dir t "\\.el\\'")))
 
 (defun agent-repl-test-declarations--in-file (file)
   "Return `(SYMBOL . FILE)' for every `declare-function' form in FILE.
@@ -99,10 +121,26 @@ answer for our own symbols."
     ;; Act
     (pcase-dolist (`(,symbol . ,file) (agent-repl-test-declarations--all))
       (when (and (agent-repl-test-declarations--own-symbol-p symbol)
+                 (not (memq symbol agent-repl-test-declarations--optional))
                  (not (fboundp symbol)))
         (push (format "%s (declared in %s)" symbol file) broken)))
     ;; Assert
     (should (equal (nreverse broken) nil))))
+
+(ert-deftest agent-repl-test-declarations-exemptions-are-still-declared ()
+  "Every exemption still names a declare that exists, so the list cannot rot.
+An exemption outliving its `declare-function' is a standing permission for
+a symbol nobody mentions any more — the audit would keep honoring it long
+after the reason for it went away."
+  ;; Arrange
+  (let ((declared (mapcar #'car (agent-repl-test-declarations--all)))
+        (stale nil))
+    ;; Act
+    (dolist (symbol agent-repl-test-declarations--optional)
+      (unless (memq symbol declared)
+        (push symbol stale)))
+    ;; Assert
+    (should (equal (nreverse stale) nil))))
 
 (provide 'test-declarations)
 
