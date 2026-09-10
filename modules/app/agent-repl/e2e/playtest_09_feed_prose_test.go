@@ -445,17 +445,28 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				// divider had not arrived yet -- so where it is asked is part
 				// of what it asserts.
 				//
-				// It is read rather than merely counted so that a red says
-				// WHICH rows they were: the row id carries the divider's key,
-				// which is the store pointer the cut arrived at, and an
-				// `unpositioned:` key is the daemon saying the producer gave
-				// it no position to identify the cut by.
-				census := p09ReadInPage(t, s, "the census of the separation rows the rotation drew",
+				// It counts what is DRAWN -- every `.separation` element --
+				// rather than the feed rows of that kind, because the second
+				// rule in run 9's picture was invisible to a count of
+				// `[data-row-kind="separation"]`: the census read one row
+				// while the reviewer counted two rules. So the census names,
+				// for each drawn divider, its arm, its label, the feed row it
+				// hangs in (whose id carries the divider's key, which is the
+				// store pointer the cut arrived at) and which feed that is.
+				census := p09ReadInPage(t, s, "the census of the dividers the rotation drew",
 					`(function () {
-                       var rows = document.querySelectorAll('`+p09SeparationRow+`');
-                       return "count=" + rows.length + " ids=[" +
-                         Array.prototype.map.call(rows, function (r) {
-                           return r.getAttribute("data-feed-row");
+                       var drawn = document.querySelectorAll(".separation");
+                       return "count=" + drawn.length + " dividers=[" +
+                         Array.prototype.map.call(drawn, function (d) {
+                           var row = d.closest("[data-feed-row]");
+                           return d.getAttribute("data-arm") + " label=" +
+                             (d.querySelector(".sep-label")
+                                ? d.querySelector(".sep-label").textContent.trim() : "<none>") +
+                             " row=" + (row ? row.getAttribute("data-feed-row") : "<not in a feed row>") +
+                             " feed=" + (function () {
+                                var feed = d.closest("[data-feed]");
+                                return feed ? feed.getAttribute("data-feed") : "<no feed>";
+                              })();
                          }).join(" | ") + "]";
                      })()`)
 				t.Logf("the rotation's separation census: %s", census)
