@@ -172,6 +172,29 @@ func (r *resolver) applyBash(s *wsState, unit string, bash *conversationv1.Agent
 // applyTaskAct maintains the ☑ chip's checklist. The tracker's `deleted`
 // status removes the row rather than drawing a fourth glyph, and a REJECTED
 // act still carries the task as it stands, so the state is applied either way.
+//
+// WHAT AN ACT DID NOT STATE IS NOT A FIELD IT STATED EMPTY, and both halves of
+// that were defects a checklist reader could see.
+//
+//   - AN UNSET STATUS LEAVES THE TASK WHERE IT STANDS. `AgentTaskState.status`
+//     is a oneof precisely so "the act said nothing about where this stands"
+//     is representable, and the shim's own converter is explicit that it leaves
+//     the arm unset for an update that moved nothing ("UNSET, not a default").
+//     This read it as `pending` and INVENTED a status the producer refused to
+//     state -- so every subject-only or blocked-by-only update knocked a
+//     running task back to unstarted. A row that never existed before still
+//     starts pending, because "recorded and not begun" IS what a new entry is.
+//   - AN EMPTY SUBJECT IS NOT A SUBJECT. A `TaskUpdate` that names only a
+//     status carries no subject at all, and this overwrote the one the create
+//     established -- so the whole checklist drew as blank lines beside its
+//     glyphs, observed in the G52 playbook.
+//
+// THE SECOND GUARD IS A SENTINEL AND SHOULD NOT HAVE TO BE. `AgentTaskState`
+// gives `owner` presence and `subject`/`description` none, so an act that
+// names no subject is indistinguishable on the wire from one that names an
+// empty one. Filed as a proto need by owner 16; until it lands, the empty
+// string is read as "not stated", which is the only reading that does not
+// erase a subject the tracker still holds.
 func (r *resolver) applyTaskAct(s *wsState, act *conversationv1.AgentTaskAct) {
 	id := act.GetTask().GetValue()
 	state := act.GetState()
@@ -181,19 +204,22 @@ func (r *resolver) applyTaskAct(s *wsState, act *conversationv1.AgentTaskAct) {
 	}
 	row, ok := s.tasks[id]
 	if !ok {
-		row = &taskRow{id: id, order: s.nextOrder()}
+		row = &taskRow{id: id, order: s.nextOrder(), status: taskPending}
 		s.tasks[id] = row
 	}
-	row.subject = state.GetSubject()
-	row.activeForm = ""
+	if subject := state.GetSubject(); subject != "" {
+		row.subject = subject
+	}
 	switch status := state.GetStatus().(type) {
 	case *conversationv1.AgentTaskState_Running:
 		row.status = taskRunning
 		row.activeForm = status.Running.GetActiveForm()
 	case *conversationv1.AgentTaskState_Completed:
 		row.status = taskCompleted
-	default:
+		row.activeForm = ""
+	case *conversationv1.AgentTaskState_Pending:
 		row.status = taskPending
+		row.activeForm = ""
 	}
 }
 
