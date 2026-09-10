@@ -1,19 +1,12 @@
-package wsm
+-- layout3.sql is the layout-3 schema EXACTLY as the build before this one
+-- wrote it, captured from schema.go at commit e6ff01635^ (the commit that
+-- added ported_prompts and took the stamp to 4).
+--
+-- IT IS A FROZEN RECORD, NOT A COPY OF THE CURRENT DDL. The migration tests
+-- build their fixture from this file precisely so they exercise a file the
+-- CURRENT code never wrote; regenerating it from schema.go would make them
+-- assert that today's schema migrates into itself.
 
-// schemaDDL is the whole layout, created in one transaction on a FRESH file.
-// An EXISTING file is never recreated from it: a file stamped with an older
-// layout is carried forward by the ordered list in migrate.go, so the user's
-// workspace state survives a schema change. Instants are integer unix nanoseconds; a nullable
-// instant column is NULL when the fact has not happened.
-//
-// Two ordering facts shape the foreign keys. A CREATION JOB precedes its
-// workspace's registration (a workspace is registered only after its worktree
-// is materialized), so creation_jobs carries no reference to workspaces and
-// Forget deletes it explicitly. Everything else — sessions, leases, held
-// prompts, turns, idempotency claims, the merge ledger, the per-repo merge
-// queue, faults, a fork's ported prompts — exists only after registration and cascades with the
-// workspace row.
-const schemaDDL = `
 CREATE TABLE layout (
   id      INTEGER PRIMARY KEY CHECK (id = 1),
   version INTEGER NOT NULL
@@ -131,7 +124,6 @@ CREATE TABLE turns (
 
 CREATE INDEX turns_by_workspace ON turns(workspace_id);
 
-` + portedPromptsDDL + `
 CREATE TABLE idempotency_keys (
   workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   idempotency_key TEXT NOT NULL,
@@ -190,22 +182,5 @@ CREATE TABLE drain_schedule (
   deadline INTEGER NOT NULL,
   set_at   INTEGER NOT NULL
 );
-`
 
-// portedPromptsDDL is the layout-4 addition, kept apart from the rest of the
-// schema because TWO paths write it: a fresh file gets it as part of schemaDDL
-// above, and a layout-3 file gets it from the 3 -> 4 migration. One text, so a
-// migrated file and a created one cannot drift into two different shapes.
-const portedPromptsDDL = `
-CREATE TABLE ported_prompts (
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  turn_id      TEXT NOT NULL,
-  ordinal      INTEGER NOT NULL,
-  text         TEXT NOT NULL,
-  origin       TEXT NOT NULL,
-  started_at   INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, turn_id)
-);
-
-CREATE INDEX ported_prompts_by_workspace ON ported_prompts(workspace_id, ordinal);
-`
+INSERT INTO layout (id, version) VALUES (1, 3);

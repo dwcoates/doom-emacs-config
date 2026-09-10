@@ -22,10 +22,12 @@ var ErrSessionDeleted = errors.New("wsm: session was deleted and refuses resurre
 // tombstoned hold never resurrects.
 var ErrTombstoned = errors.New("wsm: held prompt is tombstoned")
 
-// LayoutError refuses a database file whose layout version is not exactly this
-// binary's. A NEWER file is the deploy/rollback silent-corruption class; an
-// OLDER one is refused too, because the store is nuked and recreated, never
-// migrated.
+// LayoutError refuses a database file whose layout version this build cannot
+// interpret. It is NOT the ordinary answer to a version mismatch: a file
+// stamped OLDER is migrated forward (see migrate.go), because the workspace
+// state is the user's data. This refusal is what is left over — a file stamped
+// NEWER, which a downgrade would silently strip, and a file so old that no
+// chain of migrations in this build reaches it.
 type LayoutError struct {
 	// Path is the database file that was refused.
 	Path string
@@ -33,6 +35,10 @@ type LayoutError struct {
 	File int
 	// Binary is the layout version this build writes.
 	Binary int
+	// Reason says why this particular layout could not be interpreted, so the
+	// message a person reads names the actual obstacle rather than the
+	// mismatch they can already see.
+	Reason string
 }
 
 // Error implements error.
@@ -41,8 +47,38 @@ func (e *LayoutError) Error() string {
 	if e.File > e.Binary {
 		rel = "newer than"
 	}
-	return fmt.Sprintf("wsm: database %q has layout version %d, %s this build's %d; the store is recreated, never migrated", e.Path, e.File, rel, e.Binary)
+	reason := e.Reason
+	if reason == "" {
+		reason = "this build cannot interpret it"
+	}
+	return fmt.Sprintf("wsm: database %q has layout version %d, %s this build's %d; %s", e.Path, e.File, rel, e.Binary, reason)
 }
+
+// MigrationError refuses an open because a migration step failed. The step ran
+// in one transaction, so the file is exactly as it was before the step; Backup
+// names the copy taken before ANY step ran, so a person has somewhere to go
+// back to even if the file is later touched by something else.
+type MigrationError struct {
+	// Path is the database being migrated.
+	Path string
+	// From is the layout version the file carried when the open began.
+	From int
+	// To is the layout version the failing step was carrying it to.
+	To int
+	// Backup is the pre-migration copy of the file.
+	Backup string
+	// Err is the underlying cause.
+	Err error
+}
+
+// Error implements error.
+func (e *MigrationError) Error() string {
+	return fmt.Sprintf("wsm: migrating database %q from layout version %d to %d failed and was rolled back: %v; the file still stands at layout %d and a pre-migration copy is at %q",
+		e.Path, e.From, e.To, e.Err, e.From, e.Backup)
+}
+
+// Unwrap exposes the cause.
+func (e *MigrationError) Unwrap() error { return e.Err }
 
 // DecodeError fails a WHOLE load because one row could not be decoded. Reads
 // are all-or-nothing: a corrupt row never degrades into a partial list or a
