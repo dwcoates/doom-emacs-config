@@ -108,7 +108,7 @@ export function convertPermissionDenied(
 ): readonly PersistEntry[] {
   const toolUseId = message.tool_use_id;
   if (toolUseId === "") {
-    LOGGER.warn(
+    LOGGER.debug(
       { uuid: message.uuid },
       "a permission denial named no gated call; no unit can be identified",
     );

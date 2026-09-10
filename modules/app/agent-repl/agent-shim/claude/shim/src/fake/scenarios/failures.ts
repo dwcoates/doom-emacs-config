@@ -625,7 +625,7 @@ const FAULT_CONVERTER = scenario({
     "SessionFault.converter_defect with an OPEN SessionDegradedWindow — the diagnostics arm, reached without any " +
     "rpc failing. The malformed message itself reaches NO conversation.v1 arm, which is the point",
   run(ctx) {
-    ctx.log.warn(
+    ctx.log.debug(
       { turn: ctx.turn, branch: "fault-converter" },
       "fake turn carrying ONE malformed vendor message",
     );

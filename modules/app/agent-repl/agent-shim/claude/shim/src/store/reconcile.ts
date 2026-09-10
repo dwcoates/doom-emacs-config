@@ -391,7 +391,7 @@ export function announceLiveWork(
     const unit = create(conversationv1.AgentActivityIdSchema, { value: handle.value });
     const described = describeDetachable(findUnit(entries, unit));
     if (described === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { work: handle.value },
         "the record holds no describable start for this live work; it is not announced",
       );
@@ -429,6 +429,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       }
       const result = response.result;
       if (result.case === "failure") {
+        // warn: a defect because the store refused the obligation read needed for reconciliation.
         LOGGER.warn(
           { detail: result.value.detail },
           "the store refused to state the open obligations",

@@ -63,7 +63,7 @@ function content(outcome: ToolOutcome): conversationv1.ToolResultContent {
 function argumentsOf(call: PendingCall): JsonObject | undefined {
   const raw = rawStruct(call.input);
   if (raw === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool: call.toolName, tool_use_id: call.toolUseId },
       "an unmodeled tool's arguments could not be represented as a Struct; they are left unset",
     );
@@ -97,7 +97,7 @@ function resolveMcpServer(
     if (remainder === name) continue;
     if (remainder.startsWith(`${name}${MCP_SEPARATOR}`)) return name;
   }
-  LOGGER.warn(
+  LOGGER.debug(
     { tool: toolName, known_servers: known.length },
     "no MCP server this session knows matches this qualified tool name; the server is left unset",
   );

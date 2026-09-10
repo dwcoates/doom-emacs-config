@@ -116,7 +116,7 @@ function textExtent(
 ): conversationv1.AgentReadSuccess["extent"] | undefined {
   const contents = str(file, "content");
   if (contents === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a text read carried no content; no success frame is produced",
     );
@@ -130,7 +130,7 @@ function textExtent(
 
   if (bool(file, "truncatedByTokenCap") === true && (startLine === undefined || startLine <= 1)) {
     if (totalLines === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a token-capped read stated no total line count; no success frame is produced",
       );
@@ -141,7 +141,7 @@ function textExtent(
 
   if (askedOffset !== undefined) {
     if (startLine === undefined || numLines === undefined || totalLines === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId, asked_offset: askedOffset },
         "an offset read stated no slice bounds; no success frame is produced",
       );
@@ -162,7 +162,7 @@ function textExtent(
     // the file holds, and calling that `whole` would claim there is nothing
     // more to fetch.
     if (!startedAtFirstLine) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a short read began past line 1 with no offset asked; recorded as a range",
       );
@@ -181,7 +181,7 @@ function readSuccess(
 ): conversationv1.AgentReadSuccess | undefined {
   const record = asRecord(outcome.structured);
   if (record === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a read settled with no typed output; no success frame is produced",
     );
@@ -195,13 +195,13 @@ function readSuccess(
     // the extent stays unset — but the read settled, and the card must too.
     const nonTextPath = str(file ?? {}, "filePath") ?? requestedPath(call);
     if (nonTextPath === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId, read_type: type ?? "unstated" },
         "a non-text read settled with no path at all; no success frame is produced",
       );
       return undefined;
     }
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId, read_type: type ?? "unstated" },
       "this read's extent has no arm in the contract this wave; it settles with no extent stated",
     );
@@ -211,7 +211,7 @@ function readSuccess(
     });
   }
   if (file === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a text read carried no file object; no success frame is produced",
     );
@@ -219,7 +219,7 @@ function readSuccess(
   }
   const path = str(file, "filePath") ?? requestedPath(call);
   if (path === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a read settled with no path at all; no success frame is produced",
     );
@@ -242,7 +242,7 @@ export const readConverter: ToolConverter = {
   start(call) {
     const path = requestedPath(call);
     if (path === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a read was announced with no file path; no start frame is produced",
       );

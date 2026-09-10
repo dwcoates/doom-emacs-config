@@ -1277,7 +1277,7 @@ export function createFakeQuery(
       // consumer instead of leaving a turn that never terminates.
       const message = `fake scenario "${scenario.name}" returned without emitting a result`;
       LOGGER.error(
-        { claude_session_id: sessionUuid, turn, scenario: scenario.name },
+        { claude_session_id: sessionUuid, turn, scenario: scenario.name, detail: message },
         message,
       );
       throw new Error(message);
@@ -1444,7 +1444,7 @@ export function createFakeQuery(
       if (toolUseId === undefined) return liveTasks.size > 0;
       const live = [...liveTasks.values()].find((t) => t.toolUseId === toolUseId);
       if (live === undefined) {
-        LOGGER.warn(
+        LOGGER.debug(
           { claude_session_id: sessionUuid, tool_use_id: toolUseId },
           "fake vendor background_tasks named no live task for that tool call",
         );

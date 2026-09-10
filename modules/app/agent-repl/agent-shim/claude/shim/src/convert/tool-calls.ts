@@ -254,8 +254,9 @@ export function createCallRegistry(): CallRegistry {
       if (calls.size >= CALL_REGISTRY_CAPACITY) {
         const oldest = calls.keys().next();
         if (oldest.done !== true) {
-          LOGGER.warn(
-            { tool_use_id: oldest.value, capacity: CALL_REGISTRY_CAPACITY },
+    // warn: a defect because bounded call bookkeeping discarded a live tool call.
+    LOGGER.warn(
+      { tool_use_id: oldest.value, capacity: CALL_REGISTRY_CAPACITY },
             "forgetting the oldest unsettled tool call: the in-flight registry is full",
           );
           calls.delete(oldest.value);
@@ -370,7 +371,7 @@ export function convertToolUse(
       ];
     }
     default: {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool: call.toolName, tool_use_id: call.toolUseId },
         "no converter owns this tool name; it becomes an unmodeled unit",
       );
@@ -422,6 +423,7 @@ export function convertToolResult(
 ): readonly PersistEntry[] {
   const call = registry.take(toolUseId);
   if (call === undefined) {
+    // warn: a defect because an unannounced tool result cannot settle a unit.
     LOGGER.warn(
       { tool_use_id: toolUseId },
       "a tool result arrived for a call this shim never saw announced; no terminal is produced",
