@@ -36,15 +36,32 @@ func (f *repeatedFlag) Set(value string) error {
 }
 
 type options struct {
-	mode        string
-	since       string
-	until       string
-	minLevel    string
-	runtimes    string
-	follow      bool
-	bases       repeatedFlag
-	harvestFrom string
-	harvestTo   string
+	mode              string
+	since             string
+	until             string
+	minLevel          string
+	runtimes          string
+	follow            bool
+	bases             repeatedFlag
+	baseRuntimes      repeatedFlag
+	baseWorkspaceIDs  repeatedFlag
+	baseWorkspaceDirs repeatedFlag
+	baseKinds         repeatedFlag
+	harvestFrom       string
+	harvestTo         string
+}
+
+type sink struct {
+	base             string
+	runtime          string
+	workspaceID      string
+	workspaceDir     string
+	canonicalSymlink bool
+}
+
+type sinkFinding struct {
+	sink    sink
+	message string
 }
 
 type record struct {
@@ -76,7 +93,7 @@ type filters struct {
 }
 
 type followState struct {
-	base   string
+	sink   sink
 	path   string
 	info   os.FileInfo
 	offset int64
@@ -101,12 +118,20 @@ func run() error {
 	flag.StringVar(&opts.harvestFrom, "harvest-from", "", "harvest lower bound")
 	flag.StringVar(&opts.harvestTo, "harvest-to", "", "harvest upper bound")
 	flag.Var(&opts.bases, "base", "canonical current-generation path")
+	flag.Var(&opts.baseRuntimes, "base-runtime", "runtime owning the corresponding base")
+	flag.Var(&opts.baseWorkspaceIDs, "base-workspace-id", "workspace ID owning the corresponding base")
+	flag.Var(&opts.baseWorkspaceDirs, "base-workspace-dir", "workspace directory owning the corresponding base")
+	flag.Var(&opts.baseKinds, "base-kind", "base kind: file or symlink")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional argument %q", flag.Arg(0))
 	}
 	if len(opts.bases) == 0 {
 		return errors.New("no log paths were selected")
+	}
+	sinks, err := makeSinks(opts)
+	if err != nil {
+		return err
 	}
 	if opts.mode != "human" && opts.mode != "json" && opts.mode != "harvest" {
 		return fmt.Errorf("unknown output mode %q", opts.mode)
@@ -125,18 +150,56 @@ func run() error {
 		return err
 	}
 
-	records, sequence, states, err := readInitial(opts.bases, filter)
+	records, findings, readable, sequence, states, err := readInitial(sinks, filter)
 	if err != nil {
 		return err
 	}
 	sortRecords(records)
-	if err := emit(records, opts.mode); err != nil {
+	if err := emit(records, findings, opts.mode); err != nil {
 		return err
+	}
+	if readable == 0 {
+		return errors.New("none of the selected log sinks could be read")
 	}
 	if !opts.follow {
 		return nil
 	}
 	return follow(opts.mode, states, filter, sequence)
+}
+
+func makeSinks(opts options) ([]sink, error) {
+	counts := map[string]int{
+		"--base":               len(opts.bases),
+		"--base-runtime":       len(opts.baseRuntimes),
+		"--base-workspace-id":  len(opts.baseWorkspaceIDs),
+		"--base-workspace-dir": len(opts.baseWorkspaceDirs),
+		"--base-kind":          len(opts.baseKinds),
+	}
+	for name, count := range counts {
+		if count != len(opts.bases) {
+			return nil, fmt.Errorf("%s count %d does not match --base count %d", name, count, len(opts.bases))
+		}
+	}
+	sinks := make([]sink, 0, len(opts.bases))
+	for index, base := range opts.bases {
+		runtime := opts.baseRuntimes[index]
+		if _, ok := runtimeNames[runtime]; !ok {
+			return nil, fmt.Errorf("base %q has unknown runtime %q", base, runtime)
+		}
+		kind := opts.baseKinds[index]
+		if kind != "file" && kind != "symlink" {
+			return nil, fmt.Errorf("base %q has unknown kind %q", base, kind)
+		}
+		workspaceID, workspaceDir := opts.baseWorkspaceIDs[index], opts.baseWorkspaceDirs[index]
+		if kind == "symlink" && workspaceDir == "" {
+			return nil, fmt.Errorf("workspace base %q has no workspace directory", base)
+		}
+		if kind == "file" && (workspaceID != "" || workspaceDir != "") {
+			return nil, fmt.Errorf("central base %q carries workspace attribution", base)
+		}
+		sinks = append(sinks, sink{base, runtime, workspaceID, workspaceDir, kind == "symlink"})
+	}
+	return sinks, nil
 }
 
 func makeFilters(opts options, now time.Time) (filters, error) {
@@ -190,28 +253,33 @@ func parseBound(value string, now time.Time, durationAllowed bool) (*time.Time, 
 	return &instant, nil
 }
 
-func readInitial(bases []string, filter filters) ([]record, int64, []followState, error) {
+func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, int64, []followState, error) {
 	var records []record
+	var findings []sinkFinding
 	var sequence int64
-	states := make([]followState, 0, len(bases))
+	states := make([]followState, 0, len(sinks))
 	seen := make(map[string]struct{})
-	found := 0
-	for _, base := range bases {
-		files, current, err := generationFiles(base)
-		if err != nil {
-			return nil, 0, nil, err
-		}
-		state := followState{base: base, path: current, line: 1}
+	readable := 0
+	for _, selectedSink := range sinks {
+		files, current, discovered := generationFiles(selectedSink)
+		findings = append(findings, discovered...)
+		state := followState{sink: selectedSink, path: current, line: 1}
+		sinkReadable := false
 		for _, path := range files {
 			if _, duplicate := seen[path]; duplicate {
+				sinkReadable = true
 				continue
 			}
-			seen[path] = struct{}{}
-			found++
 			loaded, next, nextLine, err := readFile(path, sequence, filter)
 			if err != nil {
-				return nil, 0, nil, err
+				if unreadable, ok := err.(*unreadableLogError); ok {
+					findings = append(findings, unreadableFinding(selectedSink, path, unreadable.err))
+					continue
+				}
+				return nil, nil, 0, 0, nil, err
 			}
+			seen[path] = struct{}{}
+			sinkReadable = true
 			records = append(records, loaded...)
 			sequence = next
 			if path == current {
@@ -221,77 +289,130 @@ func readInitial(bases []string, filter filters) ([]record, int64, []followState
 		if current != "" {
 			info, err := os.Stat(current)
 			if err != nil {
-				return nil, 0, nil, fmt.Errorf("stat current log %q: %w", current, err)
+				findings = append(findings, unreadableFinding(selectedSink, current, err))
+			} else {
+				state.info, state.offset = info, info.Size()
 			}
-			state.info, state.offset = info, info.Size()
+		}
+		if sinkReadable {
+			readable++
 		}
 		states = append(states, state)
 	}
-	if found == 0 {
-		return nil, 0, nil, errors.New("none of the selected log files or rotation generations exists")
-	}
-	return records, sequence, states, nil
+	return records, findings, readable, sequence, states, nil
 }
 
-func generationFiles(base string) ([]string, string, error) {
-	info, err := os.Lstat(base)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, "", fmt.Errorf("inspect log %q: %w", base, err)
-	}
-	current := base
-	if err == nil && info.Mode()&os.ModeSymlink != 0 {
-		current, err = filepath.EvalSymlinks(base)
-		if err != nil {
-			return nil, "", fmt.Errorf("resolve canonical log symlink %q: %w", base, err)
+func generationFiles(selectedSink sink) ([]string, string, []sinkFinding) {
+	current := selectedSink.base
+	var findings []sinkFinding
+	if selectedSink.canonicalSymlink {
+		info, err := os.Lstat(selectedSink.base)
+		if os.IsNotExist(err) {
+			return nil, "", []sinkFinding{canonicalAbsentFinding(selectedSink)}
 		}
+		if err != nil {
+			return nil, "", []sinkFinding{canonicalUnreadableFinding(selectedSink, err)}
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return nil, "", []sinkFinding{{selectedSink, "sink not a symlink: " + selectedSink.base}}
+		}
+		target, err := os.Readlink(selectedSink.base)
+		if err != nil {
+			return nil, "", []sinkFinding{canonicalUnreadableFinding(selectedSink, err)}
+		}
+		// WHY: EvalSymlinks loses the named target when it is absent, which is
+		// exactly the expected sink state this reader must report and continue past.
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(selectedSink.base), target)
+		}
+		current = filepath.Clean(target)
 	}
 	files := make([]string, 0, retainedGenerations+1)
 	for generation := retainedGenerations; generation >= 1; generation-- {
 		path := current + "." + strconv.Itoa(generation)
-		if present, err := regularFilePresent(path); err != nil {
-			return nil, "", err
+		if present, finding := regularFilePresent(selectedSink, path, false); finding != nil {
+			findings = append(findings, *finding)
 		} else if present {
 			files = append(files, path)
 		}
 	}
-	if present, err := regularFilePresent(current); err != nil {
-		return nil, "", err
+	if present, finding := regularFilePresent(selectedSink, current, true); finding != nil {
+		findings = append(findings, *finding)
 	} else if present {
 		files = append(files, current)
-		return files, current, nil
+		return files, current, findings
 	}
-	return files, "", nil
+	return files, "", findings
 }
 
-func regularFilePresent(path string) (bool, error) {
+func regularFilePresent(selectedSink sink, path string, required bool) (bool, *sinkFinding) {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
+		if required {
+			finding := absentFinding(selectedSink, path)
+			return false, &finding
+		}
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("stat log %q: %w", path, err)
+		finding := unreadableFinding(selectedSink, path, err)
+		return false, &finding
 	}
 	if !info.Mode().IsRegular() {
-		return false, fmt.Errorf("selected log %q is not a regular file", path)
+		finding := unreadableFinding(selectedSink, path, errors.New("not a regular file"))
+		return false, &finding
 	}
 	return true, nil
 }
 
+func sinkLocation(selectedSink sink, path string) string {
+	if selectedSink.canonicalSymlink {
+		return selectedSink.base + " -> " + path
+	}
+	return path
+}
+
+func absentFinding(selectedSink sink, path string) sinkFinding {
+	return sinkFinding{selectedSink, "sink absent: " + sinkLocation(selectedSink, path)}
+}
+
+func canonicalAbsentFinding(selectedSink sink) sinkFinding {
+	return sinkFinding{selectedSink, "sink absent: " + selectedSink.base}
+}
+
+func unreadableFinding(selectedSink sink, path string, cause error) sinkFinding {
+	return sinkFinding{selectedSink,
+		fmt.Sprintf("sink unreadable: %s: %v", sinkLocation(selectedSink, path), cause)}
+}
+
+func canonicalUnreadableFinding(selectedSink sink, cause error) sinkFinding {
+	return sinkFinding{selectedSink,
+		fmt.Sprintf("sink unreadable: %s: %v", selectedSink.base, cause)}
+}
+
+type unreadableLogError struct {
+	err error
+}
+
+func (e *unreadableLogError) Error() string { return e.err.Error() }
+func (e *unreadableLogError) Unwrap() error { return e.err }
+
 func readFile(path string, sequence int64, filter filters) ([]record, int64, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, sequence, 1, fmt.Errorf("open log %q: %w", path, err)
+		return nil, sequence, 1, &unreadableLogError{fmt.Errorf("open log %q: %w", path, err)}
 	}
 	records, next, nextLine, scanErr := scanRecords(file, path, 1, sequence, filter)
 	closeErr := file.Close()
 	if scanErr != nil {
 		if closeErr != nil {
-			return nil, sequence, 1, errors.Join(scanErr, fmt.Errorf("close log %q: %w", path, closeErr))
+			return nil, sequence, 1, errors.Join(scanErr,
+				&unreadableLogError{fmt.Errorf("close log %q: %w", path, closeErr)})
 		}
 		return nil, sequence, 1, scanErr
 	}
 	if closeErr != nil {
-		return nil, sequence, 1, fmt.Errorf("close log %q: %w", path, closeErr)
+		return nil, sequence, 1, &unreadableLogError{fmt.Errorf("close log %q: %w", path, closeErr)}
 	}
 	return records, next, nextLine, nil
 }
@@ -317,7 +438,7 @@ func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, f
 		line++
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, sequence, line, fmt.Errorf("read log %q: %w", path, err)
+		return nil, sequence, line, &unreadableLogError{fmt.Errorf("read log %q: %w", path, err)}
 	}
 	return records, sequence, line, nil
 }
@@ -392,7 +513,7 @@ func sortRecords(records []record) {
 	})
 }
 
-func emit(records []record, mode string) error {
+func emit(records []record, findings []sinkFinding, mode string) error {
 	switch mode {
 	case "json":
 		for _, rec := range records {
@@ -414,7 +535,24 @@ func emit(records []record, mode string) error {
 			}
 		}
 	case "harvest":
-		return emitHarvest(records)
+		return emitHarvest(records, findings)
+	}
+	if len(findings) != 0 {
+		if _, err := fmt.Fprintf(os.Stderr, "logs-reader: %d sink finding(s)\n", len(findings)); err != nil {
+			return err
+		}
+		for _, finding := range findings {
+			identity := finding.sink.workspaceDir
+			if finding.sink.workspaceID != "" {
+				identity = finding.sink.workspaceID + " " + identity
+			}
+			if identity == "" {
+				identity = "central"
+			}
+			if _, err := fmt.Fprintf(os.Stderr, "logs-reader: %s [%s]\n", finding.message, identity); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -455,7 +593,7 @@ type harvestKey struct {
 	message      string
 }
 
-func emitHarvest(records []record) error {
+func emitHarvest(records []record, findings []sinkFinding) error {
 	counts := make(map[harvestKey]int)
 	for _, rec := range records {
 		workspaceID, workspaceDir := rec.WorkspaceID, rec.WorkspaceDir
@@ -466,6 +604,17 @@ func emitHarvest(records []record) error {
 				rec.Operation, rec.Timestamp, workspaceID, workspaceDir)
 		}
 		counts[harvestKey{workspaceID, workspaceDir, rec.Level, rec.Runtime, rec.Operation, oneLine(rec.Message)}]++
+	}
+	for _, finding := range findings {
+		workspaceID, workspaceDir := finding.sink.workspaceID, finding.sink.workspaceDir
+		if workspaceID == "" && workspaceDir == "" {
+			workspaceID, workspaceDir = "central", "-"
+		} else if workspaceID == "" || workspaceDir == "" {
+			return fmt.Errorf("harvest finding has incomplete workspace attribution: workspace_id=%q workspace_dir=%q message=%q",
+				workspaceID, workspaceDir, finding.message)
+		}
+		counts[harvestKey{workspaceID, workspaceDir, "finding", finding.sink.runtime,
+			"logs.sink", oneLine(finding.message)}]++
 	}
 	keys := make([]harvestKey, 0, len(counts))
 	for key := range counts {
@@ -509,7 +658,7 @@ func follow(mode string, states []followState, filter filters, sequence int64) e
 				batch = append(batch, loaded...)
 			}
 			sortRecords(batch)
-			if err := emit(batch, mode); err != nil {
+			if err := emit(batch, nil, mode); err != nil {
 				return err
 			}
 		}
@@ -517,10 +666,7 @@ func follow(mode string, states []followState, filter filters, sequence int64) e
 }
 
 func readFollow(state *followState, sequence int64, filter filters) ([]record, int64, error) {
-	_, current, err := generationFiles(state.base)
-	if err != nil {
-		return nil, sequence, err
-	}
+	_, current, _ := generationFiles(state.sink)
 	if current == "" {
 		return nil, sequence, nil
 	}
