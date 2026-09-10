@@ -139,7 +139,18 @@ export const taskActConverter: ToolConverter = {
     return taskItem(
       taskId(id),
       { case: "changed", value: create(conversationv1.AgentTaskChangedSchema, {}) },
-      stateOf(call, statusOf(str(call.input, "status"), str(call.input, "activeForm"))),
+      // THE ANNOUNCEMENT LEAVES THE TASK WHERE IT STANDS, so it states no
+      // status at all. `AgentTaskAct.state` is "where the act LEFT the task,
+      // resolved by the producer", and at announcement the act has left it
+      // nowhere: the tracker has not answered, and the status the call ASKED
+      // FOR is not the standing one -- which is the very claim the `rejected`
+      // arm below already refuses to make.
+      //
+      // It was stated here, and it won: a `TaskUpdate(9, completed)` the
+      // tracker REFUSED drew a ticked checklist row, because this optimistic
+      // announcement is re-delivered after the refusal and overwrote it.
+      // Observed in the G52 playbook, three frames deep.
+      stateOf(call, { case: undefined }),
     );
   },
 

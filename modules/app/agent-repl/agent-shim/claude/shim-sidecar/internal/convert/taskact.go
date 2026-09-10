@@ -21,7 +21,7 @@ func taskActSettled(call openCall, result map[string]any, failed bool, failure *
 
 	act := &conversationv1.AgentTaskAct{
 		Task:  &conversationv1.AgentTaskId{Value: id},
-		State: taskState(task, call.input),
+		State: taskState(task, call.input, failed, call.name == "TaskCreate"),
 	}
 	switch {
 	case failed:
@@ -42,7 +42,26 @@ func taskActSettled(call openCall, result map[string]any, failed bool, failure *
 // THE TRACKER IS A DAG, NOT A LIST: the blocks/blocked_by edges are the ordering
 // the author actually stated, and a surface drawing tracker order without them
 // is hiding it.
-func taskState(task, input map[string]any) *conversationv1.AgentTaskState {
+//
+// THE STATUS IS THE TRACKER'S TO STATE, NEVER THE CALLER'S ASK, and this read
+// it the other way round twice over.
+//
+//   - A REFUSED act took the status out of the CALL'S OWN INPUT, so a
+//     `TaskUpdate(9, completed)` the board answered `success:false` resolved
+//     `completed` -- the exact claim the `rejected` arm three lines above
+//     refuses to make, drawn as a TICKED checklist row in the running
+//     application. Observed in the G50-52 playbook: this file-plane act is
+//     re-delivered after the stream-plane refusal and wins. A rejection now
+//     reads only what the tracker itself echoed.
+//   - AN UNSTATED STATUS RESOLVED `pending`, inventing a status nobody stated:
+//     an update that moved only a subject or an edge said nothing about where
+//     the task stands, and `AgentTaskState.status` is a oneof precisely so
+//     that is representable. It is left UNSET now, exactly as the shim's own
+//     TypeScript converter leaves it, and the footer keeps the task where it
+//     stands. A CREATE is the one exception and keeps the default, because
+//     the create tool takes no status and a new entry IS "recorded and not
+//     begun".
+func taskState(task, input map[string]any, failed, isCreate bool) *conversationv1.AgentTaskState {
 	state := &conversationv1.AgentTaskState{
 		Subject:     firstNonEmpty(str(pick(task, "subject", "title")), str(pick(input, "subject", "title"))),
 		Description: firstNonEmpty(str(task["description"]), str(input["description"])),
@@ -50,7 +69,11 @@ func taskState(task, input map[string]any) *conversationv1.AgentTaskState {
 		Blocks:      taskIDs(pick(task, "blocks")),
 		BlockedBy:   taskIDs(pick(task, "blocked_by", "blockedBy")),
 	}
-	switch firstNonEmpty(str(task["status"]), str(input["status"])) {
+	named := str(task["status"])
+	if !failed {
+		named = firstNonEmpty(named, str(input["status"]))
+	}
+	switch named {
 	case "in_progress", "running", "active":
 		state.Status = &conversationv1.AgentTaskState_Running{Running: &conversationv1.AgentTaskRunning{
 			ActiveForm: optionalString(pick(task, "active_form", "activeForm")),
@@ -59,8 +82,12 @@ func taskState(task, input map[string]any) *conversationv1.AgentTaskState {
 		state.Status = &conversationv1.AgentTaskState_Completed{Completed: &conversationv1.AgentTaskCompleted{}}
 	case "deleted", "removed", "cancelled":
 		state.Status = &conversationv1.AgentTaskState_Deleted{Deleted: &conversationv1.AgentTaskDeleted{}}
-	default:
+	case "pending":
 		state.Status = &conversationv1.AgentTaskState_Pending{Pending: &conversationv1.AgentTaskPending{}}
+	default:
+		if isCreate {
+			state.Status = &conversationv1.AgentTaskState_Pending{Pending: &conversationv1.AgentTaskPending{}}
+		}
 	}
 	return state
 }

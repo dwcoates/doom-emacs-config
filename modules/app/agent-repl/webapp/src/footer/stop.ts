@@ -41,6 +41,8 @@ import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+import { INTERRUPT_OUTCOME_MS } from "../feed/rows/subagent.js";
+import { stopTicking, tick } from "../feed/ticking.js";
 
 /** The stop glyph: a filled square, the one shape a stop control has. */
 export const STOP_GLYPH = "■";
@@ -68,36 +70,60 @@ export function buildInterruptRequest(
 }
 
 /**
- * The turn stop, drawn beside the clock while a turn is live.
+ * THE FOOTER'S TWO STOP CONTROLS, BUILT ONCE AND RE-PARENTED, NEVER REBUILT.
  *
- * The strip mounts this only when the clock's instant is set, so the control's
- * mere presence is the statement that there is something to stop; it never
- * draws a disabled stop for an idle session.
+ * WHY THEY OUTLIVE A REDRAW, and it is a defect rather than an optimization.
+ * The footer draws its whole view on EVERY push (`footer.ts`), and a stop is
+ * the one thing on it whose answer is not pushed: the note, the refusal and
+ * the confirm challenge are this click's own, drawn at the control. A stop
+ * ALWAYS causes the next push — the live set it just emptied is in the view —
+ * so a control rebuilt per draw loses its answer within milliseconds of
+ * receiving it. Measured in the G51 playbook: the daemon answered
+ * `interrupted_detached count=3`, and the footer that came back carried a bare
+ * "stop all" with no note anywhere on it. The fan-wide stop's COUNT is the one
+ * place that number is ever stated, so it was unreadable in practice.
+ *
+ * So the footer builds these ONCE per mount and each draw appends the SAME
+ * element, which moves it into the fresh dock with whatever it is carrying.
+ * Nothing here is remembered across a workspace: the controls belong to the
+ * mount, and disposing the footer drops them with it.
  */
-export function drawTurnStopControl(ctx: AppContext): HTMLElement {
-  return interruptControl(ctx, {
-    target: "turn",
-    className: "footer-stop footer-stop-turn",
-    label: "stop",
-    title: "stop the running turn",
-    operation: "footer.stop.turn",
-  });
+export interface StopControls {
+  /**
+   * The turn stop, drawn beside the clock while a turn is live.
+   *
+   * The strip mounts it only when the clock's instant is set, so the control's
+   * mere presence is the statement that there is something to stop; it never
+   * draws a disabled stop for an idle session.
+   */
+  readonly turn: HTMLElement;
+  /**
+   * The agents panel's fan-wide stop, drawn in the panel header.
+   *
+   * The panel is the list of live subagents, so the header is where a "stop all
+   * of these" belongs — the rows beneath it are exactly what the click ends.
+   */
+  readonly allAgents: HTMLElement;
 }
 
-/**
- * The agents panel's fan-wide stop, drawn in the panel header.
- *
- * The panel is the list of live subagents, so the header is where a "stop all
- * of these" belongs — the rows beneath it are exactly what the click ends.
- */
-export function drawAgentsPanelStopAll(ctx: AppContext): HTMLElement {
-  return interruptControl(ctx, {
-    target: "allAgents",
-    className: "footer-stop footer-stop-all",
-    label: "stop all",
-    title: "stop every live agent",
-    operation: "footer.stop.all-agents",
-  });
+/** Build the pair. One call per footer mount. */
+export function createStopControls(ctx: AppContext): StopControls {
+  return {
+    turn: interruptControl(ctx, {
+      target: "turn",
+      className: "footer-stop footer-stop-turn",
+      label: "stop",
+      title: "stop the running turn",
+      operation: "footer.stop.turn",
+    }),
+    allAgents: interruptControl(ctx, {
+      target: "allAgents",
+      className: "footer-stop footer-stop-all",
+      label: "stop all",
+      title: "stop every live agent",
+      operation: "footer.stop.all-agents",
+    }),
+  };
 }
 
 interface ControlSpec {
@@ -202,7 +228,7 @@ function drawAnswer(
   const result = requireCase(response.result, "InterruptResponse.result");
   switch (result.case) {
     case "success":
-      drawOutcome(wrapper, result.value, spec);
+      drawOutcome(ctx, wrapper, result.value, spec);
       return;
     case "error": {
       const kind = requireCase(result.value.kind, "InterruptError.kind");
@@ -254,13 +280,33 @@ export function drawInterruptSuccess(success: InterruptSuccess, path: string): H
   return note;
 }
 
-function drawOutcome(wrapper: HTMLElement, success: InterruptSuccess, spec: ControlSpec): void {
+function drawOutcome(
+  ctx: AppContext,
+  wrapper: HTMLElement,
+  success: InterruptSuccess,
+  spec: ControlSpec,
+): void {
   const note = drawInterruptSuccess(success, "InterruptSuccess");
   log("info", `the stop answered ${note.getAttribute("data-stop-outcome") ?? ""}`, {
     operation: `${spec.operation}-answered`,
     context: { target: spec.target, outcome: note.getAttribute("data-stop-outcome") },
   });
   wrapper.appendChild(note);
+  // THE CONTROL NOW OUTLIVES A REDRAW, so the answer needs an end of its own:
+  // it is a statement about a click, not standing state, and the same span the
+  // detached bubble's stop uses is the one it gets. Without this the note would
+  // sit on the control until the next stop replaced it.
+  expireOutcome(ctx, note);
+}
+
+/** Clear a stop's answer once its say has been had. */
+function expireOutcome(ctx: AppContext, note: HTMLElement): void {
+  const deadline = ctx.ticker.now() + INTERRUPT_OUTCOME_MS;
+  tick(note, ctx.ticker, (nowMs) => {
+    if (nowMs < deadline) return;
+    stopTicking(note);
+    note.remove();
+  });
 }
 
 /**
