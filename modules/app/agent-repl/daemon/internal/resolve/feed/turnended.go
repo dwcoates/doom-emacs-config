@@ -158,9 +158,11 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 		return errored
 	}
 
+	var endedOn *conversationv1.ApiRequestFailed
 	if api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed); ok {
-		vendorMessage = api.ApiRequestFailed.GetMessage()
-		sentence = apiErrorArm(errored, api.ApiRequestFailed)
+		endedOn = api.ApiRequestFailed
+		vendorMessage = endedOn.GetMessage()
+		sentence = apiErrorArm(errored, endedOn)
 	} else {
 		sentence = producerErrorArm(errored, failure, s.turnRefusals[turn])
 		vendorMessage = strings.Join(failure.GetErrors(), "; ")
@@ -169,11 +171,53 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 	// The turn's own EVIDENCE — a mid-turn api error that was retried, a
 	// compaction that failed — rides the headline, because the turn's terminal
 	// is the one place a reader is looking when they ask what went wrong.
-	if evidence := s.turnEvidence[turn]; len(evidence) > 0 {
+	//
+	// A TURN NEVER RESTATES THE FAILURE IT DIED OF, and that is a race being
+	// closed rather than a nicety. The vendor's failure reaches this resolver
+	// TWICE by two independent producers: the sidecar tailing the session
+	// transcript's `system:api_error` line, and the shim's own stream terminal.
+	// So an api failure that ENDS a turn also arrives as mid-turn evidence, and
+	// which of the two lands first is a schedule nobody controls. Measured in
+	// one playtest run of the twelve `!api-*` arms (e2e/playtest_17_failure_
+	// arms_test.go): the evidence lost that race by 17ms on `api-429` and won
+	// it by 3ms on `api-401`, so ONE run drew two different headlines for the
+	// same shape of failure. The evidence line's own words settle which is
+	// right — it says the turn WENT ON, which is false of the failure that
+	// ended it — so the terminal drops its own failure from its evidence and
+	// the headline is the arm's sentence whatever the schedule. A DIFFERENT
+	// mid-turn failure still rides: a 429 the turn survived and a 500 it then
+	// died of are two facts, and the reader wants both.
+	evidence, dropped := evidenceBesides(s.turnEvidence[turn], endedOn)
+	if dropped > 0 {
+		r.logger(s.id).Debug("daemon.feed.terminal_evidence_is_the_terminal",
+			"the turn's terminal did not restate the api failure it ended on",
+			dlog.Context{"dropped": dropped, "turn": turn})
+	}
+	if len(evidence) > 0 {
 		sentence = sentence + " (" + strings.Join(evidence, "; ") + ")"
 	}
 	applyHeadline(errored, headline{Text: sentence}, vendorMessage)
 	return errored
+}
+
+// evidenceBesides is a turn's evidence sentences, minus the mid-turn api
+// failure the turn's terminal IS. `endedOn` is nil when the turn did not end on
+// an api failure at all, and then every line stands. The count of what was
+// dropped is answered so the suppression is RECORDED rather than silent.
+//
+// The vendor's message is the discriminator because it is the SAME record
+// reaching this resolver by two paths, so the two carry one string; a mid-turn
+// failure the turn survived says something else and is kept.
+func evidenceBesides(lines []turnEvidenceLine, endedOn *conversationv1.ApiRequestFailed) (texts []string, dropped int) {
+	texts = make([]string, 0, len(lines))
+	for _, line := range lines {
+		if endedOn != nil && line.apiFailure && line.apiMessage == endedOn.GetMessage() {
+			dropped++
+			continue
+		}
+		texts = append(texts, line.text)
+	}
+	return texts, dropped
 }
 
 // apiErrorArm maps the vendor's own error taxonomy onto the feed's, and words
