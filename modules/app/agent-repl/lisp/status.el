@@ -298,8 +298,9 @@ exist before its workspace directory is known."
 ;;   1. Named constants — every color / label / font-weight literal lives
 ;;      in a `agent-repl--color-*' / `--label-*' / `--tab-weight' defconst.
 ;;   2. `agent-repl--tab-default' and `agent-repl--tab-palette' — the
-;;      two defconsts that compose those named values into per-state
-;;      appearance specs.  No palette row contains a string literal,
+;;      default-spec FUNCTION (it reads the bar's own background, which
+;;      only the frame can answer) and the palette defconst that compose
+;;      those named values into per-state appearance specs.  No palette row contains a string literal,
 ;;      and no palette row spells its own shape out either: every one
 ;;      is built by `agent-repl--tab-palette-row'.
 ;;   3. Faces — four `defface' forms that reference the same named
@@ -394,36 +395,30 @@ the misread this color exists to prevent.")
 (defconst agent-repl--color-dark             "black"
   "Dark foreground for light state backgrounds.")
 
-(defconst agent-repl--color-unarmed-bg       "#4a4a4a"
-  "Background for a tab whose arm takes NO state color.
-
-THE UN-ARMED TAB IS A PAIR LIKE EVERY OTHER ROW, and it is spelled here
-because it was the one appearance that was not.  `:none', `:inactive'
-and the terminal merge arms take no lifecycle color, and the tab was
-drawn by leaving its background and foreground `unspecified' — which
-means \"whatever this frame's faces happen to resolve to\".  Measured on
-the playtest's own frame, that resolved to a name run of BLACK glyphs on
-`#14141a' (a contrast ratio of about 1.06:1) and a bracket numeral of
-WHITE on the tab bar's own `#d9d9d9' (about 1.3:1): a tab nobody could
-read, in two different ways at once, and both of them invisible to every
-assertion because the STRING was correct and only its resolved value was
-not.
-
-`agent-repl--tab-palette-row' already promises that every row states a
-foreground legible against its background.  An inherited value can make
-no such promise — it is a different color on a themed frame than on an
-unthemed one — so the un-armed row states BOTH halves outright, and is
-legible on either.
-
-A NEUTRAL DARK GREY, deliberately clear of all five state colors and of
-`agent-repl--color-selected-bg': it must not read as a sixth state.")
-
-(defconst agent-repl--color-unarmed-fg       "white"
-  "Foreground for a tab whose arm takes no state color.
-White on `agent-repl--color-unarmed-bg\=' is a contrast ratio of about
-8.6:1, well clear of the floor `agent-repl-tab-contrast-floor\=' states,
-and it does not move with the theme because neither half of the pair is
-inherited.")
+;; THERE IS NO `agent-repl--color-unarmed-bg' HERE ANY MORE, and its absence is
+;; the point: AN UNSELECTED TAB SITS FLUSH ON THE BAR.  Its name region takes
+;; the TAB BAR's own background, read off the `tab-bar' face at render time by
+;; `agent-repl--tab-bar-background', so the only thing separating one
+;; unselected tab from the bar it sits in is the text drawn on it.
+;;
+;; It was a stated dark grey (`#4a4a4a') for exactly one day, and that grey was
+;; the overshoot of a real fix.  The defect was a tab that stated NEITHER half
+;; of its pair: `:none', `:inactive' and the terminal merge arms take no
+;; lifecycle color, and the tab was drawn by leaving background and foreground
+;; `unspecified' — "whatever this frame's faces happen to resolve to".  Measured
+;; on the playtest's own frame that came out as a name run of BLACK glyphs on
+;; `#14141a' (about 1.06:1) and a bracket numeral of WHITE on the tab bar's own
+;; `#d9d9d9' (about 1.3:1): a tab nobody could read, in two ways at once, and
+;; both invisible to every assertion because the STRING was correct and only its
+;; resolved value was not.
+;;
+;; ONLY THE FOREGROUND HALF OF THAT FIX SURVIVES, because only the foreground
+;; half was the defect.  A background painted to match the bar cannot be
+;; illegible against the bar; what can be illegible is the ink on it, and that
+;; is now CHOSEN against the bar's measured background rather than inherited
+;; (`agent-repl--tab-bar-legible-fg').  So the pair is still stated outright,
+;; still holds on a themed frame and on the no-theme sandbox, and no longer
+;; introduces a grey that reads as a sixth state.
 
 (defconst agent-repl-tab-contrast-floor 3.0
   "The contrast ratio every tab's own foreground/background pair must meet.
@@ -478,6 +473,57 @@ ask ONE function rather than each carrying its own arithmetic."
          (darker  (min a b)))
     (/ (+ lighter 0.05) (+ darker 0.05))))
 
+(defun agent-repl--tab-bar-background ()
+  "Return the color THIS frame paints the tab bar's own background.
+
+Read off the `tab-bar\=' face with inheritance resolved, so it is whatever
+the active theme says the bar is, and `grey\='/`grey85\=' on the no-theme
+sandbox frame where `tab-bar\=' falls back to its own defface.
+
+IT IS READ, NEVER SPELLED.  An unselected tab must be the same color as
+the bar it sits in, and a literal here would be that color on exactly one
+theme — which is how the tab bar came to draw a white numeral on its own
+`#d9d9d9\=' and call it an appearance.
+
+A bar whose background this frame cannot resolve is an ERROR rather than
+a guess: every caller is about to pair a foreground with this color and
+check that pair against `agent-repl-tab-contrast-floor\=', and a color
+invented here would let an illegible pair pass the very check that exists
+to catch it.  `default\=' is deliberately NOT consulted as a second
+choice — in a batch frame it answers the pseudo-color
+\=`unspecified-bg\=', which no contrast arithmetic can read."
+  (let ((bg (face-background 'tab-bar nil t)))
+    (unless (and (stringp bg) (color-name-to-rgb bg))
+      (error "agent-repl: this frame resolves the tab bar's background to %S, so an unselected tab has no ground to draw on" bg))
+    bg))
+
+(defun agent-repl--tab-bar-legible-fg (&optional background)
+  "Return the foreground to draw an unselected tab's text in.
+
+BACKGROUND defaults to `agent-repl--tab-bar-background\=' — the ground the
+text will actually sit on, since an unselected tab is painted the bar's
+own color.
+
+The choice is between the palette's two existing foregrounds,
+`agent-repl--color-light\=' and `agent-repl--color-dark\=', and it is the
+one with MORE contrast against BACKGROUND.  That is what makes the pair
+theme-proof without a theme-specific literal anywhere: the better of
+black and white clears `agent-repl-tab-contrast-floor\=' against ANY
+background, because the two ratios are only equal at a luminance where
+each is about 4.58:1 — over the 3.0:1 floor with room to spare.
+
+There is no third candidate on purpose.  A foreground derived from the
+background by some luminance rule would land on colors the rest of the
+palette never uses, and this surface's whole vocabulary is that a tab's
+ink is light or dark and its GROUND carries the meaning."
+  (let* ((bg (or background (agent-repl--tab-bar-background)))
+         (light agent-repl--color-light)
+         (dark  agent-repl--color-dark))
+    (if (>= (agent-repl-color-contrast-ratio light bg)
+            (agent-repl-color-contrast-ratio dark bg))
+        light
+      dark)))
+
 ;; There are no bracket-label glyphs.  The [N] bracket carries its number
 ;; and the state's COLOR, nothing else: a glyph beside the numeral was a
 ;; second vocabulary saying what the color already says, and the sidebar
@@ -486,27 +532,35 @@ ask ONE function rather than each carrying its own arithmetic."
 (defconst agent-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
 
-(defconst agent-repl--tab-default
-  `(:unselected (:bg ,agent-repl--color-unarmed-bg
-                 :fg ,agent-repl--color-unarmed-fg
-                 :bracket-fg ,agent-repl--color-unarmed-fg
-                 :weight ,agent-repl--tab-weight)
-    :selected   (:bg ,agent-repl--color-selected-bg
-                 :fg ,agent-repl--color-dark
-                 :bracket-fg ,agent-repl--color-dark
-                 :weight ,agent-repl--tab-weight))
-  "Default tab-appearance spec for states absent from `agent-repl--tab-palette'.
+(defun agent-repl--tab-default ()
+  "Default tab-appearance spec for states absent from `agent-repl--tab-palette\='.
 
-THE UNSELECTED HALF STATES BOTH COLORS, where it once left both
-`unspecified' and took `agent-repl--color-default-bracket' — white — for
-its numeral.  That numeral was white over whatever the frame resolved
-the tab bar to, which on the playtest's own frame was `#d9d9d9': about
-1.3:1, and unreadable.  See `agent-repl--color-unarmed-bg' for the
-measurement and for why an inherited value cannot make the legibility
-promise the palette's rows all make.
+THE UNSELECTED HALF IS THE BAR'S OWN BACKGROUND with a foreground chosen
+against it, which is why this is a FUNCTION and not the defconst it used
+to be: the bar's color is a property of the frame's theme, so it can only
+be read at render time (`agent-repl--tab-bar-background\=').  A constant
+folded at load time would be the color of whatever theme happened to be
+active when this file loaded — and would go stale the moment one was
+enabled.
 
-The SELECTED half already stated its pair and is unchanged: a selected
-tab is grey with a dark numeral on it, whatever the theme.")
+An unselected tab therefore sits FLUSH on the bar: no grey, no second
+ground, nothing but its text to separate it from the bar it lives in.
+What it does NOT do is inherit its foreground, which is the defect the
+un-armed row exists for — see the comment above
+`agent-repl-tab-contrast-floor\=' for the measurement.
+
+The SELECTED half states a pair of literals and is unchanged: a selected
+tab is grey with a dark numeral on it, whatever the theme."
+  (let* ((bg (agent-repl--tab-bar-background))
+         (fg (agent-repl--tab-bar-legible-fg bg)))
+    `(:unselected (:bg ,bg
+                   :fg ,fg
+                   :bracket-fg ,fg
+                   :weight ,agent-repl--tab-weight)
+      :selected   (:bg ,agent-repl--color-selected-bg
+                   :fg ,agent-repl--color-dark
+                   :bracket-fg ,agent-repl--color-dark
+                   :weight ,agent-repl--tab-weight))))
 
 ;; --- The six-color assignment --- ;;
 
@@ -1010,7 +1064,7 @@ Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
   (let* ((row (alist-get state agent-repl--tab-palette))
          (key (if selected :selected :unselected)))
     (or (plist-get row key)
-        (plist-get agent-repl--tab-default key))))
+        (plist-get (agent-repl--tab-default) key))))
 
 (defun agent-repl--tab-spec-bracket-only (state selected)
   "Return appearance spec applying STATE's color to the [N] bracket only.
@@ -1074,8 +1128,7 @@ never prompted, or went quiet after a clean conclusion.")
 background work (yellow).")
 
 (defface agent-repl-tab-unarmed
-  `((t :background ,agent-repl--color-unarmed-bg
-       :foreground ,agent-repl--color-unarmed-fg
+  `((t :inherit tab-bar
        :weight ,agent-repl--tab-weight))
   "Face for the name of an unselected tab carrying NO state color.
 
@@ -1084,10 +1137,18 @@ terminal merge arms — plus a workspace the roster has not spoken about
 yet, and one whose full-tab color is suppressed because its panels are
 dismissed or its `:ready' view has been acknowledged.
 
-It exists because this was the only appearance in the whole palette with
-no foreground/background pairing: it fell through to Doom's
-`+workspace-tab-face', which inherits both from the frame.  See
-`agent-repl--color-unarmed-bg' for the measurement.")
+IT INHERITS `tab-bar', deliberately and only for its background: an
+unselected tab is the same color as the bar it sits in, so it takes that
+color from the bar itself rather than restating it.
+
+IT DOES NOT INHERIT ITS FOREGROUND, and that is the whole reason this
+face exists rather than Doom's `+workspace-tab-face'.  That one inherits
+BOTH halves from the frame, which is no pairing at all — measured, it
+drew BLACK glyphs on `#14141a', about 1.06:1.  The foreground is chosen
+against the bar's measured background by
+`agent-repl--tab-bar-legible-fg' and applied over this face by
+`agent-repl--tab-face', because no `defface' spec can express \"whichever
+of black and white can be read on this bar\".")
 
 (defface agent-repl-tab-merging
   `((t :background ,agent-repl--color-merging-purple
@@ -1175,22 +1236,43 @@ whenever an entry landed at a wrap (or the final row's) end."
             " ")))
 
 (defun agent-repl--tab-face (state selected)
-  "Return the face symbol for the NAME portion of a tab.
-For unselected tabs, uses the palette row's `:face' or falls back to
-`agent-repl-tab-unarmed'.  For selected tabs, always uses the Doom
-selected-tab face so selection dims the state color.
+  "Return the face for the NAME portion of a tab.
+For an unselected ARMED tab this is the palette row's `:face' symbol —
+the arm's color, untouched.  For a selected tab it is always the Doom
+selected-tab face, so selection dims the state color.  For an unselected
+UN-ARMED tab it is `agent-repl--tab-unarmed-face', which is a face SPEC
+rather than a symbol.
 
 THE UNSELECTED FALLTHROUGH IS THIS MODULE'S OWN FACE, not Doom's
 `+workspace-tab-face'.  Every other row here states a foreground legible
 against its background; that one inherited both from the frame, which is
 no pairing at all — measured, it drew BLACK glyphs on `#14141a', about
-1.06:1.  `agent-repl-tab-unarmed' states the pair, so an un-armed tab is
-as readable as an armed one and does not change legibility with the
-theme."
-  (if selected
-      (agent-repl--ws-tab-selected-face)
-    (or (plist-get (alist-get state agent-repl--tab-palette) :face)
-        'agent-repl-tab-unarmed)))
+1.06:1."
+  (cond
+   (selected (agent-repl--ws-tab-selected-face))
+   ((plist-get (alist-get state agent-repl--tab-palette) :face))
+   (t (agent-repl--tab-unarmed-face))))
+
+(defun agent-repl--tab-unarmed-face ()
+  "Return the face spec for the name of an unselected UN-ARMED tab.
+
+A list of two face references, innermost-wins order: the pair measured
+off the bar THIS frame is drawing, then `agent-repl-tab-unarmed' for
+everything else the face says (its weight, and whatever a Doom user has
+customized on it).
+
+WHY A SPEC AND NOT JUST THE FACE SYMBOL.  The background half of the
+pair is the BAR's own background, and the foreground half is chosen
+against it — both answers only the live frame can give
+\(`agent-repl--tab-bar-background', `agent-repl--tab-bar-legible-fg').  A
+`defface' is evaluated once, so it can inherit the bar's background but
+cannot state a foreground measured against it; stating the resolved pair
+here is what makes an un-armed tab as readable as an armed one on a
+themed frame and on the no-theme sandbox alike."
+  (let ((bg (agent-repl--tab-bar-background)))
+    (list (list :background bg
+                :foreground (agent-repl--tab-bar-legible-fg bg))
+          'agent-repl-tab-unarmed)))
 
 (defun agent-repl--tab-priority-image-str (name)
   "Return a propertized image string for workspace NAME's priority, or nil."
