@@ -239,11 +239,20 @@ buffer that was created (or session-restored) against the wrong dir."
     buf))
 
 (defun agent-repl--drain-pending-show-panels (ws)
-  "Show WS's session if a preemptive prompt queued a :pending-show-panels flag.
+  "Show WS's session if something armed the :pending-show-panels flag.
 Clears the flag and shows the session through WS's frontend (the
-webview).  A generated workspace is born with this flag set and its
-session booted headlessly (`agent-repl--frontend-boot-session'), so
-this drain is where a gui workspace first becomes visible."
+webview).  The gui pre-creates a workspace's page WITHOUT displaying it
+\(`agent-repl--gui-boot'), so this drain is where a gui workspace first
+becomes visible.
+
+WHO ARMS IT: `agent-repl-switch-to-project' for the workspace a
+projectile switch is about to stand on -- which is how a workspace you
+just created comes up showing itself -- and
+`agent-repl--land-after-teardown' for the workspace a teardown moves the
+user to.  Both go through `agent-repl--arm-landing-panels' and both arm
+BEFORE the switch, so the flag is set by the time the persp activation
+hook drains it.  (The old headless birth path armed it too; it went with
+`agent-repl--frontend-boot-session', which no longer exists.)"
   (if (not (agent-repl--ws-get ws :pending-show-panels))
       ;; The no-op branch is the one a persp placeholder reaches (it owns no
       ;; pending flags), so its record is screened for routability.
