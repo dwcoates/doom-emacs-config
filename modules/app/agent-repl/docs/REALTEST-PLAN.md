@@ -1,0 +1,126 @@
+# Realtests — the plan
+
+The owner's ruling, 2026-09-10. This document is the reference for every
+realtest; a realtest that is not in it does not run.
+
+## What a realtest is
+
+A realtest drives the OWNER'S ACTUAL EDITOR: the one Emacs.app process on the
+owner's Mac, the real `~/.config/doom` on master (theme, treemacs, dashboard,
+personal bindings — the owner's environment is the fixture, never a debugging
+target), the real `~/.claude-emacs` state, the real store, sidecar, shim and
+daemon deployed from master, and the owner's real `~/.claude` transcripts.
+There is NO sandbox and NO image. The one substitution is the vendor: the fake
+SDK answers every model call (`AGENT_REPL_FORBID_VENDOR_CALLS=1` on the Emacs
+process, inherited by everything it spawns) so no real Claude call can occur;
+the owner may lift this per test.
+
+Input is what the owner would send: real key events into the real Emacs
+process (`s-}`, `M-2`, `SPC TAB n`, typed prompt text), never an elisp call
+that performs the act. Elisp is read-only, for reading state and asserting.
+
+The editor must not disturb the owner: Emacs is launched without taking focus
+(or focus returns to the owner's application immediately), and NO pictures are
+taken at this stage, so Emacs is never brought frontmost. If key delivery to an
+unfocused Emacs is impossible on macOS, that is surfaced to the owner before
+any alternative is chosen.
+
+## The loop, for every realtest
+
+1. Run the realtest.
+2. Determine issues and potential issues from the logs: every WARN and ERROR
+   in Emacs `*Messages*`, the module log, every workspace's elisp sink,
+   `daemon.run.log`, the store, the sidecar and the shim — whether or not it
+   relates to the test's subject — plus anything that reads wrong (a slow
+   phase, a workspace missing, unexpected modeline text).
+3. Surface them to the owner, with evidence, verbatim. Nothing is fixed here.
+4. The owner decides what is remediated and how.
+5. The lead remediates as ruled, then redeploys master.
+6. The owner tests and confirms on their editor.
+7. The next realtest runs. Only then.
+
+A realtest is remediated if and only if ALL warnings and errors across ALL logs
+are resolved. There is no allowlist.
+
+## Step zero, once, before the first realtest
+
+The previous playtest layer verified the module against a bare sandbox Doom
+profile with elisp-driven acts and is retired entirely: the `playtest` build
+tag and every `e2e/playtest_*_test.go`, `bin/playtest.sh`, the capture and
+settle substrate, `e2e/PLAYTEST-SPEC.md`, `e2e/PLAYTEST-PLAN.md`, the sandbox
+playtest self-tests, and every reference in AGENTS.md files and ledgers. The
+e2e and Emacs-layer suites stay.
+
+## Before each run
+
+- Back up `~/.claude-emacs/wsm.db` (with `-wal`/`-shm`) and the store's
+  `events.db` to timestamped siblings and report the paths.
+- Refuse to run unless every deployed system is at master's HEAD (the
+  readiness report is the judge) and no human is using Emacs.
+- After the run the owner's editor is left working and the stack untouched.
+
+## The set
+
+Startup and shape
+1. Start Emacs cold. Time to usable; which workspaces open and when; what the
+   modeline and tab bar show while waiting.
+2. Quit and restart Emacs with the daemon still up. Same measurements; the
+   daemon is adopted, not rebuilt.
+3. Start Emacs with the daemon down. It is built and spawned; time and
+   feedback for that path.
+
+Workspaces
+4. Switch between workspaces with `s-{`, `s-}` and `M-<n>`. Selection, tab
+   highlight, panel and composer all follow.
+5. Create a workspace (`SPC TAB n`), work in it, delete it. The tab appears,
+   is selected, disappears; the user lands somewhere sensible.
+6. Register a directory (`SPC TAB C-n`); re-open a closed workspace
+   (`SPC TAB o`).
+7. Fork a workspace with its conversation (`SPC TAB f`). The fork carries the
+   history.
+8. Reorder by priority; close, reopen, kill a workspace.
+
+Conversation
+9. Send a prompt, watch it think, read the answer. Tab arm, footer and feed
+   through the whole turn.
+10. Interrupt a running turn.
+11. A permission ask and a multiple-choice question, each answered from the
+    card.
+12. A shell command; a long one that backgrounds; a detached one.
+13. Attach a clipboard image and a region to a prompt; recall history in the
+    composer.
+14. Slash commands: clear, compact, model change, fast mode.
+
+Panels and windows
+15. Hide and reshow the panels (`SPC o c`); fullscreen toggle (`SPC w f`);
+    focus the composer (`SPC o v`); rescue the webview.
+16. Visit a file from a tool card; open in editor.
+
+Daemon lifecycle
+17. Restart the daemon gracefully and forced from inside Emacs. Conversation
+    and selection survive.
+18. Schedule a drain; shut down now. The banner, the held prompts, the
+    handover to a new daemon.
+19. Deploy from master while Emacs runs (`bin/deploy-all.sh`). What the user
+    sees during the bounce.
+
+Failure
+20. Kill the shim under a workspace; the link severs and recovers on the next
+    prompt.
+21. Vendor errors: rate limit, auth failure, refusal. The footer and the
+    terminal rows.
+22. Hibernate an idle workspace; revive it with a prompt.
+
+Scale
+23. Two workspaces thinking at once; six panels open (the connection cap).
+24. A long session: an hour of mixed acts, then the log volume and memory.
+
+## Status
+
+| # | status | ruling |
+|---|---|---|
+| 0 | pending | retire the old playtest layer |
+| 1 | pending | |
+
+The lead updates this table as each realtest runs, is ruled on, and is
+confirmed.
