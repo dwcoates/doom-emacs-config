@@ -636,6 +636,33 @@ from the frame, which is why an un-armed tab drew black glyphs on
 `#14141a\=' — the one appearance in the palette with no pairing at all."
   (should (eq (agent-repl--tab-face nil nil) 'agent-repl-tab-unarmed)))
 
+;;;; ---- Tests: the selection face belongs to the selected tab alone ----
+
+(ert-deftest agent-repl-test-tab-face-selected-takes-the-selection-face ()
+  "A SELECTED tab's name takes Doom's selection face whatever its arm, so
+the highlight says which workspace the user is standing in and nothing
+else does."
+  ;; Arrange / Act / Assert
+  (should (eq (agent-repl--tab-face :ready t) (agent-repl--ws-tab-selected-face))))
+
+(ert-deftest agent-repl-test-tab-face-unselected-armed-takes-the-arm-face ()
+  "An UNSELECTED tab with an arm takes that arm's own face, never the
+selection face: the arm is what it reports, and the selection is not its
+to claim."
+  ;; Arrange / Act / Assert
+  (should-not (eq (agent-repl--tab-face :ready nil) (agent-repl--ws-tab-selected-face)))
+  (should (eq (agent-repl--tab-face :ready nil) 'agent-repl-tab-ready)))
+
+(ert-deftest agent-repl-test-tab-face-selection-does-not-depend-on-the-arm ()
+  "EVERY arm gives the same selected face.  A tab bar whose highlight
+followed the arm rather than the selection would be reporting the wrong
+thing about which workspace is current, and this is the shape that would
+have to break for that to happen."
+  ;; Arrange
+  (dolist (arm (cons nil (mapcar #'car agent-repl--tab-palette)))
+    ;; Act / Assert
+    (should (eq (agent-repl--tab-face arm t) (agent-repl--ws-tab-selected-face)))))
+
 ;;;; ---- Tests: the un-armed tab's legibility ----
 ;;
 ;; Every one of these is one edge case of ONE rule: a tab's own foreground
