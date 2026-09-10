@@ -1486,7 +1486,50 @@ gated push would then drop the very repaint this exists for."
     (should (equal record
                    '(nil "ws-persp-identity: rejected reason=nil-perspective")))))
 
-;;;; ---- Tests: --ws-run-switch-project-function ----
+;;;; ---- Tests: --ws-switch-project-display ----
+
+(ert-deftest agent-repl-test-switch-project-display-workspace-keeps-its-panel ()
+  "A switch to a workspace dir opens NO magit: the panel owns that display."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let (magit-dirs)
+      (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) "ws-one"))
+                ((symbol-function 'doom-real-buffer-list) (lambda (&optional _b) nil))
+                ((symbol-function 'agent-repl--magit-status-same-window)
+                 (lambda (dir) (push dir magit-dirs))))
+        ;; Act.
+        (agent-repl--ws-switch-project-display "/tmp/ws-one/")
+        ;; Assert.
+        (should-not magit-dirs)))))
+
+(ert-deftest agent-repl-test-switch-project-display-empty-project-shows-magit ()
+  "A plain project with nothing open still lands on magit status."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let (magit-dirs)
+      (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) nil))
+                ((symbol-function 'doom-real-buffer-list) (lambda (&optional _b) nil))
+                ((symbol-function 'agent-repl--magit-status-same-window)
+                 (lambda (dir) (push dir magit-dirs))))
+        ;; Act.
+        (agent-repl--ws-switch-project-display "/tmp/plain/")
+        ;; Assert.
+        (should (equal magit-dirs '("/tmp/plain/")))))))
+
+(ert-deftest agent-repl-test-switch-project-display-open-project-opens-nothing ()
+  "A plain project that already has buffers open is left as it is."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let (magit-dirs)
+      (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) nil))
+                ((symbol-function 'doom-real-buffer-list)
+                 (lambda (&optional _b) (list (current-buffer))))
+                ((symbol-function 'agent-repl--magit-status-same-window)
+                 (lambda (dir) (push dir magit-dirs))))
+        ;; Act.
+        (agent-repl--ws-switch-project-display "/tmp/plain/")
+        ;; Assert.
+        (should-not magit-dirs)))))
 
 ;;;; ---- Tests: --record-workspace-history ----
 
