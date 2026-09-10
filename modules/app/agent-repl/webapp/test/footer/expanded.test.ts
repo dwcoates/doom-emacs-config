@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FooterExpandedSchema,
+  FooterStatusIdleActivitySchema,
   type FooterExpanded,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import type { FooterActivity } from "../../src/footer/strip.js";
 import {
   EXPANDED_FOOTER_MAX_ROWS,
   FOOTER_PANELS,
@@ -56,6 +58,89 @@ function drawPanel(
   if (panel === null) throw new Error("the panel was not drawn");
   return { panel, revealed, h };
 }
+
+/** One activity, as the strip resolves it, for the usage rows to expand. */
+function activity(kindCase: string, kindValue: Record<string, unknown>): FooterActivity {
+  return create(FooterStatusIdleActivitySchema, {
+    at: { atMs: BigInt(NOW) },
+    kind: { case: kindCase as never, value: kindValue as never },
+  });
+}
+
+/** The tokens panel, drawn with ACTIVITY standing on the strip. */
+function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
+  const h = harness();
+  const panel = drawFooterExpanded(expanded(), "tokens", {
+    ctx: h.ctx,
+    revealRow: async () => true,
+    activity: kind,
+  });
+  if (panel === null) throw new Error("the panel was not drawn");
+  return panel;
+}
+
+/** The rate-limit activity D33 photographs: both windows, the sample unread. */
+function rateLimited(): FooterActivity {
+  return activity("rateLimited", {
+    session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
+    weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
+    sample: { outcome: { case: "serviceUnavailable", value: {} } },
+  });
+}
+
+describe("drawFooterUsageRows: what the strip could not fit", () => {
+  // THE SECOND WINDOW. The strip cuts it off at 1280 by design; the sheet is
+  // where a reader gets to see it.
+  it("carries the weekly window the strip cut off", () => {
+    const panel = drawTokensPanelWith(rateLimited());
+    expect(
+      panel.querySelector('[data-usage-allowance="weekly"]')?.textContent,
+    ).toContain("weekly 63%");
+  });
+
+  // THE CAVEAT IN FULL. The strip has room for the marker only, so its reason
+  // has exactly one drawn home and this is it.
+  it("carries the unread caveat in full", () => {
+    const panel = drawTokensPanelWith(rateLimited());
+    expect(panel.querySelector('[data-usage="unread"]')?.textContent).toBe(
+      "usage unread — the usage service did not answer",
+    );
+  });
+
+  it("carries the reset countdown of the newsworthy window", () => {
+    const panel = drawTokensPanelWith(rateLimited());
+    expect(
+      panel.querySelector('[data-usage-allowance="session"]')?.textContent,
+    ).toContain("resets in 59m");
+  });
+
+  it("leads with the same window the strip leads with", () => {
+    const panel = drawTokensPanelWith(rateLimited());
+    expect(
+      panel.querySelector("[data-usage-allowance]")?.getAttribute("data-usage-allowance"),
+    ).toBe("session");
+  });
+
+  it("carries the context-budget sentence whole", () => {
+    const panel = drawTokensPanelWith(
+      activity("contextBudget", { text: "The conversation is approaching its context window budget." }),
+    );
+    expect(panel.querySelector('[data-usage="context-budget"]')?.textContent).toBe(
+      "The conversation is approaching its context window budget.",
+    );
+  });
+
+  // AN ACTIVITY ABOUT THE TURN IS NOT ABOUT THE ACCOUNT: a hook line has no
+  // usage to expand, and the sheet says nothing rather than something empty.
+  it("draws no usage rows for an activity that is not about usage", () => {
+    const panel = drawTokensPanelWith(activity("hook", { text: "PreToolUse" }));
+    expect(panel.querySelector("[data-usage]")).toBeNull();
+  });
+
+  it("draws no usage rows when no activity stands at all", () => {
+    expect(drawPanel("tokens").panel.querySelector("[data-usage]")).toBeNull();
+  });
+});
 
 /** Every promise the click chain queued. */
 async function settle(): Promise<void> {

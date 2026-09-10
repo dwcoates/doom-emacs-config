@@ -105,6 +105,17 @@ export interface StripDeps {
 }
 
 /**
+ * What an allowance cell alone needs: the ticker its countdown rides.
+ *
+ * Narrower than `StripDeps` because the tokens sheet draws the same cells and
+ * has no panel selection to hand over — one drawing of an allowance, on both
+ * surfaces, rather than a second one that could word it differently.
+ */
+export interface AllowanceDeps {
+  ctx: AppContext;
+}
+
+/**
  * The strip's cells, in order.
  *
  * The status family draws one or two cells depending on the merge rule, so the
@@ -154,6 +165,18 @@ export type FooterActivity =
   | FooterStatusDisconnectedActivity
   | FooterStatusClosingActivity
   | FooterStatusLoadingActivity;
+
+/**
+ * The standing activity a status carries, or nothing.
+ *
+ * The sheet needs the SAME activity the strip is drawing — the usage content
+ * it expands is the strip's own line, not a second resolution of it — and this
+ * is the one walk that knows which arm parks it where.
+ */
+export function footerStatusActivity(u: FooterStatus): FooterActivity | undefined {
+  const path = "FooterStatus.status";
+  return statusParts(requireCase(u.status, path), path).activity;
+}
 
 /** One status arm's three cells, already resolved. */
 export interface StatusParts {
@@ -710,7 +733,7 @@ export function drawFooterAllowanceSample(
 export function drawFooterAllowance(
   u: FooterAllowance,
   label: string,
-  deps: StripDeps,
+  deps: AllowanceDeps,
   path: string,
 ): HTMLElement {
   const status = u.status.case === undefined ? null : u.status;
