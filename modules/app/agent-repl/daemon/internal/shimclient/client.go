@@ -980,18 +980,30 @@ func recvLoop[T any](stream Stream[T], done <-chan struct{}) (<-chan T, <-chan e
 	return frames, errs
 }
 
-// isSocketGone reports whether a dial error means the listener is not there:
-// ECONNREFUSED or ENOENT on the unix socket.
+// isSocketGone reports whether an error means the process serving the unix
+// socket is not there: ECONNREFUSED or ENOENT on the dial, and ENOTCONN on a
+// connection that was made and then lost before anything could be read off it.
+//
+// ENOTCONN IS THE SAME EVIDENCE ARRIVING ONE INSTANT LATER. A dial to a shim
+// that is on its way out can win the race with the shim's exit and hand back a
+// connected socket whose peer is already gone; the kernel then answers every
+// question about that peer -- `LOCAL_PEERPID' on Darwin, a read on either
+// platform -- with ENOTCONN. Reading that as a hard failure made `killAdopted'
+// report "could not learn the adopted shim's pid; it cannot be stopped" about a
+// shim that had just stopped itself, which is the one thing a caller asking for
+// a stop cannot act on. There is no other way for a socket handed back by a
+// successful `net.Dial' to be unconnected, so the arm is not broader than the
+// evidence it names.
 func isSocketGone(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) || errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) || errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTCONN) {
 		return true
 	}
 	var opErr *net.OpError
 	if errors.As(err, &opErr) {
-		return errors.Is(opErr.Err, syscall.ECONNREFUSED) || errors.Is(opErr.Err, syscall.ENOENT)
+		return errors.Is(opErr.Err, syscall.ECONNREFUSED) || errors.Is(opErr.Err, syscall.ENOENT) || errors.Is(opErr.Err, syscall.ENOTCONN)
 	}
 	return false
 }
