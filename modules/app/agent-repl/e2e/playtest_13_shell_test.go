@@ -21,8 +21,8 @@ import (
 // attributes, read from inside the real webview, and the sentence a reviewer
 // checks is written from what the page said at the instant of the capture.
 //
-// TWO FACTS THE PLAN'S ROW WORDING DID NOT KNOW, both settled by the schema
-// and RECORDED here rather than papered over:
+// THREE FACTS THE PLAN'S ROW WORDING DID NOT KNOW, each settled by the schema
+// or by the producers and RECORDED here rather than papered over:
 //
 //   - A DETACHED SHELL HAS NO SUB-FEED. "A SHELL IS NOT A FEED. It has no
 //     rows, only output, so unlike a subagent bubble there is nothing to open
@@ -30,13 +30,20 @@ import (
 //     plan's "its sub-feed opened" step is asserted as the NEGATIVE it really
 //     is -- the row carries no `[data-expand]` caret and no `[data-subfeed]`
 //     panel -- and the spool box on the row is the whole of what a user sees.
-//   - A FOREGROUND CARD DRAWS NO EXIT CODE, AND NO IMAGE. `FeedToolCallReturned`
-//     (frontend/v1/feed.proto) carries a verdict and an output FORM and
-//     nothing about an exit code; only the detached `FeedShell` has an exit
-//     chip. And the form oneof has no image arm, so `!bash-image` settles
-//     on the `none` form -- the shape detachedbash_e2e_test.go's #37 already
-//     pins. Both are filed in this owner's report; neither is fixable here
-//     without a proto change.
+//   - A FOREGROUND CARD NOW DRAWS ITS IMAGE AND ITS EXIT CODE. Landing 16 gave
+//     `FeedToolCallReturned` the `image` form (the feed's shared
+//     FeedImageBlock) and an `exit` chip (the detached shell's own
+//     FeedShellExit), so `!bash-image` draws the picture and `!bash-fail`
+//     draws a red `exit 3`. Both were filed by this owner as proto needs and
+//     both landed; the rows below assert the landed shapes.
+//   - A TIMED-OUT COMMAND'S CARD DOES NOT SETTLE, AND THAT IS THE CONTRACT.
+//     The vendor auto-backgrounds rather than killing, so its receipt names a
+//     `backgroundTaskId` and the shim answers no terminal for it at all: "A
+//     BACKGROUNDED COMMAND DID NOT END, IT MOVED" (convert/tools/bash.ts),
+//     pinned by that module's own integration test. So `!bash-timeout` is
+//     photographed as the TWO rows it really is -- a `Bash` card still running
+//     and a detached shell row live beneath it -- and the remainder (the card
+//     has no arm that says the work MOVED) is filed rather than asserted.
 
 // playtestBashCardJS answers the `.tool-card` of the Bash tool call whose
 // drawn text contains COMMAND, or null. Rows are matched by their command
@@ -129,10 +136,12 @@ func TestPlaytestShellFamily(t *testing.T) {
 			          card.getAttribute("data-verdict") === "succeeded" &&
 			          card.getAttribute("data-output-form") === "text" &&
 			          card.querySelector("[data-output-body]").textContent.indexOf("one") >= 0 &&
-			          card.querySelector("[data-output-body]").textContent.indexOf("two") >= 0`,
+			          card.querySelector("[data-output-body]").textContent.indexOf("two") >= 0 &&
+			          card.querySelector(".shell-exit") === null`,
 			expected: "A tool card titled `Bash` with the command line `pwd; ls | head`, a SUCCEEDED badge, " +
-				"and an output body carrying the two lines `one` and `two`. No exit code is drawn on a " +
-				"foreground card: the wire carries none (FeedToolCallReturned has no exit field).",
+				"and an output body carrying the two lines `one` and `two`. NO exit chip in the head: this " +
+				"result states no status at all, and absence draws no chip rather than a green `exit 0` the " +
+				"shell never reported.",
 		},
 		{
 			prompt:  "!bash-hold",
@@ -150,34 +159,57 @@ func TestPlaytestShellFamily(t *testing.T) {
 				s.E.Eval(`(agent-repl-restart-workspace t ` + elispString(s.Name) + `)`)
 				s.awaitArm(t, s.Name, "the held turn to settle interrupted", ":interrupted")
 			},
-			settled: `document.querySelector('[data-feed-row][data-row-kind="turnEnded"] [data-arm="interrupted"]') !== null`,
-			expected: "The feed carries the turn's INTERRUPTED terminal row beneath the `Bash` card. The card " +
-				"itself is drawn in whatever state the row's assertion column records (`data-state`), since the " +
-				"held call emitted no result of its own; the footer is idle again.",
+			// THE STOP SETTLES THE CALL IT LANDED INSIDE. The vendor returns no
+			// `tool_result` for a held command -- the captured `interrupt`
+			// session records the stop as a bare `[Request interrupted by
+			// user]` line and nothing else -- so the shim's own cut is what
+			// settles the unit (convert/tools/bash.ts `cut`). Without it the
+			// card went on drawing a running shell inside a turn that had
+			// ended, which is what this playbook found.
+			settled: `card.getAttribute("data-state") === "returned" &&
+			          card.getAttribute("data-verdict") === "succeeded" &&
+			          card.getAttribute("data-output-form") === "text" &&
+			          card.querySelector("[data-output-body]").textContent.indexOf("interrupted by the user") >= 0 &&
+			          document.querySelector('[data-feed-row][data-row-kind="turnEnded"] [data-arm="interrupted"]') !== null`,
+			expected: "The `Bash` card for `tail -f /var/log/system.log` is SETTLED: a SUCCEEDED badge (a stop " +
+				"is not the call breaking) and an output body reading `interrupted by the user` and nothing " +
+				"else -- no output was ever returned, so none is drawn. Beneath it the turn's INTERRUPTED " +
+				"terminal row, and the footer idle again. NOTHING is still drawn running.",
 		},
 		{
 			prompt:  "!bash-fail",
 			command: "exit 3",
 			settled: `card.getAttribute("data-state") === "returned" &&
 			          card.getAttribute("data-verdict") === "succeeded" &&
-			          card.querySelector("[data-output-body]").textContent.indexOf("boom") >= 0`,
+			          card.querySelector("[data-output-body]").textContent.indexOf("boom") >= 0 &&
+			          card.querySelector(".shell-exit") !== null &&
+			          card.querySelector(".shell-exit").getAttribute("data-exit-code") === "3" &&
+			          card.querySelector(".shell-exit").className.indexOf("err") >= 0`,
 			expected: "A tool card titled `Bash` with the command line `exit 3`, a SUCCEEDED badge (a non-zero " +
-				"exit is the command's verdict on itself, never a failure of the call), and an output body " +
-				"carrying `boom`. NO exit code is drawn anywhere on the card: the foreground wire carries none.",
+				"exit is the command's verdict on itself, never a failure of the call), a RED `exit 3` chip in " +
+				"the head beside that badge, and an output body carrying `boom`. The chip is the very one a " +
+				"detached shell wears: the two cards are the same command told twice.",
 		},
 		{
 			prompt:  "!bash-timeout",
 			command: "sleep 600",
-			settled: `card.getAttribute("data-state") === "returned" &&
-			          card.getAttribute("data-verdict") === "succeeded" &&
-			          card.querySelector("[data-output-body]").textContent.indexOf("timed out after") >= 0 &&
+			// THE CARD DOES NOT SETTLE, AND THAT IS THE CONTRACT. The receipt
+			// names a `backgroundTaskId`, so the shim answers no terminal for
+			// it -- "A BACKGROUNDED COMMAND DID NOT END, IT MOVED" -- and the
+			// work goes on as the detached row this waits for. The card
+			// staying `running` is therefore the truth about the command; what
+			// it cannot say is that the run MOVED, which is filed.
+			settled: `card.getAttribute("data-state") === "running" &&
 			          (function () { var sh = ` + playtestShellBubbleJS("sleep 600") + `;
-			                         return sh !== null && sh.getAttribute("data-state") === "live"; })()`,
-			expected: "TWO things for one command. The `Bash` tool card for `sleep 600` is SUCCEEDED with an " +
-				"output body that says it `timed out after` the scenario's two minutes, and beneath it a " +
-				"DETACHED SHELL row for the same command is drawn LIVE -- a running dot, a ticking clock, " +
-				"a spool box with `still going`, a stop button, and NO exit chip -- because the vendor " +
-				"auto-backgrounded the run rather than killing it.",
+			                         return sh !== null && sh.getAttribute("data-state") === "live" &&
+			                                sh.querySelector(".shell-exit") === null &&
+			                                sh.querySelector(".shell-spool").textContent.indexOf("still going") >= 0; })()`,
+			expected: "TWO ROWS FOR ONE COMMAND, and the picture must show both. The `Bash` tool card for " +
+				"`sleep 600` is still drawn RUNNING -- a running marker, no badge, no output body -- and " +
+				"beneath it a DETACHED SHELL row for the same command is LIVE: a `$` command line, a running " +
+				"dot, a ticking clock, a spool box carrying `still going`, a stop button, and NO exit chip. " +
+				"The vendor auto-backgrounded the run rather than killing it, so the command really is still " +
+				"going; the card simply has no way to say the work moved.",
 		},
 		{
 			prompt:  "!bash-spill",
@@ -194,12 +226,14 @@ func TestPlaytestShellFamily(t *testing.T) {
 			command: "screencapture",
 			settled: `card.getAttribute("data-state") === "returned" &&
 			          card.getAttribute("data-verdict") === "succeeded" &&
-			          card.getAttribute("data-output-form") === "none"`,
-			expected: "A tool card titled `Bash` with the command line `screencapture -x -` and a SUCCEEDED " +
-				"badge, and NO OUTPUT BODY AT ALL -- no image, no text. FILED, NOT A PASS: the plan " +
-				"expects the image rendered, and it cannot be: FeedToolCallReturned's form oneof has no " +
-				"image arm, so the daemon's bashOutputText drops the image form to an empty text and " +
-				"the card settles on `none` (the shape detachedbash_e2e_test.go's #37 pins).",
+			          card.getAttribute("data-output-form") === "image" &&
+			          card.querySelector(".tool-image-output img") !== null &&
+			          card.querySelector(".tool-image-output img").getAttribute("src").indexOf("data:image/png;base64,") === 0 &&
+			          card.querySelector(".tool-image-output img").getAttribute("alt").indexOf("screencapture") >= 0`,
+			expected: "A tool card titled `Bash` with the command line `screencapture -x -`, a SUCCEEDED badge, " +
+				"and AN IMAGE where every other card's output body sits -- the scenario's one-pixel PNG, " +
+				"drawn by the very function a prompt's own image block is drawn by, captioned with the " +
+				"command line. The daemon resolved the bytes into a data url; the webview merely loaded it.",
 		},
 	}
 
