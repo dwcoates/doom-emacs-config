@@ -26,6 +26,11 @@
 ;; which is the loader rather than a lisp/ source.
 (defvar agent-repl--config-file)
 
+;; `commands.el' owns `agent-repl-switch-numeral-count', and `config.el'
+;; loads that file before this one; the declaration exists so this file
+;; byte-compiles on its own.
+(defvar agent-repl-switch-numeral-count)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
@@ -130,10 +135,56 @@ the module."
 
 ;; Tabs follow ROSTER ORDER strictly (the resolver orders them, priority
 ;; included), so these two are navigation over a given order and never a
-;; reordering of it.  The push/pull-tab and switch-to-N chords are gone with
-;; client-authored ordering.
+;; reordering of it.  The push/pull-tab chords are gone with client-authored
+;; ordering; the numerals below are not, because a numeral names a SLOT OF
+;; THE DRAWN BAR.
 (map! "s-{" #'agent-repl-switch-left
       "s-}" #'agent-repl-switch-right)
+
+;;;; ---- M-1 .. M-9 : the tab-bar numerals --------------------------------
+
+;; ONE SOURCE OF TRUTH FOR NAVIGATION: THE DRAWN TAB ORDER.  Doom binds
+;; `M-1' .. `M-0' to `+workspace/switch-to-N', which indexes PERSP-MODE'S
+;; perspective list -- Doom's own `main' at slot 0, persp-mode's `none'
+;; among them -- so `M-1' landed on the splash screen with no tab
+;; highlighted and `M-2' on the FIRST tab.  Every chord here indexes
+;; `agent-repl-roster-tab-order' instead, the same list the bar is drawn
+;; from, so the numerals and the picture cannot disagree.  `M-0' is left to
+;; Doom.
+;;
+;; WHY A KEYMAP OF OUR OWN, and not a later `map!' over Doom's.  Doom's
+;; numerals are `:g' bindings, i.e. `global-map' entries, and beating a
+;; `global-map' entry by rebinding it is a LOAD-ORDER RACE: whoever writes
+;; the cell last wins, and a module reload, a Doom upgrade or a `doom sync'
+;; reordering can hand it back.  A minor-mode keymap is consulted BEFORE
+;; `global-map' whatever order the two were installed in, so the shadowing
+;; is structural instead of probabilistic.  It is also the reason the chords
+;; are observable in batch: this map is plain data, where `map!' is a no-op
+;; stub outside a Doom session.
+
+(defvar agent-repl-workspace-numerals-mode-map
+  (let ((map (make-sparse-keymap)))
+    (dotimes (i agent-repl-switch-numeral-count)
+      (let ((n (1+ i)))
+        (define-key map (kbd (format "M-%d" n))
+                    (intern (format "agent-repl-switch-to-workspace-%d" n)))))
+    map)
+  "Keymap carrying `M-1\=' .. `M-9\=', the tab-bar slot chords.
+Built from `agent-repl-switch-numeral-count' and the commands
+`commands.el\=' generates from the same number, so a chord with no
+command behind it -- or a command with no chord -- cannot be spelled.")
+
+(define-minor-mode agent-repl-workspace-numerals-mode
+  "Make `M-1\=' .. `M-9\=' switch to a SLOT OF THE DRAWN TAB BAR.
+Global, and enabled by this module\='s own load, because the chords are
+about the tab bar rather than about any one buffer.  Its keymap shadows
+Doom\='s `global-map\=' numerals structurally; see the commentary above."
+  :global t
+  :lighter nil
+  :group 'agent-repl
+  :keymap agent-repl-workspace-numerals-mode-map)
+
+(agent-repl-workspace-numerals-mode 1)
 
 ;;;; ---- SPC j : tell the agent to do a predefined thing -------------------
 
