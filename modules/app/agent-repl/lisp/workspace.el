@@ -92,6 +92,7 @@
 (declare-function magit-status "ext:magit" (&optional directory cache))
 (declare-function agent-repl--magit-status-same-window "agent-repl-magit" (dir))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
+(declare-function agent-repl--ws-name-for-dir "agent-repl-worktree" (dir))
 (declare-function agent-repl--sidebar-push "sidebar" (&optional force))
 (declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
 (declare-function doom-fallback-buffer "ext:doom" ())
@@ -1865,13 +1866,41 @@ Boundary owned by `workspace.el'."
 ;; in the top-level config.el and were moved here so the persp boundary
 ;; owns persp-mode's own configuration.  Deferred until persp-mode loads.
 
+(defun agent-repl--ws-switch-project-display (dir)
+  "Land a projectile switch to DIR on the display that dir OWNS.
+
+This is `+workspaces-switch-project-function\' -- Doom calls it right
+after `+workspaces-switch-to-project-h\' has switched the perspective,
+to decide what the new perspective shows.
+
+An agent-repl workspace ALREADY OWNS ITS DISPLAY: its panel is what the
+persp activation drains put in the main area, so this function has
+nothing left to choose and returns without touching the layout.  The
+panel is a webview buffer and is deliberately not a `doom-real-buffer-list\'
+member, so without this branch the empty-project fallback below fires for
+every workspace and replaces the panel with magit status -- which is
+exactly what a workspace you just created showed you instead of its
+agent.
+
+For a plain project (no workspace at DIR) the old behavior stands: skip
+the find-file prompt when the project already has buffers open, and show
+magit status when it has none."
+  (let ((ws (agent-repl--ws-name-for-dir dir)))
+    (cond
+     (ws
+      (agent-repl--log ws "ws-switch-project-display: ws=%s dir=%s branch=workspace-panel-owns-display"
+                       ws dir))
+     ((doom-real-buffer-list)
+      (agent-repl--log nil "ws-switch-project-display: dir=%s branch=has-real-buffers" dir))
+     (t
+      (agent-repl--log nil "ws-switch-project-display: dir=%s branch=magit-status" dir)
+      (agent-repl--magit-status-same-window dir)))))
+
 (with-eval-after-load 'persp-mode
-  ;; Skip the find-file prompt when switching to a project that already
-  ;; has an open workspace; show magit instead when there are no buffers.
+  ;; What a project switch lands on -- a workspace's own panel, or magit
+  ;; for a plain project with nothing open.  See the function's docstring.
   (setq +workspaces-switch-project-function
-        (lambda (dir)
-          (unless (doom-real-buffer-list)
-            (agent-repl--magit-status-same-window dir))))
+        #'agent-repl--ws-switch-project-display)
   ;; persp-mode's own session persistence is disabled — agent-repl is the
   ;; single source of truth for workspace save/restore via its snapshot
   ;; mechanism.  -1 disables auto-resume; 0 disables auto-save on kill.
