@@ -210,3 +210,84 @@ func loggedAt(log *dlog.TestLogger, level, operation string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// The shared block drawer
+// ---------------------------------------------------------------------------
+
+// TestDrawUserBlocksSkipsTextTheStripEmptied covers the block whose whole text
+// was a sentinel span: there is nothing to draw, and an empty text block draws
+// as an empty line in the bubble.
+func TestDrawUserBlocksSkipsTextTheStripEmptied(t *testing.T) {
+	// Arrange.
+	content := &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "all sentinel"}}},
+	}}
+	strip := func(string) string { return "" }
+
+	// Act.
+	blocks := DrawUserBlocks(content, strip, refusingResolver, dlog.NewTestLogger())
+
+	// Assert.
+	if len(blocks) != 0 {
+		t.Fatalf("the drawn blocks are %v, want none", blocks)
+	}
+}
+
+// TestDrawUserBlocksKeepsTheComposedOrder covers the order the person
+// composed in: the words, then the attachment.
+func TestDrawUserBlocksKeepsTheComposedOrder(t *testing.T) {
+	// Arrange.
+	content := &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "look"}}},
+		{Block: &conversationv1.UserContentBlock_Image{Image: pathBlock("/w/clip.png", "image/png")}},
+	}}
+	var seen []string
+	resolve, err := PathImageResolver(registrarReturning("/feed-images/abc", &seen), dlog.NewTestLogger())
+	if err != nil {
+		t.Fatalf("build the resolver: %v", err)
+	}
+
+	// Act.
+	blocks := DrawUserBlocks(content, func(s string) string { return s }, resolve, dlog.NewTestLogger())
+
+	// Assert.
+	if len(blocks) != 2 {
+		t.Fatalf("the drawn blocks are %v, want the words then the image", blocks)
+	}
+	if got := blocks[0].GetText().GetText(); got != "look" {
+		t.Errorf("the first block draws %q, want the words", got)
+	}
+	if got := blocks[1].GetImage().GetSrc(); got != "/feed-images/abc" {
+		t.Errorf("the second block's src is %q, want the resolved source", got)
+	}
+}
+
+// TestDrawUserBlocksNamesAnUnresolvableImage covers the refusal: the person is
+// TOLD something they attached could not be drawn, rather than it vanishing.
+func TestDrawUserBlocksNamesAnUnresolvableImage(t *testing.T) {
+	// Arrange.
+	content := &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+		{Block: &conversationv1.UserContentBlock_Image{Image: pathBlock("/w/clip.png", "image/png")}},
+	}}
+	log := dlog.NewTestLogger()
+
+	// Act.
+	blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, log)
+
+	// Assert.
+	if len(blocks) != 1 {
+		t.Fatalf("the drawn blocks are %v, want the named refusal", blocks)
+	}
+	if got := blocks[0].GetUnsupported().GetKind(); got != "image" {
+		t.Errorf("the refusal names %q, want \"image\"", got)
+	}
+	if !loggedAt(log, "warn", "daemon.feed.image_unresolved") {
+		t.Errorf("the unresolved image was not recorded; records: %v", log.Records())
+	}
+}
+
+// refusingResolver stands in for a resolver that cannot place a reference.
+func refusingResolver(*conversationv1.ImageBlock) (string, string, error) {
+	return "", "", fmt.Errorf("nothing resolves this reference")
+}

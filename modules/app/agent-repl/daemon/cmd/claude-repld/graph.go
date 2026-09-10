@@ -357,6 +357,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	var drainController drain.Controller
 	queue, err = promptqueue.New(promptqueue.Deps{
 		StripSentinels: stripSentinels,
+		ResolveImage:   resolveImage,
 		DB:             p.DB,
 		Judge:          judge,
 		Feed:           feedResolver,
