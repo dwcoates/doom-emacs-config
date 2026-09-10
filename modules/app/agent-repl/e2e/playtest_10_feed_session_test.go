@@ -53,6 +53,23 @@ const (
 	pt10CompactFailedError = "the summarizing request was rejected"
 )
 
+// The two wordings a compacted divider's own label opens with, from the daemon
+// that composes them (`daemon/internal/resolve/feed/separation.go`
+// compactionLabel) and pinned end to end by `compaction_e2e_test.go`
+// TestCompactionDirected and TestCompactionAuto.
+//
+// THE TRIGGER IS ON THE GLASS, and this playbook once said it was not. The
+// divider carries no trigger FIELD -- FeedContextCutCompacted has none -- so
+// the manifest sentence claimed a reader could not tell a compaction they asked
+// for from one that happened to them. The picture says otherwise: the daemon
+// composes the distinction into `label.text` precisely because, in its own
+// words, "drawing the two identically is the most misleading thing this divider
+// can do". So the two wordings are asserted here, one divider each.
+const (
+	pt10CompactRequestedLabel = "context compacted on request"
+	pt10CompactAutomaticLabel = "context compacted automatically"
+)
+
 // The fast-mode family's own conclusion prose, composed by the fake verbatim
 // into both the assistant block and `result.result`
 // (`agent-shim/claude/shim/src/fake/scenarios/session.ts` fastModeScenario),
@@ -170,6 +187,22 @@ func pt10CompactedSeparations(exactly int) string {
 	return fmt.Sprintf(
 		`document.querySelectorAll('[data-feed-row][data-row-kind="separation"][data-state="compacted"] .sep-compacted').length === %d`,
 		exactly)
+}
+
+// pt10CompactedLabelsOpeningWith is the predicate for "EXACTLY N compacted
+// dividers open their label with this wording".
+//
+// COUNTED AND EXACT, for the same reason `pt10CompactedSeparations` is: a
+// lower bound cannot see a divider drawn twice, and this predicate is the one
+// that says WHICH cut each drawn divider is about. `.sep-label` carries the
+// daemon's composed text and then the size change appended beside it
+// (`webapp/src/feed/rows/separation.ts` drawFeedSessionSeparationLabel), so the
+// wording is asserted as the label's OPENING rather than as its whole text.
+func pt10CompactedLabelsOpeningWith(opening string, exactly int) string {
+	return fmt.Sprintf(`Array.prototype.filter.call(
+                  document.querySelectorAll('[data-feed-row][data-row-kind="separation"][data-state="compacted"] .sep-label'),
+                  function (label) { return label.textContent.trim().indexOf(%s) === 0; }).length === %d`,
+		jsString(opening), exactly)
 }
 
 // pt10SummariesAllCarryText is the predicate for "every compaction summary
@@ -361,17 +394,25 @@ func TestPlaytestFeedSession(t *testing.T) {
 			settled: pt10CompactSummary,
 			waits: []pt10Wait{
 				{"exactly ONE compacted context-cut divider to be drawn in the feed", pt10CompactedSeparations(1)},
+				{
+					"the divider's own label to say the compaction was ASKED FOR",
+					pt10CompactedLabelsOpeningWith(pt10CompactRequestedLabel, 1),
+				},
 				{"the compaction summary to say something rather than open onto nothing", pt10SummariesAllCarryText},
 				{"the topbar's context budget figure to be drawn", pt10ContextFigureDrawn},
 			},
 			asserted: "a `[data-row-kind=\"separation\"][data-state=\"compacted\"]` row holding " +
-				"`.sep-compacted` is in the feed, `.topbar-context-figure` carries a figure, and the " +
-				"turn concluded with `" + pt10CompactSummary + "`",
+				"`.sep-compacted` is in the feed, its `.sep-label` opens with `" + pt10CompactRequestedLabel +
+				"`, `.topbar-context-figure` carries a figure, and the turn concluded with " +
+				"`" + pt10CompactSummary + "`",
 			expected: "A CONTEXT-CUT DIVIDER is drawn across the feed beneath the slash pairs: a coloured rule " +
-				"with a centred muted label under it, the label carrying the size change as " +
-				"`before → after`, and a closed `▸ summary` toggle beside it (the summary is folded on " +
-				"a first draw). THE TOPBAR CARRIES A CONTEXT FIGURE at its right -- a yellow number " +
-				"such as `12.3k`. The divider must be VISIBLE, not merely present.",
+				"with a centred muted label under it READING `" + pt10CompactRequestedLabel + " · took …` " +
+				"-- the label says the compaction was ASKED FOR -- carrying the size change beside it as " +
+				"`before → after`, and a closed `▸ summary` toggle (the summary is folded on " +
+				"a first draw). THE TOPBAR CARRIES A CONTEXT FIGURE at its right, and it is YELLOW -- " +
+				"the one coloured number in the strip, and the one thing on it a reader is meant to find " +
+				"without looking. A GREY figure there is a DEFECT: it was one, and the picture is what " +
+				"caught it. The divider must be VISIBLE, not merely present.",
 		},
 		{
 			name:    "compact-auto",
@@ -380,18 +421,35 @@ func TestPlaytestFeedSession(t *testing.T) {
 			settled: pt10CompactAutoSummary,
 			waits: []pt10Wait{
 				{"exactly TWO compacted dividers, the first still standing and neither of them doubled", pt10CompactedSeparations(2)},
+				{
+					// THE TWO CUTS ARE TOLD APART, and one each is the whole
+					// assertion: a divider that took the other's wording would
+					// pass a count and lie to the reader.
+					"exactly ONE of the two dividers to still say the compaction was ASKED FOR",
+					pt10CompactedLabelsOpeningWith(pt10CompactRequestedLabel, 1),
+				},
+				{
+					"exactly ONE of them to say this one happened ON ITS OWN",
+					pt10CompactedLabelsOpeningWith(pt10CompactAutomaticLabel, 1),
+				},
 				{"both compaction summaries to say something rather than open onto nothing", pt10SummariesAllCarryText},
 				{"the topbar's context budget figure to still be drawn", pt10ContextFigureDrawn},
 			},
-			asserted: "the feed now holds TWO compacted separation rows rather than one, the topbar still " +
-				"draws its context figure, and the turn concluded with `" + pt10CompactAutoSummary + "`",
+			asserted: "the feed now holds TWO compacted separation rows rather than one, ONE `.sep-label` " +
+				"opening with `" + pt10CompactRequestedLabel + "` and ONE with `" + pt10CompactAutomaticLabel +
+				"`, the topbar still draws its context figure, and the turn concluded with " +
+				"`" + pt10CompactAutoSummary + "`",
 			expected: "EXACTLY TWO context-cut dividers are visible -- ONE PER CUT -- with the auto-compaction's " +
 				"turn between them, each with its own rule, label and CLOSED summary toggle, and NOTHING " +
 				"drawn open beneath either toggle. FOUR dividers here -- each cut drawn twice -- or a " +
 				"fold that opens onto an EMPTY bubble, is a DEFECT and not a variation. The topbar " +
-				"still carries its context figure. Nothing about the drawn divider says which compaction " +
-				"was asked for and which happened on its own -- the vendor's trigger is not on the glass, " +
-				"which is a fact about the product and not a fault in the picture.",
+				"still carries its context figure, in yellow. THE TWO DIVIDERS DO NOT READ THE SAME: the " +
+				"upper one says `" + pt10CompactRequestedLabel + "` and the lower one says " +
+				"`" + pt10CompactAutomaticLabel + "`. That distinction is the point of the picture -- a " +
+				"compaction the reader ASKED FOR and one that happened to them are not the same event, " +
+				"and two dividers worded alike would be the most misleading thing this row could draw. " +
+				"(This sentence once said the trigger was NOT on the glass. It is; the sentence was wrong " +
+				"and the product was right.)",
 		},
 		{
 			name:   "compact-failed",
