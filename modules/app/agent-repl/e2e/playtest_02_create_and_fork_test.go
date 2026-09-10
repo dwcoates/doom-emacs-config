@@ -614,53 +614,52 @@ func TestPlaytestForkWorkspaceAndConversation(t *testing.T) {
 		`document.querySelector('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]')`)
 	s.awaitArm(t, forkName, "the fork's own initial turn to settle", emGHISettledArms...)
 
-	// WHAT OF THE PARENT'S TURN IS THERE, and it is HALF of it -- which is
-	// the finding this step exists to pin, and it is measured rather than
-	// narrated on both sides.
+	// THE PARENT'S WHOLE TURN IS THERE, ABOVE THE FORK'S OWN, and both facts
+	// are measured rather than narrated.
 	//
 	// PLAYTEST-PLAN.md A.6 asks for "parent history in feed". MEASURED here:
-	// the fork's feed carries the parent's settled ANSWER ("echo: recount the
-	// harbor lantern story ...", the fake SDK's own conclusion for the
-	// parent's prompt) and does NOT carry the parent's QUESTION -- no
-	// `userPrompt` bubble on the fork's feed says what was asked. The
-	// picture below shows exactly that, and a manifest sentence claiming the
-	// parent's turn is absent WHOLE would send a reviewer looking for an
-	// absence the screen contradicts.
+	// the fork's feed carries the parent's QUESTION and the parent's settled
+	// ANSWER ("echo: recount the harbor lantern story ...", the fake SDK's own
+	// conclusion for the parent's prompt), in that order, and both stand above
+	// the fork's own first prompt bubble.
 	//
-	// THE ASYMMETRY IS STRUCTURAL, and it is why this is FILED rather than
-	// fixed here. `verbs.forkTranscript`
-	// (daemon/internal/workspace/create.go:329) ports the parent's VENDOR
-	// JSONL transcript into the child's config root under a fresh vendor
-	// session id and the child resumes it; the assistant lines in that
-	// transcript reach the child's feed through the store, while the
-	// `userPrompt` bubbles are composed from the daemon's OWN conversation
-	// rows, which are keyed by workspace id and are neither ported nor
-	// unioned anywhere. So one half of the parent's turn travels and the
-	// other does not. Which rows a forked feed should show is a decision
-	// about the product, not a leaf fix, so nothing here invents an answer.
+	// A FORK PORTS THE WHOLE CONVERSATION UNDER THE CHILD'S IDENTITIES. The
+	// vendor JSONL transcript is ported into the child's config root under a
+	// fresh vendor session id and its assistant lines reach the feed through
+	// the store; the prompt bubbles come from the daemon's own per-workspace
+	// conversation rows, and those are ported too — re-minted under the same
+	// mapping, so the child's questions and its ported answers name one another
+	// exactly as the parent's did. The feed's ordering key is the plane a row
+	// was drawn in, so the ported conversation stands above the rows the fork
+	// draws for itself however the two arrive.
 	//
-	// BOTH HALVES ARE ASSERTED, not merely narrated: a playbook that only
-	// described the state of things would go on passing silently on the day
-	// the product changed either half, and this open question must be
-	// reopened when that happens.
-	forkRows, carriesParentPrompt, carriesParentAnswer := s.forkFeedFacts(t)
-	if carriesParentPrompt {
-		t.Fatalf("the fork's feed now carries the parent's prompt %q: PLAYTEST-PLAN.md A.6's "+
-			"\"parent history in feed\" is satisfied on the question as well as the answer, so this "+
-			"playbook's recorded open question is stale and must become an assertion", playtestParentPrompt)
+	// THE ORDER IS ASSERTED, not merely the presences: earlier runs of this
+	// playbook (out-run7 against out-run8) recorded the parent's rows and the
+	// fork's own changing places between runs, and a presence-only assertion
+	// would go on passing on the day that came back.
+	forkRows, parentPromptAt, parentAnswerAt, forkPromptAt := s.forkFeedFacts(t)
+	if parentPromptAt < 0 {
+		t.Fatalf("the fork's feed draws %d rows and none of them is the parent's prompt %q: a fork ports the "+
+			"WHOLE conversation, so the parent's question belongs on the child's feed", forkRows, playtestParentPrompt)
 	}
-	if !carriesParentAnswer {
-		t.Fatalf("the fork's feed no longer carries the parent's answer %q: the ported vendor transcript "+
-			"used to reach the child's feed through the store, so the forked-feed question this playbook "+
-			"records has changed shape and its manifest sentence is now wrong", playtestParentEcho)
+	if parentAnswerAt < 0 {
+		t.Fatalf("the fork's feed draws %d rows and none of them is the parent's answer %q: the ported vendor "+
+			"transcript reaches the child's feed through the store", forkRows, playtestParentEcho)
+	}
+	if forkPromptAt < 0 {
+		t.Fatalf("the fork's feed draws %d rows and none of them is the fork's own prompt %q", forkRows, playtestForkPrompt)
+	}
+	if !(parentPromptAt < parentAnswerAt && parentAnswerAt < forkPromptAt) {
+		t.Fatalf("the fork's feed draws the parent's prompt at %d, the parent's answer at %d and the fork's own "+
+			"prompt at %d over %d rows: want the parent's whole turn, in order, ABOVE the fork's own",
+			parentPromptAt, parentAnswerAt, forkPromptAt, forkRows)
 	}
 	p.note("the fork's own feed read for the PARENT's turn",
-		fmt.Sprintf("the fork's feed carries %d rows: the parent's settled ANSWER %q is among them and the "+
-			"parent's QUESTION %q is on none of them -- the ported artifact is the vendor transcript, whose "+
-			"assistant lines reach the feed through the store, while the prompt bubbles come from the "+
-			"daemon's own per-workspace conversation rows (daemon/internal/workspace/create.go:329) -- "+
-			"FILED, not fixed here",
-			forkRows, playtestParentEcho, playtestParentPrompt))
+		fmt.Sprintf("the fork's feed carries %d rows: the parent's QUESTION %q is at row %d, the parent's settled "+
+			"ANSWER %q at row %d, and the fork's OWN prompt %q at row %d -- the fork ported the whole "+
+			"conversation under its own identities, so the parent's turn reads above the fork's",
+			forkRows, playtestParentPrompt, parentPromptAt, playtestParentEcho, parentAnswerAt,
+			playtestForkPrompt, forkPromptAt))
 
 	// THE FORK'S TAB FOLLOWS ITS PARENT'S, which is the same depth-first
 	// nesting A.5 asserts. It is a FUNCTIONAL assertion with a note rather
@@ -692,75 +691,57 @@ func TestPlaytestForkWorkspaceAndConversation(t *testing.T) {
 	p.capture("forked-feed", "the fork made current and its panel opened",
 		fmt.Sprintf("the fork's OWN prompt bubble (%q) and a SETTLED response bubble are on its standing tail, "+
 			"and its roster arm has settled", playtestForkPrompt),
-		fmt.Sprintf("The panel shows the FORK's own conversation: a prompt bubble reading %q with a prose "+
-			"response settled beneath it (%q), and the sidebar drawing %q nested under its parent %q. "+
-			"HALF OF THE PARENT'S TURN IS ALSO ON THIS FEED, and the plan's A.6 asked for all of it: the "+
-			"parent's own ANSWER %q is drawn here as an ordinary response bubble, while the parent's "+
-			"QUESTION %q appears NOWHERE -- there is no prompt bubble carrying it. So the feed shows an "+
-			"answer to a question it does not show. The fork resumes the parent's ported vendor "+
-			"transcript, whose assistant lines reach the feed through the store, but prompt bubbles come "+
-			"from the daemon's per-workspace conversation rows, which are not ported. THE VERTICAL ORDER "+
-			"OF THOSE PARENT ROWS AGAINST THE FORK'S OWN IS NOT STABLE run to run, for the same reason: "+
-			"they arrive by a different route than the fork's own prompt. Both are an OPEN QUESTION for "+
-			"the lead; this playbook asserts the two halves it measured and invents no answer.",
-			playtestForkPrompt, "echo: "+playtestForkPrompt, forkName, parentName,
-			playtestParentEcho, playtestParentPrompt))
+		fmt.Sprintf("The panel shows the FORK's conversation, and it opens with the PARENT's: a prompt bubble "+
+			"reading %q with the parent's own settled answer (%q) beneath it, and only then the fork's own "+
+			"prompt bubble (%q) with its own prose response (%q). The sidebar draws %q nested under its "+
+			"parent %q. The plan's A.6 asked for the parent's history in the feed and this is it, WHOLE and "+
+			"IN ORDER: a fork ports the parent's vendor transcript AND the daemon's own prompt rows, both "+
+			"re-minted under one mapping, so the question and the answer that belong together arrive "+
+			"together and stand above everything the fork has of its own.",
+			playtestParentPrompt, playtestParentEcho, playtestForkPrompt, "echo: "+playtestForkPrompt,
+			forkName, parentName))
 }
 
-// forkFeedFacts answers how many rows the current workspace's feed is drawing,
-// whether any of them is the PARENT's own prompt bubble, and whether any of
-// them is the PARENT's own settled answer.
+// forkFeedFacts answers how many rows the current workspace's feed is drawing
+// and WHERE on it three sentences sit: the PARENT's own prompt bubble, the
+// PARENT's own settled answer, and the FORK's own prompt bubble. A sentence on
+// no row answers -1.
 //
-// THE THREE FACTS TRAVEL TOGETHER because they are read in ONE probe: asking
+// THE FOUR FACTS TRAVEL TOGETHER because they are read in ONE probe: asking
 // twice would let the page change between the count the note states and the
-// presences the assertions make, and a note that disagreed with its own
-// assertion is exactly the kind of evidence a reviewer cannot use.
+// order the assertions make, and a note that disagreed with its own assertion
+// is exactly the kind of evidence a reviewer cannot use.
 //
-// The parent's prompt and the parent's answer are asked SEPARATELY because
-// the product answers them differently, and that split is the whole finding:
-// the answer is there and the question is not.
-func (s *playtestScenario) forkFeedFacts(t *testing.T) (rows int, carriesParentPrompt, carriesParentAnswer bool) {
+// POSITIONS RATHER THAN PRESENCES. A fork ports the WHOLE conversation under
+// the child's identities, so the parent's question and the parent's answer are
+// both on the fork's feed and both stand ABOVE the fork's own first question.
+// Presence alone would go on passing on the day that order came apart, and
+// this playbook's own earlier runs are what recorded it coming apart.
+func (s *playtestScenario) forkFeedFacts(t *testing.T) (rows, parentPromptAt, parentAnswerAt, forkPromptAt int) {
 	t.Helper()
 	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
 	script := `(function () {
                      var all = document.querySelectorAll('[data-feed-row]');
-                     var prompt = Array.prototype.some.call(
-                       document.querySelectorAll('[data-feed-row][data-row-kind="userPrompt"]'),
-                       function (row) { return row.textContent.indexOf(` + jsString(playtestParentPrompt) + `) !== -1; });
-                     var answer = Array.prototype.some.call(all,
-                       function (row) { return row.textContent.indexOf(` + jsString(playtestParentEcho) + `) !== -1; });
-                     return all.length + ":" + (prompt ? "prompt" : "no-prompt") + ":" + (answer ? "answer" : "no-answer");
+                     function at(selector, needle) {
+                       var rows = document.querySelectorAll(selector);
+                       for (var i = 0; i < all.length; i++) {
+                         for (var j = 0; j < rows.length; j++) {
+                           if (all[i] === rows[j] && all[i].textContent.indexOf(needle) !== -1) return i;
+                         }
+                       }
+                       return -1;
+                     }
+                     var prompt = at('[data-feed-row][data-row-kind="userPrompt"]', ` + jsString(playtestParentPrompt) + `);
+                     var answer = at('[data-feed-row]', ` + jsString(playtestParentEcho) + `);
+                     var own = at('[data-feed-row][data-row-kind="userPrompt"]', ` + jsString(playtestForkPrompt) + `);
+                     return all.length + ":" + prompt + ":" + answer + ":" + own;
                    })()`
-	raw := s.E.AwaitEvalFor(playtestPageBound, "the fork's feed row count and which of the parent's turn it carries",
+	raw := s.E.AwaitEvalFor(playtestPageBound, "the fork's feed row count and where the parent's turn sits on it",
 		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+elispString(script)+`)`,
-		func(raw json.RawMessage) bool { return strings.Count(decodeString(raw), ":") == 2 })
+		func(raw json.RawMessage) bool { return strings.Count(decodeString(raw), ":") == 3 })
 	answer := decodeString(raw)
-	var promptMarker, answerMarker string
-	if _, err := fmt.Sscanf(answer, "%d:%s", &rows, &promptMarker); err != nil {
-		t.Fatalf("the page answered %q for its feed facts, want \"<count>:<prompt|no-prompt>:<answer|no-answer>\": %v", answer, err)
+	if _, err := fmt.Sscanf(answer, "%d:%d:%d:%d", &rows, &parentPromptAt, &parentAnswerAt, &forkPromptAt); err != nil {
+		t.Fatalf("the page answered %q for its feed facts, want \"<count>:<parent-prompt>:<parent-answer>:<fork-prompt>\": %v", answer, err)
 	}
-	// `%s` swallows the rest of the word, so the two markers are split back
-	// out here rather than scanned as separate verbs.
-	parts := strings.Split(promptMarker, ":")
-	if len(parts) != 2 {
-		t.Fatalf("the page answered %q for its feed facts, want \"<count>:<prompt|no-prompt>:<answer|no-answer>\"", answer)
-	}
-	promptMarker, answerMarker = parts[0], parts[1]
-	switch {
-	case promptMarker == "prompt":
-		carriesParentPrompt = true
-	case promptMarker == "no-prompt":
-		carriesParentPrompt = false
-	default:
-		t.Fatalf("the page answered %q for its feed facts: %q is neither \"prompt\" nor \"no-prompt\"", answer, promptMarker)
-	}
-	switch {
-	case answerMarker == "answer":
-		carriesParentAnswer = true
-	case answerMarker == "no-answer":
-		carriesParentAnswer = false
-	default:
-		t.Fatalf("the page answered %q for its feed facts: %q is neither \"answer\" nor \"no-answer\"", answer, answerMarker)
-	}
-	return rows, carriesParentPrompt, carriesParentAnswer
+	return rows, parentPromptAt, parentAnswerAt, forkPromptAt
 }
