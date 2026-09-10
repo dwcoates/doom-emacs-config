@@ -151,7 +151,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 			}})
 		}
 		return item(&conversationv1.AgentActivity_WebSearch{WebSearch: &conversationv1.AgentWebSearch{
-			Result: &conversationv1.AgentWebSearch_Success{Success: webSearchSuccess(call, result)},
+			Result: &conversationv1.AgentWebSearch_Success{Success: c.webSearchSuccess(call, result, at)},
 		}})
 	case kindMonitor:
 		if failed {

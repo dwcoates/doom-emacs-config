@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
 // readSuccess states HOW MUCH of the file came back. The set arm IS whether more
@@ -126,15 +127,25 @@ func writeSuccess(call openCall, result map[string]any, ts int64) *conversationv
 	return success
 }
 
-// writePatch prefers the patch the vendor STATED and falls back to diffing the
-// two versions it handed over — which is the whole story for a creation, whose
-// structured patch the vendor leaves empty.
+// writePatch DIFFS THE TWO VERSIONS, and does not prefer the patch the vendor
+// happened to state.
+//
+// agent_activity.proto is explicit on AgentWriteSuccess.patch: "The producer
+// diffs after the fact precisely so a card can show the CHANGE rather than the
+// whole file it was handed" — unconditionally, unlike AgentEditSuccess, whose
+// patch the vendor does state. Preferring `structuredPatch` here made this
+// plane disagree with the stream plane, which always diffs: the same write
+// drew "@@ -4,1 +4,2 @@" through one plane and "@@ -2,3 +2,4 @@" through the
+// other, and WHICH ONE a card showed was a race between the two producers
+// settling the unit. The file doc of diff.go states the guarantee this
+// restores — both planes mint the identical patch for one write.
+//
+// A result that states no content cannot be diffed at all; the vendor's own
+// stated patch is then the only account of the change there is, so it is kept
+// rather than dropped.
 func writePatch(result map[string]any) []*conversationv1.FilePatchHunk {
-	if stated := patchHunks(result["structuredPatch"]); len(stated) > 0 {
-		return stated
-	}
 	if !has(result, "content") {
-		return nil
+		return patchHunks(result["structuredPatch"])
 	}
 	return diffHunks(str(result["originalFile"]), str(result["content"]))
 }
@@ -590,8 +601,19 @@ func webFetchSuccess(call openCall, result map[string]any) *conversationv1.Agent
 }
 
 // webSearchSuccess preserves the engine's ORDER across both entry kinds: the
-// producer's array is heterogeneous, links mixed with bare narration strings.
-func webSearchSuccess(call openCall, result map[string]any) *conversationv1.AgentWebSearchSuccess {
+// producer's array is heterogeneous, HIT GROUPS mixed with bare narration
+// strings.
+//
+// A GROUP IS NOT A LINK. `WebSearchOutput.results` holds
+// `{ tool_use_id, content: {title,url}[] } | string` — the object is the
+// vendor's batching of ONE server-side call, and the pages are inside its
+// `content` array. Reading `title`/`url` off the GROUP finds neither, which
+// minted one link with an empty title and an empty url and dropped every page
+// the search actually found: the card drew an invisible dead row where two
+// clickable results belonged. So a group is FLATTENED, one link per hit in
+// order, exactly as the stream plane's convert/tools/web-search.ts does — the
+// two planes mint the identical answer for one search.
+func (c *Converter) webSearchSuccess(call openCall, result map[string]any, at Attribution) *conversationv1.AgentWebSearchSuccess {
 	success := &conversationv1.AgentWebSearchSuccess{
 		Query: &conversationv1.AgentWebSearchQuery{
 			Terms: firstNonEmpty(str(result["query"]), str(pick(call.input, "query", "terms"))),
@@ -600,16 +622,39 @@ func webSearchSuccess(call openCall, result map[string]any) *conversationv1.Agen
 		DurationSeconds: number(result["durationSeconds"]),
 	}
 	for _, raw := range list(result["results"]) {
-		switch value := raw.(type) {
-		case string:
+		if text, ok := raw.(string); ok {
 			success.Results = append(success.Results, &conversationv1.AgentWebSearchResult{
-				Entry: &conversationv1.AgentWebSearchResult_Note{Note: &conversationv1.AgentWebSearchNote{Text: value}},
+				Entry: &conversationv1.AgentWebSearchResult_Note{Note: &conversationv1.AgentWebSearchNote{Text: text}},
 			})
-		case map[string]any:
+			continue
+		}
+		group := obj(raw)
+		if group == nil {
+			c.log.With(at.ctxWarn("web-search")).With(logging.Context{ActivityID: call.activityID}).
+				Log("a web search result entry was neither a narration line nor a hit group; it is dropped")
+			continue
+		}
+		hits, ok := group["content"]
+		if !ok {
+			c.log.With(at.ctxWarn("web-search")).With(logging.Context{ActivityID: call.activityID}).
+				Log("a web search hit group carried no content array; it is dropped")
+			continue
+		}
+		for _, hit := range list(hits) {
+			page := obj(hit)
+			url := str(page["url"])
+			if url == "" {
+				// A hit with no url is not a page anyone can open, and a link
+				// row built around an empty href is a dead row drawn as a
+				// live one.
+				c.log.With(at.ctxWarn("web-search")).With(logging.Context{ActivityID: call.activityID}).
+					Log("a web search hit named no url; it is dropped rather than drawn as a dead link")
+				continue
+			}
 			success.Results = append(success.Results, &conversationv1.AgentWebSearchResult{
 				Entry: &conversationv1.AgentWebSearchResult_Link{Link: &conversationv1.AgentWebSearchLink{
-					Title: str(value["title"]),
-					Url:   str(value["url"]),
+					Title: str(page["title"]),
+					Url:   url,
 				}},
 			})
 		}

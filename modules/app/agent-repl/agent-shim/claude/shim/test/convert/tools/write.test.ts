@@ -112,8 +112,11 @@ describe("writeConverter.settle", () => {
     // Act.
     const success = successOf(writeConverter.settle(pending, outcome(result)));
 
-    // Assert.
-    expect(success.patch[0]?.lines).toEqual([" one", "-two", "+TWO", " three", " "]);
+    // Assert. The hunk ends at "three": both versions end with a terminating
+    // newline, and a terminator is not a line. This previously expected a
+    // further, EMPTY context row for it -- the same terminator that drew a
+    // created file as a blank second addition.
+    expect(success.patch[0]?.lines).toEqual([" one", "-two", "+TWO", " three"]);
   });
 
   it("carries user_modified when the user altered the content at the gate", () => {

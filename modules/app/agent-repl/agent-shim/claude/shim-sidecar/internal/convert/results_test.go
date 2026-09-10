@@ -6,6 +6,7 @@ package convert
 // so each gets one direct unit test from its documented proto contract.
 
 import (
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -74,29 +75,100 @@ func TestWebFetchSuccessCarriesTheServedStatusAlongsideTheContent(t *testing.T) 
 	}
 }
 
+// TestWebSearchSuccessPreservesOrderAcrossLinksAndNotes pins the heterogeneous
+// array's ORDER and, with it, the shape of its object entries.
+//
+// The object is a HIT GROUP, `{tool_use_id, content: {title,url}[]}` — that is
+// what testdata/corpus/tool-results/web_search.jsonl holds, and what
+// convert/tools/web-search.ts's file doc states. This test previously arranged
+// a bare `{title, url}` object as though the group itself were a link, which is
+// a shape the vendor never sends; the conversion read `title`/`url` off the
+// GROUP, found neither, and minted an empty dead link while losing every page.
 func TestWebSearchSuccessPreservesOrderAcrossLinksAndNotes(t *testing.T) {
-	// Arrange: the engine's array is heterogeneous — a bare string is a note,
-	// an object is a link — and order must survive the conversion.
+	// Arrange: a narration line, then a group of two pages.
+	c := newTestConverter(t)
 	call := openCall{}
 	result := map[string]any{
 		"results": []any{
 			"a narration note",
-			map[string]any{"title": "A Link", "url": "https://x.example"},
+			map[string]any{
+				"tool_use_id": "srvtoolu_01",
+				"content": []any{
+					map[string]any{"title": "A Link", "url": "https://x.example"},
+					map[string]any{"title": "Another", "url": "https://y.example"},
+				},
+			},
 		},
 	}
 
 	// Act
-	got := webSearchSuccess(call, result)
+	got := c.webSearchSuccess(call, result, Attribution{})
 
 	// Assert
-	if len(got.GetResults()) != 2 {
-		t.Fatalf("len(Results) = %d, want 2", len(got.GetResults()))
+	if len(got.GetResults()) != 3 {
+		t.Fatalf("len(Results) = %d, want 3: the note plus BOTH pages of the group", len(got.GetResults()))
 	}
 	if _, ok := got.GetResults()[0].GetEntry().(*conversationv1.AgentWebSearchResult_Note); !ok {
 		t.Fatalf("Results[0] = %T, want a note", got.GetResults()[0].GetEntry())
 	}
-	if _, ok := got.GetResults()[1].GetEntry().(*conversationv1.AgentWebSearchResult_Link); !ok {
+	first, ok := got.GetResults()[1].GetEntry().(*conversationv1.AgentWebSearchResult_Link)
+	if !ok {
 		t.Fatalf("Results[1] = %T, want a link", got.GetResults()[1].GetEntry())
+	}
+	if first.Link.GetTitle() != "A Link" || first.Link.GetUrl() != "https://x.example" {
+		t.Fatalf("Results[1] = %+v, want the group's first page", first.Link)
+	}
+	second, ok := got.GetResults()[2].GetEntry().(*conversationv1.AgentWebSearchResult_Link)
+	if !ok {
+		t.Fatalf("Results[2] = %T, want a link", got.GetResults()[2].GetEntry())
+	}
+	if second.Link.GetUrl() != "https://y.example" {
+		t.Fatalf("Results[2] = %+v, want the group's second page", second.Link)
+	}
+}
+
+// TestWebSearchSuccessDropsAHitWithNoUrlRatherThanDrawingADeadLink pins the
+// refusal: a link row built around an empty href is a dead row drawn as a live
+// one, so the hit is dropped and said so instead.
+func TestWebSearchSuccessDropsAHitWithNoUrlRatherThanDrawingADeadLink(t *testing.T) {
+	// Arrange: one page has a url, one does not.
+	c := newTestConverter(t)
+	result := map[string]any{
+		"results": []any{
+			map[string]any{"content": []any{
+				map[string]any{"title": "No url here"},
+				map[string]any{"title": "Real", "url": "https://x.example"},
+			}},
+		},
+	}
+
+	// Act
+	got := c.webSearchSuccess(openCall{}, result, Attribution{})
+
+	// Assert
+	if len(got.GetResults()) != 1 {
+		t.Fatalf("len(Results) = %d, want 1: the url-less hit is not a page anyone can open", len(got.GetResults()))
+	}
+	link, ok := got.GetResults()[0].GetEntry().(*conversationv1.AgentWebSearchResult_Link)
+	if !ok || link.Link.GetUrl() != "https://x.example" {
+		t.Fatalf("Results[0] = %v, want the hit that named a url", got.GetResults()[0].GetEntry())
+	}
+}
+
+// TestWebSearchSuccessDropsAnEntryThatIsNeitherNoteNorGroup pins the other
+// refusal: an object with no `content` array states no pages, and inventing an
+// empty link from it is what put an invisible row on the card.
+func TestWebSearchSuccessDropsAnEntryThatIsNeitherNoteNorGroup(t *testing.T) {
+	// Arrange: an object carrying no content array at all.
+	c := newTestConverter(t)
+	result := map[string]any{"results": []any{map[string]any{"tool_use_id": "srvtoolu_01"}}}
+
+	// Act
+	got := c.webSearchSuccess(openCall{}, result, Attribution{})
+
+	// Assert
+	if len(got.GetResults()) != 0 {
+		t.Fatalf("Results = %v, want none: a group with no content names no page", got.GetResults())
 	}
 }
 
@@ -1285,5 +1357,63 @@ func TestBashResultImageAnswersNothingForATextOnlyResult(t *testing.T) {
 	// Assert
 	if data != nil || mediaType != "" {
 		t.Fatalf("data, mediaType = %q, %q, want both empty", data, mediaType)
+	}
+}
+
+// TestWritePatchDiffsTheVersionsRatherThanPreferringTheStatedPatch pins the
+// proto's own words on AgentWriteSuccess.patch -- "The producer diffs after
+// the fact" -- against the deviation that once stood here.
+//
+// This plane preferred `structuredPatch` when the vendor stated one, while the
+// stream plane always diffs. The same update then drew a different hunk
+// depending on WHICH PRODUCER settled the unit first, which is a race a card's
+// content must never turn on.
+func TestWritePatchDiffsTheVersionsRatherThanPreferringTheStatedPatch(t *testing.T) {
+	// Arrange: the vendor states a patch AND hands over both versions.
+	result := map[string]any{
+		"type":         "update",
+		"filePath":     "/w/s/a.ts",
+		"originalFile": "one\ntwo\n",
+		"content":      "one\ntwo\nthree\n",
+		"structuredPatch": []any{map[string]any{
+			"oldStart": float64(2), "oldLines": float64(1),
+			"newStart": float64(2), "newLines": float64(2),
+			"lines": []any{"   two", "+  three"},
+		}},
+	}
+
+	// Act
+	got := writePatch(result)
+
+	// Assert: the DIFF's own hunk, not the vendor's.
+	if len(got) != 1 {
+		t.Fatalf("hunks = %d, want 1", len(got))
+	}
+	want := []string{" one", " two", "+three"}
+	if lines := got[0].GetLines(); !slices.Equal(lines, want) {
+		t.Fatalf("lines = %q, want %q: the producer diffs, it does not restate the vendor's patch", lines, want)
+	}
+}
+
+// TestWritePatchKeepsTheStatedPatchWhenThereIsNoContentToDiff is the other
+// half: nothing can be diffed without the new contents, and the vendor's own
+// patch is then the only account of the change there is.
+func TestWritePatchKeepsTheStatedPatchWhenThereIsNoContentToDiff(t *testing.T) {
+	// Arrange: a result carrying a patch and no content at all.
+	result := map[string]any{
+		"type": "update",
+		"structuredPatch": []any{map[string]any{
+			"oldStart": float64(2), "oldLines": float64(1),
+			"newStart": float64(2), "newLines": float64(2),
+			"lines": []any{"   two", "+  three"},
+		}},
+	}
+
+	// Act
+	got := writePatch(result)
+
+	// Assert
+	if len(got) != 1 {
+		t.Fatalf("hunks = %d, want the vendor's own patch kept rather than dropped", len(got))
 	}
 }
