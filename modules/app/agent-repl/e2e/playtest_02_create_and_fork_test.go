@@ -349,9 +349,9 @@ func TestPlaytestAddProjectFromDirectory(t *testing.T) {
 func TestPlaytestNewWorkspaceAndChild(t *testing.T) {
 	t.Parallel()
 	s := newPlaytestScenario(t, "02-new-and-child",
-		"Plan A.5. `SPC TAB n` creates a workspace the daemon names from the initial prompt, and "+
-			"`C-u SPC TAB n` creates a CHILD of the current one, whose row nests under its parent's "+
-			"and whose tab stands immediately after it.")
+		"Plan A.5. `SPC TAB n` creates a workspace the daemon names from the initial prompt AND "+
+			"stands on it, and `C-u SPC TAB n` creates a CHILD of the current one, whose row nests "+
+			"under its parent's and whose tab stands immediately after it.")
 	p, e := s.Book, s.E
 
 	repository := s.repoAt(t, "repo")
@@ -396,20 +396,28 @@ func TestPlaytestNewWorkspaceAndChild(t *testing.T) {
 
 	// ---- standing on the parent ------------------------------------------
 	//
-	// `C-u SPC TAB n` makes the new workspace a child of THE CURRENT ONE, so
-	// what Emacs is standing on is the whole input to the next step. Whether
-	// creating SELECTED it is read off the product rather than assumed:
-	// `agent-repl-verb-create`'s docstring says nothing happens on success.
-	selectedByCreate := !playtestStandOn(t, s, createdName)
-	// THE STANDING IS ASSERTED EITHER WAY. Whichever branch was taken, the
-	// child create below reads `agent-repl--ws-current-name` itself, so its
-	// input is checked here rather than assumed from the branch.
+	// CREATING A WORKSPACE SELECTS IT, and that is now ASSERTED rather than
+	// read off the product and narrated. `agent-repl-create-workspace` passes
+	// `:select t` to `agent-repl-verb-create`, which stands on the dir
+	// `CreateWorkspaceSuccess` minted through `agent-repl-switch-to-project`
+	// -- the same step `agent-repl-add-project-workspace` takes after
+	// registering a directory.
+	//
+	// THE WAIT IS NOT A COURTESY. The switch is deferred onto a timer inside
+	// `agent-repl-switch-to-project` so the perspective change completes and
+	// Emacs redraws before any blocking I/O, so the selection lands strictly
+	// after the create's answer rather than inside it.
 	playtestAwaitCurrent(t, s, createdName)
-	p.note("Emacs made the created workspace the current one",
-		fmt.Sprintf("`agent-repl--ws-current-name` is %q; creating it %s, so a switch was %s",
-			createdName,
-			map[bool]string{true: "DID select it", false: "did NOT select it"}[selectedByCreate],
-			map[bool]string{true: "not needed", false: "performed"}[selectedByCreate]))
+	// AND NO SWITCH WAS NEEDED TO GET THERE: standing on it is a no-op, which
+	// is what distinguishes "the create selected it" from "this playbook
+	// selected it".
+	if switched := playtestStandOn(t, s, createdName); switched {
+		t.Fatalf("creating %q left Emacs standing somewhere else: `SPC TAB n` must SELECT the workspace it "+
+			"just made, the way registering a directory does", createdName)
+	}
+	p.note("`SPC TAB n` answered and Emacs was asked what it is standing on",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q with no switch performed: the create SELECTED the "+
+			"workspace it made, so the child create below reads the right parent", createdName))
 
 	// ---- the child create ------------------------------------------------
 	beforeChild := s.tabNames()
