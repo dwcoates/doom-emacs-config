@@ -63,6 +63,7 @@
 (declare-function agent-repl-popup-open "agent-repl-popup" (path &optional line))
 (declare-function agent-repl-host-register "agent-repl-host" (conn dir on-done))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
+(declare-function agent-repl-verbs-select-minted "agent-repl-verbs" (ref))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-verbs--row-ref "agent-repl-verbs" (row))
 (declare-function agent-repl-verbs--row-closed-p "agent-repl-verbs" (row))
@@ -568,7 +569,19 @@ onboarding a directory twice reconciles to the same ref.
 
 This is the one RegisterWorkspace site besides the link-up re-register:
 everything else about the workspace -- its parentage, branch, repo,
-naming and status -- the daemon derives and pushes."
+naming and status -- the daemon derives and pushes.
+
+REGISTERING A WORKSPACE COMES UP ON ITS PANEL EXACTLY LIKE CREATING ONE.
+The switch waits for the answer, because the answer is when the workspace
+EXISTS: switching on the way out of this function switched to a directory
+the daemon had not accepted yet, so `agent-repl-switch-to-project\' found
+no workspace at it, armed no landing panels, and Doom\'s empty-project
+fallback put MAGIT STATUS in the main area instead of the new
+workspace\'s own panel.  The minted ref is handed to
+`agent-repl-verbs-select-minted\' -- the same landing
+`CreateWorkspaceSuccess\' takes -- so the two verbs stand on a workspace
+they just made through ONE mechanism.  A register the daemon REFUSED
+moves the user nowhere: there is no workspace to come up on."
   (interactive (list (read-directory-name "Add project directory: " nil nil t)))
   (let ((canonical (file-name-as-directory (expand-file-name dir))))
     (unless (file-directory-p canonical)
@@ -579,11 +592,12 @@ naming and status -- the daemon derives and pushes."
      (agent-repl-link-primary) canonical
      (lambda (ref)
        (if ref
-           (agent-repl--info nil "elisp.commands.add-project-registered dir=%s id=%s"
-                             canonical (plist-get ref :id))
+           (progn
+             (agent-repl--info nil "elisp.commands.add-project-registered dir=%s id=%s"
+                               canonical (plist-get ref :id))
+             (agent-repl-verbs-select-minted ref))
          (agent-repl--warn nil "elisp.commands.add-project-not-registered dir=%s"
-                           canonical))))
-    (agent-repl-switch-to-project canonical)))
+                           canonical))))))
 
 ;;;; ---- Workspace navigation ---------------------------------------------
 
