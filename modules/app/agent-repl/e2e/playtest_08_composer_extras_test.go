@@ -33,10 +33,11 @@ import (
 // acceptance is asserted as well through the drawn feed: a green step means
 // Emacs composed the right words AND the daemon took them.
 //
-// WHERE THE PLAN AND THE PRODUCT DISAGREE ON A KEY. The plan writes the
-// explain verbs as `SPC TAB e` / `SPC TAB E`. The product binds them under
-// the `SPC j` ("claude") prefix as `SPC j e e` and `SPC j e E`
-// (`lisp/keybindings.el`); the playbook asserts the product's own binding.
+// THE KEYS ARE THE PRODUCT'S. The explain verbs live under the `SPC j`
+// ("claude") prefix as `SPC j e e` and `SPC j e E` (`lisp/keybindings.el`).
+// The plan once wrote them as `SPC TAB e` / `SPC TAB E`; that was the plan's
+// error, corrected there, and the playbook asserts the binding the product
+// actually carries rather than either text.
 
 // playtestContextFile is the plain file C22 visits, and its lines are what
 // the references count. Five lines, so a line-3 point and a 2-4 region are
