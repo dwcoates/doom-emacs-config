@@ -119,6 +119,11 @@ type watcher struct {
 
 	turn      *ids.TurnID
 	mainAgent *conversationv1.AgentId
+	// held is a main-watch terminal that arrived BEFORE the main agent was
+	// named — the stream plane outrunning StartTurn's answer. It is replayed
+	// in full at the naming, so a turn is never left standing in flight with
+	// its only ending edge already spent. See routeTerminalLocked.
+	held *heldTerminal
 
 	// freeWaiters are the standing AwaitFree calls. They are answered by the
 	// stream edges — a turn end and a live-work change — never by a poll.
@@ -388,6 +393,11 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 		w.log.Debug("daemon.sessionwatcher.main_agent", "main agent named", dlog.Context{
 			"agent_id": agent.GetValue(), "source": source,
 		})
+		// THE RELEASE IS NOT DONE HERE. Naming is a precondition for it, not
+		// the moment for it: the caller may still owe the views the turn's
+		// OPEN edge, and a terminal replayed before that edge leaves the
+		// footer with a turn it never saw start. Each naming site releases
+		// when it has finished handing over what it knows.
 		return
 	}
 	if w.mainAgent.GetValue() != agent.GetValue() {
@@ -435,6 +445,9 @@ func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	w.log.Debug("daemon.sessionwatcher.turn_open_failed", "the shim refused a turn; it no longer stands in flight", dlog.Context{
 		"turn_id": string(turn),
 	})
+	// The refusal IS the answer that would have named the main agent, so a
+	// terminal held for that name has nothing left to wait on.
+	w.flushHeldTerminalLocked()
 	w.signalFreenessLocked()
 }
 
@@ -486,6 +499,13 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 	if page != nil {
 		w.routeOpeningPageLocked(w.main, page)
 	}
+	// THE HAND-OVER IS COMPLETE, so a terminal held for this turn's naming is
+	// released HERE and not a line earlier: the views have just been given the
+	// turn's OPEN edge, and the replay now reaches them in the order they
+	// would have seen had the answer beaten the stream. Released at the
+	// naming instead, the footer took a terminal for a turn it had never seen
+	// start and never came back to idle.
+	w.releaseHeldTerminalLocked()
 }
 
 // SessionEnding records that the daemon itself is ending this session, so the
@@ -1069,6 +1089,25 @@ func (w *watcher) flushTurnEnds() {
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
 	}
+}
+
+// flushTurnEndsAsync hands the recorded turn ends to the lifecycle sink on a
+// goroutine of its own, joinable through the same WaitGroup the inline flush
+// uses.
+//
+// IT EXISTS FOR EXACTLY ONE CALLER: the release of a HELD terminal. That
+// release runs on the PROMPT QUEUE'S OWN call into this watcher — the queue is
+// what names the main agent, from StartTurn's answer, while it holds that
+// workspace's delivery lock — and the lifecycle sink IS the prompt queue,
+// whose OnTurnEnded takes the same lock. Told inline it is a self-deadlock,
+// and the turn's delivery never returns. Every other turn end is recorded by a
+// stream goroutine, which flushes inline the moment it drops mu.
+func (w *watcher) flushTurnEndsAsync() {
+	w.dispatching.Add(1)
+	go func() {
+		defer w.dispatching.Done()
+		w.flushTurnEnds()
+	}()
 }
 
 // stale reports whether a goroutine's generation has been superseded, which

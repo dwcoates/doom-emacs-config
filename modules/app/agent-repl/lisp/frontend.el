@@ -72,7 +72,6 @@
 (declare-function xwidget-put "xwidget" (xwidget propname value))
 (declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-hibernate-workspace "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--frontend-base-url "agent-repl-frontend-client" ())
 (declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
@@ -92,7 +91,6 @@
 (declare-function agent-repl-register-frontend "agent-repl-frontends" (frontend))
 (declare-function agent-repl-frontend-create "agent-repl-frontends")
 (declare-function agent-repl--gui-cancel-detached-agents "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--gui-running-p "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-adopt-session "agent-repl-frontend-client" (ws claude-session-id on-success on-failure))
 (defvar agent-repl-input-height-fraction)
@@ -771,24 +769,44 @@ distinguishes them by asking for the buffer itself."
       (when-let ((xw (agent-repl--frontend-webview-live-widget buf)))
         (agent-repl--frontend-webview-uri xw)))))
 
-(defun agent-repl--frontend-webview-at-home-p (uri)
-  "Return non-nil when URI is served by OUR daemon.
-Home is the daemon's ORIGIN (`agent-repl--frontend-base-url'), not the
-workspace's full webview URL: the page rewrites its own query as the
+(defun agent-repl--frontend-home-origin (ws)
+  "Return the origin WS's webapp is served from, or nil.
+
+The origin is the address of the connection whose daemon OWNS WS
+\(`agent-repl-host-conn'), which is the same source
+`agent-repl-frontend-webview-url' builds its URL from — so home and the
+page the rescue navigates back to can never name two different daemons.
+There is no global base URL to ask instead: a workspace handed over to
+another daemon is served by THAT daemon, and a module-wide address would
+call its perfectly-correct page stray.
+
+Nil when WS has no connection: a workspace whose daemon cannot be named
+cannot certify any page as home."
+  (let ((conn (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws))))
+    (when conn
+      (format "http://%s" (agent-repl-connect-connection-address conn)))))
+
+(defun agent-repl--frontend-webview-at-home-p (ws uri)
+  "Return non-nil when URI is served by the daemon that owns WS.
+Home is that daemon's ORIGIN (`agent-repl--frontend-home-origin'), not
+the workspace's full webview URL: the page rewrites its own query as the
 user navigates the webapp, and the build stamp in a freshly built URL
 differs from the one a still-correct mounted page carries, so comparing
 whole URLs would call a perfectly-at-home webview stray.  What the
 rescue actually detects is the page having left the daemon entirely.
 
 An unknown or empty URI is NOT home: a webview that cannot say where it
-is has no claim on being left alone."
+is has no claim on being left alone.  Neither is any URI when WS has no
+connection to be at home on."
   (and (stringp uri)
        (not (string-empty-p uri))
-       (let ((there (url-generic-parse-url uri))
-             (home (url-generic-parse-url (agent-repl--frontend-base-url))))
-         (and (equal (url-type there) (url-type home))
-              (equal (url-host there) (url-host home))
-              (equal (url-port there) (url-port home))))))
+       (when-let ((origin (agent-repl--frontend-home-origin ws)))
+         (let ((there (url-generic-parse-url uri))
+               (home (url-generic-parse-url origin)))
+           (and (equal (url-type there) (url-type home))
+                (equal (url-host there) (url-host home))
+                (equal (url-port there) (url-port home))
+                t)))))
 
 (defun agent-repl--frontend-webview-host (uri)
   "Return a short host label for URI, for user copy.
@@ -829,7 +847,7 @@ webview open at all, matching `agent-repl-frontend-reload-webview'."
     (unless (buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
       (user-error "agent-repl: no webview open for workspace %s" ws))
     (let ((uri (agent-repl--frontend-webview-current-uri ws)))
-      (if (agent-repl--frontend-webview-at-home-p uri)
+      (if (agent-repl--frontend-webview-at-home-p ws uri)
           (progn
             (agent-repl--log ws "rescue-webview: outcome=already-home")
             (agent-repl--user-message ws "webview is already home" nil
@@ -896,6 +914,24 @@ one workspace never disturbs another workspace's windows."
        (agent-repl--ws-get ws :frontend-buffer)
        (or (agent-repl--ws-get ws :input-buffer)
            (get-buffer (agent-repl--buffer-name "-input" ws)))))))
+
+(defun agent-repl--gui-running-p (ws)
+  "The gui frontend's liveness capability (registry `:running-p-fn').
+
+Non-nil when WS has a MOUNTED WEBVIEW — a page that exists and can be
+put back on the frame — which is exactly the question the toggle asks it
+(`agent-repl--toggle'): a running frontend is SHOWN
+\(`agent-repl--gui-show'), one that is not is OPENED
+\(`agent-repl--gui-open').  A workspace whose panels were merely hidden
+by the plain close still holds its buffer, so it is shown rather than
+mounted a second time; one that was never opened, or whose webview was
+killed, holds none and is opened.
+
+IT IS NOT A QUESTION ABOUT THE DAEMON'S SESSION, and deliberately: a
+parked workspace presents as live with `shim_attached' false and its
+page draws whatever state it is in, so session liveness would answer a
+question neither branch of the toggle asks."
+  (and (buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) t))
 
 (defun agent-repl--gui-kill (ws)
   "The gui frontend's kill capability (registry `:kill-fn').

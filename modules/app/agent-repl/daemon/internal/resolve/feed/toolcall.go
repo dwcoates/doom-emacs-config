@@ -43,6 +43,7 @@ func (r *resolver) toolRow(s *wsState, at placement, unitID, name string, outcom
 	}
 	u.row = row
 	u.feedKey = r.feedKey(s.id, at.feed)
+	u.name = name
 	return row
 }
 
@@ -60,6 +61,31 @@ func runningOutcome(u *unitState) toolOutcome {
 	return func(card *frontendv1.FeedSimpleToolCall) {
 		card.Outcome = &frontendv1.FeedSimpleToolCall_Running{Running: running}
 	}
+}
+
+// movedOutcome is the arm for a call whose WORK MOVED to the background: no
+// verdict, no output, no runtime.
+//
+// THE CARD IS NOT WHERE THIS FINISHES. A backgrounded command is still running,
+// under a detached shell row of its own, and that row alone settles it. Saying
+// `returned` here would state an ending that has not happened; leaving it on
+// `running` states one that never will.
+func movedOutcome() toolOutcome {
+	return func(card *frontendv1.FeedSimpleToolCall) {
+		card.Outcome = &frontendv1.FeedSimpleToolCall_Moved{Moved: &frontendv1.FeedToolCallMoved{}}
+	}
+}
+
+// withMove keeps a MOVED call moved. Every frame of the unit that arrives after
+// its work left -- the vendor's receipt for the launch, the other plane's
+// replay, the next turn's live-work reconciliation -- restates the call and
+// never the move, so the outcome is decided from the unit's memory rather than
+// from the frame in hand.
+func withMove(u *unitState, outcome toolOutcome) toolOutcome {
+	if !u.moved {
+		return outcome
+	}
+	return movedOutcome()
 }
 
 // returnedOutcome builds the returned arm: the verdict badge, the output's
@@ -629,10 +655,10 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		if u.denied {
 			return r.toolRow(s, at, unitID, "Bash", deniedOutcome()), nil
 		}
-		return r.toolRow(s, at, unitID, "Bash", runningOutcome(u)), nil
+		return r.toolRow(s, at, unitID, "Bash", withMove(u, runningOutcome(u))), nil
 	case *conversationv1.AgentBash_Progress:
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
-		return r.toolRow(s, at, unitID, "Bash", runningOutcome(u)), nil
+		return r.toolRow(s, at, unitID, "Bash", withMove(u, runningOutcome(u))), nil
 	case *conversationv1.AgentBash_Update:
 		// A foreground call reports no growth; an update here belongs to the
 		// work's own detached stream and is drawn there.
@@ -647,12 +673,12 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		// number, so the reader was told the command went wrong and never told
 		// how. The two sites must stay parallel; see FeedToolCallReturned.exit.
 		return r.toolRow(s, at, unitID, "Bash",
-			withExit(returnedOutcome(u, ok, form, state.Success.GetSettledAt().GetAtMs()),
-				bashExit(state.Success))), nil
+			withMove(u, withExit(returnedOutcome(u, ok, form, state.Success.GetSettledAt().GetAtMs()),
+				bashExit(state.Success)))), nil
 	case *conversationv1.AgentBash_Failure:
 		return r.toolRow(s, at, unitID, "Bash",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
-				failureSettledMs(state.Failure.GetError()))), nil
+			withMove(u, returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
+				failureSettledMs(state.Failure.GetError())))), nil
 	}
 	return nil, errNotARow
 }

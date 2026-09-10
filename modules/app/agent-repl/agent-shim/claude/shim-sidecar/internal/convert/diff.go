@@ -78,9 +78,21 @@ func diffHunks(before, after string) []*conversationv1.FilePatchHunk {
 
 // splitLines reads a file version as its lines. An EMPTY version has no lines
 // at all, rather than one empty line a diff would draw as a change.
+//
+// A FILE'S TERMINATING NEWLINE IS NOT A LINE. Text files end with one, so a
+// bare Split leaves a final empty element that is the terminator rather than
+// any content — and a creation then drew a one-line file as TWO additions,
+// the second of them blank, and stated "+1,2" for it. `diff` itself counts
+// "one\n" as one line, and so does the card now. A version that genuinely
+// ends in a blank line is "a\n\n", which keeps its blank line here because
+// only ONE trailing empty element is dropped.
 func splitLines(text string) []string {
 	if text == "" {
 		return nil
 	}
-	return strings.Split(text, "\n")
+	lines := strings.Split(text, "\n")
+	if last := len(lines) - 1; lines[last] == "" {
+		lines = lines[:last]
+	}
+	return lines
 }

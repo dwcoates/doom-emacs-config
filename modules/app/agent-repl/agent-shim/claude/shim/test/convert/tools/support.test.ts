@@ -101,4 +101,26 @@ describe("diffHunks", () => {
     // Assert.
     expect(hunks[0]?.lines).toEqual(["+new", "+file"]);
   });
+
+  it("does not count a file's TERMINATING newline as a line", () => {
+    // Arrange: every real file ends with one, and the vendor hands `content`
+    // verbatim -- so a bare split used to draw a one-line creation as two
+    // additions, the second blank, under a "+1,2" header.
+    // Act.
+    const hunks = diffHunks("", "export const fresh = true;\n");
+
+    // Assert.
+    expect(hunks[0]?.lines).toEqual(["+export const fresh = true;"]);
+    expect(hunks[0]?.newRange?.lines).toBe(1);
+  });
+
+  it("KEEPS a final blank line that is real content, not the terminator", () => {
+    // Arrange: "one\n\n" genuinely ends with a blank line, and only the
+    // terminator after it is dropped.
+    // Act.
+    const hunks = diffHunks("", "one\n\n");
+
+    // Assert.
+    expect(hunks[0]?.lines).toEqual(["+one", "+"]);
+  });
 });

@@ -156,6 +156,93 @@ func TestASecondEpisodeGetsItsOwnBubble(t *testing.T) {
 	}
 }
 
+func TestAnEpisodeReDeliveredDrawsOntoTheSameBubble(t *testing.T) {
+	// Arrange: one episode, opened and closed. The SAME vendor record reaches
+	// this resolver twice — the shim's stream plane converts it, and the
+	// sidecar's file tail converts it again from the transcript — so the exit
+	// having closed the episode must not let the re-delivery mint a new one.
+	h := newHarness(t)
+	episode := func(markdown string) {
+		h.t.Helper()
+		h.planFrame("unit-1", &conversationv1.AgentPlanModeStart{
+			Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		})
+		h.planFrame("unit-2", &conversationv1.AgentPlanModeSuccess{
+			Act: &conversationv1.AgentPlanModeSuccess_Exited{Exited: &conversationv1.AgentPlanModeExited{
+				Plan: &conversationv1.AgentResponseProse{Markdown: markdown},
+			}},
+		})
+	}
+	episode("## the plan")
+
+	// Act: the other plane delivers the same two calls.
+	episode("## the plan")
+
+	// Assert: ONE bubble. A second one is the duplicate plan card the playtest
+	// photographed, drawn from the same record twice.
+	bubbles := 0
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetActivity().GetPlan() != nil {
+			bubbles++
+		}
+	}
+	if bubbles != 1 {
+		t.Fatalf("plan bubbles = %d, want 1 — the same record re-delivered keys onto the same FeedId", bubbles)
+	}
+}
+
+func TestASettledEpisodeReDeliveredStaysPlanned(t *testing.T) {
+	// Arrange: an episode presented and settled.
+	h := newHarness(t)
+	h.planFrame("unit-1", &conversationv1.AgentPlanModeStart{
+		Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.planFrame("unit-2", &conversationv1.AgentPlanModeSuccess{
+		Act: &conversationv1.AgentPlanModeSuccess_Exited{Exited: &conversationv1.AgentPlanModeExited{
+			Plan: &conversationv1.AgentResponseProse{Markdown: "## the plan"},
+		}},
+	})
+
+	// Act: the other plane's copy of the ENTER arrives after the exit already
+	// settled the bubble, which is the order the sidecar's file tail produces.
+	h.planFrame("unit-1", &conversationv1.AgentPlanModeStart{
+		Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert: the presented plan stands; it does not go back to planning.
+	if h.planBubble().GetPlanned().GetProse().GetMarkdown() != "## the plan" {
+		t.Fatalf("state = %T, want the planned bubble to stand", h.planBubble().GetState())
+	}
+}
+
+func TestATurnEndingAfterThePlanWasPresentedLeavesItPlanned(t *testing.T) {
+	// Arrange: an episode presented and settled within the turn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "plan it")
+	h.planFrame("unit-1", &conversationv1.AgentPlanModeStart{
+		Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.planFrame("unit-2", &conversationv1.AgentPlanModeSuccess{
+		Act: &conversationv1.AgentPlanModeSuccess_Exited{Exited: &conversationv1.AgentPlanModeExited{
+			Plan: &conversationv1.AgentResponseProse{Markdown: "## the plan"},
+		}},
+	})
+
+	// Act: the turn ends. Plan mode was NOT still open.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert: the break is for OPEN episodes only.
+	if h.planBubble().GetPlanned() == nil {
+		t.Fatalf("state = %T, want the presented plan to stand", h.planBubble().GetState())
+	}
+}
+
 func TestATurnThatEndsInPlanModeBreaksTheEpisode(t *testing.T) {
 	// Arrange: an open episode.
 	h := newHarness(t)
@@ -401,6 +488,43 @@ func TestAPublishDrawsItsHeadingThenItsUrl(t *testing.T) {
 	}
 	if bubble.GetPublished().GetUrl().GetUrl() != "https://claude.ai/a/1" {
 		t.Fatalf("url = %q", bubble.GetPublished().GetUrl().GetUrl())
+	}
+}
+
+func TestAPublishedTitleKeepsTheFaviconTheCallAnnounced(t *testing.T) {
+	// Arrange: the call announces the favicon and a working title.
+	h := newHarness(t)
+	favicon, title := "📊", "Draft"
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
+			Result: &conversationv1.AgentArtifact_Start{Start: &conversationv1.AgentArtifactStart{
+				Act: &conversationv1.AgentArtifactStart_Publish{Publish: &conversationv1.AgentArtifactPublish{
+					FilePath: "/tmp/report.html", Favicon: &favicon, Title: &title,
+				}},
+				StartedAtMs: 1_000,
+			}},
+		}},
+	})
+
+	// Act: the outcome restates the title -- and never a favicon, which no
+	// outcome carries.
+	published := "Offline Report"
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
+			Result: &conversationv1.AgentArtifact_Success{Success: &conversationv1.AgentArtifactSuccess{
+				Outcome: &conversationv1.AgentArtifactSuccess_Published{
+					Published: &conversationv1.AgentArtifactPublished{Url: "https://claude.ai/a/1", Title: &published},
+				},
+			}},
+		}},
+	})
+
+	// Assert: feed.proto words the heading as "favicon emoji + title", so the
+	// finished card keeps the glyph it wore while it was publishing.
+	if got := h.artifactBubble().GetHeading().GetText(); got != "📊 Offline Report" {
+		t.Fatalf("heading = %q, want the outcome's title under the call's favicon", got)
 	}
 }
 
