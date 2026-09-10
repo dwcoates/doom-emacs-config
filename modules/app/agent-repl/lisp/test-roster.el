@@ -101,7 +101,8 @@ whose calls are the observation."
            (agent-repl-roster--status-by-id (make-hash-table :test 'equal))
            (agent-repl-roster-finish-functions nil)
            (agent-repl-roster-update-functions nil)
-           (agent-repl-host-last-selected-id nil))
+           (agent-repl-host-last-selected-id nil)
+           (agent-repl-host-reselect-pending nil))
        (cl-letf (((symbol-function 'agent-repl--ws-create)
                   (lambda (ws &optional dir)
                     (push ws agent-repl-test-roster--created)
@@ -624,6 +625,43 @@ Re-selection is idempotent, which is what keeps this from looping."
       :current "b"))
     ;; Assert
     (should (equal agent-repl-test-roster--switched nil))))
+
+(ert-deftest agent-repl-test-roster-a-current-during-a-relink-switches-nothing ()
+  "A roster push landing mid re-registration must not move the frame.
+The daemon that just relaunched stamped `current' on whichever workspace
+re-registered first, which is a walk order and not the user's choice;
+host.el is re-asserting the real selection at that moment."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one"
+          agent-repl-host-reselect-pending "/w/one")
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                    (agent-repl-test-roster--row "b" "two" :ready))))
+      :current "b"))
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched nil))))
+
+(ert-deftest agent-repl-test-roster-a-current-after-a-relink-switches-again ()
+  "Once the re-select is acknowledged the frame follows `current' again.
+A suppression that outlived its re-select would deafen Emacs to the
+user's next sidebar click."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one"
+          agent-repl-host-reselect-pending nil)
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                    (agent-repl-test-roster--row "b" "two" :ready))))
+      :current "b"))
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("two")))))
 
 (ert-deftest agent-repl-test-roster-a-current-already-selected-switches-nothing ()
   "The workspace already on screen is not switched to again."

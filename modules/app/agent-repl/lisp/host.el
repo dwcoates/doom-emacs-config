@@ -74,6 +74,7 @@
 (declare-function agent-repl--live-ws-names "workspace" ())
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
+(defvar agent-repl--eager-open-in-progress)
 
 (declare-function agent-repl--notify "notifications" (ws title message &optional activate))
 (declare-function agent-repl--notification-activate "notifications" (ws))
@@ -99,6 +100,19 @@ first one arrives).")
   "The `WorkspaceRef' id of the last workspace Emacs itself selected.
 roster.el compares a daemon-originated `current' change against this so
 Emacs's own tab switch is not mistaken for a switch REQUEST (ruling R8).")
+
+(defvar agent-repl-host-reselect-pending nil
+  "The project dir Emacs is re-asserting as the user's selection, or nil.
+EMACS OWNS THE USER'S SELECTION ACROSS A DAEMON RESTART.  A relaunched
+daemon has no memory of `current' — `endpoint_watch_workspace_roster.proto'
+carries `current' as the daemon's stamp, and `endpoint_select_workspace.proto'
+is the only verb that sets it — so the first thing it stamps is whatever
+Emacs re-registered first, which is an arbitrary order and not a choice
+the user made.  This is set for the length of a re-registration and
+cleared when the re-select is acknowledged; while it stands,
+`agent-repl-roster-react-to-current' does not move the frame, so a roster
+push carrying that arbitrary `current' cannot drag the user onto the
+other workspace's panel.")
 
 (defvar agent-repl-host-update-functions nil
   "Functions run with (WS HOST-PLIST) after every `host' push for WS.")
@@ -296,8 +310,12 @@ one place the handover walk lives."
 
 ;;;; ---- Select ----
 
-(defun agent-repl-host-select (ws)
+(defun agent-repl-host-select (ws &optional on-settled)
   "Tell the daemon the user switched to workspace WS.
+ON-SETTLED, when given, is called with `:success', `:error' or
+`:failure' once the call has an outcome — the one moment a caller
+holding state on the selection\='s behalf (the link-up re-assertion) may
+let go of it, whichever way it went.
 Idempotent by contract — re-selecting the current workspace succeeds —
 and the daemon's own act of stamping `current' also CLEARS the
 workspace's attention marker, which is why no ack verb exists.  Answers
@@ -327,22 +345,44 @@ workspace has no identity to select."
             ;; workspace is current.
             (setq agent-repl-host-last-selected-id (plist-get ref :id))
             (agent-repl--log ws "elisp.host.selected ws=%s id=%S"
-                             ws (plist-get ref :id)))
-           (:error (agent-repl-host--on-refused ws "select" (plist-get response :value)))
-           (arm (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm))))
+                             ws (plist-get ref :id))
+            (when on-settled (funcall on-settled :success)))
+           (:error
+            (agent-repl-host--on-refused ws "select" (plist-get response :value))
+            (when on-settled (funcall on-settled :error)))
+           (arm
+            (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
+            (when on-settled (funcall on-settled :error)))))
        :on-failure
        (lambda (detail)
-         (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)))
+         (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
+         (when on-settled (funcall on-settled :failure))))
       t))))
 
 (defun agent-repl-host--on-workspace-activated (&rest _)
   "Select the newly activated perspective's workspace with the daemon.
 Registered on workspace.el's perspective-activation boundary: an ordinary
 tab switch IS the SelectWorkspace, and it is also what clears the
-workspace's attention marker."
-  (let ((ws (agent-repl--ws-current-name)))
-    (when (and ws (agent-repl-host--entry ws))
-      (agent-repl-host-select ws))))
+workspace's attention marker.
+
+A TRANSIENT BACKGROUND ACTIVATION IS NOT A TAB SWITCH, and reporting one
+as such told the daemon the user had chosen a workspace they never
+looked at.  `agent-repl--call-in-background-workspace' activates a
+workspace\='s perspective to build into its own frame -- the webview mount
+and the link-up re-point both go through it -- and binds
+`agent-repl--eager-open-in-progress\=' around the whole switch-in /
+build / switch-back.  Measured on the link-up edge: re-pointing the
+UNSELECTED workspace\='s webview activated its perspective, this hook
+selected it with the fresh daemon, the daemon stamped it `current\=',
+and the roster push carrying that stamp took the frame off the workspace
+the user was standing in.  It is the same flag the other two
+activation-reactive hooks consult for the same reason (see its
+docstring in `core.el\=')."
+  (if agent-repl--eager-open-in-progress
+      (agent-repl--log nil "elisp.host.select-skipped reason=background-activation")
+    (let ((ws (agent-repl--ws-current-name)))
+      (when (and ws (agent-repl-host--entry ws))
+        (agent-repl-host-select ws)))))
 
 ;;;; ---- Subscribe ----
 
@@ -373,7 +413,15 @@ costs a round trip and changes no view."
   (agent-repl-host--put ws :ref ref)
   (agent-repl-host--put ws :conn conn)
   (agent-repl--ws-put ws :ref ref)
-  (when (equal ws (agent-repl--ws-current-name))
+  ;; THE USER'S WORKSPACE, NOT A TRANSIENTLY ACTIVATED ONE.  `--ws-current-name'
+  ;; answers the perspective that is active right now, and
+  ;; `agent-repl--call-in-background-workspace' makes a BACKGROUND workspace's
+  ;; perspective active for the length of a mount, so an attach landing inside
+  ;; that window would report the user as having switched to a workspace they
+  ;; never looked at.  Same flag, same reason as
+  ;; `agent-repl-host--on-workspace-activated'.
+  (when (and (equal ws (agent-repl--ws-current-name))
+             (not agent-repl--eager-open-in-progress))
     (agent-repl-host-select ws)))
 
 (defun agent-repl-host-subscribe (conn ws ref)
@@ -841,6 +889,60 @@ dired."
 
 ;;;; ---- Link lifecycle ----
 
+(defun agent-repl-host--selected-dir ()
+  "Return the project dir the user\='s selection stands on, or nil.
+THE DIR, NOT THE ID, IS WHAT SURVIVES A DAEMON RESTART: a relaunched
+daemon re-mints every `WorkspaceRef\=' id, so the id Emacs held before the
+link went down names nothing afterwards, while the directory the user
+stood in is the same directory the re-registration hands back.  The id is
+still where the answer is looked up FIRST — it is the selection Emacs
+last had acknowledged — and the tab the frame is on is the fallback."
+  (let ((ws (or (and agent-repl-host-last-selected-id
+                     (agent-repl--ws-by-ref-id agent-repl-host-last-selected-id))
+                (agent-repl--ws-current-name))))
+    (and ws (agent-repl--ws-get ws :project-dir))))
+
+(defun agent-repl-host--ws-for-dir (dir)
+  "Return the live workspace registered at DIR, or nil when none came back.
+A ref is required: a workspace the new daemon refused to register has no
+identity to select."
+  (and dir
+       (seq-find (lambda (ws)
+                   (and (agent-repl-host-ref ws)
+                        (equal dir (agent-repl--ws-get ws :project-dir))))
+                 (agent-repl--live-ws-names))))
+
+(defun agent-repl-host--reassert-selection (dir)
+  "Re-assert DIR as the user\='s selection once re-registration has settled.
+The daemon that came back stamped `current\=' on whichever workspace
+re-registered first — an order Emacs happens to walk in, never a choice
+the user made — so Emacs says again what the user chose.  Clearing
+`agent-repl-host-reselect-pending\=' is what re-arms
+`agent-repl-roster-react-to-current\=', and every arm below clears it: a
+suppression that outlived its re-select would deafen Emacs to the user\='s
+next sidebar click."
+  (cond
+   ((null dir)
+    (setq agent-repl-host-reselect-pending nil)
+    (agent-repl--log nil "elisp.host.link-up-reselect-skipped reason=no-selection"))
+   ((null (agent-repl-host--ws-for-dir dir))
+    ;; The workspace the user stood in did not come back.  The selection
+    ;; stays wherever it is — a live workspace — and the loss is reported
+    ;; rather than papered over with an arbitrary substitute.
+    (setq agent-repl-host-reselect-pending nil)
+    (agent-repl--warn nil "elisp.host.link-up-reselect-lost dir=%S kept=%S"
+                      dir (agent-repl--ws-current-name)))
+   (t
+    (let ((ws (agent-repl-host--ws-for-dir dir)))
+      (agent-repl--info ws "elisp.host.link-up-reselect ws=%s dir=%S" ws dir)
+      (unless (equal ws (agent-repl--ws-current-name))
+        (agent-repl--ws-switch ws))
+      (agent-repl-host-select
+       ws (lambda (outcome)
+            (setq agent-repl-host-reselect-pending nil)
+            (agent-repl--log ws "elisp.host.link-up-reselected ws=%s outcome=%S"
+                             ws outcome)))))))
+
 (defun agent-repl-host-on-link-up (conn)
   "Re-register, re-subscribe and re-point every live workspace on CONN.
 This is the NORMAL path after a daemon restart, not an error recovery:
@@ -864,8 +966,21 @@ is what moves `:conn\=' to the new daemon (`agent-repl-host--attach\=') and
 frontend.el derives the page url from `agent-repl-host-conn\='.  It is a
 no-op for a workspace with no live webview, so a headless one costs
 nothing."
-  (let ((names (agent-repl--live-ws-names)))
-    (agent-repl--info nil "elisp.host.link-up workspaces=%d" (length names))
+  (let* ((names (agent-repl--live-ws-names))
+         (wanted (agent-repl-host--selected-dir))
+         (eligible (seq-filter (lambda (ws) (agent-repl--ws-get ws :project-dir)) names))
+         (outstanding (length eligible))
+         (settle (lambda ()
+                   (setq outstanding (1- outstanding))
+                   ;; EXACTLY zero, once: a register callback that answers
+                   ;; synchronously walks this counter down past every
+                   ;; workspace, and a re-assertion fired twice would select
+                   ;; twice for one relink.
+                   (when (zerop outstanding)
+                     (agent-repl-host--reassert-selection wanted)))))
+    (setq agent-repl-host-reselect-pending wanted)
+    (agent-repl--info nil "elisp.host.link-up workspaces=%d selection=%S"
+                      (length names) wanted)
     (dolist (ws names)
       (let ((dir (agent-repl--ws-get ws :project-dir)))
         (if (null dir)
@@ -878,7 +993,12 @@ nothing."
                (agent-repl-host-subscribe conn ws ref)
                (agent-repl-frontend-reload-webview ws)
                (agent-repl--info ws "elisp.host.link-up-webview-repointed ws=%s address=%S"
-                                 ws (agent-repl-connect-connection-address conn))))))))))
+                                 ws (agent-repl-connect-connection-address conn)))
+             (funcall settle))))))
+    ;; Nothing to wait for: no workspace had a dir to re-register, so the
+    ;; selection is settled here rather than in a callback that never runs.
+    (when (null eligible)
+      (agent-repl-host--reassert-selection wanted))))
 
 (defun agent-repl-host-on-link-down (conn)
   "Forget the streams CONN carried, keeping every workspace's last state.
