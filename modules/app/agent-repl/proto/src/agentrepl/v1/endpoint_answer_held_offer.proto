@@ -1,0 +1,76 @@
+// endpoint_answer_held_offer.proto — AnswerHeldOffer: answering a QUESTION
+// the daemon parked in the tray. DAEMON-HOLD TRAY section. Addressed by
+// OFFER KIND, not an id: a workspace has at most one offer of a kind
+// standing (the tray's HeldOffer semantics), so a token would over-address.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AnswerHeldOfferRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHICH offer kind is being answered, the answer inside its arm — today
+  // only the merge-dequeue question (an interrupt no longer silently yanks
+  // the merge off the queue; the daemon asks instead).
+  oneof answer {
+    AnswerHeldOfferMergeDequeue merge_dequeue = 2;
+  }
+}
+
+// THE ARM IS THE ANSWER.
+message AnswerHeldOfferMergeDequeue {
+  oneof decision {
+    // Keep the queue slot; the merge stays enqueued.
+    AnswerHeldOfferKeep keep = 1;
+    // Release the slot; the merge leaves the queue.
+    AnswerHeldOfferRelease release = 2;
+  }
+}
+message AnswerHeldOfferKeep {}
+message AnswerHeldOfferRelease {}
+
+// THE ARM IS THE OUTCOME.
+message AnswerHeldOfferResponse {
+  oneof result {
+    AnswerHeldOfferSuccess success = 1;
+    AnswerHeldOfferError error = 2;
+  }
+}
+
+// Done; the tray's new state arrives on its stream.
+message AnswerHeldOfferSuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message AnswerHeldOfferError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    AnswerHeldOfferUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    AnswerHeldOfferWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    AnswerHeldOfferTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    AnswerHeldOfferNotYetAdopted not_yet_adopted = 4;
+    // No offer is standing for this workspace.
+    AnswerHeldOfferNoOfferStanding no_offer_standing = 5;
+    // A newer offer has superseded the one answered.
+    AnswerHeldOfferOfferSuperseded offer_superseded = 6;
+  }
+}
+message AnswerHeldOfferUnknownWorkspace {}
+message AnswerHeldOfferWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message AnswerHeldOfferTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message AnswerHeldOfferNotYetAdopted {}
+message AnswerHeldOfferNoOfferStanding {}
+message AnswerHeldOfferOfferSuperseded {}

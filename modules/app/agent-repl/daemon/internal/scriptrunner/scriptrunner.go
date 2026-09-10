@@ -1,0 +1,135 @@
+// Package scriptrunner runs one shell-invoked script and reports its combined
+// output and exit code.
+//
+// It is the ONE process-spawning script runner in the daemon: the rollout
+// controller's deploy chain and the merge orchestrator's test gate both
+// consume it through their own copy of the same narrow interface (see
+// internal/rollout's Deployer and internal/merge/api.go's ScriptRunner). A
+// script that RAN AND FAILED is a non-zero exit code and a NIL error; an
+// error is returned only when the run could not be CLASSIFIED at all — an
+// empty argv, a script that could not be spawned, or a context that ended
+// first. A caller that wants "did it succeed" reads the exit code, not the
+// error.
+package scriptrunner
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+
+	"claude-repld/internal/dlog"
+)
+
+// gitEnvKeys are the repository-selecting variables that must never be
+// inherited by a spawned script: a hook-leaked GIT_DIR is a real, previously
+// observed source of bogus work-tree errors, and a script running as part of
+// the deploy chain or the merge test gate must resolve its own repository
+// rather than one a caller's environment happened to leak in. This mirrors
+// integration/harness/daemon.go's gitEnvKeys, which scrubs a fake git child's
+// environment for the identical reason.
+var gitEnvKeys = []string{
+	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+}
+
+// cleanEnv returns env with every repository-selecting git variable dropped.
+func cleanEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		drop := false
+		for _, bad := range gitEnvKeys {
+			if key == bad {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// Runner runs a script in a directory. It is stateless beyond its logger, so
+// one instance serves every caller in the daemon.
+type Runner struct {
+	log dlog.Logger
+}
+
+// New builds the runner. log is required; every run is recorded through it,
+// because a script the daemon spawns on the deploy chain or the merge test
+// gate is exactly the kind of external, hard-to-reproduce step whose outcome
+// must survive in the durable log.
+func New(log dlog.Logger) (*Runner, error) {
+	if log == nil {
+		return nil, fmt.Errorf("scriptrunner: a logger is required")
+	}
+	return &Runner{log: log}, nil
+}
+
+// Run executes argv in dir and returns the combined stdout and stderr with
+// the process's exit code.
+//
+// An empty argv or an empty dir is refused before anything is spawned: every
+// caller names both a script and a directory to run it in, so either being
+// blank is a caller bug rather than a runtime condition to classify. A
+// refusal and a failed spawn are both reported as errors alongside a failed
+// run's own non-zero code, per the package doc's RAN-AND-FAILED-versus
+// COULD-NOT-BE-CLASSIFIED distinction.
+func (r *Runner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
+	if len(argv) == 0 {
+		err := fmt.Errorf("scriptrunner: argv is empty")
+		r.log.Error("daemon.scriptrunner.run", "refused an empty argv", dlog.Context{"dir": dir})
+		return "", 0, err
+	}
+	if strings.TrimSpace(dir) == "" {
+		err := fmt.Errorf("scriptrunner: dir is empty")
+		r.log.Error("daemon.scriptrunner.run", "refused an empty dir", dlog.Context{"script": argv[0]})
+		return "", 0, err
+	}
+
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Env = cleanEnv(os.Environ())
+	// stdout and stderr are combined, in order, into one buffer: a caller
+	// painting a test gate's output or a deploy step's log wants what a
+	// terminal would have shown, not two streams it must interleave itself.
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err := cmd.Run()
+	output := buf.String()
+
+	var exitErr *exec.ExitError
+	if err == nil {
+		r.log.Debug("daemon.scriptrunner.run", "script ran to completion", dlog.Context{
+			"script": argv[0], "dir": dir, "exit_code": 0,
+		})
+		return output, 0, nil
+	}
+	if errors.As(err, &exitErr) {
+		// The process ran and answered with a non-zero code: that is a
+		// classified, non-error outcome, per the package's RAN-AND-FAILED
+		// ruling.
+		code := exitErr.ExitCode()
+		r.log.Warn("daemon.scriptrunner.run", "script exited non-zero", dlog.Context{
+			"script": argv[0], "dir": dir, "exit_code": code,
+		})
+		return output, code, nil
+	}
+
+	// The process never produced an exit code at all: it could not be
+	// spawned, or the context ended first. Either is a failure to CLASSIFY,
+	// not an answer, so it is surfaced as an error rather than folded into a
+	// fabricated exit code.
+	r.log.Error("daemon.scriptrunner.run", "script could not be run", dlog.Context{
+		"script": argv[0], "dir": dir, "cause": err.Error(),
+	})
+	return output, 0, fmt.Errorf("scriptrunner: run %s: %w", argv[0], err)
+}

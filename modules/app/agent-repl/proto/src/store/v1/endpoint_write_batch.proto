@@ -1,0 +1,62 @@
+// endpoint_write_batch.proto — WriteBatch: one producer's write of one batch,
+// with the cursor advance that must commit in the same transaction.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// One producer's write. The rpc is the envelope: no separate carrier message
+// exists, so the write's shape has exactly one spelling.
+message WriteBatchRequest {
+  // Which producer is writing, for attribution in the store's own logs.
+  // "claude-shim:<session>" or "shim-claude-sidecar".
+  string producer = 1;
+  // The records, and the reader position that becomes durable with them.
+  EntryBatch batch = 2;
+}
+
+// Durable, or nothing.
+message WriteBatchResponse {
+  oneof result {
+    WriteBatchSuccess success = 1;
+    WriteBatchFailure failure = 2;
+  }
+}
+
+// The batch is DURABLE — records and cursor advance committed as one
+// transaction. A replayed batch whose write_ids all landed before is this
+// same arm: absorption is success, and the producer can retire the batch
+// from its retry buffer either way.
+message WriteBatchSuccess {}
+
+// Nothing was committed: the transaction failed whole, so the producer
+// holds the batch in its BOUNDED IN-MEMORY retry buffer and replays it.
+// There is deliberately NO durable producer-side spill: exhausted retries
+// are a LOUD failure (dropped frames logged with what was lost), because a
+// persistent inability to reach the store indicates a lifetime-sequencing
+// defect to fix, not a condition to paper over with fallback persistence.
+// (The sidecar needs no buffer at all — its sources are durable files it
+// re-reads from the cursor.) THE ARM IS WHY.
+message WriteBatchFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // The batch violated validation (unset arm, empty id, negative offset,
+    // …); nothing was committed and a retry of the same bytes cannot help.
+    WriteBatchInvalidRequest invalid_request = 2;
+    // The transaction failed in the database; a retry may succeed.
+    WriteBatchStorageFailure storage_failure = 3;
+  }
+}
+// The request was malformed or violated the validation invariant.
+message WriteBatchInvalidRequest {
+  // Which field (with the offending entry's index where one applies), as
+  // the store names it — for the producer's logs, never switched on.
+  string field = 1;
+}
+// The database failed; `detail` carries the driver's text.
+message WriteBatchStorageFailure {}

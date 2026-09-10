@@ -6,13 +6,13 @@ package tail
 // to defer belongs to the handler package.
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -23,7 +23,7 @@ func (w sliceWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// holdStub defers whatever offset hold returns, and emits one event per frame
+// holdStub defers whatever offset hold returns, and emits one entry per frame
 // it did convert — the same shape a real handler's hold has.
 type holdStub struct {
 	hold    func(fr []Frame) (int64, bool)
@@ -31,7 +31,7 @@ type holdStub struct {
 	lastCtx Context
 }
 
-func (s *holdStub) Handle(fr []Frame, ctx *Context) []*corev1.Event {
+func (s *holdStub) Handle(fr []Frame, ctx *Context) []*storev1.StoreEntry {
 	s.batches = append(s.batches, fr)
 	kept := len(fr)
 	ctx.HeldOffset, ctx.HeldDeliveries = 0, 0
@@ -44,10 +44,10 @@ func (s *holdStub) Handle(fr []Frame, ctx *Context) []*corev1.Event {
 			}
 		}
 	}
-	var out []*corev1.Event
+	var out []*storev1.StoreEntry
 	for _, f := range fr[:kept] {
 		if f.Obj != nil {
-			out = append(out, &corev1.Event{SessionId: ctx.SessionID})
+			out = append(out, stubEntry(ctx.SessionID))
 		}
 	}
 	s.lastCtx = *ctx
@@ -103,8 +103,8 @@ func TestTailerCursorStopsBeforeAHeldFrame(t *testing.T) {
 	if off := r.Next.GetOffset(); off != int64(len(first)) {
 		t.Fatalf("committed offset = %d, want %d (the held frame's first byte)", off, int64(len(first)))
 	}
-	if len(r.Events) != 1 {
-		t.Fatalf("events = %d, want 1 (only the converted frame)", len(r.Events))
+	if len(r.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1 (only the converted frame)", len(r.Entries))
 	}
 	if r.Records != 1 {
 		t.Fatalf("records = %d, want 1 (a deferred frame is not yet observed)", r.Records)
@@ -146,7 +146,7 @@ func TestTailerRedeliversAHeldFrameOnTheNextPoll(t *testing.T) {
 	}
 }
 
-func TestTailerRefusesAHoldOutsideTheBatch(t *testing.T) {
+func TestTailerRejectsABatchWhoseHoldIsOutsideIt(t *testing.T) {
 	tests := []struct {
 		name string
 		// at is the offset the handler names, relative to the batch it was given.
@@ -158,24 +158,121 @@ func TestTailerRefusesAHoldOutsideTheBatch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: a handler naming an offset it was never given frames for.
-			content := `{"a":1}` + "\n"
-			tr, _, logs, _ := newHoldTailer(t, content, func([]Frame) (int64, bool) { return tc.at, true })
-			// Act
-			r, err := tr.Poll()
-			if err != nil {
-				t.Fatalf("poll: %v", err)
-			}
-			tr.Commit(r)
+			tr, _, _, _ := newHoldTailer(t, `{"a":1}`+"\n", func([]Frame) (int64, bool) { return tc.at, true })
+
+			// Act.
+			_, err := tr.Poll()
+
 			// Assert: obeying it would rewind over converted records or park the
-			// cursor ahead of the frame it claims to hold, so it is refused —
-			// loudly, never silently.
-			if off := r.Next.GetOffset(); off != int64(len(content)) {
-				t.Fatalf("committed offset = %d, want %d (the refused hold must not move the cursor)", off, int64(len(content)))
-			}
-			if !strings.Contains(strings.Join(*logs, "\n"), "outside this batch") {
-				t.Fatalf("missing the loud log for the refused hold; got %v", *logs)
+			// cursor ahead of the frame it claims to hold, so the whole batch is
+			// rejected as a producer defect.
+			if !errors.Is(err, ErrHoldOutOfBatch) {
+				t.Fatalf("Poll error = %v, want ErrHoldOutOfBatch", err)
 			}
 		})
+	}
+}
+
+func TestTailerLogsARejectedOutOfBatchHold(t *testing.T) {
+	// Arrange.
+	tr, _, logs, _ := newHoldTailer(t, `{"a":1}`+"\n", func([]Frame) (int64, bool) { return 1 << 20, true })
+
+	// Act.
+	if _, err := tr.Poll(); err == nil {
+		t.Fatal("an out-of-batch hold was accepted")
+	}
+
+	// Assert.
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "hold-out-of-batch", "error")
+	if got, ok := rec.Context["offset"].(float64); !ok || int64(got) != 1<<20 {
+		t.Fatalf("hold-out-of-batch/error offset = %v, want %d", rec.Context["offset"], int64(1<<20))
+	}
+}
+
+func TestTailerRejectedHoldLeavesTheCursorUnmoved(t *testing.T) {
+	// Arrange.
+	tr, _, _, _ := newHoldTailer(t, `{"a":1}`+"\n", func([]Frame) (int64, bool) { return 1 << 20, true })
+
+	// Act.
+	if _, err := tr.Poll(); err == nil {
+		t.Fatal("an out-of-batch hold was accepted")
+	}
+
+	// Assert: nothing was written, so nothing may be committed.
+	if got := tr.offset; got != 0 {
+		t.Fatalf("committed offset = %d, want 0 (a rejected batch commits nothing)", got)
+	}
+}
+
+func TestTailerForcesConversionOnTheRedelivery(t *testing.T) {
+	// Arrange: a handler that holds the batch's last frame every time it is
+	// asked, so only the tailer's bound can end the hold.
+	tr, h, _, _ := newHoldTailer(t, `{"a":1}`+"\n"+`{"b":2}`+"\n", holdLast)
+	r1, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll1: %v", err)
+	}
+	tr.Commit(r1)
+
+	// Act: the redelivery.
+	r2, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll2: %v", err)
+	}
+	tr.Commit(r2)
+
+	// Assert: the handler was told the delivery was forced.
+	if !h.lastCtx.HoldForced {
+		t.Fatal("the redelivery did not tell the handler its hold was forced")
+	}
+}
+
+func TestTailerAdvancesPastAHoldThatSurvivesItsRedelivery(t *testing.T) {
+	// Arrange: the same never-settling handler.
+	tr, _, _, p := newHoldTailer(t, `{"a":1}`+"\n"+`{"b":2}`+"\n", holdLast)
+	r1, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll1: %v", err)
+	}
+	tr.Commit(r1)
+
+	// Act.
+	r2, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll2: %v", err)
+	}
+	tr.Commit(r2)
+
+	// Assert: a record held forever is a record never stored, so the bound wins.
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if off := r2.Next.GetOffset(); off != fi.Size() {
+		t.Fatalf("committed offset = %d, want %d (the exhausted hold must release)", off, fi.Size())
+	}
+}
+
+func TestTailerLogsAnExhaustedHold(t *testing.T) {
+	// Arrange.
+	first := `{"a":1}` + "\n"
+	tr, _, logs, _ := newHoldTailer(t, first+`{"b":2}`+"\n", holdLast)
+	r1, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll1: %v", err)
+	}
+	tr.Commit(r1)
+
+	// Act.
+	if _, err := tr.Poll(); err != nil {
+		t.Fatalf("poll2: %v", err)
+	}
+
+	// Assert: the exhausted hold names the SECOND frame's offset, the one it
+	// held on both the original delivery and its forced redelivery.
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "hold-exhausted", "warn")
+	if got, ok := rec.Context["offset"].(float64); !ok || int64(got) != int64(len(first)) {
+		t.Fatalf("hold-exhausted/warn offset = %v, want %d", rec.Context["offset"], int64(len(first)))
 	}
 }
 

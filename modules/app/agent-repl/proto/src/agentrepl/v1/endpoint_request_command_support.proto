@@ -1,0 +1,69 @@
+// endpoint_request_command_support.proto — RequestCommandSupport: the
+// unsupported-command refusal card's "engineer support for it" button. FEED
+// section. The DAEMON composes the support brief (which command, what the
+// vendor answers, where the daemon's recognition lives) and creates an
+// ordinary support workspace in the same repository with that brief as its
+// initial prompt — the ordinary CreateWorkspace path underneath; the caller
+// never composes a brief.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RequestCommandSupportRequest {
+  // The workspace whose feed carried the refusal card.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The refused command, echoed from the card ("/agents").
+  string command = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message RequestCommandSupportResponse {
+  oneof result {
+    RequestCommandSupportSuccess success = 1;
+    RequestCommandSupportError error = 2;
+  }
+}
+
+// The support workspace exists; everything else rides the roster.
+message RequestCommandSupportSuccess {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message RequestCommandSupportError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    RequestCommandSupportUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    RequestCommandSupportWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    RequestCommandSupportTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    RequestCommandSupportNotYetAdopted not_yet_adopted = 4;
+    // The command is blank once trimmed.
+    RequestCommandSupportBlankCommand blank_command = 5;
+    // The named brief file is absent.
+    RequestCommandSupportBriefMissing brief_missing = 6;
+  }
+}
+message RequestCommandSupportUnknownWorkspace {}
+message RequestCommandSupportWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message RequestCommandSupportTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message RequestCommandSupportNotYetAdopted {}
+message RequestCommandSupportBlankCommand {}
+message RequestCommandSupportBriefMissing {
+  // The brief's name, as asked for.
+  string name = 1;
+}

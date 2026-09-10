@@ -24,6 +24,11 @@
 #   4. store   — Go, built with `go build` -> ~/.cache/agent-repl/bin/shim-store
 #   5. sidecar — Go, built with `go build` ->
 #               ~/.cache/agent-repl/bin/shim-claude-sidecar
+#   6. lock    — Go, built with `go build` ->
+#               ~/.cache/agent-repl/bin/shim-lock. The shim spawns it to hold
+#               each kernel claim, because Node cannot take a flock, so a shim
+#               without it refuses every session — which is why `lock` is in
+#               the DEFAULT target set and store/sidecar are not.
 #
 # Staleness rule (per artifact): rebuild iff the artifact is missing, or any
 # source file under its source set is newer (mtime) than the artifact. This is
@@ -73,7 +78,7 @@
 #
 # Usage:
 #   build-frontend.sh [--force] [--dry-run] [-v]
-#                     [shim|webapp|daemon|store|sidecar|deps|gc ...]
+#                     [shim|webapp|daemon|store|sidecar|lock|deps|gc ...]
 #     --force            rebuild the selected artifacts unconditionally
 #     --dry-run          gc only: report what WOULD be collected, delete nothing
 #     -v, --verbose      gc only: also report each entry KEPT and why
@@ -105,7 +110,7 @@ WEBAPP_DIR="$ROOT/webapp"
 DAEMON_DIR="$ROOT/daemon"
 STORE_DIR="$ROOT/agent-shim/shim-store"
 SIDECAR_DIR="$ROOT/agent-shim/claude/shim-sidecar"
-WIRE_DIR="$ROOT/agent-shim/wire"
+LOCK_DIR="$ROOT/agent-shim/shim-lock"
 SHARED_LOGGING_DIR="$ROOT/agent-shim/logging/go"
 PROTO_GO_DIR="$ROOT/proto/gen/go"
 
@@ -127,9 +132,9 @@ REL_WEBAPP="${REL_ROOT:+$REL_ROOT/}webapp"
 NODE_STORE="${AGENT_REPL_NODE_STORE:-${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl/node-store}"
 
 # The shim artifact is the esbuild SINGLE-FILE bundle (`npm run build` ->
-# build.mjs). It stays at dist/main.js — the exact entry the daemon (daemon.el)
-# and the e2e harness spawn — so the bundle IS the spawned shim without a path
-# change on the (frozen) daemon side. The bundle inlines @bufbuild/protobuf,
+# build.mjs). It stays at dist/main.js — the exact entry the daemon and the e2e
+# harness spawn — so the bundle IS the spawned shim without a path change on
+# the daemon side. The bundle inlines @bufbuild/protobuf,
 # which the committed out-of-package proto stubs cannot resolve at runtime; a
 # plain tsc emit both breaks that resolution and lands under a deep rootDir path.
 SHIM_ARTIFACT="$SHIM_DIR/dist/main.js"
@@ -138,6 +143,7 @@ DAEMON_ARTIFACT="$DAEMON_DIR/bin/claude-repld"
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 STORE_ARTIFACT="$CACHE_BIN/shim-store"
 SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
+LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
 
 # Built-sha stamps, written beside each artifact after a SUCCESSFUL build so
 # readiness-report.sh can say which source revision the deployed artifact is
@@ -156,6 +162,7 @@ WEBAPP_BUILD_ID_STAMP="$WEBAPP_DIR/dist/.build-id"
 DAEMON_SHA_STAMP="$DAEMON_DIR/bin/.built-sha"
 STORE_SHA_STAMP="$CACHE_BIN/.shim-store.built-sha"
 SIDECAR_SHA_STAMP="$CACHE_BIN/.shim-claude-sidecar.built-sha"
+LOCK_SHA_STAMP="$CACHE_BIN/.shim-lock.built-sha"
 
 GRACE_MINS="${AGENT_REPL_NODE_STORE_GRACE_MINS:-60}"
 
@@ -172,7 +179,7 @@ while [ $# -gt 0 ]; do
         --force) FORCE=1 ;;
         --dry-run) DRY_RUN=1 ;;
         -v|--verbose) VERBOSE=1 ;;
-        shim|webapp|daemon|store|sidecar|deps|gc) TARGETS+=("$1") ;;
+        shim|webapp|daemon|store|sidecar|lock|deps|gc) TARGETS+=("$1") ;;
         -h|--help)
             sed -n '2,60p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
@@ -185,10 +192,17 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# Default to all three, in dependency-agnostic order. `gc` is never implicit:
-# it is either asked for, or triggered by a run that minted an entry.
+# Default set, in dependency-agnostic order. `gc` is never implicit: it is
+# either asked for, or triggered by a run that minted an entry.
+#
+# `lock` is in here and `store`/`sidecar` are not, because the three are not
+# alike: the store and the sidecar are launchd SERVICES, deployed and bounced
+# on their own cadence, while shim-lock is a dependency of the SHIM ITSELF —
+# the shim spawns it for every session claim and refuses to start a session
+# without it. Building the shim without it would deploy a bundle that cannot
+# take a lock.
 if [ "${#TARGETS[@]}" -eq 0 ]; then
-    TARGETS=(shim webapp daemon)
+    TARGETS=(shim webapp daemon lock)
 fi
 
 require_bin() {
@@ -523,8 +537,9 @@ build_webapp() {
 }
 
 build_daemon() {
-    # The daemon's set is its manifests plus every .go file in the tree.
-    load_sources "$DAEMON_DIR" -name '*.go'
+    # The daemon's set is its manifests, every .go file in its tree, and the
+    # repo-local modules it compiles against (generated proto Go + logging).
+    load_go_sources "$DAEMON_DIR"
     if ! is_stale "$DAEMON_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
         echo "[build-frontend] daemon: fresh, skipping"
         return 0
@@ -537,22 +552,22 @@ build_daemon() {
     echo "[build-frontend] daemon: done"
 }
 
-load_service_sources() {
-    # Both services compile against repo-local proto + wire + logging modules.
-    # Their generated/source files are real prerequisites even though they live
-    # outside the service module, so a proto, wire or logging edit must stale
-    # the installed launchd binary.
+load_go_sources() {
+    # Every Go artifact here compiles against the repo-local proto + logging
+    # modules. Their generated/source files are real prerequisites even though
+    # they live outside the built module, so a proto or logging edit must stale
+    # the binary.
     local dir="$1" source_dir f
     SOURCES=()
-    for source_dir in "$dir" "$WIRE_DIR" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR"; do
+    for source_dir in "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR"; do
         if [ ! -d "$source_dir" ]; then
-            echo "build-frontend.sh: required service source directory missing: $source_dir" >&2
+            echo "build-frontend.sh: required Go source directory missing: $source_dir" >&2
             exit 1
         fi
     done
     while IFS= read -r -d '' f; do
         SOURCES+=("$f")
-    done < <(find "$dir" "$WIRE_DIR" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR" -type f \
+    done < <(find "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR" -type f \
              \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) -print0)
 }
 
@@ -561,7 +576,7 @@ build_service() {
     # launchd services.  Keeping one helper prevents their source sets and
     # install semantics from drifting.
     local name="$1" dir="$2" artifact="$3" sha_stamp="$4"
-    load_service_sources "$dir"
+    load_go_sources "$dir"
     if ! is_stale "$artifact" ${SOURCES[@]+"${SOURCES[@]}"}; then
         echo "[build-frontend] $name: fresh, skipping"
         return 0
@@ -583,6 +598,7 @@ for target in "${TARGETS[@]}"; do
         daemon) build_daemon ;;
         store)  build_service shim-store "$STORE_DIR" "$STORE_ARTIFACT" "$STORE_SHA_STAMP" ;;
         sidecar) build_service shim-claude-sidecar "$SIDECAR_DIR" "$SIDECAR_ARTIFACT" "$SIDECAR_SHA_STAMP" ;;
+        lock)   build_service shim-lock "$LOCK_DIR" "$LOCK_ARTIFACT" "$LOCK_SHA_STAMP" ;;
         gc)     EXPLICIT_GC=1 ;;
         # Unreachable: the argument parser allowlists these same names. It is
         # here so that adding a target THERE and forgetting it here fails

@@ -1,0 +1,54 @@
+// endpoint_kill_workspace.proto — KillWorkspace: the big red button. SIDEBAR
+// section. Forced session death: the daemon tears down its shim connections
+// AND the shim itself — the shim's forced kill underneath, so the turn and
+// every live task die with it. NEVER blocks, NEVER warns, checks nothing:
+// killing the work IS the stated intent. The worktree and branch SURVIVE —
+// destroying data is NukeWorkspace's, never this verb's. The host command
+// is a thin wrapper: send, await the ack, then tear the tab down.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message KillWorkspaceRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message KillWorkspaceResponse {
+  oneof result {
+    // Dead — connections down, shim gone; the roster's new state arrives on
+    // its stream.
+    KillWorkspaceSuccess success = 1;
+    KillWorkspaceError error = 2;
+  }
+}
+message KillWorkspaceSuccess {}
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message KillWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    KillWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    KillWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    KillWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    KillWorkspaceNotYetAdopted not_yet_adopted = 4;
+  }
+}
+message KillWorkspaceUnknownWorkspace {}
+message KillWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message KillWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message KillWorkspaceNotYetAdopted {}

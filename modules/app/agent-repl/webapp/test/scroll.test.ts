@@ -1,9 +1,15 @@
+// @vitest-environment jsdom
+//
+// The pure decisions in this module need no dom, but `observeScrollBox` is the
+// one DOM-facing thing in it: it subscribes a real element's scroll events and
+// a real `ResizeObserver` to the tail owner, and the subscription being wired
+// to THAT element is half of what the footer-occlusion cases assert.
 import { describe, expect, it } from "vitest";
 import {
   EDGE_PX,
   PIN_PX,
-  SECTION_CLASSES,
   captureFeedAnchor,
+  feedTopChanged,
   restoreFeedAnchor,
   type AnchorBox,
   inEdgeZone,
@@ -20,9 +26,11 @@ import {
   type RevealBlock,
   type RevealTarget,
   revealNode,
+  revealDelta,
+  revealInBox,
+  observeScrollBox,
 } from "../src/scroll.js";
-import { renderItem } from "../src/render.js";
-import { PermissionItem, TextItem, ToolItem, UserTurnItem } from "../src/store.js";
+import { fireResize } from "./resize-observer.js";
 
 /** Fake ancestor-chain node: the shape innerScrollerAt walks. */
 interface FakeNode {
@@ -289,68 +297,6 @@ describe("sectionFor", () => {
     const output = node("bare-output", { parentElement: feed });
     // Act + Assert
     expect(sectionFor(output, feed, isSection).name).toBe("bare-output");
-  });
-});
-
-describe("SECTION_CLASSES", () => {
-  it("names the class the renderer puts on a tool card, which holds the tool scroll boxes", () => {
-    // Arrange
-    const item: ToolItem = {
-      kind: "tool",
-    ts: "2026-05-24T10:00:00.000Z",
-      toolUseId: "t1",
-      toolName: "Bash",
-      messageId: "m1",
-      inputJson: "",
-      input: { command: "ls" },
-      inputDone: true,
-    };
-    // Act + Assert
-    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[0]} `);
-  });
-
-  it("names the class the renderer puts on a permission card, which holds a preview scroll box", () => {
-    // Arrange
-    const item: PermissionItem = {
-      kind: "permission",
-      requestId: "p1",
-      toolUseId: "t1",
-      toolName: "Write",
-      input: {},
-      preview: { kind: "generic", summary: "a long preview" },
-    };
-    // Act + Assert
-    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[1]} `);
-  });
-
-  it("names the class the renderer puts on a response bubble, which holds its capped body", () => {
-    // Arrange — the response body caps at 25 lines and scrolls past that, so
-    // the bubble is a section: the lit gutters must ride the bubble's own
-    // edges rather than sit inset at its body's.
-    const item: TextItem = {
-      kind: "text",
-      blockId: "b1",
-      messageId: "m1",
-      text: "an answer",
-      done: true,
-      ts: "2026-05-24T10:00:00.000Z",
-    };
-    // Act + Assert
-    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[2]} `);
-  });
-
-  it("names the class the renderer puts on a prompt bubble, which holds its capped body", () => {
-    // Arrange — the prompt body caps at the same 25 lines and scrolls past
-    // that, so the prompt bubble is a section on the same terms the response
-    // bubble is.
-    const item: UserTurnItem = {
-      kind: "user-turn",
-      requestId: "r1",
-      content: [{ type: "text", text: "a prompt" }],
-      ts: "2026-05-24T10:00:00.000Z",
-    };
-    // Act + Assert
-    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[2]} `);
   });
 });
 
@@ -872,7 +818,11 @@ describe("feed anchoring across a rebuild", () => {
  * and that is what this catches — at the import, before it can be believed.
  */
 describe("the tail-follow decision has exactly one owner", () => {
-  const sources = import.meta.glob("../src/*.ts", {
+  // `**` rather than `*`: the rebuilt webapp puts each component in its own
+  // `src/<component>/` directory, and a flat glob would stop scanning exactly
+  // the modules most likely to re-open the question.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.
+  const sources = import.meta.glob("../src/**/*.ts", {
     query: "?raw",
     import: "default",
     eager: true,
@@ -883,7 +833,11 @@ describe("the tail-follow decision has exactly one owner", () => {
 
   it("scans a real set of sibling modules, so an empty glob cannot pass it", () => {
     // Arrange + Act + Assert — the guard is worthless if it inspects nothing.
-    expect(others.length).toBeGreaterThan(50);
+    // The floor is well under the module count on purpose: it exists to catch a
+    // glob that resolved to nothing, and the strip to the chassis legitimately
+    // took src from ninety-odd modules to a handful, so a floor tracking the
+    // real count would have to be retuned by every agent that adds a component.
+    expect(others.length).toBeGreaterThan(5);
   });
 
   it("lets no other module reach for the raw pin test", () => {
@@ -899,5 +853,354 @@ describe("the tail-follow decision has exactly one owner", () => {
     const offenders = others.filter(([, src]) => /\bparkAtTail\b/.test(src));
     // Assert
     expect(offenders.map(([p]) => p)).toEqual([]);
+  });
+});
+
+describe("a load-more prepend does not jump the viewport", () => {
+  /** A scroll box whose items are at fixed offsets, mounted by key. */
+  const box = (over: Partial<AnchorBox> & { offsets?: Record<string, number> } = {}): AnchorBox => {
+    const offsets = over.offsets ?? {};
+    return {
+      scrollTop: over.scrollTop ?? 0,
+      scrollHeight: over.scrollHeight ?? 1000,
+      clientHeight: over.clientHeight ?? 200,
+      querySelector: (selector: string) => {
+        const key = /\[data-key="(.*)"\]/.exec(selector)?.[1] ?? "";
+        const offsetTop = offsets[key];
+        return offsetTop === undefined ? null : { offsetTop };
+      },
+    };
+  };
+
+  it("preserves the reading position across a prepend of older messages", () => {
+    // Arrange — the reader sits 300px down, looking at `b` 20px below the
+    // viewport top. A page of ten older messages then lands ABOVE everything,
+    // pushing `b` down by 800px. The reader asked for MORE of what they had,
+    // not to be moved off it.
+    const before = box({ scrollTop: 300 });
+    const anchor = captureFeedAnchor(
+      before,
+      [
+        { key: "a", offsetTop: 100 },
+        { key: "b", offsetTop: 320 },
+      ],
+      false,
+    );
+    const after = box({ scrollTop: 300, scrollHeight: 1800, offsets: { b: 1120 } });
+    // Act
+    restoreFeedAnchor(after, anchor, new TailFollow(after));
+    // Assert — `b` sits at exactly the same 20px from the viewport top.
+    expect(after.scrollTop).toBe(1100);
+  });
+
+  it("a NEW item at the feed's top is what says content was inserted above", () => {
+    // Arrange / Act / Assert
+    expect(feedTopChanged("older-1", "b-tail")).toBe(true);
+  });
+
+  it("an unchanged top item is NOT a prepend, whatever the feed's height did", () => {
+    // Arrange — a card expanding or a deferred item settling grows the feed
+    // without inserting anything above the reader; compensating those would
+    // move the reader instead.
+    // Act / Assert
+    expect(feedTopChanged("b-tail", "b-tail")).toBe(false);
+  });
+
+  it("an empty feed BEFORE the render has no reading position to preserve", () => {
+    // Arrange / Act / Assert
+    expect(feedTopChanged(null, "b-tail")).toBe(false);
+  });
+
+  it("an empty feed AFTER the render has no anchor item to restore", () => {
+    // Arrange / Act / Assert
+    expect(feedTopChanged("b-tail", null)).toBe(false);
+  });
+});
+
+describe("redirectsToFeed default gutter", () => {
+  it("falls back to EDGE_PX when the caller names no gutter width", () => {
+    // Arrange — a pointer one px inside the default gutter, with edgePx omitted
+    // so only the `?? EDGE_PX` fallback can decide the answer.
+    const scroller = { left: 100, right: 500 };
+    // Act
+    const redirected = redirectsToFeed({
+      scroller,
+      clientX: 100 + EDGE_PX - 1,
+      feedScrollable: true,
+    });
+    // Assert — the pointer is in the gutter, so the section keeps the wheel.
+    expect(redirected).toBe(false);
+  });
+});
+
+describe("wheelAction default gutter", () => {
+  it("falls back to EDGE_PX when the caller names no gutter width", () => {
+    // Arrange — a pointer well clear of the default gutters, edgePx omitted.
+    // Act
+    const delta = wheelAction({
+      scroller: { left: 100, right: 500 },
+      clientX: 300,
+      deltaY: 7,
+      deltaMode: 0,
+      feedScrollable: true,
+      feedHeight: 600,
+    });
+    // Assert — redirected to the feed, carrying the pixel delta verbatim.
+    expect(delta).toBe(7);
+  });
+});
+
+describe("sectionFor detached box", () => {
+  it("falls back to the box when the chain runs out before reaching the feed", () => {
+    // Arrange — a box whose ancestors end at a root that is NOT the feed, the
+    // shape a section removed from the document leaves mid-render.
+    const feed = node("feed");
+    const orphanRoot = node("orphan-root");
+    const output = node("bare-output", { parentElement: orphanRoot });
+    // Act + Assert — no card was found and the walk still terminated.
+    expect(sectionFor(output, feed, isSection).name).toBe("bare-output");
+  });
+});
+
+describe("captureFeedAnchor exhausted scan", () => {
+  it("captures nothing when every item sits above the viewport top", () => {
+    // Arrange — a reader scrolled past the last item, so the walk runs off the
+    // end without ever finding an item still on screen.
+    const box: AnchorBox = {
+      scrollTop: 900,
+      scrollHeight: 1000,
+      clientHeight: 300,
+      querySelector: () => null,
+    };
+    const items = [
+      { key: "a", offsetTop: 0 },
+      { key: "b", offsetTop: 400 },
+    ];
+    // Act
+    const anchor = captureFeedAnchor(box, items, false);
+    // Assert
+    expect(anchor).toBeNull();
+  });
+});
+
+describe("TailFollow on a box shorter than its viewport", () => {
+  it("clamps the reconcile baseline at zero rather than a negative reach", () => {
+    // Arrange — a feed with less content than viewport: scrollHeight minus
+    // clientHeight is NEGATIVE, so only the Math.max floor keeps the baseline
+    // inside the box's real range.
+    const box: ReanchorBox = { scrollTop: 0, scrollHeight: 120, clientHeight: 300 };
+    const tail = new TailFollow(box);
+    // Act — content arrives, still short of the viewport; nothing moved.
+    box.scrollHeight = 200;
+    // Assert — the follow survives, unclamped arithmetic would have ended it.
+    expect(tail.isFollowing()).toBe(true);
+  });
+});
+
+describe("restoreFeedAnchor key escaping", () => {
+  it("escapes a quote in the anchor key instead of building a broken selector", () => {
+    // Arrange — a key carrying the one character that would end the selector's
+    // attribute string early.
+    const seen: string[] = [];
+    const box: AnchorBox = {
+      scrollTop: 0,
+      scrollHeight: 1000,
+      clientHeight: 300,
+      querySelector: (sel: string) => {
+        seen.push(sel);
+        return { offsetTop: 500 };
+      },
+    };
+    const placed: number[] = [];
+    // Act
+    restoreFeedAnchor(box, { key: 'a"b', offsetPx: 20, pinned: false }, {
+      park: () => {},
+      place: (top: number) => placed.push(top),
+    });
+    // Assert
+    expect(seen).toEqual(['[data-key="a\\"b"]']);
+    expect(placed).toEqual([480]);
+  });
+});
+
+
+/**
+ * `observeScrollBox` — THE FOOTER OCCLUSION, at its source.
+ *
+ * The docked progress footer is laid out BELOW the scroll box, so the box's
+ * height is already the window's minus the footer's: the space is reserved by
+ * the layout and never needed reserving again. What went stale was the
+ * POSITION — a footer that appeared or grew AFTER the render that parked the
+ * tail shrank the box under a `scrollTop` nobody moved, leaving the last bubble
+ * that many pixels below the fold and clipped by the footer's top edge.
+ *
+ * These drive a real element with scripted geometry, because the subscription
+ * being wired to THAT element is half of what is under test.
+ */
+describe("observeScrollBox", () => {
+  /**
+   * A real element that answers scroll geometry, since jsdom lays nothing out.
+   * `scrollTop` clamps into the scrollable range on write, as a browser's does
+   * — which is what turns `parkAtTail`'s "assign scrollHeight" into the bottom.
+   */
+  function scrollBox(init: { scrollHeight: number; clientHeight: number; scrollTop: number }) {
+    const element = document.createElement("div");
+    const scrollHeight = init.scrollHeight;
+    let clientHeight = init.clientHeight;
+    let scrollTop = init.scrollTop;
+    Object.defineProperties(element, {
+      scrollHeight: { get: () => scrollHeight },
+      clientHeight: { get: () => clientHeight },
+      scrollTop: {
+        get: () => scrollTop,
+        set: (next: number) => {
+          scrollTop = Math.max(0, Math.min(next, scrollHeight - clientHeight));
+        },
+      },
+    });
+    return {
+      element,
+      /** The footer appearing or growing by PX: the box loses that height. */
+      loseHeight: (px: number) => {
+        clientHeight -= px;
+      },
+      top: () => scrollTop,
+    };
+  }
+
+  it("re-lands the tail on the shrunken viewport when the footer takes height", () => {
+    // Arrange — a reader parked at the tail: 700 + 300 viewport = 1000.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    // Act — the footer settles after the render and eats 48px of the box.
+    box.loseHeight(48);
+    fireResize(box.element);
+    // Assert — the tail is the new bottom, so the last bubble clears the strip.
+    expect(box.top()).toBe(748);
+  });
+
+  it("re-lands by exactly the height the footer took", () => {
+    // Arrange — the same box, so the delta is the only thing being read.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const before = box.top();
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    // Act
+    box.loseHeight(48);
+    fireResize(box.element);
+    // Assert — the reservation IS the footer's height, not an approximation.
+    expect(box.top() - before).toBe(48);
+  });
+
+  it("leaves a reader who scrolled away exactly where they are", () => {
+    // Arrange — the reader left the tail, so nothing may pull them back.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    box.element.scrollTop = 200;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Act
+    box.loseHeight(48);
+    fireResize(box.element);
+    // Assert
+    expect(box.top()).toBe(200);
+  });
+
+  it("hears the box's own scroll events, so a gesture ends the follow", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    // Act — the reader scrolls up and the browser dispatches the event.
+    box.element.scrollTop = 400;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect(tail.isFollowing()).toBe(false);
+  });
+
+  it("stops observing the box when its unsubscriber is called", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    const unobserve = observeScrollBox(box.element, tail);
+    // Act
+    unobserve();
+    // Assert — nothing watches it any more, so a fire finds no observer.
+    expect(() => fireResize(box.element)).toThrow(/no ResizeObserver/);
+  });
+});
+
+/**
+ * THE EXPANSION'S OWN REVEAL.
+ *
+ * A caret opens a sub-feed BELOW the fold and growth moves nothing on its own,
+ * so the reader was left looking at the head of something they could not see
+ * (measured at a click: `below=208 scrollTop=40`). The arithmetic below is the
+ * whole of the answer; the caret's two cases (pinned, not pinned) live in
+ * test/feed/bubble.test.ts, where the caret is.
+ */
+describe("revealDelta", () => {
+  /** A 300px viewport starting at the top of the screen. */
+  const box = { boxTop: 0, boxHeight: 300 };
+
+  it("moves nothing for a panel already wholly on screen", () => {
+    expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 100 })).toBe(0);
+  });
+
+  it("moves by exactly the overhang for a panel running past the fold", () => {
+    expect(revealDelta({ ...box, nodeTop: 250, nodeHeight: 200 })).toBe(150);
+  });
+
+  it("stops at the panel's own top for a panel taller than the viewport", () => {
+    // Capped: the head above it stays on screen rather than being pushed off
+    // to chase a bottom edge that cannot fit anyway.
+    expect(revealDelta({ ...box, nodeTop: 80, nodeHeight: 900 })).toBe(80);
+  });
+
+  it("brings a panel above the viewport back down to its top", () => {
+    expect(revealDelta({ ...box, nodeTop: -50, nodeHeight: 100 })).toBe(-50);
+  });
+
+  it("counts a panel ending exactly at the fold as visible", () => {
+    expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 200 })).toBe(0);
+  });
+});
+
+describe("revealInBox", () => {
+  /** An element answering a scripted rect, jsdom laying nothing out. */
+  const at = (top: number, height: number): HTMLElement => {
+    const el = document.createElement("div");
+    el.getBoundingClientRect = () => ({
+      top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top,
+      toJSON: () => ({}),
+    });
+    return el;
+  };
+
+  /** The two writes a reveal is allowed to make, recorded. */
+  const writer = () => {
+    const shifts: number[] = [];
+    let released = 0;
+    return { shifts, released: () => released, shift: (d: number) => shifts.push(d),
+      release: () => { released += 1; } };
+  };
+
+  it("shifts the box by the delta the geometry asks for", () => {
+    const w = writer();
+    revealInBox(at(0, 300), at(250, 200), w);
+    expect(w.shifts).toEqual([150]);
+  });
+
+  it("writes nothing when the node is already on screen", () => {
+    const w = writer();
+    revealInBox(at(0, 300), at(100, 100), w);
+    expect(w.shifts).toEqual([]);
+  });
+
+  it("ends the follow even when it moves nothing, the reader having opened content to read", () => {
+    const w = writer();
+    revealInBox(at(0, 300), at(100, 100), w);
+    expect(w.released()).toBe(1);
   });
 });

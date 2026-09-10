@@ -1,0 +1,33 @@
+{
+  "scenario": "held-turn-gate",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `rm -f held.txt`, then tell me it is done.",
+  "prompts": [
+    {
+      "text": "Run `rm -f held.txt`, then tell me it is done.",
+      "resume": false
+    }
+  ],
+  "world": "held-turn-gate",
+  "cwd_init": null,
+  "vendor_session_id": "ba2acbf7-f8b8-4928-aab2-2c75c85835a3",
+  "manual": null,
+  "expect": [
+    "a long gap in t_ms across the gate",
+    "no SDK messages while held",
+    "the turn resuming after the answer"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-held-turn-gate-wCqTl6-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:33:23.909Z",
+  "controls": [
+    {
+      "verb": "getContextUsage",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

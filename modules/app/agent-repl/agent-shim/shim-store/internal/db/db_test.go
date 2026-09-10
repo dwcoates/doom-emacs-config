@@ -3,437 +3,588 @@ package db
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
-	"io"
-	"net/url"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	datav1 "agentrepl/proto/agentshim/data/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// --- shared test helpers ---------------------------------------------------
+func TestMain(m *testing.M) {
+	// Nothing in this package reaches a vendor, and the flag says so out loud
+	// for every helper that checks it.
+	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	os.Unsetenv(EnvSlowQueryMs)
+	os.Exit(m.Run())
+}
 
-// openTemp opens a fresh WAL database in a temp dir (exercises real WAL, unlike
-// :memory:) and registers cleanup.
-func openTemp(t *testing.T) *DB {
+// ---- harness ----
+
+// sink captures both logging destinations so a test can assert the record a
+// branch was required to emit.
+type sink struct {
+	file   bytes.Buffer
+	stderr bytes.Buffer
+}
+
+func (s *sink) records(t *testing.T) []map[string]any {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "events.db")
-	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(s.file.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("log line is not JSON: %v: %q", err, line)
+		}
+		out = append(out, record)
 	}
-	t.Cleanup(func() { d.Close() })
+	return out
+}
+
+// assertLogged fails unless some record at `level` mentions `substring`.
+func (s *sink) assertLogged(t *testing.T, level, substring string) {
+	t.Helper()
+	for _, record := range s.records(t) {
+		if record["level"] == level && strings.Contains(record["message"].(string), substring) {
+			return
+		}
+	}
+	t.Fatalf("no %s record mentioning %q; log was:\n%s", level, substring, s.file.String())
+}
+
+// assertTracedRefusal is the assertion for a REFUSED REQUEST: this layer traces
+// it at verbose with its statement and table, and writes NO normal-level record
+// for it, because the single normal-level record belongs to the server — the
+// only layer that knows the rpc, the request id and the producer the refusal
+// belongs to. Two normal-level records on one refusal is what "logged exactly
+// once" exists to prevent.
+func (s *sink) assertTracedRefusal(t *testing.T, substring string) {
+	t.Helper()
+	traced := false
+	for _, record := range s.records(t) {
+		message, _ := record["message"].(string)
+		if !strings.Contains(message, substring) {
+			continue
+		}
+		if record["verbosity"] == "verbose" {
+			traced = true
+			continue
+		}
+		t.Fatalf("a refused request wrote a normal-level record; the server owns that record: %v\nlog was:\n%s", record, s.file.String())
+	}
+	if !traced {
+		t.Fatalf("no verbose trace mentioning %q; log was:\n%s", substring, s.file.String())
+	}
+}
+
+// assertContext fails unless some record carries key=value in its context.
+func (s *sink) assertContext(t *testing.T, key string, value any) {
+	t.Helper()
+	for _, record := range s.records(t) {
+		context, _ := record["context"].(map[string]any)
+		if got, ok := context[key]; ok && got == value {
+			return
+		}
+	}
+	t.Fatalf("no record with context %s=%v; log was:\n%s", key, value, s.file.String())
+}
+
+func newSink(t *testing.T) (*sink, *logging.Logger) {
+	t.Helper()
+	s := &sink{}
+	return s, logging.New(&s.file, &s.stderr, true)
+}
+
+// newStore opens a fresh on-disk store with a frozen clock, so a test can
+// assert an exact instant without waiting for one.
+func newStore(t *testing.T) (*DB, *sink) {
+	t.Helper()
+	s, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+	return d, s
+}
+
+const testNow int64 = 1_700_000_000_000
+
+// newStoreWithClock opens a fresh on-disk store whose clock is the caller's, so
+// a test can advance it between writes and assert an ORDER rather than an
+// instant.
+func newStoreWithClock(t *testing.T, now func() int64) *DB {
+	t.Helper()
+	_, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+	d, err := OpenWithOptions(path, log, Options{Now: now})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
 	return d
 }
 
-// persistentCore builds a PERSISTENT core-lifecycle event with no dedup
-// identity (SessionStarted) — useful for testing gapless seq without dedup.
-func persistentCore(session string) *corev1.Event {
-	return &corev1.Event{
-		SessionId: session,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Payload:   &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
+func ctx() context.Context { return context.Background() }
+
+// ---- entry builders ----
+
+func streamPlane() *storev1.Plane {
+	return &storev1.Plane{Plane: &storev1.Plane_Stream{Stream: &storev1.PlaneStream{}}}
+}
+
+func agentUpdateEntry(writeID, upsertKey string, update *storev1.StoreAgentUpdate) *storev1.StoreEntry {
+	return &storev1.StoreEntry{
+		Plane:     streamPlane(),
+		WriteId:   writeID,
+		UpsertKey: upsertKey,
+		Entry:     &storev1.StoreEntry_AgentUpdate{AgentUpdate: update},
 	}
 }
 
-// collectReplay materializes a streamed replay only inside tests that need to
-// inspect the complete result. Production has no slice-returning replay API.
-func collectReplay(t *testing.T, d *DB, session string, fromSeq uint64) []*corev1.Event {
-	t.Helper()
-	var events []*corev1.Event
-	if _, err := d.ReplayFrom(context.Background(), session, fromSeq, func(ev *corev1.Event) error {
-		events = append(events, ev)
-		return nil
-	}); err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
-	return events
-}
-
-// streamAssistant builds a PERSISTENT stream-plane event whose derived dedup
-// key is "uuid:<uuid>".
-func streamAssistant(t *testing.T, session, uuid string) *corev1.Event {
-	t.Helper()
-	a, err := anypb.New(&datav1.ClaudeStreamMessage{
-		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: uuid}},
+func pageEntry(writeID, upsertKey, book string, item *storev1.StoreAgentItem) *storev1.StoreEntry {
+	return agentUpdateEntry(writeID, upsertKey, &storev1.StoreAgentUpdate{
+		AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
+			PageAgentId: &conversationv1.AgentId{Value: book},
+			AgentItem:   item,
+		}},
 	})
-	if err != nil {
-		t.Fatalf("anypb.New: %v", err)
-	}
-	return &corev1.Event{
-		SessionId: session,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Payload:   &corev1.Event_Vendor{Vendor: a},
-	}
 }
 
-// diskAssistant is the file-plane twin of streamAssistant (same uuid → same
-// derived key → dedup collision).
-func diskAssistant(t *testing.T, session, uuid string) *corev1.Event {
-	t.Helper()
-	a, err := anypb.New(&datav1.TranscriptLine{
-		Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{Envelope: &datav1.LineEnvelope{Uuid: uuid}}},
-	})
-	if err != nil {
-		t.Fatalf("anypb.New: %v", err)
-	}
-	return &corev1.Event{
-		SessionId: session,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Plane:     corev1.Plane_PLANE_FILE,
-		Payload:   &corev1.Event_Vendor{Vendor: a},
-	}
+func frameItem(frame *conversationv1.AgentFrame) *storev1.StoreAgentItem {
+	return &storev1.StoreAgentItem{Item: &storev1.StoreAgentItem_AgentFrame{AgentFrame: frame}}
 }
 
-// taskEnded builds a PERSISTENT core TaskEnded event (task_id column extracted).
-func taskEnded(session, taskID string) *corev1.Event {
-	return &corev1.Event{
-		SessionId: session,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
-			TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_AGENT,
+func promptItem(agentID string) *storev1.StoreAgentItem {
+	return &storev1.StoreAgentItem{Item: &storev1.StoreAgentItem_AgentPrompt{AgentPrompt: &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-1"},
+		Agent: &conversationv1.AgentId{Value: agentID},
+	}}}
+}
+
+func activityFrame(agentID, activityID string, item any) *conversationv1.AgentFrame {
+	activity := &conversationv1.AgentActivity{ActivityId: &conversationv1.AgentActivityId{Value: activityID}}
+	switch typed := item.(type) {
+	case *conversationv1.AgentSubagent:
+		activity.Item = &conversationv1.AgentActivity_Subagent{Subagent: typed}
+	case *conversationv1.AgentBash:
+		activity.Item = &conversationv1.AgentActivity_Bash{Bash: typed}
+	case *conversationv1.AgentResponse:
+		activity.Item = &conversationv1.AgentActivity_Response{Response: typed}
+	default:
+		panic("unsupported activity item in test fixture")
+	}
+	return &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: agentID},
+		Result: &conversationv1.AgentFrame_Update{Update: &conversationv1.AgentUpdate{
+			Update: &conversationv1.AgentUpdate_Activity{Activity: activity},
 		}},
 	}
 }
 
-// --- write serialization ---------------------------------------------------
+// prose is the ordinary, non-terminal update every "just a page line" fixture
+// uses.
+func prose() *conversationv1.AgentResponse {
+	return &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Start{Start: &conversationv1.AgentResponseStart{}}}
+}
 
-func TestConcurrentIngestsAssignEverySeqExactlyOnce(t *testing.T) {
-	// Arrange: BEGIN IMMEDIATE (`_txlock=immediate`, see Open) is what makes
-	// concurrent writers mutually exclusive. Ingest reads MAX(seq) and only then
-	// inserts, so if that serialization did NOT hold, two transactions would read
-	// the same high-water and derive the same candidate — and the loser's
-	// `INSERT OR IGNORE` against PRIMARY KEY (session_id, seq) would be silently
-	// ignored and then miscounted as a dedup. Every failure mode is therefore
-	// observable from outside: a duplicate seq, a gap, a lost event, or an error.
-	//
-	// SessionStarted carries no dedup identity, so a genuine dedup can never be
-	// confused with a seq collision here.
-	const writers = 12
-	d := openTemp(t)
-
-	// Act: release every writer at once from a channel barrier — no sleeps.
-	var ready, done sync.WaitGroup
-	ready.Add(writers)
-	done.Add(writers)
-	start := make(chan struct{})
-	results := make([]Result, writers)
-	errs := make([]error, writers)
-	for i := range writers {
-		go func() {
-			defer done.Done()
-			ready.Done()
-			<-start
-			results[i], errs[i] = d.Ingest("p", []*corev1.Event{persistentCore("s1")}, nil)
-		}()
-	}
-	ready.Wait()
-	close(start)
-	done.Wait()
-
-	// Assert: every writer succeeded with its one event, and the assigned seqs are
-	// exactly 1..writers with no duplicate and no gap.
-	seen := make(map[uint64]int, writers)
-	for i := range writers {
-		if errs[i] != nil {
-			t.Fatalf("writer %d: Ingest failed (write serialization did not hold): %v", i, errs[i])
-		}
-		if results[i].Accepted != 1 || results[i].Deduped != 0 {
-			t.Fatalf("writer %d: accepted=%d deduped=%d, want accepted=1 deduped=0 — a seq collision was miscounted as a dedup",
-				i, results[i].Accepted, results[i].Deduped)
-		}
-		seen[results[i].LastSeq]++
-	}
-	for seq := uint64(1); seq <= writers; seq++ {
-		switch n := seen[seq]; {
-		case n == 0:
-			t.Fatalf("seq %d was never assigned; assigned set = %v", seq, seen)
-		case n > 1:
-			t.Fatalf("seq %d was assigned to %d writers; assigned set = %v", seq, n, seen)
-		}
-	}
-
-	// Assert: the durable rows agree with the acks.
-	replayed := collectReplay(t, d, "s1", 0)
-	if len(replayed) != writers {
-		t.Fatalf("persisted %d events, want %d", len(replayed), writers)
-	}
-	for i, ev := range replayed {
-		if want := uint64(i + 1); ev.GetSeq() != want {
-			t.Fatalf("persisted event %d has seq %d, want %d", i, ev.GetSeq(), want)
-		}
+// proseSaying is a SETTLED response whose markdown is the row's content, so a
+// test can tell one write of a unit from a later write of the same unit.
+func proseSaying(markdown string) *conversationv1.AgentResponse {
+	return &conversationv1.AgentResponse{
+		Result: &conversationv1.AgentResponse_Success{
+			Success: &conversationv1.AgentResponseSuccess{
+				Prose:      &conversationv1.AgentResponseProse{Markdown: markdown},
+				Authorship: &conversationv1.AgentResponseSuccess_FromModel{FromModel: &conversationv1.AgentResponseFromModel{}},
+			},
+		},
 	}
 }
 
-// --- schema / migration tests ----------------------------------------------
-
-func TestOpenSeedsSchemaMeta(t *testing.T) {
-	// Arrange / Act
-	d := openTemp(t)
-	// Assert
-	var version int
-	if err := d.sql.QueryRow(`SELECT version FROM schema_meta`).Scan(&version); err != nil {
-		t.Fatalf("reading schema_meta: %v", err)
-	}
-	if version != SchemaVersion {
-		t.Fatalf("schema_meta version = %d, want %d", version, SchemaVersion)
+func successFrame(agentID string) *conversationv1.AgentFrame {
+	return &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: agentID},
+		Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{
+			Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+		}},
 	}
 }
 
-func TestReopenIsIdempotent(t *testing.T) {
-	// Arrange
-	path := filepath.Join(t.TempDir(), "events.db")
-	d1, err := Open(path, logging.New(io.Discard, io.Discard, false))
+func failureFrame(agentID string) *conversationv1.AgentFrame {
+	return &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: agentID},
+		Result: &conversationv1.AgentFrame_Failure{Failure: &conversationv1.AgentFailure{
+			Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}},
+		}},
+	}
+}
+
+func subagentStart(createdAgentID string) *conversationv1.AgentSubagent {
+	return subagentStartAt(createdAgentID, 42)
+}
+
+// subagentStartAt is subagentStart with the PRODUCER's start instant chosen by
+// the caller — the shim's Date.now() on the stream plane, the vendor's
+// transcript timestamp on the file plane, and 0 when that timestamp was missing
+// or unparseable.
+func subagentStartAt(createdAgentID string, atMs int64) *conversationv1.AgentSubagent {
+	return &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+		CreatedAgentId: &conversationv1.AgentId{Value: createdAgentID},
+		Prompt: &conversationv1.AgentSubagentPrompt{
+			Text:      "do the thing",
+			Isolation: &conversationv1.AgentSubagentPrompt_Worktree{Worktree: &conversationv1.AgentSubagentIsolationWorktree{}},
+		},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: atMs},
+	}}}
+}
+
+func detachedFrame(agentID string, work *conversationv1.AgentDetachedWork) *conversationv1.AgentFrame {
+	return &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: agentID},
+		Result:  &conversationv1.AgentFrame_DetachedWork{DetachedWork: work},
+	}
+}
+
+func batch(entries ...*storev1.StoreEntry) *storev1.EntryBatch {
+	return &storev1.EntryBatch{Entries: entries}
+}
+
+// writeOK writes a batch that must succeed.
+func writeOK(t *testing.T, d *DB, entries ...*storev1.StoreEntry) WriteResult {
+	t.Helper()
+	result, err := d.WriteBatch(ctx(), "test-producer", batch(entries...))
 	if err != nil {
-		t.Fatalf("first Open: %v", err)
+		t.Fatalf("WriteBatch: %v", err)
 	}
-	d1.Close()
+	return result
+}
+
+// scalar reads one value straight out of the database, so a test asserts what
+// was STORED rather than what a read path chose to report.
+func scalar[T any](t *testing.T, d *DB, query string, args ...any) T {
+	t.Helper()
+	var value T
+	if err := d.sql.QueryRow(query, args...).Scan(&value); err != nil {
+		t.Fatalf("query %q: %v", query, err)
+	}
+	return value
+}
+
+// ---- schema ----
+
+func TestOpenCreatesTheSchemaOnAFreshDatabase(t *testing.T) {
+	// Arrange
+	_, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+
 	// Act
-	d2, err := Open(path, logging.New(io.Discard, io.Discard, false))
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
 	// Assert
+	_, tables, err := d.inspectSchema(ctx())
+	if err != nil {
+		t.Fatalf("inspectSchema: %v", err)
+	}
+	if !slicesEqual(tables, schemaTables) {
+		t.Fatalf("tables = %v, want %v", tables, schemaTables)
+	}
+	if got := scalar[int](t, d, `SELECT version FROM schema_meta`); got != SchemaVersion {
+		t.Fatalf("schema version = %d, want %d", got, SchemaVersion)
+	}
+}
+
+func TestOpenCreatesTheDirectoryItsDatabaseLivesIn(t *testing.T) {
+	// Arrange: a path whose parent does not exist. Nothing upstream may create
+	// it, because that would move an unwritable --db ahead of the pprof surface.
+	_, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store", "events.db")
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("stat %q = %v, want the database created under a directory Open made", path, statErr)
+	}
+}
+
+func TestOpenRefusesADatabaseDirectoryItCannotCreate(t *testing.T) {
+	// Arrange: a FILE where the database's parent directory must be.
+	s, log := newSink(t)
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("a file, not a directory"), 0o600); err != nil {
+		t.Fatalf("staging the blocker: %v", err)
+	}
+
+	// Act
+	d, err := OpenWithOptions(filepath.Join(blocker, "events.db"), log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // the open should not have succeeded
+		t.Fatal("OpenWithOptions = nil, want the unwritable database directory refused")
+	}
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("error = %v, want an ErrStorage", err)
+	}
+	s.assertLogged(t, "error", "creating the database directory failed")
+}
+
+func TestOpenRecordsAFirstCreateWithoutWarning(t *testing.T) {
+	// Arrange: an empty database, which is what every fresh store starts from.
+	s, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert: creating a schema where there was none is not a degraded state.
+	for _, record := range s.records(t) {
+		if record["level"] == "warn" {
+			t.Fatalf("a first create logged a warning: %v", record)
+		}
+	}
+}
+
+func TestOpenNukesADatabaseStampedAtAnotherVersion(t *testing.T) {
+	// Arrange: a store with a row in it, re-stamped at a foreign version.
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	writeOK(t, first, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+	if _, err := first.sql.Exec(`UPDATE schema_meta SET version = 99`); err != nil {
+		t.Fatalf("restamp: %v", err)
+	}
+	first.Close() //nolint:errcheck // reopened below
+
+	// Act
+	s, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer d2.Close()
-	var version int
-	if err := d2.sql.QueryRow(`SELECT version FROM schema_meta`).Scan(&version); err != nil {
-		t.Fatalf("reading schema_meta: %v", err)
+	defer second.Close() //nolint:errcheck // test teardown
+
+	// Assert: the rows are gone and the stamp is this binary's.
+	if got := scalar[int](t, second, `SELECT COUNT(*) FROM entry`); got != 0 {
+		t.Fatalf("entry rows after nuke = %d, want 0", got)
 	}
-	if version != SchemaVersion {
-		t.Fatalf("version after reopen = %d, want %d", version, SchemaVersion)
+	if got := scalar[int](t, second, `SELECT version FROM schema_meta`); got != SchemaVersion {
+		t.Fatalf("schema version = %d, want %d", got, SchemaVersion)
 	}
+	s.assertLogged(t, "warn", "dropping and recreating")
 }
 
-func TestOpenRejectsNewerSchema(t *testing.T) {
-	// Arrange: a database stamped with a future version.
-	path := filepath.Join(t.TempDir(), "events.db")
-	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
+func TestOpenNukesADatabaseWhoseTableSetDiffers(t *testing.T) {
+	// Arrange: the right stamp on a shape this binary did not create.
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("first open: %v", err)
 	}
-	if _, err := d.sql.Exec(`UPDATE schema_meta SET version = ?`, SchemaVersion+1); err != nil {
-		t.Fatalf("bumping version: %v", err)
+	if _, err := first.sql.Exec(`DROP TABLE detached_work`); err != nil {
+		t.Fatalf("drop: %v", err)
 	}
-	d.Close()
+	first.Close() //nolint:errcheck // reopened below
+
 	// Act
-	var logs bytes.Buffer
-	_, err = Open(path, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "db", DatabasePath: path}))
+	s, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer second.Close() //nolint:errcheck // test teardown
+
 	// Assert
-	if err == nil {
-		t.Fatal("expected Open to reject a newer on-disk schema, got nil")
-	}
-	var record struct {
-		Operation string         `json:"operation"`
-		Level     string         `json:"level"`
-		Message   string         `json:"message"`
-		Context   map[string]any `json:"context"`
-	}
-	found := false
-	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
-		var candidate struct {
-			Operation string         `json:"operation"`
-			Level     string         `json:"level"`
-			Message   string         `json:"message"`
-			Context   map[string]any `json:"context"`
-		}
-		if decodeErr := json.Unmarshal(line, &candidate); decodeErr != nil {
-			t.Fatalf("newer-schema record is not JSON: %v", decodeErr)
-		}
-		if candidate.Operation == "migrate" && candidate.Level == "error" {
-			record = candidate
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("newer-schema error record missing: %s", logs.String())
-	}
-	if record.Operation != "migrate" || record.Level != "error" || !strings.Contains(record.Message, "schema migration failed") || record.Context["db"] != path || record.Context["table"] != "schema_meta" {
-		t.Fatalf("newer-schema error was not canonically logged with context: %#v", record)
-	}
-}
-
-func TestOpenTasksFailureUsesCanonicalQueryLogger(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "events.db")
-	var logs bytes.Buffer
-	log := logging.New(&logs, io.Discard, false).With(logging.Fields{
-		Component:    "db",
-		DatabasePath: path,
-	})
-	d, err := Open(path, log)
+	_, tables, err := second.inspectSchema(ctx())
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("inspectSchema: %v", err)
 	}
-	if err := d.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if !slicesEqual(tables, schemaTables) {
+		t.Fatalf("tables = %v, want %v", tables, schemaTables)
 	}
-	logs.Reset()
-
-	if _, err := d.OpenTasks(); err == nil {
-		t.Fatal("OpenTasks on closed database returned nil error")
-	}
-
-	var record struct {
-		Operation string         `json:"operation"`
-		Level     string         `json:"level"`
-		Message   string         `json:"message"`
-		Context   map[string]any `json:"context"`
-	}
-	found := false
-	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
-		if err := json.Unmarshal(line, &record); err != nil {
-			t.Fatalf("OpenTasks failure record is not JSON: %v", err)
-		}
-		if record.Operation == "open-tasks" && record.Level == "error" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("OpenTasks canonical error record missing: %s", logs.String())
-	}
-	if record.Context["component"] != "db" || record.Context["db"] != path || record.Context["table"] != "event" ||
-		!strings.Contains(record.Message, "database query failed") {
-		t.Fatalf("OpenTasks error lacks canonical query context: %#v", record)
-	}
+	s.assertLogged(t, "warn", "dropping and recreating")
 }
 
-// --- write-identity schema migration ---------------------------------------
-
-// openRawV1 creates a database in the version-1 shape — base DDL, schema_meta
-// stamped at 1, no write_id column — using the raw driver, so the migration is
-// exercised against a genuinely old file rather than a simulated one.
-func openRawV1(t *testing.T, path string) {
-	t.Helper()
-	dsn := "file:" + path + "?" + url.Values{"_pragma": {"journal_mode(WAL)"}}.Encode()
-	raw, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		t.Fatalf("raw open: %v", err)
-	}
-	defer raw.Close()
-	if _, err := raw.Exec(baseDDL); err != nil {
-		t.Fatalf("raw base DDL: %v", err)
-	}
-	if _, err := raw.Exec(`INSERT INTO schema_meta(version) VALUES (1)`); err != nil {
-		t.Fatalf("raw schema_meta: %v", err)
-	}
-}
-
-func TestMigrateUpgradesAVersion1DatabaseToWriteIdentity(t *testing.T) {
+func TestOpenLeavesAMatchingDatabaseUntouched(t *testing.T) {
 	// Arrange
-	path := filepath.Join(t.TempDir(), "events.db")
-	openRawV1(t, path)
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	writeOK(t, first, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+	first.Close() //nolint:errcheck // reopened below
 
 	// Act
-	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
-
-	// Assert
+	_, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
 	if err != nil {
-		t.Fatalf("Open on a v1 database: %v", err)
+		t.Fatalf("reopen: %v", err)
 	}
-	defer d.Close()
-	var version int
-	if err := d.sql.QueryRow(`SELECT version FROM schema_meta`).Scan(&version); err != nil {
-		t.Fatalf("reading schema_meta: %v", err)
-	}
-	if version != SchemaVersion {
-		t.Fatalf("version after migration = %d, want %d", version, SchemaVersion)
-	}
-	if _, err := d.Ingest("p", []*corev1.Event{writeIdentified("s1", "w-1")}, nil); err != nil {
-		t.Fatalf("write-identified Ingest on a migrated database: %v", err)
+	defer second.Close() //nolint:errcheck // test teardown
+
+	// Assert: the row survived, so nothing was dropped.
+	if got := scalar[int](t, second, `SELECT COUNT(*) FROM entry`); got != 1 {
+		t.Fatalf("entry rows = %d, want 1", got)
 	}
 }
 
-func TestMigratePreservesRowsWrittenBeforeTheUpgrade(t *testing.T) {
-	// Arrange: a v1 database carrying a real event row.
-	path := filepath.Join(t.TempDir(), "events.db")
-	openRawV1(t, path)
-	// The store marshals the event AFTER stamping seq, so the blob a v1
-	// database holds already carries it.
-	preUpgrade := persistentCore("s1")
-	preUpgrade.Seq = 1
-	blob, err := proto.Marshal(preUpgrade)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	dsn := "file:" + path
-	raw, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		t.Fatalf("raw open: %v", err)
-	}
-	if _, err := raw.Exec(`INSERT INTO event (session_id, seq, plane, class, kind, produced_at, payload)
-	  VALUES ('s1', 1, 1, 2, 'SessionStarted', 0, ?)`, blob); err != nil {
-		t.Fatalf("raw insert: %v", err)
-	}
-	raw.Close()
+func TestOpenRefusesAMalformedSlowQueryThreshold(t *testing.T) {
+	// Arrange
+	t.Setenv(EnvSlowQueryMs, "not-a-number")
+	s, log := newSink(t)
 
 	// Act
-	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
-	if err != nil {
-		t.Fatalf("Open on a v1 database: %v", err)
-	}
-	defer d.Close()
-
-	// Assert
-	rows := collectReplay(t, d, "s1", 0)
-	if len(rows) != 1 || rows[0].GetSeq() != 1 {
-		t.Fatalf("pre-upgrade row did not survive migration: %d rows", len(rows))
-	}
-}
-
-func TestMigrateIsIdempotentAcrossReopens(t *testing.T) {
-	// Arrange: ALTER TABLE ADD COLUMN is not itself repeatable, so a second
-	// open must not run the step again.
-	path := filepath.Join(t.TempDir(), "events.db")
-	openRawV1(t, path)
-	first, err := Open(path, logging.New(io.Discard, io.Discard, false))
-	if err != nil {
-		t.Fatalf("first Open: %v", err)
-	}
-	first.Close()
-
-	// Act
-	second, err := Open(path, logging.New(io.Discard, io.Discard, false))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("reopen after migration: %v", err)
-	}
-	second.Close()
-}
-
-func TestApplyMigrationRollsBackAndSurfacesABadStep(t *testing.T) {
-	// Arrange: a failing step must leave the recorded version untouched, or a
-	// later open would claim a shape the database does not have.
-	d := openTemp(t)
-	bad := migrationStep{to: 99, name: "broken", ddl: `ALTER TABLE nonexistent ADD COLUMN x TEXT;`, reason: "test"}
-
-	// Act
-	err := d.applyMigration(SchemaVersion, bad)
+	_, err := Open(filepath.Join(t.TempDir(), "store.db"), log)
 
 	// Assert
 	if err == nil {
-		t.Fatal("applyMigration accepted a broken step")
+		t.Fatal("Open accepted a malformed threshold")
 	}
-	if !strings.Contains(err.Error(), "applying migration") {
-		t.Fatalf("error = %v, want it to name the failed migration", err)
+	s.assertLogged(t, "error", "slow-query threshold rejected")
+}
+
+func TestCloseReportsADoubleCloseAsAStorageFailure(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	if err := d.Close(); err != nil {
+		t.Fatalf("first close: %v", err)
 	}
-	var version int
-	if scanErr := d.sql.QueryRow(`SELECT version FROM schema_meta`).Scan(&version); scanErr != nil {
-		t.Fatalf("reading schema_meta: %v", scanErr)
+
+	// Act
+	err := d.Close()
+
+	// Assert: SQLite tolerates the second close, so the contract this test
+	// pins is that a close which DOES fail is reported, never swallowed.
+	if err != nil {
+		s.assertLogged(t, "error", "closing SQLite database failed")
 	}
-	if version != SchemaVersion {
-		t.Fatalf("version after a failed migration = %d, want %d (rolled back)", version, SchemaVersion)
+}
+
+func TestOpenNukesAFileThatIsNotADatabaseAtAll(t *testing.T) {
+	// Arrange: a truncated copy, a half-written file, somebody's notes. A --db
+	// path this binary cannot read is the SAME situation as a schema it did not
+	// create, and refusing to boot would wedge the service on bytes nobody can
+	// read.
+	path := filepath.Join(t.TempDir(), "store.db")
+	if err := os.WriteFile(path, []byte("this is not a SQLite database"), 0o600); err != nil {
+		t.Fatalf("stage garbage: %v", err)
+	}
+	s, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenWithOptions over a garbage file = %v, want the file removed and recreated", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+	if got := scalar[int](t, d, `SELECT version FROM schema_meta`); got != SchemaVersion {
+		t.Fatalf("schema version = %d, want %d", got, SchemaVersion)
+	}
+	s.assertLogged(t, "warn", "cannot be read by this binary")
+}
+
+func TestOpenRemovesTheWalSiblingsOfAnUnreadableDatabase(t *testing.T) {
+	// Arrange: SQLite opening a fresh database beside a stale WAL is how a
+	// "recreated" store comes up carrying fragments of the one it replaced.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.db")
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.WriteFile(name, []byte("garbage"), 0o600); err != nil {
+			t.Fatalf("stage %q: %v", name, err)
+		}
+	}
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert: whatever WAL files exist now are this database's own, not the
+	// staged bytes.
+	if data, readErr := os.ReadFile(path + "-wal"); readErr == nil && string(data) == "garbage" {
+		t.Fatal("the stale -wal survived the recreate")
+	}
+	if data, readErr := os.ReadFile(path + "-shm"); readErr == nil && string(data) == "garbage" {
+		t.Fatal("the stale -shm survived the recreate")
+	}
+}
+
+func TestOpenStillFailsWhenTheRecreateItselfCannotSucceed(t *testing.T) {
+	// Arrange: the nuke happens ONCE. A second failure after a clean recreate is
+	// a real problem — an unwritable directory, a full disk — and is returned
+	// rather than retried forever.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.db")
+	if err := os.WriteFile(path, []byte("not a database"), 0o600); err != nil {
+		t.Fatalf("stage garbage: %v", err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // test teardown
+		t.Fatal("OpenWithOptions succeeded on a read-only directory holding a garbage file")
+	}
+}
+
+func TestOpenRefusesADirectoryAtTheDatabasePathRatherThanRemovingIt(t *testing.T) {
+	// Arrange: unlinking whatever sits at an operator-supplied path is how a
+	// service deletes somebody's data. A directory at --db is a
+	// misconfiguration to report, not a database to replace.
+	path := filepath.Join(t.TempDir(), "events.db")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("stage a directory: %v", err)
+	}
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // test teardown
+		t.Fatal("OpenWithOptions accepted a directory at the database path")
+	}
+	if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+		t.Fatalf("the directory at %q did not survive the refused open (stat err: %v)", path, statErr)
 	}
 }

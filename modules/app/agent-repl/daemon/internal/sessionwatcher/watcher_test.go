@@ -1,0 +1,1379 @@
+package sessionwatcher
+
+import (
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"connectrpc.com/connect"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+
+	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
+)
+
+// TestStartOpensTheSessionAndMainWatches covers the opening: WatchSession goes
+// up immediately and the main agent's watch is addressed by an UNSET target,
+// which the shim resolves to the session's prompt thread.
+func TestStartOpensTheSessionAndMainWatches(t *testing.T) {
+	// Arrange / Act.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+
+	// Assert.
+	if h.session == nil {
+		t.Fatal("WatchSession was not opened")
+	}
+	if h.mainReq.Target != nil {
+		t.Fatalf("the main watch was addressed to %q, want an unset target", h.mainReq.GetTarget().GetValue())
+	}
+	if h.mainReq.GetPageSize() == 0 {
+		t.Fatal("the main watch was opened with no page budget")
+	}
+}
+
+// TestStartCatchesUpFromThePersistedPointer covers the caller's persisted
+// mark: passing it is what makes the opening page a catch-up instead of a
+// repaint of history the daemon already holds.
+func TestStartCatchesUpFromThePersistedPointer(t *testing.T) {
+	// Arrange / Act.
+	h := newHarness(t, Session{
+		Started:          sessionStarted(""),
+		MainKnownThrough: &conversationv1.HistoryPointer{Value: "ptr-main"},
+	})
+
+	// Assert.
+	if h.mainReq.GetKnownThrough().GetValue() != "ptr-main" {
+		t.Fatalf("known_through = %q, want ptr-main", h.mainReq.GetKnownThrough().GetValue())
+	}
+}
+
+// TestStartOpensOneWatchPerLiveWorkKind covers the opening LEVEL: a daemon
+// that restarted was not there for the announcements, so it is told the
+// membership once and opens the matching stream for each item by kind.
+func TestStartOpensOneWatchPerLiveWorkKind(t *testing.T) {
+	tests := []struct {
+		name       string
+		item       *conversationv1.AgentDetachedWork
+		wantAgent  string
+		wantShell  bool
+		wantLive   LiveWorkSet
+		wantKicked bool
+	}{
+		{
+			name:      "a detached subagent is watched on its created agent id",
+			item:      createdWork("w-1", subagentWork("sub-1")),
+			wantAgent: "sub-1",
+			wantLive:  LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("sub-1")}},
+		},
+		{
+			name:      "a detached shell is watched by its handle",
+			item:      createdWork("w-1", bashWork()),
+			wantShell: true,
+			wantLive:  LiveWorkSet{Shells: []*conversationv1.DetachedWorkId{workID("w-1")}},
+		},
+		{
+			name:     "a monitor is live with no stream at all",
+			item:     createdWork("w-1", monitorWork()),
+			wantLive: LiveWorkSet{Monitors: []*conversationv1.DetachedWorkId{workID("w-1")}},
+		},
+		{
+			name:       "a workflow is kicked, never watched and never live",
+			item:       createdWork("w-1", workflowWork()),
+			wantLive:   LiveWorkSet{},
+			wantKicked: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act.
+			h := newHarness(t, Session{Started: sessionStarted("", tt.item)})
+
+			// Assert.
+			if tt.wantAgent != "" {
+				open := h.client.nextAgentOpen(t)
+				if open.req.GetTarget().GetValue() != tt.wantAgent {
+					t.Fatalf("watched %q, want %q", open.req.GetTarget().GetValue(), tt.wantAgent)
+				}
+			} else {
+				h.client.noAgentOpen(t)
+			}
+			if tt.wantShell {
+				h.client.nextBashOpen(t)
+			} else {
+				h.client.noBashOpen(t)
+			}
+			assertLiveWork(t, h.w.LiveWork(), tt.wantLive)
+			if tt.wantKicked && !h.hasRecord("info", "daemon.sessionwatcher.workflow_kicked") {
+				t.Fatal("a workflow was not recorded as kicked")
+			}
+		})
+	}
+}
+
+// TestDetachedAnnouncementOpensExactlyOneWatch covers the eager leg: the
+// announcement opens the watch, and a REPEATED announcement (a re-announcement
+// after a restart states the original instant again) must not open a second.
+func TestDetachedAnnouncementOpensExactlyOneWatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	announcement := createdWork("w-1", subagentWork("sub-1"))
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", announcement)))
+	h.client.nextAgentOpen(t)
+	h.route(h.main, entryFrame(frameDetached("main-1", announcement)))
+
+	// Assert.
+	h.client.noAgentOpen(t)
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("sub-1")}})
+}
+
+// TestDetachedOriginResolvesItsKindFromTheUnit covers the `detached` origin,
+// which names only the in-turn unit the work used to be: the kind comes from
+// what that unit's own activity already taught the watcher.
+func TestDetachedOriginResolvesItsKindFromTheUnit(t *testing.T) {
+	tests := []struct {
+		name      string
+		activity  *conversationv1.AgentActivity
+		wantAgent string
+		wantShell bool
+	}{
+		{
+			name:      "a spawn unit resolves to its created agent's watch",
+			activity:  subagentActivity("act-1", "sub-1"),
+			wantAgent: "sub-1",
+		},
+		{
+			name:      "a shell unit resolves to a bash watch",
+			activity:  bashActivity("act-1"),
+			wantShell: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the unit streams first, which is what teaches the kind.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(tt.activity))))
+
+			// Act.
+			h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "act-1"))))
+
+			// Assert.
+			if tt.wantAgent != "" {
+				open := h.client.nextAgentOpen(t)
+				if open.req.GetTarget().GetValue() != tt.wantAgent {
+					t.Fatalf("watched %q, want %q", open.req.GetTarget().GetValue(), tt.wantAgent)
+				}
+			}
+			if tt.wantShell {
+				open := h.client.nextBashOpen(t)
+				if open.work.GetValue() != "w-1" {
+					t.Fatalf("watched shell %q, want w-1", open.work.GetValue())
+				}
+			}
+		})
+	}
+}
+
+// TestDetachedOriginForAnUnknownUnitIsAnError covers the gap honestly: an
+// announcement naming a unit this daemon never saw cannot be resolved to a
+// kind, and guessing one would open the wrong stream.
+func TestDetachedOriginForAnUnknownUnitIsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "never-seen"))))
+
+	// Assert.
+	h.client.noAgentOpen(t)
+	h.client.noBashOpen(t)
+	if !h.hasRecord("error", "daemon.sessionwatcher.detached_kind_unknown") {
+		t.Fatal("an unresolvable detached announcement was not recorded as an error")
+	}
+}
+
+// TestAgentTerminalReapsItsWatch covers the reap: the open set IS the live
+// set, so a subagent's terminal has to close its watch and leave the set.
+func TestAgentTerminalReapsItsWatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1")))})
+	open := h.client.nextAgentOpen(t)
+	h.quiet()
+
+	// Act.
+	h.routeReaping(open.stream, entryFrame(frameSuccess("sub-1", completed())))
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the reaped subagent is still live: %+v", h.w.LiveWork())
+	}
+}
+
+// TestBashTerminalReapsItsWatch covers the same for a detached shell, whose
+// terminal is the bash unit's own success arm.
+func TestBashTerminalReapsItsWatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	h.client.nextBashOpen(t)
+	h.quiet()
+	entry := h.shellWatchFor("w-1")
+
+	// Act.
+	h.routeNow(func(w *watcher) {
+		w.routeBashLocked(entry, &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}},
+		})
+	})
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the reaped shell is still live: %+v", h.w.LiveWork())
+	}
+}
+
+// TestMonitorIsRetiredByItsOwnTerminal covers the one live item with no
+// stream: a monitor can only be retired by its activity's terminal arm.
+func TestMonitorIsRetiredByItsOwnTerminal(t *testing.T) {
+	// Arrange: the monitor detaches from a unit, which is what ties the
+	// handle to the activity that will end it.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorActivity("act-1", false)))))
+	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "act-1"))))
+	if h.w.LiveWork().Empty() {
+		t.Fatal("the announced monitor was not live")
+	}
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorActivity("act-1", true)))))
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the ended monitor is still live: %+v", h.w.LiveWork())
+	}
+}
+
+// TestACreatedMonitorIsRetiredByItsEndedFrame covers the re-adopted monitor:
+// it was never announced on this watch, so nothing ties an activity to its
+// handle — but DetachedWorkId.value IS the unit's AgentActivityId.value, so
+// the monitor's own ended frame retires it.
+func TestACreatedMonitorIsRetiredByItsEndedFrame(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("act-1", monitorWork()))})
+	h.quiet()
+	if h.w.LiveWork().Empty() {
+		t.Fatal("the re-adopted monitor was not live")
+	}
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorActivity("act-1", true)))))
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the ended monitor is still live: %+v", h.w.LiveWork())
+	}
+}
+
+// TestACreatedMonitorIsRetiredByItsFailureFrame covers the other terminal arm:
+// a watch that could not be armed is over, so it leaves the live set too.
+func TestACreatedMonitorIsRetiredByItsFailureFrame(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("act-1", monitorWork()))})
+	h.quiet()
+	if h.w.LiveWork().Empty() {
+		t.Fatal("the re-adopted monitor was not live")
+	}
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorFailedActivity("act-1")))))
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the failed monitor is still live: %+v", h.w.LiveWork())
+	}
+}
+
+// TestTheRosterHearsTheEmptiedLiveWorkSet covers the roster's half of the
+// live-work seam: the set the watcher republishes when the last detached item
+// is reaped reaches the sidebar, which is what retires `idle_async`.
+func TestTheRosterHearsTheEmptiedLiveWorkSet(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("act-1", monitorWork()))})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorFailedActivity("act-1")))))
+
+	// Assert.
+	e := requireEvent(t, got, "sidebar.OnLiveWorkChanged")
+	if e.live == nil || !e.live.Empty() {
+		t.Fatalf("the roster was told %+v, want an empty live-work set", e.live)
+	}
+}
+
+// TestATerminalForUnannouncedWorkChangesNothing covers the levels rule: the
+// live set is the announcements and the terminals of what was announced, and
+// an unpaired terminal edge must not invent or retire membership.
+func TestATerminalForUnannouncedWorkChangesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1")))})
+	h.client.nextAgentOpen(t)
+	h.quiet()
+
+	// Act: a terminal for a subagent that was never announced.
+	got := h.route(h.main, entryFrame(frameSuccess("sub-unknown", completed())))
+
+	// Assert.
+	if _, changed := find(got, "lifecycle.OnLiveWorkChanged"); changed {
+		t.Fatal("an unpaired terminal edge changed the live set")
+	}
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("sub-1")}})
+}
+
+// TestFree covers freeness, which is the whole reason the watcher tracks both
+// halves: no turn in flight AND an empty live set.
+func TestFree(t *testing.T) {
+	tests := []struct {
+		name    string
+		session Session
+		want    bool
+	}{
+		{
+			name:    "an idle session with nothing detached is free",
+			session: Session{Started: sessionStarted("")},
+			want:    true,
+		},
+		{
+			name:    "a turn in flight is not free",
+			session: Session{Started: sessionStarted("turn-1")},
+			want:    false,
+		},
+		{
+			name:    "a live subagent is not free",
+			session: Session{Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1")))},
+			want:    false,
+		},
+		{
+			name:    "a live monitor is not free even though it has no stream",
+			session: Session{Started: sessionStarted("", createdWork("w-1", monitorWork()))},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act.
+			h := newHarness(t, tt.session)
+
+			// Assert.
+			if got := h.w.Free(); got != tt.want {
+				t.Fatalf("Free() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStartPublishesTheOpeningFacts covers what a started session owes its
+// views before a single frame arrives: its identity, its roster row and the
+// link it is serving on.
+func TestStartPublishesTheOpeningFacts(t *testing.T) {
+	// Arrange / Act.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	got := h.quietAll()
+
+	// Assert.
+	assertNames(t, got, []string{
+		"topbar.OnSessionStarted", "sidebar.OnSessionStarted",
+		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink", "lifecycle.OnLinkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
+	})
+	if !h.w.Connected() {
+		t.Fatal("a started session is not connected")
+	}
+}
+
+// TestATurnDrivenToItsTerminalOpensTheMainWatchExactlyOnce covers the count
+// itself: the main agent's book is watched by ONE standing WatchAgent for the
+// life of the session, and a turn running and ending on it is not an occasion
+// to open another.
+//
+// A SECOND TAIL ON ONE BOOK IS A STALL, not merely waste. The shim registers
+// every open WatchAgent for its teardown and concludes each one through the
+// book's head; a tail nobody drains cannot reach that head, so the shim's
+// `KillSession` spends its whole conclusion budget on it and the daemon's stop
+// waits inside that call.
+func TestATurnDrivenToItsTerminalOpensTheMainWatchExactlyOnce(t *testing.T) {
+	// Arrange: the session's one main watch, and the turn it is about to run.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act: the turn's prompt, one activity, and the terminal that ends it.
+	h.route(h.main, entryPrompt("turn-1", "main-1"))
+	h.route(h.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-42"))
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	h.client.noAgentOpen(t)
+}
+
+// TestSeveredLinkReopensFromTheTrackedPointer covers the transport failure:
+// only the consumer knows a stream should still be open, so a WatchSession that
+// ends while the session lives severs the link, and the return re-opens the
+// fleet catching up from the newest pointer each watch was served.
+func TestSeveredLinkReopensFromTheTrackedPointer(t *testing.T) {
+	// Arrange: a frame first, so the watcher holds a pointer to catch up from.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.main.send(t, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-42"))
+	h.rec.until(t, "footer.OnActivity")
+
+	// Act: the session stream dies, then the client reports the link back.
+	h.session.fail(errors.New("connection reset"))
+	h.rec.until(t, "sidebar.OnLink")
+	if h.w.Connected() {
+		t.Fatal("the link is connected while a standing stream is down")
+	}
+	h.client.links <- shimclient.LinkConnected
+
+	// Assert.
+	h.client.nextSessionOpen(t)
+	reopened := h.client.nextAgentOpen(t)
+	if reopened.req.GetKnownThrough().GetValue() != "ptr-42" {
+		t.Fatalf("re-opened with known_through %q, want ptr-42", reopened.req.GetKnownThrough().GetValue())
+	}
+	if !h.hasRecord("error", "daemon.sessionwatcher.watch_session") {
+		t.Fatal("the transport failure was not recorded as an error")
+	}
+	if !h.hasRecord("warn", "daemon.sessionwatcher.reopen") {
+		t.Fatal("the re-open was not warned about")
+	}
+}
+
+// TestABringUpLinkReplayWithEveryStreamStandingDoesNotReopen covers the
+// connectivity feed's HISTORY: the client publishes dialing and then connected
+// during bring-up, and the watcher is created afterwards holding a connected
+// link. Replaying those transitions is not a link that broke, so nothing is
+// re-opened -- a re-open here tears down the streams bring-up just
+// established, and the session is then left with no standing watch at all.
+func TestABringUpLinkReplayWithEveryStreamStandingDoesNotReopen(t *testing.T) {
+	// Arrange: a started session whose every stream is standing.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: the bring-up transitions arrive after the watcher already exists.
+	// Neither publishes a link: the replayed dial is refused as stale and the
+	// `connected` that follows is the state already held, so the replay is
+	// observed through the watcher's own record of refusing it.
+	h.client.links <- shimclient.LinkDialing
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link_replay")
+	h.client.links <- shimclient.LinkConnected
+	h.quiet()
+
+	// Assert.
+	h.client.noAgentOpen(t)
+	if h.hasRecord("warn", "daemon.sessionwatcher.reopen") {
+		t.Fatal("the fleet was re-opened on a link replay with every stream standing")
+	}
+}
+
+// TestABringUpLinkReplayNeverWalksTheLinkBackToDialing pins the other half of
+// the replay: the watcher is born on the connected link, so the bring-up's
+// own `dialing` arriving late must not be published as a transition. It was,
+// and the roster painted `init` over a workspace whose turn was already
+// accepted (the playtest's cold start measured `submitting` -> `init` ->
+// `submitting` within 1ms of the first StartTurn).
+func TestABringUpLinkReplayNeverWalksTheLinkBackToDialing(t *testing.T) {
+	// Arrange: a started session, already published as connected.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: the bring-up's own first dial arrives after the fact.
+	h.client.links <- shimclient.LinkDialing
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link_replay")
+	events := h.quietAll()
+
+	// Assert: no sink was told the link went anywhere, and the watcher still
+	// answers connected.
+	for _, e := range events {
+		if e.method == "OnLink" {
+			t.Fatalf("%s published link %d on a stale first-dial replay; the link must stay as it was", e.name(), e.link)
+		}
+	}
+	if !h.w.Connected() {
+		t.Fatalf("Link() = %d after a stale first-dial replay, want connected", h.w.Link())
+	}
+}
+
+// TestReopenRestoresEveryDetachedWatch covers the fleet, not just the main
+// watch: a live subagent whose stream died has to be followed again or its
+// bubble stops growing with no terminal ever arriving.
+func TestReopenRestoresEveryDetachedWatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1")))})
+	h.client.nextAgentOpen(t)
+	h.quiet()
+
+	// Act.
+	h.session.fail(errors.New("connection reset"))
+	h.rec.until(t, "sidebar.OnLink")
+	h.client.links <- shimclient.LinkConnected
+
+	// Assert: the session, the main watch and the subagent all come back.
+	h.client.nextSessionOpen(t)
+	first := h.client.nextAgentOpen(t)
+	second := h.client.nextAgentOpen(t)
+	targets := map[string]bool{
+		first.req.GetTarget().GetValue():  true,
+		second.req.GetTarget().GetValue(): true,
+	}
+	if !targets[""] || !targets["sub-1"] {
+		t.Fatalf("re-opened %v, want the main watch and sub-1", targets)
+	}
+}
+
+// TestStreamEndAfterTheSessionDiedIsNotAFailure covers the one legal end: once
+// query_died has been seen the session is over, and reporting its streams'
+// ends as transport failures would sever a link that has nothing to reconnect.
+func TestStreamEndAfterTheSessionDiedIsNotAFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(queryDiedUpdate()) })
+
+	// Act.
+	h.main.Close()
+
+	// Assert: the watcher stays connected and logs the end as ordinary.
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.stream_closed")
+	if !h.w.Connected() {
+		t.Fatal("a stream ending with its dead session severed the link")
+	}
+}
+
+// TestStreamEndAfterTheDaemonEndedTheSessionIsNotAFailure covers the OTHER
+// legal end: the daemon itself is standing the session down, so the streams
+// the shim closes on its way out are that stand-down, never a severing to
+// redial.
+func TestStreamEndAfterTheDaemonEndedTheSessionIsNotAFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.SessionEnding("the daemon is ending the session")
+
+	// Act.
+	h.main.Close()
+
+	// Assert.
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.stream_closed")
+	if !h.w.Connected() {
+		t.Fatal("a stream ending with the daemon's own stand-down severed the link")
+	}
+}
+
+// TestCloseClosesEveryStream covers the teardown: it ends every watch and
+// KILLS NOTHING, because attaching created nothing.
+func TestCloseClosesEveryStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	bash := h.client.nextBashOpen(t)
+	h.quiet()
+
+	// Act.
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	if !h.session.isClosed() {
+		t.Fatal("the session stream was left open")
+	}
+	if !h.main.isClosed() {
+		t.Fatal("the main agent stream was left open")
+	}
+	if !bash.stream.isClosed() {
+		t.Fatal("the detached shell's stream was left open")
+	}
+}
+
+// TestCloseIsIdempotent covers the second call: a workspace teardown and a
+// drain can both reach it, and the second must not panic on closed streams.
+func TestCloseIsIdempotent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+
+	// Act.
+	first := h.w.Close()
+	second := h.w.Close()
+
+	// Assert.
+	if first != nil || second != nil {
+		t.Fatalf("Close returned %v then %v, want nil twice", first, second)
+	}
+}
+
+// TestSetMainAgentNamesTheTurnsAgent covers the authoritative source: the
+// prompt queue hands over StartTurnSuccess.prompt.agent, and that is what
+// makes a terminal attributable to the turn.
+func TestSetMainAgentNamesTheTurnsAgent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+
+	// Act.
+	h.w.SetMainAgent(agentID("main-1"))
+	got := h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnTurnEnded"); !ok {
+		t.Fatalf("the turn did not end: %v", names(got))
+	}
+}
+
+// TestMainAgentIsRecoveredFromTheOpeningPage covers an adoption with a turn
+// already in flight: no StartTurn has happened in this process, and the
+// opening page's prompt is the only thing that names the recipient.
+func TestMainAgentIsRecoveredFromTheOpeningPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+
+	// Act.
+	h.route(h.main, pageFrame(promptEntry("ptr-1", "turn-1", "main-1")))
+	got := h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnTurnEnded"); !ok {
+		t.Fatalf("the turn did not end: %v", names(got))
+	}
+}
+
+// TestOnTurnOpenedTracksTheTurnAndItsPage covers the queue's hand-over: it
+// names the main agent, records the turn, states the turn-open edge to BOTH
+// surfaces that have no other source for it (the footer's clock and the feed's
+// running turn), and feeds StartTurnSuccess's page through the opening-page
+// path without mirroring the prompt a second time.
+func TestOnTurnOpenedTracksTheTurnAndItsPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-9"},
+		Agent: agentID("main-1"),
+	}, &conversationv1.HistoryPage{})
+	got := h.drainNow()
+
+	// Assert.
+	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnTurnOpened", "feed.OnHistoryPage", "footer.OnHistoryPage"})
+	turn := h.w.TurnInFlight()
+	if turn == nil || *turn != ids.TurnID("turn-9") {
+		t.Fatalf("turn in flight = %v, want turn-9", turn)
+	}
+}
+
+// TestOnTurnOpeningRecordsTheTurnBeforeTheShimTakesIt covers the pre-record:
+// the caller has not yet dispatched StartTurn, and the turn must already stand
+// in flight so a terminal arriving first is attributable.
+func TestOnTurnOpeningRecordsTheTurnBeforeTheShimTakesIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+
+	// Assert.
+	turn := h.w.TurnInFlight()
+	if turn == nil || *turn != ids.TurnID("turn-9") {
+		t.Fatalf("turn in flight = %v, want turn-9", turn)
+	}
+}
+
+// TestATerminalAheadOfTheAcceptanceStillEndsTheTurn covers the race the
+// pre-record exists for: the shim put the turn's terminal on the agent stream
+// before StartTurn's response was processed, and the turn must still end.
+func TestATerminalAheadOfTheAcceptanceStillEndsTheTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.SetMainAgent(agentID("main-1"))
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnTurnEnded"); !ok {
+		t.Fatalf("the turn did not end: %v", names(got))
+	}
+}
+
+// TestAnAcceptanceDoesNotReopenATurnThatAlreadyEnded covers the other half of
+// that race: the late acceptance must not stand the dead turn back up, because
+// no edge is left to take it down again.
+func TestAnAcceptanceDoesNotReopenATurnThatAlreadyEnded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.SetMainAgent(agentID("main-1"))
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Act.
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-9"},
+		Agent: agentID("main-1"),
+	}, &conversationv1.HistoryPage{})
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none: the turn had already ended", *turn)
+	}
+}
+
+// TestOnTurnOpenFailedRetiresTheRecordedTurn covers the refusal: the shim never
+// took the turn, so it must not stand in flight and block the next submission.
+func TestOnTurnOpenFailedRetiresTheRecordedTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+
+	// Act.
+	h.w.OnTurnOpenFailed("ws-1", ids.TurnID("turn-9"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none after the shim refused it", *turn)
+	}
+}
+
+// TestOnTurnOpenFailedLeavesALaterTurnAlone covers the stale refusal: it clears
+// only the turn it names, never whatever is running now.
+func TestOnTurnOpenFailedLeavesALaterTurnAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-10"))
+
+	// Act.
+	h.w.OnTurnOpenFailed("ws-1", ids.TurnID("turn-9"))
+
+	// Assert.
+	turn := h.w.TurnInFlight()
+	if turn == nil || *turn != ids.TurnID("turn-10") {
+		t.Fatalf("turn in flight = %v, want turn-10 left standing", turn)
+	}
+}
+
+// TestOnTurnOpeningRefusesAnotherWorkspacesTurn covers the same invariant
+// OnTurnOpened holds: a watcher is one workspace's.
+func TestOnTurnOpeningRefusesAnotherWorkspacesTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpening("ws-other", ids.TurnID("turn-9"))
+
+	// Assert.
+	if h.w.TurnInFlight() != nil {
+		t.Fatal("another workspace's turn was adopted")
+	}
+	if !h.hasRecord("error", "daemon.sessionwatcher.turn_opening_foreign") {
+		t.Fatal("a foreign opening turn was not recorded as an error")
+	}
+}
+
+// TestOnTurnOpeningRefusesAnUnidentifiedTurn covers the empty id: nothing can
+// be attributed to it, so it is recorded rather than stored.
+func TestOnTurnOpeningRefusesAnUnidentifiedTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpening("ws-1", ids.TurnID(""))
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.sessionwatcher.turn_opening_unidentified") {
+		t.Fatal("an unidentified opening turn was not recorded as an error")
+	}
+}
+
+// TestOnTurnOpenedRaisesTheFootersTurnOpenEdge covers the edge nothing on the
+// shim's streams states: the accepted turn reaches the footer, which is what
+// raises `thinking submitting` before the first frame of the turn arrives.
+func TestOnTurnOpenedRaisesTheFootersTurnOpenEdge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-9"},
+		Agent: agentID("main-1"),
+	}, nil)
+	got := h.drainNow()
+
+	// Assert.
+	ev, ok := find(got, "footer.OnTurnOpened")
+	if !ok {
+		t.Fatalf("the footer never took the turn-open edge: %v", names(got))
+	}
+	if ev.detail != "turn-9" {
+		t.Fatalf("footer.OnTurnOpened turn = %q, want turn-9", ev.detail)
+	}
+}
+
+// TestOnTurnOpenedRefusesAnotherWorkspacesTurn covers the invariant: a
+// watcher is one workspace's, and a turn handed to the wrong one has no useful
+// treatment beyond being recorded loudly.
+func TestOnTurnOpenedRefusesAnotherWorkspacesTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpened("ws-other", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-9"},
+		Agent: agentID("main-1"),
+	}, &conversationv1.HistoryPage{})
+
+	// Assert.
+	if h.w.TurnInFlight() != nil {
+		t.Fatal("another workspace's turn was adopted")
+	}
+	if !h.hasRecord("error", "daemon.sessionwatcher.turn_opened_foreign") {
+		t.Fatal("a foreign turn was not recorded as an error")
+	}
+}
+
+// TestSetOutputAddress covers the lease holder's redirection and its
+// restoration, since every feed row the session produces is stamped with it.
+func TestSetOutputAddress(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	elsewhere := OutputAddress{Feed: feedFor("sub-1")}
+
+	// Act / Assert: installed.
+	h.w.SetOutputAddress(&elsewhere)
+	if h.addressNow().Feed.Root {
+		t.Fatal("the installed address was ignored")
+	}
+
+	// Act / Assert: nil restores the root feed.
+	h.w.SetOutputAddress(nil)
+	if !h.addressNow().Feed.Root {
+		t.Fatal("nil did not restore the root feed")
+	}
+}
+
+// TestSinkCallsAreSerializedPerWorkspace covers the ordering guarantee the
+// resolvers depend on: many streams, one mutex, so each agent's frames reach
+// the sinks in that stream's order however they interleave.
+func TestSinkCallsAreSerializedPerWorkspace(t *testing.T) {
+	// Arrange: the main watch plus a detached subagent's own watch.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1")))})
+	sub := h.client.nextAgentOpen(t)
+	h.quiet()
+
+	const frames = 25
+	var wg sync.WaitGroup
+	wg.Add(2)
+	send := func(stream *fakeStream[*shimResponse], agent string) {
+		defer wg.Done()
+		for i := 0; i < frames; i++ {
+			stream.send(t, entryFrame(frameUpdate(agent, activityUpdate(readActivity(agent+"-"+itoa(i))))))
+		}
+	}
+
+	// Act.
+	go send(h.main, "main-1")
+	go send(sub.stream, "sub-1")
+	wg.Wait()
+
+	// Assert: per agent, the feed saw its activities in the order they were
+	// sent, with nothing interleaved inside one frame's routing.
+	got := h.collect(t, 2*frames*3)
+	assertPerAgentOrder(t, got, "main-1", frames)
+	assertPerAgentOrder(t, got, "sub-1", frames)
+}
+
+// TestAReopenWhoseStreamCloseBlocksStillAnswersTurnInFlight covers the one
+// thing a stream Close may never do: hold the watcher's lock. The real
+// transport's Close drains the response body and returns only when the server
+// ends the stream, which a standing watch never does on its own, so closing
+// under the lock wedges every reader of the watcher.
+func TestAReopenWhoseStreamCloseBlocksStillAnswersTurnInFlight(t *testing.T) {
+	// Arrange: a session whose stream will not finish closing.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	release := make(chan struct{})
+	h.session.blockClose = release
+	t.Cleanup(func() { close(release) })
+
+	// Act: sever the link and bring it back, which re-opens the fleet.
+	h.session.fail(errors.New("connection reset"))
+	h.rec.until(t, "sidebar.OnLink")
+	h.client.links <- shimclient.LinkConnected
+	h.client.nextSessionOpen(t)
+
+	answered := make(chan struct{})
+	go func() {
+		h.w.TurnInFlight()
+		close(answered)
+	}()
+
+	// Assert: the freeness read is answered while the close is still standing.
+	select {
+	case <-answered:
+	case <-time.After(waitDeadline):
+		t.Fatal("TurnInFlight never answered while a stream close was in flight")
+	}
+}
+
+// TestADeadLinkIsNeverWalkedBackToRedialing covers the terminal-death
+// invariant: the shim process being gone is stronger evidence than any stream
+// break, and the breaks that follow the death are its consequence.
+func TestADeadLinkIsNeverWalkedBackToRedialing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.links <- shimclient.LinkDead
+	h.rec.until(t, "sidebar.OnLink")
+
+	// Act: a standing stream breaks after the death, as every one of them does.
+	h.session.fail(errors.New("connection reset"))
+
+	// Assert.
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link")
+	if got := h.w.Link(); got != shimclient.LinkDead {
+		t.Fatalf("the link after a post-death stream break = %v, want LinkDead", got)
+	}
+}
+
+// TestASeveredStreamRaisesASeveredLinkFault pins the evidence half of a broken
+// standing stream: the views get the link state, and the lifecycle sink gets
+// the fault the session's health answer is built from.
+func TestASeveredStreamRaisesASeveredLinkFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.session.fail(errors.New("connection reset"))
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultSevered {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultSevered)
+	}
+	if got.ExitCode != nil {
+		t.Fatalf("link fault exit code = %d, want none: the shim is still running", *got.ExitCode)
+	}
+}
+
+// TestADeadLinkRaisesAShimDiedFaultCarryingTheExitCode pins that the reap's
+// own decoding travels with the fault, which is what the two booleans of the
+// liveness probe could never carry.
+func TestADeadLinkRaisesAShimDiedFaultCarryingTheExitCode(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 3})
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultDead {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultDead)
+	}
+	if got.ExitCode == nil || *got.ExitCode != 3 {
+		t.Fatalf("link fault exit code = %v, want 3", got.ExitCode)
+	}
+}
+
+// TestADeadLinkWithNoDecodedExitRaisesNoExitCode pins presence over sentinels:
+// an exit nothing decoded is ABSENT, never a zero that reads as a clean exit.
+func TestADeadLinkWithNoDecodedExitRaisesNoExitCode(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.ExitCode != nil {
+		t.Fatalf("link fault exit code = %d, want none", *got.ExitCode)
+	}
+}
+
+// TestTheLinkComingBackRaisesNoFault pins that only a LOST link is evidence: a
+// link that connects is the ordinary path.
+//
+// The loss is spelled `redialing`, which is how a client that has already
+// connected reports a link it is re-establishing. It was `dialing` here, and
+// that only ever passed because the watcher applied a first-time dial it had
+// already outrun -- the replay `setLinkLocked` now refuses.
+func TestTheLinkComingBackRaisesNoFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.client.links <- shimclient.LinkRedialing
+	h.client.links <- shimclient.LinkConnected
+
+	// Assert: the connected edge reaches the views, and no fault rides with it.
+	h.rec.until(t, "lifecycle.OnLinkChanged")
+	select {
+	case e := <-h.rec.ch:
+		if e.name() == "lifecycle.OnLinkFault" {
+			t.Fatalf("a link coming back raised %+v, want no fault", e.linkFault)
+		}
+	default:
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The landing-7 re-announcement: WatchSessionResponse.session_started
+// ---------------------------------------------------------------------------
+
+// TestAPureAttachTakesTheSessionFactsFromTheReannouncement is the adoption
+// case: a watcher opened with NO facts (crash boot, handover) learns the
+// session's identity and its turn in flight from the shim's own re-announcement
+// rather than from a durable record.
+func TestAPureAttachTakesTheSessionFactsFromTheReannouncement(t *testing.T) {
+	// Arrange: a pure attach — Session carries nothing.
+	h := newHarness(t, Session{})
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted("turn-7"))
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert: the facts reached the surfaces, and the open turn is held.
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+	if !hasEvent(seen, "topbar.OnSessionStarted") {
+		t.Fatalf("the re-announcement routed %v, want topbar.OnSessionStarted", names(seen))
+	}
+	turn := h.w.TurnInFlight()
+	if turn == nil || *turn != ids.TurnID("turn-7") {
+		t.Fatalf("TurnInFlight() = %v, want the re-announced turn-7", turn)
+	}
+}
+
+// TestAReannouncementOnAWatchThatAlreadyHoldsTheFactsIsIgnored is the
+// idempotence half: the re-announcement rides EVERY new watch, including each
+// re-open after a link break, so a watcher that already holds the facts must
+// not republish them.
+func TestAReannouncementOnAWatchThatAlreadyHoldsTheFactsIsIgnored(t *testing.T) {
+	// Arrange: a watcher that opened WITH the facts.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted(""))
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert: nothing was republished, and the ordinary case is not warned.
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+	if hasEvent(seen, "topbar.OnSessionStarted") {
+		t.Fatalf("a repeat re-announcement routed %v, want no re-publication", names(seen))
+	}
+	if h.hasRecord("warn", "daemon.sessionwatcher.watch_session") {
+		t.Fatal("a repeat re-announcement was warned; it is the ordinary case")
+	}
+}
+
+// TestASessionFrameWithNoArmIsRecordedAsAnError is the validation half: the
+// frame oneof is never guessed at, and an unset one is surfaced.
+func TestASessionFrameWithNoArmIsRecordedAsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.session.send(t, &shimv1.WatchSessionResponse{})
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert.
+	h.rec.until(t, "footer.OnSessionUpdate")
+	if !h.hasRecord("error", "daemon.sessionwatcher.watch_session") {
+		t.Fatal("an armless session frame was not recorded as an error")
+	}
+}
+
+// hasEvent reports whether a run of recorded sink calls contains one by name.
+func hasEvent(seen []event, name string) bool {
+	for _, e := range seen {
+		if e.name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+// TestShellStreamEndingEarlyReopensTheWatch covers a watch the shim drops
+// before the shell settles: the shell's terminal frame is what reaps the watch,
+// so a stream ending while the entry is still registered means the daemon lost
+// sight of live work and must open the watch again.
+func TestShellStreamEndingEarlyReopensTheWatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	first := h.client.nextBashOpen(t)
+	h.quiet()
+
+	// Act.
+	first.stream.fail(errors.New("stream ended"))
+
+	// Assert.
+	if second := h.client.nextBashOpen(t); second.work.GetValue() != "w-1" {
+		t.Fatalf("re-opened watch = %q, want w-1", second.work.GetValue())
+	}
+}
+
+// TestShellStreamEndingAfterTheTerminalIsNotReopened covers the reaped case: a
+// settled shell's watch was already forgotten, so its stream ending is the
+// teardown and nothing is opened again.
+func TestShellStreamEndingAfterTheTerminalIsNotReopened(t *testing.T) {
+	// Arrange: a shell that has settled.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	open := h.client.nextBashOpen(t)
+	entry := h.shellWatchFor("w-1")
+	h.quiet()
+	h.routeNow(func(w *watcher) {
+		w.routeBashLocked(entry, &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}},
+		})
+	})
+
+	// Act.
+	open.stream.fail(errors.New("stream ended"))
+	h.quiet()
+
+	// Assert.
+	h.client.noBashOpen(t)
+}
+
+// ---------------------------------------------------------------------------
+// A REFUSED watch open is not a severed link
+// ---------------------------------------------------------------------------
+
+// TestRefusedOpenClassification pins which failures on a watch OPEN are the
+// shim's semantic refusal and which are the transport failing.
+func TestRefusedOpenClassification(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "not found on the open is a refusal",
+			err:  refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"),
+			want: true,
+		},
+		{
+			name: "failed precondition on the open is a refusal",
+			err:  refusedOpenError("WatchBash", connect.CodeFailedPrecondition, "no rows yet"),
+			want: true,
+		},
+		{
+			name: "unavailable on the open is the transport failing",
+			err:  refusedOpenError("WatchAgent", connect.CodeUnavailable, "connection refused"),
+			want: false,
+		},
+		{
+			name: "a bare transport error is not a refusal",
+			err:  errors.New("connection reset"),
+			want: false,
+		},
+		{
+			name: "a connect refusal that is NOT an open error is not a refusal",
+			err:  connect.NewError(connect.CodeNotFound, errors.New("no such agent")),
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := refusedOpen(tc.err)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("refusedOpen(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestARefusedMainWatchOpenAtBringUpNeverSeversTheLink is the defect: the
+// store has not registered the main agent's book at a fresh bring-up, and the
+// refusal that answers is a semantic one — not a transport that broke.
+func TestARefusedMainWatchOpenAtBringUpNeverSeversTheLink(t *testing.T) {
+	// Arrange & Act: bring up a watcher whose main watch the shim refuses.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Assert: the link is intact, and the refusal was logged rather than raised.
+	if got := h.w.Link(); got != shimclient.LinkConnected {
+		t.Fatalf("the link after a refused main open = %v, want LinkConnected", got)
+	}
+	if !h.hasRecord("info", "daemon.sessionwatcher.watch_agent") {
+		t.Fatalf("a refused main open logged %v, want an info record", h.log.Records())
+	}
+}
+
+// TestARefusedMainWatchOpenRaisesNoLinkFault is the evidence half: nothing
+// severed, so nothing is recorded as severed.
+func TestARefusedMainWatchOpenRaisesNoLinkFault(t *testing.T) {
+	// Arrange & Act.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Assert: the start's own events are drained; no fault is among them.
+	for _, e := range h.rec.drain() {
+		if e.name() == "lifecycle.OnLinkFault" || e.name() == "lifecycle.OnWatchOpenRefused" {
+			t.Fatalf("a refused main open raised %s, want no fault", e.name())
+		}
+	}
+}
+
+// TestARefusedMainWatchIsReopenedWhenTheBookAppears pins the retry: nothing
+// re-announces the main agent, so a frame on the session's own stream is the
+// occasion to open its watch again.
+func TestARefusedMainWatchIsReopenedWhenTheBookAppears(t *testing.T) {
+	// Arrange: a bring-up whose main open was refused, then a shim that holds
+	// the book.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+	h.client.setAgentErr(nil)
+
+	// Act.
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert.
+	if open := h.client.nextAgentOpen(t); open.req.GetTarget() != nil {
+		t.Fatalf("the re-opened watch targeted %q, want the main agent's unset target", open.req.GetTarget().GetValue())
+	}
+}
+
+// TestARefusedMainWatchStopsBeingRetriedAndRaisesItsOwnFault pins the bound: a
+// shim that refuses forever is reported, and still never severs the link.
+func TestARefusedMainWatchStopsBeingRetriedAndRaisesItsOwnFault(t *testing.T) {
+	// Arrange: a shim that refuses every open.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Act: drive the retries past the bound.
+	for i := 0; i < openRefusalLimit; i++ {
+		h.sendSessionUpdate(t, compactingUpdate())
+	}
+
+	// Assert.
+	got := h.awaitRefusal(t)
+	if got.Operation != "watch_agent" {
+		t.Fatalf("refusal operation = %q, want watch_agent", got.Operation)
+	}
+	if link := h.w.Link(); link != shimclient.LinkConnected {
+		t.Fatalf("the link after exhausted retries = %v, want LinkConnected", link)
+	}
+}
+
+// TestARefusedOpenOnAnUnannouncedHandleRaisesItsOwnFault pins the other half
+// of the classification: nothing announced this agent, so the refusal is a
+// disagreement about what exists and is reported at once.
+func TestARefusedOpenOnAnUnannouncedHandleRaisesItsOwnFault(t *testing.T) {
+	// Arrange: a healthy watcher whose shim refuses agent opens.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Act: open a watch for a handle no announcement ever registered.
+	h.w.mu.Lock()
+	h.w.openAgentStreamLocked(&agentWatch{id: agentID("ghost-1")})
+	h.w.mu.Unlock()
+
+	// Assert.
+	got := h.awaitRefusal(t)
+	if got.Handle != "ghost-1" {
+		t.Fatalf("refusal handle = %q, want ghost-1", got.Handle)
+	}
+	if link := h.w.Link(); link != shimclient.LinkConnected {
+		t.Fatalf("the link after an unannounced refusal = %v, want LinkConnected", link)
+	}
+}
+
+// TestARefusedOpenOnAnUnannouncedHandleIsWarned pins the level: an unexpected
+// refusal is a warning, not the ordinary bring-up race's info line.
+func TestARefusedOpenOnAnUnannouncedHandleIsWarned(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Act.
+	h.w.mu.Lock()
+	h.w.openAgentStreamLocked(&agentWatch{id: agentID("ghost-1")})
+	h.w.mu.Unlock()
+	h.awaitRefusal(t)
+
+	// Assert.
+	if !h.hasRecord("warn", "daemon.sessionwatcher.watch_open_refused") {
+		t.Fatalf("an unannounced refusal logged %v, want a warn record", h.log.Records())
+	}
+}
+
+// TestAnAgentStreamEndingAfterOpeningStillSevers pins that the fix narrowed
+// nothing else: a stream that OPENED and then ended while the session is live
+// is a transport failure exactly as before.
+func TestAnAgentStreamEndingAfterOpeningStillSevers(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.main.fail(errors.New("connection reset"))
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultSevered {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultSevered)
+	}
+}
+
+// TestAnUnavailableWatchOpenStillSevers pins the same for the OPEN: a
+// transport that will not carry the stream is a severed link, refusals or no
+// refusals.
+func TestAnUnavailableWatchOpenStillSevers(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeUnavailable, "connection refused"))
+
+	// Act.
+	h.w.mu.Lock()
+	h.w.openAgentStreamLocked(&agentWatch{id: agentID("sub-1")})
+	h.w.mu.Unlock()
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultSevered {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultSevered)
+	}
+}

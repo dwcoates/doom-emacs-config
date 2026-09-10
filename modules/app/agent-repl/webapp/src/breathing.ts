@@ -36,8 +36,8 @@
 export const BREATH_SHADES = 20;
 
 /**
- * One full left-to-right pass of a resting PROMPT bubble's thinking wave. Must
- * match the `bubble-wave` keyframes' duration in `styles.css` (`.bubble.user`):
+ * One full left-to-right pass of a WORKING prompt bubble's thinking wave. Must
+ * match the `bubble-wave` keyframes' duration in `styles.css`:
  * the negative delay computed here only seeks to the point the pass had already
  * reached if both sides agree on how long the pass is, and a period that
  * drifted from the stylesheet would land every rebuilt bubble at the wrong
@@ -71,7 +71,7 @@ export class AnimationEpoch {
 
   /** Time since the epoch, stamping it on first read. Never negative. */
   elapsedMs(nowMs: number): number {
-    if (this.epochMs === null) this.epochMs = nowMs;
+    this.epochMs ??= nowMs;
     return Math.max(0, nowMs - this.epochMs);
   }
 }
@@ -163,6 +163,9 @@ export class BreathingTicker {
  * ONE epoch serves the whole page, so every prompt bubble's wave crosses in
  * unison. That is deliberate: per-bubble epochs would make the feed shimmer as
  * a dozen unrelated phases drifted past each other.
+ *
+ * WHICH bubbles wave is not this class's business: the epoch is a phase, and
+ * the feed decides who is in flight (`PROMPT_WAVE_ATTRIBUTE`).
  */
 export class BubbleWave {
   private epoch = new AnimationEpoch();
@@ -177,9 +180,37 @@ export class BubbleWave {
 export const bubbleWave = new BubbleWave();
 
 /**
+ * The attribute a prompt bubble wears WHILE ITS TURN IS IN FLIGHT, and the ONE
+ * thing the `bubble-wave` rule keys on.
+ *
+ * The wave is a WORKING prompt's wave — this module has said so from the start
+ * — so it belongs to the prompt whose turn the daemon still has, and to no
+ * other. A stylesheet that ran it on `.bubble.user` outright animated every
+ * prompt in the scrollback forever: a settled conversation of thirty prompts
+ * painting thirty shadow bands over and over, which says "thirty turns are
+ * working" when none of them is, and which no screenshot of the page can ever
+ * catch at rest.
+ *
+ * It is an ATTRIBUTE ON THE BUBBLE rather than a fact rendered into the
+ * bubble's body, because the transition out of flight must not redraw a word
+ * of the prompt: the feed sets and clears it on the element already on screen
+ * (`markWorkingPrompts` in feed-view.ts), so the wave stops without the text
+ * under it moving.
+ */
+export const PROMPT_WAVE_ATTRIBUTE = "data-wave";
+
+/** The one value {@link PROMPT_WAVE_ATTRIBUTE} takes: the turn is in flight. */
+export const PROMPT_WAVE_WORKING = "working";
+
+/**
  * The inline delay one prompt bubble renders with, as the whole style value.
  * Every construction site of a `.bubble.user` must carry it — a bubble built
  * without it is the jump-back this module exists to remove.
+ *
+ * STAMPED ON EVERY PROMPT BUBBLE, waving or not. The delay is only a phase,
+ * and it is inert on a bubble with no animation to seek; a bubble that carried
+ * it only while working would need it re-stamped at the moment the feed marks
+ * it, which is one more thing to get wrong for no gain.
  */
 export function bubbleWaveStyle(nowMs: number = Date.now()): string {
   return `animation-delay:-${Math.round(bubbleWave.delayMs(nowMs))}ms`;

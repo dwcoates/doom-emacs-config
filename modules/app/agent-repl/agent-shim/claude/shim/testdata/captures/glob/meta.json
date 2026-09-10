@@ -1,0 +1,27 @@
+{
+  "scenario": "glob",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "List every .md file anywhere under this directory using a glob pattern.",
+  "prompts": [
+    {
+      "text": "List every .md file anywhere under this directory using a glob pattern.",
+      "resume": false
+    }
+  ],
+  "world": "glob",
+  "cwd_init": null,
+  "vendor_session_id": "29bde42b-36ca-4cc8-9f9b-f5d6b0067bb4",
+  "manual": null,
+  "expect": [
+    "tool:Glob",
+    "tool_result:glob"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-glob-YOYzy7-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:19:50.282Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

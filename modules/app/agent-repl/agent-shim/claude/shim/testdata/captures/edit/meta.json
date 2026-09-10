@@ -1,0 +1,28 @@
+{
+  "scenario": "edit",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "In config.ini, change the line 'timeout = 30' to 'timeout = 90'. Change nothing else.",
+  "prompts": [
+    {
+      "text": "In config.ini, change the line 'timeout = 30' to 'timeout = 90'. Change nothing else.",
+      "resume": false
+    }
+  ],
+  "world": "edit",
+  "cwd_init": null,
+  "vendor_session_id": "b86016da-478c-46a7-8228-819537f19501",
+  "manual": null,
+  "expect": [
+    "tool:Edit",
+    "tool_result:edit",
+    "attachment:edited_text_file"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-edit-RZwdkb-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:19:40.357Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

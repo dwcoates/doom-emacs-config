@@ -1,0 +1,87 @@
+// endpoint_update_held_prompt.proto — UpdateHeldPrompt: the tray's actions on
+// a held PROMPT. DAEMON-HOLD TRAY section. Doing nothing is the normal path —
+// a held prompt delivers itself when its hold clears; these are the two ways
+// to not wait.
+//
+// The prompt is identified by its TurnId — the TYPED ECHO TOKEN loop: the
+// daemon minted it at submission (SubmitPromptSuccess.turn), served it inside
+// the tray's HeldPrompt entry, and the client hands it back unchanged.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateHeldPromptRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHICH held prompt — the daemon-minted turn it is held under, echoed from
+  // the tray entry.
+  conversation.v1.TurnId turn = 2;
+  // THE ARM IS THE ACTION.
+  oneof action {
+    // Deliver NOW — override the hold (interrupting the running turn when
+    // that is what delivery takes).
+    UpdateHeldPromptRelease release = 3;
+    // Discard it, never delivered (the composer takes the text back).
+    UpdateHeldPromptDrop drop = 4;
+    // Confirm the hold (view state only: HeldPromptAccepted.accepted flips
+    // and the tray re-pushes; delivery is unchanged). Legal ONLY on an
+    // entry whose classification is hold_for_turn_end; refused otherwise.
+    UpdateHeldPromptAccept accept = 5;
+  }
+}
+message UpdateHeldPromptRelease {}
+message UpdateHeldPromptDrop {}
+message UpdateHeldPromptAccept {}
+
+// THE ARM IS THE OUTCOME.
+message UpdateHeldPromptResponse {
+  oneof result {
+    UpdateHeldPromptSuccess success = 1;
+    UpdateHeldPromptError error = 2;
+  }
+}
+
+// Done; the tray's new state arrives on its stream.
+message UpdateHeldPromptSuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message UpdateHeldPromptError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    UpdateHeldPromptUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    UpdateHeldPromptWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    UpdateHeldPromptTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    UpdateHeldPromptNotYetAdopted not_yet_adopted = 4;
+    // No hold by that id.
+    UpdateHeldPromptNoSuchHold no_such_hold = 5;
+    // The hold was already delivered.
+    UpdateHeldPromptAlreadyDelivered already_delivered = 6;
+    // An accept on a verdict other than hold_for_turn_end.
+    UpdateHeldPromptAcceptNotApplicable accept_not_applicable = 7;
+    // A force-through on an uninterruptible or session_starting hold.
+    UpdateHeldPromptReleaseRefused release_refused = 8;
+  }
+}
+message UpdateHeldPromptUnknownWorkspace {}
+message UpdateHeldPromptWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message UpdateHeldPromptTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message UpdateHeldPromptNotYetAdopted {}
+message UpdateHeldPromptNoSuchHold {}
+message UpdateHeldPromptAlreadyDelivered {}
+message UpdateHeldPromptAcceptNotApplicable {}
+message UpdateHeldPromptReleaseRefused {}

@@ -1,0 +1,30 @@
+{
+  "scenario": "skill-invocation",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Invoke the project skill named capture-probe and follow it.",
+  "prompts": [
+    {
+      "text": "Invoke the project skill named capture-probe and follow it.",
+      "resume": false
+    }
+  ],
+  "world": "skill-invocation",
+  "cwd_init": null,
+  "vendor_session_id": "e2bbb106-f0a3-4e58-9b06-46e797496487",
+  "manual": null,
+  "expect": [
+    "tool:Skill",
+    "tool_result:skill",
+    "attachment:dynamic_skill",
+    "attachment:invoked_skills",
+    "isMeta user record with sourceToolUseID"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-skill-invocation-krwGzk-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:21:04.911Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

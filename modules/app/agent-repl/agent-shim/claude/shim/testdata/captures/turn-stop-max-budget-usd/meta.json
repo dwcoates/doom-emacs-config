@@ -1,0 +1,28 @@
+{
+  "scenario": "turn-stop-max-budget-usd",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Write a 40000 word essay on the history of file systems, one section at a time.",
+  "prompts": [
+    {
+      "text": "Write a 40000 word essay on the history of file systems, one section at a time.",
+      "resume": false
+    }
+  ],
+  "world": "turn-stop-max-budget-usd",
+  "cwd_init": null,
+  "vendor_session_id": "00b56199-f477-41ee-9004-d56f7d8a0764",
+  "manual": null,
+  "expect": [
+    "result:error_max_budget_usd"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-turn-stop-max-budget-usd-5RR7lS-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:36:39.931Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": [],
+  "reclassified_at": "2026-09-01T21:56:29.687Z",
+  "reclassified_by": "project lead, declared error-subtype allowance (outcome.mjs)"
+}

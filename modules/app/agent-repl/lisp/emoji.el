@@ -12,6 +12,15 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--git-string-quiet "core")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--warn "core")
+(declare-function agent-repl--ws-current-log-name "workspace")
+
 (defconst agent-repl--emoji-categories
   `((feat     . ("✨" "🚀" "🎉" "🌟" "💡" "🎨" "🌈" "🔮" "🎯" "⚡" "🏗" "🧩" "🪅" "🌻" "🍀"))
     (fix      . ("🔧" "🩹" "🐛" "🔨" "🛠" "🪛" "🏥" "💊" "🩺" "🪚" "🔩" "⛏" "🪠" "🧰" "🦷"))

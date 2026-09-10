@@ -1,0 +1,87 @@
+// endpoint_open_agent_session.proto — OpenAgentSession: the unary OPEN that
+// answers with the first page and the watch token.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Open one agent's reading session: the first page, and the address of the
+// tail that follows it.
+message OpenAgentSessionRequest {
+  // The agent whose lines are wanted.
+  conversation.v1.AgentId agent = 1;
+  // The opening page's budget.
+  uint32 page_size = 2;
+  // The newest item the caller already holds. UNSET = repaint: a full first
+  // page. SET = catch-up: the page carries only items NEWER than this, never
+  // it or anything older. The store tracks nothing about what it previously
+  // served — the caller states its own high-water mark.
+  optional StoreItemPointer known_through = 3;
+  // Whether the caller will FOLLOW this open with a watch. UNSET/false = a
+  // watch is coming: the store mints a token and pins the tail (the ordinary
+  // open). SET = a one-shot read: the caller wants the page and nothing more,
+  // no token is minted, `watch` in the success is UNSET, and a watch cannot
+  // be opened from this page. Stated by the caller because the store has no
+  // other way to learn a page was abandoned — OpenAgentSession is unary and
+  // there is no close — and every unclaimed token minted for a read that
+  // never watched lived for the store's whole process lifetime (measured:
+  // two per turn, 2026-09-10).
+  bool page_only = 4;
+}
+
+// The page, or why it could not be served.
+message OpenAgentSessionResponse {
+  oneof result {
+    OpenAgentSessionSuccess success = 1;
+    OpenAgentSessionFailure failure = 2;
+  }
+}
+
+// Where the caller now is, and how to follow along.
+message OpenAgentSessionSuccess {
+  // The first page, newest first (bounded by known_through when given). When
+  // the gap since known_through exceeds page_size, the page holds the newest
+  // page_size items and `more` points into the gap — the caller walks older
+  // via ReadAgentPage until it meets its own mark.
+  AgentSessionPage page = 1;
+  // The watch address: opaque, store-minted at THIS open, pinning the tail to
+  // begin exactly after this page's newest item — nothing is missed or
+  // doubled between page and stream. A caller cannot watch an agent it did
+  // not open. UNSET when the request said `page_only`: no token was minted.
+  AgentSessionToken watch = 2;
+}
+
+// The open could not be served. THE ARM IS WHY.
+message OpenAgentSessionFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // Empty agent id, zero page_size, or a known_through that is empty or
+    // not store-minted.
+    OpenAgentSessionInvalidRequest invalid_request = 2;
+    // A well-formed known_through naming no line of THIS book.
+    OpenAgentSessionStalePointer stale_pointer = 3;
+    OpenAgentSessionStorageFailure storage_failure = 4;
+    // A well-formed agent id naming NO book of this store: refused rather
+    // than served empty, so a stale or mistyped target is distinguishable
+    // from a real agent that has said nothing yet. The shim maps it to
+    // NotFound. (Landing 7, 2026-09-02; cross-plane, store lead agreed.)
+    OpenAgentSessionUnknownAgent unknown_agent = 5;
+  }
+}
+message OpenAgentSessionUnknownAgent {}
+// The request was malformed or violated the validation invariant.
+message OpenAgentSessionInvalidRequest {
+  // Which field (with the offending entry's index where one applies), as
+  // the store names it — for the producer's logs, never switched on.
+  string field = 1;
+}
+// The database failed; `detail` carries the driver's text.
+message OpenAgentSessionStorageFailure {}
+// The pointer names no line of the addressed book.
+message OpenAgentSessionStalePointer {}

@@ -1,0 +1,98 @@
+/**
+ * tests-tab — the merge run's test suites, and their COLORED output.
+ *
+ * THE DAEMON PARSED THE TERMINAL, NOT THE CLIENT. Each span arrives with a
+ * paint-class name out of the shared inventory and the client turns it into a
+ * class; there is no ANSI parser here, no language guess, no token table. An
+ * empty class is the one spelling of plain text, and a class this build has
+ * never heard of draws the text unstyled rather than throwing — the text is the
+ * substance, the color is decoration (`vocab.paintClass` logs the drift).
+ *
+ * THE OUTPUT IS ALREADY CAPPED by the daemon; the client scrolls what it was
+ * given inside the block rather than growing the bubble without bound.
+ */
+import { log } from "../../log.js";
+import { requireCase } from "../../rpc/strict.js";
+import { paintSpanClass } from "../cards/paint.js";
+import { armName } from "../renderers.js";
+import { unreachableArm } from "../../rpc/strict.js";
+import type {
+  FeedMergeTestSpan,
+  FeedMergeTestSuite,
+} from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+
+const PATH = "FeedMergeTestSuite";
+
+/** The glyph a suite reports its own state with. */
+const SUITE_GLYPHS = {
+  running: "●",
+  passed: "✓",
+  failed: "✗",
+} as const satisfies Record<string, string>;
+
+/** Every suite of a tests tab, in served order. */
+export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "merge-suites list-rows";
+  for (const suite of suites) el.append(drawFeedMergeTestSuite(suite));
+  return el;
+}
+
+/** One suite: its name, its state glyph, its painted output. */
+export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
+  const state = requireCase(suite.state, `${PATH}.state`);
+  log("debug", `drawing a merge test suite as ${state.case}`, {
+    operation: "merge.draw-suite",
+    context: { suite: suite.name, arm: state.case },
+  });
+
+  const el = document.createElement("div");
+  el.className = "merge-suite";
+  el.setAttribute("data-suite-state", state.case);
+
+  const head = document.createElement("div");
+  head.className = "merge-suite-head";
+  el.append(head);
+
+  const glyph = document.createElement("span");
+  glyph.className = "merge-suite-glyph";
+  glyph.setAttribute("aria-hidden", "true");
+  switch (state.case) {
+    case "running":
+      glyph.classList.add("is-live");
+      glyph.textContent = SUITE_GLYPHS.running;
+      break;
+    case "passed":
+      glyph.classList.add("is-succeeded");
+      glyph.textContent = SUITE_GLYPHS.passed;
+      break;
+    case "failed":
+      glyph.classList.add("is-failed");
+      glyph.textContent = SUITE_GLYPHS.failed;
+      break;
+    default:
+      return unreachableArm(`${PATH}.state`, armName(state));
+  }
+  head.append(glyph);
+
+  const name = document.createElement("span");
+  name.className = "merge-suite-name";
+  name.textContent = suite.name;
+  head.append(name);
+
+  if (suite.output.length > 0) {
+    const pre = document.createElement("pre");
+    pre.className = "merge-suite-output";
+    for (const span of suite.output) pre.append(drawFeedMergeTestSpan(span));
+    el.append(pre);
+  }
+  return el;
+}
+
+/** One painted span of a suite's output. */
+export function drawFeedMergeTestSpan(span: FeedMergeTestSpan): HTMLElement {
+  const el = document.createElement("span");
+  el.className = paintSpanClass(span.paintClass);
+  el.textContent = span.text;
+  return el;
+}

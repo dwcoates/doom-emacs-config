@@ -1,0 +1,263 @@
+// service.proto — THE agentrepl.v1 SERVICE: every verb a client can call, and
+// every stream a component watches.
+//
+// DELIBERATELY EMPTY. The previous 34-method command surface and its 34
+// endpoint_*.proto files were deleted outright to start from a clean slate:
+// what stood here was so far from the figma→idl model being designed that it
+// confused more than it informed. Every RPC is re-added one at a time, with its
+// own endpoint_<snake_case_method>.proto, as it is agreed.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "agentrepl/v1/endpoint_open_feed.proto";
+import "agentrepl/v1/endpoint_watch_feed.proto";
+import "agentrepl/v1/endpoint_get_feed_page.proto";
+import "agentrepl/v1/endpoint_interrupt.proto";
+import "agentrepl/v1/endpoint_answer_permission.proto";
+import "agentrepl/v1/endpoint_answer_question.proto";
+import "agentrepl/v1/endpoint_answer_cold_gate.proto";
+import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
+import "agentrepl/v1/endpoint_create_workspace.proto";
+import "agentrepl/v1/endpoint_open_workspace.proto";
+import "agentrepl/v1/endpoint_close_workspace.proto";
+import "agentrepl/v1/endpoint_kill_workspace.proto";
+import "agentrepl/v1/endpoint_nuke_workspace.proto";
+import "agentrepl/v1/endpoint_merge_workspace.proto";
+import "agentrepl/v1/endpoint_restart_workspace.proto";
+import "agentrepl/v1/endpoint_watch_topbar.proto";
+import "agentrepl/v1/endpoint_open_external.proto";
+import "agentrepl/v1/endpoint_open_in_editor.proto";
+import "agentrepl/v1/endpoint_send_login_input.proto";
+import "agentrepl/v1/endpoint_request_command_support.proto";
+import "agentrepl/v1/endpoint_create_task.proto";
+import "agentrepl/v1/endpoint_update_task.proto";
+import "agentrepl/v1/endpoint_assign_workspace_task.proto";
+import "agentrepl/v1/endpoint_open_login.proto";
+import "agentrepl/v1/endpoint_watch_login_terminal.proto";
+import "agentrepl/v1/endpoint_close_login.proto";
+import "agentrepl/v1/endpoint_set_model.proto";
+import "agentrepl/v1/endpoint_set_permission_mode.proto";
+import "agentrepl/v1/endpoint_set_workspace_priority.proto";
+import "agentrepl/v1/endpoint_watch_footer.proto";
+import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
+import "agentrepl/v1/endpoint_update_held_prompt.proto";
+import "agentrepl/v1/endpoint_answer_held_offer.proto";
+import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
+import "agentrepl/v1/endpoint_update_merge_queue.proto";
+import "agentrepl/v1/endpoint_daemon_health.proto";
+import "agentrepl/v1/endpoint_session_health.proto";
+import "agentrepl/v1/endpoint_client_log.proto";
+import "agentrepl/v1/endpoint_register_workspace.proto";
+import "agentrepl/v1/endpoint_select_workspace.proto";
+import "agentrepl/v1/endpoint_watch_host_workspace.proto";
+import "agentrepl/v1/endpoint_watch_daemon.proto";
+import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
+import "agentrepl/v1/endpoint_watch_web_workspace.proto";
+import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
+import "agentrepl/v1/endpoint_watch_page.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+service AgentRepl {
+  // ---- FEED ----
+
+  // The composer's submission, whole; the daemon recognizes programmatically
+  // handled commands transparently. See endpoint_submit_prompt.proto.
+  rpc SubmitPrompt(SubmitPromptRequest) returns (SubmitPromptResponse);
+
+  // The refusal card's "engineer support for it" offer: spawn a support
+  // workspace with a daemon-composed brief. See
+  // endpoint_request_command_support.proto.
+  rpc RequestCommandSupport(RequestCommandSupportRequest) returns (RequestCommandSupportResponse);
+
+  // The feed's live half: every row upsert for one workspace, top-level and
+  // nested alike. See endpoint_watch_feed.proto.
+  // Opens ONE feed (root, or a subagent bubble's sub-feed): answers with the
+  // newest page and mints the token WatchFeed echoes.
+  rpc OpenFeed(OpenFeedRequest) returns (OpenFeedResponse);
+  rpc WatchFeed(WatchFeedRequest) returns (stream WatchFeedResponse);
+
+  // The feed's history half: a page of rows for one container, "first" or
+  // "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.
+  rpc GetFeedPage(GetFeedPageRequest) returns (GetFeedPageResponse);
+
+  // "Stop that": the running turn, or a detached bubble's work — the arm is
+  // the target. See endpoint_interrupt.proto.
+  rpc Interrupt(InterruptRequest) returns (InterruptResponse);
+
+  // The permission card's verdicts and the question card's answers. See
+  // endpoint_answer_permission.proto.
+  rpc AnswerPermission(AnswerPermissionRequest) returns (AnswerPermissionResponse);
+  // The question card's submission — answers echo the served values.
+  rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
+  // The cold-context gate's buttons — pay, clear, or compact{model, scope}.
+  rpc AnswerColdGate(AnswerColdGateRequest) returns (AnswerColdGateResponse);
+
+  // ---- SIDEBAR ----
+
+  // The one global stream: the roster, whole, for every webview alike. See
+  // endpoint_watch_workspace_roster.proto.
+  rpc WatchWorkspaceRoster(WatchWorkspaceRosterRequest) returns (stream WatchWorkspaceRosterResponse);
+
+  // A new workspace in a repository; the daemon names and creates everything.
+  // See endpoint_create_workspace.proto.
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
+
+  // Open a registered-but-closed workspace.
+  rpc OpenWorkspace(OpenWorkspaceRequest) returns (OpenWorkspaceResponse);
+
+  // Tear down a workspace's editor state without merging — the only teardown.
+  rpc CloseWorkspace(CloseWorkspaceRequest) returns (CloseWorkspaceResponse);
+  // The big red button: forced session death, never blocks, data survives.
+  rpc KillWorkspace(KillWorkspaceRequest) returns (KillWorkspaceResponse);
+  // Data destruction: kill if live, then delete worktree and branch.
+  rpc NukeWorkspace(NukeWorkspaceRequest) returns (NukeWorkspaceResponse);
+
+  // Enqueue this workspace's merge; its life from there is the feed's bubble.
+  rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
+
+
+
+  // Bounce the workspace's shim (rebuild if stale); graceful unless forced.
+  // See endpoint_restart_workspace.proto.
+  rpc RestartWorkspace(RestartWorkspaceRequest) returns (RestartWorkspaceResponse);
+
+  // Set or clear a workspace's priority; the roster orders by it. See
+  // endpoint_set_workspace_priority.proto.
+  rpc SetWorkspacePriority(SetWorkspacePriorityRequest) returns (SetWorkspacePriorityResponse);
+
+  // A new user task; the roster's task view renders it. See
+  // endpoint_create_task.proto.
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  // Change one task (retitle, done, reopen). See endpoint_update_task.proto.
+  rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
+  // Assign a workspace to a task, or unassign it. See
+  // endpoint_assign_workspace_task.proto.
+  rpc AssignWorkspaceTask(AssignWorkspaceTaskRequest) returns (AssignWorkspaceTaskResponse);
+
+  // ---- TOPBAR ----
+
+  // The topbar's stream: the view, whole (the token-breakdown menu inside).
+  rpc WatchTopbar(WatchTopbarRequest) returns (stream WatchTopbarResponse);
+
+  // The selector's pick: the typed echo token handed back. See
+  // endpoint_set_model.proto.
+  rpc SetModel(SetModelRequest) returns (SetModelResponse);
+
+  // The permission-mode switch, SetModel's sibling. See
+  // endpoint_set_permission_mode.proto.
+  rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
+
+  // ---- FOOTER ----
+
+  // The footer's stream: the view, whole.
+  rpc WatchFooter(WatchFooterRequest) returns (stream WatchFooterResponse);
+
+  // ---- DAEMON-HOLD TRAY ----
+
+  // The tray's stream: the tray, whole.
+  rpc WatchDaemonHolds(WatchDaemonHoldsRequest) returns (stream WatchDaemonHoldsResponse);
+
+  // Act on a held prompt: deliver now, or discard. See
+  // endpoint_update_held_prompt.proto.
+  rpc UpdateHeldPrompt(UpdateHeldPromptRequest) returns (UpdateHeldPromptResponse);
+
+  // Answer a question the daemon parked in the tray. See
+  // endpoint_answer_held_offer.proto.
+  rpc AnswerHeldOffer(AnswerHeldOfferRequest) returns (AnswerHeldOfferResponse);
+
+  // ---- DAEMON ADMIN ----
+
+  // The deploy tooling's drain-and-exit control. See
+  // endpoint_update_shutdown_schedule.proto.
+  rpc UpdateShutdownSchedule(UpdateShutdownScheduleRequest) returns (UpdateShutdownScheduleResponse);
+
+  // Operator control of the merge queue. See
+  // endpoint_update_merge_queue.proto.
+  rpc UpdateMergeQueue(UpdateMergeQueueRequest) returns (UpdateMergeQueueResponse);
+
+  // Is the daemon itself healthy? Unhealthy is an ANSWER. See
+  // endpoint_daemon_health.proto.
+  rpc DaemonHealth(DaemonHealthRequest) returns (DaemonHealthResponse);
+
+  // Is this workspace's session healthy? Unhealthy is an ANSWER. See
+  // endpoint_session_health.proto.
+  rpc SessionHealth(SessionHealthRequest) returns (SessionHealthResponse);
+
+  // A console-less client's diagnostic record, into the durable log. See
+  // endpoint_client_log.proto.
+  rpc ClientLog(ClientLogRequest) returns (ClientLogResponse);
+
+  // ---- HOST ----
+
+  // Emacs announces a workspace exists; idempotent by dir. See
+  // endpoint_register_workspace.proto.
+  rpc RegisterWorkspace(RegisterWorkspaceRequest) returns (RegisterWorkspaceResponse);
+
+  // The user switched to this workspace in the editor; idempotent. See
+  // endpoint_select_workspace.proto.
+  rpc SelectWorkspace(SelectWorkspaceRequest) returns (SelectWorkspaceResponse);
+
+  // The host-facing view of one workspace, per-workspace subscription. See
+  // endpoint_watch_host_workspace.proto.
+  rpc WatchHostWorkspace(WatchHostWorkspaceRequest) returns (stream WatchHostWorkspaceResponse);
+
+  // The daemon-level host stream — daemon-scoped facts only (the graceful
+  // rollout's shutdown announcement). See endpoint_watch_daemon.proto.
+  rpc WatchDaemon(WatchDaemonRequest) returns (stream WatchDaemonResponse);
+
+  // Emacs's half of the handover rendezvous, called on the NEW daemon. See
+  // endpoint_adopt_host_workspace.proto.
+  rpc AdoptHostWorkspace(AdoptHostWorkspaceRequest) returns (AdoptHostWorkspaceResponse);
+
+  // ---- WEB LINK ----
+  // The webview's connection surface: neither host-natured nor a drawn
+  // component — the per-workspace daemon link the graceful rollout rides.
+
+  // The webview's standing daemon-link stream for one workspace. See
+  // endpoint_watch_web_workspace.proto.
+  rpc WatchWebWorkspace(WatchWebWorkspaceRequest) returns (stream WatchWebWorkspaceResponse);
+
+  // Begin (or join) the account login flow — the daemon-owned pty running
+  // the vendor's login TUI. See endpoint_open_login.proto.
+  rpc OpenLogin(OpenLoginRequest) returns (OpenLoginResponse);
+  // The login pty's output stream: raw bytes out, scrollback replayed on
+  // attach; the input direction is SendLoginInput (a WKWebView cannot speak
+  // a bidirectional Connect stream). See endpoint_watch_login_terminal.proto.
+  rpc WatchLoginTerminal(WatchLoginTerminalRequest) returns (stream LoginTerminalOutput);
+  // Keystrokes or a resize for the login pty. See
+  // endpoint_send_login_input.proto.
+  rpc SendLoginInput(SendLoginInputRequest) returns (SendLoginInputResponse);
+  // End the login session; closing an absent one is success. See
+  // endpoint_close_login.proto.
+  rpc CloseLogin(CloseLoginRequest) returns (CloseLoginResponse);
+  // Open a clicked link in the pinned external browser profile. See
+  // endpoint_open_external.proto.
+  rpc OpenExternal(OpenExternalRequest) returns (OpenExternalResponse);
+  // A host-raised click: open a path (at a line) in the editor — relayed to
+  // the workspace's host stream. See endpoint_open_in_editor.proto.
+  rpc OpenInEditor(OpenInEditorRequest) returns (OpenInEditorResponse);
+
+  // The webview's half of the handover rendezvous, called on the NEW
+  // daemon. See endpoint_adopt_web_workspace.proto.
+  rpc AdoptWebWorkspace(AdoptWebWorkspaceRequest) returns (AdoptWebWorkspaceResponse);
+
+  // ---- THE PAGE'S ONE STREAM ----
+  //
+  // A browser page multiplexes EVERY standing subscription onto WatchPage,
+  // because HTTP/1.1 caps it at about six connections per host and a
+  // server-streaming call pins one for its whole life. See
+  // endpoint_watch_page.proto for what that cap actually cost.
+
+  // The page's one standing stream. Its first frame is the attachment latch;
+  // every frame after it is one subscription's push.
+  rpc WatchPage(WatchPageRequest) returns (stream WatchPageResponse);
+  // Start one subscription on an attached page. The acceptance IS the answer,
+  // and a refused open is a Connect error exactly as a refused Watch* is.
+  rpc SubscribePage(SubscribePageRequest) returns (SubscribePageResponse);
+  // End one subscription, leaving the page's others alone.
+  rpc UnsubscribePage(UnsubscribePageRequest) returns (UnsubscribePageResponse);
+}

@@ -1,0 +1,34 @@
+{
+  "scenario": "worktree-enter-exit-kept-and-removed",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "This directory is a git repository. Enter a worktree to make an experimental change, add a file called kept.txt, then exit the worktree KEEPING it. Then enter a second worktree, add scratch.txt, and exit that one REMOVING it.",
+  "prompts": [
+    {
+      "text": "This directory is a git repository. Enter a worktree to make an experimental change, add a file called kept.txt, then exit the worktree KEEPING it. Then enter a second worktree, add scratch.txt, and exit that one REMOVING it.",
+      "resume": false
+    }
+  ],
+  "world": "worktree-enter-exit-kept-and-removed",
+  "cwd_init": {
+    "command": "git init -q . && git add -A && git -c user.email=capture@example.invalid -c user.name=capture commit -qm init",
+    "stdout": "",
+    "stderr": ""
+  },
+  "vendor_session_id": "f4294df1-87ec-4808-afe5-a20d00bde6d4",
+  "manual": null,
+  "expect": [
+    "tool:EnterWorktree",
+    "tool_result:enter_worktree",
+    "tool:ExitWorktree",
+    "exit kept",
+    "exit removed"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-worktree-enter-exit-kept-and-removed-SQorVn-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:24:13.998Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

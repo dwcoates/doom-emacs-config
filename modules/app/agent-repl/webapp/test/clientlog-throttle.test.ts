@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { ClientLogThrottle, type ClientLogSend } from "../src/clientlog-throttle.js";
-import type { ClientLogContext } from "../src/protocol.js";
-import type { ClientLogLevel } from "../src/wslog.js";
+import type { ClientLogContext } from "../src/log.js";
+import type { ClientLogLevel } from "../src/log.js";
 
 interface SentRecord {
   level: ClientLogLevel;
@@ -173,5 +173,42 @@ describe("ClientLogThrottle", () => {
 
     // Assert.
     expect(sent.map((r) => r.message)).toEqual(["one", "two"]);
+  });
+});
+
+describe("ClientLogThrottle: a refused drop summary", () => {
+  it("keeps owing the count when the summary itself is refused", () => {
+    // Arrange: one record fits, the second is dropped and counted.
+    const { throttle, setAccept, sent } = harness({ maxBuffer: 1 });
+    throttle.write("info", "kept");
+    throttle.write("info", "lost");
+    setAccept(false);
+
+    // Act: the refused flush must not forget the drop.
+    throttle.flush();
+    setAccept(true);
+    throttle.flush();
+
+    // Assert.
+    expect(sent[0].message).toBe(
+      "client log forwarding dropped 1 record(s) over its 1-record buffer bound",
+    );
+  });
+
+  it("reports the drop exactly once across the two flushes", () => {
+    // Arrange.
+    const { throttle, setAccept, sent } = harness({ maxBuffer: 1 });
+    throttle.write("info", "kept");
+    throttle.write("info", "lost");
+    setAccept(false);
+
+    // Act.
+    throttle.flush();
+    setAccept(true);
+    throttle.flush();
+    throttle.flush();
+
+    // Assert.
+    expect(sent.filter((r) => r.message.startsWith("client log forwarding dropped"))).toHaveLength(1);
   });
 });

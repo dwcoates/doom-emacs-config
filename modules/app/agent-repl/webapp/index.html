@@ -6,146 +6,64 @@
     <title>claude-repl</title>
   </head>
   <body>
-    <!-- The workspaces rail (sidebar.ts): a flex sibling docked left of the
-         main column. Hidden until Emacs pushes the first roster, so a
-         bare-browser session keeps the single-column layout. -->
-    <nav id="ws-sidebar" hidden></nav>
-    <!-- The main column: topbar over feed over composer. -->
+    <!-- THE SHELL.
+
+         Every id below is a MOUNT POINT and nothing else: the page ships
+         empty, and each component (src/sidebar, src/topbar, src/feed,
+         src/tray, src/footer, src/composer, src/login, src/failure,
+         src/lifecycle) draws its whole view into the host it is mounted on and
+         redraws it whole on every push. Nothing here is markup a renderer
+         reconciles against, so the shell can be read as the layout it is.
+
+         `src/shell.ts` resolves these ids once at boot and fails loudly by
+         name if one is missing; the ids and the data-component hooks are the
+         contract the integration suite targets, so neither is renamed lightly. -->
+
+    <!-- The workspaces rail: a flex sibling docked left of the main column.
+         Ships hidden so a session that never receives a roster keeps the
+         single-column layout; the sidebar reveals it on its first push. -->
+    <nav id="ws-sidebar" data-component="sidebar" hidden></nav>
+
     <div id="main-col">
-      <header id="topbar">
-        <span id="conn-status">connecting…</span>
-        <span id="spinner" class="spinner">●</span>
-        <button id="account" title="the Claude account this session runs as — click for account actions"></button>
-        <!-- The session-level hibernate action, beside the account chip where
-             the other session-scoped verbs live. It asks; the daemon decides,
-             and REFUSES while a turn is live or the merge lease is held. The
-             button is not pre-gated on either, because the webapp cannot
-             resolve settledness — the nack is the answer, and it lands as an
-             ordinary classified failure card. -->
-        <button id="hibernate-btn" title="put this session to sleep and reclaim its memory">sleep</button>
-        <span id="remediation"></span>
-        <!-- The session's one-line "current objective" (§2.14), absolute-
-             centered over the topbar. Out of the flex flow so it never
-             shifts the left cluster or the right pickers; empty (and so
-             invisible) until the first completed turn is summarized. -->
-        <span id="task-summary" class="topbar-summary" title=""></span>
-        <span id="session-info" class="topbar-info"></span>
-        <select id="model-select" title="model"></select>
-        <!-- Only modes a RUNNING session can switch into. `delegate` is not
-             here because the CLI rejects it outright, and `bypassPermissions`
-             is not here because it is launch-only ("the session was not
-             launched with --dangerously-skip-permissions"). Both used to be
-             offered and both silently did nothing. -->
-        <select id="mode-select" title="permission mode">
-          <option value="default">default</option>
-          <option value="acceptEdits">acceptEdits</option>
-          <option value="plan">plan</option>
-          <option value="auto">auto</option>
-          <option value="manual">manual</option>
-          <option value="dontAsk">dontAsk</option>
-        </select>
-      </header>
-      <!-- The account chip's dropdown: one re-auth verb for the current
-           account, one switch verb per other canonical root. Built on open
-           from the daemon's roster, so the identities are live. -->
-      <div id="account-menu" hidden></div>
-      <!-- The ungated-session banner (ungated.ts): filled whenever the session
-           runs under a permission mode that shadows canUseTool in the
-           fail-OPEN direction (bypassPermissions), which leaves the daemon
-           with NO permission gate at all. Empty (and so collapsed via :empty)
-           for every gated session, and deliberately carries no dismiss
-           control — it is a pure function of the live mode, re-rendered from
-           state on every chrome frame. -->
-      <div id="ungated-banner"></div>
-      <!-- The scheduled-shutdown drain banner (drain.ts): filled whenever the
-           daemon holds a drain lease, i.e. a bounce is scheduled and is
-           waiting on the workspaces it enumerates. GLOBAL, not per-workspace:
-           while the lease is held no new turn starts anywhere, so a reader
-           whose own session is idle still needs to see it. Empty (and so
-           collapsed via :empty) whenever the lease is idle, and carries no
-           dismiss control — it is a pure function of the live lease. -->
-      <div id="drain-banner"></div>
-      <!-- The compaction-in-progress banner slot: filled with an indeterminate
-           "Compacting conversation…" bar while a /compact runs, empty (and so
-           collapsed) otherwise. -->
-      <div id="compact-progress-slot"></div>
-      <!-- The REVIVAL GATE (hibernation.ts): filled whenever the daemon
-           reports this session hibernated, empty (and so collapsed via
-           :empty) whenever it is awake. It is a BLOCKING gate, not a notice:
-           the composer below is disabled while it stands, because the two
-           revival modes it offers differ in what every later turn costs and
-           the expensive one must not be reachable by default. It carries no
-           dismiss control — it is a pure function of the daemon's live
-           SessionView, re-rendered on every chrome frame, and it clears when
-           a pushed view drops the hibernation field. -->
-      <div id="revival-gate"></div>
-      <!-- The merge dequeue offer's slot: the question an interrupt raises
-           over a workspace whose merge is on the queue. Like the revival gate
-           above it carries NO dismiss control and is a pure function of the
-           daemon's live WorkspaceState — the daemon clears the offer to take
-           it down, so there is no local decision to fall out of step. It is
-           ringed in the alarm red rather than the picker yellow because its
-           confirm button aborts work rather than choosing a harmless answer. -->
-      <div id="merge-dequeue"></div>
-      <!-- RETIRED (F4): the degraded-state banner lived here. Degradation is
-           now a self-resolving failure card IN the feed, because a user whose
-           workspace changed color needs to find out why from the conversation
-           rather than from chrome that scrolls away. -->
-      <!-- LOAD MORE: the top of the conversation's history.
+      <!-- The thin top strip: account and connectivity left, flexing title
+           centered, model selector / context chip / warning chip right. Its
+           reveals render below the strip, clamped in-viewport. -->
+      <header id="topbar" data-component="topbar"></header>
 
-           A cold open no longer replays the whole conversation — it asks for
-           the newest ~10 top-level items and walks backwards on demand
-           (conversation-page.proto) — so the feed's top is now a place where
-           more history may exist, and this is how a user reaches it.
+      <!-- The scheduled-restart banner: standing and page-wide while the
+           daemon holds a drain lease. Empty (and so collapsed) otherwise. -->
+      <div id="drain-banner" data-component="drain-banner"></div>
 
-           It sits ABOVE the scrolling feed rather than inside it because the
-           feed's children are owned by FeedRenderer's keyed node map, and a
-           foreign child would be reconciled away on the next paint. It hides
-           itself the moment the daemon reports the conversation's beginning,
-           so an exhausted history leaves no chrome behind. -->
-      <div id="load-more" hidden></div>
-      <main id="feed"></main>
-      <!-- The consolidated progress footer's slot (progress-footer.ts): THE
-           in-flight indicator, a flex sibling wedged between the scrolling
-           feed and the composer so the dock stays stuck to the window's
-           bottom rather than floating just under the last bubble as the feed
-           grew. It replaced the scattered tail rows (thinking / working /
-           retrying) and the live turn-stats row that used to render here.
-           Empty (and so collapsed via :empty) before the daemon resolves its
-           first ProgressView. -->
-      <div id="progress-footer"></div>
-      <!-- The feed search's echo area: `C-s` in the composer starts an
-           incremental search over the feed, and the query, the position among
-           the matches, and any folds the search could not reach are reported
-           here rather than in the composer, which keeps its draft. Empty (and
-           so collapsed) whenever no search is running. -->
-      <footer id="composer">
-        <div id="search-status"></div>
-        <!-- The merge gate's notice (merge-gate.ts): why the composer below is
-             disabled while the merge coordinator owns this workspace's
-             session. Empty (and so collapsed via :empty) whenever no lease is
-             held. It sits INSIDE the composer, next to the control it
-             explains, rather than in the topbar where the composer's own
-             greyed-out state would read as a bug. -->
-        <div id="merge-gate-notice"></div>
-        <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>
-        <button id="send-btn">send</button>
-      </footer>
-    </div>
-    <!-- The login terminal. Hidden until the login button opens it: the
-         daemon owns the pty, this is where it gets rendered, and a human
-         drives it exactly as they drove the vterm it replaces. It is
-         position:fixed, so it stays outside #main-col. -->
-    <div id="login-overlay" hidden>
-      <div id="login-panel">
-        <header id="login-header">
-          <span id="login-title">Claude login</span>
-          <span id="login-account"></span>
-          <button id="login-close" title="close the login terminal">close</button>
-        </header>
-        <div id="login-term"></div>
+      <!-- THE SCROLL ZONE owns the conversation's scrolling, so the feed and
+           the hold tray move together: the tray is the feed's TAIL region, not
+           chrome docked under it, and a reader scrolled to the bottom sees the
+           held prompts sitting after the last row. -->
+      <div id="feed-scroll" class="scroll-zone">
+        <main id="feed" data-feed="root"></main>
+        <!-- Held prompts and daemon-posed offers, whole-list-replaced. -->
+        <section id="hold-tray" data-component="hold-tray"></section>
       </div>
+
+      <!-- The status footer: docked at the window's bottom rather than
+           floating under the last row, so the strip stays put as the feed
+           grows. Outside the scroll zone for exactly that reason. -->
+      <footer id="footer" data-component="footer"></footer>
+
+      <!-- The composer. Production runs COMPOSER-LESS -- the root composer is
+           host-native (Emacs) -- so this ships hidden and is revealed only by
+           the dev-mode `&composer=1` boot. Per-bubble composers do not live
+           here; the feed mounts those inside their bubbles. -->
+      <div id="composer" data-component="composer" hidden></div>
     </div>
+
+    <!-- Page-wide overlays, outside the main column because they cover it. -->
+    <!-- Client-local failure states (daemon unreachable, workspace gone, boot
+         failed, undecodable frame, stale bundle). Empty while healthy. -->
+    <div id="failure-overlay" data-component="failure-overlay"></div>
+    <!-- The full-screen login terminal: the daemon owns the pty, this is where
+         it is drawn. Hidden until an account action opens it. -->
+    <div id="login-overlay" data-component="login-overlay" hidden></div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

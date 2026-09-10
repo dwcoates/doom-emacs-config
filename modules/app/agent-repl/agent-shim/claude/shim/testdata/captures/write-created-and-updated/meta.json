@@ -1,0 +1,28 @@
+{
+  "scenario": "write-created-and-updated",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Create a new file called fresh.txt containing the single line 'hello'. Then overwrite existing.txt so that its only content is the line 'replaced'.",
+  "prompts": [
+    {
+      "text": "Create a new file called fresh.txt containing the single line 'hello'. Then overwrite existing.txt so that its only content is the line 'replaced'.",
+      "resume": false
+    }
+  ],
+  "world": "write-created-and-updated",
+  "cwd_init": null,
+  "vendor_session_id": "46adc4aa-15a3-425e-8f67-a0e763f3bd66",
+  "manual": null,
+  "expect": [
+    "tool:Write",
+    "tool_result:write(created)",
+    "tool_result:write(updated)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-write-created-and-updated-IiEC22-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:19:31.041Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

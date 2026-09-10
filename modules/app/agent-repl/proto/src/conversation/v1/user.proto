@@ -1,0 +1,50 @@
+// user.proto — THE USER'S MESSAGE: what a person typed.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/content_blocks.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// Something a person typed — the opening of a turn — or, when nested inside
+// detached agent work, the prompt that work was given by whoever spawned it.
+// Which of the two is read from the parent chain, never from a field: at the
+// top level it is a person, under a DetachedAgent it is the spawning agent's
+// prompt.
+//
+// A SESSION COMMAND IS NOT ONE OF THESE. The daemon recognizes `/clear`,
+// `/compact`, `/model` … (slash_command.proto) before forwarding a prompt,
+// and a recognized command earns no user message; a custom command or skill
+// EXPANDS into a prompt, and the text the user typed really is the turn's
+// opening and really is one of these.
+message UserSaid {
+  // What they typed, and anything they attached. NOT a bare TextBlock: a person
+  // pastes images, and a single block could not hold one alongside their words.
+  UserContent content = 1;
+
+  // Tag 2 is RETIRED: prompt provenance is deferred — see the deferred-work
+  // metadocument ("prompt provenance").
+}
+
+// What a PERSON said, as an ordered sequence of blocks. No reasoning and no
+// tool calls, because a person produces neither.
+message UserContent {
+  // In the order the person composed them, which is the order they are shown.
+  repeated UserContentBlock blocks = 1;
+}
+
+// One block of what a person said.
+message UserContentBlock {
+  oneof block {
+    // Words the person typed.
+    TextBlock text = 1;
+    // An image they pasted or attached.
+    ImageBlock image = 2;
+    // A block whose kind we do not model. It renders as nothing and is kept so
+    // the decision is reversible.
+    UnsupportedBlock unsupported = 3;
+    // Tag 4 is RETIRED: the attached-file block is deferred.
+  }
+}

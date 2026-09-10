@@ -1,0 +1,86 @@
+// endpoint_answer_permission.proto — AnswerPermission: the consent card's
+// buttons. FEED section. Success is "delivered" — the card's new state
+// arrives as the row's re-push, never restated here.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AnswerPermissionRequest {
+  // The workspace whose card this is.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The permission card's row, exactly as the feed served it. The daemon
+  // decodes it to the ask's identity; the STANDING echo token stays
+  // daemon-side and is supplied to the shim when the arm picks standing.
+  frontend.v1.FeedId permission = 2;
+  // Which button.
+  oneof answer {
+    // Allow this call alone.
+    AnswerPermissionAllowOnce allow_once = 3;
+    // Allow with standing — legal only when the card carried
+    // standing_offered; refused otherwise.
+    AnswerPermissionAllowStanding allow_standing = 4;
+    // Refuse the call; the agent proceeds without it.
+    AnswerPermissionDeny deny = 5;
+  }
+}
+message AnswerPermissionAllowOnce {}
+message AnswerPermissionAllowStanding {}
+// The refusal, with the user's optional reason relayed to the agent.
+message AnswerPermissionDeny {
+  // Why, when the user typed one. UNSET = no reason given.
+  optional AnswerPermissionDenyReason reason = 1;
+}
+message AnswerPermissionDenyReason {
+  // The reason text, relayed verbatim.
+  string text = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message AnswerPermissionResponse {
+  oneof result {
+    AnswerPermissionSuccess success = 1;
+    AnswerPermissionError error = 2;
+  }
+}
+// Delivered. Empty on purpose: the card's new state is the feed's to push —
+// restating it here would be a second authority.
+message AnswerPermissionSuccess {}
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message AnswerPermissionError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    AnswerPermissionUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    AnswerPermissionWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    AnswerPermissionTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    AnswerPermissionNotYetAdopted not_yet_adopted = 4;
+    // The permission card is no longer standing.
+    AnswerPermissionAskNotStanding ask_not_standing = 5;
+    // A standing allow was picked where none was offered.
+    AnswerPermissionNoStandingOffer no_standing_offer = 6;
+    // The workspace has no session to answer to.
+    AnswerPermissionNoSession no_session = 7;
+  }
+}
+message AnswerPermissionUnknownWorkspace {}
+message AnswerPermissionWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message AnswerPermissionTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message AnswerPermissionNotYetAdopted {}
+message AnswerPermissionAskNotStanding {}
+message AnswerPermissionNoStandingOffer {}
+message AnswerPermissionNoSession {}

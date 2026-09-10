@@ -93,279 +93,81 @@ agent panel it is, with no special-casing left to carve out."
 
 ;;;; ---- ensure-webview-buffer ------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-webview-created-and-pinned ()
-  "A fresh webview is created at the workspace URL with a pinned name."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Assert
-          (should (equal agent-repl-test--urls '("http://x/?workspace=%2Fw")))
-          (should (equal (buffer-name buf) "*agent-frontend-ws1*"))
-          (should (equal (buffer-local-value 'xwidget-webkit-buffer-name-format buf)
-                         "*agent-frontend-ws1*"))
-          (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf)))))))
-
-(ert-deftest agent-repl-test-frontend-webview-mount-never-probes-health ()
-  "The render chokepoint asks the daemon nothing about the session's health.
-The probe that used to gate this mount was the create-then-poll shape: the
-daemon acked `createSession' as soon as a spawn was issued, so the mount had
-to re-ask whether the shim was up — and lost that race.  The ack now proves
-establishment, so a probe here would be a question already answered."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '())
-        probed)
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-wait-session-healthy)
-                 (lambda (&rest _) (setq probed t)))
-                ((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        ;; Act
-        (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")
-        ;; Assert
-        (should-not probed)))))
-
-(ert-deftest agent-repl-test-frontend-webview-stamped-with-its-owner ()
-  "A fresh webview records the workspace that owns it.
-The stamp is what `agent-repl--foreign-owned-buffer-p' reads, so an
-unstamped webview would be invisible to every owner-keyed window sweep
-and a background panel build could mount its page over it."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Assert
-          (should (equal (agent-repl--buffer-owner buf) "ws1")))))))
-
-(ert-deftest agent-repl-test-frontend-webview-is-foreign-to-another-workspace ()
-  "A webview stamped for one workspace reads as foreign to another.
-The end the stamp exists for: the sweep a background build runs must
-classify another workspace's live page as untouchable."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Assert
-          (should (agent-repl--foreign-owned-buffer-p buf "ws2"))
-          (should-not (agent-repl--foreign-owned-buffer-p buf "ws1")))))))
-
-(ert-deftest agent-repl-test-frontend-webview-adopted-with-nil-owner-is-foreign-to-nobody ()
-  "A webview adopted with no owner (the explain-config popup) stays
-eligible for no workspace's window sweep."
-  ;; Arrange
-  (let ((buf (generate-new-buffer " *agent-repl-test-popup-webview*")))
-    (unwind-protect
-        (progn
-          ;; Act
-          (agent-repl--frontend-adopt-webview-buffer buf "*agent-explain-config*" nil)
-          ;; Assert
-          (should-not (agent-repl--buffer-owner buf))
-          (should-not (agent-repl--foreign-owned-buffer-p buf "ws1")))
-      (kill-buffer buf))))
-
-(ert-deftest agent-repl-test-frontend-webview-header-line-cleared ()
-  "The mount clears `xwidget-webkit-mode's \"WebKit: <title>\" header-line."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Assert
-          (should-not (buffer-local-value 'header-line-format buf)))))))
-
-(ert-deftest agent-repl-test-frontend-webview-reused-for-same-session ()
-  "A live webview bound to the same session is reused, not recreated."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        (let ((first (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Act
-          (let ((second (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-            ;; Assert — one creation only.
-            (should (eq first second))
-            (should (= (length agent-repl-test--urls) 1))))))))
-
-(ert-deftest agent-repl-test-frontend-webview-aligns-default-directory ()
-  "A mounted webview's `default-directory' is realigned to WS's :project-dir."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Assert
-          (should (equal (buffer-local-value 'default-directory buf) "/w/")))))))
-
-(ert-deftest agent-repl-test-frontend-webview-survives-a-session-change ()
-  "A live webview is kept whatever happens to the workspace's session.
-The mounted URL addresses the WORKSPACE, so a session change leaves it
-naming the same thing; remounting for one would throw away a rendered
-feed to navigate to the identical address."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        (let ((old (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Act — the workspace's session turns over underneath the view.
-          (let ((new (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-            ;; Assert
-            (should (eq old new))
-            (should (buffer-live-p old))
-            (should (= (length agent-repl-test--urls) 1))))))))
-
 ;;;; ---- webview URL ------------------------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-webview-url-carries-composer-flag ()
-  "The webview URL always hides the webapp composer (Emacs owns input)."
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    ;; Act / Assert
-    (should (string-match-p "composer=0"
-                            (agent-repl--frontend-webview-url "ws1")))))
-
-(ert-deftest agent-repl-test-frontend-webview-url-carries-parent-ws ()
-  "A recorded parent worktree lands in the URL as parent_ws."
-  (agent-repl-test--with-frontend-ws "ws1"
-      '(:project-dir "/w" :source-ws-dir "/repos/parent-tree/")
-    ;; Act / Assert
-    (should (string-match-p "parent_ws=parent-tree"
-                            (agent-repl--frontend-webview-url "ws1")))))
-
-(ert-deftest agent-repl-test-frontend-webview-url-addresses-the-workspace ()
-  "The webview URL names WS's workspace, and carries no session at all.
-A session id in the address is what tied the view's lifetime to one
-session's: a rotation invalidated the URL and a reload attached to
-whatever session the address had recorded."
-  (let ((agent-repl-frontend-daemon-addr "127.0.0.1:9999"))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/repos/proj")
-      ;; Act
-      (let ((url (agent-repl--frontend-webview-url "ws1")))
-        ;; Assert
-        (should (string-prefix-p
-                 "http://127.0.0.1:9999/?workspace=%2Frepos%2Fproj" url))
-        (should-not (string-match-p "session" url))))))
-
-(ert-deftest agent-repl-test-frontend-webview-url-uses-the-command-wire-key ()
-  "The URL's workspace is the SAME key the daemon routes WS's commands by.
-Two keyings of one workspace would route a view and the commands sent
-from it to different places."
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/repos/proj")
-    ;; Act / Assert
-    (should (string-match-p
-             (regexp-quote (url-hexify-string (agent-repl--frontend-ws-command-key "ws1")))
-             (agent-repl--frontend-webview-url "ws1")))))
 
 ;;;; ---- remount-webview (bundle reload) ----------------------------------------
 
-(ert-deftest agent-repl-test-frontend-remount-webview-reloads-live-buffer ()
-  "Remount kills the live webview and mounts a fresh one at the same URL.
-This is the whole point over `agent-repl--frontend-ensure-webview-buffer'
-reuse: a live buffer would otherwise be kept, so the served bundle would
-never be refetched."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
-                 ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (_ws ok _fail) (funcall ok) :ready)))
-        (let ((old (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Act
-          (let ((new (agent-repl--frontend-remount-webview "ws1")))
-            ;; Assert
-            (should-not (buffer-live-p old))
-            (should (eq new :pending))
-            (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
-            (should (= (length agent-repl-test--urls) 2))))))))
-
-(ert-deftest agent-repl-test-frontend-remount-webview-noop-when-closed ()
-  "Remount returns nil and mounts nothing when no webview is open."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
-                ((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws &optional _purpose) "s_1")))
-        ;; Act
-        (let ((result (agent-repl--frontend-remount-webview "ws1")))
-          ;; Assert
-          (should (null result))
-          (should (null agent-repl-test--urls)))))))
-
-(ert-deftest agent-repl-test-frontend-remount-all-counts-open-webviews ()
-  "Remount-all remounts only workspaces with an open webview, and counts them."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (agent-repl-test--with-frontend-ws "ws2" '(:project-dir "/w2")
-        (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                   (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
-                  ((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (_ws &optional _purpose) "s_x"))
-                  ((symbol-function 'agent-repl--live-ws-names)
-                   (lambda () '("ws1" "ws2"))))
-          (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")
-          ;; Act
-          (let ((count (agent-repl--frontend-remount-all-webviews)))
-            ;; Assert — only ws1 had an open webview.
-            (should (= count 1))
-            (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
-            (should (null (agent-repl--ws-get "ws2" :frontend-buffer)))))))))
-
-(ert-deftest agent-repl-test-frontend-reload-webview-command-errors-without-webview ()
-  "The interactive reload signals when the current workspace has no webview."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-      ;; Act / Assert
-      (should-error (agent-repl-frontend-reload-webview) :type 'user-error))))
-
-(ert-deftest agent-repl-test-frontend-reload-webview-command-remounts-current ()
-  "The interactive reload remounts the current workspace's open webview."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
-                 ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (_ws ok _fail) (funcall ok) :ready))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-        (let ((old (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Act
-          (agent-repl-frontend-reload-webview)
-          ;; Assert
-          (should-not (buffer-live-p old))
-          (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
-          (should (= (length agent-repl-test--urls) 2)))))))
-
 ;;;; ---- rescue-webview (navigated away) ----------------------------------------
+
+(ert-deftest agent-repl-test-frontend-home-origin-is-the-owning-daemons-address ()
+  "Home is the origin of the connection whose daemon owns the workspace."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-home-origin "alpha")
+                     "http://127.0.0.1:7777")))))
+
+(ert-deftest agent-repl-test-frontend-home-origin-is-nil-without-a-connection ()
+  "A workspace whose daemon cannot be named has no home to be at."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-home-origin "alpha")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-accepts-the-daemons-own-page ()
+  "The workspace's own webview URL is at home on the daemon that serves it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should (agent-repl--frontend-webview-at-home-p
+               "alpha" (agent-repl-frontend-webview-url "alpha"))))))
+
+(ert-deftest agent-repl-test-frontend-at-home-ignores-the-path-and-query ()
+  "Home is the ORIGIN: the page rewrites its own query as the user navigates."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should (agent-repl--frontend-webview-at-home-p
+               "alpha" "http://127.0.0.1:7777/other?workspace=someone-else")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-refuses-another-daemons-port ()
+  "A page served by a DIFFERENT daemon is astray, however similar its host."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p
+                   "alpha" "http://127.0.0.1:7778/?workspace=ws-1")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-refuses-a-page-that-left-the-web ()
+  "`about:blank' — where an external hyperlink can strand a webview — is not home."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p "alpha" "about:blank")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-refuses-a-webview-with-no-uri ()
+  "A webview that cannot say where it is has no claim on being left alone."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p "alpha" "")))))
+
+(ert-deftest agent-repl-test-frontend-at-home-refuses-when-the-daemon-is-unknown ()
+  "With no connection there is no origin to certify a page against."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p
+                   "alpha" "http://127.0.0.1:7777/?workspace=ws-1")))))
+
 
 (defmacro agent-repl-test--with-rescue-webview (uri remounted messages &rest body)
   "Run BODY with a mounted webview reporting URI, capturing rescue effects.
@@ -386,63 +188,6 @@ DELEGATES navigation rather than implementing a second one."
                 (lambda (text &rest _) (push text ,messages))))
        ,@body)))
 
-(ert-deftest agent-repl-test-frontend-rescue-webview-remounts-when-astray ()
-  "A webview showing another site is remounted against its workspace."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl--ws-put "ws1" :frontend-buffer (get-buffer-create "*agent-frontend-ws1*"))
-    (agent-repl-test--with-rescue-webview "https://www.google.com/" remounted messages
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-        ;; Act
-        (agent-repl-frontend-rescue-webview)
-        ;; Assert
-        (ignore messages)
-        (should (equal remounted '("ws1")))))))
-
-(ert-deftest agent-repl-test-frontend-rescue-webview-names-the-stray-host ()
-  "The echoed line says which host the webview was brought home from."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl--ws-put "ws1" :frontend-buffer (get-buffer-create "*agent-frontend-ws1*"))
-    (agent-repl-test--with-rescue-webview "https://www.google.com/" remounted messages
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-        ;; Act
-        (agent-repl-frontend-rescue-webview)
-        ;; Assert
-        (ignore remounted)
-        (should (equal messages
-                       (list "agent-repl: webview brought home from www.google.com")))))))
-
-(ert-deftest agent-repl-test-frontend-rescue-webview-noop-when-already-home ()
-  "A webview still on the daemon's own origin is reported and left alone.
-Remounting it would throw away a rendered feed to navigate to where the
-page already is."
-  ;; Arrange
-  (let ((agent-repl-frontend-daemon-addr "127.0.0.1:9999"))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (agent-repl--ws-put "ws1" :frontend-buffer (get-buffer-create "*agent-frontend-ws1*"))
-      (agent-repl-test--with-rescue-webview "http://127.0.0.1:9999/?workspace=%2Fw&build=abc"
-          remounted messages
-        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-          ;; Act
-          (agent-repl-frontend-rescue-webview)
-          ;; Assert
-          (should (null remounted))
-          (should (equal messages '("agent-repl: webview is already home"))))))))
-
-(ert-deftest agent-repl-test-frontend-rescue-webview-targets-a-named-workspace ()
-  "A workspace name argument targets THAT workspace, not the current one."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws2" '(:project-dir "/w2")
-    (agent-repl--ws-put "ws2" :frontend-buffer (get-buffer-create "*agent-frontend-ws2*"))
-    (agent-repl-test--with-rescue-webview "https://www.google.com/" remounted messages
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-        ;; Act
-        (agent-repl-frontend-rescue-webview "ws2")
-        ;; Assert
-        (ignore messages)
-        (should (equal remounted '("ws2")))))))
-
 (ert-deftest agent-repl-test-frontend-rescue-webview-errors-without-webview ()
   "The rescue signals when the workspace has no webview open at all."
   ;; Arrange
@@ -451,19 +196,6 @@ page already is."
       ;; Act / Assert
       (should-error (agent-repl-frontend-rescue-webview) :type 'user-error))))
 
-(ert-deftest agent-repl-test-frontend-rescue-webview-treats-unknown-uri-as-astray ()
-  "A webview that cannot say where it is gets remounted rather than trusted."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl--ws-put "ws1" :frontend-buffer (get-buffer-create "*agent-frontend-ws1*"))
-    (agent-repl-test--with-rescue-webview nil remounted messages
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-        ;; Act
-        (agent-repl-frontend-rescue-webview)
-        ;; Assert
-        (ignore messages)
-        (should (equal remounted '("ws1")))))))
-
 (ert-deftest agent-repl-test-frontend-rescue-webview-uri-probe-is-a-registered-boundary ()
   "The read-only URI probe is registered as an external boundary wrapper."
   (should (memq 'agent-repl--frontend-webview-uri
@@ -471,483 +203,11 @@ page already is."
 
 ;;;; ---- Copy chords ------------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-webview-arms-copy-chords ()
-  "The mount arms `agent-repl-frontend-webview-mode' on the webview."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
-          ;; Assert
-          (should (buffer-local-value 'agent-repl-frontend-webview-mode buf)))))))
-
-(ert-deftest agent-repl-test-frontend-copy-chord-y ()
-  "`y' copies the webview's highlight (the vim reflex)."
-  ;; Arrange + Act + Assert
-  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "y"))
-              #'agent-repl-frontend-copy-selection)))
-
-(ert-deftest agent-repl-test-frontend-copy-chord-c-c ()
-  "`C-c' copies the webview's highlight (the terminal reflex)."
-  ;; Arrange + Act + Assert
-  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "C-c"))
-              #'agent-repl-frontend-copy-selection)))
-
-(ert-deftest agent-repl-test-frontend-copy-mode-normalizes-evil-keymaps ()
-  "Enabling the mode rebuilds evil's keymap list, or the chords never win.
-Evil ignores a minor-mode map's per-state auxiliary keymaps until
-`evil-normalize-keymaps' has run in the buffer, and enabling a minor mode
-does not itself trigger it — unnormalized, evil's own maps still outrank
-this one and `y' lands on the major mode's aux map instead."
-  ;; Arrange — batch has no evil, so the call is observed through a stub.
-  (let ((normalized 0))
-    (cl-letf (((symbol-function 'evil-normalize-keymaps)
-               (lambda (&optional _state) (cl-incf normalized))))
-      (with-temp-buffer
-        ;; Act
-        (agent-repl-frontend-webview-mode 1)
-        ;; Assert
-        (should (= normalized 1))))))
-
-(ert-deftest agent-repl-test-frontend-copy-mode-survives-a-non-evil-emacs ()
-  "The mode enables cleanly where evil is absent (a plain Emacs, batch)."
-  ;; Arrange
-  (should-not (fboundp 'evil-normalize-keymaps))
-  (with-temp-buffer
-    ;; Act
-    (agent-repl-frontend-webview-mode 1)
-    ;; Assert
-    (should agent-repl-frontend-webview-mode)))
-
-(ert-deftest agent-repl-test-frontend-copy-selection-reads-the-webview ()
-  "The copy command asks the webview for its selection and kills the answer."
-  ;; Arrange
-  (let ((kill-ring nil)
-        (interprogram-cut-function nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-webview-selection)
-               (lambda (callback) (funcall callback "highlighted text"))))
-      ;; Act
-      (agent-repl-frontend-copy-selection)
-      ;; Assert
-      (should (equal (car kill-ring) "highlighted text")))))
-
-(ert-deftest agent-repl-test-frontend-yank-selection-kills-the-text ()
-  "A real selection lands on the kill ring verbatim, whitespace included."
-  ;; Arrange
-  (let ((kill-ring nil)
-        (interprogram-cut-function nil))
-    ;; Act
-    (agent-repl--frontend-yank-selection "  indented\n")
-    ;; Assert
-    (should (equal (car kill-ring) "  indented\n"))))
-
-(ert-deftest agent-repl-test-frontend-yank-selection-empty-never-clobbers ()
-  "An empty selection leaves the kill ring alone (a stray click kills nothing)."
-  ;; Arrange
-  (let ((kill-ring '("previous kill"))
-        (interprogram-cut-function nil))
-    ;; Act
-    (agent-repl--frontend-yank-selection "")
-    ;; Assert
-    (should (equal kill-ring '("previous kill")))))
-
-(ert-deftest agent-repl-test-frontend-yank-selection-blank-never-clobbers ()
-  "A whitespace-only selection is nothing highlighted, so nothing is killed."
-  ;; Arrange
-  (let ((kill-ring '("previous kill"))
-        (interprogram-cut-function nil))
-    ;; Act
-    (agent-repl--frontend-yank-selection " \n ")
-    ;; Assert
-    (should (equal kill-ring '("previous kill")))))
-
-(ert-deftest agent-repl-test-frontend-yank-selection-nil-never-clobbers ()
-  "A nil selection (no answer from the webview) kills nothing."
-  ;; Arrange
-  (let ((kill-ring '("previous kill"))
-        (interprogram-cut-function nil))
-    ;; Act
-    (agent-repl--frontend-yank-selection nil)
-    ;; Assert
-    (should (equal kill-ring '("previous kill")))))
-
 ;;;; ---- Snapping the feed to its newest message -------------------------------
-
-(ert-deftest agent-repl-test-frontend-snap-to-tail-runs-the-hook ()
-  "The snap evaluates the webapp's tail hook inside the live webview."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
-          (calls nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :frontend-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                       (lambda (b script) (push (cons b script) calls))))
-              ;; Act
-              (agent-repl--frontend-snap-webview-to-tail "ws1")
-              ;; Assert
-              (should (equal calls
-                             (list (cons buf
-                                         (concat "window.agentReplParkAtTail && "
-                                                 "window.agentReplParkAtTail();")))))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-snap-to-tail-hook-name-matches-webapp ()
-  "The hook name lisp calls is the one the webapp plants on `window'.
-The two constants are a single cross-language contract: webapp/src/host.ts
-exports `TAIL_HOOK', frontend.el names it in the script it evaluates, and a
-rename on either side silently turns the snap into a no-op."
-  ;; Arrange
-  (let* ((host-ts (expand-file-name "webapp/src/host.ts" agent-repl--frontend-root))
-         (source (progn
-                   (should (file-exists-p host-ts))
-                   (with-temp-buffer
-                     (insert-file-contents host-ts)
-                     (buffer-string)))))
-    ;; Act + Assert
-    (should (string-match-p
-             (regexp-quote (format "export const TAIL_HOOK = \"%s\";"
-                                   agent-repl-frontend-tail-hook))
-             source))))
-
-(ert-deftest agent-repl-test-frontend-snap-to-tail-without-webview-is-noop ()
-  "A workspace with no webview yet (never opened, or its panel closed) is
-never asked to snap.  The wrapper is left guarded, so any call would fail
-the test loudly."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    ;; Act + Assert — no :frontend-buffer, so the boundary is not reached.
-    (agent-repl--frontend-snap-webview-to-tail "ws1")))
-
-(ert-deftest agent-repl-test-frontend-snap-to-tail-dead-webview-is-noop ()
-  "A recorded but killed webview is never asked to snap.
-The wrapper is left guarded, so any call would fail the test loudly."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*agent-frontend-ws1*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (kill-buffer buf)
-      ;; Act + Assert — the dead buffer is not reachable by a script.
-      (agent-repl--frontend-snap-webview-to-tail "ws1"))))
 
 ;;;; ---- Closing the topbar dropdowns on an input-window click -----------------
 
-(ert-deftest agent-repl-test-frontend-close-menus-script-shape ()
-  "The close script guards on the hook before calling it."
-  ;; Arrange + Act + Assert
-  (should (equal (agent-repl--frontend-close-menus-script)
-                 (concat "window.agentReplCloseTopbarMenus && "
-                         "window.agentReplCloseTopbarMenus();"))))
-
-(ert-deftest agent-repl-test-frontend-close-topbar-menus-runs-the-hook ()
-  "The close evaluates the webapp's close-menus hook inside the live webview."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
-          (calls nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :frontend-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                       (lambda (b script) (push (cons b script) calls))))
-              ;; Act
-              (agent-repl--frontend-close-topbar-menus "ws1")
-              ;; Assert
-              (should (equal calls
-                             (list (cons buf
-                                         (concat "window.agentReplCloseTopbarMenus && "
-                                                 "window.agentReplCloseTopbarMenus();")))))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-close-menus-hook-name-matches-webapp ()
-  "The hook name lisp calls is the one the webapp plants on `window'.
-webapp/src/host.ts exports `CLOSE_MENUS_HOOK'; a rename on either side
-silently turns the input-click dismissal into a no-op."
-  ;; Arrange
-  (let* ((host-ts (expand-file-name "webapp/src/host.ts" agent-repl--frontend-root))
-         (source (progn
-                   (should (file-exists-p host-ts))
-                   (with-temp-buffer
-                     (insert-file-contents host-ts)
-                     (buffer-string)))))
-    ;; Act + Assert
-    (should (string-match-p
-             (regexp-quote (format "export const CLOSE_MENUS_HOOK = \"%s\";"
-                                   agent-repl-frontend-close-menus-hook))
-             source))))
-
-(ert-deftest agent-repl-test-frontend-close-topbar-menus-without-webview-is-noop ()
-  "A workspace with no webview yet (never opened, or its panel closed) is
-never asked to close menus.  The wrapper is left guarded, so any call
-would fail the test loudly."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    ;; Act + Assert — no :frontend-buffer, so the boundary is not reached.
-    (agent-repl--frontend-close-topbar-menus "ws1")))
-
-(ert-deftest agent-repl-test-frontend-close-topbar-menus-dead-webview-is-noop ()
-  "A recorded but killed webview is never asked to close menus.
-The wrapper is left guarded, so any call would fail the test loudly."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*agent-frontend-ws1*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (kill-buffer buf)
-      ;; Act + Assert — the dead buffer is not reachable by a script.
-      (agent-repl--frontend-close-topbar-menus "ws1"))))
-
-(ert-deftest agent-repl-test-frontend-close-menus-on-input-click-fires-on-mouse-click ()
-  "A mouse click selecting the workspace's input window closes its dropdowns."
-  ;; Arrange
-  (let ((closed nil)
-        (last-input-event '(mouse-1)))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-               (lambda () "ws1"))
-              ((symbol-function 'agent-repl-window--panel-window)
-               (lambda (kind &rest _) (and (eq kind :input) (selected-window))))
-              ((symbol-function 'agent-repl--frontend-close-topbar-menus)
-               (lambda (ws) (push ws closed))))
-      ;; Act
-      (agent-repl--frontend-close-menus-on-input-click (selected-frame))
-      ;; Assert
-      (should (equal closed '("ws1"))))))
-
-(ert-deftest agent-repl-test-frontend-close-menus-on-input-click-skips-keyboard-selection ()
-  "Keyboard selection of the input window leaves the dropdowns alone.
-The gesture is a click; keyboard nav into the composer is not, and the
-autoselect-on-switch path selects the input window without one."
-  ;; Arrange
-  (let ((closed nil)
-        (last-input-event 'return))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-               (lambda () "ws1"))
-              ((symbol-function 'agent-repl-window--panel-window)
-               (lambda (kind &rest _) (and (eq kind :input) (selected-window))))
-              ((symbol-function 'agent-repl--frontend-close-topbar-menus)
-               (lambda (ws) (push ws closed))))
-      ;; Act
-      (agent-repl--frontend-close-menus-on-input-click (selected-frame))
-      ;; Assert
-      (should-not closed))))
-
-(ert-deftest agent-repl-test-frontend-close-menus-on-input-click-skips-non-input-window ()
-  "A click landing on a window other than the input panel leaves it alone."
-  ;; Arrange
-  (let ((closed nil)
-        (last-input-event '(mouse-1))
-        (other (split-window)))
-    (unwind-protect
-        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-                   (lambda () "ws1"))
-                  ;; The input panel is some OTHER live window, not the selected one.
-                  ((symbol-function 'agent-repl-window--panel-window)
-                   (lambda (kind &rest _) (and (eq kind :input) other)))
-                  ((symbol-function 'agent-repl--frontend-close-topbar-menus)
-                   (lambda (ws) (push ws closed))))
-          ;; Act
-          (agent-repl--frontend-close-menus-on-input-click (selected-frame))
-          ;; Assert
-          (should-not closed))
-      (delete-window other))))
-
-(ert-deftest agent-repl-test-frontend-close-menus-on-input-click-skips-without-workspace ()
-  "Outside any workspace a click has no webview whose dropdowns to close."
-  ;; Arrange
-  (let ((closed nil)
-        (last-input-event '(mouse-1)))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-               (lambda () nil))
-              ((symbol-function 'agent-repl-window--panel-window)
-               (lambda (kind &rest _) (and (eq kind :input) (selected-window))))
-              ((symbol-function 'agent-repl--frontend-close-topbar-menus)
-               (lambda (ws) (push ws closed))))
-      ;; Act
-      (agent-repl--frontend-close-menus-on-input-click (selected-frame))
-      ;; Assert
-      (should-not closed))))
-
-(ert-deftest agent-repl-test-frontend-close-menus-registered-on-selection-change ()
-  "The input-click handler is wired onto `window-selection-change-functions'.
-An unwired handler is a silent regression — the composer click would
-never reach the webview and the dropdowns would hang open."
-  ;; Arrange + Act + Assert
-  (should (memq #'agent-repl--frontend-close-menus-on-input-click
-                window-selection-change-functions)))
-
 ;;;; ---- Adjusting the webview's text size -------------------------------------
-
-(ert-deftest agent-repl-test-frontend-text-size-script-shape-positive-delta ()
-  "The text-size script guards on the hook and passes a positive delta."
-  ;; Arrange + Act + Assert
-  (should (equal (agent-repl--frontend-text-size-script 0.02)
-                 (concat "window.agentReplAdjustTextScale && "
-                         "window.agentReplAdjustTextScale(0.02);"))))
-
-(ert-deftest agent-repl-test-frontend-text-size-script-shape-negative-delta ()
-  "The text-size script passes a negative delta as a bare JS number."
-  ;; Arrange + Act + Assert
-  (should (equal (agent-repl--frontend-text-size-script -0.02)
-                 (concat "window.agentReplAdjustTextScale && "
-                         "window.agentReplAdjustTextScale(-0.02);"))))
-
-(ert-deftest agent-repl-test-frontend-text-size-script-shape-reset ()
-  "The text-size script passes the `reset' symbol as the quoted JS string."
-  ;; Arrange + Act + Assert
-  (should (equal (agent-repl--frontend-text-size-script 'reset)
-                 (concat "window.agentReplAdjustTextScale && "
-                         "window.agentReplAdjustTextScale(\"reset\");"))))
-
-(ert-deftest agent-repl-test-frontend-text-size-hook-name-matches-webapp ()
-  "The hook name lisp calls is the one the webapp plants on `window'.
-webapp/src/host.ts exports `TEXT_SCALE_HOOK'; a rename on either side
-silently turns the text-size commands into no-ops."
-  ;; Arrange
-  (let* ((host-ts (expand-file-name "webapp/src/host.ts" agent-repl--frontend-root))
-         (source (progn
-                   (should (file-exists-p host-ts))
-                   (with-temp-buffer
-                     (insert-file-contents host-ts)
-                     (buffer-string)))))
-    ;; Act + Assert
-    (should (string-match-p
-             (regexp-quote (format "export const TEXT_SCALE_HOOK = \"%s\";"
-                                   agent-repl-frontend-text-size-hook))
-             source))))
-
-(ert-deftest agent-repl-test-frontend-adjust-text-size-runs-the-hook ()
-  "The adjust evaluates the webapp's text-size hook inside the live webview."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
-          (calls nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :frontend-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                       (lambda (b script) (push (cons b script) calls))))
-              ;; Act
-              (agent-repl--frontend-adjust-text-size "ws1" 0.02)
-              ;; Assert
-              (should (equal calls
-                             (list (cons buf
-                                         (agent-repl--frontend-text-size-script 0.02)))))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-adjust-text-size-returns-buffer ()
-  "The adjust returns the live webview buffer it drove, so callers can tell
-whether a script actually ran."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*agent-frontend-ws1*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :frontend-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                       (lambda (_b _script) nil)))
-              ;; Act + Assert
-              (should (eq (agent-repl--frontend-adjust-text-size "ws1" 'reset) buf))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-adjust-text-size-without-webview-is-noop ()
-  "A workspace with no webview is never asked to resize, and the adjust
-reports nil so the interactive command can signal.  The wrapper is left
-guarded, so any call would fail the test loudly."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    ;; Act + Assert — no :frontend-buffer, so the boundary is not reached.
-    (should-not (agent-repl--frontend-adjust-text-size "ws1" 0.02))))
-
-(ert-deftest agent-repl-test-frontend-adjust-text-size-dead-webview-is-noop ()
-  "A recorded but killed webview is never asked to resize, and reports nil.
-The wrapper is left guarded, so any call would fail the test loudly."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*agent-frontend-ws1*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (kill-buffer buf)
-      ;; Act + Assert — the dead buffer is not reachable by a script.
-      (should-not (agent-repl--frontend-adjust-text-size "ws1" 0.02)))))
-
-(ert-deftest agent-repl-test-frontend-text-size-increase-sends-positive-step ()
-  "The increase command drives the current workspace's webview by +one step."
-  ;; Arrange
-  (let ((agent-repl-frontend-text-size-step 0.05))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
-            (calls nil))
-        (unwind-protect
-            (progn
-              (agent-repl--ws-put "ws1" :frontend-buffer buf)
-              (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                         (lambda (_b script) (push script calls)))
-                        ((symbol-function 'agent-repl--ws-current-name)
-                         (lambda () "ws1")))
-                ;; Act
-                (agent-repl-frontend-text-size-increase)
-                ;; Assert
-                (should (equal calls
-                               (list (agent-repl--frontend-text-size-script 0.05))))))
-          (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-frontend-text-size-decrease-sends-negative-step ()
-  "The decrease command drives the current workspace's webview by -one step."
-  ;; Arrange
-  (let ((agent-repl-frontend-text-size-step 0.05))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
-            (calls nil))
-        (unwind-protect
-            (progn
-              (agent-repl--ws-put "ws1" :frontend-buffer buf)
-              (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                         (lambda (_b script) (push script calls)))
-                        ((symbol-function 'agent-repl--ws-current-name)
-                         (lambda () "ws1")))
-                ;; Act
-                (agent-repl-frontend-text-size-decrease)
-                ;; Assert
-                (should (equal calls
-                               (list (agent-repl--frontend-text-size-script -0.05))))))
-          (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-frontend-text-size-reset-sends-reset ()
-  "The reset command drives the current workspace's webview with `reset'."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
-          (calls nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :frontend-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                       (lambda (_b script) (push script calls)))
-                      ((symbol-function 'agent-repl--ws-current-name)
-                       (lambda () "ws1")))
-              ;; Act
-              (agent-repl-frontend-text-size-reset)
-              ;; Assert
-              (should (equal calls
-                             (list (agent-repl--frontend-text-size-script 'reset))))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-text-size-command-errors-without-workspace ()
-  "The text-size commands signal when there is no current workspace."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
-    ;; Act / Assert
-    (should-error (agent-repl-frontend-text-size-increase) :type 'user-error)))
-
-(ert-deftest agent-repl-test-frontend-text-size-command-errors-without-webview ()
-  "The text-size commands signal when the current workspace has no webview."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-      ;; Act / Assert — no :frontend-buffer, so nothing to resize.
-      (should-error (agent-repl-frontend-text-size-reset) :type 'user-error))))
 
 ;;;; ---- Placement ---------------------------------------------------------------
 
@@ -1348,39 +608,6 @@ that can never show it — silently, and across restarts."
       (should (null (agent-repl--ws-get "ws1" :frontend)))
       (should (null (agent-repl--ws-get "ws1" :frontend-explicit))))))
 
-(ert-deftest agent-repl-test-frontend-accepted-open-panel-persists-the-choice ()
-  "An open that is accepted still records `gui' as the deliberate choice."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-               (lambda () t))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--frontend-after-ensure-session)
-               (lambda (&rest _) :pending)))
-      ;; Act
-      (agent-repl-frontend-open-panel)
-      ;; Assert
-      (should (eq 'gui (agent-repl--ws-get "ws1" :frontend)))
-      (should (agent-repl--ws-get "ws1" :frontend-explicit)))))
-
-(ert-deftest agent-repl-test-frontend-open-panel-persists-before-the-mount-runs ()
-  "The choice lands before any mount continuation, which fires only later.
-`--frontend-after-ensure-session' returns immediately and always, so the
-async ladder must still observe an explicit `gui' when it resumes."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((continuation nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                 (lambda () t))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok &rest _) (setq continuation ok) :pending)))
-        ;; Act
-        (agent-repl-frontend-open-panel)
-        ;; Assert
-        (should (functionp continuation))
-        (should (eq 'gui (agent-repl--ws-get "ws1" :frontend)))))))
-
 (ert-deftest agent-repl-test-frontend-xwidget-available-requires-before-probe ()
   "The capability probe loads xwidget.el before the fboundp check.
 The creator fn is not autoloaded, so probing first false-negatives on
@@ -1403,104 +630,6 @@ exact failure seen live in the fresh instance."
       (should (agent-repl--frontend-xwidget-available-p))
       (should required))))
 
-(ert-deftest agent-repl-test-frontend-open-panel-wires-session-to-webview ()
-  "open-panel establishes the workspace, then mounts and displays its webview."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((displayed nil)
-          (ensured nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                 (lambda () t))
-                ((symbol-function 'agent-repl--ws-current-name)
-                 (lambda () "ws1"))
-                 ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (ws ok _fail &rest _) (setq ensured ws) (funcall ok) :ready))
-                ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
-                 (lambda (_ws url)
-                   ;; composer=0: Emacs owns input in the hybrid UI.  build: the
-                   ;; artifact's identity, so a rebuild is a different address.
-                   (should (string-match-p
-                            "/\\?workspace=%2Fw&build=[^&]+&composer=0\\'" url))
-                   'fake-buffer))
-                ((symbol-function 'agent-repl--frontend-display-webview)
-                 (lambda (_ws buf) (setq displayed buf))))
-        ;; Act
-        (agent-repl-frontend-open-panel)
-        ;; Assert
-        (should (equal ensured "ws1"))
-        (should (eq displayed 'fake-buffer))))))
-
-(ert-deftest agent-repl-test-frontend-open-mounts-in-the-target-perspective ()
-  "The DEFERRED webview mount runs with the TARGET workspace activated.
-Establishment is asynchronous, so the continuation fires after the user
-may have moved on; without the background-workspace anchor the mount
-would lay out the frame of whichever perspective is current then."
-  ;; Arrange — establishment is stashed, not run, so the user \"moves\" first.
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((current "other")
-          (continuation nil)
-          (mounted-in nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                 (lambda () t))
-                ((symbol-function 'agent-repl--ws-current-name)
-                 (lambda () current))
-                ((symbol-function 'agent-repl--ws-switch)
-                 (lambda (ws &rest _) (setq current ws)))
-                ((symbol-function 'agent-repl--restore-focus)
-                 (lambda (persp &rest _) (setq current persp)))
-                ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
-                ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
-                 (lambda (_ws _url) 'fake-buffer))
-                ((symbol-function 'agent-repl--frontend-display-webview)
-                 (lambda (_ws _buf) (setq mounted-in current))))
-        ;; Act
-        (agent-repl--gui-open "ws1")
-        (funcall continuation)
-        ;; Assert
-        (should (equal mounted-in "ws1"))
-        (should (equal current "other"))))))
-
-(ert-deftest agent-repl-test-frontend-open-carries-parent-ws-param ()
-  "gui-open appends parent_ws (url-encoded :source-ws-dir basename) to the URL.
-The webapp status bar renders it in its topbar."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1"
-      '(:project-dir "/w" :source-ws-dir "/repos/parent dir/")
-    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-               (lambda () t))
-              ((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws &optional _purpose) "s_42"))
-              ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
-               (lambda (_ws _id url)
-                 ;; Assert — encoded basename rides after composer=0.
-                 (should (string-suffix-p "&composer=0&parent_ws=parent%20dir" url))
-                 'fake-buffer))
-              ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
-      ;; Act
-      (agent-repl--gui-open "ws1"))))
-
-(ert-deftest agent-repl-test-frontend-open-omits-parent-ws-when-absent ()
-  "gui-open leaves parent_ws off the URL when no parent was recorded."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-               (lambda () t))
-              ((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws &optional _purpose) "s_42"))
-              ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
-               (lambda (_ws _id url)
-                 (should-not (string-match-p "parent_ws" url))
-                 'fake-buffer))
-              ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
-      ;; Act
-      (agent-repl--gui-open "ws1"))))
-
-(ert-deftest agent-repl-test-frontend-parent-ws-name-empty-string-is-nil ()
-  "An empty :source-ws-dir yields nil, not an empty parent name."
-  (agent-repl-test--with-frontend-ws "ws1" '(:source-ws-dir "")
-    (should-not (agent-repl--frontend-parent-ws-name "ws1"))))
-
 (ert-deftest agent-repl-test-frontend-open-panel-marks-the-choice-explicit ()
   "Asking for the web panel by name is a DELIBERATE frontend choice."
   ;; Arrange
@@ -1516,21 +645,6 @@ The webapp status bar renders it in its topbar."
       (should (agent-repl--ws-get "ws1" :frontend-explicit)))))
 
 ;;;; ---- gui boot (headless) ----------------------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-gui-boot-ensures-session ()
-  "The gui boot starts the workspace's daemon session."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((ensured nil))
-       (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready))
-                 ;; The establishment continuation now pre-creates the page;
-                 ;; that boundary is covered by its own tests below.
-                 ((symbol-function 'agent-repl--frontend-precreate-webview) #'ignore))
-        ;; Act
-        (agent-repl--gui-boot "ws1" "/w" :bare-metal)
-        ;; Assert
-        (should (equal ensured "ws1"))))))
 
 (ert-deftest agent-repl-test-frontend-gui-boot-mounts-no-webview ()
   "The gui boot mounts nothing SYNCHRONOUSLY and touches no window.
@@ -1553,19 +667,6 @@ without display (`agent-repl--frontend-precreate-webview')."
         ;; Assert
         (should-not mounted)
         (should-not displayed)))))
-
-(ert-deftest agent-repl-test-frontend-gui-boot-marks-the-workspace-starting ()
-  "The gui boot marks :init before the session exists, so a generated
-workspace shows a loading badge immediately instead of rendering no
-state at all until its agent answered."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws &optional _purpose) "s_42")))
-      ;; Act
-      (agent-repl--gui-boot "ws1" "/w" :bare-metal)
-      ;; Assert
-      (should (eq (agent-repl--ws-get "ws1" :agent-state) :init)))))
 
 (ert-deftest agent-repl-test-frontend-gui-boot-refuses-an-undeclared-env ()
   "The gui boot refuses a workspace whose env the gui does not declare.
@@ -1619,31 +720,10 @@ mount, a cleared key over a live buffer leaks the WKWebView."
       (should-not (buffer-live-p buf))
       (should (null (agent-repl--ws-get "ws1" :frontend-buffer))))))
 
-(ert-deftest agent-repl-test-frontend-teardown-sites-share-the-detach ()
-  "Every take-down-for-remount site routes through the shared detach.
-A hand-rolled kill-plus-clear at one of them fails here rather than
-drifting silently out of step with the others."
-  ;; Arrange — a detach that records instead of killing.
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((detached 0)
-          (buf (generate-new-buffer "*fake-webview*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (cl-letf (((symbol-function 'agent-repl--frontend-detach-webview)
-                 (lambda (&rest _) (setq detached (1+ detached))))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--gui-open) #'ignore)
-                ((symbol-function 'message) (lambda (&rest _) nil)))
-        ;; Act — close-panel and the restart verb's bounce.
-        (agent-repl-frontend-close-panel)
-        (agent-repl--frontend-bounce-webview "ws1")
-        ;; Assert
-        (should (equal detached 2)))
-      (kill-buffer buf))))
-
 (ert-deftest agent-repl-test-frontend-kill-webview-suppresses-query-prompt ()
   "Webview kills bypass kill-buffer query functions.
 The xwidget query fn raises a blocking yes-or-no prompt, which would
-deadlock the non-interactive nuke hook."
+deadlock the non-interactive kill hook."
   ;; Arrange — a query fn that refuses every kill.
   (let ((buf (generate-new-buffer "*fake-webview*"))
         (kill-buffer-query-functions (list (lambda () nil))))
@@ -1651,6 +731,132 @@ deadlock the non-interactive nuke hook."
     (agent-repl--frontend-kill-webview buf)
     ;; Assert — killed despite the refusing query fn.
     (should-not (buffer-live-p buf))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-holds-for-a-mounted-webview ()
+  "A workspace holding a live webview reads as running, so the toggle SHOWS it."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            ;; Act / Assert
+            (should (agent-repl--gui-running-p "ws1")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-holds-for-a-hidden-webview ()
+  "The plain close hides the panels and keeps the buffer, so the ws still runs.
+This is the branch `SPC o c' toggles on: a second press must SHOW the page
+back rather than mount a second one."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (delete-other-windows)
+            ;; Act — no window shows it, the buffer is alive.
+            ;; Assert
+            (should-not (get-buffer-window buf))
+            (should (agent-repl--gui-running-p "ws1")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-fails-without-a-webview ()
+  "A workspace that was never opened has nothing to show, so the toggle OPENS."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    ;; Act / Assert
+    (should-not (agent-repl--gui-running-p "ws1"))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-fails-for-a-killed-webview ()
+  "A webview that died leaves a dead buffer, and a dead buffer is not a page."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (kill-buffer buf)
+      ;; Act / Assert
+      (should-not (agent-repl--gui-running-p "ws1")))))
+
+(ert-deftest agent-repl-test-frontend-gui-running-p-answers-a-boolean ()
+  "The capability answers t or nil, never the buffer it looked at.
+The registry's callers treat the answer as a predicate, and leaking the
+buffer would make a truthy answer carry state no caller may rely on."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            ;; Act / Assert
+            (should (eq (agent-repl--gui-running-p "ws1") t)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-gui-registry-running-p-fn-is-defined ()
+  "The gui registration's `:running-p-fn' names a function that EXISTS.
+A registry slot pointing at a void symbol is a defect no unit test of the
+function itself can catch: the toggle finds it only when a user presses
+`SPC o c' on a workspace whose panels are hidden."
+  ;; Act / Assert
+  (should (fboundp (agent-repl-frontend-running-p-fn
+                    (agent-repl-frontend-get 'gui)))))
+
+(ert-deftest agent-repl-test-frontend-gui-registry-every-capability-is-defined ()
+  "EVERY function-valued slot of the gui registration names a live function.
+The registry is the one place a capability can name a symbol nothing
+defines and no compiler complains: a `declare-function' satisfies the byte
+compiler, and the void function surfaces only when a user reaches that
+capability.  Deleting a source file (frontend-client.el) left three slots
+in exactly that state, so this walks the struct rather than naming slots
+one by one — a capability added later is covered the day it is added."
+  ;; Arrange
+  (let ((fe (agent-repl-frontend-get 'gui))
+        (undefined nil))
+    ;; Act
+    (dolist (slot (cdr (cl-struct-slot-info 'agent-repl-frontend)))
+      (let* ((name (car slot))
+             (value (cl-struct-slot-value 'agent-repl-frontend name fe)))
+        (when (and (string-suffix-p "-fn" (symbol-name name))
+                   value
+                   (not (functionp value)))
+          (push name undefined))))
+    ;; Assert
+    (should (equal undefined nil))))
+
+(ert-deftest agent-repl-test-frontend-gui-registry-declares-no-cancel-detached ()
+  "The gui cannot stop detached work, and leaves the capability UNSET.
+Stopping detached work is the `Interrupt' verb's `all_agents' target, and
+`Interrupt' is a feed verb the webapp footer owns; Emacs calls no
+interrupt rpc.  An unset slot makes the dispatch warn loudly instead of
+sending something that could not reach the work."
+  ;; Act / Assert
+  (should-not (agent-repl-frontend-cancel-detached-fn
+               (agent-repl-frontend-get 'gui))))
+
+(ert-deftest agent-repl-test-frontend-gui-registry-declares-no-adopt-session ()
+  "The gui cannot adopt a named vendor session, and leaves the slot UNSET.
+No post-overhaul verb binds a workspace to a session uuid a client names:
+the daemon owns session identity and resumes a workspace's own
+conversation from its own record."
+  ;; Act / Assert
+  (should-not (agent-repl-frontend-adopt-session-fn
+               (agent-repl-frontend-get 'gui))))
+
+(ert-deftest agent-repl-test-frontend-gui-durable-session-id-is-the-vendor-id ()
+  "The durable id is the vendor conversation's, read off the host stream."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-host-vendor-session-id)
+             (lambda (ws) (and (equal ws "ws1") "sess-uuid-1"))))
+    ;; Act / Assert
+    (should (equal (agent-repl--gui-durable-session-id "ws1") "sess-uuid-1"))))
+
+(ert-deftest agent-repl-test-frontend-gui-durable-session-id-is-nil-without-a-conversation ()
+  "No vendor conversation durably identifies nothing, which is an answer."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-host-vendor-session-id)
+             (lambda (_ws) nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--gui-durable-session-id "ws1"))))
 
 (ert-deftest agent-repl-test-frontend-gui-hide-restores-saved-layout ()
   "gui hide restores the pre-panel layout when one was saved.
@@ -1790,8 +996,8 @@ cwd, so a reopened workspace reattaches to the same record."
         ;; Assert
         (should (null commands))))))
 
-(ert-deftest agent-repl-test-frontend-webview-killed-on-ws-nuke ()
-  "The nuke hook kills the webview so the WKWebView never outlives the ws."
+(ert-deftest agent-repl-test-frontend-webview-killed-on-ws-kill ()
+  "The kill hook kills the webview so the WKWebView never outlives the ws."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*")))
@@ -1815,275 +1021,280 @@ cwd, so a reopened workspace reattaches to the same record."
       ;; Act / Assert
       (should-error (agent-repl-frontend-close-panel) :type 'user-error))))
 
+
+;;;; ---- The webview URL -------------------------------------------------
+
+(defmacro agent-repl-test-frontend--with-ref (ref address &rest body)
+  "Run BODY with WS's ref answered by REF and its connection at ADDRESS.
+A REAL connection object rather than a stubbed accessor: cl-defstruct
+accessors are inlined into their callers at load time, so stubbing the
+accessor would not reach the code under test."
+  (declare (indent 2))
+  `(let ((conn (agent-repl-connect-connection-create :address ,address)))
+     (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) ,ref))
+               ((symbol-function 'agent-repl-host-conn) (lambda (_ws) conn)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-frontend-url-is-the-daemon-address-and-the-ref ()
+  "The URL is the owning daemon's address plus the ref's id and dir."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w/one") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should (equal (agent-repl-frontend-webview-url "alpha")
+                     "http://127.0.0.1:7777/?workspace=ws-1&dir=%2Fw%2Fone")))))
+
+(ert-deftest agent-repl-test-frontend-url-hexifies-the-id ()
+  "An opaque id is echoed verbatim, URL-encoded — never parsed or rebuilt."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "a b/c" :dir "/w") "127.0.0.1:1"
+      ;; Act / Assert
+      (should (string-match-p "workspace=a%20b%2Fc"
+                              (agent-repl-frontend-webview-url "alpha"))))))
+
+(ert-deftest agent-repl-test-frontend-url-hexifies-the-dir ()
+  "The dir rides along encoded, for display and for opening files."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w/my ws") "127.0.0.1:1"
+      ;; Act / Assert
+      (should (string-match-p "dir=%2Fw%2Fmy%20ws"
+                              (agent-repl-frontend-webview-url "alpha"))))))
+
+(ert-deftest agent-repl-test-frontend-url-carries-no-composer-flag ()
+  "The webapp runs composer-less unless `&composer=1', which is dev only."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:1"
+      ;; Act / Assert
+      (should-not (string-match-p "composer"
+                                  (agent-repl-frontend-webview-url "alpha"))))))
+
+(ert-deftest agent-repl-test-frontend-url-carries-nothing-but-the-two-values ()
+  "Nothing else rides the URL: a third parameter would be a second channel
+for facts the daemon already pushes."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:1"
+      ;; Act / Assert
+      (should (equal (length (split-string (agent-repl-frontend-webview-url "alpha") "&"))
+                     2)))))
+
+(ert-deftest agent-repl-test-frontend-url-refuses-a-workspace-with-no-ref ()
+  "A URL invented without a ref would address the wrong workspace."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn)))
+      ;; Act / Assert
+      (should-error (agent-repl-frontend-webview-url "alpha")))))
+
+(ert-deftest agent-repl-test-frontend-url-refuses-a-workspace-with-no-connection ()
+  "During a handover a workspace's page must load from the daemon that owns it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-host-ref)
+               (lambda (_ws) '(:id "ws-1" :dir "/w")))
+              ((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should-error (agent-repl-frontend-webview-url "alpha")))))
+
+;;;; ---- Reloading the webview -------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-reload-navigates-the-live-widget ()
+  "`reload_webapp' navigates the widget to the current URL."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((navigated nil)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "alpha" :frontend-buffer buf)
+            (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:9"
+              (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                         (lambda (_buf) 'widget))
+                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                         (lambda (_w uri) (setq navigated uri))))
+                ;; Act
+                (agent-repl-frontend-reload-webview "alpha")
+                ;; Assert
+                (should (equal navigated
+                               "http://127.0.0.1:9/?workspace=ws-1&dir=%2Fw")))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-reload-does-not-remount-the-buffer ()
+  "The webview is bound to its buffer for life: the widget is navigated."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "alpha" :frontend-buffer buf)
+            (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:9"
+              (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                         (lambda (_buf) 'widget))
+                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                         #'ignore))
+                ;; Act
+                (agent-repl-frontend-reload-webview "alpha")
+                ;; Assert
+                (should (eq (agent-repl--ws-get "alpha" :frontend-buffer) buf)))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-reload-without-a-webview-is-a-noop ()
+  "A workspace with no page has nothing to reload."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (null (agent-repl-frontend-reload-webview "alpha")))))
+
+;;;; ---- Pre-creation eligibility ----------------------------------------
+
+(ert-deftest agent-repl-test-frontend-precreate-refuses-a-workspace-with-no-ref ()
+  "No ref means no URL to mount at, and a guessed one is not an option."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should (eq (agent-repl--frontend-precreate-refusal "alpha") :no-ref)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-refuses-an-already-mounted-workspace ()
+  "Pre-creation is idempotent: every driver may call it freely."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "alpha" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
+                      ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
+                      ((symbol-function 'agent-repl-host-ref)
+                       (lambda (_ws) '(:id "ws-1" :dir "/w"))))
+              ;; Act / Assert
+              (should (eq (agent-repl--frontend-precreate-refusal "alpha")
+                          :already-mounted))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-refuses-a-dead-workspace ()
+  "A workspace that is gone gets no page."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should (eq (agent-repl--frontend-precreate-refusal "alpha") :not-live)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-accepts-an-eligible-workspace ()
+  "A live gui workspace with a ref and no page is owed one."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl-host-ref)
+               (lambda (_ws) '(:id "ws-1" :dir "/w")))
+              ((symbol-function 'agent-repl--frontend-xwidget-available-p)
+               (lambda () t)))
+      ;; Act / Assert
+      (should (null (agent-repl--frontend-precreate-refusal "alpha"))))))
+
+(ert-deftest agent-repl-test-frontend-precreate-mounts-without-waiting ()
+  "There is no session to establish first: the mount waits on nothing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((mounted nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                 (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--frontend-precreate-mount)
+                 (lambda (ws) (setq mounted ws))))
+        ;; Act
+        (should (eq (agent-repl--frontend-precreate-webview "alpha") :created))
+        ;; Assert
+        (should (equal mounted "alpha"))))))
+
+;;;; ---- The load watcher ------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-load-watcher-reports-the-load ()
+  "A load-changed event advances the open-progress ladder to `:loaded'."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((noted nil)
+          (props nil)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                     (lambda (_buf) 'widget))
+                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
+                    ((symbol-function 'xwidget-put)
+                     (lambda (_w _p v) (setq props v)))
+                    ((symbol-function 'agent-repl-open-progress-note-loaded)
+                     (lambda (ws) (setq noted ws))))
+            (agent-repl--frontend-watch-load "alpha" buf)
+            ;; Act
+            (funcall props 'widget 'load-changed)
+            ;; Assert
+            (should (equal noted "alpha")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-load-watcher-defers-to-the-prior-callback ()
+  "The webkit machinery still gets every event it needs."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((prior-called nil)
+          (props nil)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                     (lambda (_buf) 'widget))
+                    ((symbol-function 'xwidget-get)
+                     (lambda (_w _p) (lambda (_w _e) (setq prior-called t))))
+                    ((symbol-function 'xwidget-put)
+                     (lambda (_w _p v) (setq props v)))
+                    ((symbol-function 'agent-repl-open-progress-note-loaded) #'ignore))
+            (agent-repl--frontend-watch-load "alpha" buf)
+            ;; Act
+            (funcall props 'widget 'load-changed)
+            ;; Assert
+            (should prior-called))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-load-watcher-ignores-other-events ()
+  "Only a finished load is a `:loaded' report."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((noted nil)
+          (props nil)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                     (lambda (_buf) 'widget))
+                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
+                    ((symbol-function 'xwidget-put)
+                     (lambda (_w _p v) (setq props v)))
+                    ((symbol-function 'agent-repl-open-progress-note-loaded)
+                     (lambda (ws) (setq noted ws))))
+            (agent-repl--frontend-watch-load "alpha" buf)
+            ;; Act
+            (funcall props 'widget 'download-callback)
+            ;; Assert
+            (should (null noted)))
+        (kill-buffer buf)))))
+
+;;;; ---- No JavaScript surface remains -----------------------------------
+
+(ert-deftest agent-repl-test-frontend-defines-no-script-evaluator ()
+  "Every `xwidget-webkit-execute-script' call and script helper is deleted:
+there is no `window.agentRepl*' hook surface at all, and the webview is
+purely daemon-driven."
+  ;; Act / Assert
+  (should-not (fboundp 'agent-repl--frontend-webview-execute-script)))
+
 (provide 'test-frontend)
 
 ;;; test-frontend.el ends here
 
 ;;;; ---- Chess-board keyboard navigation ---------------------------------------
-
-(ert-deftest agent-repl-test-frontend-chess-step-script-shape ()
-  "The step script guards on the hook and passes the direction."
-  ;; Arrange + Act + Assert
-  (should (equal (agent-repl--frontend-chess-step-script "back")
-                 (concat "window.agentReplChessStep && "
-                         "window.agentReplChessStep(\"back\");"))))
-
-(ert-deftest agent-repl-test-frontend-chess-back-evaluates-in-current-buffer ()
-  "The back command drives the current buffer's webview with the back script."
-  ;; Arrange
-  (let ((calls nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-               (lambda (b script) (push (cons b script) calls))))
-      (with-temp-buffer
-        ;; Act
-        (agent-repl-frontend-chess-back)
-        ;; Assert
-        (should (equal calls
-                       (list (cons (current-buffer)
-                                   (agent-repl--frontend-chess-step-script "back")))))))))
-
-(ert-deftest agent-repl-test-frontend-chess-forward-evaluates-in-current-buffer ()
-  "The forward command drives the current buffer's webview with the forward script."
-  ;; Arrange
-  (let ((calls nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-               (lambda (b script) (push (cons b script) calls))))
-      (with-temp-buffer
-        ;; Act
-        (agent-repl-frontend-chess-forward)
-        ;; Assert
-        (should (equal calls
-                       (list (cons (current-buffer)
-                                   (agent-repl--frontend-chess-step-script "forward")))))))))
-
-(ert-deftest agent-repl-test-frontend-chess-hook-name-matches-webapp ()
-  "The nav hook name lisp calls is the one the webapp plants on `window'.
-webapp/src/chess-game.ts exports `CHESS_NAV_HOOK'; a rename on either
-side silently turns the keys into no-ops."
-  ;; Arrange
-  (let* ((ts (expand-file-name "webapp/src/chess-game.ts" agent-repl--frontend-root))
-         (source (progn
-                   (should (file-exists-p ts))
-                   (with-temp-buffer
-                     (insert-file-contents ts)
-                     (buffer-string)))))
-    ;; Act + Assert
-    (should (string-match-p
-             (format "CHESS_NAV_HOOK = \"%s\""
-                     (regexp-quote agent-repl-frontend-chess-step-hook))
-             source))))
-
-(ert-deftest agent-repl-test-frontend-webview-map-binds-chess-nav-keys ()
-  "The webview minor-mode map routes h/l and the arrows to board stepping."
-  ;; Arrange + Act + Assert
-  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "h"))
-              #'agent-repl-frontend-chess-back))
-  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "l"))
-              #'agent-repl-frontend-chess-forward))
-  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "<left>"))
-              #'agent-repl-frontend-chess-back))
-  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "<right>"))
-              #'agent-repl-frontend-chess-forward)))
-
-;;;; ---- the hard session restart command ---------------------------------
-
-(defmacro agent-repl-test--with-restart-session (build &rest body)
-  "Run BODY with the restart verb's collaborators faked, ws1 current.
-BUILD stands in for `agent-repl--frontend-build-targets-async' and is
-called with (TARGETS FORCE ON-SUCCESS ON-FAILURE), so each test decides
-whether the build succeeds, fails, or never settles.
-`agent-repl-test--restart-asked' records the workspace whose shim restart
-was issued, `agent-repl-test--restart-acked' the continuation the verb
-hung off that restart's success ack (call it to simulate the ack landing),
-and `agent-repl-test--restart-opened' the workspace whose webview was
-reopened.  The faked client NEVER calls the continuation itself, so a test
-that does not fire it is testing a restart still in flight."
-  (declare (indent 1))
-  `(let ((agent-repl-test--restart-asked nil)
-         (agent-repl-test--restart-acked nil)
-         (agent-repl-test--restart-opened nil))
-     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-               ((symbol-function 'agent-repl--frontend-restart-session)
-                (lambda (ws &optional on-restarted)
-                  (setq agent-repl-test--restart-asked ws
-                        agent-repl-test--restart-acked on-restarted)
-                  "req-1"))
-               ((symbol-function 'agent-repl--gui-open)
-                (lambda (ws) (setq agent-repl-test--restart-opened ws)))
-               ((symbol-function 'agent-repl--frontend-build-targets-async) ,build)
-               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-               ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
-               ((symbol-function 'message) (lambda (&rest _) nil)))
-       ,@body)))
-
-(defvar agent-repl-test--restart-asked nil
-  "Workspace whose shim restart the faked client recorded.")
-
-(defvar agent-repl-test--restart-acked nil
-  "Continuation the restart verb hung off the shim restart's success ack.")
-
-(defvar agent-repl-test--restart-opened nil
-  "Workspace whose webview the faked gui open recorded.")
-
-(ert-deftest agent-repl-test-restart-session-command-dispatches ()
-  "`agent-repl-restart-session' asks the client to restart the current ws."
-  ;; Arrange
-  (agent-repl-test--with-restart-session (lambda (&rest _) 'started)
-    ;; Act
-    (agent-repl-restart-session)
-    ;; Assert
-    (should (equal agent-repl-test--restart-asked "ws1"))))
-
-(ert-deftest agent-repl-test-restart-session-kicks-off-the-webapp-build ()
-  "The restart requests an asynchronous build of the webapp target alone.
-The daemon is not rebuilt or restarted by this verb."
-  ;; Arrange
-  (let (targets)
-    (agent-repl-test--with-restart-session
-        (lambda (ts &rest _) (setq targets ts) 'started)
-      ;; Act
-      (agent-repl-restart-session)
-      ;; Assert
-      (should (equal targets '("webapp"))))))
-
-(ert-deftest agent-repl-test-restart-session-issues-the-shim-restart-unbuilt ()
-  "The shim restart is issued while the build is still in flight.
-It is never held behind the build, so a slow or never-settling build
-cannot delay the restart the user asked for."
-  ;; Arrange — a build that captures its continuations and never calls them.
-  (agent-repl-test--with-restart-session (lambda (&rest _) 'started)
-    ;; Act
-    (agent-repl-restart-session)
-    ;; Assert
-    (should (equal agent-repl-test--restart-asked "ws1"))
-    (should (null agent-repl-test--restart-opened))))
-
-(ert-deftest agent-repl-test-restart-session-bounces-the-webview-once-both-legs-land ()
-  "The webview bounces when the build AND the shim restart have both settled."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (agent-repl-test--with-restart-session
-          (lambda (_ts _force on-success _on-failure) (funcall on-success) 'started)
-        ;; Act — the build already settled; the restart ack lands now.
-        (agent-repl-restart-session)
-        (funcall agent-repl-test--restart-acked)
-        ;; Assert
-        (should-not (buffer-live-p buf))
-        (should (equal agent-repl-test--restart-opened "ws1"))))))
-
-(ert-deftest agent-repl-test-restart-session-holds-the-bounce-until-the-restart-acks ()
-  "A finished build alone does not reopen a page against a shim still coming up."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (unwind-protect
-          (agent-repl-test--with-restart-session
-              (lambda (_ts _force on-success _on-failure) (funcall on-success) 'started)
-            ;; Act — the build settles, the restart ack never arrives.
-            (agent-repl-restart-session)
-            ;; Assert
-            (should (buffer-live-p buf))
-            (should (null agent-repl-test--restart-opened)))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-restart-session-holds-the-bounce-until-the-build-settles ()
-  "A restart ack alone does not reopen the page onto the stale bundle."
-  ;; Arrange — a build that captures its continuations and never calls them.
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (unwind-protect
-          (agent-repl-test--with-restart-session (lambda (&rest _) 'started)
-            ;; Act
-            (agent-repl-restart-session)
-            (funcall agent-repl-test--restart-acked)
-            ;; Assert
-            (should (buffer-live-p buf))
-            (should (null agent-repl-test--restart-opened)))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-restart-session-leaves-the-webview-on-build-failure ()
-  "A failed build leaves the webview alone rather than bouncing it."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (agent-repl-test--with-restart-session
-          (lambda (_ts _force _on-success on-failure)
-            (funcall on-failure "exit 1") 'started)
-        ;; Act — even a restart that completes cannot bounce onto a bundle
-        ;; the failed build never produced.
-        (agent-repl-restart-session)
-        (funcall agent-repl-test--restart-acked)
-        ;; Assert
-        (should (buffer-live-p buf))
-        (should (null agent-repl-test--restart-opened))))))
-
-(ert-deftest agent-repl-test-restart-session-warns-on-build-failure ()
-  "A failed build is surfaced loudly rather than swallowed."
-  ;; Arrange
-  (let (warned)
-    (agent-repl-test--with-restart-session
-        (lambda (_ts _force _on-success on-failure)
-          (funcall on-failure "exit 1") 'started)
-      (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
-        ;; Act
-        (agent-repl-restart-session)))
-    ;; Assert
-    (should (string-match-p "exit 1" (or warned "")))))
-
-(ert-deftest agent-repl-test-restart-session-bounce-skips-a-closed-panel ()
-  "A workspace with no open webview is not given one by a successful build."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl-test--with-restart-session
-        (lambda (_ts _force on-success _on-failure) (funcall on-success) 'started)
-      ;; Act
-      (agent-repl-restart-session)
-      (funcall agent-repl-test--restart-acked)
-      ;; Assert
-      (should (null agent-repl-test--restart-opened)))))
-
-(ert-deftest agent-repl-test-restart-session-returns-before-the-restart-completes ()
-  "The verb returns to the command loop with the restart still in flight."
-  ;; Arrange
-  (agent-repl-test--with-restart-session (lambda (&rest _) 'started)
-    ;; Act
-    (agent-repl-restart-session)
-    ;; Assert — the restart is issued and its completion is still pending.
-    (should (equal agent-repl-test--restart-asked "ws1"))
-    (should (functionp agent-repl-test--restart-acked))
-    (should (null agent-repl-test--restart-opened))))
-
-(ert-deftest agent-repl-test-restart-session-command-needs-a-workspace ()
-  "With no current workspace the restart signals rather than guessing one."
-  (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
-    (should-error (agent-repl-restart-session) :type 'user-error)))
-
-;;;; ---- the deliberate hibernate command ---------------------------------
-
-(ert-deftest agent-repl-test-hibernate-workspace-command-dispatches ()
-  "`agent-repl-hibernate-workspace' asks the client to hibernate the current ws."
-  ;; Arrange
-  (let (asked)
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--frontend-hibernate-workspace)
-               (lambda (ws) (setq asked ws) "req-1"))
-              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'message) (lambda (&rest _) nil)))
-      ;; Act
-      (agent-repl-hibernate-workspace)
-      ;; Assert
-      (should (equal asked "ws1")))))
-
-(ert-deftest agent-repl-test-hibernate-workspace-command-needs-a-workspace ()
-  "With no current workspace the hibernate signals rather than guessing one."
-  (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
-    (should-error (agent-repl-hibernate-workspace) :type 'user-error)))
 
 ;;;; ---- Refreshing live webviews -----------------------------------------
 
@@ -2095,69 +1306,12 @@ cannot delay the restart the user asked for."
        (dolist (b agent-repl-test--bufs)
          (when (buffer-live-p b) (kill-buffer b))))))
 
-;; WHAT A SWEEP DOES is tested in test-webview-recovery.el, which is where
-;; the sweep now lives: `agent-repl-refresh-webviews' is the deploy-time
-;; entry point into `agent-repl--webview-recovery-sweep' and holds no
-;; per-webview logic of its own.  What is owned here is the delegation, the
-;; buffer enumeration, and the boundary wrappers the sweep reaches through.
-
-(ert-deftest agent-repl-test-refresh-webviews-delegates-to-the-recovery-sweep ()
-  "The deploy-time refresh runs the one sweep, naming the deploy as its reason."
-  ;; Arrange
-  (let (reasons)
-    (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep)
-               (lambda (reason) (push reason reasons) 3)))
-      ;; Act
-      (should (equal 3 (agent-repl-refresh-webviews)))
-      ;; Assert
-      (should (equal reasons (list "deploy_refresh"))))))
-
-(ert-deftest agent-repl-test-refresh-webviews-reports-zero-for-a-debounced-sweep ()
-  "A debounced sweep reports the integer 0, never nil: deploy-all formats %d."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep) (lambda (_reason) nil)))
-    ;; Act / Assert
-    (should (equal 0 (agent-repl-refresh-webviews)))))
-
-(ert-deftest agent-repl-test-refresh-webviews-always-returns-an-integer ()
-  "Every refresh answer survives the `%d' deploy-all formats it with."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep) (lambda (_reason) nil)))
-    ;; Act
-    (let ((answer (agent-repl-refresh-webviews)))
-      ;; Assert
-      (should (integerp answer))
-      (should (equal "refreshed 0" (format "refreshed %d" answer))))))
-
-(ert-deftest agent-repl-test-frontend-live-webview-buffers-skips-non-frontend-buffers ()
-  "Only `*agent-frontend-WS*' buffers are enumerated for a sweep."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers
-      '("*agent-frontend-ws1*" "*agent-panel-input-ws1*" "*scratch-not-ours*")
-    ;; Act
-    (let ((bufs (agent-repl--frontend-live-webview-buffers)))
-      ;; Assert
-      (should (memq (get-buffer "*agent-frontend-ws1*") bufs))
-      (should-not (memq (get-buffer "*agent-panel-input-ws1*") bufs))
-      (should-not (memq (get-buffer "*scratch-not-ours*") bufs)))))
-
-(ert-deftest agent-repl-test-refresh-webviews-workspace-prefers-owning-local ()
-  "The logged workspace comes from the buffer's owner when one is stamped."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
-    (with-current-buffer "*agent-frontend-ws1*"
-      (setq-local agent-repl--owning-workspace "renamed-ws"))
-    ;; Act / Assert
-    (should (equal (agent-repl--frontend-webview-workspace
-                    (get-buffer "*agent-frontend-ws1*"))
-                   "renamed-ws"))))
-
-(ert-deftest agent-repl-test-refresh-webviews-widget-probe-is-a-registered-boundary ()
+(ert-deftest agent-repl-test-frontend-webview-live-widget-is-a-registered-boundary ()
   "The live-widget probe is registered as an external boundary wrapper."
   (should (memq 'agent-repl--frontend-webview-live-widget
                 agent-repl--external-boundary-functions)))
 
-(ert-deftest agent-repl-test-refresh-webviews-reload-is-a-registered-boundary ()
+(ert-deftest agent-repl-test-frontend-webview-reload-is-a-registered-boundary ()
   "The reload wrapper is registered as an external boundary wrapper."
   (should (memq 'agent-repl--frontend-webview-reload-widget
                 agent-repl--external-boundary-functions)))
@@ -2198,39 +1352,6 @@ cannot delay the restart the user asked for."
         (should-error (agent-repl--frontend-webview-read-script buf "1" nil)
                       :type 'error)))))
 
-(ert-deftest agent-repl-test-webview-read-channel-injects-nothing-into-a-dead-widget ()
-  "A buffer whose webview is gone is not injected into at all."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
-    (let ((injected nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                 (lambda (_buf) nil))
-                ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
-                 (lambda (&rest args) (push args injected))))
-        ;; Act
-        (let ((result (agent-repl--frontend-webview-read-script
-                       (get-buffer "*agent-frontend-ws1*") "1" #'ignore)))
-          ;; Assert
-          (should (null result))
-          (should (null injected)))))))
-
-(ert-deftest agent-repl-test-webview-read-channel-injects-into-the-resolved-widget ()
-  "The widget injected into is the one resolved from the buffer, not the session."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
-    (let ((injected nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                 (lambda (_buf) 'live-widget))
-                ((symbol-function 'xwidget-webkit-current-session)
-                 (lambda () 'stale-session-widget))
-                ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
-                 (lambda (&rest args) (push args injected))))
-        ;; Act
-        (agent-repl--frontend-webview-read-script
-         (get-buffer "*agent-frontend-ws1*") "probe()" #'ignore)
-        ;; Assert
-        (should (equal injected '((live-widget "probe()" ignore))))))))
-
 ;;;; ---- Returning the keyboard to Emacs after a script evaluation ------------
 
 (defmacro agent-repl-test--capturing-scripts (var &rest body)
@@ -2258,101 +1379,12 @@ VAR is bound to a list in reverse call order."
             start (+ hit (length needle))))
     n))
 
-(ert-deftest agent-repl-test-frontend-execute-script-appends-keyboard-release ()
-  "A script evaluated while another window is selected carries the blur."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
-    (agent-repl-test--capturing-scripts scripts
-      ;; Act
-      (agent-repl--frontend-webview-execute-script
-       (get-buffer "*agent-frontend-ws1*") "noop();")
-      ;; Assert
-      (should (string-suffix-p agent-repl-frontend-keyboard-release-js
-                               (car scripts))))))
-
-(ert-deftest agent-repl-test-frontend-execute-script-keeps-the-callers-script ()
-  "The keyboard release is appended to the caller's script, never replacing it."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
-    (agent-repl-test--capturing-scripts scripts
-      ;; Act
-      (agent-repl--frontend-webview-execute-script
-       (get-buffer "*agent-frontend-ws1*") "window.someHook();")
-      ;; Assert
-      (should (string-prefix-p "window.someHook();" (car scripts))))))
-
-(ert-deftest agent-repl-test-frontend-execute-script-spares-the-selected-webview ()
-  "No keyboard release is appended when the webview's own window is selected."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
-    (let ((buf (get-buffer "*agent-frontend-ws1*")))
-      (agent-repl-test--capturing-scripts scripts
-        (agent-repl-test--with-window-buffer buf
-          ;; Act
-          (agent-repl--frontend-webview-execute-script buf "noop();"))
-        ;; Assert
-        (should (equal (car scripts) "noop();"))))))
-
-(ert-deftest agent-repl-test-frontend-execute-script-burst-releases-once-each ()
-  "A burst of evaluations issues no extra evaluations and blurs once per script."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
-    (let ((buf (get-buffer "*agent-frontend-ws1*")))
-      (agent-repl-test--capturing-scripts scripts
-        ;; Act
-        (dotimes (_ 6)
-          (agent-repl--frontend-webview-execute-script buf "noop();"))
-        ;; Assert
-        (should (= (length scripts) 6))
-        (should (cl-every (lambda (s)
-                            (= 1 (agent-repl-test--count-substring
-                                  agent-repl-frontend-keyboard-release-js s)))
-                          scripts))))))
-
-(ert-deftest agent-repl-test-frontend-keyboard-release-blurs-the-active-element ()
-  "The release script blurs `document.activeElement', the NS focus gate."
-  (should (string-match-p "document\\.activeElement\\.blur()"
-                          agent-repl-frontend-keyboard-release-js)))
-
 (ert-deftest agent-repl-test-frontend-execute-script-raw-is-a-registered-boundary ()
   "The raw execute-script wrapper is registered as an external boundary."
   (should (memq 'agent-repl--frontend-webview-execute-script-1
                 agent-repl--external-boundary-functions)))
 
 ;;;; ---- snap-webview-to-tail skip-record routing ----
-
-(ert-deftest agent-repl-test-frontend-snap-skip-for-a-placeholder-logs-globally ()
-  "Snapping a persp PLACEHOLDER's absent webview records globally.
-The workspace-switch path snaps whatever perspective persp-mode activated,
-and \"main\"/\"none\" have neither a webview nor a durable log sink."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((logged 'no-record))
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
-                 (lambda (ws &rest _)
-                   (when (eq logged 'no-record) (setq logged ws)))))
-        ;; Act
-        (agent-repl--frontend-snap-webview-to-tail "main"))
-      ;; Assert
-      (should (null logged)))))
-
-(ert-deftest agent-repl-test-frontend-snap-skip-for-a-routable-ws-keeps-attribution ()
-  "A REAL workspace's snap-skip record stays attributed to that workspace."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((project (make-temp-file "agent-repl-snap-route-" t))
-          (logged 'no-record))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :project-dir project)
-            (cl-letf (((symbol-function 'agent-repl--log-verbose)
-                       (lambda (ws &rest _)
-                         (when (eq logged 'no-record) (setq logged ws)))))
-              ;; Act
-              (agent-repl--frontend-snap-webview-to-tail "ws1")))
-        (delete-directory project t))
-      ;; Assert
-      (should (equal logged "ws1")))))
 
 ;;;; ---- The open path never holds the main thread ---------------------------
 ;;
@@ -2364,193 +1396,7 @@ and \"main\"/\"none\" have neither a webview nor a durable log sink."
 ;; a continuation, and nothing the open touches is left half-written when a
 ;; quit lands.
 
-(ert-deftest agent-repl-test-frontend-open-returns-before-the-ack ()
-  "gui-open returns `:pending' with nothing mounted until establishment acks."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let (continuation mounted)
-      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                 (lambda () t))
-                ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
-                ((symbol-function 'agent-repl--call-in-background-workspace)
-                 (lambda (_ws fn) (funcall fn)))
-                ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
-                 (lambda (_ws _url) 'fake-buffer))
-                ((symbol-function 'agent-repl--frontend-display-webview)
-                 (lambda (_ws _buf) (setq mounted t))))
-        ;; Act — the command finishes here, with the daemon still working.
-        (should (eq :pending (agent-repl--gui-open "ws1")))
-        ;; Assert — no mount has happened yet.
-        (should-not mounted)
-        ;; Act — the ack arrives later, from a timer or a sentinel.
-        (funcall continuation)
-        ;; Assert
-        (should mounted)))))
-
-(ert-deftest agent-repl-test-frontend-show-returns-before-the-ack ()
-  "gui-show returns `:pending' too; the wake gate is awaited, not waited on."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let (continuation shown)
-      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
-                ((symbol-function 'agent-repl--gui-open)
-                 (lambda (_ws) (setq shown t) :pending)))
-        ;; Act
-        (should (eq :pending (agent-repl--gui-show "ws1")))
-        (should-not shown)
-        (funcall continuation)
-        ;; Assert
-        (should shown)))))
-
-(ert-deftest agent-repl-test-frontend-open-timeout-surfaces-the-failure ()
-  "An establishment timeout reaches the failure surface, mounting nothing.
-The card the user reads is unchanged; only the waiting is gone."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let (fail warned mounted)
-      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                 (lambda () t))
-                ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws _ok on-failure &rest _) (setq fail on-failure) :pending))
-                ((symbol-function 'agent-repl--frontend-display-webview)
-                 (lambda (&rest _) (setq mounted t)))
-                ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
-        ;; Act — the command already returned; the deadline fires afterwards.
-        (should (eq :pending (agent-repl--gui-open "ws1")))
-        (funcall fail "timed out after 30.000s")
-        ;; Assert
-        (should (string-match-p "gui-open: FAILED" warned))
-        (should (string-match-p "timed out after 30.000s" warned))
-        (should-not mounted)))))
-
-(ert-deftest agent-repl-test-frontend-show-timeout-surfaces-the-failure ()
-  "gui-show's timeout warns exactly as it did when it blocked."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let (fail warned)
-      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws _ok on-failure &rest _) (setq fail on-failure) :pending))
-                ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
-        ;; Act
-        (agent-repl--gui-show "ws1")
-        (funcall fail "timed out after 30.000s")
-        ;; Assert
-        (should (string-match-p "gui-show: FAILED" warned))
-        (should (string-match-p "timed out after 30.000s" warned))))))
-
-(ert-deftest agent-repl-test-frontend-mount-holds-quit-off ()
-  "The webview mount runs with quit inhibited, start to finish.
-Creating the WKWebView, adopting it and binding it to the workspace are
-one fact; a `C-g' between them leaks a live webview no workspace holds."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let (observed)
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (lambda (_url)
-                   (setq observed inhibit-quit)
-                   (generate-new-buffer "*fake-webview*")))
-                ((symbol-function 'agent-repl--align-buffer-to-ws-dir) #'ignore))
-        ;; Act
-        (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/")
-        ;; Assert
-        (should observed)))))
-
-(ert-deftest agent-repl-test-frontend-quit-mid-open-leaves-the-webview-registered ()
-  "A quit after the mount finds the workspace already holding its webview.
-An unregistered-but-live webview is invisible to `gui-kill', so it would
-never be released and the next open would mount a second one beside it."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let (continuation)
-      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                 (lambda () t))
-                ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
-                ((symbol-function 'agent-repl--call-in-background-workspace)
-                 (lambda (_ws fn) (funcall fn)))
-                ((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (lambda (_url) (generate-new-buffer "*fake-webview*")))
-                ((symbol-function 'agent-repl--align-buffer-to-ws-dir) #'ignore)
-                ;; The quit lands where a user's `C-g' realistically lands:
-                ;; in the window work that follows the mount.
-                ((symbol-function 'agent-repl--frontend-display-webview)
-                 (lambda (&rest _) (signal 'quit nil))))
-        (agent-repl--gui-open "ws1")
-        ;; Act — `quit' is not an `error', so `should-error' cannot catch it;
-        ;; caught explicitly here, the quit stops escaping the test and the
-        ;; assertion below actually runs.
-        (let ((quit-seen (condition-case nil
-                             (progn (funcall continuation) nil)
-                           (quit t))))
-          ;; Assert — the registry names the buffer that was created.
-          (should quit-seen)
-          (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer))))))))
-
-(ert-deftest agent-repl-test-frontend-open-leaves-the-heartbeat-armed ()
-  "An open leaves the 1Hz heartbeat timer exactly as it found it.
-The blocking open starved the timer queue for the length of the deploy,
-which is what produced the `outcome=stranded' re-arms."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((agent-repl--timers nil)
-          (agent-repl--keyed-timers nil)
-          continuation)
-      (unwind-protect
-          (let ((heartbeat (agent-repl--register-timer
-                            :state-poll (run-with-timer 3600 nil #'ignore))))
-            (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                       (lambda () t))
-                      ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                       (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
-                      ((symbol-function 'agent-repl--call-in-background-workspace)
-                       (lambda (_ws fn) (funcall fn)))
-                      ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
-                       (lambda (_ws _url) 'fake-buffer))
-                      ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
-              ;; Act
-              (agent-repl--gui-open "ws1")
-              (funcall continuation)
-              ;; Assert — same timer object, still scheduled.
-              (should (agent-repl--timer-armed-p :state-poll))
-              (should (eq heartbeat (cdr (assq :state-poll agent-repl--keyed-timers))))))
-        (agent-repl--cancel-all-timers)))))
 ;;;; ---- the restart/rebuild rendezvous ------------------------------------
-
-(ert-deftest agent-repl-test-rendezvous-runs-on-the-last-arrival ()
-  "The completion fires exactly when the final party arrives, not before."
-  ;; Arrange
-  (let* ((done 0)
-         (gate (agent-repl--frontend-make-rendezvous 2 (lambda () (cl-incf done)))))
-    ;; Act / Assert
-    (funcall gate)
-    (should (= done 0))
-    (funcall gate)
-    (should (= done 1))))
-
-(ert-deftest agent-repl-test-rendezvous-never-completes-twice ()
-  "An extra arrival after completion does not re-run the completion."
-  ;; Arrange
-  (let* ((done 0)
-         (gate (agent-repl--frontend-make-rendezvous 1 (lambda () (cl-incf done)))))
-    ;; Act
-    (funcall gate)
-    (funcall gate)
-    ;; Assert
-    (should (= done 1))))
-
-(ert-deftest agent-repl-test-rendezvous-withholds-completion-when-a-leg-fails ()
-  "A leg that never arrives leaves the completion unrun, which is the point."
-  ;; Arrange
-  (let* ((done nil)
-         (gate (agent-repl--frontend-make-rendezvous 2 (lambda () (setq done t)))))
-    ;; Act — only one of the two legs reports in.
-    (funcall gate)
-    ;; Assert
-    (should-not done)))
 
 (ert-deftest agent-repl-test-rendezvous-rejects-a-non-positive-party-count ()
   "A rendezvous of nobody is a caller bug and fails hard rather than firing."
@@ -2559,68 +1405,6 @@ which is what produced the `outcome=stranded' re-arms."
     (should-error (agent-repl--frontend-make-rendezvous 0 #'ignore) :type 'error)))
 
 ;;;; ---- the rebuild's success routing: gate vs direct bounce --------------
-
-(ert-deftest agent-repl-test-rebuild-webapp-routes-success-through-the-gate ()
-  "With a GATE, the build's success arrives at the rendezvous, not the bounce.
-Bouncing straight off the build would reopen the page against a shim the
-restart has not brought back yet."
-  ;; Arrange
-  (let (arrived bounced)
-    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
-               (lambda (_targets _force on-success _on-failure)
-                 (funcall on-success)
-                 'started))
-              ((symbol-function 'agent-repl--frontend-bounce-webview)
-               (lambda (&rest _) (setq bounced t))))
-      ;; Act
-      (agent-repl--frontend-rebuild-and-redeploy-webapp
-       "ws1" (lambda () (setq arrived t)))
-      ;; Assert
-      (should arrived)
-      (should-not bounced))))
-
-(ert-deftest agent-repl-test-rebuild-webapp-bounces-directly-without-a-gate ()
-  "Without a GATE the build's success bounces the webview by itself."
-  ;; Arrange
-  (let (bounced)
-    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
-               (lambda (_targets _force on-success _on-failure)
-                 (funcall on-success)
-                 'started))
-              ((symbol-function 'agent-repl--frontend-bounce-webview)
-               (lambda (ws) (setq bounced ws))))
-      ;; Act
-      (agent-repl--frontend-rebuild-and-redeploy-webapp "ws1")
-      ;; Assert
-      (should (equal bounced "ws1")))))
-
-(ert-deftest agent-repl-test-rebuild-webapp-failure-never-reaches-the-gate ()
-  "A failed build never arrives at the rendezvous, so the bounce never runs.
-The webview is left on the bundle it already has, and the failure is
-warned about against the workspace."
-  ;; Arrange
-  (let (arrived warned)
-    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
-               (lambda (_targets _force _on-success on-failure)
-                 (funcall on-failure "exit 1")
-                 'started))
-              ((symbol-function 'agent-repl--warn)
-               (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
-      ;; Act
-      (agent-repl--frontend-rebuild-and-redeploy-webapp
-       "ws1" (lambda () (setq arrived t)))
-      ;; Assert
-      (should-not arrived)
-      (should (string-match-p "exit 1" warned)))))
-
-(ert-deftest agent-repl-test-rebuild-webapp-returns-the-async-outcome ()
-  "The rebuild hands back the build's outcome rather than blocking on it."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
-             (lambda (&rest _) 'queued)))
-    ;; Act / Assert
-    (should (eq (agent-repl--frontend-rebuild-and-redeploy-webapp "ws1")
-                'queued))))
 
 ;;;; ---- Open-placeholder resolution -----------------------------------------
 ;;
@@ -2643,98 +1427,6 @@ warned about against the workspace."
              (when (timerp timer) (cancel-timer timer)))
            (when (buffer-live-p (plist-get entry :buffer))
              (kill-buffer (plist-get entry :buffer))))))))
-
-(ert-deftest agent-repl-test-frontend-open-tears-down-the-placeholder ()
-  "A mounted webview removes the placeholder that stood in for it."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl-test--with-pending-open "ws1"
-      (let (continuation)
-        (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                   (lambda () t))
-                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                   (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
-                  ((symbol-function 'agent-repl--call-in-background-workspace)
-                   (lambda (_ws fn) (funcall fn)))
-                  ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
-                   (lambda (_ws _url) 'fake-buffer))
-                  ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
-          (agent-repl--gui-open "ws1")
-          ;; Act
-          (funcall continuation)
-          ;; Assert
-          (should-not (agent-repl--open-progress-active-p "ws1")))))))
-
-(ert-deftest agent-repl-test-frontend-open-failure-names-the-cause ()
-  "A failed open replaces the placeholder's ladder with the daemon's cause."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl-test--with-pending-open "ws1"
-      (let (fail)
-        (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                   (lambda () t))
-                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                   (lambda (_ws _ok on-failure &rest _) (setq fail on-failure) :pending))
-                  ((symbol-function 'agent-repl--warn) #'ignore))
-          (agent-repl--gui-open "ws1")
-          ;; Act
-          (funcall fail "timed out after 30.000s")
-          ;; Assert
-          (should (equal "timed out after 30.000s"
-                         (plist-get (agent-repl--open-progress-entry "ws1") :detail))))))))
-
-(ert-deftest agent-repl-test-frontend-open-reports-establishment-stages ()
-  "gui-open hands the establishment ladder's stages to the placeholder."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl-test--with-pending-open "ws1"
-      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                 (lambda () t))
-                ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws _ok _fail &optional _purpose on-progress)
-                   (funcall on-progress :opening)
-                   :pending)))
-        ;; Act
-        (agent-repl--gui-open "ws1")
-        ;; Assert
-        (should (eq :opening (plist-get (agent-repl--open-progress-entry "ws1")
-                                        :phase)))))))
-
-(ert-deftest agent-repl-test-frontend-show-tears-down-the-placeholder ()
-  "A redisplayed live webview removes the placeholder that stood in for it."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl-test--with-pending-open "ws1"
-      (let ((webview (generate-new-buffer "*fake-live-webview*"))
-            continuation)
-        (unwind-protect
-            (progn
-              (agent-repl--ws-put "ws1" :frontend-buffer webview)
-              (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                         (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
-                        ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
-                (agent-repl--gui-show "ws1")
-                ;; Act
-                (funcall continuation)
-                ;; Assert
-                (should-not (agent-repl--open-progress-active-p "ws1"))))
-          (when (buffer-live-p webview) (kill-buffer webview)))))))
-
-(ert-deftest agent-repl-test-frontend-show-failure-keeps-the-placeholder ()
-  "A failed wake leaves its cause standing instead of silently vanishing."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (agent-repl-test--with-pending-open "ws1"
-      (let (fail)
-        (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                   (lambda (_ws _ok on-failure &rest _) (setq fail on-failure) :pending))
-                  ((symbol-function 'agent-repl--warn) #'ignore))
-          (agent-repl--gui-show "ws1")
-          ;; Act
-          (funcall fail "command rejected: daemon is shutting down")
-          ;; Assert
-          (should (eq :failed (plist-get (agent-repl--open-progress-entry "ws1")
-                                         :phase))))))))
 
 ;;;; ---- Non-displaying pre-creation -------------------------------------------
 
@@ -2759,16 +1451,6 @@ pre-creation that ever reaches it is the defect these tests cover."
                 (lambda (_ws _buf) (setq ,displayed t))))
        ,@body)))
 
-(ert-deftest agent-repl-test-frontend-precreate-mounts-a-webview-buffer ()
-  "Pre-creation records a live `:frontend-buffer' for the workspace."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
-    (agent-repl-test--with-precreate-boundaries _displayed
-      ;; Act
-      (agent-repl--frontend-precreate-webview "ws1")
-      ;; Assert
-      (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer))))))
-
 (ert-deftest agent-repl-test-frontend-precreate-never-displays ()
   "Pre-creation never reaches the display path."
   ;; Arrange
@@ -2789,17 +1471,6 @@ pre-creation that ever reaches it is the defect these tests cover."
         (agent-repl--frontend-precreate-webview "ws1")
         ;; Assert
         (should (compare-window-configurations before (current-window-configuration)))))))
-
-(ert-deftest agent-repl-test-frontend-precreate-addresses-the-workspace-url ()
-  "The pre-created page is mounted at the workspace's own build-stamped URL."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
-    (agent-repl-test--with-precreate-boundaries _displayed
-      ;; Act
-      (agent-repl--frontend-precreate-webview "ws1")
-      ;; Assert
-      (should (equal (list (agent-repl--frontend-webview-url "ws1"))
-                     agent-repl-test--precreate-urls)))))
 
 (ert-deftest agent-repl-test-frontend-precreate-skips-an-already-mounted-workspace ()
   "A workspace already holding a live webview mounts nothing further."
@@ -2822,10 +1493,10 @@ pre-creation that ever reaches it is the defect these tests cover."
       ;; Assert
       (should (null agent-repl-test--precreate-urls)))))
 
-(ert-deftest agent-repl-test-frontend-precreate-skips-a-nuked-workspace ()
+(ert-deftest agent-repl-test-frontend-precreate-skips-a-killed-workspace ()
   "A tombstoned workspace is not given a page."
   ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui :nuked-at 1)
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui :killed-at 1)
     (agent-repl-test--with-precreate-boundaries _displayed
       ;; Act
       (agent-repl--frontend-precreate-webview "ws1")
@@ -2845,66 +1516,16 @@ pre-creation that ever reaches it is the defect these tests cover."
 
 ;; The fixture below is the shape a startup restore actually leaves behind
 ;; (`agent-repl--establish-workspace' + `agent-repl--initialize-ws-env'):
-;; `:project-dir' and a cleared `:nuked-at', the hydrated env, and the
+;; `:project-dir' and a cleared `:killed-at', the hydrated env, and the
 ;; display/priority state read back off the project's state.el.  There is NO
 ;; `:frontend' key — only a DELIBERATE choice is persisted, so a restored
 ;; workspace resolves its presentation from the default — and no `:type' key,
 ;; which the registry has never carried at all.  Idealizing the entry with an
 ;; explicit `:frontend gui' is what hid this bug.
 (defconst agent-repl-test--restored-ws-plist
-  '(:project-dir "/w/feed-tail" :nuked-at nil :active-env :bare-metal
+  '(:project-dir "/w/feed-tail" :killed-at nil :active-env :bare-metal
     :repl-state :idle :priority 3 :worktree-p t :source-ws-dir "/w/parent")
   "The registry entry a snapshot-restored gui workspace comes back as.")
-
-(ert-deftest agent-repl-test-frontend-precreate-accepts-a-restored-workspace ()
-  "A restored entry with no explicit `:frontend' is still a gui workspace."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
-    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t)))
-      ;; Act + Assert
-      (should (null (agent-repl--frontend-precreate-refusal "wsr"))))))
-
-(ert-deftest agent-repl-test-frontend-precreate-mounts-a-restored-workspace-with-no-establishment ()
-  "An established workspace mounts NOW, never waiting on an establishment edge."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
-    (agent-repl-test--with-precreate-boundaries _displayed
-      (let ((ensured nil))
-        (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-                   (lambda (_key) '(:sessionId "s_1")))
-                  ;; The continuation is NEVER invoked: an already-established
-                  ;; workspace has no establishment edge left to fire.
-                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                   (lambda (ws _ok _fail &rest _) (setq ensured ws) :pending)))
-          ;; Act
-          (agent-repl--frontend-precreate-webview "wsr")
-          ;; Assert
-          (should (null ensured))
-          (should (buffer-live-p (agent-repl--ws-get "wsr" :frontend-buffer))))))))
-
-(ert-deftest agent-repl-test-frontend-precreate-reports-a-created-mount ()
-  "The established path reports `:created', not the `:pending' of a wait."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
-    (agent-repl-test--with-precreate-boundaries _displayed
-      (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-                 (lambda (_key) '(:sessionId "s_1"))))
-        ;; Act + Assert
-        (should (eq :created (agent-repl--frontend-precreate-webview "wsr")))))))
-
-(ert-deftest agent-repl-test-frontend-precreate-still-waits-for-a-mid-boot-workspace ()
-  "A workspace the daemon has no view for keeps the establishment wiring."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
-    (agent-repl-test--with-precreate-boundaries _displayed
-      (let ((ensured nil))
-        (cl-letf (((symbol-function 'agent-repl--frontend-session-view) (lambda (_key) nil))
-                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                   (lambda (ws _ok _fail &rest _) (setq ensured ws) :pending)))
-          ;; Act
-          (should (eq :pending (agent-repl--frontend-precreate-webview "wsr")))
-          ;; Assert
-          (should (equal "wsr" ensured)))))))
 
 (ert-deftest agent-repl-test-frontend-precreate-refuses-a-fenced-restored-workspace ()
   "A restored entry the daemon fenced is still refused a page."
@@ -2912,54 +1533,55 @@ pre-creation that ever reaches it is the defect these tests cover."
   (agent-repl-test--with-frontend-ws "wsr"
       (append '(:open-fenced t) agent-repl-test--restored-ws-plist)
     (agent-repl-test--with-precreate-boundaries _displayed
-      (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-                 (lambda (_key) '(:sessionId "s_1"))))
+      ;; Act
+      (should (null (agent-repl--frontend-precreate-webview "wsr")))
+      ;; Assert
+      (should (null agent-repl-test--precreate-urls)))))
+
+
+;;;; ---- Adopting a mounted webview ----
+
+(ert-deftest agent-repl-test-frontend-adopt-webview-buffer-completes ()
+  "Adoption runs to completion and hands the buffer back.
+Every mount site funnels through `agent-repl--frontend-adopt-webview-buffer',
+so a single stale call inside it to a command deleted with its feature
+takes down EVERY webview mount with a void-function — the mount is the
+one place where a decoration failing may not cost the user a page."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt*")))
+    (unwind-protect
         ;; Act
-        (should (null (agent-repl--frontend-precreate-webview "wsr")))
-        ;; Assert
-        (should (null agent-repl-test--precreate-urls))))))
+        (let ((adopted (agent-repl--frontend-adopt-webview-buffer
+                        buf "*agent-repl-test-adopted*" "ws-1")))
+          ;; Assert
+          (should (eq adopted buf)))
+      (kill-buffer buf))))
 
-(ert-deftest agent-repl-test-frontend-precreate-refuses-a-merged-workspace ()
-  "A merged (closed) workspace is data-only and gets no automatic page."
+(ert-deftest agent-repl-test-frontend-adopt-webview-buffer-stamps-the-owner ()
+  "Adoption records the OWNER every owner-keyed predicate reads."
   ;; Arrange
-  (agent-repl-test--with-frontend-ws "wsr"
-      (append '(:merge-completed t) agent-repl-test--restored-ws-plist)
-    (agent-repl-test--with-precreate-boundaries _displayed
-      (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-                 (lambda (_key) '(:sessionId "s_1"))))
-        ;; Act + Assert
-        (should (eq :merge-completed (agent-repl--frontend-precreate-refusal "wsr")))))))
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt-owner*")))
+    (unwind-protect
+        (progn
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer
+           buf "*agent-repl-test-adopted-owner*" "ws-1")
+          ;; Assert
+          (should (equal (buffer-local-value 'agent-repl--owning-workspace buf)
+                         "ws-1")))
+      (kill-buffer buf))))
 
-(ert-deftest agent-repl-test-frontend-established-p-reads-the-daemon-view ()
-  "Establishment is answered by the daemon's pushed view for the command key."
+(ert-deftest agent-repl-test-frontend-adopt-webview-buffer-clears-the-header-line ()
+  "Adoption clears `xwidget-webkit-mode's header line: a webview is a
+panel, not a browser."
   ;; Arrange
-  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-               (lambda (_key) '(:sessionId "s_1"))))
-      ;; Act + Assert
-      (should (agent-repl--frontend-ws-established-p "wsr")))))
-
-(ert-deftest agent-repl-test-frontend-established-p-is-nil-without-a-project-dir ()
-  "A workspace with no command key cannot have been established."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "wsr" '(:project-dir nil)
-    ;; Act + Assert
-    (should (null (agent-repl--frontend-ws-established-p "wsr")))))
-
-(ert-deftest agent-repl-test-frontend-boot-precreates-on-establishment ()
-  "gui-boot pre-creates the workspace's page once the session establishes."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
-    (let (continuation precreated)
-      (cl-letf (((symbol-function 'agent-repl--frontend-validate-for-ws) (lambda (&rest _) t))
-                ((symbol-function 'agent-repl--ws-set-agent-state) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
-                ((symbol-function 'agent-repl--frontend-precreate-webview)
-                 (lambda (ws) (setq precreated ws) :pending)))
-        (agent-repl--gui-boot "ws1")
-        (should-not precreated)
-        ;; Act
-        (funcall continuation)
-        ;; Assert
-        (should (equal "ws1" precreated))))))
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt-header*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf (setq-local header-line-format "WebKit: x"))
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer
+           buf "*agent-repl-test-adopted-header*" "ws-1")
+          ;; Assert
+          (should (null (buffer-local-value 'header-line-format buf))))
+      (kill-buffer buf))))

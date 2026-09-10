@@ -1,0 +1,27 @@
+{
+  "scenario": "question-single-select",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Before you do anything else, ask me exactly one question with the question tool: whether I want the output as JSON or as YAML.",
+  "prompts": [
+    {
+      "text": "Before you do anything else, ask me exactly one question with the question tool: whether I want the output as JSON or as YAML.",
+      "resume": false
+    }
+  ],
+  "world": "question-single-select",
+  "cwd_init": null,
+  "vendor_session_id": "92bd9e02-1de0-4035-a72e-69ef64022dbb",
+  "manual": null,
+  "expect": [
+    "tool:AskUserQuestion",
+    "tool_result:ask_user_question with answers keyed by question text"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-question-single-select-Bg3Ypi-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:20:22.169Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

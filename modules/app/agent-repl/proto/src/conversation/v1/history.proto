@@ -1,0 +1,73 @@
+// history.proto — A BOUNDED, BACKWARD READ of one agent's durable history.
+//
+// THE PAGE'S SCOPE IS THE AGENT. Every entry is a child of the agent the
+// request named — the main agent included, which has an identity like any
+// other and is never "nil" — so an entry carries no placement of its own:
+// where it sits is the request's fact, and what it is is the entry's.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// One page: a contiguous run of an agent's history, NEWEST FIRST, and
+// whether older history remains.
+message HistoryPage {
+  // The entries, newest first, each with its pointer. A turn may straddle
+  // pages: entries are units that upsert by identity, so a split costs a
+  // consumer nothing.
+  repeated HistoryEntryAt entries = 1;
+  // WHETHER older history remains — never how much, never where.
+  oneof boundary {
+    // Older entries remain below this page.
+    HistoryMore more = 2;
+    // This page reached the oldest RETAINED entry. Retention is the serving
+    // side's own fact; it says so rather than letting a caller infer a
+    // beginning from a short page.
+    HistoryFloor floor = 3;
+  }
+}
+
+// One entry and its position, so the caller always holds a pointer for the
+// newest thing it has seen — the reconnect mark and the older-pages walk key.
+message HistoryEntryAt {
+  // This entry's position in the agent's order. Stable across upserts:
+  // order is by the entry's FIRST appearance, never its last write.
+  HistoryPointer at = 1;
+  // The entry itself.
+  HistoryEntry entry = 2;
+}
+
+// One thing in an agent's history. THE ARM IS WHAT IT IS.
+message HistoryEntry {
+  oneof entry {
+    // A prompt delivered to this agent.
+    AgentPrompt user_prompt = 1;
+    // A frame of this agent in its SETTLED state — a unit as it ended, a
+    // question or permission as it concluded, a detached-work announcement,
+    // or the terminal arm that says how a turn ended. No `start` is replayed:
+    // by the upsert rule the settled frame carries the start's facts.
+    AgentFrame agent_frame = 2;
+  }
+}
+
+// Older entries remain below this page.
+message HistoryMore {
+  // Points at this page's LAST (oldest) entry; the next request echoes it.
+  HistoryPointer last_entry = 1;
+}
+
+// This page reached the oldest retained entry.
+message HistoryFloor {}
+
+// An opaque, producer-minted position of one entry in one agent's order.
+// Echoed verbatim, never parsed or constructed: a pointer names a place the
+// caller has DEMONSTRABLY BEEN.
+message HistoryPointer {
+  // The opaque value.
+  string value = 1;
+}

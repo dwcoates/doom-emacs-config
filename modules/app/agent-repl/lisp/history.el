@@ -2,6 +2,26 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--warn "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--ws-current-log-name "workspace")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-dir "status")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-put "workspace")
+(declare-function agent-repl-instantiation-p "workspace")
+(declare-function agent-repl-instantiation-session-id "workspace")
+
+;; `agent-repl--input-history' is buffer-local and declared with
+;; `defvar-local' further down, beside the history commands that own it.
+;; The state save/restore pair above those commands reads and writes it, so
+;; the special declaration has to precede them.
+(defvar agent-repl--input-history)
+
 ;;;; Constants
 
 (defconst agent-repl--environment-keys '(:bare-metal)
@@ -121,15 +141,6 @@ durable.  See `test-history.el\='s state-file invariant test."
       nil
     (agent-repl--log nil "instantiation-to-plist: inst is nil, returning nil")
     nil))
-
-(defun agent-repl--make-instantiation-from-plist (saved)
-  "Create a new `agent-repl-instantiation' from SAVED plist.
-Returns a fresh empty instantiation when SAVED is nil."
-  (when saved
-    (agent-repl--log nil
-                     "make-instantiation-from-plist: ignoring persisted keys=%S — nothing in an instantiation is durable any more"
-                     (cl-loop for (k _v) on saved by #'cddr collect k)))
-  (make-agent-repl-instantiation))
 
 ;;;; State migration
 
@@ -342,7 +353,7 @@ then the value persisted in the existing on-disk state file, then
 `current-time' as a final fallback — so the first state-save for a
 project stamps a creation date that subsequent saves preserve.
 `:last-killed-at' is written through unchanged when set on the ws plist
-\(nuke flows populate it before calling state-save), and falls back to
+\(kill flows populate it before calling state-save), and falls back to
 the previously-persisted value to avoid clobbering on stray saves that
 do not represent a kill.
 
@@ -354,7 +365,7 @@ stray save never clobbers it.  The project picker sorts on this key.
 `:model' records the model the USER ASKED FOR — the workspace-generation
 alias, or whatever a model-picking variant like `SPC j C-o' supplied — and
 never the model a live session happens to be running.
-`agent-repl--apply-display-state' restores it so the re-booted session
+the daemon's own pushed views restore it, so the re-booted session
 launches under the same request."
   (let* ((root (agent-repl--ws-get ws :project-dir))
          (file (agent-repl--state-file root)))
@@ -382,7 +393,7 @@ launches under the same request."
                                  (plist-get existing :last-viewed-at)))
              ;; The model the USER ASKED FOR, and only that: the
              ;; workspace-generation alias, or whatever a model-picking
-             ;; variant like `SPC j C-o' supplied.  `agent-repl--apply-display-state'
+             ;; variant like `SPC j C-o' supplied.  The daemon's pushed views
              ;; restores it onto `:model' so `agent-repl--build-start-cmd' passes
              ;; `--model' when re-booting the session.
              ;;

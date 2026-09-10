@@ -1,0 +1,44 @@
+// endpoint_register_workspace.proto — RegisterWorkspace: Emacs announces a
+// workspace exists. HOST section. IDEMPOTENT BY DIR: re-registering after a
+// reconnect or daemon restart is the normal path, never an error — the
+// daemon's registry is durable, and registration reconciles rather than
+// duplicates. Everything about the workspace beyond its address (parentage,
+// branch, repo) the daemon derives itself from the dir.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RegisterWorkspaceRequest {
+  // The worktree's path, in whatever spelling the host has. A PATH, not an
+  // identity: the daemon normalizes it and MINTS the identity, which the
+  // response returns.
+  string dir = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message RegisterWorkspaceResponse {
+  oneof result {
+    RegisterWorkspaceSuccess success = 1;
+    RegisterWorkspaceError error = 2;
+  }
+}
+// Registered (or already was — idempotence makes the two one answer).
+message RegisterWorkspaceSuccess {
+  // The workspace's daemon-minted identity — what every later call and every
+  // view uses; the path the host sent is never the identity.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message RegisterWorkspaceError {
+  oneof cause {
+    // The dir exists but is not a git worktree the daemon can adopt.
+    RegisterWorkspaceNotAWorktree not_a_worktree = 1;
+  }
+}
+message RegisterWorkspaceNotAWorktree {}

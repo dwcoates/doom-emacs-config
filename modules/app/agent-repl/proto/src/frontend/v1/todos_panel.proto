@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// THE /todos PANEL: the task tracker's checklist, printed. Filled from the
+// DAEMON'S OWN tracker state (no vendor route exists or is needed); the
+// WEBAPP owns the rendering. One fact in two views with the footer's
+// checklist — its own family, per duplicate-don't-share.
+message TodosPanelView {
+  // In tracker order.
+  repeated TodosPanelRow rows = 1;
+}
+// One task's line.
+message TodosPanelRow {
+  // The drawn treatment; the set arm picks the glyph.
+  oneof status {
+    TodosPanelPending pending = 1;
+    TodosPanelRunning running = 2;
+    TodosPanelCompleted completed = 3;
+  }
+  // The task's subject, drawn verbatim.
+  string subject = 4;
+}
+// Not started. Empty: the arm is the glyph.
+message TodosPanelPending {}
+// In progress. Empty: the arm is the glyph.
+message TodosPanelRunning {}
+// Done. Empty: the arm is the glyph.
+message TodosPanelCompleted {}

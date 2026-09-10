@@ -1,0 +1,98 @@
+// workflow.proto — THE WORKFLOW'S DESCRIPTION: what a run IS — its script,
+// its placement, its start. This is what a spawning stream ANNOUNCES when a
+// workflow is launched (a workflow is always detached, so a turn never carries
+// its frames). The run's FRAME — its updates, which carry its agents' work, and
+// its terminal arms — is agent.proto, beside every other stream vocabulary,
+// because a workflow's update recurses into AgentUpdate.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// A run this stream has begun carrying.
+message AgentWorkflowStart {
+  // The workflow's own declared name, as its script states it.
+  string name = 1;
+
+  // Where the script that ran is kept. ALWAYS SET: the producer persists a
+  // script for every invocation, whether it was supplied inline, named, or read
+  // from a path — so there is no "the script is unavailable" case and no need for
+  // a oneof over how it was supplied.
+  AgentWorkflowScript script = 2;
+
+  // The run this one resumed, when it resumed one. UNSET for a fresh run. When
+  // set, the run's unchanged steps returned CACHED results instead of
+  // re-running, so a reader knows it may have cost far less than the number of
+  // agents it reports would suggest.
+  //
+  // A BARE HANDLE rather than a described run: resuming needs only the value the
+  // producer accepts, and it is the same kind of handle the placement arm below
+  // carries for this run.
+  optional string resumed_from = 3;
+
+  // Where the run executes. EACH ARM CARRIES ITS OWN RESUME HANDLE, because the
+  // producer uses a different one per placement and neither means anything for
+  // the other.
+  oneof placement {
+    // In this process, alongside the agent that launched it.
+    AgentWorkflowPlacementLocal local = 4;
+    // In a remote environment.
+    AgentWorkflowPlacementRemote remote = 5;
+  }
+
+  // A non-blocking notice about the run's conditions — for example that local
+  // state diverges from what a remote run will clone. UNSET is the ordinary
+  // case. A consumer draws it as a notice, NEVER as a failure: the run
+  // proceeded.
+  optional AgentWorkflowNotice notice = 6;
+
+  // When the run was launched.
+  AgentActivityStartedAt started_at = 7;
+}
+
+// Where a run's script is kept.
+message AgentWorkflowScript {
+  // The path the producer persisted it at. A reader opens this to see what
+  // actually ran; an author edits it and re-runs from the same path. The script
+  // itself is deliberately NOT carried on the wire — a whole program costs far
+  // more than anything drawn from it is worth.
+  string path = 1;
+}
+
+// The run executes in this process.
+message AgentWorkflowPlacementLocal {
+  // This run's identifier, and the value a later invocation names to resume it.
+  //
+  // NOT THE HANDLE ITS STREAM OPENS UNDER — that is the detached-work identity on
+  // the envelope, which addresses live work and dies with it. This one OUTLIVES
+  // the run: it is how a later invocation reuses this run's results, and it is
+  // also where the producer keeps the run's files. Opaque; compare for equality,
+  // never parse or construct one.
+  string run_id = 1;
+}
+
+// The run executes remotely.
+message AgentWorkflowPlacementRemote {
+  // Where the remote session can be opened.
+  //
+  // ALSO THE RESUME HANDLE for a remote run — the producer issues no run
+  // identifier in this case, which is why the two placements carry different
+  // fields rather than sharing one.
+  string session_url = 1;
+}
+
+// A non-blocking notice about a run's conditions.
+message AgentWorkflowNotice {
+  // The notice, verbatim.
+  string text = 1;
+}
+
+// A run's closing account of itself.
+message AgentWorkflowSummary {
+  // The summary, verbatim.
+  string text = 1;
+}

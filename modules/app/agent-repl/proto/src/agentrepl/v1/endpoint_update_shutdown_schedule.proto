@@ -1,0 +1,58 @@
+// endpoint_update_shutdown_schedule.proto — UpdateShutdownSchedule: the
+// deploy tooling's drain-and-exit control. DAEMON ADMIN section. The
+// schedule is ANNOUNCED: WatchDaemon pushes drain_scheduled /
+// drain_cancelled so every client draws the standing banner; the other
+// consequences arrive on the existing surfaces (held prompts in the tray
+// during the drain, footer status). Consolidates the old
+// ScheduleShutdown / CancelScheduledShutdown / Shutdown trio.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/drain_reason.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateShutdownScheduleRequest {
+  // THE ARM IS THE ACTION.
+  oneof action {
+    UpdateShutdownScheduleSchedule schedule = 1;
+    UpdateShutdownScheduleCancel cancel = 2;
+    UpdateShutdownScheduleNow now = 3;
+  }
+}
+// Drain then exit at/after this instant: finish in-flight turns, hold new
+// prompts (tray-visible), exit when quiet.
+message UpdateShutdownScheduleSchedule {
+  int64 at_ms = 1;
+  // Why — REQUIRED; typed, never a bare string. Every client's drain
+  // banner names it (the drain_scheduled push carries it verbatim).
+  DrainReason reason = 2;
+}
+// Drop the standing schedule; resume normal intake.
+message UpdateShutdownScheduleCancel {}
+// Exit now: stop accepting work, flush in-flight writes, go.
+message UpdateShutdownScheduleNow {
+  // Why — REQUIRED; rides the shutdown announcement's immediate cause.
+  DrainReason reason = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message UpdateShutdownScheduleResponse {
+  oneof result {
+    UpdateShutdownScheduleSuccess success = 1;
+    UpdateShutdownScheduleError error = 2;
+  }
+}
+// The action is armed (schedule), cleared (cancel), or under way (now).
+message UpdateShutdownScheduleSuccess {}
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message UpdateShutdownScheduleError {
+  oneof cause {
+    // Nothing is scheduled to cancel.
+    UpdateShutdownScheduleNothingScheduled nothing_scheduled = 1;
+  }
+}
+message UpdateShutdownScheduleNothingScheduled {}

@@ -1,0 +1,6 @@
+{
+  "agentType": "general-purpose",
+  "description": "Read all .txt files and grep for 'target'",
+  "toolUseId": "toolu_01RiSs483caaPXwc4jJPkLp6",
+  "spawnDepth": 1
+}

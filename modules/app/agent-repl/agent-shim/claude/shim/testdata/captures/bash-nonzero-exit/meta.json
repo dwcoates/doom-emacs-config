@@ -1,0 +1,28 @@
+{
+  "scenario": "bash-nonzero-exit",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `bash fail.sh` and report exactly what happened, including the exit status. Do not try to fix it.",
+  "prompts": [
+    {
+      "text": "Run `bash fail.sh` and report exactly what happened, including the exit status. Do not try to fix it.",
+      "resume": false
+    }
+  ],
+  "world": "bash-nonzero-exit",
+  "cwd_init": null,
+  "vendor_session_id": "9d38a1b3-c782-4a04-83a6-6e3fecd0b1d5",
+  "manual": null,
+  "expect": [
+    "tool:Bash",
+    "tool_result:bash(exit 7)",
+    "tool_result:bash.stderr"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-bash-nonzero-exit-prdPcp-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:20:02.748Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

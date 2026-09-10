@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   com.agentrepl.shim-claude-sidecar — launchd user agent for the
-  shim-claude-sidecar service (§7.1, §13 of design-agent-shim-architecture.md).
+  shim-claude-sidecar service. The binding design is
+  docs/overhaul/sidecar.md (the file-plane reader; it writes to the store
+  over Connect on the store's UNIX domain socket).
 
   TEMPLATE: this checked-in copy uses ~-relative paths so it reads portably
   and resolves on any machine. launchd does NOT expand `~`, so
@@ -9,11 +11,30 @@
   to the invoking user's absolute $HOME when copying this file into
   ~/Library/LaunchAgents/. Do not load this template file directly.
 
-  Flag contract (must match agent-shim/claude/shim-sidecar/main.go, §14.1 G3):
-    --store-socket   shim-store UDS        (~/.cache/agent-repl/sock/store.sock)
+  Flag contract (must match agent-shim/claude/shim-sidecar/main.go):
+    --store-socket   shim-store Connect UDS (~/.cache/agent-repl/sock/store.sock)
     --config-roots   comma-separated Claude config roots whose projects/*
-                     transcripts + subagent spools are observed (§7.1)
+                     transcripts + subagent spools are observed
     --spool-root     base dir under which /tmp/claude-<uid>/ task spools live
+    --state-dir      agent-repl state root (~/.claude-emacs) holding the
+                     shim's identity records — agent-id.json and
+                     vendor-id/<vendor-session-id>.json. They are the ONLY
+                     link between a vendor session id a /clear rotated and
+                     the conversation's original one, and without them a
+                     rotated transcript's rows are offered to the store under
+                     a second book, refused, and the file's cursor freezes.
+
+  It is passed EXPLICITLY even though it is also the default, on the same
+  grounds as --store-socket: an OS-managed service is pinned to the real path
+  by its argv, so no environment can move it off the root the daemon uses.
+
+  Nothing else is passed: --log, --poll-interval (1s) and --rescan-interval
+  (30s) keep their defaults, and this service needs no other flag.
+
+  AGENT_REPL_STORE_SOCKET is the TEST-ONLY override of the --store-socket
+  default (an explicit --store-socket always beats it). It is deliberately
+  NOT set here: the OS-managed service is pinned to the real socket path by
+  the explicit --store-socket argument above.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -30,6 +51,8 @@
         <string>~/.claude,~/.claude-chesscom</string>
         <string>--spool-root</string>
         <string>/tmp</string>
+        <string>--state-dir</string>
+        <string>~/.claude-emacs</string>
     </array>
 
     <key>RunAtLoad</key>

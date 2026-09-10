@@ -1,0 +1,509 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+
+	"connectrpc.com/connect"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"claude-repld/internal/drain"
+	"claude-repld/internal/merge"
+	"claude-repld/internal/prompthandler"
+	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/resolve/feed"
+	"claude-repld/internal/rollout"
+	"claude-repld/internal/workspace"
+)
+
+// TestSetResponseErrorSetsTheNamedArm pins the mapping's core: an arm the rpc's
+// error message carries is set by NAME.
+func TestSetResponseErrorSetsTheNamedArm(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.MergeWorkspaceResponse{}
+
+	// Act.
+	ok := setResponseError(resp, "already_queued", nil)
+
+	// Assert.
+	if !ok || resp.GetError().GetAlreadyQueued() == nil {
+		t.Fatalf("already_queued was not set: ok=%v resp=%v", ok, resp)
+	}
+}
+
+// TestSetResponseErrorRefusesAnUnlandedArm pins that an arm the contract does
+// NOT carry falls through, which is what routes it to UnlandedArm.
+func TestSetResponseErrorRefusesAnUnlandedArm(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.MergeWorkspaceResponse{}
+
+	// Act.
+	ok := setResponseError(resp, "duplicate_submission", nil)
+
+	// Assert.
+	if ok {
+		t.Fatal("an arm MergeWorkspaceError does not carry was reported as set")
+	}
+}
+
+// TestSetResponseErrorFillsTheArmsOwnField pins that an arm's own field is
+// filled from the refusal rather than left empty.
+func TestSetResponseErrorFillsTheArmsOwnField(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.MergeWorkspaceResponse{}
+
+	// Act.
+	setResponseError(resp, "transferring_away", map[string]any{"address": "127.0.0.1:1"})
+
+	// Assert.
+	if got := resp.GetError().GetTransferringAway().GetAddress(); got != "127.0.0.1:1" {
+		t.Fatalf("address = %q, want the successor's", got)
+	}
+}
+
+// TestSetResponseErrorFillsAnInt64Field pins the numeric arm field, which the
+// confirm_required challenge carries.
+func TestSetResponseErrorFillsAnInt64Field(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.InterruptResponse{}
+
+	// Act.
+	setResponseError(resp, "confirm_required", map[string]any{"live_agent_count": int64(3)})
+
+	// Assert.
+	if got := resp.GetError().GetConfirmRequired().GetLiveAgentCount(); got != 3 {
+		t.Fatalf("live_agent_count = %d, want 3", got)
+	}
+}
+
+// TestAsRefusalNormalizesEveryComponentSentinel pins that every documented
+// component refusal reaches the mapping as its arm NAME.
+func TestAsRefusalNormalizesEveryComponentSentinel(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	tests := []struct {
+		name string
+		err  error
+		arm  string
+	}{
+		{"workspace refusal", &workspace.Refusal{Arm: "no_session", Reason: "x"}, "no_session"},
+		{"merge refusal", &merge.RefusalError{Arm: "already_merging", Reason: "x"}, "already_merging"},
+		{"confirm challenge", &workspace.ConfirmRequired{LiveAgentCount: 2}, "confirm_required"},
+		{"shim refusal", &workspace.ShimRefusal{Arm: "not_deliverable"}, "not_deliverable"},
+		{"duplicate submission", prompthandler.ErrDuplicateSubmission, "duplicate_submission"},
+		{"feed not in workspace", prompthandler.ErrFeedNotInWorkspace, "feed_not_in_workspace"},
+		{"merging", promptqueue.ErrMerging, "merging"},
+		{"no such hold", promptqueue.ErrNoSuchHold, "no_such_hold"},
+		{"already delivered", promptqueue.ErrAlreadyDelivered, "already_delivered"},
+		{"accept not applicable", promptqueue.ErrAcceptNotApplicable, "accept_not_applicable"},
+		{"release refused", promptqueue.ErrReleaseRefused, "release_refused"},
+		{"no walk", feed.ErrNoWalk, "no_walk_standing"},
+		{"nothing scheduled", drain.ErrNothingScheduled, "nothing_scheduled"},
+		{"no transfer announced", rollout.ErrNoTransferAnnounced, "no_transfer_announced"},
+		{"not yet adopted", rollout.ErrNotYetAdopted, "not_yet_adopted"},
+		{"participant not expected", rollout.ErrParticipantNotExpected, "participant_not_expected"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got, ok := surface.asRefusal(test.err)
+
+			// Assert.
+			if !ok || got.Arm != test.arm {
+				t.Fatalf("arm = %q (ok=%v), want %q", got.Arm, ok, test.arm)
+			}
+		})
+	}
+}
+
+// TestAsRefusalRejectsAnOrdinaryFailure pins that a plain error is NOT turned
+// into a refusal answer: it must surface as an error.
+func TestAsRefusalRejectsAnOrdinaryFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+
+	// Act.
+	_, ok := surface.asRefusal(errors.New("the disk caught fire"))
+
+	// Assert.
+	if ok {
+		t.Fatal("an ordinary failure was normalized into a typed refusal")
+	}
+}
+
+// TestUnlandedArmSpellsTheLedgerMessage pins the EXACT message ERROR-ARMS.md
+// prescribes, because the ledger reconciles against it.
+func TestUnlandedArmSpellsTheLedgerMessage(t *testing.T) {
+	// Arrange.
+	const want = "intended arm: WatchFeedError.unknown_token: the token was never minted"
+
+	// Act.
+	cerr := UnlandedArm(fakeLogger{}, "WatchFeed", "unknown_token", "the token was never minted", false)
+
+	// Assert.
+	if got := cerr.Message(); got != want {
+		t.Fatalf("message = %q, want %q", got, want)
+	}
+}
+
+// TestUnlandedArmUsesNotFoundForAnUnknownID pins the code split: an unknown id
+// answers NotFound, a state refusal answers FailedPrecondition.
+func TestUnlandedArmUsesNotFoundForAnUnknownID(t *testing.T) {
+	// Arrange, Act.
+	cerr := UnlandedArm(fakeLogger{}, "WatchFeed", "unknown_token", "no such token", true)
+
+	// Assert.
+	if got := cerr.Code().String(); got != "not_found" {
+		t.Fatalf("code = %q, want not_found", got)
+	}
+}
+
+// TestAsRefusalCarriesTheVerbsArmFields pins that an arm's OWN evidence
+// survives the normalization: base_ref_unresolved spells `ref`, and a client
+// reading the arm must get the ref rather than an empty string beside prose.
+func TestAsRefusalCarriesTheVerbsArmFields(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := &workspace.Refusal{
+		Arm:    workspace.ArmBaseRefUnresolved,
+		Reason: "the base ref does not resolve",
+		Fields: map[string]any{"ref": "origin/nope"},
+	}
+
+	// Act.
+	got, ok := surface.asRefusal(err)
+
+	// Assert.
+	if !ok {
+		t.Fatal("the workspace refusal was not normalized")
+	}
+	if got.Fields["ref"] != "origin/nope" {
+		t.Fatalf("Fields = %v, want the arm's ref value", got.Fields)
+	}
+}
+
+// TestAsRefusalDoesNotMutateTheVerbsFieldMap pins that the transport's shared
+// text/detail values are not written back into the component's own map.
+func TestAsRefusalDoesNotMutateTheVerbsFieldMap(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	fields := map[string]any{"ref": "origin/nope"}
+	err := &workspace.Refusal{Arm: workspace.ArmBaseRefUnresolved, Reason: "nope", Fields: fields}
+
+	// Act.
+	if _, ok := surface.asRefusal(err); !ok {
+		t.Fatal("the workspace refusal was not normalized")
+	}
+
+	// Assert.
+	if len(fields) != 1 {
+		t.Fatalf("the verb's own field map = %v, want it untouched", fields)
+	}
+}
+
+// TestSetArmFillsTheBaseRefUnresolvedRef pins the whole path end to end: the
+// arm the wire carries names the ref.
+func TestSetArmFillsTheBaseRefUnresolvedRef(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.CreateWorkspaceResponse{}
+
+	// Act.
+	ok := setResponseError(resp, workspace.ArmBaseRefUnresolved, map[string]any{"ref": "origin/nope"})
+
+	// Assert.
+	if !ok {
+		t.Fatal("setResponseError refused the landed base_ref_unresolved arm")
+	}
+	if got := resp.GetError().GetBaseRefUnresolved().GetRef(); got != "origin/nope" {
+		t.Fatalf("base_ref_unresolved.ref = %q, want origin/nope", got)
+	}
+}
+
+// TestAsRefusalUnwrapsAWrappedWorkspaceRefusal pins that the normalization goes
+// through workspace.AsRefusal, the package's canonical extractor, so a refusal
+// a verb wrapped on its way out still names its arm.
+func TestAsRefusalUnwrapsAWrappedWorkspaceRefusal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := fmt.Errorf("CreateWorkspace: %w",
+		&workspace.Refusal{Arm: workspace.ArmBaseRefUnresolved, Reason: "the base ref does not resolve"})
+
+	// Act.
+	got, ok := surface.asRefusal(err)
+
+	// Assert.
+	if !ok || got.Arm != workspace.ArmBaseRefUnresolved {
+		t.Fatalf("asRefusal = %+v, %t, want the wrapped arm", got, ok)
+	}
+}
+
+// TestAsRefusalCarriesTheMergeRefusalsReason pins that the merge extractor
+// hands back the refusal's SENTENCE as well as its arm: the reason becomes the
+// arm's text and detail fields, so an extractor that dropped it would answer
+// every merge refusal with an empty message.
+func TestAsRefusalCarriesTheMergeRefusalsReason(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := fmt.Errorf("MergeWorkspace: %w",
+		&merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "a merge is already queued"})
+
+	// Act.
+	got, ok := surface.asRefusal(err)
+
+	// Assert.
+	if !ok || got.Arm != merge.ArmAlreadyQueued || got.Reason != "a merge is already queued" {
+		t.Fatalf("asRefusal = %+v, %t, want the merge arm and its reason", got, ok)
+	}
+}
+
+// TestAsRefusalPutsTheMergeReasonOnTheArmsTextField pins the one consequence
+// that made the arm-only extractor unusable here: the reason must reach the
+// arm's own text field, not only the refusal's prose.
+func TestAsRefusalPutsTheMergeReasonOnTheArmsTextField(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := &merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "a merge is already queued"}
+
+	// Act.
+	got, _ := surface.asRefusal(err)
+
+	// Assert.
+	if got.Fields["text"] != "a merge is already queued" {
+		t.Fatalf("Fields[text] = %v, want the merge refusal's reason", got.Fields["text"])
+	}
+}
+
+// TestSetArmSelectsANestedOneofArm pins the landing-7 shape: an arm message
+// with a oneof of its OWN (SubmitPromptBubbleRefused.kind) has that arm
+// selected by name.
+func TestSetArmSelectsANestedOneofArm(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	ok := setResponseError(resp, "bubble_refused", map[string]any{
+		"detail": "the subagent's turn is running",
+		"kind":   nestedArm("agent_busy"),
+	})
+
+	// Assert.
+	if !ok || resp.GetError().GetBubbleRefused().GetAgentBusy() == nil {
+		t.Fatalf("setResponseError = %v, %v, want bubble_refused{kind: agent_busy}", ok, resp)
+	}
+}
+
+// TestSetArmCarriesTheDetailBesideTheNestedArm pins that the shim's own words
+// ride the arm as `detail`, one edge case per test.
+func TestSetArmCarriesTheDetailBesideTheNestedArm(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	setResponseError(resp, "bubble_refused", map[string]any{
+		"detail": "the subagent's turn is running",
+		"kind":   nestedArm("agent_busy"),
+	})
+
+	// Assert.
+	if got := resp.GetError().GetBubbleRefused().GetDetail(); got != "the subagent's turn is running" {
+		t.Fatalf("bubble_refused.detail = %q, want the shim's sentence", got)
+	}
+}
+
+// TestSetArmRefusesANestedArmTheMessageDoesNotCarry pins that an unknown nested
+// arm is REFUSED rather than dropped: the refusal then answers as an unlanded
+// arm instead of arriving with an empty kind.
+func TestSetArmRefusesANestedArmTheMessageDoesNotCarry(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	ok := setResponseError(resp, "bubble_refused", map[string]any{"kind": nestedArm("no_such_kind")})
+
+	// Assert.
+	if ok {
+		t.Fatalf("setResponseError with an unknown nested arm = true, want a refusal")
+	}
+}
+
+// TestEndStreamIsQuietOnACancelledClient pins the standing-stream ending: a
+// cancelled or expired request context is the CLIENT LEAVING and must record
+// no ERROR and return no error, while every other failure keeps fail's ERROR
+// record and its internal Connect error.
+func TestEndStreamIsQuietOnACancelledClient(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		wantQuiet bool
+	}{
+		{name: "cancelled", err: context.Canceled, wantQuiet: true},
+		{name: "wrapped cancelled", err: fmt.Errorf("read: %w", context.Canceled), wantQuiet: true},
+		{name: "deadline exceeded", err: context.DeadlineExceeded, wantQuiet: true},
+		{name: "a genuine read failure", err: errors.New("the disk went away"), wantQuiet: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+
+			// Act.
+			err := endStream(log, "WatchFooter", tc.err)
+
+			// Assert.
+			if tc.wantQuiet {
+				if err != nil {
+					t.Fatalf("endStream returned %v, want no error", err)
+				}
+				if got := log.at("ERROR"); len(got) != 0 {
+					t.Fatalf("recorded %v at ERROR, want none", got)
+				}
+				info := log.at("INFO")
+				if len(info) != 1 || info[0].Context["stream"] != "WatchFooter" {
+					t.Fatalf("INFO records = %v, want exactly one naming the stream", info)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("endStream swallowed a genuine failure")
+			}
+			if got := log.at("ERROR"); len(got) != 1 {
+				t.Fatalf("ERROR records = %v, want exactly one", got)
+			}
+		})
+	}
+}
+
+// TestStreamVerbsEndQuietlyWhenTheClientsContextIsCancelled pins the ending on
+// every verb family that opens a standing stream: one cancelled resolve, no
+// ERROR record, no error returned.
+func TestStreamVerbsEndQuietlyWhenTheClientsContextIsCancelled(t *testing.T) {
+	tests := []string{
+		"WatchFooter",
+		"WatchTopbar",
+		"WatchDaemonHolds",
+		"WatchHostWorkspace",
+		"WatchWebWorkspace",
+		"WatchFeed",
+		"WatchLoginTerminal",
+	}
+	for _, rpc := range tests {
+		t.Run(rpc, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+
+			// Act.
+			err := endStream(log, rpc, fmt.Errorf("%s: workspace %q: %w",
+				rpc, "ws-1", context.Canceled))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("%s returned %v, want no error", rpc, err)
+			}
+			if got := log.at("ERROR"); len(got) != 0 {
+				t.Fatalf("%s recorded %v at ERROR, want none", rpc, got)
+			}
+			info := log.at("INFO")
+			if len(info) != 1 || info[0].Context["stream"] != rpc {
+				t.Fatalf("%s INFO records = %v, want exactly one naming the stream", rpc, info)
+			}
+		})
+	}
+}
+
+// TestResolveRefDecidesTheStandingBeforeReadingState pins the ORDERING the
+// contract owes: the serving standing is answered before any state is touched,
+// so the outgoing daemon of a handover — whose state client is already closed
+// when the late rpc lands — still answers the typed arm rather than the state
+// client's failure.
+func TestResolveRefDecidesTheStandingBeforeReadingState(t *testing.T) {
+	closedDB := errors.New("sql: database is closed")
+	tests := []struct {
+		name     string
+		standing workspace.Standing
+		want     func(*agentreplv1.SubmitPromptError) bool
+	}{
+		{
+			name:     "a transferred workspace answers transferring_away",
+			standing: workspace.StandingTransferringAway,
+			want: func(e *agentreplv1.SubmitPromptError) bool {
+				return e.GetTransferringAway().GetAddress() == "127.0.0.1:9999"
+			},
+		},
+		{
+			name:     "an unadopted workspace answers not_yet_adopted",
+			standing: workspace.StandingNotYetAdopted,
+			want: func(e *agentreplv1.SubmitPromptError) bool {
+				return e.GetNotYetAdopted() != nil
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Ownership.standing = test.standing
+			h.DB.workspaceErr = closedDB
+
+			// Act.
+			resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SubmitPrompt answered an error rather than a typed arm: %v", err)
+			}
+			if !test.want(resp.Msg.GetError()) {
+				t.Fatalf("SubmitPrompt answered %v, want the standing's own arm", resp.Msg.GetError())
+			}
+		})
+	}
+}
+
+// TestResolveRefFailsAnOwnedWorkspaceOnAClosedState pins that the reordering
+// does NOT swallow a genuine state failure: a workspace this daemon still
+// serves surfaces the read's error.
+func TestResolveRefFailsAnOwnedWorkspaceOnAClosedState(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Ownership.standing = workspace.StandingOwned
+	h.DB.workspaceErr = errors.New("sql: database is closed")
+
+	// Act.
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err == nil || connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("SubmitPrompt = %v, want an internal error for an owned workspace", err)
+	}
+}
+
+// TestResolveRefRefusesOnceTheDaemonIsShuttingDown pins that an rpc arriving
+// after the surface's lifetime ended — an h2c connection the client still holds
+// through the shutdown grace — is answered UNAVAILABLE, never with whatever the
+// state client being torn down underneath it returns.
+func TestResolveRefRefusesOnceTheDaemonIsShuttingDown(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.workspaceErr = errors.New("sql: database is closed")
+	if err := h.Server.Close(); err != nil {
+		t.Fatalf("close the surface: %v", err)
+	}
+
+	// Act.
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err == nil || connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("SubmitPrompt = %v, want CodeUnavailable while the daemon is shutting down", err)
+	}
+}

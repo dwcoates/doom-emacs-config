@@ -1,0 +1,29 @@
+{
+  "scenario": "plan-mode-enter-exit",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Enter plan mode, draw up a short plan for adding a health-check endpoint to app.py, then exit plan mode presenting that plan for approval.",
+  "prompts": [
+    {
+      "text": "Enter plan mode, draw up a short plan for adding a health-check endpoint to app.py, then exit plan mode presenting that plan for approval.",
+      "resume": false
+    }
+  ],
+  "world": "plan-mode-enter-exit",
+  "cwd_init": null,
+  "vendor_session_id": "b1bacb4c-8af7-4f4b-ad6d-095b61b2ebc5",
+  "manual": null,
+  "expect": [
+    "tool:EnterPlanMode",
+    "tool:ExitPlanMode",
+    "attachment:plan_mode_exit",
+    "file:plan"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-plan-mode-enter-exit-MpqlvM-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:21:57.871Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

@@ -1,0 +1,67 @@
+// endpoint_read_history.proto — ReadHistory: one page of one agent's
+// durable history — the newest page, or an older one walking down from a
+// served pointer. The newest-page arm exists because StartTurn's page is the
+// MAIN agent's only: a subagent bubble's cold paint reads its first page
+// here, then follows with WatchAgent (passing the page's newest pointer as
+// known_through, which pins the tail to exactly after it).
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/history.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which agent's history, and where in it.
+message ReadHistoryRequest {
+  // WHOSE history. UNSET = the session's prompt thread, resolved by the
+  // shim; an unknown agent is a refusal.
+  optional conversation.v1.AgentId target = 1;
+  // This page's budget.
+  uint32 page_size = 2;
+  // Where this page begins. THE ARM IS THE POSITION.
+  oneof position {
+    // The newest page. The newest entry is the serving side's fact, never a
+    // value the caller supplies.
+    ReadHistoryFirst first = 3;
+    // Strictly OLDER than the entry this pointer names — a pointer served by
+    // a page's `more` arm or by a watched entry, echoed verbatim.
+    conversation.v1.HistoryPointer after = 4;
+  }
+}
+
+// Anchor at the newest entry.
+message ReadHistoryFirst {}
+
+// THE ARM IS THE OUTCOME.
+message ReadHistoryResponse {
+  oneof result {
+    ReadHistorySuccess success = 1;
+    ReadHistoryFailure failure = 2;
+  }
+}
+
+// The page. An EMPTY page with `floor` is a legitimate answer for an agent
+// with no history yet.
+message ReadHistorySuccess {
+  conversation.v1.HistoryPage page = 1;
+}
+
+// Not served. THE ARM IS WHY.
+message ReadHistoryFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // The addressed agent is not known.
+    ReadHistoryUnknownAgent unknown_agent = 2;
+    // The echoed pointer names a position the store no longer honors.
+    ReadHistoryStalePointer stale_pointer = 3;
+    // The store could not be reached.
+    ReadHistoryStoreUnavailable store_unavailable = 4;
+  }
+}
+message ReadHistoryUnknownAgent {}
+message ReadHistoryStalePointer {}
+message ReadHistoryStoreUnavailable {}

@@ -1,0 +1,1103 @@
+//go:build playtest
+
+package e2e
+
+import (
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/color"
+	"strconv"
+	"strings"
+	"testing"
+
+	frontendv1 "agentrepl/proto/frontend/v1"
+)
+
+// OWNER 3 of PLAYTEST-PLAN.md's partition: A7-A10 -- switch, priority,
+// close/reopen/kill, and copy.
+//
+// A.7 and A.9 are here; A.8 and A.10 are in
+// `playtest_03_priority_and_copy_test.go`, which is the same owner's second
+// file and shares this one's helpers.
+
+// ---------------------------------------------------------------------------
+// THE SHARED PANEL-FOLLOWS-THE-SELECTION ASSERTION
+// ---------------------------------------------------------------------------
+
+// awaitPanelFollows asserts that the PANEL IS SHOWING WS: the workspace's own
+// webview buffer is in a window, and so is its own composer.
+//
+// WHY THIS IS THE ASSERTION FOR "THE WEBVIEW SWAPPED". Each workspace owns a
+// webview buffer of its own (`agent-repl--frontend-webview-buffer-name`) and a
+// composer of its own (`agent-repl--input-buffer`), and the panel is one pair
+// of windows. So "the webview swapped content" and "the composer follows" are
+// the same claim asked of two buffers: the windows that were displaying the
+// OTHER workspace's pair are now displaying THIS one's. Reading which buffer a
+// window holds is the module's own answer to that; asking the page for its
+// name would ask the webapp a question Emacs already answered, and asking it
+// of a page that never swapped would have nothing to say.
+//
+// It also asserts the previous workspace's pair is GONE from the windows,
+// because "the panel shows A" and "the panel shows A and B at once" are
+// different facts and only the first is a swap.
+//
+// The bound is `emacsVerbBound` -- the layer's own named bound for one verb's
+// round trip, and a selection change is exactly that.
+func awaitPanelFollows(t *testing.T, s *playtestScenario, ws, gone string) {
+	t.Helper()
+	awaitPanelShown(t, s, ws)
+	awaitPanelHidden(t, s, gone)
+}
+
+// panelWindowsForm answers non-nil when WS's OWN panel pair -- its webview
+// buffer and its composer -- are BOTH in windows of the frame, and
+// panelGoneForm answers non-nil when NEITHER of them is.
+//
+// TWO FORMS, NOT ONE NEGATED. "Both shown" and "neither shown" are not each
+// other's complement: a frame carrying the webview but not the composer
+// satisfies the negation of the first while the panel is plainly still
+// half on the glass, and waiting on that negation would accept it. The
+// hidden claim has to be made in its own right or it is the weaker one.
+func panelWindowsForm(ws string) string {
+	return `(let ((shown (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))))
+             (and (member (agent-repl--frontend-webview-buffer-name ` + elispString(ws) + `) shown)
+                  (member (buffer-name (agent-repl--input-buffer ` + elispString(ws) + `)) shown)
+                  t))`
+}
+
+func panelGoneForm(ws string) string {
+	return `(let ((shown (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))))
+             (and (not (member (agent-repl--frontend-webview-buffer-name ` + elispString(ws) + `) shown))
+                  (not (member (buffer-name (agent-repl--input-buffer ` + elispString(ws) + `)) shown))
+                  t))`
+}
+
+// awaitPanelShown asserts that WS's panel is ON THE FRAME, not merely that
+// its buffers exist.
+//
+// WHY THIS IS A SEPARATE ASSERTION FROM THE ONES `openPanel` MAKES.
+// `openPanel` waits for the webview WIDGET to be live and for the PAGE to
+// have mounted, and both of those hold for a webview buffer that no window is
+// displaying: the widget belongs to the buffer, and WebKit runs the page
+// whether or not Emacs has laid that buffer out anywhere. So a panel that
+// opened and was then laid over -- by the magit status buffer a project
+// registration leaves on the frame, say -- satisfies every wait `openPanel`
+// makes while PHOTOGRAPHING as an editor with no webapp in it at all. That is
+// what this owner's first round of priority captures turned out to be
+// pictures of, and it went unnoticed precisely because no step asserted the
+// one fact those pictures were about.
+//
+// The bound is `emacsVerbBound`, the layer's own named bound for one verb's
+// round trip: opening a panel is one verb.
+func awaitPanelShown(t *testing.T, s *playtestScenario, ws string) {
+	t.Helper()
+	s.E.AwaitEvalFor(emacsVerbBound,
+		fmt.Sprintf("%q's own webview and composer buffers to be displayed in windows of the frame", ws),
+		panelWindowsForm(ws), func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+}
+
+// awaitPanelHidden asserts the frame is showing NEITHER of WS's panel
+// buffers -- not merely that it has stopped showing both of them.
+func awaitPanelHidden(t *testing.T, s *playtestScenario, ws string) {
+	t.Helper()
+	s.E.AwaitEvalFor(emacsVerbBound,
+		fmt.Sprintf("no window of the frame to be showing %q's webview or its composer", ws),
+		panelGoneForm(ws), func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+}
+
+// tablineDrawn answers the tab bar's rendered line as PLAIN TEXT.
+//
+// It reads `agent-repl-workspace-tabline-formatted` -- the function installed
+// in `tab-bar-format`, and therefore the one that drives the VISIBLE bar --
+// exactly the way `tabFaceFor` reads the faces off that same string. What it
+// answers is what the module WROTE for the bar, so an assertion made on it
+// beside a picture that disagrees splits the question cleanly: either the
+// string was already wrong before any redisplay was involved, or the string
+// was right and the glass never took it.
+func tablineDrawn(t *testing.T, s *playtestScenario) string {
+	t.Helper()
+	return s.E.EvalString(`(substring-no-properties (agent-repl-workspace-tabline-formatted))`)
+}
+
+// tablineAndNames reads the RENDERED line and the roster's own enumeration IN
+// ONE FORM, and answers them together.
+//
+// ONE FORM BECAUSE THEY ARE BEING COMPARED. Tab order is a transient by the
+// product's own design -- `agent-repl-roster-move-tab-to-back`'s docstring
+// says the next accepted roster push re-derives it from the daemon's walk --
+// so two evals could straddle a push and report an enumeration from before it
+// beside a line rendered after it. That disagreement would be the harness's
+// own race dressed up as a defect in the renderer, which is exactly the
+// reading a manifest must never invite.
+func tablineAndNames(t *testing.T, s *playtestScenario) (drawn string, names []string) {
+	t.Helper()
+	both := s.E.EvalStrings(`(cons (substring-no-properties (agent-repl-workspace-tabline-formatted))
+                                   (agent-repl--ws-tabline-names))`)
+	if len(both) < 1 {
+		t.Fatalf("reading the tabline and its names answered %v, want the rendered line and the names", both)
+	}
+	return both[0], both[1:]
+}
+
+// NO WIDER BOUND IS USED FOR A PUSH-DRIVEN WAIT, and that is a measurement
+// rather than a preference. Both of this owner's page waits that follow a
+// daemon round trip were once suspected of needing one; MEASURED once their
+// real causes were fixed, the sidebar's `current` row arrives in 22, 22 and
+// 23ms and the page-identity read answers in 21, 22 and 23ms, against
+// `playtestPageBound`'s 2s. A wider bound here would have bought nothing and
+// hidden both defects for another round.
+
+// trayText answers the daemon hold tray's own drawn text, whitespace
+// collapsed. It is read rather than asserted: what it is FOR is to put the
+// document's version of the tray into the manifest beside a picture of the
+// tray, so a reviewer who sees the two disagree is told so rather than left
+// to decide which one the product meant.
+func trayText(t *testing.T, s *playtestScenario) string {
+	t.Helper()
+	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
+	s.E.AwaitEvalFor(playtestPageBound, "the hold tray's own drawn text",
+		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+
+			elispString(`(document.querySelector('[data-component="hold-tray"]') || {}).innerText`)+`)`,
+		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
+	return strings.Join(strings.Fields(s.E.EvalString(
+		`(format "%s" agent-repl-playtest--js)`)), " ")
+}
+
+// awaitPageIsForWorkspace asserts that the page in the webview on the glass
+// is THIS workspace's page, read from inside the page itself.
+//
+// It is the DETERMINISTIC half of "the webview swapped", and it sits beside
+// `awaitPanelFollows` rather than replacing it. That one reads which buffer a
+// window holds, which is EMACS's answer; this asks the document, and the
+// document's own `?workspace=`/`&dir=` query is what the panel navigated it
+// with. A window swapped over a page that never navigated satisfies the first
+// and fails this one, and no daemon round trip stands between the two -- the
+// url is a fact the page carries from its first byte.
+func awaitPageIsForWorkspace(t *testing.T, s *playtestScenario, dir string) {
+	t.Helper()
+	s.awaitInPage(t, fmt.Sprintf("the page in the webview to be the one opened for %s", dir),
+		`decodeURIComponent(location.href).indexOf(`+jsString(dir)+`) !== -1`)
+}
+
+// awaitSidebarNamesCurrent asserts that the page in the webview now on the
+// glass says, IN ITS OWN WORDS, which workspace is selected: the sidebar's
+// roster row carrying `[data-current="true"]` names WS.
+//
+// This is the half `awaitPanelFollows` cannot answer. That one reads which
+// buffer a window holds, which is Emacs's answer; this reads what the WEBAPP
+// drew, which is the only thing that can say the content in the view is this
+// workspace's and not the previous one's. `[data-roster-row][data-current]`
+// is the webapp suite's own hook for exactly that (`webapp/src/sidebar/row.ts`).
+func awaitSidebarNamesCurrent(t *testing.T, s *playtestScenario, ws string) {
+	t.Helper()
+	s.awaitInPage(t, fmt.Sprintf("the sidebar's current roster row to name %q", ws),
+		`(function () { var row = document.querySelector('[data-roster-row][data-current="true"]');
+                        return row && row.textContent.indexOf(`+jsString(ws)+`) !== -1; })()`)
+}
+
+// enterWorkspace re-points the scenario at WS after a switch and opens the
+// panel on it, so every later page probe and every later submit acts on the
+// workspace the playbook is now standing on rather than on the one it started
+// from.
+//
+// THE PANEL OPEN IS NOT OPTIONAL HERE, and that is the module's own shape
+// rather than a convenience. A workspace's composer and webview buffers are
+// born when its PANEL is opened, not when it is registered or selected -- so a
+// freshly registered workspace and a just-re-opened one both have no composer
+// at all until this runs, and `awaitInputBuffer` on one of them waits for a
+// buffer nothing has yet created. `agent-repl-frontend-open-panel` is
+// idempotent, so a workspace whose panel is already up is merely re-entered,
+// and `openPanel`'s own waits then assert that this workspace's page is live
+// and mounted.
+//
+// AND THE PANEL IS ASSERTED ONTO THE FRAME, which `openPanel`'s waits do not
+// say -- see `awaitPanelShown`. Every one of this owner's captures is a
+// picture of an editor with the panel up, so the frame carrying it is a
+// precondition of the pictures rather than a detail of one step.
+func enterWorkspace(t *testing.T, s *playtestScenario, ws string) {
+	t.Helper()
+	// THE PANEL OPENS ON THE CURRENT WORKSPACE, so a caller that has not
+	// actually landed the selection would open a panel on some OTHER
+	// workspace and every later assertion would be about the wrong one. This
+	// is the guard for that, and it fails right here rather than downstream.
+	if got := s.E.EvalString(`(format "%s" (agent-repl--ws-current-name))`); got != ws {
+		t.Fatalf("the current workspace is %q, want %q: `agent-repl-frontend-open-panel` opens the "+
+			"CURRENT workspace's panel, so the selection must have landed first", got, ws)
+	}
+	s.Name = ws
+	s.openPanel(t)
+	awaitPanelShown(t, s, ws)
+}
+
+// ---------------------------------------------------------------------------
+// WHAT THE BAR DECIDED, WHAT IT WROTE, AND WHETHER IT CAN BE READ
+// ---------------------------------------------------------------------------
+
+// tabPaintSentence answers what the module DECIDED about WS's tab and what it then
+// WROTE for it, in ONE form, as a sentence a manifest can carry.
+//
+// WHY BOTH HALVES, AND WHY IN ONE FORM. A picture of the bar can disagree
+// with the manifest in two entirely different ways, and only these two reads
+// together say which: the DECISION is the roster arm, the display state that
+// drives the full-tab color, the bracket state that colors the `[N]` run when
+// the full color is suppressed, and the ready-view latch that is the one
+// thing which suppresses it for a `:ready` workspace the user has stood in;
+// what was WRITTEN is the face actually on that workspace's name run in the
+// line `tab-bar-format` renders. A face that follows the decision means the
+// string was right and the glass did not take it; a face that does not means
+// the string was already wrong. One form because the two would otherwise
+// straddle a roster push or a dwell tick and disagree for the harness's own
+// reasons -- the same rule `tablineAndNames` is written to.
+//
+// IT IS WHAT FOUND THIS OWNER'S ONE PRODUCT DEFECT. Two captures of this
+// playbook drew the same unselected tab in two different colors; this read
+// said the module had written the SAME face in both, which is what moved the
+// question off `status.el`'s string and onto the pair of colors that face
+// resolved to -- and that pair turned out not to exist at all.
+//
+// THE NAME MUST BE IN THE DRAWN LINE, and that is asserted here rather than
+// reported: a workspace on `agent-repl--ws-tabline-names` whose name the
+// rendered line does not carry is a bar that lost a tab, which is a defect in
+// `status.el` before any picture is taken.
+func tabPaintSentence(t *testing.T, s *playtestScenario, ws string) string {
+	t.Helper()
+	parts := s.E.EvalStrings(`(let* ((line (agent-repl-workspace-tabline-formatted))
+                                     (plain (substring-no-properties line))
+                                     (at (string-match (regexp-quote ` + elispString(ws) + `) plain)))
+                                (list (format "%s" (or at ""))
+                                      (format "%s" (agent-repl-roster-status-for-ws ` + elispString(ws) + `))
+                                      (format "%s" (agent-repl--ws-display-state ` + elispString(ws) + `))
+                                      (format "%s" (agent-repl--ws-bracket-state ` + elispString(ws) + `))
+                                      (format "%s" (and (agent-repl--ws-ready-view-acknowledged-p ` + elispString(ws) + `) t))
+                                      (format "%S" (and at (get-text-property at 'face line)))))`)
+	if len(parts) != 6 {
+		t.Fatalf("reading %q's tab paint answered %v, want the offset, the arm, the display state, "+
+			"the bracket state, the ready-view latch and the name face", ws, parts)
+	}
+	if parts[0] == "" {
+		t.Fatalf("the line `agent-repl-workspace-tabline-formatted` writes does not carry %q at all, "+
+			"while `agent-repl--ws-tabline-names` reports it: the bar lost a tab", ws)
+	}
+	return fmt.Sprintf("%q: arm %s, display-state %s, bracket-state %s, ready-view-acknowledged %s, "+
+		"and the face on its name run is %s", ws, parts[1], parts[2], parts[3], parts[4], parts[5])
+}
+
+// tabPaintSentences answers `tabPaintSentence` for every name on the bar, joined, so a
+// capture's assertion cell says what EVERY tab was decided and written as
+// rather than only the one the step moved.
+func tabPaintSentences(t *testing.T, s *playtestScenario, names []string) string {
+	t.Helper()
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		out = append(out, tabPaintSentence(t, s, name))
+	}
+	return strings.Join(out, "; ")
+}
+
+// barFaceColors answers the BACKGROUNDS the frame currently resolves the tab
+// bar's faces to, at the instant of a capture.
+//
+// WHY THIS SITS BESIDE `tabPaintSentence`. That one says which FACE the module wrote
+// on a tab's name run; this says what that face is worth on this frame right
+// now. A run where two captures carry the SAME face and DIFFERENT pixels is
+// otherwise unattributable, and this is the read that attributes it.
+func barFaceColors(t *testing.T, s *playtestScenario) string {
+	t.Helper()
+	parts := s.E.EvalStrings(`(list (format "%s" (face-background 'default nil t))
+                                    (format "%s" (face-background 'agent-repl-tab-unarmed nil t))
+                                    (format "%s" (face-foreground 'agent-repl-tab-unarmed nil t))
+                                    (format "%s" (face-background (agent-repl--ws-tab-selected-face) nil t))
+                                    (format "%s" (face-background 'tab-bar nil t)))`)
+	if len(parts) != 5 {
+		t.Fatalf("reading the bar's face colors answered %v, want default, the un-armed pair, the "+
+			"selected tab face and `tab-bar`", parts)
+	}
+	return fmt.Sprintf("`default` %s, the un-armed tab face %s on %s, the selected tab face %s, "+
+		"`tab-bar` %s", parts[0], parts[2], parts[1], parts[3], parts[4])
+}
+
+// assertHighlightFollowsSelection requires the tab the bar draws with the
+// SELECTION face to be the one `agent-repl--ws-current-name` names, and every
+// other tab not to carry it.
+//
+// WHY IT IS WORTH ASSERTING, given the panel assertions beside it. Those read
+// which buffer a window holds, which is where the selection LANDED; this
+// reads which tab the bar drew as selected, which is what the user is told
+// about it. The two can disagree -- a bar rendered from a stale render key
+// would keep the highlight where it was -- and only this one would notice.
+//
+// IT ALSO SETTLES A MISREADING THAT COST A ROUND. A `:ready` or `:done` tab
+// is painted `agent-repl--color-done-green' (`#1a7a1a`) across its whole
+// unselected entry, and the SELECTED tab is painted Doom's own selection face
+// (`#b4eeb4` on this frame). Both are green, so a picture with an armed
+// unselected tab beside the selected one reads at a glance as two highlights,
+// and was filed as "the highlight follows the arm rather than the selection".
+// Measured off those very pixels it did not: the selection face sat on the
+// current workspace's tab throughout. An assertion on the FACE says which tab
+// the bar called selected without anyone having to tell two greens apart.
+func assertHighlightFollowsSelection(t *testing.T, s *playtestScenario, after string) {
+	t.Helper()
+	current := s.E.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
+	names := s.tabNames()
+	for _, name := range names {
+		selected := s.E.EvalBool(`(let* ((line (agent-repl-workspace-tabline-formatted))
+                                        (plain (substring-no-properties line))
+                                        (at (string-match (regexp-quote ` + elispString(name) + `) plain)))
+                                   (unless at (error "the drawn tabline does not carry %s" ` + elispString(name) + `))
+                                   (and (eq (get-text-property at 'face line)
+                                            (agent-repl--ws-tab-selected-face))
+                                        t))`)
+		if want := name == current; selected != want {
+			t.Fatalf("after %s the bar draws %q with selected=%v, want %v: "+
+				"`agent-repl--ws-current-name` is %q and the tab bar's selection face belongs to that "+
+				"tab and to no other. The bar drew %v.", after, name, selected, want, current, names)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE BAR MUST BE READABLE, AND THAT IS READ OFF THE PICTURE
+// ---------------------------------------------------------------------------
+
+// assertTabBarLegible requires the un-armed tab's STATED pair of colors --
+// `agent-repl-tab-unarmed`'s own foreground and background -- to clear
+// `agent-repl-tab-contrast-floor` by the module's own arithmetic, and to
+// actually be the colors on the glass in the picture just taken.
+//
+// WHY THE ASSERTION IS SHAPED THIS WAY. The defect it exists for was not a
+// pair that was too close together; it was NO PAIR AT ALL. An un-armed tab
+// left both halves `unspecified` and inherited them from the frame, so there
+// was nothing for an ERT test to check and the two colors came into being
+// only when a frame resolved them -- to black glyphs on `#14141a` (1.06:1)
+// with a white numeral on the tab bar's own `#d9d9d9` (1.3:1). Both numbers
+// existed only on the glass.
+//
+// So this asks the two questions that together close that hole, and neither
+// of them alone does:
+//
+//   - IS THE PAIR READABLE? Asked of `agent-repl-color-contrast-ratio`, the
+//     module's own answer, against the module's own floor. Nothing is
+//     restated here, so this cannot drift from what `lisp/test-status.el`
+//     holds the palette to.
+//   - DID THAT PAIR REACH THE GLASS? The stated background must cover a
+//     tab-sized field of the tab-bar band, and the stated foreground must be
+//     drawn on it. A face whose colors are right and whose pixels are some
+//     other pair is the display failing to take a string that was correct,
+//     which is the OTHER half of the split `tabPaintSentence` sets up.
+//
+// IT IS NOT A HEURISTIC OVER GLYPH PIXELS, and that was tried first: reading
+// the "best contrast any ink achieves on each ground" catches the defect, but
+// it also reads the anti-aliased fringe around a tab's edge, where the answer
+// is a fraction of a ratio away from the floor and depends on where a glyph
+// happens to land. An assertion that can be pushed over by font hinting is a
+// flake waiting to be re-run, and a re-run is not a strategy. Exact colors
+// over a tab-sized area are decided by the palette, not by the rasterizer.
+func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, capture string) {
+	t.Helper()
+	// THERE HAS TO BE AN UN-ARMED TAB TO READ. A bar whose every tab is the
+	// selected one draws none of this pair -- the selected tab takes Doom's
+	// own selection face, which is not this module's palette -- so there is
+	// nothing here to be right or wrong about. It is SAID rather than passed
+	// over quietly: a check that silently stopped applying is how a suite
+	// comes to assert nothing while still going green.
+	names, current := s.tabNames(), s.E.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
+	unselected := 0
+	for _, name := range names {
+		if name != current {
+			unselected++
+		}
+	}
+	if unselected == 0 {
+		t.Logf("capture %s: the bar carries %d tab(s), all selected (%q), so it draws no un-armed tab "+
+			"and this legibility check has nothing to read", capture, len(names), current)
+		return
+	}
+	// EVERY NUMBER HERE IS THE MODULE'S. The pair, the ratio it makes and the
+	// floor it is held to all come back from Emacs; this file supplies only
+	// the picture.
+	answer := s.E.EvalStrings(`(let* ((hex (lambda (c)
+                                            (apply #'format "#%02x%02x%02x"
+                                                   (mapcar (lambda (v) (/ v 256)) (color-values c)))))
+                                     (fg (face-foreground 'agent-repl-tab-unarmed nil t))
+                                     (bg (face-background 'agent-repl-tab-unarmed nil t)))
+                                (list (funcall hex fg)
+                                      (funcall hex bg)
+                                      (format "%.4f" (agent-repl-color-contrast-ratio fg bg))
+                                      (format "%s" agent-repl-tab-contrast-floor)))`)
+	if len(answer) != 4 {
+		t.Fatalf("capture %s: reading the un-armed pair answered %v, want its foreground, its "+
+			"background, their ratio and the floor", capture, answer)
+	}
+	fg, bg := mustParseHexColor(t, answer[0]), mustParseHexColor(t, answer[1])
+	ratio, err := strconv.ParseFloat(answer[2], 64)
+	if err != nil {
+		t.Fatalf("capture %s: `agent-repl-color-contrast-ratio` answered %q, which is not a ratio: %v",
+			capture, answer[2], err)
+	}
+	floor, err := strconv.ParseFloat(answer[3], 64)
+	if err != nil {
+		t.Fatalf("capture %s: `agent-repl-tab-contrast-floor` reads %q, which is not a ratio: %v",
+			capture, answer[3], err)
+	}
+	if ratio < floor {
+		t.Fatalf("capture %s: the un-armed tab's own pair, %s on %s, is %.2f:1 -- under the %.2f:1 "+
+			"floor `agent-repl-tab-contrast-floor` states. Every appearance in "+
+			"`agent-repl--tab-palette` states a foreground legible against its background.",
+			capture, answer[0], answer[1], ratio, floor)
+	}
+
+	band := s.E.EvalInt(`(tab-bar-height nil t)`)
+	if band <= 0 {
+		t.Fatalf("capture %s: `tab-bar-height` answers %d pixels, so there is no tab bar to read",
+			capture, band)
+	}
+	if band > img.Bounds().Dy() {
+		band = img.Bounds().Dy()
+	}
+
+	field, ink := 0, 0
+	for y := 0; y < band; y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			switch pixelAt(img, x, y) {
+			case bg:
+				field++
+			case fg:
+				// INK ONLY WHERE IT SITS ON THAT GROUND. The same foreground
+				// is drawn elsewhere on the bar, so a count of the color
+				// alone would not say the un-armed TAB carried any text.
+				//
+				// THE NEAREST GROUND ALONG THE ROW, not the pixel next door:
+				// a glyph's stroke is separated from the ground it sits on by
+				// the rasterizer's own blend, so the two exact colors are
+				// almost never neighbours. What decides which tab a stroke
+				// belongs to is which tab's ground it is standing in.
+				if nearestGroundIs(img, x, y, bg, fg) {
+					ink++
+				}
+			}
+		}
+	}
+	if field < playtestTabBarFieldArea {
+		t.Errorf("capture %s: the un-armed tab's stated background %s covers %d pixels of the "+
+			"%d-pixel tab bar band, want at least %d. The module says an un-armed tab is drawn in "+
+			"that color, and the glass says it is not: the string was right and the display did "+
+			"not take it.", capture, answer[1], field, band, playtestTabBarFieldArea)
+	}
+	if ink == 0 {
+		t.Errorf("capture %s: not one pixel of the un-armed tab's stated foreground %s is drawn on "+
+			"its stated background %s, so the tab carries no readable text at all in this picture",
+			capture, answer[0], answer[1])
+	}
+}
+
+// nearestGroundIs answers whether the ground the pixel at X,Y stands in is
+// BG: scanning left and right along the row, the first pixel that is either
+// GROUND or some other flat color -- anything that is not the blend between
+// the two -- is BG on at least one side.
+//
+// Scanning rather than reading the neighbour is what makes this robust to
+// anti-aliasing, which is the whole difficulty: a white stroke on a grey
+// ground has two or three blended pixels between the two exact colors, so
+// "is the pixel next door the ground?" answers no for every glyph ever
+// drawn.
+func nearestGroundIs(img *image.RGBA, x, y int, bg, fg color.RGBA) bool {
+	for _, dir := range []int{-1, 1} {
+		for k := 1; k <= playtestGlyphBlendReach; k++ {
+			n := x + dir*k
+			if n < 0 || n >= img.Bounds().Dx() {
+				break
+			}
+			c := pixelAt(img, n, y)
+			if c == fg {
+				continue
+			}
+			if c == bg {
+				return true
+			}
+			// Some other flat color: the stroke is standing somewhere else.
+			if c != bg && isFlatNeighbourhood(img, n, y) {
+				break
+			}
+		}
+	}
+	return false
+}
+
+// isFlatNeighbourhood answers whether the pixel at X,Y is the same color as
+// the one beside it, which is what separates a GROUND from the one-to-three
+// pixel gradient a rasterizer lays between a stroke and its ground.
+func isFlatNeighbourhood(img *image.RGBA, x, y int) bool {
+	c := pixelAt(img, x, y)
+	for _, dir := range []int{-1, 1} {
+		n := x + dir
+		if n >= 0 && n < img.Bounds().Dx() && pixelAt(img, n, y) == c {
+			return true
+		}
+	}
+	return false
+}
+
+// playtestGlyphBlendReach is how far along a row the search for the ground a
+// stroke stands on may travel.
+//
+// MEASURED: the widest blend between a glyph stroke and its ground in these
+// captures is 3 pixels, and the narrowest gap between two glyph strokes is 2.
+// 12 clears both by a wide margin while staying far inside a tab, whose
+// narrowest is over 90 pixels.
+const playtestGlyphBlendReach = 12
+
+// playtestTabBarFieldArea is how many pixels of the tab-bar band the un-armed
+// tab's own background must cover before the tab counts as DRAWN.
+//
+// MEASURED, not chosen: on this frame one tab of a two-tab bar covers about
+// 1,500 pixels of the band, and the largest run of glyph ink covers under
+// 300. 600 sits between the two populations by more than a factor of two on
+// either side, so it separates them rather than cutting through one.
+const playtestTabBarFieldArea = 600
+
+// pixelAt answers the picture's color at one point, alpha discarded, so two
+// colors compare as values.
+func pixelAt(img *image.RGBA, x, y int) color.RGBA {
+	r, g, b, _ := img.At(x, y).RGBA()
+	return color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), 0xff}
+}
+
+// mustParseHexColor turns Emacs's `#rrggbb` into a comparable color, and
+// fails the test on anything else rather than defaulting to a color that
+// would silently match nothing.
+func mustParseHexColor(t *testing.T, hex string) color.RGBA {
+	t.Helper()
+	var r, g, b uint8
+	if n, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b); n != 3 || err != nil {
+		t.Fatalf("the color %q is not #rrggbb (read %d fields: %v)", hex, n, err)
+	}
+	return color.RGBA{r, g, b, 0xff}
+}
+
+// ---------------------------------------------------------------------------
+// A.7 -- SWITCH
+// ---------------------------------------------------------------------------
+
+// TestPlaytestSwitchBetweenWorkspaces is plan A.7: a second workspace, the
+// selection moving between the two, and the webview, the composer and the tab
+// bar all following it.
+//
+// BOTH VERBS ARE DRIVEN, because they are two different acts.
+// `agent-repl-switch-to-project` (`SPC p p`) is a switch to a NAMED project
+// root, and `agent-repl-open-most-recent-workspace` (`SPC TAB R`) is a switch
+// to whichever workspace the ROSTER'S OWN when-column says was looked at last.
+// A playbook that drove only the first would never touch the roster-ordered
+// path at all.
+func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "03-switch",
+		"Plan A.7. Two workspaces on the tab bar, and the selection -- the tab bar's highlight, "+
+			"the panel's webview and the composer -- moving between them.")
+	p, e := s.Book, s.E
+
+	first := s.repoAt(t, "repo-first")
+	firstName := s.register(t, first.Dir)
+	s.openPanel(t)
+	awaitPanelShown(t, s, firstName)
+	p.note("the first repository registered and its panel opened",
+		"the composer buffer exists, the webapp drew its footer against this daemon, and the "+
+			"panel's own webview and composer windows are on the frame")
+
+	second := s.repoAt(t, "repo-second")
+	secondName := s.register(t, second.Dir)
+	// Registering SELECTS, which is one of Emacs's only two inputs to the
+	// roster, so the assertion is on the module's own current-workspace
+	// accessor rather than on anything drawn.
+	e.AwaitEval("the second workspace to become the selected one",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == secondName })
+	// The panel is opened on the newly selected workspace, so the swap
+	// assertions below have two live pairs of buffers to move between rather
+	// than one pair and a hole.
+	enterWorkspace(t, s, secondName)
+	awaitPanelFollows(t, s, secondName, firstName)
+	awaitPageIsForWorkspace(t, s, second.Dir)
+	awaitSidebarNamesCurrent(t, s, secondName)
+	names := s.tabNames()
+	if len(names) != 2 {
+		t.Fatalf("the tab bar draws %v, want both workspaces", names)
+	}
+	assertHighlightFollowsSelection(t, s, "registering the second workspace")
+	twoTabsShot := p.capture("two-tabs", "a second repository registered through the same verb, and its panel opened",
+		fmt.Sprintf("`agent-repl--ws-tabline-names` is %v, `agent-repl--ws-current-name` is %q, and the "+
+			"panel's windows hold %q's own webview and composer buffers and NOT %q's, and that page's "+
+			"sidebar draws %q's row as the current one. The bar wrote %s, on a frame resolving %s, and "+
+			"every run of text it draws clears `agent-repl-tab-contrast-floor` in the picture itself",
+			names, secondName, secondName, firstName, secondName,
+			tabPaintSentences(t, s, names), barFaceColors(t, s)),
+		fmt.Sprintf("The tab bar must carry TWO workspace tabs, %q and %q, in that order, and the "+
+			"SECOND must be the highlighted one — registering selects it.", names[0], names[1]))
+	// AND THE BAR IS READABLE IN THE PICTURE THAT WAS JUST TAKEN.
+	assertTabBarLegible(t, s, twoTabsShot, "two-tabs")
+
+	// `agent-repl-switch-to-project` takes a PROJECT ROOT PATH, not a
+	// workspace name -- its own docstring says so -- and taking the target as
+	// an argument is why the picker is neither the subject nor stubbed. The
+	// binding is asserted first, because `SPC p p` with no argument would
+	// prompt and a press would wedge the command loop.
+	if want, got := "agent-repl-switch-to-project", e.LeaderBinding("p p"); got != want {
+		t.Fatalf("SPC p p resolves to %q, want %q", got, want)
+	}
+	e.Eval(`(agent-repl-switch-to-project ` + elispString(first.Dir) + `)`)
+	e.AwaitEval("the first workspace to become the selected one again",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == firstName })
+	// AND THE PAGE IN THAT WEBVIEW IS THE ONE THAT BELONGS TO IT. The webview
+	// buffer being displayed says Emacs swapped the window; the page's own
+	// mount says the thing now on the glass is a live webapp rather than the
+	// husk of a view that was torn down -- and `enterWorkspace` asserts that
+	// mount for the workspace it re-points the scenario at.
+	enterWorkspace(t, s, firstName)
+	awaitPanelFollows(t, s, firstName, secondName)
+	awaitPageIsForWorkspace(t, s, first.Dir)
+	awaitSidebarNamesCurrent(t, s, firstName)
+	assertHighlightFollowsSelection(t, s, "`agent-repl-switch-to-project`")
+	switchedBackShot := p.capture("switched-back", "`agent-repl-switch-to-project` back to the first workspace",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the panel's windows now hold %q's own webview "+
+			"and composer and NOT %q's, that webview's page is mounted (its feed host is drawn and its "+
+			"footer carries a status word), and that page's sidebar draws %q's row as the current one. "+
+			"The bar wrote %s, on a frame resolving %s, and every run of text it draws clears the floor "+
+			"in the picture itself",
+			firstName, firstName, secondName, firstName,
+			tabPaintSentences(t, s, names), barFaceColors(t, s)),
+		fmt.Sprintf("The SAME two tabs in the SAME order, with the highlight moved back to %q. "+
+			"The selection moved; the roster did not.", firstName))
+	// AND THE BAR IS READABLE IN THE PICTURE THAT WAS JUST TAKEN.
+	assertTabBarLegible(t, s, switchedBackShot, "switched-back")
+
+	// `SPC TAB R` takes NO argument -- it picks from the roster's when-column
+	// -- so it is PRESSED: real keymap lookup, real command. With two
+	// workspaces and the first one selected, the only candidate is the second.
+	if want, got := "agent-repl-open-most-recent-workspace", e.LeaderBinding("TAB R"); got != want {
+		t.Fatalf("SPC TAB R resolves to %q, want %q", got, want)
+	}
+	e.Leader("TAB R")
+	e.AwaitEval("`SPC TAB R` to land on the other workspace",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == secondName })
+	enterWorkspace(t, s, secondName)
+	awaitPanelFollows(t, s, secondName, firstName)
+	awaitPageIsForWorkspace(t, s, second.Dir)
+	awaitSidebarNamesCurrent(t, s, secondName)
+	assertHighlightFollowsSelection(t, s, "`SPC TAB R`")
+	switchedMostRecentShot := p.capture("switched-most-recent", "`SPC TAB R` (`agent-repl-open-most-recent-workspace`) pressed",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the panel's windows hold %q's own webview and "+
+			"composer and NOT %q's, that webview's page is mounted, and that page's sidebar draws %q's "+
+			"row as the current one. The bar wrote %s, on a frame resolving %s, and every run of text it "+
+			"draws clears the floor in the picture itself",
+			secondName, secondName, firstName, secondName,
+			tabPaintSentences(t, s, names), barFaceColors(t, s)),
+		fmt.Sprintf("The SAME two tabs in the SAME order once more, with the highlight back on %q. "+
+			"`SPC TAB R` walks the roster's when-column, so it lands on the OTHER workspace and the bar "+
+			"looks exactly as it did in the first capture.", secondName))
+	// AND THE BAR IS READABLE IN THE PICTURE THAT WAS JUST TAKEN.
+	assertTabBarLegible(t, s, switchedMostRecentShot, "switched-most-recent")
+}
+
+// ---------------------------------------------------------------------------
+// A.9 -- CLOSE, RE-OPEN, CLOSE WITH A HELD PROMPT, KILL
+// ---------------------------------------------------------------------------
+
+// TestPlaytestCloseAndKillLeaveTheEditorAnswering is plan A.9's close and
+// kill, and it is deliberately FUNCTIONAL-ONLY: what it proves is that the
+// tab goes away, the daemon still holds the session after a close, and Emacs
+// is still answering afterwards. None of that is a picture.
+//
+// The heartbeat is the real assertion behind the last of those, and it is
+// armed for the whole life of the process: this is the sentinel/kill-buffer
+// recursion, which manifests only as an editor that stops answering.
+func TestPlaytestCloseAndKillLeaveTheEditorAnswering(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "03-close-and-kill",
+		"Plan A.9. Close is a view act and kill never blocks, and neither wedges the editor. "+
+			"FUNCTIONAL ONLY: nothing here has a visual subject, so nothing is captured.")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	s.openPanel(t)
+	awaitPanelShown(t, s, name)
+	p.note("one repository registered with its panel open",
+		"the panel's webview is live, the webapp drew its footer, and the panel's own webview and "+
+			"composer windows are on the frame")
+
+	// `SPC j d` takes the CURRENT workspace, so it is PRESSED: real keymap
+	// lookup, real command.
+	e.Leader("j d")
+	e.AwaitEval("the closed workspace's tab to be gone",
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), name) })
+	p.note("`SPC j d` pressed to close the workspace",
+		"the name is gone from `agent-repl--ws-tabline-names`")
+
+	// CLOSE IS A VIEW ACT BY CONTRACT, so the only way to say the daemon still
+	// holds the workspace is to ask the daemon -- at the address Emacs's own
+	// launcher published.
+	awaitDaemonRoster(t, e.DaemonAddr(), emacsVerbBound,
+		"the daemon to still hold the closed workspace",
+		func(r *frontendv1.WorkspaceRoster) bool { return len(r.GetRepository().GetSections()) > 0 })
+	p.note("the daemon asked for its own roster at the address the launcher published",
+		"the daemon still carries the workspace: closing is a VIEW act and destroys nothing")
+
+	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after the close and kill",
+		`(and (emacs-pid) t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	p.note("Emacs probed for liveness after the close",
+		"the command loop still answers, and the heartbeat has not missed for the whole run")
+}
+
+// TestPlaytestClosingATabLandsOnALivePanel is plan A.9's close in the
+// configuration the close above cannot reach: one where a workspace SURVIVES
+// it.
+//
+// WHAT THE CLOSE ABOVE CANNOT SAY. It registers one workspace and closes it,
+// so nothing survives and there is nowhere to land -- which is a real case,
+// and it is the one where a bare frame is correct. The case a user is
+// actually in is the other one: they close a tab and are moved to another
+// workspace, and what they must arrive at is that workspace.
+//
+// THE DEFECT THIS WAS WRITTEN FOR. Landing switched the perspective and
+// stopped there, so the frame restored whatever window configuration
+// persp-mode had saved for the survivor -- and for a workspace nobody had
+// stood in since its panel was pre-created, that was nothing. The frame came
+// up EMPTY: one window, no buffer content, not even a mode line, with only
+// the tab bar to say anything had happened. Photographed by owner 5 after a
+// merged child's teardown, and indistinguishable from a wedged editor.
+//
+// THE ASSERTIONS ARE THE ONES THE REST OF THIS FILE ALREADY MAKES, plus the
+// one that names the emptiness: `awaitPanelShown` says the survivor's own
+// webview and composer are in windows of the frame, and the selected window
+// is required to be showing one of them. A frame with a single window holding
+// something else is exactly the picture that was filed.
+func TestPlaytestClosingATabLandsOnALivePanel(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "03-close-lands",
+		"Plan A.9's close WITH A SURVIVOR. Closing a tab moves the user to another workspace, and "+
+			"what they arrive at is that workspace's panel -- never a bare frame.")
+	p, e := s.Book, s.E
+
+	survivor := s.repoAt(t, "repo-survivor")
+	survivorName := s.register(t, survivor.Dir)
+	s.openPanel(t)
+	awaitPanelShown(t, s, survivorName)
+
+	// THE ONE THAT WILL BE CLOSED IS REGISTERED SECOND, so it is the selected
+	// workspace and closing it is closing the tab the user is standing in --
+	// which is the configuration that has somewhere to land FROM.
+	doomed := s.repoAt(t, "repo-doomed")
+	doomedName := s.register(t, doomed.Dir)
+	e.AwaitEval("the second workspace to become the selected one",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == doomedName })
+	enterWorkspace(t, s, doomedName)
+	p.note("two repositories registered, the second one selected with its panel open",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q and its own webview and composer windows "+
+			"are on the frame", doomedName))
+
+	e.Leader("j d")
+	e.AwaitEval("the closed workspace's tab to be gone",
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), doomedName) })
+	// THE LANDING IS ASSERTED AS A LANDING, not as the absence of the closed
+	// workspace: the user has to be somewhere, and where is the whole point.
+	e.AwaitEval("the surviving workspace to be the one the user landed on",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == survivorName })
+	s.Name = survivorName
+
+	// AND THE LANDING HAS SOMETHING ON IT.
+	awaitPanelShown(t, s, survivorName)
+	e.AwaitEvalFor(emacsVerbBound,
+		fmt.Sprintf("the selected window to be showing one of %q's own panel buffers", survivorName),
+		`(let ((shown (buffer-name (window-buffer (selected-window)))))
+           (and (member shown
+                        (list (agent-repl--frontend-webview-buffer-name `+elispString(survivorName)+`)
+                              (buffer-name (agent-repl--input-buffer `+elispString(survivorName)+`))))
+                t))`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	p.note("`SPC j d` pressed on the selected tab, with one workspace left behind it",
+		fmt.Sprintf("the tab is gone, `agent-repl--ws-current-name` is %q, its own webview and "+
+			"composer are in windows of the frame, and the SELECTED window is showing one of "+
+			"them -- the frame is not bare", survivorName))
+
+	landedShot := p.capture("landed-on-the-survivor", "`SPC j d` pressed on the selected tab",
+		fmt.Sprintf("the closed tab is gone from `agent-repl--ws-tabline-names`, "+
+			"`agent-repl--ws-current-name` is %q, %q's own webview and composer buffers are both in "+
+			"windows of the frame, and the selected window holds one of them. The bar wrote %s",
+			survivorName, survivorName, tabPaintSentences(t, s, s.tabNames())),
+		fmt.Sprintf("The tab bar carries ONE tab, %q, and it is highlighted. The main area shows that "+
+			"workspace's WEBAPP with its composer beneath it — a sidebar, a hold tray and a footer, and "+
+			"a mode line under them. What this picture must NOT be is an empty frame: a single blank "+
+			"window with no buffer content and no mode line, with only the tab bar drawn, is the defect "+
+			"this step exists for.", survivorName))
+	assertTabBarLegible(t, s, landedShot, "landed-on-the-survivor")
+
+	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after the landing",
+		`(and (emacs-pid) t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	p.note("Emacs probed for liveness after the close and the landing",
+		"the command loop still answers, and the heartbeat has not missed for the whole run")
+}
+
+// TestPlaytestReopenAClosedWorkspace is plan A.9's re-open: `SPC TAB o`
+// (`agent-repl-open-workspace`), the tab coming back, and the panel with it.
+//
+// THE RE-OPEN IS A REQUEST TO THE DAEMON, not an editor-local switch --
+// `agent-repl-switch-to-project`'s own docstring says so and refuses to offer
+// a closed workspace. So the assertion that it worked is the TAB RETURNING,
+// which only a roster push can produce: Emacs cannot put that tab back by
+// itself.
+//
+// The verb picks from the roster's closed rows through `completing-read`, so
+// the pick is stubbed FOR THE DURATION OF THE ONE CALL, the way this layer
+// stubs every interactive pick. The stub asserts the offered candidates
+// CONTAIN the closed workspace rather than answering blindly: a picker that
+// was offered nothing would otherwise be answered with a name it never had.
+func TestPlaytestReopenAClosedWorkspace(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "03-reopen",
+		"Plan A.9's re-open. A closed workspace brought back through `SPC TAB o`, and the tab, "+
+			"the panel and the composer that come back with it.")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	s.openPanel(t)
+	awaitPanelShown(t, s, name)
+	p.note("one repository registered with its panel open",
+		"the panel's webview is live, the webapp drew its footer, and the panel's own webview and "+
+			"composer windows are on the frame")
+
+	e.Leader("j d")
+	e.AwaitEval("the closed workspace's tab to be gone",
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), name) })
+	// The roster must actually be OFFERING the closed row before the pick is
+	// answered, or the stub below would answer a picker that had nothing in
+	// it and the verb would fail on its own `user-error` instead.
+	e.AwaitEval("the roster to list the closed workspace as re-openable",
+		`(mapcar (lambda (row) (format "%s" (agent-repl-verbs--row-name row)))
+                 (agent-repl-verbs--closed-rows))`,
+		func(raw json.RawMessage) bool { return containsString(decodeStrings(raw), name) })
+	p.note("`SPC j d` pressed to close the workspace",
+		fmt.Sprintf("the tab is gone from `agent-repl--ws-tabline-names` and "+
+			"`agent-repl-verbs--closed-rows` now offers %q as re-openable", name))
+
+	if want, got := "agent-repl-open-workspace", e.LeaderBinding("TAB o"); got != want {
+		t.Fatalf("SPC TAB o resolves to %q, want %q", got, want)
+	}
+	e.Eval(`(cl-letf (((symbol-function 'completing-read)
+                        (lambda (_prompt candidates &rest _)
+                          (unless (member ` + elispString(name) + ` candidates)
+                            (error "the open picker offered %S, not the closed workspace" candidates))
+                          ` + elispString(name) + `)))
+               (agent-repl-open-workspace)
+               t)`)
+
+	// THE TAB COMES BACK ONLY THROUGH A ROSTER PUSH, which is what makes this
+	// an assertion about the daemon having re-opened the workspace rather
+	// than about Emacs having drawn something.
+	e.AwaitEval("the re-opened workspace's tab to return",
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return containsString(decodeStrings(raw), name) })
+	// AND THE TAB CARRIES THE DAEMON-MINTED REF, which is the tab's identity:
+	// a name back on the bar without one would be a husk that no verb could
+	// address, and the panel open below is the first thing that would need it.
+	e.AwaitEval("the re-opened workspace's tab to carry its daemon-minted ref",
+		`(plist-get (agent-repl--ws-get `+elispString(name)+` :ref) :id)`,
+		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
+
+	// RE-OPENING DOES NOT SELECT, and that is the verb's own contract rather
+	// than a gap: `agent-repl-verb-open`'s docstring says the tab arrives
+	// through the roster push, and the close left the editor standing on
+	// Doom's own `main` perspective. So the switch onto the revived workspace
+	// is a SEPARATE user act.
+	//
+	// IT IS THE PICKER ARM OF `SPC p p`, not the project-path arm A.7 drives.
+	// `agent-repl-switch-to-project` with no argument completes over
+	// `agent-repl--live-ws-names` -- the roster's own live workspaces -- and
+	// switches to the chosen one, which is exactly the question here: the
+	// revived workspace is live again, so it must be on offer. The path arm
+	// goes through projectile's own project switch, which is a different
+	// mechanism and one the close's perspective teardown leaves nothing for.
+	e.Eval(`(cl-letf (((symbol-function 'completing-read)
+                        (lambda (_prompt candidates &rest _)
+                          (unless (member ` + elispString(name) + ` candidates)
+                            (error "the switch picker offered %S, not the re-opened workspace" candidates))
+                          ` + elispString(name) + `)))
+               (agent-repl-switch-to-project)
+               t)`)
+	e.AwaitEval("the re-opened workspace to become the selected one",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == name })
+	enterWorkspace(t, s, name)
+	p.capture("reopened-tab", "`SPC TAB o` (`agent-repl-open-workspace`) answered with the closed workspace, then `SPC p p` picked back onto it",
+		fmt.Sprintf("`agent-repl--ws-tabline-names` carries %q again and its tab carries the "+
+			"daemon-minted ref -- which only a roster push can do -- and its panel re-opened with a "+
+			"live webview and a mounted page", name),
+		fmt.Sprintf("The tab bar carries the workspace tab %q once more, exactly as it did before the "+
+			"close: a re-opened workspace is the same workspace and not a new one.", name))
+}
+
+// TestPlaytestCloseWithAHeldPromptKeepsTheTab is plan A.9's third act: a
+// prompt held against a live turn, a close that must therefore be REFUSED,
+// and the tab that stays.
+//
+// WHAT EMACS OWES HERE IS PRECISELY TO NOT ACT. The refusal is echo-area text
+// by contract rather than a dialog, so the assertions are negative on both
+// sides: the tab is still drawn and the held prompt is still in
+// `agent-repl--prompt-queue`. Undelivered user intent may never be silently
+// discarded, and only the second half says so.
+//
+// THE HELD PROMPT IS EMACS'S OWN QUEUE, not the daemon's hold tray. The two
+// are different surfaces: `agent-repl--prompt-queue` is what the close
+// consults and refuses on, and the webapp's `[data-component="hold-tray"]`
+// draws the DAEMON's held items, which an Emacs-side deferred prompt never
+// enters (`lisp/prompt-queue.el` delivers it on the finish edge, from Emacs).
+// The tray is plan C.20's subject and owner 7's; asserting it here would
+// assert the wrong mechanism's state about this step.
+func TestPlaytestCloseWithAHeldPromptKeepsTheTab(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "03-held-close",
+		"Plan A.9's held-prompt close. A prompt held against a live turn makes the close a REFUSAL, "+
+			"and the tab stays on the bar. Kill then takes it, and never blocks.")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	s.openPanel(t)
+	awaitPanelShown(t, s, name)
+
+	// The turn is parked with the fake SDK's `!hold` scenario so the close is
+	// genuinely refused rather than merely slow: the held prompt is queued
+	// against a turn that is actually in flight.
+	s.submit(t, holdScenario)
+	// A RUNNING ARM IS NOT YET A RUNNING TURN, and this step's whole premise
+	// is the turn. `:submitting` is a running arm and it is ALSO what a prompt
+	// that has not reached a session yet reads as: measured on the first round
+	// of this capture, the arm await was satisfied while the `!hold` prompt was
+	// still sitting in the DAEMON's hold tray drawn as "queued -- classifying /
+	// held until the session is up", with the footer reading "idle / ready".
+	// The close would then have been refused against a queued prompt rather
+	// than against work in flight, which is a different fact from the one the
+	// plan's line names.
+	//
+	// So the premise is asserted on the two surfaces that can only be in this
+	// state once the session HAS the turn: the daemon's own tray is empty
+	// again -- `.hold-tray-empty[data-empty]` is how `webapp/src/tray/tray.ts`
+	// spells "nothing held" -- and the prompt has been drawn as a feed row of
+	// the session's own turn.
+	// The bound is `emacsTurnBound`, not the page's redraw bound: what is
+	// being waited for is a fake-SDK turn reaching a state, which is the shape
+	// of work that constant is sized for -- the daemon and shim plumbing plus
+	// the session's own start, with no model call in it.
+	s.awaitInPageFor(t, emacsTurnBound,
+		"the daemon's hold tray to be empty again, so the prompt is no longer queued behind a booting session",
+		`document.querySelector('[data-component="hold-tray"] .hold-tray-empty[data-empty]') !== null`)
+	s.awaitInPageFor(t, emacsTurnBound,
+		"the submitted prompt to be drawn as a row of the session's own turn",
+		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"]') !== null`)
+	arm := s.awaitArm(t, name, "the held turn to be in flight before anything is queued", emGHIRunningArms...)
+	p.note("`!hold` submitted, parking a turn that will not conclude",
+		fmt.Sprintf("the daemon's hold tray is EMPTY and the prompt is drawn as a feed row, so the "+
+			"session has the turn rather than the prompt being queued ahead of one, and the "+
+			"workspace's roster arm is %s -- one of the module's own RUNNING arms", arm))
+
+	// The deferred prompt goes in through its own ordinary command, PRESSED
+	// in the composer where a user would press it.
+	typeIntoComposer(e, s.Input, "the deferred prompt for the playtest")
+	if want, got := "agent-repl-queue-deferred-prompt", e.LeaderBinding("j RET"); got != want {
+		t.Fatalf("SPC j RET resolves to %q, want %q", got, want)
+	}
+	e.KeysIn(s.Input, "SPC j RET")
+	e.AwaitEval("the deferred prompt to be held",
+		`(length (gethash `+elispString(name)+` agent-repl--prompt-queue))`,
+		func(raw json.RawMessage) bool {
+			var n int
+			return !isJSONNull(raw) && json.Unmarshal(raw, &n) == nil && n >= 1
+		})
+	p.note("`SPC j RET` pressed in the composer to hold the prompt until the turn ends",
+		fmt.Sprintf("`agent-repl--prompt-queue` holds at least one entry for %q", name))
+
+	e.Leader("j d")
+	// Waiting for the refusal's own message is what makes the surviving tab an
+	// assertion rather than a race with the close: the refusal IS echo-area
+	// text by contract, which is this layer's sanctioned rendered exception.
+	e.AwaitEval("the blocked close to be answered",
+		`(with-current-buffer "*Messages*"
+                   (and (string-match-p "close blocked" (buffer-string)) t))`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	if tabs := s.tabNames(); !containsString(tabs, name) {
+		t.Fatalf("agent-repl--ws-tabline-names = %v, want %q still present: a blocked close draws no dialog and leaves the tab in place", tabs, name)
+	}
+	if n := e.EvalInt(`(length (gethash ` + elispString(name) + ` agent-repl--prompt-queue))`); n < 1 {
+		t.Fatalf("agent-repl--prompt-queue holds %d entries for %q, want the held prompt still there: undelivered intent is never silently discarded", n, name)
+	}
+	// THE TURN'S PREMISE IS RE-READ AT CAPTURE TIME, for the same reason
+	// `captureArm` re-reads an arm there. This picture is of a close refused
+	// against a LIVE TURN, and the premise was established several acts
+	// earlier; a manifest sentence written from that earlier moment would send
+	// a reviewer looking for a state the world may since have left. The
+	// daemon's tray drawing this workspace's prompt AGAIN at the instant of
+	// the capture would mean the turn had gone back to being queued, which is
+	// a different fact from the one this step is about -- and the first round
+	// of this capture showed exactly that tray, drawn `held (1)`.
+	awaitPanelShown(t, s, name)
+	trayBefore := trayText(t, s)
+	s.awaitInPage(t, "the daemon's hold tray to still be empty at the instant of the capture",
+		`document.querySelector('[data-component="hold-tray"] .hold-tray-empty[data-empty]') !== null`)
+	p.capture("held-close-tab-stays", "`SPC j d` pressed while a prompt is held against the live turn",
+		fmt.Sprintf("the close was REFUSED (`*Messages*` carries \"close blocked\"), %q is still in "+
+			"`agent-repl--ws-tabline-names`, its held prompt is still in `agent-repl--prompt-queue`, and "+
+			"the daemon's hold tray reads %q immediately BEFORE this picture was taken", name, trayBefore),
+		fmt.Sprintf("The tab bar STILL carries %q. The close was asked for and refused, so nothing about "+
+			"the bar changed: there is no dialog, no missing tab and no gap where one was. The webapp's "+
+			"HOLD TRAY reads \"nothing held\" -- the held prompt is EMACS's queue, not the daemon's, and a "+
+			"tray with the `!hold` prompt still in it would mean the turn this close was refused against "+
+			"had never started.", name))
+
+	// AND THE TRAY IS READ AGAIN ON THE OTHER SIDE OF THE PICTURE, which
+	// BRACKETS the capture. The tray was empty when the step asserted it; if
+	// it is still empty now, no re-queue happened inside the moment the camera
+	// was open -- so a picture that nevertheless draws a held item is the
+	// WEBVIEW's pixels standing still while its document moved on, and the
+	// reviewer is told which of the two they are looking at rather than left
+	// to guess.
+	s.awaitInPage(t, "the daemon's hold tray to still be empty on the other side of the picture",
+		`document.querySelector('[data-component="hold-tray"] .hold-tray-empty[data-empty]') !== null`)
+	p.note("the daemon's hold tray read again immediately after the picture was taken",
+		fmt.Sprintf("it reads %q, the same as it read immediately before: nothing was re-queued while "+
+			"the camera was open, so the picture and the document are being compared at the same state",
+			trayText(t, s)))
+
+	// KILL IS FORCED and takes no refusal path even with the turn in flight,
+	// which is exactly the configuration the close just refused.
+	if want, got := "agent-repl-kill-workspace", e.LeaderBinding("j x"); got != want {
+		t.Fatalf("SPC j x resolves to %q, want %q", got, want)
+	}
+	e.Leader("j x")
+	e.AwaitEval("the killed workspace's tab to go away",
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), name) })
+	if e.EvalBool(`(with-current-buffer "*Messages*"
+                          (and (string-match-p "kill blocked" (buffer-string)) t))`) {
+		t.Fatal("*Messages* carries a kill refusal: kill is forced and never blocks")
+	}
+	p.note("`SPC j x` pressed to kill the workspace the close had refused to take",
+		"the tab is gone and `*Messages*` carries NO kill refusal: kill is forced and never blocks")
+
+	// THE WEDGE PROBE, which is the real subject of running close and kill
+	// back to back on a workspace with a live panel: the sentinel/kill-buffer
+	// recursion manifests only as an Emacs that stops answering.
+	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after the refused close and the kill",
+		`(and (emacs-pid) t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	p.note("Emacs probed for liveness after the refused close and the kill",
+		"the command loop still answers, and the heartbeat has not missed for the whole run")
+}

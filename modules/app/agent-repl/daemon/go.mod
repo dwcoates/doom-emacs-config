@@ -1,15 +1,16 @@
 module claude-repld
 
-go 1.23.4
-
-require github.com/gorilla/websocket v1.5.3
+go 1.23.0
 
 require (
-	agentrepl/logging v0.0.0
+	agentrepl/logging v0.0.0-00010101000000-000000000000
 	agentrepl/proto v0.0.0
-	agentrepl/wire v0.0.0
+	connectrpc.com/connect v1.17.0
+	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
-	golang.org/x/sys v0.22.0
+	golang.org/x/net v0.43.0
+	golang.org/x/sys v0.35.0
+	golang.org/x/text v0.28.0
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.34.4
 )
@@ -29,7 +30,5 @@ require (
 )
 
 replace agentrepl/proto => ../proto/gen/go
-
-replace agentrepl/wire => ../agent-shim/wire
 
 replace agentrepl/logging => ../agent-shim/logging/go
