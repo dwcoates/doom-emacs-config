@@ -709,6 +709,19 @@ its own sidecar and store processes, and the only package-level state is
   `takeMockDriveSlot` (in `generateMock`, so no call site can escape it) caps
   concurrent drives at `GOMAXPROCS/2`, floored at 2 and capped at 8. `-parallel`
   only decides how much of the rest of the package overlaps with them.
+- **A Connect client of the SHIM keeps the request body it promised.**
+  `udsHTTPClient` wraps its transport in `ownedRequestBody`
+  (`integration/helpers_transport_test.go`), and the wrapper is not optional.
+  connect-go releases a declared-length request payload the instant `Do`
+  returns, and the shim answers a stream on the request HEAD, so the head beats
+  the body write and the transport reads EOF at offset zero on a request that
+  already announced its length — `http: ContentLength=48 with Body length 0`,
+  after which it TEARS THE CONNECTION DOWN under every other call riding it.
+  The failure surfaces on whichever WatchAgent tail happened to share the
+  connection, as `incomplete envelope: … use of closed network connection`, so
+  it names an innocent scenario. The daemon fixed the h2c shape of the same
+  defect in `daemon/internal/shimclient/transport.go`; the two must stay in
+  step.
 - **A subject that must act between two things the sidecar does back to back
   stops the sidecar, it does not out-run it.** `writeGate`
   (`integration/helpers_test.go`, on both the fake store and the recording
