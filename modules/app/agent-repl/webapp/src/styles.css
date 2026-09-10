@@ -1605,6 +1605,26 @@ pre {
    which is exactly "the caret does not toggle" as a reader sees it, and it is
    invisible to every jsdom drawing test, which install no stylesheet at all. */
 .agent-panel[hidden] { display: none; }
+/* A SUB-FEED BUBBLE STACKS: the collapsed head line, and the sub-feed beneath
+   it. `bubble.ts` appends exactly those two children in that order, and every
+   other rule here is written for that shape -- `.async-fold`'s dashed rule
+   above the fold, the panel's own padding mirroring the card's, the fixed
+   panel's N-line cap and scroller.
+   IT DID NOT STACK. The element wears `.bubble` for the card's fill, border
+   and lift, and `.bubble` is a flex ROW -- that row exists to put a bubble's
+   body beside the turn's time stamp -- so the head pill and the whole sub-feed
+   became SIDE-BY-SIDE columns: half the bubble's width left empty under the
+   head, and every nested row squeezed into the other half. Photographed by the
+   G49 playbook the first time a subagent bubble was opened in the real
+   webview.
+   The panel stretches and the ticker does not, because the ticker is a pill
+   that hugs its own text (see .async-ticker) and a stretched one would draw
+   a full-width bar. */
+.async-fold.bubble {
+  flex-direction: column;
+  align-items: stretch;
+}
+.async-fold.bubble > .async-ticker { align-self: flex-start; }
 /* The fixed panel a teal card's fold drops (see .fold-fixed above), capped at
    the SAME visible-line budget a response or prompt bubble stops at
    (--feed-cap-lines) and measured in the shared default line box, which is the
