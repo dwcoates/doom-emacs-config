@@ -384,6 +384,17 @@ ARG TARGETARCH
 # therefore `systemd`) at all — it depends on plain `dbus-daemon` +
 # `dbus-bin`, both already required here.
 #
+# `fonts-noto-color-emoji` and `fontconfig` are here because a playtest
+# PHOTOGRAPHS this image. The metaprompt's tree glyphs (🎯 and friends) reach
+# the webapp through the shim, and the Emacs frame paints emoji in its tab
+# bar; with no color emoji font installed, both render as tofu boxes and a
+# picture of tofu cannot be reviewed against its manifest sentence. It is the
+# only font this image installs on purpose, and it is pinned to
+# SNAPSHOT_STAMP like every other package here. `fontconfig` comes with it
+# for `fc-match`/`fc-list`/`fc-cache`, which is both how the build asserts
+# the font is reachable and how `e2e/playtest_substrate_font_test.go`
+# asserts it of the running container.
+#
 # `gdb` is here for ONE reason: an Emacs that stops answering its server
 # socket, its nested evals, `debug-on-event''s SIGUSR2 and a plain SIGINT is
 # by definition looping in C with no QUIT check, and every witness the Go
@@ -402,14 +413,27 @@ ARG TARGETARCH
 # verb has no reader at all and REPORTS that -- the failure is loud rather
 # than silent, which is exactly why the sandbox must carry the tool the
 # scenarios exercise instead of asserting the refusal path forever.
+# `Acquire::ForceIPv4=true` IS NOT A PREFERENCE, IT IS WHAT MAKES THIS STEP
+# FINISH. snapshot.debian.org is a Fastly name, and in the BUILD sandbox its
+# resolver answers with AAAA records only while the sandbox has no working
+# IPv6 route: every request then burns a ~16s connect timeout and the 8.8 MB
+# Packages fetch never completes at all (measured: this step sat for an hour
+# having fetched one InRelease, with `bookworm-security` already Ign'd, and
+# reproduced identically on a second run). The SAME apt lines in a plain
+# `docker run` of the same base finish in 3 seconds, which is what isolates
+# it to the build sandbox's network rather than to the archive. Forcing IPv4
+# pins the request to the A records that do route. It changes transport only:
+# the snapshot, the suite and every version pinned above are untouched.
 COPY --from=emacs-builder /emacs-runtime-pkgs.txt /tmp/emacs-runtime-pkgs.txt
 RUN set -eux; \
-    apt-get -o Acquire::Check-Valid-Until=false update; \
-    apt-get install -y --no-install-recommends \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::ForceIPv4=true update; \
+    apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
         binutils \
         bsdutils \
         curl \
         dbus-x11 \
+        fontconfig \
+        fonts-noto-color-emoji \
         gcc \
         gdb \
         git \
@@ -429,10 +453,38 @@ RUN set -eux; \
     command -v gdb; \
     command -v Xvfb; \
     command -v xclip; \
+    command -v fc-match; \
     if dpkg -s systemd >/dev/null 2>&1; then \
       echo "sandbox: systemd got pulled in after all; dbus-x11 no longer heads off the dconf/dbus-user-session chain" >&2; \
       exit 1; \
     fi
+
+# --- the color emoji fallback ---------------------------------------------
+#
+# Installing the font is half of it; the other half is that the renderers
+# FIND it. See fontconfig/99-agent-repl-emoji.conf for why each generic
+# family needs the append. The assertion is made at BUILD time, so an image
+# that would draw tofu cannot exist: `fc-match emoji` must land on Noto Color
+# Emoji, and each generic family must be able to fall back to it for an
+# actual emoji codepoint (`fc-match -s` walks the fallback list, which is the
+# list a renderer walks too).
+COPY fontconfig/99-agent-repl-emoji.conf /etc/fonts/conf.d/99-agent-repl-emoji.conf
+RUN set -eux; \
+    fc-cache -f; \
+    fc-list | grep -i 'Noto Color Emoji'; \
+    matched=$(fc-match --format='%{family}' emoji); \
+    case "$matched" in \
+      *"Noto Color Emoji"*) ;; \
+      *) echo "sandbox: 'fc-match emoji' answered '$matched'; the color emoji font is not reachable" >&2; exit 1 ;; \
+    esac; \
+    for generic in sans-serif serif monospace; do \
+      fallback=$(fc-match -s --format='%{family}\n' "$generic" | grep -i -c 'Noto Color Emoji' || true); \
+      if [ "$fallback" -lt 1 ]; then \
+        echo "sandbox: '$generic' cannot fall back to Noto Color Emoji; emoji would draw as tofu" >&2; \
+        exit 1; \
+      fi; \
+    done; \
+    echo "fontconfig: color emoji reachable from every generic family"
 
 # --- the Emacs built in stage 1 -------------------------------------------
 COPY --from=emacs-builder /emacs-dist/ /
