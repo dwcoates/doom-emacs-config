@@ -164,6 +164,25 @@ type sidecar struct {
 	// drops every tailer must not quietly un-park the file the store already
 	// told us it cannot accept.
 	parked map[string]bool
+	// defects counts how many times each file's OWN defect has now been
+	// observed, keyed by the file's `dev:inode` identity so a rename does not
+	// buy the same defect a fresh count.
+	//
+	// A PARK ALREADY STATES THE DEFECT ONCE, and for a file that stays parked
+	// that is the end of it. But a park is not permanent: `rekeyRotations`
+	// UN-PARKS a file whose refusal was a book move the shim's link files have
+	// since contradicted, and if the re-read is refused all over again the
+	// defect is restated. When the identity that decides the book oscillates,
+	// that is a per-poll record for a condition that never changes — the exact
+	// drowning the park exists to prevent, arriving through the un-park door
+	// instead. So a repeat of the SAME defect for the SAME file is restated
+	// only on powers of two, and every record carries the running count: a
+	// defect that never stops being true stays visible, logarithmically,
+	// rather than becoming the log's entire content.
+	defects map[string]*fileDefect
+	// watchedThisPass counts the files ONE rescan started watching, so the
+	// pass can state a count rather than a record per file.
+	watchedThisPass int
 	// rewound remembers which files have had their one boot rewind, so the
 	// bounded backward scan happens once per file per process rather than on
 	// every reconnect.
@@ -213,6 +232,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		settling: map[string]string{},
 		stopped:  map[string]int64{},
 		parked:   map[string]bool{},
+		defects:  map[string]*fileDefect{},
 		rewound:  map[string]bool{},
 		// A fresh sidecar is simply a sidecar whose first cycle has not begun
 		// yet, with its first attempt due immediately. That is all "boot" means.
@@ -461,6 +481,10 @@ func (s *sidecar) noteStoreErr(operation string, err error) {
 // at — so all three ride dedicated keys rather than prose.
 func (s *sidecar) park(path string, w *watched, result tail.PollResult, field string, cause error) {
 	s.parked[path] = true
+	count, state := s.countDefect(result.Next.GetFileId(), path, field)
+	if !state {
+		return
+	}
 	s.log.With(logging.Context{
 		Operation: "producer-defect", Level: "error", Path: path,
 		FileID:      result.Next.GetFileId(),
@@ -470,10 +494,50 @@ func (s *sidecar) park(path string, w *watched, result tail.PollResult, field st
 		RefusalSite: storeclient.WriteBatchSite,
 		Field:       field,
 		WriteIDs:    writeIDsOf(result.Entries),
+		Repeat:      logging.Repeat(count),
 	}).Log(
-		"the store refused %d record(s) from this file as an invalid_request; a retry of the same bytes cannot help, so THIS FILE is parked for the life of the process (its cursor stays where the store has it) while every other file keeps being read: %v",
-		len(result.Entries), cause)
+		"the store refused %d record(s) from this file as an invalid_request; a retry of the same bytes cannot help, so THIS FILE is parked for the life of the process (its cursor stays where the store has it) while every other file keeps being read (observed %d time(s) for this file): %v",
+		len(result.Entries), count, cause)
 }
+
+// fileDefect is one file's running defect tally.
+type fileDefect struct {
+	count int
+	field string
+}
+
+// countDefect records one more occurrence of a file's defect and answers the
+// running count together with whether THIS occurrence is stated.
+//
+// A NEW FIELD IS ALWAYS A NEW DEFECT, and always stated: the store named a
+// different part of the batch, so it is a different bug and suppressing it
+// would hide the second one behind the first. A repeat of the same field is
+// stated on powers of two, so a defect stuck in an un-park loop reports 1, 2,
+// 4, 8 ... rather than once per poll forever.
+func (s *sidecar) countDefect(fileID, path, field string) (int, bool) {
+	key := fileID
+	if key == "" {
+		// An inferred record names no file position. Falling back to the path
+		// keeps the tally per subject rather than collapsing every unfiled
+		// defect onto one counter.
+		key = path
+	}
+	seen := s.defects[key]
+	if seen == nil {
+		seen = &fileDefect{field: field}
+		s.defects[key] = seen
+	}
+	if seen.field != field {
+		seen.field = field
+		seen.count = 1
+		return seen.count, true
+	}
+	seen.count++
+	return seen.count, isPowerOfTwo(seen.count)
+}
+
+// isPowerOfTwo answers whether n is 1, 2, 4, 8 ... — the restatement ladder.
+func isPowerOfTwo(n int) bool { return n > 0 && n&(n-1) == 0 }
 
 // writeIDsOf names every record of a batch. A batch is refused WHOLE, so
 // naming one of its records would misreport what the store rejected.
@@ -510,6 +574,7 @@ func (s *sidecar) reportResumed() {
 func (s *sidecar) rescan() {
 	s.requireCursors("rescan")
 	now := s.now()
+	s.watchedThisPass = 0
 	// THE IDENTITY RECORDS ARE RE-READ BEFORE ANYTHING IS DISCOVERED OR
 	// RE-KEYED, so a rotation that happened since the last pass is already
 	// known when the transcript it produced is first seen.
@@ -553,6 +618,26 @@ func (s *sidecar) rescan() {
 		}
 		s.watch(resolved, identity, cursor, now)
 	}
+	s.reportRescan()
+}
+
+// reportRescan states, ONCE PER PASS, what the pass did to the watched set.
+//
+// The per-file `watch` record is verbose because this process has no age bound
+// on discovery: every transcript ever written under either config root is
+// watched forever, so on a working machine that is thousands of records per
+// boot describing files nothing will ever append to again. The lifecycle fact
+// an operator actually reads off the log is HOW MANY — the size of the watched
+// set, and whether this pass grew it — so that is what stands at normal
+// verbosity. A pass that changed nothing says nothing.
+func (s *sidecar) reportRescan() {
+	if s.watchedThisPass == 0 {
+		return
+	}
+	s.log.With(logging.Context{
+		Operation: "rescan", Repeat: logging.Repeat(s.watchedThisPass),
+	}).Log("this rescan started watching %d newly discovered file(s); %d file(s) are now watched",
+		s.watchedThisPass, len(s.watchers))
 }
 
 // refreshSpawnFacts re-reads, for every watched file, the one attribution fact
@@ -667,7 +752,14 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 	}
 	s.watchers[target.Path] = &watched{target: target, tailer: tailer, ctx: ctx}
 	s.trackDetached(target, now)
-	bound.With(logging.Context{Operation: "watch"}).Log("watching %s", target.Kind)
+	// PER FILE, SO VERBOSE. This process watches every transcript under both
+	// config roots with no age bound, which on a developer's machine is
+	// thousands of long-dead files; one normal-verbosity record each made
+	// every boot cost megabytes of log that said nothing but "still here".
+	// The COUNTS are the lifecycle fact and rescan states those; WHICH file,
+	// and of what kind, is per-record detail.
+	bound.With(logging.Context{Operation: "watch"}).LogVerbose("watching %s", target.Kind)
+	s.watchedThisPass++
 	// A stop that arrived while this spool was held is NOT applied here, even
 	// though the spool now has a reader.
 	//
