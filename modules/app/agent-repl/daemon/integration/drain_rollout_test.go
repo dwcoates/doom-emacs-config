@@ -234,6 +234,77 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate(t *tes
 	}
 }
 
+// TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound
+// pins the STOP'S OWN COST after the shape every playbook ends in: a turn that
+// ran and concluded, with the session's watches still standing.
+//
+// It exists because a playtest reported `emacs phase daemon-exit took 6.04s
+// (bound 6s)` on every scenario that ran a turn, which reads as a daemon that
+// does not exit on the stop it acked. It is not: the bound belonged to the
+// e2e Emacs layer's own stray finder, which counted the SCENARIO'S OWN Xvfb
+// and sidecar and so could never come up empty. This is the assertion that
+// says so from the daemon's side, and the one that would fail first if the
+// exit ever did start riding a bound.
+func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound(t *testing.T) {
+	t.Parallel()
+	// Arrange: a live session that has run one turn to its terminal, with the
+	// feed watch and the session's own watches still standing.
+	f := newOpened(t, harness.Opts{})
+	expectSessionKillRecords(f.d)
+	// Standing a live session down on purpose opens the shim_died and
+	// link_severed faults, and the fake shim exits on the forced kill rather
+	// than answering it, which is the "session kill did not answer" WARN.
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	feed := f.watchRootFeed()
+	f.submit("do the thing", "k-stop-after-a-turn", origin)
+	f.shim.ExpectStartTurn()
+	// The DAEMON's opening of the turn, not the shim's receipt of it: a
+	// terminal pushed on the request races the answer that names the main
+	// agent, and one that wins is withheld rather than attributed.
+	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 1)
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	awaitRow(t, f, feed, "the turn's terminal row", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded() != nil
+	})
+
+	// Act: exactly what Emacs sends.
+	asked := time.Now()
+	resp, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: drainReasonOperator("emacs"),
+		}},
+	}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateShutdownSchedule{now} after a completed turn = (%v, %v), want a success", resp, err)
+	}
+	f.d.AwaitExit()
+	took := time.Since(asked)
+	t.Logf("the stop after a completed turn was asked and the process was gone %s later", took.Round(time.Millisecond))
+	if took > stopAfterATurnBound {
+		t.Fatalf("the stop after a completed turn took %s to leave no process (bound %s); the daemon acked a stop it then rode a bound to perform",
+			took.Round(time.Millisecond), stopAfterATurnBound)
+	}
+}
+
+// stopAfterATurnBound is how long the whole stop above may take, from the
+// request leaving the client to the daemon's process being reaped.
+//
+// MEASURED rather than chosen: 7ms at the median and 8ms at the worst across
+// a -count=10 run of this test, and 5ms for the same stop against the REAL
+// quartet (e2e/daemonstop_e2e_test.go). It covers the WHOLE orderly exit --
+// the announcement, the forced stand-down of the one live session, the
+// in-flight write grace, the merge drain, the watchers and the background
+// loops -- so anything approaching it means a step of that exit has started
+// riding its own bound instead of ending on an event. 250ms is ~31x the
+// observed worst case, which is headroom for a loaded box and still an order
+// of magnitude under the smallest bound the exit itself states
+// (`writesQuietBound`, 250ms, is the only one this small, and every other
+// step is measured in seconds).
+const stopAfterATurnBound = 250 * time.Millisecond
+
 // strayReclaimBound is how long the kernel is given to finish reaping a
 // process group the daemon already SIGKILLed and already waited on.
 //
