@@ -94,13 +94,25 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 // frame that already holds the workspace.
 func awaitRegistrationLanding(e *Emacs, dir string) {
 	e.t.Helper()
+	// The form answers the STATE rather than a bare yes/no, so a wait that
+	// is never satisfied names which half of "settled" is missing.
 	e.AwaitEvalFor(emacsVerbBound, "the registration's landing to put the workspace's panel on the frame",
-		`(let ((ws (agent-repl--ws-name-for-dir `+elispString(dir)+`)))
-                   (and ws
-                        (not (agent-repl--ws-get ws :pending-show-panels))
-                        (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-                          (and (buffer-live-p buf) (window-live-p (get-buffer-window buf)) t))))`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+		`(let* ((ws (agent-repl--ws-name-for-dir `+elispString(dir)+`))
+                        (buf (and ws (agent-repl--ws-get ws :frontend-buffer))))
+                   (format "ws=%s pending=%s webview=%s window=%s"
+                           ws
+                           (and ws (agent-repl--ws-get ws :pending-show-panels))
+                           (and (buffer-live-p buf) (buffer-name buf))
+                           (and (buffer-live-p buf) (window-live-p (get-buffer-window buf)))))`,
+		func(raw json.RawMessage) bool {
+			var state string
+			if err := json.Unmarshal(raw, &state); err != nil {
+				return false
+			}
+			return !strings.HasPrefix(state, "ws=nil") &&
+				strings.Contains(state, "pending=nil") &&
+				strings.HasSuffix(state, "window=t")
+		})
 }
 
 // putTheLandingAway leaves every scenario the same starting frame: the
