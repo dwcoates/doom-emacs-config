@@ -27,17 +27,31 @@ import (
 // SAME vendor record — collapse onto one row instead of drawing it twice.
 func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, plan *conversationv1.AgentPlanMode) (*frontendv1.FeedRow, error) {
 	agentID := agent.GetValue()
-	episode := s.plans[agentID]
-	// open answers the episode this call belongs to, opening one keyed on THIS
-	// call's activity id when the agent has none. Both planes convert the same
-	// vendor record, so the same call re-delivered opens the same episode.
-	open := func() *planState {
-		if episode != nil {
-			return episode
+	unitID := act.GetActivityId().GetValue()
+
+	// WHICH EPISODE THIS CALL BELONGS TO, and it is answered from the call's
+	// own identity first. A call already attributed to an episode is attributed
+	// to the SAME one however often it arrives; otherwise it joins the agent's
+	// open episode, and opens one keyed on itself when there is none.
+	episode := s.planUnits[unitID]
+	if episode == nil {
+		episode = s.plans[agentID]
+		if episode == nil || episode.closed {
+			episode = &planState{opener: unitID, feed: at}
+			s.plans[agentID] = episode
 		}
-		episode = &planState{opener: act.GetActivityId().GetValue(), feed: at}
-		s.plans[agentID] = episode
-		return episode
+		s.planUnits[unitID] = episode
+	}
+	if episode.closed {
+		// A SETTLED EPISODE IS INERT. Its bubble already carries its final
+		// state, and the only frames that can still arrive for it are the
+		// other plane's copies of the calls it was drawn from — a `start` among
+		// them, which redrawn would put a finished plan back into its planning
+		// treatment. Nothing is lost by declining: the row stands as drawn.
+		r.logger(s.id).Debug("daemon.feed.plan_redelivered",
+			"a plan-mode call arrived again for an episode already settled; the bubble stands as drawn",
+			dlog.Context{"agent": agentID, "episode": episode.opener, "unit": unitID})
+		return nil, errNotARow
 	}
 
 	bubble := &frontendv1.FeedPlan{}
@@ -45,18 +59,15 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 	case *conversationv1.AgentPlanMode_Start:
 		switch frame.Start.GetAct().(type) {
 		case *conversationv1.AgentPlanModeStart_Enter:
-			open()
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		case *conversationv1.AgentPlanModeStart_Exit:
 			// AN EXIT WITH NO ENTER IS LEGAL: a session started in the plan
 			// permission mode never calls EnterPlanMode at all.
-			open()
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		default:
 			return nil, errNotARow
 		}
 	case *conversationv1.AgentPlanMode_Success:
-		open()
 		switch outcome := frame.Success.GetAct().(type) {
 		case *conversationv1.AgentPlanModeSuccess_Entered:
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
@@ -69,17 +80,18 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 				planned.Edit = &frontendv1.FeedPlanEditTarget{Path: outcome.Exited.GetFilePath()}
 			}
 			bubble.State = &frontendv1.FeedPlan_Planned{Planned: planned}
-			// The episode is over; the next enter opens a new one.
-			delete(s.plans, agentID)
+			// The episode is over; the next enter opens a new one. It is KEPT
+			// rather than deleted so a re-delivery of either of its calls is
+			// recognized as one instead of opening a second episode.
+			episode.closed = true
 		default:
 			return nil, errNotARow
 		}
 	case *conversationv1.AgentPlanMode_Failure:
-		open()
 		bubble.State = &frontendv1.FeedPlan_Failed{Failed: &frontendv1.FeedPlanFailed{
 			Text: planFailureText(frame.Failure.GetError()),
 		}}
-		delete(s.plans, agentID)
+		episode.closed = true
 	default:
 		return nil, errNotARow
 	}
@@ -105,6 +117,13 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 // planning state forever.
 func (r *resolver) breakPlanEpisodes(s *wsState, reason string) {
 	for agentID, episode := range s.plans {
+		if episode.closed {
+			// An episode that already reached its final state is not open, and
+			// breaking it would put "the turn ended while plan mode was still
+			// open" over a plan the agent DID present. It is only still in this
+			// map so a re-delivery of its calls is recognized as one.
+			continue
+		}
 		row := &frontendv1.FeedRow{
 			Id: r.rowID(s.id, episode.feed.feed, feedid.RowKey{
 				Kind: feedid.KindActivity,
@@ -121,7 +140,7 @@ func (r *resolver) breakPlanEpisodes(s *wsState, reason string) {
 			dlog.Context{"agent": agentID, "episode": episode.opener, "reason": reason})
 		r.stampTurn(s, row, nil)
 		r.upsert(s, episode.feed, row, true)
-		delete(s.plans, agentID)
+		episode.closed = true
 	}
 }
 
