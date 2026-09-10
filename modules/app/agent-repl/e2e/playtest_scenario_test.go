@@ -552,6 +552,71 @@ func (s *playtestScenario) tabFaceFor(t *testing.T, ws string) string {
                                "<the drawn tabline carries no face at all>"))`)
 }
 
+// tabPaint is WHERE a tab's arm color actually landed, read off the entry the
+// module rendered rather than derived from the color table.
+type tabPaint struct {
+	// Selected says whether this is the selected tab.
+	Selected bool
+	// SelectedBg is `agent-repl--color-selected-bg` when Selected, else "".
+	SelectedBg string
+	// BracketBg and NameBg are the backgrounds the rendered entry carries on
+	// its `[N]` bracket run and on its workspace-name run. Equal means the
+	// arm color reached the whole entry; different means it stopped at the
+	// badge.
+	BracketBg, NameBg string
+}
+
+// WholeEntry says the arm color reached the name region too.
+func (p tabPaint) WholeEntry() bool { return p.BracketBg != "" && p.BracketBg == p.NameBg }
+
+// tabEntryPaint reads the two backgrounds out of the entry
+// `agent-repl--render-tab-entry` produces for WS.
+//
+// WHY THE COLOR TABLE IS NOT ENOUGH, and it was a manifest saying the wrong
+// thing about a correct picture. How far an arm's color reaches is not the
+// table's decision: `agent-repl--render-tab-entry` takes the BRACKET-ONLY
+// spec whenever `agent-repl--ws-display-state` suppresses the full-tab color
+// -- a workspace whose panels are dismissed, or a `:ready` one the user has
+// already looked at -- and then `agent-repl--tab-spec-bracket-only` leaves
+// `:bg` unspecified so only the badge carries the arm. Measured, in owner
+// 20's K.63: the `:merging` workspace's badge was `#a21caf` while its name
+// region was `#14141a`, under a sentence promising purple across the whole
+// entry.
+//
+// So both runs are read from the rendered string at their own positions, the
+// same way `tabFaceFor` reads the faces the module wrote: the bracket at the
+// `[` the entry opens its badge with, the name at the workspace's own name.
+func (s *playtestScenario) tabEntryPaint(t *testing.T, ws string) tabPaint {
+	t.Helper()
+	got := s.E.EvalStrings(`(let* ((ws ` + elispString(ws) + `)
+                                   (cur (agent-repl--ws-current-name))
+                                   (line (agent-repl--render-tab-entry ws cur 1))
+                                   (bg-at
+                                    (lambda (pos)
+                                      (let ((f (and pos (get-text-property pos 'face line))))
+                                        (cond
+                                         ((null f) "")
+                                         ((and (listp f) (plist-member f :background))
+                                          (format "%s" (plist-get f :background)))
+                                         ((symbolp f)
+                                          (format "%s" (or (face-attribute f :background nil t)
+                                                           'unspecified)))
+                                         (t "")))))
+                                   (bracket (string-match (regexp-quote "[") line))
+                                   (name (string-match (regexp-quote ws) line)))
+                              (list (funcall bg-at bracket) (funcall bg-at name)))`)
+	if len(got) != 2 {
+		t.Fatalf("reading the rendered tab entry for %s answered %v, want a bracket background and a "+
+			"name background", ws, got)
+	}
+	return tabPaint{
+		Selected:   s.E.EvalBool(`(equal ` + elispString(ws) + ` (agent-repl--ws-current-name))`),
+		SelectedBg: s.tabSelectedBackground(t, ws),
+		BracketBg:  got[0],
+		NameBg:     got[1],
+	}
+}
+
 // armSentence is the manifest sentence for a tab painted from one arm.
 //
 // WHAT THE PRODUCT ACTUALLY PAINTS, WHICH IS NOT A DISC. `agent-repl--render-tab`
@@ -561,16 +626,19 @@ func (s *playtestScenario) tabFaceFor(t *testing.T, ws string) string {
 // promising a "status disc beside the name" sends a reviewer hunting a glyph
 // the module never draws, and every owner's manifest inherits this sentence.
 //
-// HOW FAR THE COLOR REACHES IS THE SELECTION'S ANSWER, and the sentence has
-// to give the reviewer the one they will see. `agent-repl--tab-face` hands
-// the SELECTED tab's name region Doom's selected-tab face -- so on that tab
-// the arm color is on the badge alone and the name is on the selection's own
-// ground -- while an UNSELECTED tab takes its palette row's `:bg`, which IS
-// the arm color, so its whole entry is painted with it. Measured on owner
-// 20's K.61: the unselected `:thinking` tab was `#cc3333` from its bracket
-// through the end of its name, under a sentence saying the name did not carry
-// the arm color, which is a manifest telling a reviewer the correct picture
-// is wrong.
+// HOW FAR THE COLOR REACHES IS READ, NEVER ASSUMED, and it is the half a
+// reviewer was being lied to about. `agent-repl--render-tab-entry` paints an
+// UNSELECTED tab's whole entry with its palette row's `:bg`, which IS the arm
+// color; hands the SELECTED tab's name region Doom's selected-tab face, so
+// the arm stops at the badge; and takes the BRACKET-ONLY spec whenever
+// `agent-repl--ws-display-state` suppresses the full-tab color -- a workspace
+// whose panels are dismissed, or a `:ready` one already viewed -- where the
+// arm stops at the badge on an unselected tab too. Measured, in owner 20's
+// section: K.61's unselected `:thinking` tab ran `#cc3333` unbroken from
+// bracket through name, and K.63's unselected `:merging` tab carried `#a21caf`
+// on its badge with `#14141a` under its name. One sentence cannot be true of
+// both, so PAINT carries what `tabEntryPaint` read off the rendered entry and
+// the sentence says which of the three the reviewer is looking at.
 //
 // "none" is a real answer and not a missing one: the color table maps
 // `:none` and the whole merge family to it, and the index badge then carries
@@ -588,31 +656,33 @@ func (s *playtestScenario) tabFaceFor(t *testing.T, ws string) string {
 // ground the reviewer will actually see; it is READ OFF THE MODULE at
 // capture time rather than written here, because a color spelled twice
 // drifts.
-func armSentence(ws, arm, color, selectedBg string) string {
+func armSentence(ws, arm, color string, paint tabPaint) string {
 	if color == "none" {
 		ground := "the tab bar's own ordinary background"
-		if selectedBg != "" {
+		if paint.Selected && paint.SelectedBg != "" {
 			ground = fmt.Sprintf("the SELECTED tab's own background (`%s`), which is visibly darker "+
 				"than the bar around it -- that darker ground is the SELECTION, not an arm color",
-				selectedBg)
+				paint.SelectedBg)
 		}
 		return fmt.Sprintf("The tab for %q carries NO arm color at all on its %s index badge: its arm "+
 			"is %s, which the module's own color table maps to no color, so the badge is drawn on "+
 			"%s and only the name beside it is faced.", ws, tabBadgeShape, arm, ground)
 	}
-	if selectedBg != "" {
-		return fmt.Sprintf("The tab for %q is the SELECTED one, and the arm color is on its %s index "+
-			"badge ALONE: the badge is painted %s -- its arm is %s, and %s is the color the module's "+
-			"own table gives that arm -- while the name beside it is drawn on the SELECTION's own "+
-			"ground, which is not the arm color. That is `agent-repl--tab-face` dimming the state to "+
-			"the badge on whichever tab is selected.",
-			ws, tabBadgeShape, strings.ToUpper(color), arm, color)
+	if paint.WholeEntry() {
+		return fmt.Sprintf("The tab for %q is painted %s ACROSS THE WHOLE ENTRY -- its %s index badge "+
+			"and the workspace name beside it alike, both on `%s`: its arm is %s, and %s is the color "+
+			"the module's own table gives that arm.",
+			ws, strings.ToUpper(color), tabBadgeShape, paint.BracketBg, arm, color)
 	}
-	return fmt.Sprintf("The tab for %q is painted %s ACROSS THE WHOLE ENTRY -- its %s index badge and "+
-		"the workspace name beside it alike: its arm is %s, and %s is the color the module's own table "+
-		"gives that arm. It is not the selected tab, so nothing dims the state to the badge and the "+
-		"name region carries the arm color too.",
-		ws, strings.ToUpper(color), tabBadgeShape, arm, color)
+	name := fmt.Sprintf("the name beside it is NOT that color -- it is drawn on `%s`", paint.NameBg)
+	if paint.Selected {
+		name = fmt.Sprintf("the name beside it is drawn on the SELECTION's own ground (`%s`) instead, "+
+			"which is `agent-repl--tab-face` dimming the state to the badge on whichever tab is "+
+			"selected", paint.NameBg)
+	}
+	return fmt.Sprintf("The tab for %q carries %s on its %s index badge ALONE (`%s`): its arm is %s, "+
+		"and %s is the color the module's own table gives that arm, while %s.",
+		ws, strings.ToUpper(color), tabBadgeShape, paint.BracketBg, arm, color, name)
 }
 
 // tabBadgeShape is the shape of the run the arm color lands on, spelled the
@@ -632,7 +702,7 @@ func (s *playtestScenario) captureArm(t *testing.T, name, ws, act string, want s
 	face := s.tabFaceFor(t, ws)
 	s.Book.capture(name, act,
 		fmt.Sprintf("`agent-repl-roster-status-for-ws` still reads %s at the instant of the capture, which the module's color table paints %s, and `agent-repl-workspace-tabline-formatted` wrote the face %s onto that tab", arm, color, face),
-		armSentence(ws, arm, color, s.tabSelectedBackground(t, ws))+" "+extra)
+		armSentence(ws, arm, color, s.tabEntryPaint(t, ws))+" "+extra)
 }
 
 // tabSelectedBackground answers the background a SELECTED tab is drawn on

@@ -38,7 +38,7 @@ func TestPlaytestArmSentenceNamesTheIndexBadgeAndNeverADisc(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := armSentence("ws-a", tc.arm, tc.col, "")
+			got := armSentence("ws-a", tc.arm, tc.col, tabPaint{BracketBg: "#111111", NameBg: "#111111"})
 
 			if strings.Contains(strings.ToLower(got), "disc") {
 				t.Errorf("the sentence for %s says %q; it names a status disc, and the module paints "+
@@ -60,7 +60,7 @@ func TestPlaytestArmSentenceNamesTheIndexBadgeAndNeverADisc(t *testing.T) {
 // tab's name color as its arm's: `agent-repl--tab-face` hands that one name
 // region Doom's selected-tab face, so the arm reaches the badge and stops.
 func TestPlaytestASelectedColoredArmSentenceSaysTheNameCarriesSelectionNotTheArm(t *testing.T) {
-	got := armSentence("ws-a", ":idle", "green", "#c0c0c0")
+	got := armSentence("ws-a", ":idle", "green", tabPaint{Selected: true, SelectedBg: "#c0c0c0", BracketBg: "#1a7a1a", NameBg: "#b4eeb4"})
 
 	if !strings.Contains(got, "SELECTION") {
 		t.Errorf("the selected colored-arm sentence says %q, and never tells the reviewer the name "+
@@ -78,7 +78,7 @@ func TestPlaytestASelectedColoredArmSentenceSaysTheNameCarriesSelectionNotTheArm
 // bracket through name, while the sentence said the name did not carry the arm
 // color -- a manifest telling a reviewer that the correct picture is a defect.
 func TestPlaytestAnUnselectedColoredArmSentenceSaysTheWholeEntryCarriesTheArm(t *testing.T) {
-	got := armSentence("ws-a", ":idle", "green", "")
+	got := armSentence("ws-a", ":idle", "green", tabPaint{BracketBg: "#1a7a1a", NameBg: "#1a7a1a"})
 
 	if !strings.Contains(got, "WHOLE ENTRY") {
 		t.Errorf("the unselected colored-arm sentence says %q, and never tells the reviewer the arm "+
@@ -148,6 +148,40 @@ func columnCount(row string) int {
 	return n
 }
 
+// TestPlaytestAnUnselectedBracketOnlyArmSentenceStopsTheColorAtTheBadge is the
+// third way a tab is painted, and the one that made a correct picture read as
+// a defect.
+//
+// `agent-repl--render-tab-entry` takes the BRACKET-ONLY spec whenever
+// `agent-repl--ws-display-state` suppresses the full-tab color -- a workspace
+// whose panels are dismissed, or a `:ready` one already viewed -- and
+// `agent-repl--tab-spec-bracket-only` then leaves `:bg` unspecified, so the
+// arm reaches the badge and stops even though the tab is not selected.
+// Measured, in owner 20's K.63: the `:merging` workspace's badge was `#a21caf`
+// while its name region was `#14141a`, under a sentence promising purple
+// across the whole entry.
+func TestPlaytestAnUnselectedBracketOnlyArmSentenceStopsTheColorAtTheBadge(t *testing.T) {
+	got := armSentence("ws-a", ":merging", "purple",
+		tabPaint{BracketBg: "#a21caf", NameBg: "#14141a"})
+
+	if strings.Contains(got, "WHOLE ENTRY") {
+		t.Errorf("the bracket-only sentence says %q; it promises the whole entry is the arm color on a "+
+			"tab whose name region is a different background entirely", got)
+	}
+	if !strings.Contains(got, "ALONE") {
+		t.Errorf("the bracket-only sentence says %q, and never tells the reviewer the arm color stops "+
+			"at the badge", got)
+	}
+	if !strings.Contains(got, "#14141a") {
+		t.Errorf("the bracket-only sentence says %q, and never names the ground the name region is "+
+			"actually drawn on", got)
+	}
+	if strings.Contains(got, "SELECTION") {
+		t.Errorf("the bracket-only sentence says %q; it blames the selection for a tab that is not "+
+			"selected, and the reviewer would then look for a highlight that is not there", got)
+	}
+}
+
 // TestPlaytestASelectedNoneArmBadgeSaysTheDarkerGroundIsTheSelection is the
 // half a reviewer would otherwise file as a defect: a `none`-arm badge on the
 // SELECTED tab sits on `agent-repl--color-selected-bg`, visibly darker than
@@ -156,7 +190,7 @@ func columnCount(row string) int {
 func TestPlaytestASelectedNoneArmBadgeSaysTheDarkerGroundIsTheSelection(t *testing.T) {
 	const selectedBg = "#c0c0c0"
 
-	got := armSentence("ws-a", ":none", "none", selectedBg)
+	got := armSentence("ws-a", ":none", "none", tabPaint{Selected: true, SelectedBg: selectedBg, BracketBg: selectedBg, NameBg: "#b4eeb4"})
 
 	if !strings.Contains(got, selectedBg) {
 		t.Errorf("the selected none-arm sentence says %q, and never names the %s ground the badge is "+
@@ -173,7 +207,7 @@ func TestPlaytestASelectedNoneArmBadgeSaysTheDarkerGroundIsTheSelection(t *testi
 // really is on the bar's own ground, and naming a grey there would send a
 // reviewer hunting a darker patch that is not in the picture.
 func TestPlaytestAnUnselectedNoneArmBadgeSaysTheBarsOwnBackground(t *testing.T) {
-	got := armSentence("ws-a", ":none", "none", "")
+	got := armSentence("ws-a", ":none", "none", tabPaint{BracketBg: "unspecified", NameBg: "#14141a"})
 
 	if !strings.Contains(got, "the tab bar's own ordinary background") {
 		t.Errorf("the unselected none-arm sentence says %q, and never names the bar's own background", got)

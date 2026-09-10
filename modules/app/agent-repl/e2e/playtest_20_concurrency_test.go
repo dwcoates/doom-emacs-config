@@ -176,7 +176,7 @@ func (s *playtestScenario) pt20CaptureArms(t *testing.T, name, act string, claim
 			"`agent-repl-roster-status-for-ws` still reads %s for %q at the instant of the capture, "+
 				"which the module's tables paint %s, and `agent-repl-workspace-tabline-formatted` "+
 				"wrote the face %s", arm, claim.WS, color, face))
-		sentences = append(sentences, armSentence(claim.WS, arm, color, s.tabSelectedBackground(t, claim.WS)))
+		sentences = append(sentences, armSentence(claim.WS, arm, color, s.tabEntryPaint(t, claim.WS)))
 	}
 	s.Book.capture(name, act, strings.Join(asserted, "; "), strings.Join(sentences, " ")+" "+extra)
 }
