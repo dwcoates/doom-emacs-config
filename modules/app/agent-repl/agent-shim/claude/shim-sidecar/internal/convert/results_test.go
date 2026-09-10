@@ -6,6 +6,7 @@ package convert
 // so each gets one direct unit test from its documented proto contract.
 
 import (
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -1182,5 +1183,63 @@ func TestBashResultImageAnswersNothingForATextOnlyResult(t *testing.T) {
 	// Assert
 	if data != nil || mediaType != "" {
 		t.Fatalf("data, mediaType = %q, %q, want both empty", data, mediaType)
+	}
+}
+
+// TestWritePatchDiffsTheVersionsRatherThanPreferringTheStatedPatch pins the
+// proto's own words on AgentWriteSuccess.patch -- "The producer diffs after
+// the fact" -- against the deviation that once stood here.
+//
+// This plane preferred `structuredPatch` when the vendor stated one, while the
+// stream plane always diffs. The same update then drew a different hunk
+// depending on WHICH PRODUCER settled the unit first, which is a race a card's
+// content must never turn on.
+func TestWritePatchDiffsTheVersionsRatherThanPreferringTheStatedPatch(t *testing.T) {
+	// Arrange: the vendor states a patch AND hands over both versions.
+	result := map[string]any{
+		"type":         "update",
+		"filePath":     "/w/s/a.ts",
+		"originalFile": "one\ntwo\n",
+		"content":      "one\ntwo\nthree\n",
+		"structuredPatch": []any{map[string]any{
+			"oldStart": float64(2), "oldLines": float64(1),
+			"newStart": float64(2), "newLines": float64(2),
+			"lines": []any{"   two", "+  three"},
+		}},
+	}
+
+	// Act
+	got := writePatch(result)
+
+	// Assert: the DIFF's own hunk, not the vendor's.
+	if len(got) != 1 {
+		t.Fatalf("hunks = %d, want 1", len(got))
+	}
+	want := []string{" one", " two", "+three"}
+	if lines := got[0].GetLines(); !slices.Equal(lines, want) {
+		t.Fatalf("lines = %q, want %q: the producer diffs, it does not restate the vendor's patch", lines, want)
+	}
+}
+
+// TestWritePatchKeepsTheStatedPatchWhenThereIsNoContentToDiff is the other
+// half: nothing can be diffed without the new contents, and the vendor's own
+// patch is then the only account of the change there is.
+func TestWritePatchKeepsTheStatedPatchWhenThereIsNoContentToDiff(t *testing.T) {
+	// Arrange: a result carrying a patch and no content at all.
+	result := map[string]any{
+		"type": "update",
+		"structuredPatch": []any{map[string]any{
+			"oldStart": float64(2), "oldLines": float64(1),
+			"newStart": float64(2), "newLines": float64(2),
+			"lines": []any{"   two", "+  three"},
+		}},
+	}
+
+	// Act
+	got := writePatch(result)
+
+	// Assert
+	if len(got) != 1 {
+		t.Fatalf("hunks = %d, want the vendor's own patch kept rather than dropped", len(got))
 	}
 }
