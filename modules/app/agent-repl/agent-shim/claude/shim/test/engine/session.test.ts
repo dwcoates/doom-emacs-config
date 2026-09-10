@@ -4429,6 +4429,24 @@ describe("the teardown's tails", () => {
     expect(h.persistence.concludedThrough).toContain("p-9");
   });
 
+  it("VOUCHES for the agent when reading the head, so a book never written is not asked for", async () => {
+    // Arrange. A session killed before its first turn has an agent with no book,
+    // and asking the store for one earns an `unknown_agent` refusal on every
+    // such teardown.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+    await watching.next();
+
+    // Act.
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert. The head read carried the producer's own answer, and it holds.
+    expect(h.persistence.lastKnownAgent?.()).toBe(true);
+  });
+
   it("concludes NOTHING for a tail that already ended on its own", async () => {
     const h = harness({ watcherConclusionBudgetMs: 25 });
     await started(h);
