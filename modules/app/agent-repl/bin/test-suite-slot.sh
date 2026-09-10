@@ -34,6 +34,11 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/ss.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# The harness may itself run behind the host gate. Its subjects use private
+# slot directories and must begin as independent process trees; the nested
+# cases below establish their own marker through the outer subject invocation.
+unset AGENT_REPL_SUITE_SLOT_HELD
+
 # --- 1. the plain case: the command runs and its status is this script's ----
 d="$TMP/t1"; mkdir -p "$d"
 set +e
