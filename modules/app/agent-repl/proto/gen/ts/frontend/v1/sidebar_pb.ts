@@ -466,9 +466,20 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
 
   /**
    * The ATTENTION marker: present iff the workspace has an unseen
-   * notification. The daemon sets it when an agent notification fires and
-   * CLEARS it when SelectWorkspace names this workspace, re-pushing the
-   * roster both times.
+   * notification. The daemon sets it when an agent notification fires, and
+   * clears it on EITHER of the two ways that notification becomes seen,
+   * re-pushing the roster each time:
+   *
+   *   - SelectWorkspace names this workspace — the user looked at it;
+   *   - the LAST open ask settles — a permission or a question answered by the
+   *     user, or decided without them. Answering a card IS looking at the
+   *     workspace, and a workspace the user never selects would otherwise wear
+   *     the marker forever. While any ask is still open the marker STANDS:
+   *     unseen is unseen.
+   *
+   * UNSEEN IS THE WHOLE MEANING. A settled ask is not an unseen notification,
+   * so a row that still carries the marker after every ask has resolved is a
+   * defect rather than a stale view.
    *
    * @generated from field: optional frontend.v1.RosterRowAttention attention = 32;
    */
