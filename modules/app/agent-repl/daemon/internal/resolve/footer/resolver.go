@@ -201,6 +201,7 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	s.turnEverRan = true
 	s.sawActivity = false
 	s.blocked = nil
+	s.queryDied = nil
 	s.interrupted = nil
 	// COMPACTING IS OR-ED IN, NEVER ASSIGNED. `SessionUpdate.compacting` is the
 	// vendor's own start signal and it lands BEFORE the turn-open edge it
@@ -325,17 +326,20 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 		dlog.Context{"arm": arm}, apply)
 }
 
+// deadQueryLine is the strip's sentence for a vendor query that died and has
+// not been restarted, worded as footer.proto's FooterStatusActivityQueryDied
+// arm words it.
+const deadQueryLine = "vendor query died — the next prompt restarts it"
+
 // sessionArm names the update's arm and returns what it changes. Every arm has
 // a branch, including the ones the footer deliberately draws nothing from.
 func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.SessionUpdate) (string, func(*wsState)) {
 	switch u := update.GetUpdate().(type) {
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died", func(s *wsState) {
-			s.blocked = &blockedState{
-				kind: blockedQueryDied,
-				line: "vendor query died — the next prompt restarts it",
-				at:   r.opts.clock.Now(),
-			}
+			now := r.opts.clock.Now()
+			s.queryDied = &standing{text: deadQueryLine, at: now}
+			s.blocked = &blockedState{kind: blockedQueryDied, at: now}
 			s.turn = nil
 			s.tok.settled = true
 		}
