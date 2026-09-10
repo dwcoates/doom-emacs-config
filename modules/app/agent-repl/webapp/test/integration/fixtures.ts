@@ -402,6 +402,22 @@ export const toolCallDeniedUnit = (): ActivityUnit => ({
   },
 });
 
+/**
+ * A call whose WORK MOVED to the background: no verdict, no output.
+ *
+ * The detached shell bubble the daemon draws beneath the card is where the run
+ * reports, and it alone settles. Without this arm the card sat on `running`
+ * forever above a row already saying `exit 0` (playtest F43, 2026-09-09).
+ */
+export const toolCallMovedUnit = (): ActivityUnit => ({
+  case: "simpleToolCall",
+  value: {
+    name: { text: "Bash" },
+    input: toolCallInput({ text: "sleep 600" }),
+    outcome: { case: "moved", value: {} },
+  },
+});
+
 // ---- FeedSkill ------------------------------------------------------------
 
 export const SKILL_OUTCOMES = ["running", "loaded", "failed", "denied"] as const;

@@ -2645,3 +2645,98 @@ func TestApiRequestFailedTerminalStatesAMidTurnFailureItSurvived(t *testing.T) {
 		t.Fatalf("headline = %q, want the surviving mid-turn failure folded in as evidence", got)
 	}
 }
+
+// ==========================================================================
+// A shell whose work MOVED to the background.
+// ==========================================================================
+
+// A BACKGROUNDED COMMAND DID NOT END, IT MOVED. Two rows carry one run -- the
+// card the agent's call drew, and the detached shell bubble the run reports
+// from -- and only the bubble settles. The card said `running` forever above a
+// bubble already reporting `exit 0` until the `moved` arm existed to say where
+// the work went (playtest F43, 2026-09-09).
+
+func TestABackgroundedForegroundShellsCardDrawsTheMovedArm(t *testing.T) {
+	t.Parallel()
+	// Arrange: a foreground shell, drawn running.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-bash-moved", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("bash-moved"),
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{
+			Start: &conversationv1.AgentBashStart{
+				Command:   &conversationv1.AgentBashCommand{Line: "sleep 600"},
+				StartedAt: startedAt(1),
+			},
+		}}},
+	}))
+	awaitRow(t, f, tail, "the running bash card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetRunning() != nil
+	})
+
+	// Act: the command exceeded its own timeout and was moved to the
+	// background rather than killed.
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedShell("bash-moved")))
+
+	// Assert: no verdict and no output -- the detached bubble beneath it is
+	// the record of the run.
+	card := awaitRow(t, f, tail, "the moved bash card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetMoved() != nil
+	}).GetActivity().GetSimpleToolCall()
+	if card.GetReturned() != nil || card.GetRunning() != nil {
+		t.Fatalf("outcome = %T, want the moved arm alone", card.GetOutcome())
+	}
+}
+
+func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
+	t.Parallel()
+	// Arrange: a detached run that has ENDED. Its watch is reaped at the
+	// terminal, so the next announcement of the same work opens a fresh one.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-shell-resettle", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-resettle-1", "make")))
+	head := awaitRow(t, f, tail, "the detached_shell head", func(r *frontendv1.FeedRow) bool { return r.GetDetachedShell() != nil })
+	f.shim.PushBash("work-resettle-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
+		Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "make"},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output:      &conversationv1.AgentBashOutput{Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{Stdout: "EXIT=0\n", Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}}}}},
+				Termination: &conversationv1.AgentBashTermination{How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: 0}}},
+			}},
+			SettledAt: settledAt(2),
+		},
+	}})
+	awaitRow(t, f, tail, "the settled detached shell", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetDetachedShell().GetShell().GetSettled() != nil
+	})
+
+	// Act: the next turn's live-work reconciliation announces the SAME work
+	// again, carrying the run's start and no ending at all.
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-resettle-1", "make")))
+
+	// Assert: nothing the replay produced drew the run live. A bubble drawn
+	// from the frame in hand walked back here -- an orange dot and a stop
+	// button over a spool holding `EXIT=0`.
+	//
+	// THE BARRIER IS AN ORDINARY FRAME ON THE SAME STREAM, which is what makes
+	// a negative observable: the announcement and it are delivered in order, so
+	// reaching the barrier proves the replay has been drawn.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("resettle-barrier"),
+		Item: &conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Start{
+			Start: &conversationv1.AgentReadStart{Path: &conversationv1.ReadPath{Path: "go.mod"}, StartedAt: startedAt(3)},
+		}}},
+	}))
+	redrawnLive := false
+	awaitRow(t, f, tail, "the barrier row behind the replayed announcement", func(r *frontendv1.FeedRow) bool {
+		if r.GetId().GetValue() == head.GetId().GetValue() && r.GetDetachedShell().GetShell().GetLive() != nil {
+			redrawnLive = true
+		}
+		return r.GetActivity().GetSimpleToolCall().GetName().GetText() == "Read"
+	})
+	if redrawnLive {
+		t.Fatal("a replayed announcement redrew the settled shell bubble as live")
+	}
+}

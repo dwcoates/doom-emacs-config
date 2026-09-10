@@ -121,6 +121,8 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -312,6 +314,29 @@ func TestArtifactPublishAndList(t *testing.T) {
 	listTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "artifact-list")
 	if listTurn.GetValue() == "" {
 		t.Fatal("artifact-list turn minted no id")
+	}
+}
+
+// TestArtifactHeadingKeepsTheFavicon reads the published heading exactly.
+// #72 only asks that it is non-empty, which a heading that lost its glyph
+// satisfies — and the playtest photographed exactly that card, titled with no
+// favicon, against feed.proto's "favicon emoji + title". The fake's
+// `!artifact-publish` announces 📊 on the call and restates only the title on
+// the outcome, which is the shape every real publish has.
+func TestArtifactHeadingKeepsTheFavicon(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	publishTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "artifact-publish")
+
+	// Assert
+	row := rmAwaitFeedRow(t, w, ws, "the artifact-publish bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == publishTurn.GetValue() && r.GetActivity().GetArtifact().GetPublished() != nil
+	})
+	if got := row.GetActivity().GetArtifact().GetHeading().GetText(); got != "📊 Offline Report" {
+		t.Fatalf("artifact heading = %q, want %q", got, "📊 Offline Report")
 	}
 }
 
@@ -524,6 +549,82 @@ func TestPlanModeEnterExit(t *testing.T) {
 	if planned.GetEdit().GetPath() == "" {
 		t.Fatal("plan bubble's planned state carries no edit target, want one (PLAN_MODE names a plan file)")
 	}
+}
+
+// TestPlanModeCoalescesOntoOneBubble is the SAME turn as #85 asked the other
+// way: feed.proto's FeedPlan says the daemon keys the enter and the exit onto
+// ONE FeedId, so a plan episode is ONE row in the feed no matter how many
+// plan-mode calls it took or how many planes reported them. The playtest's
+// picture of `!plan` showed the plan card drawn TWICE -- once where the enter
+// landed and once after the turn concluded -- which is invisible to #85,
+// since a duplicate satisfies "a planned row exists" perfectly.
+//
+// The count is read AFTER driveScenarioToCompletion, which waits for the
+// sidecar's file-plane cursor to advance past this turn's transcript lines as
+// well as for the turn's own terminal row: both planes have delivered
+// everything they are going to deliver for this turn before the page is read.
+func TestPlanModeCoalescesOntoOneBubble(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
+
+	// Assert
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
+	}
+	var plans []string
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		if row.GetActivity().GetPlan() != nil {
+			plans = append(plans, fmt.Sprintf("%s(%T)", row.GetId().GetValue(), row.GetActivity().GetPlan().GetState()))
+		}
+	}
+	if len(plans) != 1 {
+		t.Fatalf("the feed holds %d plan rows %v, want exactly 1: feed.proto's FeedPlan coalesces the enter and the exit onto ONE FeedId", len(plans), plans)
+	}
+}
+
+// TestPlanModeSettlesPlanned reads the plan bubble's state off the page AFTER
+// both planes have delivered, rather than waiting for a `planned` row to
+// appear at any moment. The difference is the whole defect: the sidecar's copy
+// of the turn arrives after the shim's, its `EnterPlanMode` last, and a bubble
+// that took that enter would go back to its PLANNING treatment with the plan
+// already presented. #85's wait passes either way.
+func TestPlanModeSettlesPlanned(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
+
+	// Assert
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
+	}
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		plan := row.GetActivity().GetPlan()
+		if plan == nil {
+			continue
+		}
+		if plan.GetPlanned() == nil {
+			t.Fatalf("the plan bubble settled as %T, want planned", plan.GetState())
+		}
+		return
+	}
+	t.Fatal("the feed holds no plan bubble at all")
 }
 
 // ===========================================================================
@@ -1029,8 +1130,29 @@ func TestWebSearch(t *testing.T) {
 	// Assert
 	row := rmAwaitFeedRow(t, w, ws, "the WebSearch settled tool card", rmToolCallSettled(turn, "WebSearch"))
 	returned := rmRequireSucceeded(t, row, "WebSearch")
-	if links := returned.GetLinks(); links == nil || len(links.GetLinks()) == 0 {
+	links := returned.GetLinks()
+	if links == nil || len(links.GetLinks()) == 0 {
 		t.Fatalf("WebSearch tool call returned = %v, want a non-empty links output form", returned)
+	}
+	// THE GROUP'S PAGES, EACH ITS OWN ROW. web.ts's fixture answers one hit
+	// group of two pages plus one bare narration string, so the drawn answer
+	// is THREE rows in the engine's order. Asserting only "non-empty" passed
+	// while the transcript plane read `title`/`url` off the GROUP rather than
+	// its `content` array: it minted one row with an empty title and an empty
+	// href and lost both pages, and the card drew an invisible dead row where
+	// two clickable results belonged.
+	type linkRow struct{ text, url string }
+	var got []linkRow
+	for _, link := range links.GetLinks() {
+		got = append(got, linkRow{text: link.GetText(), url: link.GetUrl().GetUrl()})
+	}
+	want := []linkRow{
+		{text: "Example API reference", url: "https://docs.example.com/reference/"},
+		{text: "Example changelog", url: "https://docs.example.com/changelog/"},
+		{text: "The reference page covers every method; the changelog lists recent additions.", url: ""},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("WebSearch drawn link rows = %+v, want %+v", got, want)
 	}
 }
 
@@ -1079,6 +1201,28 @@ func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
 	})
 	if left.GetSeparation().GetWorktreeLeft().GetRemoved().GetDiscarded() == nil {
 		t.Fatal("worktree-left (removed) divider carries no discarded-files/commits line, want one composed (the fixture discards 3 files, 1 commit)")
+	}
+}
+
+// TestWorktreeDiscardLineIsGrammatical reads the loud discard line the removal
+// composes. The fake's `!worktree-remove` discards THREE files and ONE commit,
+// and the playtest photographed that line as "3 files, 1 commits discarded" —
+// the one figure a reader is most likely to be alarmed by, misspelled.
+func TestWorktreeDiscardLineIsGrammatical(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "worktree-remove")
+
+	// Assert
+	left := rmAwaitFeedRow(t, w, ws, "the worktree-left divider (removed)", func(r *frontendv1.FeedRow) bool {
+		return r.GetSeparation().GetWorktreeLeft().GetRemoved() != nil
+	})
+	got := left.GetSeparation().GetWorktreeLeft().GetRemoved().GetDiscarded().GetText()
+	if got != "3 files, 1 commit discarded" {
+		t.Fatalf("discard line = %q, want %q", got, "3 files, 1 commit discarded")
 	}
 }
 
