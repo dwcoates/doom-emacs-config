@@ -130,6 +130,13 @@ func (r *resolver) applyHook(s *wsState, hook *conversationv1.AgentHook) {
 func (r *resolver) applySubagent(s *wsState, unit string, sub *conversationv1.AgentSubagent) {
 	switch item := sub.GetResult().(type) {
 	case *conversationv1.AgentSubagent_Start:
+		// A SPAWN UNIT REPLAYED AFTER ITS RUN SETTLED IS THE SAME REPLAY
+		// OnSubagent guards against, arriving on the CALLER's stream instead:
+		// the handle and the spawn unit are one value, so a start naming a
+		// retired handle re-opened a row the terminal had already taken away.
+		if _, done := s.retiredWork[unit]; done {
+			return
+		}
 		row, ok := s.agents[unit]
 		if !ok {
 			row = &agentRow{spawnUnit: unit, order: s.nextOrder()}
@@ -506,6 +513,12 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 
 // applyDetached folds a detachment announcement into the chips.
 func (r *resolver) applyDetached(s *wsState, id string, work *conversationv1.AgentDetachedWork) {
+	// AN ANNOUNCEMENT AFTER THE TERMINAL IS A REPLAY TOO, for the reason a
+	// start is: the announcement reaches the footer once per book, and the
+	// second telling can arrive after the run has already settled.
+	if _, done := s.retiredWork[id]; done {
+		return
+	}
 	switch origin := work.GetOrigin().(type) {
 	case *conversationv1.AgentDetachedWork_Detached:
 		unit := origin.Detached.GetDetachedFromId().GetValue()
@@ -579,6 +592,13 @@ func (r *resolver) OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedW
 		dlog.Context{"work_id": id}, func(s *wsState) {
 			switch item := sub.GetResult().(type) {
 			case *conversationv1.AgentSubagent_Start:
+				// A START AFTER THE TERMINAL IS A REPLAY, never a new run.
+				// See wsState.retiredWork: the run's own book carries its
+				// opening frames and the caller's book carries the settle,
+				// and neither is ordered against the other.
+				if _, done := s.retiredWork[id]; done {
+					return
+				}
 				row, ok := s.agents[id]
 				if !ok {
 					row = &agentRow{spawnUnit: id, order: s.nextOrder()}
@@ -612,6 +632,7 @@ func retireWork(s *wsState, id string) {
 	if id == "" {
 		return
 	}
+	s.retiredWork[id] = struct{}{}
 	for unit, row := range s.agents {
 		if unit == id || row.work == id || row.spawnUnit == id || row.createdAgent == id {
 			delete(s.agents, unit)
@@ -629,6 +650,9 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 		dlog.Context{"work_id": id}, func(s *wsState) {
 			switch item := bash.GetResult().(type) {
 			case *conversationv1.AgentBash_Start:
+				if _, done := s.retiredWork[id]; done {
+					return
+				}
 				row, ok := s.shells[id]
 				if !ok {
 					row = &shellRow{work: id, order: s.nextOrder()}
@@ -638,6 +662,7 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 				row.startedAt = time.UnixMilli(item.Start.GetStartedAt().GetAtMs())
 			case *conversationv1.AgentBash_Update:
 			default:
+				s.retiredWork[id] = struct{}{}
 				delete(s.shells, id)
 			}
 		})

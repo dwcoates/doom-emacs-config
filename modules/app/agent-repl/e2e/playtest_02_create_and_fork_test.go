@@ -163,12 +163,21 @@ func playtestNewTabName(t *testing.T, before, after []string) string {
 }
 
 // playtestAwaitNewTab waits until the tab bar carries exactly one name it did
-// not carry BEFORE, and answers it.
+// not carry BEFORE, and answers it -- ON A SETTLED FRAME.
+//
+// Both `agent-repl-create-workspace` and `agent-repl-fork-workspace` pass
+// `:select t`, so the minted workspace LANDS on its own panel, and the tab's
+// arrival is the first step of that landing rather than its last (see
+// landing_test.go). Every create and fork in every playbook reads its new
+// name through here, so waiting the landing out here is what keeps the step
+// after it from racing a panel show.
 func playtestAwaitNewTab(t *testing.T, s *playtestScenario, before []string, what string) string {
 	t.Helper()
 	s.E.AwaitEvalFor(emacsVerbBound, what, emacsWSTablineNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(before)+1 })
-	return playtestNewTabName(t, before, s.tabNames())
+	name := playtestNewTabName(t, before, s.tabNames())
+	awaitMintedLanding(s.E, name)
+	return name
 }
 
 // playtestCreateReaders runs BODY with the two prompting readers

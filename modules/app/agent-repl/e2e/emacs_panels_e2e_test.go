@@ -69,51 +69,10 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 	return w, names
 }
 
-// awaitRegistrationLanding waits out the landing that REGISTERING a
-// workspace performs.
-//
-// A REGISTERED WORKSPACE COMES UP ON ITS OWN PANEL, by design: the daemon
-// mints the ref, `agent-repl-verbs-select-minted` switches to the minted
-// worktree, and the switch arms `:pending-show-panels` so the perspective
-// activation drain shows the workspace's view
-// (`agent-repl--arm-landing-panels`, `agent-repl--drain-pending-show-panels`).
-// That landing waits on the daemon's answer, so it is ASYNCHRONOUS: a
-// scenario that starts measuring windows as soon as the registry holds the
-// name is racing a panel show it never asked for. Under the soak the show
-// arrived mid-scenario — the frame already held both panels before the open
-// under test, and a work layout arranged before an open was collapsed by the
-// arriving show.
-//
-// Settled means BOTH: nothing is left armed, and the workspace's own webview
-// has a live window. The window is what makes the wait safe — the flag alone
-// reads as "settled" in the moment before the arm.
-//
-// The bound is `emacsVerbBound`, not `panelSettleBound`: this wait spans a
-// WHOLE VERB — the register call out of Emacs, the daemon's minted ref, and
-// the landing that ref triggers — rather than a panel's own settling on a
-// frame that already holds the workspace.
-func awaitRegistrationLanding(e *Emacs, dir string) {
-	e.t.Helper()
-	// The form answers the STATE rather than a bare yes/no, so a wait that
-	// is never satisfied names which half of "settled" is missing.
-	e.AwaitEvalFor(emacsVerbBound, "the registration's landing to put the workspace's panel on the frame",
-		`(let* ((ws (agent-repl--ws-name-for-dir `+elispString(dir)+`))
-                        (buf (and ws (agent-repl--ws-get ws :frontend-buffer))))
-                   (format "ws=%s pending=%s webview=%s window=%s"
-                           ws
-                           (and ws (agent-repl--ws-get ws :pending-show-panels))
-                           (and (buffer-live-p buf) (buffer-name buf))
-                           (and (buffer-live-p buf) (window-live-p (get-buffer-window buf)))))`,
-		func(raw json.RawMessage) bool {
-			var state string
-			if err := json.Unmarshal(raw, &state); err != nil {
-				return false
-			}
-			return !strings.HasPrefix(state, "ws=nil") &&
-				strings.Contains(state, "pending=nil") &&
-				strings.HasSuffix(state, "window=t")
-		})
-}
+// The landing each registration performs is waited out through
+// `awaitRegistrationLanding` (landing_test.go), the ONE settle every caller
+// that mints a workspace goes through -- this world, and the playtest
+// substrate's own `register`, `create` and `fork`.
 
 // putTheLandingAway leaves every scenario the same starting frame: the
 // workspaces exist and their panels are NOT on it.

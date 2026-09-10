@@ -1005,3 +1005,81 @@ func TestTheScheduledJobsChipCountsCronsAndTheWakeup(t *testing.T) {
 		})
 	}
 }
+
+// subagentStartFrame is a detached run's own opening frame, as its OWN book
+// carries it -- the frame the caller's book never sends.
+func subagentStartFrame(created, subagentType string) *conversationv1.AgentSubagent {
+	return &conversationv1.AgentSubagent{
+		Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+			CreatedAgentId: &conversationv1.AgentId{Value: created},
+			Prompt:         &conversationv1.AgentSubagentPrompt{SubagentType: &subagentType},
+			StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: instant.UnixMilli()},
+		}},
+	}
+}
+
+// A TERMINAL IS FINAL, AND THE TWO BOOKS ARE NOT ORDERED AGAINST EACH OTHER.
+//
+// MEASURED in the G50 playbook: `AgentSubagent_Success` for a handle arrived on
+// the spawning agent's book and retired the chip row, and 80ms later the SAME
+// handle's `AgentSubagent_Start` arrived on the run's own book and re-opened
+// it. The ⚙ chip then read 3 beside two settled placements and one live one,
+// for the rest of the session -- the very count the terminal was supposed to
+// have retired.
+func TestADetachedSubagentsStartAfterItsTerminalDoesNotCountItLiveAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
+
+	// Act: the run's own book replaying its opening frame after the settle.
+	h.r.OnSubagent(testWS, workID("work-1"), subagentStartFrame("agent-2", "Explore"))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents(); got != nil {
+		t.Fatalf("agents chip = %d after a start replayed behind the run's own terminal, want the run to stay retired",
+			got.GetCount())
+	}
+}
+
+// AND NEITHER DOES THE ANNOUNCEMENT, which reaches the footer once per book for
+// the same reason the start does.
+func TestADetachedWorkAnnouncementAfterItsTerminalDoesNotCountItLiveAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
+
+	// Act: the announcement told a second time, after the settle.
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents(); got != nil {
+		t.Fatalf("agents chip = %d after the announcement replayed behind the run's own terminal, want the run to stay retired",
+			got.GetCount())
+	}
+}
+
+// AND THE CALLER'S OWN STREAM REPLAYS TOO. The spawn unit and the handle are
+// one value, so a spawn frame re-read off the calling agent's activity stream
+// after the run settled re-opened the row the terminal had taken away -- the
+// second half of the ⚙ chip reading 3 in the G50 playbook.
+func TestASpawnUnitReplayedAfterItsRunSettledDoesNotCountItLiveAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+	h.r.OnSubagent(testWS, workID("spawn-1"), subagentSettled(false))
+
+	// Act: the caller's stream re-read from its own start.
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents(); got != nil {
+		t.Fatalf("agents chip = %d after the spawn unit replayed behind the run's own terminal, want the run to stay retired",
+			got.GetCount())
+	}
+}
