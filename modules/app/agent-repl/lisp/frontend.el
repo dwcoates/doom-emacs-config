@@ -54,7 +54,6 @@
 (declare-function agent-repl--ws-gui-frontend-p "agent-repl-frontends" (ws))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--agent-view-buffer-p "agent-repl-core" (&optional buf))
-(declare-function agent-repl--webview-recovery-sweep "webview-recovery" (reason))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--current-ws-p "agent-repl-core" (ws))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
@@ -70,8 +69,6 @@
 (declare-function agent-repl-open-progress-note-loaded "agent-repl-open-progress" (ws))
 (declare-function xwidget-get "xwidget" (xwidget propname))
 (declare-function xwidget-put "xwidget" (xwidget propname value))
-(declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--frontend-hibernate-workspace "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
@@ -90,9 +87,6 @@
 (declare-function agent-repl--ws-choose-frontend "agent-repl-frontends" (ws name))
 (declare-function agent-repl-register-frontend "agent-repl-frontends" (frontend))
 (declare-function agent-repl-frontend-create "agent-repl-frontends")
-(declare-function agent-repl--gui-cancel-detached-agents "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--gui-adopt-session "agent-repl-frontend-client" (ws claude-session-id on-success on-failure))
 (defvar agent-repl-input-height-fraction)
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
 (declare-function xwidget-webkit-current-session "xwidget" ())
@@ -111,6 +105,7 @@
 ;; W2-A's names (host.el) and the transport's connection accessor.
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-host-conn "host" (ws))
+(declare-function agent-repl-host-vendor-session-id "host" (ws))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 
 ;;;; ---- Customization ------------------------------------------------------
@@ -270,32 +265,6 @@ external call; tests mock via `cl-letf'.  Registered in
 `agent-repl--external-boundary-functions'."
   (require 'xwidget)
   (xwidget-webkit-uri xwidget)) ;; ALLOW-EXTERNAL-BOUNDARY
-
-(defun agent-repl-refresh-webviews ()
-  "Bring every workspace webview onto the deployed bundle, returning the count.
-
-The deploy-time entry point bin/deploy-all.sh calls over emacsclient
-right after it restarts the daemon.  It holds no sweep logic of its own:
-the sweep is `agent-repl--webview-recovery-sweep' (webview-recovery.el),
-which is the SAME sweep the daemon link-up edge fires.  The two edges
-are one mechanism deliberately — a deploy and a link-up differ only in
-what named them, and a page's staleness is decided by comparing what it
-is running against what is on disk either way.
-
-ALWAYS RETURNS AN INTEGER — the number of webviews the sweep acted on,
-and 0 when the sweep was debounced away by a recent one.  The caller is
-bin/deploy-all.sh, which formats this answer over emacsclient with a
-`%d'; the sweep's own nil-for-debounced is an internal distinction, and
-handing it out over the wire made a debounced deploy report `Format
-specifier doesn\\='t match argument type' instead of a count.  Nothing was
-acted on when a sweep is debounced, so 0 is the true count, not a
-papered-over failure."
-  (interactive)
-  (let ((acted (or (agent-repl--webview-recovery-sweep "deploy_refresh") 0)))
-    (when (called-interactively-p 'interactive)
-      (agent-repl--user-message nil "webview sweep acted on %s webview(s)"
-                                (list acted)))
-    acted))
 
 ;;;; ---- Webview buffer adoption ----------------------------------------------
 
@@ -933,6 +902,22 @@ page draws whatever state it is in, so session liveness would answer a
 question neither branch of the toggle asks."
   (and (buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) t))
 
+(defun agent-repl--gui-durable-session-id (ws)
+  "The gui frontend's durable-session capability (`:durable-session-id-fn').
+
+Answers the VENDOR conversation id — the claude session uuid a resume
+replays — for WS, or nil.  The gui holds no session state of its own to
+answer from: the daemon owns the session and publishes its vendor
+identity on the host stream, so this reads
+`agent-repl-host-vendor-session-id' and nothing else.  A second source
+would be a second answer, and the two would disagree the moment a
+session rotates.
+
+Nil is an ANSWER, not a failure: a workspace with no live session, or
+one whose vendor conversation has not started yet, durably identifies no
+conversation."
+  (agent-repl-host-vendor-session-id ws))
+
 (defun agent-repl--gui-kill (ws)
   "The gui frontend's kill capability (registry `:kill-fn').
 Tears down the LAYOUT first (webview + dedicated input windows), then
@@ -960,7 +945,13 @@ which is not what closing a panel says."
   :open-fn #'agent-repl--gui-open
   :boot-fn #'agent-repl--gui-boot
   :kill-fn #'agent-repl--gui-kill
-  :cancel-detached-fn #'agent-repl--gui-cancel-detached-agents
+  ;; NO `:cancel-detached-fn'.  Stopping detached work is the `Interrupt'
+  ;; verb's `all_agents' target, and `Interrupt' is a FEED verb: its other
+  ;; targets are named by `frontend.v1.FeedId', vocabulary Emacs has no
+  ;; feed to hold.  Emacs calls no interrupt rpc at all (elisp-fanout
+  ;; ruling b) — the webapp footer owns the gesture, on the very page this
+  ;; frontend mounts.  The registry's dispatch says so loudly rather than
+  ;; sending an interrupt that provably could not reach detached work.
   :running-p-fn #'agent-repl--gui-running-p
   :show-fn #'agent-repl--gui-show
   :hide-fn #'agent-repl--gui-hide
@@ -972,7 +963,13 @@ which is not what closing a panel says."
   :supported-backends '(claude)
   :supported-envs '(:bare-metal)
   :durable-session-id-fn #'agent-repl--gui-durable-session-id
-  :adopt-session-fn #'agent-repl--gui-adopt-session))
+  ;; NO `:adopt-session-fn'.  No verb in the post-overhaul contract binds a
+  ;; workspace to a vendor session uuid a client names: the daemon owns
+  ;; session identity and resumes a workspace's own conversation from its
+  ;; own record, and the cross-frontend switch that used to hand a uuid
+  ;; across is gone with frontend-client.el.  A frontend that could adopt
+  ;; would fill the slot; the gui cannot, and says so by leaving it unset.
+  ))
 
 ;;;###autoload
 (defun agent-repl-frontend-open-panel ()

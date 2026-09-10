@@ -705,6 +705,37 @@ looked at."
       ;; Act / Assert
       (should (equal (agent-repl-host-faults "ws-1") faults)))))
 
+(ert-deftest agent-repl-test-host-vendor-session-id-is-read-off-the-claude-arm ()
+  "The durable id is the vendor conversation's, not the daemon's echo token."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
+    ;; Act / Assert
+    (should (equal (agent-repl-host-vendor-session-id "ws-1") "vendor-1"))))
+
+(ert-deftest agent-repl-test-host-vendor-session-id-is-nil-while-the-oneof-is-unset ()
+  "No vendor conversation yet is the ordinary early state, not a failure."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host
+                  :value (agent-repl-test-host--live :vendor-info nil)))
+    ;; Act / Assert
+    (should (null (agent-repl-host-vendor-session-id "ws-1")))))
+
+(ert-deftest agent-repl-test-host-vendor-session-id-is-nil-without-a-live-session ()
+  "`vendor_info' lives on the LIVE arm and nowhere else."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--terminal t)))
+    ;; Act / Assert
+    (should (null (agent-repl-host-vendor-session-id "ws-1")))))
+
 (ert-deftest agent-repl-test-host-state-push-runs-the-update-hook ()
   "Every host push is whole-replace, and consumers hear about it."
   (agent-repl-test-host--with-harness
