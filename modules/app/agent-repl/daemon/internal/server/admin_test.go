@@ -202,31 +202,51 @@ func TestUnhealthyDaemonIsAnAnswer(t *testing.T) {
 	}
 }
 
-// TestClientLogPersistsToTheOwningWorkspace pins that a console-less client's
-// record lands in the WORKSPACE's durable log, never in a global one.
-func TestClientLogPersistsToTheOwningWorkspace(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-
-	// Act.
-	if _, err := h.Client.ClientLog(context.Background(),
-		connect.NewRequest(&agentreplv1.ClientLogRequest{
-			Workspace: ref(),
-			Record: &agentreplv1.ClientLogRecord{
+// TestClientLogRoutesEachRuntimeToItsOwningSink pins all three routing arms,
+// including the historical webapp route for a sender that predates the oneof.
+func TestClientLogRoutesEachRuntimeToItsOwningSink(t *testing.T) {
+	tests := []struct {
+		name    string
+		runtime func(*agentreplv1.ClientLogRecord)
+		want    string
+	}{
+		{name: "an unset runtime keeps the historical webapp route", want: dlog.RuntimeWebapp},
+		{name: "the webapp arm", runtime: func(r *agentreplv1.ClientLogRecord) {
+			r.Runtime = &agentreplv1.ClientLogRecord_Webapp{Webapp: &agentreplv1.ClientLogRuntimeWebapp{}}
+		}, want: dlog.RuntimeWebapp},
+		{name: "the sidecar arm", runtime: func(r *agentreplv1.ClientLogRecord) {
+			r.Runtime = &agentreplv1.ClientLogRecord_Sidecar{Sidecar: &agentreplv1.ClientLogRuntimeSidecar{}}
+		}, want: dlog.RuntimeSidecar},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			record := &agentreplv1.ClientLogRecord{
 				Level:     &agentreplv1.ClientLogRecord_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}},
-				Operation: "webapp.render",
+				Operation: "client.render",
 				Message:   "a render stalled",
-			},
-		})); err != nil {
-		t.Fatalf("ClientLog: %v", err)
-	}
+			}
+			if tc.runtime != nil {
+				tc.runtime(record)
+			}
 
-	// Assert.
-	if len(h.Surfaces.clientRecords) != 1 {
-		t.Fatalf("persisted %d records, want 1", len(h.Surfaces.clientRecords))
-	}
-	if got := h.Surfaces.clientRecords[0].Level; got != dlog.LevelWarn {
-		t.Fatalf("level = %q, want %q", got, dlog.LevelWarn)
+			// Act.
+			if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+				Workspace: ref(),
+				Record:    record,
+			})); err != nil {
+				t.Fatalf("ClientLog: %v", err)
+			}
+
+			// Assert.
+			if len(h.Surfaces.clientRecords) != 1 {
+				t.Fatalf("persisted %d records, want 1", len(h.Surfaces.clientRecords))
+			}
+			if got := h.Surfaces.clientRecords[0].ClientKind; got != tc.want {
+				t.Fatalf("client kind = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
