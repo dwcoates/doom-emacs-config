@@ -33,6 +33,20 @@
 # its recorded pid and moving the directory aside, so a slot only ever becomes
 # claimable by ceasing to exist, never by being emptied under a live holder.
 #
+# NESTING IS RE-ENTRANT, AND IT HAS TO BE.
+#
+# A slot is held by a PROCESS TREE, not by one command, so a wrapped command
+# that wraps its own children hits the gate it is already behind. That is not
+# theoretical: `bin/suite-slot.sh bin/e2e-repeat.sh ...` hung for 6000s of
+# "still waiting", because e2e-repeat takes a slot per run and every one of them
+# queued behind the outer holder that was waiting for them to finish. A deadlock
+# with a polite progress message is still a deadlock.
+#
+# So an acquired slot is exported as AGENT_REPL_SUITE_SLOT_HELD, and any nested
+# invocation that sees it runs its command DIRECTLY, with one line saying so.
+# The gate's promise is unchanged: one suite per slot at a time on this host.
+# The nested run is not a second suite, it is the same one, already counted.
+#
 # Usage:
 #   bin/suite-slot.sh npm test
 #   bin/suite-slot.sh go test ./... -count=1
@@ -56,6 +70,7 @@ SLOT_DIR=${AGENT_REPL_SUITE_SLOT_DIR:-/tmp/agent-repl-suite.slots}
 SUITE_SLOTS=${AGENT_REPL_SUITE_SLOTS:-1}
 
 SUITE_SLOT=""
+# shellcheck disable=SC2329  # invoked indirectly, from the EXIT/INT/TERM trap
 release_slot() {
   [[ -n ${SUITE_SLOT:-} ]] || return 0
   rm -rf "$SUITE_SLOT"
@@ -78,6 +93,12 @@ reap_dead_slots() {
 }
 
 acquire_slot() {
+  # ALREADY INSIDE A HELD SLOT. Waiting here would be waiting on this very
+  # process tree, which is the deadlock the header records. Run through.
+  if [[ -n ${AGENT_REPL_SUITE_SLOT_HELD:-} ]]; then
+    log "already holding $AGENT_REPL_SUITE_SLOT_HELD (nested invocation): running without acquiring a second slot"
+    return 0
+  fi
   if [[ ${AGENT_REPL_SUITE_NO_GATE:-0} == 1 ]]; then
     log "AGENT_REPL_SUITE_NO_GATE=1: running WITHOUT the host gate; concurrent suites will contend for every CPU"
     return 0
@@ -91,6 +112,10 @@ acquire_slot() {
         SUITE_SLOT="$SLOT_DIR/slot-$i"
         printf '%s\n' "$$" > "$SUITE_SLOT/pid"
         printf '%s\n' "$*" > "$SUITE_SLOT/cmd"
+        # The marker every descendant reads. It is exported, not written to the
+        # slot: what matters to a nested invocation is whether IT is inside the
+        # holder, which is exactly what an inherited environment answers.
+        export AGENT_REPL_SUITE_SLOT_HELD="slot-$i"
         trap release_slot EXIT INT TERM
         (( waited > 0 )) && log "slot $i acquired after ${waited}s"
         return 0
