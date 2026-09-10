@@ -240,6 +240,14 @@ type agentRow struct {
 	startedAt time.Time
 	// order is the spawn order the panel draws in.
 	order int
+	// work is the handle the run is addressed by once it has DETACHED, empty
+	// while the spawn is still the turn's own progress.
+	//
+	// It is what makes the row retirable BY ITS OWN IDENTITY: a detached run's
+	// terminal is addressed to the work, on whichever stream carries it, and a
+	// row with a handle is no longer retired by the spawning call's stream
+	// alone. See chips.go OnSubagent.
+	work string
 }
 
 // shellRow is one live detached shell.

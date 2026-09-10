@@ -262,6 +262,125 @@ func TestASubagentsTerminalRetiresItsRow(t *testing.T) {
 	}
 }
 
+// detachedSubagentWork announces a spawn that is detached from the moment the
+// footer hears of it -- the `created` origin.
+func detachedSubagentWork(work, created, subagentType string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: work},
+		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+			WorkCreated: &conversationv1.DetachableWork{
+				Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
+					Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+						CreatedAgentId: &conversationv1.AgentId{Value: created},
+						Prompt:         &conversationv1.AgentSubagentPrompt{SubagentType: &subagentType},
+						StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: instant.UnixMilli()},
+					}},
+				}},
+			},
+		}},
+	}
+}
+
+// movedSubagent announces an in-turn spawn LEAVING the turn under a handle.
+func movedSubagent(unit string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: unit},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+		}},
+	}
+}
+
+// subagentSettled is a detached run's own terminal, success or failure.
+func subagentSettled(failed bool) *conversationv1.AgentSubagent {
+	if failed {
+		return &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{}},
+		}
+	}
+	return &conversationv1.AgentSubagent{
+		Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{}},
+	}
+}
+
+// workID addresses one piece of detached work.
+func workID(v string) *conversationv1.DetachedWorkId {
+	return &conversationv1.DetachedWorkId{Value: v}
+}
+
+func TestADetachedSubagentCountsInTheAgentsChip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents().GetCount(); got != 1 {
+		t.Fatalf("agents chip = %d, want the detached run counted", got)
+	}
+}
+
+// THE DEFECT G50 READ: two settled placements and one live one, and the chip
+// counted all three. A detached run's terminal is addressed to its HANDLE, and
+// nothing retired the row from it.
+func TestADetachedSubagentsTerminalRetiresItsChip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("spawn-1"), subagentSettled(false))
+
+	// Assert
+	if h.view(t).GetStrip().GetLiveWork().GetAgents() != nil {
+		t.Fatalf("the agents chip survived the detached run's own terminal")
+	}
+}
+
+// HOWEVER IT SETTLED. A failed run is as over as a successful one, exactly as a
+// shell's is.
+func TestADetachedSubagentsFailureRetiresItsChip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(true))
+
+	// Assert
+	if h.view(t).GetStrip().GetLiveWork().GetAgents() != nil {
+		t.Fatalf("the agents chip survived the detached run's failure")
+	}
+}
+
+// THE SPAWNING CALL RETURNING IS A LAUNCH RECEIPT. Once the run has left the
+// turn, the caller's stream states nothing about whether it is still going, so
+// a terminal arm read off that unit must not retire a run that is still live.
+func TestTheSpawningCallsReturnDoesNotRetireADetachedRun(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+
+	// Act: the spawn unit's own settled arm on the CALLER's activity stream.
+	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item:       &conversationv1.AgentActivity_Subagent{Subagent: subagentSettled(false)},
+	})
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents().GetCount(); got != 1 {
+		t.Fatalf("agents chip = %d, want the detached run still counted", got)
+	}
+}
+
 func TestTheTaskChipCountsDoneOverTotal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

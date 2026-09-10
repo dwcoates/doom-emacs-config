@@ -169,6 +169,12 @@ type FooterSink interface {
 	OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork)
 	// OnBash advances a shell chip.
 	OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash)
+	// OnSubagent advances a DETACHED subagent's chip and retires it at that
+	// run's own terminal. The counterpart of OnBash: a detached run is
+	// addressed by its HANDLE, so its terminal retires the chip whichever
+	// stream carried the frame, and the spawning call's stream is never read
+	// as a statement about a run that has already left the turn.
+	OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, sub *conversationv1.AgentSubagent)
 	// OnContextBudgetWarning is the vendor's own context-budget warning. It
 	// is an AGENT-PLANE fact (a page line of the agent's book, sidecar-
 	// produced), never a session-stream event, so it arrives addressed to the
