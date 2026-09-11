@@ -105,6 +105,8 @@ class Subscriber {
 export class SessionPushes {
   private readonly subscribers = new Set<Subscriber>();
   private readonly faults: conversationv1.SessionFault[] = [];
+  /** How many times each standing (component, kind) fault has recurred, for the log record only. */
+  private readonly faultRepeats = new Map<string, number>();
   private readonly degradedWindows: conversationv1.SessionDegradedWindow[] = [];
   /** The current value of each replayed arm, so a late subscriber is not blind. */
   private readonly current = new Map<string, conversationv1.SessionUpdate>();
@@ -237,13 +239,33 @@ export class SessionPushes {
     });
   }
 
-  /** Record a fault and restate the diagnostics. */
+  /**
+   * Record a fault and restate the diagnostics.
+   *
+   * A fault whose (component, kind) matches a STANDING fault REPLACES it —
+   * latest detail wins — rather than stacking a new entry beside it. A store
+   * down for an hour with a watch every few minutes would otherwise pile up
+   * identical faults until recovery clears them, and the diagnostics arm
+   * would report a growing list of one repeated symptom rather than one
+   * symptom that has recurred. The `repeats` count lives only on this
+   * instance, for the log record — it is not carried into the SessionFault
+   * message itself.
+   */
   fault(fault: conversationv1.SessionFault): void {
-    this.faults.push(fault);
-    LOGGER.error(
-      { component: fault.component, kind: fault.kind.case ?? "", detail: fault.detail },
-      "recorded a session fault",
+    const kind = fault.kind.case ?? "";
+    const key = `${fault.component} ${kind}`;
+    const index = this.faults.findIndex(
+      (standing) => standing.component === fault.component && (standing.kind.case ?? "") === kind,
     );
+    const repeats = (this.faultRepeats.get(key) ?? 0) + 1;
+    this.faultRepeats.set(key, repeats);
+    if (index === -1) {
+      this.faults.push(fault);
+      LOGGER.error({ component: fault.component, kind, detail: fault.detail }, "recorded a session fault");
+    } else {
+      this.faults[index] = fault;
+      LOGGER.debug({ component: fault.component, kind, detail: fault.detail, repeats }, "recorded a session fault");
+    }
     this.push(this.diagnostics());
   }
 
@@ -274,8 +296,10 @@ export class SessionPushes {
   resolveComponent(component: string, droppedCount: number): boolean {
     let changed = false;
     for (let index = this.faults.length - 1; index >= 0; index -= 1) {
-      if (this.faults[index]?.component !== component) continue;
+      const standing = this.faults[index];
+      if (standing?.component !== component) continue;
       this.faults.splice(index, 1);
+      this.faultRepeats.delete(`${standing.component} ${standing.kind.case ?? ""}`);
       changed = true;
     }
     for (const window of this.degradedWindows) {
