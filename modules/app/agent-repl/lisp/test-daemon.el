@@ -160,6 +160,7 @@ under the temp root rather than the session's state dir.")
          (agent-repl-daemon--own-address nil)
          (agent-repl-daemon--lifecycle nil)
          (agent-repl-daemon--lifecycle-timer nil)
+         (agent-repl-daemon--workspace-echo-done nil)
          ;; The segment reads the roster's order and the pending-open set,
          ;; so both are reset per scenario: a tab order left standing by an
          ;; earlier test would put a workspace bring-up note in this one's
@@ -232,7 +233,11 @@ under the temp root rather than the session's state dir.")
                   (push buffer agent-repl-test-daemon--displayed)
                   nil))
                ((symbol-function 'message) (lambda (&rest _) nil))
-               ((symbol-function 'agent-repl--backend-phase) (lambda (&rest _) nil))
+               ;; `agent-repl--backend-phase' and `agent-repl--phase-echo' are
+               ;; NOT stubbed: they are how the startup phases reach the echo
+               ;; area, and the scenarios below assert exactly that.  Both
+               ;; end at `agent-repl--emit-message', whose `message' is
+               ;; stubbed above, so nothing is printed either way.
                ((symbol-function 'agent-repl--log)
                 (lambda (_ws fmt &rest args)
                   (push (cons :log (apply #'format fmt args)) agent-repl-test-daemon--logs)))
@@ -1604,6 +1609,231 @@ the spawn, called the daemon booted, and linked to a refused port."
     (agent-repl-daemon-schedule-ensure)
     ;; Assert
     (should (null agent-repl-test-daemon--build-runs))))
+
+
+;;;; ---- The bring-up phases in the MINIBUFFER ----
+;;
+;; The mode line says where bring-up has got to in a corner of the frame
+;; and then clears itself; these assert the other half, the short line the
+;; user actually reads while a cold start runs.  Every echo is produced by
+;; the module's own logging function in echo mode, so the capture point is
+;; `agent-repl--emit-message' -- the one chokepoint separating agent-repl's
+;; quiet sink from its loud one -- and a line captured with ECHO nil is a
+;; line that was RECORDED but never reached the echo area.
+
+(defvar agent-repl-test-daemon--echoes nil
+  "Echo-area lines captured during a scenario, oldest first.")
+
+(defmacro agent-repl-test-daemon--capturing-echoes (&rest body)
+  "Run BODY with every loud `agent-repl--emit-message' line captured."
+  (declare (indent 0))
+  `(let ((agent-repl-test-daemon--echoes nil))
+     (cl-letf (((symbol-function 'agent-repl--emit-message)
+                (lambda (text &optional echo)
+                  (when echo
+                    (setq agent-repl-test-daemon--echoes
+                          (append agent-repl-test-daemon--echoes (list text))))
+                  text)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-daemon-the-starting-phase-echoes-once ()
+  "The spawn says so in the minibuffer, and says it exactly once."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--set-lifecycle 'starting)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: starting the daemon…"))))))
+
+(ert-deftest agent-repl-test-daemon-the-linking-phase-echoes-once ()
+  "The wait between an address and a standing link is the invisible leg."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--set-lifecycle 'linking)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: linking to the daemon…"))))))
+
+(ert-deftest agent-repl-test-daemon-the-ready-outcome-echoes-once ()
+  "A daemon this Emacs started reaching link-up is `ready'."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--set-lifecycle 'ready)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: daemon ready"))))))
+
+(ert-deftest agent-repl-test-daemon-the-adopted-outcome-echoes-once ()
+  "A daemon this Emacs attached to is `adopted', and says which it was."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--set-lifecycle 'adopted)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: daemon adopted"))))))
+
+(ert-deftest agent-repl-test-daemon-a-phase-while-the-minibuffer-is-busy-is-not-echoed ()
+  "The echo area is the user's prompt; progress must not type over it."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
+        ;; Act
+        (agent-repl-daemon--set-lifecycle 'linking))
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-a-phase-while-the-minibuffer-is-busy-is-still-recorded ()
+  "Suppressed is not dropped: the transition is still in the log."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
+        ;; Act
+        (agent-repl-daemon--set-lifecycle 'linking))
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :info "elisp.daemon.lifecycle state=linking")))))
+
+(ert-deftest agent-repl-test-daemon-the-spawn-echoes-the-starting-phase-once ()
+  "The spawn records its own line, but the TRANSITION owns the echo."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--start)
+      ;; Assert
+      (should (equal (seq-filter
+                      (lambda (line)
+                        (string-match-p "starting the daemon" line))
+                      agent-repl-test-daemon--echoes)
+                     '("agent-repl: starting the daemon…"))))))
+
+(ert-deftest agent-repl-test-daemon-a-running-build-echoes-once ()
+  "The build is the leg that blocks the frame, so it announces itself."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--existing-paths t
+          agent-repl-test-daemon--build-defer t)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--build nil #'ignore)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: building the stack…"))))))
+
+(ert-deftest agent-repl-test-daemon-a-finished-build-echoes-its-outcome ()
+  "A build that finished is worth one line and not worth keeping."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--existing-paths t)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--build nil #'ignore)
+      ;; Assert
+      (should (seq-find (lambda (line) (string-match-p "stack built" line))
+                        agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-a-build-failure-echoes-through-the-log-function ()
+  "A failure the user must act on reaches the echo area as a LOGGED line."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--report-build-failure "build failed (exit 2)")
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: build failed (exit 2)"))))))
+
+(ert-deftest agent-repl-test-daemon-a-launch-failure-echoes-through-the-log-function ()
+  "Same one-call rule for the daemon that never launched at all."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--report-launch-failure "the daemon needs a state root")
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: the daemon needs a state root"))))))
+
+(ert-deftest agent-repl-test-daemon-a-failure-echoes-even-while-the-minibuffer-is-busy ()
+  "The guard covers PROGRESS, never a failure: this one is worth interrupting."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
+        ;; Act
+        (agent-repl-daemon--report-launch-failure "no state root"))
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: no state root"))))))
+
+;;;; ---- The workspace bring-up count in the minibuffer ----
+
+(ert-deftest agent-repl-test-daemon-the-workspace-count-echoes-when-it-moves ()
+  "One line per workspace that finishes painting, naming how far along it is."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
+    (puthash "ws-1" (list :phase :loaded) agent-repl--open-progress)
+    (puthash "ws-2" (list :phase :requested) agent-repl--open-progress)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-open-progress-change)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: loading workspaces (1/2)…"))))))
+
+(ert-deftest agent-repl-test-daemon-an-unmoved-workspace-count-echoes-nothing ()
+  "The change hook fires several times per workspace; only a MOVE is a line."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
+    (puthash "ws-1" (list :phase :loaded) agent-repl--open-progress)
+    (puthash "ws-2" (list :phase :requested) agent-repl--open-progress)
+    (agent-repl-daemon-on-open-progress-change)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-open-progress-change)
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-the-workspace-count-is-final-when-it-empties ()
+  "The last line of a cold start says how many workspaces stood up."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
+    (puthash "ws-1" (list :phase :requested) agent-repl--open-progress)
+    (agent-repl-daemon-on-open-progress-change)
+    (remhash "ws-1" agent-repl--open-progress)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-open-progress-change)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: 2 workspaces ready"))))))
+
+(ert-deftest agent-repl-test-daemon-an-empty-count-that-never-moved-echoes-nothing ()
+  "A session with no cold start behind it has no bring-up to announce."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1"))
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-open-progress-change)
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-the-workspace-count-is-quiet-while-the-minibuffer-is-busy ()
+  "Bring-up progress is exactly the chatter a prompt must not be buried under."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
+    (puthash "ws-1" (list :phase :requested) agent-repl--open-progress)
+    (agent-repl-test-daemon--capturing-echoes
+      (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
+        ;; Act
+        (agent-repl-daemon-on-open-progress-change))
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
 
 (provide 'test-daemon)
 
