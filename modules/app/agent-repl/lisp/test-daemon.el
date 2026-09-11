@@ -889,23 +889,59 @@ stubbed too, which is the only external thing about this branch."
   "A caller that must sequence on the stop learns whether it landed."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
-    (let ((accepted :unset))
+    (let ((outcome :unset))
       ;; Act
-      (agent-repl-frontend-daemon-stop (lambda (ok) (setq accepted ok)))
+      (agent-repl-frontend-daemon-stop (lambda (value) (setq outcome value)))
       ;; Assert
-      (should (eq accepted t)))))
+      (should (equal outcome '(:arm :accepted))))))
 
-(ert-deftest agent-repl-test-daemon-stop-transport-failure-reports-nil ()
+(ert-deftest agent-repl-test-daemon-stop-transport-failure-reports-the-reason ()
   "A stop that could not be delivered did not happen."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
-    (let ((accepted :unset))
+    (let ((outcome :unset))
       (setq agent-repl-test-daemon--shutdown-answer
             (list :failure (list :kind :transport :message "no route")))
       ;; Act
-      (agent-repl-frontend-daemon-stop (lambda (ok) (setq accepted ok)))
+      (agent-repl-frontend-daemon-stop (lambda (value) (setq outcome value)))
       ;; Assert
-      (should (null accepted)))))
+      (should (eq (plist-get outcome :arm) :not-restarted))
+      (should (string-match-p "no route" (plist-get outcome :reason))))))
+
+(ert-deftest agent-repl-test-daemon-observe-identity-returns-the-serving-process ()
+  "DaemonHealth is the identity boundary used by restart coordination."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange.
+    (let ((identity nil))
+      (setq agent-repl-test-daemon--health-answer
+            '(:response
+              (:arm :success
+               :value (:arm :healthy :value nil
+                       :identity (:instance-id "daemon-2" :pid 4242
+                                  :build-sha "abc123")))))
+      ;; Act.
+      (agent-repl-daemon-observe-identity
+       'the-connection (lambda (value) (setq identity value)) #'ignore)
+      ;; Assert.
+      (should (equal identity '(:instance-id "daemon-2" :pid 4242
+                                             :build-sha "abc123"))))))
+
+(ert-deftest agent-repl-test-daemon-observe-identity-rejects-an-invalid-pid ()
+  "A malformed identity cannot certify a restarted daemon."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange.
+    (let ((failure nil))
+      (setq agent-repl-test-daemon--health-answer
+            '(:response
+              (:arm :success
+               :value (:arm :healthy :value nil
+                       :identity (:instance-id "daemon-2" :pid 0
+                                  :build-sha "abc123")))))
+      ;; Act.
+      (agent-repl-daemon-observe-identity
+       'the-connection #'ignore (lambda (detail) (setq failure detail)))
+      ;; Assert.
+      (should (string-match-p "invalid process identity" failure)))))
 
 (ert-deftest agent-repl-test-daemon-restart-stops-then-ensures ()
   "Restart is the stop request followed by a fresh ensure."
@@ -983,8 +1019,8 @@ stubbed too, which is the only external thing about this branch."
     ;; Assert
     (should (agent-repl-test-daemon--logged-p :warn "elisp.daemon.departure-timeout"))))
 
-(ert-deftest agent-repl-test-daemon-departure-timeout-still-ensures ()
-  "A timed-out wait ensures anyway: the link is down and no daemon is worse."
+(ert-deftest agent-repl-test-daemon-departure-timeout-does-not-ensure ()
+  "A timed-out departure aborts instead of re-adopting the same daemon."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address "127.0.0.1:9999")
@@ -993,7 +1029,9 @@ stubbed too, which is the only external thing about this branch."
     (setq agent-repl-daemon--departure-deadline (- (float-time) 1))
     (agent-repl-daemon--departure-tick)
     ;; Assert
-    (should (> agent-repl-test-daemon--link-connect-calls 0))))
+    (should (= agent-repl-test-daemon--link-connect-calls 0))
+    (should (agent-repl-test-daemon--logged-p
+             :error "elisp.daemon.restart-abandoned"))))
 
 ;;;; ---- The sentinel ----
 
