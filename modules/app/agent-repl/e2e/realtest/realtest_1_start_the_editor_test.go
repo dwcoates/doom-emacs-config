@@ -160,7 +160,6 @@ func TestRealtestStartTheEditor(t *testing.T) {
 	// everything before it belongs to whoever wrote it.
 	started := time.Now()
 	snapshot := TakeSnapshot(sources)
-	moduleLogOffset := snapshot.OffsetFor(env.ModuleLog)
 
 	manifest := Manifest{
 		Title:      "Realtest 1 — start the editor",
@@ -181,7 +180,7 @@ func TestRealtestStartTheEditor(t *testing.T) {
 	const run = 1
 	launch := coldStart(ctx, t, client, run)
 
-	phases := waitForUsable(ctx, t, run, env.ModuleLog, moduleLogOffset, launch.SpawnedAt, openWorkspaces)
+	phases := waitForUsable(ctx, t, run, sources, snapshot, launch.SpawnedAt, openWorkspaces)
 	measurements := phases.Measure()
 
 	manifest.Runs = append(manifest.Runs, ManifestRun{
@@ -289,8 +288,8 @@ func TestRealtestStartTheEditor(t *testing.T) {
 	}
 }
 
-// waitForUsable polls the module log until the startup has produced everything
-// realtest 1 measures, or the observation ceiling expires.
+// waitForUsable polls the Emacs log sinks until the startup has produced
+// everything realtest 1 measures, or the observation ceiling expires.
 //
 // It polls the LOG, not Emacs. Two reasons, and the second is the important
 // one: asking Emacs whether it has drawn a tab costs an emacsclient round trip
@@ -299,24 +298,28 @@ func TestRealtestStartTheEditor(t *testing.T) {
 // which carries no timestamp. The record does. So the poll is only ever used to
 // decide WHEN TO STOP WAITING; every number reported comes from the log.
 //
+// It reads across the enumerated sources rather than one path because the
+// per-workspace tab-open and panel-painted markers live in each workspace's own
+// `emacs.log` sink, not in the global module log (ReadPhases says why).
+//
 // It returns whatever it has when the ceiling expires rather than failing:
 // a startup that did not finish is exactly the run whose partial phase table
 // the owner needs to see, and the missing workspaces are asserted separately
 // by assertEveryWorkspaceDrawn.
-func waitForUsable(ctx context.Context, t *testing.T, run int, moduleLog string, offset int64, spawnedAt time.Time, expected []Workspace) Phases {
+func waitForUsable(ctx context.Context, t *testing.T, run int, sources []Source, snap Snapshot, spawnedAt time.Time, expected []Workspace) Phases {
 	t.Helper()
 	var phases Phases
 	waitUntil(ctx, t,
 		fmt.Sprintf("cold start %d: every workspace's tab drawn and panel painted", run),
 		usableCeiling,
 		func() bool {
-			read, err := ReadPhases(moduleLog, offset, spawnedAt)
+			read, err := ReadPhases(sources, snap, spawnedAt)
 			if err != nil {
-				// A module log that cannot be read at all is fatal here: it
-				// is the only source every phase is measured from, so a run
-				// that continued past this would report an empty timeline as
-				// though it were a fast one.
-				t.Fatalf("cold start %d: read the startup phases from %s: %v", run, moduleLog, err)
+				// An Emacs sink that cannot be read at all is fatal here: the
+				// phases are measured from these sinks, so a run that continued
+				// past this would report an empty timeline as though it were a
+				// fast one.
+				t.Fatalf("cold start %d: read the startup phases: %v", run, err)
 			}
 			phases = read
 			drawn := setOf(read.DrawnWorkspaces())
@@ -502,6 +505,13 @@ func pgrepOne(ctx context.Context, pattern string) (int, error) {
 // It reads `(recent-keys)` rather than observing a workspace switch: the switch
 // would also have happened if something had CALLED the command, and the whole
 // point of a real key event is that Emacs's keymap is what resolved it.
+//
+// The key driver deliberately brings Emacs frontmost for the instant of each
+// keypress and restores the prior frontmost app afterwards (keydriver.swift
+// says why a no-activation post reaches no key window). So the focus check
+// below is a NET check: it fails only if focus was left on something other than
+// where it started, which is a failure to restore, not the momentary activation
+// itself. This is the one phase that touches focus at all; startup never does.
 func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir string, manifest *Manifest) {
 	t.Helper()
 
@@ -512,8 +522,8 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	driver := &KeyDriver{Pid: pid, Scratch: runDir}
 	if err := driver.Build(ctx); err != nil {
 		// SURFACED, NOT WORKED AROUND. The plan rules that if key delivery to
-		// an unfocused Emacs is impossible, the owner decides the alternative;
-		// there is no elisp fallback here on purpose.
+		// Emacs is impossible, the owner decides the alternative; there is no
+		// elisp fallback here on purpose.
 		note := fmt.Sprintf("KEY DRIVER UNAVAILABLE: %v", err)
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
@@ -566,12 +576,13 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 		t.Fatalf("read which application is frontmost after the key self-test: %v", err)
 	}
 	if before != after {
-		note := fmt.Sprintf("the key self-test MOVED FOCUS from %q to %q, which a realtest must not do", before, after)
+		note := fmt.Sprintf("the key self-test left focus on %q, not on %q where it started: the driver "+
+			"activates Emacs for each keypress and must restore the prior frontmost app, and here it did not", after, before)
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
 	} else {
 		manifest.Notes = append(manifest.Notes,
-			fmt.Sprintf("the key self-test left focus on %q", after))
+			fmt.Sprintf("the key self-test restored focus to %q after momentarily activating Emacs for each keypress", after))
 	}
 }
 

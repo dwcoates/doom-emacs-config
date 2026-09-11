@@ -78,6 +78,12 @@ const (
 	// KindRotation is a source whose size shrank during the run: it rotated or
 	// was truncated, and whatever it held at the snapshot offset is gone.
 	KindRotation
+	// KindDangling is a canonical sink LINK that exists but resolves to no
+	// file: its target was removed while the link was left behind, so any
+	// records it would have named are unreachable. It is distinct from a sink
+	// path that was simply never created, which is an ordinary "this workspace
+	// has no records yet" and no finding at all.
+	KindDangling
 )
 
 func (k FindingKind) String() string {
@@ -94,6 +100,8 @@ func (k FindingKind) String() string {
 		return "attribution-conflict"
 	case KindRotation:
 		return "rotation"
+	case KindDangling:
+		return "dangling"
 	default:
 		return fmt.Sprintf("FindingKind(%d)", int(k))
 	}
@@ -216,27 +224,88 @@ func TakeSnapshot(sources []Source) Snapshot {
 	return snap
 }
 
-// OffsetFor is where a run's own records start in the file behind `path`.
+// sourceRead is one file standing behind a source and the offset its bytes are
+// read from.
 //
-// It is what a reader other than the harvester — the phase reader — needs, and
-// it resolves the same way the harvester does: through the path's current
-// target and that target's inode, so a log renamed or relinked since the
-// snapshot still answers with the offset belonging to its bytes. An unknown
-// file answers zero, which is the honest answer: none of it has been read yet.
-func (s Snapshot) OffsetFor(path string) int64 {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return 0
+// shrankFrom is non-zero when the SAME inode now holds fewer bytes than the
+// snapshot recorded: a truncation in place, where offset is reset to zero and
+// the records the file held past shrankFrom are gone from every path. size is
+// the file's current length, carried so the caller can name it in the finding.
+type sourceRead struct {
+	path       string
+	offset     int64
+	shrankFrom int64
+	size       int64
+}
+
+// resolveReads applies the log-symlink re-resolution invariant to one source
+// and returns every file to read behind it, each with the offset its bytes are
+// read from.
+//
+// THE INVARIANT (docs/REALTEST-JUDGEMENT-CALLS.md, realtest 1, row 28): a
+// per-workspace sink is a SYMLINK whose IDENTITY is the link and whose target
+// can change between the run-start snapshot and the read. A new Emacs instance
+// can append to the standing target (same inode, grown), mint a fresh one (new
+// inode, read whole), or a cap rotation can replace it (new inode, the old
+// bytes moved aside). A reader that seeks to a byte offset taken against the
+// symlink PATH would seek past the end of a replaced or truncated target and
+// read nothing — which is precisely what made run 3 report a startup that had
+// drawn every tab as "no tab drawn". So the offset is taken from the resolved
+// target's INODE, never from the path: an inode the snapshot knew is read from
+// where this run left it (unless it shrank, which reads from zero and is
+// reported), and an inode the snapshot never saw is read whole from zero. When
+// a relink has moved the link since the snapshot, the prior target is read too,
+// because a restarting runtime writes to the old target right up to the swap.
+//
+// The second return value is true when the link itself exists but resolves to
+// no file — a dangling sink — which the caller reports in its own right. A path
+// that was never created at all is neither a read nor a dangling finding: it is
+// an ordinary absent sink.
+func resolveReads(src Source, snap Snapshot) ([]sourceRead, bool, error) {
+	candidates := make([]string, 0, 2)
+	dangling := false
+
+	resolved, err := filepath.EvalSymlinks(src.Path)
+	switch {
+	case err == nil:
+		candidates = append(candidates, resolved)
+	case os.IsNotExist(err):
+		// The link resolves to nothing. A link that EXISTS but names a gone
+		// target is dangling and worth reporting; a path that was never created
+		// is an ordinary absent sink and is not.
+		if info, lerr := os.Lstat(src.Path); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			dangling = true
+		}
+	default:
+		return nil, false, fmt.Errorf("resolve the log %s: %w", src.Path, err)
 	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return 0
+
+	if prior, ok := snap.Resolved[src.Path]; ok && prior != resolved {
+		candidates = append(candidates, prior)
 	}
-	key, ok := inodeKey(info)
-	if !ok {
-		return 0
+
+	var reads []sourceRead
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, false, fmt.Errorf("stat the log %s: %w", candidate, err)
+		}
+		read := sourceRead{path: candidate, size: info.Size()}
+		if key, ok := inodeKey(info); ok {
+			if known, seen := snap.Sizes[key]; seen {
+				read.offset = known
+				if info.Size() < known {
+					read.shrankFrom = known
+					read.offset = 0
+				}
+			}
+		}
+		reads = append(reads, read)
 	}
-	return s.Sizes[key]
+	return reads, dangling, nil
 }
 
 // Window is the interval a run's records must fall in.
@@ -324,52 +393,36 @@ type readPlan struct {
 // bytes than before: a truncation in place, where the records between the
 // offset and the new end no longer exist anywhere.
 func plan(src Source, snap Snapshot, index *workspaceIndex) ([]readPlan, []Finding, error) {
-	candidates := make([]string, 0, 2)
-
-	resolved, err := filepath.EvalSymlinks(src.Path)
-	switch {
-	case err == nil:
-		candidates = append(candidates, resolved)
-	case os.IsNotExist(err):
-		// The path is gone. Whatever it named at snapshot time may still hold
-		// this run's records, so it is still read.
-	default:
-		return nil, nil, fmt.Errorf("resolve the log %s: %w", src.Path, err)
-	}
-
-	if prior, ok := snap.Resolved[src.Path]; ok && prior != resolved {
-		candidates = append(candidates, prior)
+	reads, dangling, err := resolveReads(src, snap)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var plans []readPlan
 	var findings []Finding
-	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, nil, fmt.Errorf("stat the log %s: %w", candidate, err)
+	if dangling {
+		findings = append(findings, Finding{
+			Kind:      KindDangling,
+			Source:    src.Name,
+			Path:      src.Path,
+			Workspace: sourceWorkspace(src, index),
+			Note: "the canonical sink link exists but resolves to no file: its target was removed while " +
+				"the link was left behind, so any records it would have named are unreachable",
+		})
+	}
+	for _, r := range reads {
+		if r.shrankFrom > 0 {
+			findings = append(findings, Finding{
+				Kind:      KindRotation,
+				Source:    src.Name,
+				Path:      r.path,
+				Workspace: sourceWorkspace(src, index),
+				Note: fmt.Sprintf(
+					"these bytes were %d long at snapshot and are %d long now, under the same inode: the file was truncated in place during the run, and the records it held past %d are gone from every path",
+					r.shrankFrom, r.size, r.size),
+			})
 		}
-		offset := int64(0)
-		if key, ok := inodeKey(info); ok {
-			if known, seen := snap.Sizes[key]; seen {
-				offset = known
-				if info.Size() < known {
-					findings = append(findings, Finding{
-						Kind:      KindRotation,
-						Source:    src.Name,
-						Path:      candidate,
-						Workspace: sourceWorkspace(src, index),
-						Note: fmt.Sprintf(
-							"these bytes were %d long at snapshot and are %d long now, under the same inode: the file was truncated in place during the run, and the records it held past %d are gone from every path",
-							known, info.Size(), info.Size()),
-					})
-					offset = 0
-				}
-			}
-		}
-		plans = append(plans, readPlan{path: candidate, offset: offset})
+		plans = append(plans, readPlan{path: r.path, offset: r.offset})
 	}
 	return plans, findings, nil
 }
