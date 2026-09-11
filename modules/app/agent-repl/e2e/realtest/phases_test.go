@@ -12,15 +12,22 @@ import (
 // The phase reader's unit tests. Each one writes a module log under
 // t.TempDir(), reads it, and asserts one thing about the timeline.
 
-func phaseFixture(t *testing.T, lines ...string) (string, time.Time) {
+// phaseFixture writes one global Emacs sink and returns the source, a snapshot
+// taken while the file did not yet exist, and the fixture spawn time. The
+// snapshot precedes the write on purpose: the run's snapshot is always taken
+// before the cold start writes anything, so a zero offset here reads the whole
+// fixture exactly as a real cold start reads its own fresh records.
+func phaseFixture(t *testing.T, lines ...string) (Source, Snapshot, time.Time) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "doom-agent-repl.log")
+	src := Source{Name: "emacs.global", Path: path, Kind: KindJSONL}
+	snap := TakeSnapshot([]Source{src})
 	writeLines(t, path, lines...)
 	spawned, err := time.Parse(time.RFC3339Nano, "2026-09-10T12:00:00.000000-04:00")
 	if err != nil {
 		t.Fatalf("parse the fixture spawn time: %v", err)
 	}
-	return path, spawned
+	return src, snap, spawned
 }
 
 func elisp(timestamp, level, message string, extra string) string {
@@ -39,11 +46,11 @@ func measurementFor(measurements []Measurement, phase PhaseName, workspace strin
 func TestPhasesMeasureDoomBootFromTheFirstModuleRecord(t *testing.T) {
 	// Arrange: the module's first record is the earliest evidence the process
 	// reached lisp at all.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:04.500000-04:00", "debug", "elisp.core.loaded", ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -62,10 +69,10 @@ func TestPhasesMeasureDoomBootFromTheFirstModuleRecord(t *testing.T) {
 func TestPhasesReportDoomBootAsNotObservedWhenTheModuleWroteNothing(t *testing.T) {
 	// Arrange: an empty log after the spawn. A zero elapsed would read as an
 	// instantaneous boot, which is the wrong answer to give.
-	path, spawned := phaseFixture(t)
+	src, snap, spawned := phaseFixture(t)
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -82,12 +89,12 @@ func TestPhasesReportDoomBootAsNotObservedWhenTheModuleWroteNothing(t *testing.T
 
 func TestPhasesReadTheDaemonAdoptionPath(t *testing.T) {
 	// Arrange.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:03.000000-04:00", "info", "elisp.daemon.ensure-command", ""),
 		elisp("2026-09-10T12:00:03.400000-04:00", "info", `elisp.daemon.adopted address="127.0.0.1:1234" health=healthy`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -105,11 +112,11 @@ func TestPhasesReadTheDaemonAdoptionPath(t *testing.T) {
 func TestPhasesReadTheDaemonSpawnPath(t *testing.T) {
 	// Arrange: a spawned daemon is different work from an adopted one, and
 	// comparing their times would be comparing different things.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:09.000000-04:00", "info", `elisp.daemon.started argv=("claude-repld") state-dir="/s"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -127,11 +134,11 @@ func TestPhasesReadTheDaemonSpawnPath(t *testing.T) {
 func TestPhasesDoNotCreditAnUnhealthyAdoptionToTheDaemonSpawnedPhase(t *testing.T) {
 	// Arrange: `elisp.daemon.adopted-unhealthy` is the OPPOSITE of the phase a
 	// word-boundary match would credit it to.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:03.000000-04:00", "warn", `elisp.daemon.adopted-unhealthy address="a"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -145,12 +152,12 @@ func TestPhasesDoNotCreditAnUnhealthyAdoptionToTheDaemonSpawnedPhase(t *testing.
 func TestPhasesEndDaemonAnsweredAtTheLaterOfLinkUpAndTheRosterSubscription(t *testing.T) {
 	// Arrange: a link with no roster has nothing to draw, so the phase ends at
 	// the subscription when that is the later of the two.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:10.000000-04:00", "info", `elisp.link.reconnected address="a"`, ""),
 		elisp("2026-09-10T12:00:13.500000-04:00", "info", `elisp.roster.subscribed method="push" address="a"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -166,11 +173,11 @@ func TestPhasesDoNotEndDaemonAnsweredOnABootClaim(t *testing.T) {
 	// Arrange: realtest 1 run 1 wrote `elisp.daemon.booted` three milliseconds
 	// after the spawn against a stale address file, while the link came up ten
 	// seconds later. A phase that ends here measures the claim.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:00.003000-04:00", "info", `elisp.daemon.booted address="127.0.0.1:1234"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -187,11 +194,11 @@ func TestPhasesDoNotEndDaemonAnsweredOnABootClaim(t *testing.T) {
 
 func TestPhasesSayWhichHalfOfDaemonAnsweredIsMissing(t *testing.T) {
 	// Arrange: a link and no roster subscription.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:10.000000-04:00", "info", `elisp.link.up address="a"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -206,12 +213,12 @@ func TestPhasesSayWhichHalfOfDaemonAnsweredIsMissing(t *testing.T) {
 func TestPhasesMeasureLinkUpFromAHostLinkUpRecord(t *testing.T) {
 	// Arrange: `elisp.host.link-up-skipped` must not be credited as a link
 	// coming up, and `elisp.host.link-up` must be.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:04.000000-04:00", "warn", `elisp.host.link-up-skipped ws=none`, ""),
 		elisp("2026-09-10T12:00:11.000000-04:00", "info", `elisp.host.link-up workspaces=3 selection="a"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -225,12 +232,12 @@ func TestPhasesMeasureLinkUpFromAHostLinkUpRecord(t *testing.T) {
 
 func TestPhasesMeasureATabPerWorkspace(t *testing.T) {
 	// Arrange: two workspaces, each with its own tab-open record.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:06.000000-04:00", "info", "elisp.roster.tab-open: ws=one id=aaaa dir=/tmp/one", `"workspace_id":"aaaa"`),
 		elisp("2026-09-10T12:00:07.500000-04:00", "info", "elisp.roster.tab-open: ws=two id=bbbb dir=/tmp/two", `"workspace_id":"bbbb"`))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -254,11 +261,11 @@ func TestPhasesMeasureATabPerWorkspace(t *testing.T) {
 func TestPhasesReadATabsWorkspaceFromTheMessageWhenTheFieldIsAbsent(t *testing.T) {
 	// Arrange: tab-open is the one marker that can be written before the
 	// workspace's sink exists, so its `id=` token is the fallback.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:06.000000-04:00", "info", "elisp.roster.tab-open: ws=one id=aaaa dir=/tmp/one", ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -273,11 +280,11 @@ func TestPhasesReadATabsWorkspaceFromTheMessageWhenTheFieldIsAbsent(t *testing.T
 func TestPhasesMeasureAPanelPaintedPerWorkspace(t *testing.T) {
 	// Arrange: the webview's own load-finished event, which is the only
 	// signal in the startup that comes from the page.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:11.000000-04:00", "debug", "elisp.frontend.watch-load: load-changed ws=one", `"workspace_id":"aaaa"`))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -296,12 +303,12 @@ func TestPhasesTakeTheFirstOccurrenceOfAOncePerRunMarker(t *testing.T) {
 	// Arrange: a link that comes up, drops and comes back reports
 	// `elisp.link.up` twice. The startup is the first one; the second is a
 	// reconnect.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:05.000000-04:00", "info", `elisp.link.up address="a"`, ""),
 		elisp("2026-09-10T12:00:40.000000-04:00", "info", `elisp.link.up address="a"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -316,12 +323,12 @@ func TestPhasesTakeTheFirstOccurrenceOfAOncePerRunMarker(t *testing.T) {
 func TestPhasesIgnoreRecordsWrittenBeforeTheSpawn(t *testing.T) {
 	// Arrange: the outgoing Emacs can write a straggler after the snapshot
 	// offset was taken and before this one was spawned.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-09T23:00:00.000000-04:00", "info", `elisp.link.up address="stale"`, ""),
 		elisp("2026-09-10T12:00:05.000000-04:00", "info", `elisp.link.up address="fresh"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -333,19 +340,119 @@ func TestPhasesIgnoreRecordsWrittenBeforeTheSpawn(t *testing.T) {
 	}
 }
 
-func TestPhasesReadFromTheSnapshotOffset(t *testing.T) {
-	// Arrange: everything before the offset belongs to a previous run, even
-	// when its timestamps are indistinguishable.
-	path, spawned := phaseFixture(t,
-		elisp("2026-09-10T12:00:02.000000-04:00", "info", `elisp.link.up address="previous run"`, ""))
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat the fixture: %v", err)
+func TestPhasesReadPerWorkspaceMarkersFromTheWorkspaceSink(t *testing.T) {
+	// Arrange: this is the run-3 defect. The workspace-owned tab-open and
+	// panel-painted records land in the workspace's own emacs.log sink, not in
+	// the global module log, so a phase reader that opened only the global log
+	// would report a startup that drew every tab as "no tab drawn".
+	dir := t.TempDir()
+	global := filepath.Join(dir, "doom-agent-repl.log")
+	globalSrc := Source{Name: "emacs.global", Path: global, Kind: KindJSONL}
+	link := filepath.Join(dir, "ws", ".claude", "emacs", "emacs.log")
+	target := filepath.Join(dir, "ws-target.log")
+	wsSrc := Source{Name: "workspace.emacs.log", Path: link, Kind: KindJSONL, Workspace: "aaaa"}
+	sources := []Source{globalSrc, wsSrc}
+	snap := TakeSnapshot(sources)
+
+	writeLines(t, global,
+		elisp("2026-09-10T12:00:05.000000-04:00", "info", `elisp.link.up address="a"`, ""))
+	writeLines(t, target,
+		elisp("2026-09-10T12:00:06.000000-04:00", "info", "elisp.roster.tab-open: ws=one id=aaaa dir=/tmp/one", `"workspace_id":"aaaa"`),
+		elisp("2026-09-10T12:00:07.000000-04:00", "debug", "elisp.frontend.watch-load: load-changed ws=one", `"workspace_id":"aaaa"`))
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatalf("create the workspace sink directory: %v", err)
 	}
-	appendLines(t, path, elisp("2026-09-10T12:00:08.000000-04:00", "info", `elisp.link.up address="this run"`, ""))
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("install the workspace sink link: %v", err)
+	}
+	spawned, err := time.Parse(time.RFC3339Nano, "2026-09-10T12:00:00.000000-04:00")
+	if err != nil {
+		t.Fatalf("parse the spawn time: %v", err)
+	}
 
 	// Act.
-	phases, err := ReadPhases(path, info.Size(), spawned)
+	phases, err := ReadPhases(sources, snap, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert: the marker in the global log is read, and so are the two in the
+	// workspace sink.
+	if _, ok := measurementFor(phases.Measure(), PhaseLinkUp, GlobalWorkspace); !ok {
+		t.Errorf("the global link-up marker was not read")
+	}
+	if drawn := phases.DrawnWorkspaces(); len(drawn) != 1 || drawn[0] != "aaaa" {
+		t.Errorf("the drawn workspaces are %v, want [aaaa] read from the workspace sink", drawn)
+	}
+	if painted := phases.PaintedWorkspaces(); len(painted) != 1 || painted[0] != "aaaa" {
+		t.Errorf("the painted workspaces are %v, want [aaaa] read from the workspace sink", painted)
+	}
+}
+
+func TestPhasesFollowARelinkedWorkspaceSink(t *testing.T) {
+	// Arrange: the workspace sink's canonical link is replaced mid-run, exactly
+	// as a new Emacs instance or a cap rotation replaces it, and the tab-open
+	// record is in the NEW target. A reader keyed to the snapshot offset of the
+	// old target would seek past the end of the new one and see nothing.
+	dir := t.TempDir()
+	link := filepath.Join(dir, "ws", ".claude", "emacs", "emacs.log")
+	first := filepath.Join(dir, "target-1.log")
+	second := filepath.Join(dir, "target-2.log")
+	writeLines(t, first,
+		elisp("2026-09-10T12:00:01.000000-04:00", "info", "elisp.roster.reconcile: tabs=0", ""))
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatalf("create the workspace sink directory: %v", err)
+	}
+	if err := os.Symlink(first, link); err != nil {
+		t.Fatalf("install the workspace sink link: %v", err)
+	}
+	wsSrc := Source{Name: "workspace.emacs.log", Path: link, Kind: KindJSONL, Workspace: "aaaa"}
+	sources := []Source{wsSrc}
+	snap := TakeSnapshot(sources)
+
+	writeLines(t, second,
+		elisp("2026-09-10T12:00:06.000000-04:00", "info", "elisp.roster.tab-open: ws=one id=aaaa dir=/tmp/one", `"workspace_id":"aaaa"`))
+	if err := os.Remove(link); err != nil {
+		t.Fatalf("remove the old link: %v", err)
+	}
+	if err := os.Symlink(second, link); err != nil {
+		t.Fatalf("install the replaced link: %v", err)
+	}
+	spawned, err := time.Parse(time.RFC3339Nano, "2026-09-10T12:00:00.000000-04:00")
+	if err != nil {
+		t.Fatalf("parse the spawn time: %v", err)
+	}
+
+	// Act.
+	phases, err := ReadPhases(sources, snap, spawned)
+	if err != nil {
+		t.Fatalf("read the phases across a relink: %v", err)
+	}
+
+	// Assert.
+	if drawn := phases.DrawnWorkspaces(); len(drawn) != 1 || drawn[0] != "aaaa" {
+		t.Errorf("the drawn workspaces are %v, want [aaaa] read from the relinked sink", drawn)
+	}
+}
+
+func TestPhasesReadFromTheSnapshotOffset(t *testing.T) {
+	// Arrange: everything at or before the snapshot offset belongs to a
+	// previous run, even when its timestamps are indistinguishable. The
+	// snapshot is taken AFTER the previous run's line and BEFORE this run's, so
+	// the offset it records is the inode's size at that moment.
+	path := filepath.Join(t.TempDir(), "doom-agent-repl.log")
+	src := Source{Name: "emacs.global", Path: path, Kind: KindJSONL}
+	writeLines(t, path,
+		elisp("2026-09-10T12:00:02.000000-04:00", "info", `elisp.link.up address="previous run"`, ""))
+	snap := TakeSnapshot([]Source{src})
+	appendLines(t, path, elisp("2026-09-10T12:00:08.000000-04:00", "info", `elisp.link.up address="this run"`, ""))
+	spawned, err := time.Parse(time.RFC3339Nano, "2026-09-10T12:00:00.000000-04:00")
+	if err != nil {
+		t.Fatalf("parse the spawn time: %v", err)
+	}
+
+	// Act.
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -360,12 +467,12 @@ func TestPhasesReadFromTheSnapshotOffset(t *testing.T) {
 func TestPhasesMeasureTheTotalToTheLastMarker(t *testing.T) {
 	// Arrange: usable is when the last thing the startup produces has
 	// happened, which here is the second workspace's panel.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:06.000000-04:00", "info", "elisp.roster.tab-open: ws=one id=aaaa dir=/tmp/one", ""),
 		elisp("2026-09-10T12:00:13.250000-04:00", "debug", "elisp.frontend.watch-load: load-changed ws=one", `"workspace_id":"aaaa"`))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
@@ -380,12 +487,12 @@ func TestPhasesMeasureTheTotalToTheLastMarker(t *testing.T) {
 func TestPhasesSkipALineThatIsNotARecord(t *testing.T) {
 	// Arrange: the harvester reports the malformed line; the phase reader's
 	// job is the timeline, and a line it cannot parse carries no marker.
-	path, spawned := phaseFixture(t,
+	src, snap, spawned := phaseFixture(t,
 		"not a record at all",
 		elisp("2026-09-10T12:00:05.000000-04:00", "info", `elisp.link.up address="a"`, ""))
 
 	// Act.
-	phases, err := ReadPhases(path, 0, spawned)
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
