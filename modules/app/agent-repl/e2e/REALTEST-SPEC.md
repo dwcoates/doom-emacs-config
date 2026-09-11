@@ -101,7 +101,13 @@ There is exactly one launch method (owner ruling, 2026-09-11):
 
 | method | how |
 |---|---|
-| `open -g -a /Applications/Emacs.app --env AGENT_REPL_FORBID_VENDOR_CALLS=1` | asks LaunchServices not to bring the application forward. It is used because it asks for the behavior instead of correcting for it |
+| `open -gj -a /Applications/Emacs.app --env AGENT_REPL_FORBID_VENDOR_CALLS=1` | `-g` asks LaunchServices not to bring the application forward and `-j` launches it hidden. It is used because it asks for the behavior instead of correcting for it |
+
+`-g` alone did not hold on run 3's cold launch: a GUI app's first launch
+activated Emacs despite `-g` and moved focus from Chrome to Emacs. `-j` launches
+the app hidden, so there is no window for the window server to bring forward
+(docs/REALTEST-JUDGEMENT-CALLS.md, realtest 1, row 29; lead verifies focus on
+the next run).
 
 `--env` is not decoration. `open` hands the application to launchd, which does
 NOT pass this process's environment along, so a variable merely exported by the
