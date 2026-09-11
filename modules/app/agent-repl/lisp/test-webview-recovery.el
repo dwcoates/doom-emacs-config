@@ -174,71 +174,133 @@
       (should (equal agent-repl--webview-precreate-queue '("beta"))))))
 
 
-;;;; ---- Holding for desktop focus ----
+;;;; ---- Holding: only visible-but-unfocused ----
 ;;
 ;; Creating a WKWebView instantiates a native view and macOS activates the
-;; owning process when it does, which `open -g' cannot suppress.  A link-up
-;; pre-creates every eligible page seconds into every cold start, so an
-;; Emacs launched deliberately in the background took the desktop from
-;; whatever the user was looking at -- three background launches, three
-;; focus moves.  These pin the hold and its release.
+;; owning process when doing so would bring a window forward.  That can
+;; happen from ONE state only: a frame already on screen while Emacs is not
+;; the focused app.  A HIDDEN Emacs (an `open -gj' launch) creating a view
+;; stays hidden, and a FOCUSED Emacs has no focus to steal -- both proceed
+;; and paint.  Only visible-but-unfocused holds.  These pin that invariant,
+;; the created-reason log, and the focus-edge release.
 ;;
-;; `noninteractive' is bound to nil where the hold itself is under test: in
-;; a batch process there is no application to activate and nothing holds,
-;; which is what lets every drain test above run unchanged.
+;; The three macros below drive the guard's two inputs -- visibility and
+;; focus -- directly, so a batch process (which has no real frames) can
+;; exercise every desktop state.  `noninteractive' is bound to nil where
+;; the hold itself is under test, since the hold short-circuits to nil in
+;; batch and every drain test above relies on that.
 
-(defmacro agent-repl-test-wr--unfocused (&rest body)
-  "Run BODY as an interactive Emacs that does NOT hold desktop focus."
+(defmacro agent-repl-test-wr--visible-unfocused (&rest body)
+  "Run BODY as a VISIBLE interactive Emacs that does NOT hold focus.
+This is the one held state: creating a view here could foreground Emacs."
   (declare (indent 0))
   `(let ((noninteractive nil))
-     (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
+     (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) t))
+               ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
+       ,@body)))
+
+(defmacro agent-repl-test-wr--hidden (&rest body)
+  "Run BODY as a HIDDEN interactive Emacs (no visible frame, unfocused).
+Creating a view here cannot foreground a hidden app, so it must proceed."
+  (declare (indent 0))
+  `(let ((noninteractive nil))
+     (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
        ,@body)))
 
 (defmacro agent-repl-test-wr--focused (&rest body)
-  "Run BODY as an interactive Emacs that DOES hold desktop focus."
+  "Run BODY as a VISIBLE interactive Emacs that DOES hold desktop focus.
+A focused app has no focus to steal, so creating a view must proceed."
   (declare (indent 0))
   `(let ((noninteractive nil))
-     (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t)))
+     (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) t))
+               ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t)))
        ,@body)))
 
-(ert-deftest agent-repl-test-wr-an-unfocused-drain-mounts-nothing ()
-  "A background Emacs must not take the desktop to warm a page."
+;;;; ---- The guard predicates ----
+
+(ert-deftest agent-repl-test-wr-visible-frames-report-visible ()
+  "A mapped frame is a positively-visible answer."
+  ;; Arrange / Act / Assert
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'visible-frame-list) (lambda () '(frame))))
+    (should (agent-repl--emacs-visible-p))))
+
+(ert-deftest agent-repl-test-wr-no-visible-frame-is-hidden ()
+  "An empty `visible-frame-list' on a graphic display is the hidden case."
+  ;; Arrange / Act / Assert
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'visible-frame-list) (lambda () nil)))
+    (should-not (agent-repl--emacs-visible-p))))
+
+(ert-deftest agent-repl-test-wr-unreadable-visibility-counts-as-visible ()
+  "A state we cannot read errs toward visible, so the guard parks."
+  ;; Arrange — no window system to answer the question.
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should (agent-repl--emacs-visible-p))))
+
+(ert-deftest agent-repl-test-wr-can-foreground-only-when-visible-and-unfocused ()
+  "The foregrounding state is exactly visible AND not focused."
+  ;; Arrange / Act / Assert
+  (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) t))
+            ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
+    (should (agent-repl--emacs-can-foreground-p))))
+
+(ert-deftest agent-repl-test-wr-hidden-cannot-foreground ()
+  "A hidden app creating a view cannot raise itself."
+  ;; Arrange / Act / Assert
+  (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
+    (should-not (agent-repl--emacs-can-foreground-p))))
+
+(ert-deftest agent-repl-test-wr-focused-cannot-foreground ()
+  "A focused app has no focus to steal."
+  ;; Arrange / Act / Assert
+  (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) t))
+            ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t)))
+    (should-not (agent-repl--emacs-can-foreground-p))))
+
+;;;; ---- The drain honours the guard ----
+
+(ert-deftest agent-repl-test-wr-a-visible-unfocused-drain-mounts-nothing ()
+  "A visible background Emacs must not take the desktop to warm a page."
   ;; Arrange
   (agent-repl-test-wr--with-queue
     (agent-repl-test-wr--eligible '("alpha")
       (agent-repl--webview-precreate-schedule '("alpha"))
       ;; Act
-      (agent-repl-test-wr--unfocused
+      (agent-repl-test-wr--visible-unfocused
         (agent-repl--webview-precreate-drain))
       ;; Assert
       (should (null agent-repl-test-wr--mounted)))))
 
-(ert-deftest agent-repl-test-wr-an-unfocused-drain-keeps-the-queue-whole ()
+(ert-deftest agent-repl-test-wr-a-visible-unfocused-drain-keeps-the-queue-whole ()
   "Holding is not dropping: every owed page is still owed."
   ;; Arrange
   (agent-repl-test-wr--with-queue
     (agent-repl-test-wr--eligible '("alpha" "beta")
       (agent-repl--webview-precreate-schedule '("alpha" "beta"))
       ;; Act
-      (agent-repl-test-wr--unfocused
+      (agent-repl-test-wr--visible-unfocused
         (agent-repl--webview-precreate-drain))
       ;; Assert
       (should (equal agent-repl--webview-precreate-queue '("alpha" "beta"))))))
 
-(ert-deftest agent-repl-test-wr-an-unfocused-drain-arms-no-timer ()
+(ert-deftest agent-repl-test-wr-a-visible-unfocused-drain-arms-no-timer ()
   "A held drain does not spin: the focus edge is what wakes it."
   ;; Arrange
   (agent-repl-test-wr--with-queue
     (agent-repl-test-wr--eligible '("alpha")
       (agent-repl--webview-precreate-schedule '("alpha"))
       ;; Act
-      (agent-repl-test-wr--unfocused
+      (agent-repl-test-wr--visible-unfocused
         (agent-repl--webview-precreate-drain))
       ;; Assert
       (should (null agent-repl--webview-precreate-timer)))))
 
-(ert-deftest agent-repl-test-wr-an-unfocused-drain-is-recorded ()
-  "A pre-creation that did not happen has to say why."
+(ert-deftest agent-repl-test-wr-a-visible-unfocused-drain-is-recorded ()
+  "A pre-creation that did not happen has to say why, and name the state."
   ;; Arrange
   (agent-repl-test-wr--with-queue
     (let ((logged nil))
@@ -247,11 +309,42 @@
         (cl-letf (((symbol-function 'agent-repl--info)
                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
           ;; Act
-          (agent-repl-test-wr--unfocused
+          (agent-repl-test-wr--visible-unfocused
             (agent-repl--webview-precreate-drain))))
       ;; Assert
       (should (seq-some (lambda (text)
-                          (string-search "precreate-parked" text))
+                          (and (string-search "precreate-parked" text)
+                               (string-search "reason=visible-unfocused" text)))
+                        logged)))))
+
+(ert-deftest agent-repl-test-wr-a-hidden-drain-mounts ()
+  "A hidden Emacs creating a view cannot foreground it, so it paints."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha")
+      (agent-repl--webview-precreate-schedule '("alpha"))
+      ;; Act
+      (agent-repl-test-wr--hidden
+        (agent-repl--webview-precreate-drain))
+      ;; Assert
+      (should (equal agent-repl-test-wr--mounted '("alpha"))))))
+
+(ert-deftest agent-repl-test-wr-a-hidden-mount-is-recorded-as-hidden ()
+  "A mount that happened while hidden names the reason it was safe."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (let ((logged nil))
+      (agent-repl-test-wr--eligible '("alpha")
+        (agent-repl--webview-precreate-schedule '("alpha"))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act
+          (agent-repl-test-wr--hidden
+            (agent-repl--webview-precreate-drain))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (and (string-search "precreate-created" text)
+                               (string-search "reason=hidden" text)))
                         logged)))))
 
 (ert-deftest agent-repl-test-wr-a-focused-drain-mounts ()
@@ -266,6 +359,24 @@
       ;; Assert
       (should (equal agent-repl-test-wr--mounted '("alpha"))))))
 
+(ert-deftest agent-repl-test-wr-a-focused-mount-is-recorded-as-focused ()
+  "A mount that happened while focused names the reason it was safe."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (let ((logged nil))
+      (agent-repl-test-wr--eligible '("alpha")
+        (agent-repl--webview-precreate-schedule '("alpha"))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act
+          (agent-repl-test-wr--focused
+            (agent-repl--webview-precreate-drain))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (and (string-search "precreate-created" text)
+                               (string-search "reason=focused" text)))
+                        logged)))))
+
 (ert-deftest agent-repl-test-wr-a-batch-drain-never-holds ()
   "A batch process has no application to activate, so nothing holds."
   ;; Arrange / Act / Assert
@@ -277,7 +388,7 @@
   (agent-repl-test-wr--with-queue
     (agent-repl-test-wr--eligible '("alpha")
       (agent-repl--webview-precreate-schedule '("alpha"))
-      (agent-repl-test-wr--unfocused
+      (agent-repl-test-wr--visible-unfocused
         (agent-repl--webview-precreate-drain))
       ;; Act
       (agent-repl-test-wr--focused
@@ -291,7 +402,7 @@
   (agent-repl-test-wr--with-queue
     (agent-repl-test-wr--eligible '("alpha")
       (agent-repl--webview-precreate-schedule '("alpha"))
-      (agent-repl-test-wr--unfocused
+      (agent-repl-test-wr--visible-unfocused
         (agent-repl--webview-precreate-drain))
       ;; Act
       (agent-repl-test-wr--focused
@@ -315,7 +426,7 @@
   (agent-repl-test-wr--with-queue
     (agent-repl-test-wr--eligible '("alpha")
       (agent-repl--webview-precreate-schedule '("alpha"))
-      (agent-repl-test-wr--unfocused
+      (agent-repl-test-wr--visible-unfocused
         (agent-repl--webview-precreate-drain)
         ;; Act
         (agent-repl--webview-precreate-on-focus-change))
@@ -330,7 +441,7 @@ what matters is that a real focus change reaches the resume."
   (agent-repl-test-wr--with-queue
     (agent-repl-test-wr--eligible '("alpha")
       (agent-repl--webview-precreate-schedule '("alpha"))
-      (agent-repl-test-wr--unfocused
+      (agent-repl-test-wr--visible-unfocused
         (agent-repl--webview-precreate-drain))
       ;; Act: the other handlers on this edge answer the frame, which has no
       ;; focus state in batch, so they no-op and leave ours the observation.

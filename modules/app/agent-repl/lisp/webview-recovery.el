@@ -70,37 +70,99 @@ The queue is kept whole; nothing is dropped and no timer stands.")
                        #'agent-repl--webview-precreate-drain)))
   agent-repl--webview-precreate-timer)
 
+(defun agent-repl--emacs-visible-p ()
+  "Return nil ONLY when we KNOW Emacs shows nothing on the desktop.
+
+The one question this answers for the park guard is whether creating a
+native view could raise a frame the user can see.  It cannot when the app
+is HIDDEN: a hidden macOS app (an `open -gj' launch, or a `Cmd-H') has no
+on-screen window, and instantiating a WKWebView inside it neither unhides
+nor activates it -- hidden is a stronger state than merely unfocused.
+
+`visible-frame-list' is the signal: it is empty exactly when no frame is
+mapped on screen, which on ns is the hidden case.  We return nil ONLY on
+that positive \"nothing is visible\" answer; anything else -- a mapped
+frame, or a state we cannot read (no window system, `display-graphic-p'
+nil) -- returns non-nil so the guard treats it as possibly-visible and
+errs toward parking, matching the conservative \"suppress when possibly
+foregrounding\" stance the focus gate already takes.  Under
+`noninteractive' the whole hold short-circuits before this is reached, so
+its batch answer here is moot."
+  (cond
+   ((not (display-graphic-p)) t)        ; cannot tell -> treat as visible
+   ((visible-frame-list) t)
+   (t nil)))                            ; positively hidden
+
+(defun agent-repl--emacs-can-foreground-p ()
+  "Return non-nil when creating a native view could bring Emacs to the front.
+
+That is exactly the VISIBLE-BUT-UNFOCUSED state: a frame is on screen but
+Emacs is not the focused app, so instantiating a WKWebView could raise the
+frame and steal the desktop from whatever the user is looking at.  When
+Emacs is HIDDEN (no visible frame) creating a view cannot foreground it,
+and when Emacs is already FOCUSED there is no focus to steal -- both are
+safe, so both return nil.  An unreadable visibility state counts as
+visible (see `agent-repl--emacs-visible-p'), so it parks rather than
+gambles; an `unknown' focus state counts as focused
+\(`agent-repl--emacs-focused-p'), so it proceeds rather than parking a
+frame that may already be frontmost."
+  (and (agent-repl--emacs-visible-p)
+       (fboundp 'agent-repl--emacs-focused-p)
+       (not (agent-repl--emacs-focused-p))))
+
 (defun agent-repl--webview-precreate-hold-p ()
   "Return non-nil while a pre-creation must not mount a webview yet.
 
-MOUNTING A WEBVIEW TAKES THE DESKTOP.  Creating a WKWebView instantiates
-a native view, and macOS activates the owning process when it does --
-which is a thing `open -g' cannot suppress, because it is not the app
-launch doing it.  A link-up pre-creates every eligible workspace's page,
-and a link-up happens seconds into every cold start, so an Emacs launched
-DELIBERATELY IN THE BACKGROUND stole focus from whatever the user was
-looking at.  Three background launches, three focus moves, every time.
+MOUNTING A WEBVIEW CAN TAKE THE DESKTOP, but only from ONE state.
+Creating a WKWebView instantiates a native view, and macOS activates the
+owning process when doing so would bring a window forward -- a thing
+`open -g' cannot suppress, because it is not the app launch doing it.  A
+link-up pre-creates every eligible workspace's page seconds into every
+cold start, so an Emacs that is on screen but not focused stole the
+desktop from whatever the user was looking at.
+
+That raise can happen only when a frame is ALREADY ON SCREEN and Emacs is
+NOT the focused app: the visible-but-unfocused state.  A HIDDEN Emacs (an
+`open -gj' launch) creating a view stays hidden -- hidden is a stronger
+state than merely unfocused, and macOS does not unhide an app to mount a
+native view inside it -- and a FOCUSED Emacs has no focus to steal.  So
+both of those proceed and paint; only visible-but-unfocused holds.
+Parking a hidden launch is exactly the collision realtest 1 caught: focus
+was preserved but no panel painted.
 
 Holding costs the warm page nothing it was for: pre-creation exists so
 the mount is not paid at first LOOK, and a look is a focus.  The hold is
 released by `agent-repl--webview-precreate-on-focus-change' the moment
 Emacs is frontmost, which is at or before that first look.
 
-The question is deliberately \"do we KNOW Emacs is unfocused\":
-`agent-repl--emacs-focused-p' counts an `unknown' focus state as
-focused, so an unanswerable frame drains as it always did rather than
-parking on a guess.  Under `noninteractive' nothing holds -- a batch
-process has no application to activate, and the suites drive this drain
-directly."
+Under `noninteractive' nothing holds -- a batch process has no
+application to activate, and the suites drive this drain directly.  The
+guard itself is `agent-repl--emacs-can-foreground-p'."
   (and (not noninteractive)
-       (fboundp 'agent-repl--emacs-focused-p)
-       (not (agent-repl--emacs-focused-p))))
+       (agent-repl--emacs-can-foreground-p)))
+
+(defun agent-repl--webview-precreate-allow-reason ()
+  "Name WHY the drain is allowed to mount right now, for the log line.
+
+Mirrors `agent-repl--webview-precreate-hold-p': the hold is only the
+visible-unfocused state, so a mount that actually happens is one of
+created-while-hidden, created-while-focused, or (in batch) driven
+directly by the suites.  Reported as a `reason=' tag on the created log."
+  (cond
+   (noninteractive "batch")
+   ((not (agent-repl--emacs-visible-p)) "hidden")
+   ((and (fboundp 'agent-repl--emacs-focused-p)
+         (agent-repl--emacs-focused-p))
+    "focused")
+   (t "allowed")))
 
 (defun agent-repl--webview-precreate-park ()
-  "Hold the drain until Emacs has desktop focus, keeping the queue whole."
+  "Hold the drain until creating a view can no longer foreground Emacs.
+The only held state is visible-but-unfocused; the queue is kept whole,
+nothing is dropped and no timer stands."
   (setq agent-repl--webview-precreate-parked t)
   (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
-                    "elisp.webview-recovery.precreate-parked queued=%d reason=emacs-not-focused"
+                    "elisp.webview-recovery.precreate-parked queued=%d reason=visible-unfocused"
                     (length agent-repl--webview-precreate-queue))
   t)
 
@@ -112,7 +174,7 @@ repaints the tab bar on.  A no-op when nothing is parked."
              (not (agent-repl--webview-precreate-hold-p)))
     (setq agent-repl--webview-precreate-parked nil)
     (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
-                      "elisp.webview-recovery.precreate-resumed queued=%d reason=emacs-focused"
+                      "elisp.webview-recovery.precreate-drained-on-focus queued=%d reason=focus-edge"
                       (length agent-repl--webview-precreate-queue))
     (agent-repl--webview-precreate-arm)))
 
@@ -141,6 +203,9 @@ continues: one workspace's failure must not strand the rest of the queue."
       (when ws
         (condition-case err
             (when (agent-repl--webview-precreate-needed-p ws)
+              (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
+                                "elisp.webview-recovery.precreate-created ws=%s reason=%s"
+                                ws (agent-repl--webview-precreate-allow-reason))
               (agent-repl--frontend-precreate-webview ws))
           (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
                                    ws err))))
