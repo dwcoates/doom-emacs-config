@@ -112,6 +112,21 @@ func ctxString(t *testing.T, r logRecord, key string) string {
 	return value
 }
 
+// ctxInt reads one correlation key as an integer. JSON numbers decode as
+// float64, so a count rides back through that and is checked exactly.
+func ctxInt(t *testing.T, r logRecord, key string) int {
+	t.Helper()
+	raw, ok := r.Context[key]
+	if !ok {
+		t.Fatalf("record %q carries no %q; its context was %v", r.Operation, key, r.Context)
+	}
+	value, ok := raw.(float64)
+	if !ok {
+		t.Fatalf("record %q carries %q as %T, want a number", r.Operation, key, raw)
+	}
+	return int(value)
+}
+
 // ---- harness conveniences -------------------------------------------------
 
 func (h *harness) records(t *testing.T) []logRecord {
