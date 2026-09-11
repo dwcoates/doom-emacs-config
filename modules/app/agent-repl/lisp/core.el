@@ -51,18 +51,25 @@ same job replaces its timer rather than adding one.  Reset alongside
 `agent-repl--timers' by `agent-repl--cancel-all-timers'.")
 
 (defconst agent-repl--required-timer-keys
-  '((:state-poll               . agent-repl--arm-state-poll-timer)
-    (:workspace-status-export  . agent-repl--arm-workspace-status-export-timer)
-    (:autosave                 . agent-repl--arm-autosave-timer)
-    (:readiness-poll           . agent-repl--readiness-start-timer))
+  '((:state-poll . agent-repl--arm-state-poll-timer)
+    (:autosave   . agent-repl--arm-autosave-timer))
   "Alist of (KEY . ARM-FUNCTION) for every timer the module must keep armed.
 
 This is the contract `agent-repl--assert-heartbeat-armed' enforces: each
 KEY names a job that must have exactly one live timer once the module is
 loaded, and ARM-FUNCTION is the owner file's entry point for (re-)arming
-it.  The owners are `status.el' (:state-poll, the 1Hz heartbeat that
-repaints the tab bar), `workspace-status-export.el', `autosave.el', and
-`readiness.el'.
+it.  The owners are `status.el' (:state-poll, the heartbeat that repaints
+the tab bar) and `autosave.el' (:autosave).
+
+EVERY KEY HERE MUST HAVE A LIVE OWNER.  Two did not: `:readiness-poll' and
+`:workspace-status-export' outlived `readiness.el' and
+`workspace-status-export.el', both deleted in the overhaul's dead-module
+pre-pass, so their arm functions are defined nowhere.  No load order can
+satisfy a key whose owner does not exist, and the deferral cannot either:
+every cold start spent its idle second waiting and then warned
+`outcome=unavailable reason=owner-not-loaded' twice, for jobs the daemon's
+own roster push and address file had already taken over.  A key added here
+without an owner is that warning again, forever.
 
 Declared HERE rather than accumulated by the owners so a core.el loaded
 by itself still knows what is supposed to be running — which is exactly
@@ -3111,8 +3118,8 @@ it exists to check for.")
 (defcustom agent-repl-heartbeat-assert-defer-delay 1.0
   "Idle seconds to wait before re-checking the timer contract on a cold load.
 Only used when core.el is loaded before its timer owners, which is the
-normal cold-boot order: config.el loads core.el first, then status.el,
-workspace-status-export.el, autosave.el, and readiness.el."
+normal cold-boot order: config.el loads core.el first, then status.el
+and autosave.el."
   :type 'number
   :group 'agent-repl)
 
