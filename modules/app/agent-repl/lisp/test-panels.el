@@ -3849,3 +3849,97 @@ The batch -Q harness does not load evil, so `evil-normal-state' is not
   (agent-repl-test--with-clean-state
     ;; Should not error, and returns nil since the guard short-circuits.
     (should-not (agent-repl--input-enter-command-state))))
+
+;;;; ---- Tests: panels-open default and explicit-close preference ----
+
+(ert-deftest agent-repl-test-panels-open-preferred-when-no-preference ()
+  "A workspace with no recorded preference defaults to panels-open."
+  (agent-repl-test--with-clean-state
+    (should (agent-repl--ws-panels-open-preferred-p "fresh-ws"))))
+
+(ert-deftest agent-repl-test-panels-open-not-preferred-after-explicit-close ()
+  "An explicit close is honored: panels-open is no longer preferred."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :panels-closed-by-user t)
+    (should-not (agent-repl--ws-panels-open-preferred-p "ws"))))
+
+(ert-deftest agent-repl-test-panels-note-closed-by-user-sets-flag ()
+  "note-panels-closed-by-user records the explicit-close preference."
+  (agent-repl-test--with-clean-state
+    (agent-repl--note-panels-closed-by-user "ws")
+    (should (agent-repl--ws-get "ws" :panels-closed-by-user))))
+
+(ert-deftest agent-repl-test-panels-note-closed-by-user-nil-ws-noop ()
+  "note-panels-closed-by-user is a no-op for a nil workspace."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--note-panels-closed-by-user nil))))
+
+(ert-deftest agent-repl-test-panels-note-shown-clears-flag ()
+  "note-panels-shown clears a recorded explicit-close preference."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :panels-closed-by-user t)
+    (agent-repl--note-panels-shown "ws")
+    (should-not (agent-repl--ws-get "ws" :panels-closed-by-user))))
+
+(ert-deftest agent-repl-test-panels-ensure-own-shows-by-default-no-preference ()
+  "ensure-own-panels-on-persp-switch shows panels by DEFAULT when no
+preference is recorded (panels default to open), given a live view buffer."
+  (agent-repl-test--with-clean-state
+    (let ((shown-ws nil))
+      (let ((frontend-buf (get-buffer-create "*agent-frontend-def-ws*"))
+            (input-buf (get-buffer-create "*agent-panel-input-def-ws*")))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "def-ws" :frontend-buffer frontend-buf)
+              (agent-repl--ws-put "def-ws" :input-buffer input-buf)
+              ;; NB: :panels-were-visible is deliberately NOT set — a
+              ;; never-stood-in workspace must still default open.
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "def-ws"))
+                        ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                        ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                        ((symbol-function 'agent-repl--frontend-dispatch-show)
+                         (lambda (ws) (setq shown-ws ws))))
+                (agent-repl--ensure-own-panels-on-persp-switch "def-ws")
+                (should (equal shown-ws "def-ws"))))
+          (kill-buffer frontend-buf)
+          (kill-buffer input-buf))))))
+
+(ert-deftest agent-repl-test-panels-ensure-own-honors-explicit-close ()
+  "ensure-own-panels-on-persp-switch does NOT re-show when the user
+explicitly closed the panels, even with a live view buffer."
+  (agent-repl-test--with-clean-state
+    (let ((shown-ws nil))
+      (let ((frontend-buf (get-buffer-create "*agent-frontend-closed-ws*"))
+            (input-buf (get-buffer-create "*agent-panel-input-closed-ws*")))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "closed-ws" :frontend-buffer frontend-buf)
+              (agent-repl--ws-put "closed-ws" :input-buffer input-buf)
+              (agent-repl--ws-put "closed-ws" :panels-closed-by-user t)
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "closed-ws"))
+                        ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                        ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                        ((symbol-function 'agent-repl--frontend-dispatch-show)
+                         (lambda (ws) (setq shown-ws ws))))
+                (agent-repl--ensure-own-panels-on-persp-switch "closed-ws")
+                (should-not shown-ws)))
+          (kill-buffer frontend-buf)
+          (kill-buffer input-buf))))))
+
+(ert-deftest agent-repl-test-panels-on-simple-close-records-explicit-close ()
+  "agent-repl--on-simple-close records the explicit-close preference."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'agent-repl--close-view) #'ignore))
+      (agent-repl--on-simple-close)
+      (should (agent-repl--ws-get "ws" :panels-closed-by-user)))))
+
+(ert-deftest agent-repl-test-panels-on-close-records-explicit-close ()
+  "agent-repl--on-close records the explicit-close preference."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws"))
+              ((symbol-function 'agent-repl--close-view) #'ignore)
+              ((symbol-function 'agent-repl--save-tab-index) #'ignore)
+              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
+      (agent-repl--on-close)
+      (should (agent-repl--ws-get "ws" :panels-closed-by-user)))))
