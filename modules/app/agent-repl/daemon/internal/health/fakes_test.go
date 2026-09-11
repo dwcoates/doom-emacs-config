@@ -110,7 +110,11 @@ var fixedNow = time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 // construction refuses.
 func newReporter(t *testing.T, db wsm.DB, live LiveFunc, log dlog.Surfaces) Reporter {
 	t.Helper()
-	r, err := New(Deps{DB: db, Live: live, Log: log, Now: func() time.Time { return fixedNow }})
+	r, err := New(Deps{
+		DB: db, Live: live, Log: log, Now: func() time.Time { return fixedNow },
+		Instance: "daemon-test", PID: 4242,
+		BuildSHA: func() (string, error) { return "test-build", nil },
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

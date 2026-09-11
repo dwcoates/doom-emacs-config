@@ -22,13 +22,17 @@ const (
 	opSelfCheck  = "daemon.health.self_check"
 )
 
-// reporter is the Reporter. It holds no state of its own: every fault lives in
-// WSM, and liveness is answered by the injected fleet probe.
+// reporter is the Reporter. It snapshots immutable process identity at boot;
+// every fault lives in WSM, and liveness is answered by the injected fleet
+// probe.
 type reporter struct {
-	db   wsm.DB
-	live LiveFunc
-	log  dlog.Surfaces
-	now  func() time.Time
+	db       wsm.DB
+	live     LiveFunc
+	log      dlog.Surfaces
+	now      func() time.Time
+	instance ids.InstanceID
+	pid      int
+	buildSHA string
 }
 
 // Daemon answers DaemonHealth. UNHEALTHY IS AN ANSWER: the only error this
@@ -36,7 +40,14 @@ type reporter struct {
 // liveness self-check turns a failing state client into an unhealthy answer
 // rather than an rpc failure.
 func (r *reporter) Daemon(ctx context.Context) (*agentreplv1.DaemonHealthResponse, error) {
-	log := r.log.Global()
+	identity := &agentreplv1.DaemonIdentity{
+		InstanceId: string(r.instance),
+		Pid:        int64(r.pid),
+		BuildSha:   r.buildSHA,
+	}
+	log := r.log.Global().With(dlog.Context{
+		"instance": string(r.instance), "pid": r.pid, "build_sha": r.buildSHA,
+	})
 	var faults []*agentreplv1.DaemonFault
 
 	// The liveness self-check: the daemon's own state client must answer. A
@@ -49,7 +60,7 @@ func (r *reporter) Daemon(ctx context.Context) (*agentreplv1.DaemonHealthRespons
 			"cause": err.Error(),
 		})
 		faults = append(faults, selfCheckFault(err))
-		return unhealthyDaemon(faults), nil
+		return unhealthyDaemon(identity, faults), nil
 	}
 	log.Debug(opSelfCheck, "state client answered the open-fault read", dlog.Context{
 		"scope": "daemon", "open_faults": len(open),
@@ -65,13 +76,14 @@ func (r *reporter) Daemon(ctx context.Context) (*agentreplv1.DaemonHealthRespons
 	}
 	if len(faults) > 0 {
 		log.Warn(opDaemon, "daemon is unhealthy", dlog.Context{"faults": len(faults)})
-		return unhealthyDaemon(faults), nil
+		return unhealthyDaemon(identity, faults), nil
 	}
 	log.Debug(opDaemon, "daemon is healthy", dlog.Context{"faults": 0})
 	return &agentreplv1.DaemonHealthResponse{
 		Result: &agentreplv1.DaemonHealthResponse_Success{
 			Success: &agentreplv1.DaemonHealthSuccess{
-				Health: &agentreplv1.DaemonHealthSuccess_Healthy{Healthy: &agentreplv1.DaemonHealthy{}},
+				Health:   &agentreplv1.DaemonHealthSuccess_Healthy{Healthy: &agentreplv1.DaemonHealthy{}},
+				Identity: identity,
 			},
 		},
 	}, nil
@@ -206,13 +218,14 @@ func (r *reporter) OpenFaults(ctx context.Context, scope wsm.FaultScope) ([]wsm.
 	return out, nil
 }
 
-func unhealthyDaemon(faults []*agentreplv1.DaemonFault) *agentreplv1.DaemonHealthResponse {
+func unhealthyDaemon(identity *agentreplv1.DaemonIdentity, faults []*agentreplv1.DaemonFault) *agentreplv1.DaemonHealthResponse {
 	return &agentreplv1.DaemonHealthResponse{
 		Result: &agentreplv1.DaemonHealthResponse_Success{
 			Success: &agentreplv1.DaemonHealthSuccess{
 				Health: &agentreplv1.DaemonHealthSuccess_Unhealthy{
 					Unhealthy: &agentreplv1.DaemonUnhealthy{Faults: faults},
 				},
+				Identity: identity,
 			},
 		},
 	}

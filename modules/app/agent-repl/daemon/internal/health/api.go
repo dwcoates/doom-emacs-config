@@ -44,6 +44,14 @@ type Deps struct {
 	Live LiveFunc
 	// Log is the reporter's logger.
 	Log dlog.Surfaces
+	// Instance is the immutable identity minted for this daemon process.
+	Instance ids.InstanceID
+	// PID is the operating-system process id serving health answers.
+	PID int
+	// BuildSHA reads the deployed daemon build stamp once, while the reporter is
+	// built. An empty answer is valid only for an unstamped development
+	// checkout; a read error is not hidden.
+	BuildSHA func() (string, error)
 	// Now supplies the instant a fault's open and resolved marks are stamped
 	// with. It is injected so a test asserts an exact instant rather than a
 	// window; nil means time.Now.
@@ -67,9 +75,28 @@ func New(deps Deps) (Reporter, error) {
 	if deps.Log == nil {
 		return nil, fmt.Errorf("health: log surfaces are required")
 	}
+	if deps.Instance == "" {
+		return nil, fmt.Errorf("health: a daemon instance id is required")
+	}
+	if deps.PID <= 0 {
+		return nil, fmt.Errorf("health: a positive daemon pid is required")
+	}
+	if deps.BuildSHA == nil {
+		return nil, fmt.Errorf("health: a build sha reader is required")
+	}
+	buildSHA, err := deps.BuildSHA()
+	if err != nil {
+		deps.Log.Global().Error(opDaemon, "the daemon build identity could not be read", dlog.Context{
+			"instance": string(deps.Instance), "pid": deps.PID, "cause": err.Error(),
+		})
+		return nil, fmt.Errorf("health: read daemon build identity: %w", err)
+	}
 	now := deps.Now
 	if now == nil {
 		now = time.Now
 	}
-	return &reporter{db: deps.DB, live: deps.Live, log: deps.Log, now: now}, nil
+	return &reporter{
+		db: deps.DB, live: deps.Live, log: deps.Log, now: now,
+		instance: deps.Instance, pid: deps.PID, buildSHA: buildSHA,
+	}, nil
 }
