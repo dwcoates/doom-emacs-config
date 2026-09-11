@@ -925,6 +925,11 @@ func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error) {
 	}
 	return &fakeBorrowed{}, nil
 }
+
+// BindWorkspaceIDs implements dlog.Surfaces. This double answers its own
+// workspace ids, so there is no lookup to install.
+func (s *fakeSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
+
 func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 // fakeBorrowed is a non-closeable sink handle over the null device, which is

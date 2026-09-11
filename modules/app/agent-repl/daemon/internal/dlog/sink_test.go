@@ -9,15 +9,11 @@ import (
 	"testing"
 )
 
-// newWorkspace makes a temp workspace directory and its log id.
+// newWorkspace makes a temp workspace directory and its daemon-minted id.
 func newWorkspace(t *testing.T) (dir, id string) {
 	t.Helper()
 	dir = t.TempDir()
-	id, err := LogWorkspaceID(dir)
-	if err != nil {
-		t.Fatalf("LogWorkspaceID: %v", err)
-	}
-	return dir, id
+	return dir, mintedTestID(dir)
 }
 
 func TestOpenSinkLinksToAnExternalTarget(t *testing.T) {
@@ -642,5 +638,86 @@ func TestAStandingTargetThatIsGoneIsNotJoined(t *testing.T) {
 	}
 	if _, err := os.Stat(second.target); err != nil {
 		t.Fatalf("stat the minted target: %v", err)
+	}
+}
+
+// A newly minted target is named by the DAEMON-MINTED workspace id, so a sink
+// file name and a log record name the workspace with the same characters.
+func TestMintedTargetNameCarriesTheMintedWorkspaceID(t *testing.T) {
+	// Arrange.
+	dir, id := newWorkspace(t)
+	logsDir := t.TempDir()
+
+	// Act.
+	s, err := openSink(logsDir, dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { s.close() })
+
+	// Assert.
+	base := filepath.Base(s.target)
+	if !strings.HasPrefix(base, "agent-repl-"+id+"-daemon-") {
+		t.Fatalf("target %q is not named agent-repl-<minted id>-daemon-*", base)
+	}
+	if !s.mintedTarget {
+		t.Fatalf("the sink does not report having minted its target")
+	}
+}
+
+// MIGRATION: a target an older daemon minted under the 8-character directory
+// hash is APPENDED TO, not replaced. Renaming it or minting beside it would
+// orphan every record written before the id scheme changed.
+func TestOpenSinkKeepsAppendingToADirectoryHashNamedTarget(t *testing.T) {
+	// Arrange: the canonical link already names an under-cap target whose
+	// name carries the directory hash, exactly as an older daemon left it.
+	dir, id := newWorkspace(t)
+	logsDir := t.TempDir()
+	hash, err := WorkspaceDirHash(dir)
+	if err != nil {
+		t.Fatalf("WorkspaceDirHash: %v", err)
+	}
+	legacy := filepath.Join(logsDir, "agent-repl-"+hash+"-daemon-123456.log")
+	if err := os.WriteFile(legacy, []byte("{\"old\":true}\n"), 0o600); err != nil {
+		t.Fatalf("write the legacy target: %v", err)
+	}
+	linkDir := filepath.Join(dir, ".claude", "emacs")
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(legacy, filepath.Join(linkDir, "daemon.log")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Act.
+	s, err := openSink(logsDir, dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { s.close() })
+	if err := s.write([]byte("{\"new\":true}\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Assert: the same file, still the only one, with both records in it.
+	if s.target != legacy {
+		t.Fatalf("target = %q, want the standing %q — the history must not be orphaned", s.target, legacy)
+	}
+	if s.mintedTarget {
+		t.Fatalf("the sink minted a target although a standing one was joinable")
+	}
+	entries, err := os.ReadDir(logsDir)
+	if err != nil {
+		t.Fatalf("read the logs directory: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("the logs directory holds %d files, want only the standing target", len(entries))
+	}
+	raw, err := os.ReadFile(legacy)
+	if err != nil {
+		t.Fatalf("read the target: %v", err)
+	}
+	if want := "{\"old\":true}\n{\"new\":true}\n"; string(raw) != want {
+		t.Fatalf("target contents = %q, want %q", raw, want)
 	}
 }

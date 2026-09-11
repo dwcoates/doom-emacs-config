@@ -32,6 +32,14 @@ is under the cap; anything else -- a regular file or foreign symlink the
 workspace put there, a swept target, a target at the cap -- is displaced by a
 new unique target and an atomic link replacement, exactly as before.
 
+A daemon-owned target the daemon MINTS is named
+`<state>/logs/agent-repl-<workspace_id>-<runtime>-<unique>.log`, with the
+minted 16-hex workspace id. A target an earlier instance minted under the
+8-character directory hash is APPENDED TO wherever the canonical link still
+names it, under the standing-target rule above: nothing is renamed, no history
+is orphaned, and only a new target carries the current scheme. The runtime
+records the scheme it used at INFO when it opens a sink.
+
 The daemon opens its workspace targets with append semantics and manages a
 64 MiB cap for `daemon.log`, `shim.log`, `webapp.log`, and `sidecar.log`.
 For daemon-owned writes (`daemon.log`, `webapp.log`, and `sidecar.log`), the
@@ -110,6 +118,18 @@ Workspace records also include:
 
 - `workspace_dir`
 - `workspace_id`
+
+`workspace_id` is the DAEMON-MINTED workspace identity in every runtime: 16
+hex characters (`daemon/internal/wsm.IDLength`), opaque, never derived from a
+path. A runtime that is not the daemon receives it rather than computing it --
+the shim reads it off the `--listen` socket the daemon named after the
+workspace -- and a runtime that cannot resolve it refuses the record rather
+than substituting a path-derived stand-in, so a reader grouping by
+`workspace_id` sees one group per workspace across every runtime.
+
+The workspace directory hash md5hex(clean absolute dir)[:8] -- the
+shim-held kernel lock file's derivation -- is separate evidence and travels in
+`context` as `workspace_dir_hash`. It is never a `workspace_id`.
 
 Identity fields are included whenever the owning runtime knows them:
 
