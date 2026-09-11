@@ -22,6 +22,64 @@ type claim struct {
 	ln       net.Listener
 	addrPath string
 	address  string
+	pid      int
+}
+
+// pidLinePrefix marks the second line of a daemon.addr advertisement, which
+// carries the advertising daemon's process id. See ReadAdvertisement for the
+// on-disk format.
+const pidLinePrefix = "pid="
+
+// Advertisement is the parsed content of a daemon.addr file: the loopback
+// address a daemon serves on, and the process id of the daemon that wrote it.
+//
+// The file's format is forward-compatible. The first line is the bare
+// "host:port" address, exactly as a legacy daemon wrote it; an optional
+// second line "pid=<n>" names the advertiser. A reader that finds no pid line
+// -- a file a legacy daemon wrote -- reports PIDKnown false rather than
+// guessing a pid, so a client can tell "this advertiser is dead" apart from
+// "this file does not say who the advertiser is."
+type Advertisement struct {
+	// Address is the "host:port" the daemon serves on, or "" when the file
+	// names none (absent first line).
+	Address string
+	// PID is the advertising daemon's process id, meaningful only when
+	// PIDKnown is true.
+	PID int
+	// PIDKnown is false for a legacy bare-address file, which names no pid.
+	PIDKnown bool
+}
+
+// ParseAdvertisement parses the daemon.addr payload. It never fails: a file
+// that names no address answers an empty Address, and one that names no pid
+// answers PIDKnown false, because both are states a reader must handle rather
+// than errors it can act on.
+func ParseAdvertisement(raw string) Advertisement {
+	var adv Advertisement
+	for i, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if i == 0 {
+			adv.Address = trimmed
+			continue
+		}
+		if rest, ok := strings.CutPrefix(trimmed, pidLinePrefix); ok {
+			if pid, err := strconv.Atoi(strings.TrimSpace(rest)); err == nil {
+				adv.PID = pid
+				adv.PIDKnown = true
+			}
+		}
+	}
+	return adv
+}
+
+// ReadAdvertisement reads and parses a daemon.addr file. A read error is
+// surfaced to the caller; the parse itself never fails.
+func ReadAdvertisement(addrPath string) (Advertisement, error) {
+	raw, err := os.ReadFile(addrPath)
+	if err != nil {
+		return Advertisement{}, fmt.Errorf("read the daemon advertisement %q: %w", addrPath, err)
+	}
+	return ParseAdvertisement(string(raw)), nil
 }
 
 // bind takes the boot claim and binds the listener, in that order. The lock
@@ -78,6 +136,7 @@ func bindWith(addrPath string, port int, claimBoot bool) (Claim, error) {
 		ln:       ln,
 		addrPath: addrPath,
 		address:  net.JoinHostPort(LoopbackHost, strconv.Itoa(bound.Port)),
+		pid:      os.Getpid(),
 	}, nil
 }
 
@@ -87,9 +146,18 @@ func (c *claim) Listener() net.Listener { return c.ln }
 // Address implements Claim.
 func (c *claim) Address() string { return c.address }
 
+// advertisement is the daemon.addr payload this claim publishes: the bare
+// address on the first line, this daemon's pid on the second. The first line
+// alone is what a legacy daemon wrote, so a legacy reader that takes only the
+// first line still reads a valid address.
+func (c *claim) advertisement() string {
+	return c.address + "\n" + pidLinePrefix + strconv.Itoa(c.pid) + "\n"
+}
+
 // Publish implements Claim. The write is atomic — a temporary file in the
 // same directory, then a rename — so a reader either sees the previous
-// address or this one, never a half-written line.
+// address or this one, never a half-written advertisement. The payload is the
+// address followed by "pid=<n>"; see ReadAdvertisement for the format.
 func (c *claim) Publish() error {
 	// A SUCCESSOR TAKES THE BOOT CLAIM WHEN IT TAKES OVER. It bound without
 	// one -- the incumbent held it -- and publishing daemon.addr is the moment
@@ -108,7 +176,7 @@ func (c *claim) Publish() error {
 		return fmt.Errorf("create a temporary daemon.addr beside %q: %w", c.addrPath, err)
 	}
 	name := tmp.Name()
-	if _, err := tmp.WriteString(c.address + "\n"); err != nil {
+	if _, err := tmp.WriteString(c.advertisement()); err != nil {
 		tmp.Close()
 		os.Remove(name)
 		return fmt.Errorf("write the daemon address to %q: %w", name, err)
@@ -153,7 +221,7 @@ func (c *claim) Withdraw() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read %q before withdrawing it: %w", c.addrPath, err)
 	}
-	if strings.TrimSpace(string(raw)) != c.address {
+	if ParseAdvertisement(string(raw)).Address != c.address {
 		return false, nil
 	}
 	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
@@ -189,7 +257,7 @@ func staleAdvertisement(addrPath string, dial func(addr string) error) (string, 
 	if err != nil {
 		return "", false
 	}
-	addr := strings.TrimSpace(string(raw))
+	addr := ParseAdvertisement(string(raw)).Address
 	if addr == "" {
 		return "", false
 	}

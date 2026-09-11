@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -28,14 +29,16 @@ func mustBind(t *testing.T, addrPath string) Claim {
 
 // readAddrFile reads daemon.addr's advertised address directly, without
 // going through any production parsing helper, for tests that verify
-// Publish's on-disk side effect rather than a reader's own behavior.
+// Publish's on-disk side effect rather than a reader's own behavior. The
+// address is the first line; a "pid=<n>" line may follow it.
 func readAddrFile(t *testing.T, addrPath string) string {
 	t.Helper()
 	raw, err := os.ReadFile(addrPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", addrPath, err)
 	}
-	return strings.TrimSpace(string(raw))
+	first, _, _ := strings.Cut(string(raw), "\n")
+	return strings.TrimSpace(first)
 }
 
 func TestBindListensOnLoopback(t *testing.T) {
@@ -128,7 +131,7 @@ func TestALosingBindLeavesTheIncumbentsAdvertisementAlone(t *testing.T) {
 	}
 }
 
-func TestPublishWritesTheAddressLine(t *testing.T) {
+func TestPublishWritesTheAddressAndPid(t *testing.T) {
 	// Arrange.
 	addrPath := newAddrPath(t)
 	c := mustBind(t, addrPath)
@@ -138,13 +141,83 @@ func TestPublishWritesTheAddressLine(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 
-	// Assert.
+	// Assert: the address on the first line, this daemon's pid on the second.
 	raw, err := os.ReadFile(addrPath)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if string(raw) != c.Address()+"\n" {
-		t.Fatalf("daemon.addr = %q, want %q", raw, c.Address()+"\n")
+	want := c.Address() + "\npid=" + strconv.Itoa(os.Getpid()) + "\n"
+	if string(raw) != want {
+		t.Fatalf("daemon.addr = %q, want %q", raw, want)
+	}
+}
+
+// TestReadAdvertisementParsesTheAddressAndPid pins the reader against what
+// Publish writes: both the address and the advertiser's pid come back.
+func TestReadAdvertisementParsesTheAddressAndPid(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	c := mustBind(t, addrPath)
+	if err := c.Publish(); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Act.
+	adv, err := ReadAdvertisement(addrPath)
+	if err != nil {
+		t.Fatalf("ReadAdvertisement: %v", err)
+	}
+
+	// Assert.
+	if adv.Address != c.Address() {
+		t.Fatalf("Address = %q, want %q", adv.Address, c.Address())
+	}
+	if !adv.PIDKnown {
+		t.Fatal("PIDKnown = false, want the pid Publish wrote")
+	}
+	if adv.PID != os.Getpid() {
+		t.Fatalf("PID = %d, want %d", adv.PID, os.Getpid())
+	}
+}
+
+// TestReadAdvertisementReadsALegacyBareAddressAsPidUnknown pins the forward
+// compatibility: a file a legacy daemon wrote -- a bare host:port -- reads as
+// an address whose advertiser is unknown, never a guessed pid.
+func TestReadAdvertisementReadsALegacyBareAddressAsPidUnknown(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	if err := os.MkdirAll(filepath.Dir(addrPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(addrPath, []byte("127.0.0.1:58161\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act.
+	adv, err := ReadAdvertisement(addrPath)
+	if err != nil {
+		t.Fatalf("ReadAdvertisement: %v", err)
+	}
+
+	// Assert.
+	if adv.Address != "127.0.0.1:58161" {
+		t.Fatalf("Address = %q, want the advertised one", adv.Address)
+	}
+	if adv.PIDKnown {
+		t.Fatalf("PIDKnown = true (pid %d), want a legacy file to name no pid", adv.PID)
+	}
+}
+
+// TestReadAdvertisementSurfacesAReadError pins the one failure ReadAdvertisement
+// can have: an absent file is a read error the caller must see, never an empty
+// advertisement it might mistake for a named one.
+func TestReadAdvertisementSurfacesAReadError(t *testing.T) {
+	// Arrange, Act.
+	_, err := ReadAdvertisement(newAddrPath(t))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ReadAdvertisement of an absent file = nil error, want the read error surfaced")
 	}
 }
 

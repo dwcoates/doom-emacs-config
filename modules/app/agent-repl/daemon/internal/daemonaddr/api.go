@@ -5,6 +5,14 @@
 // orderly exit; a joining successor writes it only once it owns every
 // workspace. See ARCHITECTURE.md "State root layout" and docs/overhaul/
 // daemon.md "CROSS-SYSTEM PROCESS CONTRACTS".
+//
+// The daemon.addr payload is the bare "host:port" address on the first line
+// and an optional "pid=<n>" line naming the advertising daemon's process id.
+// A reader that needs only the address takes the first line, which is exactly
+// what a legacy daemon wrote; ReadAdvertisement returns both, reporting
+// PIDKnown false for a legacy file that names no pid. The pid lets a reader
+// tell a dead advertiser (retire it silently) from a live-but-unreachable one
+// (a real transport fault) without dialing.
 package daemonaddr
 
 import (
@@ -18,9 +26,11 @@ type Claim interface {
 	Listener() net.Listener
 	// Address is "127.0.0.1:<port>" with the actually-bound port.
 	Address() string
-	// Publish writes Address to the daemon.addr path atomically (write a
-	// temporary file, then rename). A joining daemon calls it only once it
-	// owns every workspace.
+	// Publish writes the advertisement to the daemon.addr path atomically
+	// (write a temporary file, then rename). The payload is the bare address
+	// on the first line and "pid=<n>" -- this daemon's process id -- on the
+	// second; see ReadAdvertisement for the format and its legacy fallback. A
+	// joining daemon calls it only once it owns every workspace.
 	Publish() error
 	// Withdraw removes the daemon.addr file WHILE IT STILL NAMES THIS CLAIM'S
 	// ADDRESS, and answers whether it removed anything. Orderly exit calls it;

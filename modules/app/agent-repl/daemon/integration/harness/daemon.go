@@ -22,6 +22,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/fakegit"
+	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/stateroot"
 
@@ -672,23 +673,40 @@ const LoggedOut = "\x00logged-out"
 // AddrFile is the state root's daemon.addr path.
 func (d *Daemon) AddrFile() string { return filepath.Join(d.StateDir, "daemon.addr") }
 
-// AwaitAddrFile waits for daemon.addr to appear and answers its address,
-// asserting the contracted `127.0.0.1:<port>\n` shape.
+// AwaitAddrFile waits for daemon.addr to appear and answers its address. The
+// payload is the bare address on the first line and this daemon's `pid=<n>`
+// on the second; the address is asserted to be the contracted loopback shape
+// and the pid line to name this daemon's live process.
 func (d *Daemon) AwaitAddrFile() string {
 	d.t.Helper()
 	raw := d.awaitFile(d.AddrFile())
 	if !strings.HasSuffix(raw, "\n") {
 		d.t.Fatalf("daemon.addr = %q, want a trailing newline", raw)
 	}
-	addr := strings.TrimSuffix(raw, "\n")
-	host, _, err := net.SplitHostPort(addr)
+	adv := AddrAdvertisement(raw)
+	host, _, err := net.SplitHostPort(adv.Address)
 	if err != nil {
 		d.t.Fatalf("daemon.addr = %q, want 127.0.0.1:<port>: %v", raw, err)
 	}
 	if host != "127.0.0.1" {
 		d.t.Fatalf("daemon.addr host = %q, want the loopback address", host)
 	}
-	return addr
+	if !adv.PIDKnown || adv.PID <= 0 {
+		d.t.Fatalf("daemon.addr = %q, want a pid=<n> line naming the advertiser", raw)
+	}
+	return adv.Address
+}
+
+// AddrAdvertisement parses a daemon.addr payload into its address and pid,
+// mirroring the daemon's own reader for the integration and e2e suites.
+func AddrAdvertisement(raw string) daemonaddr.Advertisement {
+	return daemonaddr.ParseAdvertisement(raw)
+}
+
+// AddrLine is the bare address a daemon.addr payload advertises, for tests
+// that only need the address the file names.
+func AddrLine(raw string) string {
+	return daemonaddr.ParseAdvertisement(raw).Address
 }
 
 // staleFor is the content awaitFile must NOT accept for a path: the
