@@ -2562,7 +2562,8 @@ func (e *Emacs) DaemonAddr() string {
 	if err != nil {
 		e.t.Fatalf("read the daemon address Emacs's launcher published: %v", err)
 	}
-	return strings.TrimSpace(string(body))
+	// The address is the first line; a "pid=<n>" line may follow it.
+	return harness.AddrLine(string(body))
 }
 
 // ===========================================================================
