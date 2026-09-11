@@ -61,6 +61,17 @@ func envOr(name, fallback string) string {
 // failure with the elapsed time, never silently retried into a pass.
 const probeBound = 5 * time.Second
 
+// probeRingSize caps how many probe-answer files a run leaves behind.
+//
+// Every read-only probe writes its answer to a file this side reads back, and a
+// startup poll fires a probe a second. Naming each answer by a monotonic
+// sequence left run 3 with 126 `probe-*.json` files and a run directory nobody
+// could read. The names cycle through a small ring instead, so a run keeps a
+// short tail for debugging — including the last probe's content — without
+// littering. It is small because the answers are transient: a probe reads its
+// file back immediately, so a name is free to be reused a few probes later.
+const probeRingSize = 8
+
 // Client is a read-only connection to a running Emacs.
 type Client struct {
 	// Socket is the server socket path (`--socket-name`). On this machine it
@@ -69,6 +80,13 @@ type Client struct {
 	// Scratch is a directory this side owns, where probe answers land.
 	Scratch string
 	seq     int
+}
+
+// probeAnswerPath is where the probe numbered `seq` writes its answer. The name
+// cycles through `probeRingSize` slots so a long run of probes leaves a bounded
+// set of files rather than one per probe.
+func probeAnswerPath(scratch string, seq int) string {
+	return filepath.Join(scratch, fmt.Sprintf("probe-%02d.json", seq%probeRingSize))
 }
 
 // probeResult is the envelope every probe answers in.
@@ -99,7 +117,7 @@ func (c *Client) Alive(ctx context.Context) bool {
 // message travels with it.
 func (c *Client) Read(ctx context.Context, form string) (json.RawMessage, error) {
 	c.seq++
-	answer := filepath.Join(c.Scratch, fmt.Sprintf("probe-%03d.json", c.seq))
+	answer := probeAnswerPath(c.Scratch, c.seq)
 
 	// `json-encode` rather than `json-serialize`: it accepts any lisp value at
 	// top level, where `json-serialize` requires an object or array, and every
