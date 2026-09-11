@@ -46,8 +46,14 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 	// nothing to wait it out.
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
 
-	// Act: the spool exists and no transcript ever names it.
+	// Act: the spool exists and no transcript ever names it. It is created AFTER
+	// the first production cycle so it is a steady-state spool, not startup
+	// backlog: a spool already on disk when the reader's first scan runs is
+	// caught up on and summarized (see the catch-up subjects), while one that
+	// appears while the reader is running is the per-file degradation this
+	// subject asserts.
 	startSidecar(t, opts)
+	awaitFirstProductionCycle(ctx, t, opts.LogPath)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte(payload))
 	awaitLog(ctx, t, opts.LogPath, "the spool being held", func(r logRecord) bool {
@@ -126,8 +132,10 @@ func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
 
-	// Act.
+	// Act: created after the first cycle so it is a steady-state spool whose
+	// lapse is a per-file degradation, not startup backlog (which is summarized).
 	startSidecar(t, opts)
+	awaitFirstProductionCycle(ctx, t, opts.LogPath)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte("nobody claimed this\n"))
 
@@ -139,6 +147,68 @@ func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
 		t.Errorf("the hold expired at level %q; an aged unowned spool is a degradation and is stated as a WARNING", rec.Level)
 	}
 	_ = fake
+}
+
+// TestStartupCatchUpSummarizesABacklogOfUnownedSpools asserts the realtest-1
+// flood is leveled: a sidecar that starts with a backlog of pre-existing
+// unclaimed spools states ONE summary rather than one warning per spool. The
+// spools are created BEFORE the sidecar starts, so they are exactly the
+// historical corpus a restart catches up on.
+func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	cwd := "/Users/dodgecoates/spool-catchup-probe"
+	slug := cwdSlug(cwd)
+	session := "12121212-1212-4212-8212-121212121212"
+	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	tasks := []string{"b0aaaaaaa", "b0bbbbbbb", "b0ccccccc"}
+	var spoolPaths []string
+	for _, task := range tasks {
+		path := tree.spoolPath(slug, session, task)
+		spool := newGrowingFile(t, path)
+		spool.AppendRaw([]byte("backlog output nobody claimed\n"))
+		spoolPaths = append(spoolPaths, path)
+	}
+
+	// Act: the sidecar starts with the backlog already on disk.
+	startSidecar(t, opts)
+	for _, spoolPath := range spoolPaths {
+		sp := spoolPath
+		fake.awaitEntry(ctx, t, "residue for the backlog spool", func(e *storev1.StoreEntry) bool {
+			u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
+			return u != nil && samePath(u.GetSource(), sp)
+		})
+	}
+	rec := awaitLog(ctx, t, opts.LogPath, "the spool catch-up summary", func(r logRecord) bool {
+		return r.Operation == "catchup-summary" && r.Context["reason"] == "spool_unclaimed"
+	})
+
+	// Assert: the backlog is summarized, not stated one spool at a time. The
+	// bytes still landed as residue (awaited above), so nothing was silenced.
+	if rec.Level != "warn" {
+		t.Errorf("the catch-up summary is at level %q, want warn", rec.Level)
+	}
+	records := readLog(t, opts.LogPath)
+	var summed int
+	for _, r := range records {
+		if r.Operation == "catchup-summary" && r.Context["reason"] == "spool_unclaimed" {
+			if c, ok := r.Context["repeat_count"].(float64); ok {
+				summed += int(c)
+			}
+		}
+	}
+	if summed != len(tasks) {
+		t.Errorf("the catch-up summaries counted %d backlog spools, want %d", summed, len(tasks))
+	}
+	for _, r := range records {
+		if r.Operation == "hold-expired" && r.Level == "warn" {
+			t.Errorf("a backlog spool was stated as a per-file warning: %v", r.Context)
+		}
+	}
 }
 
 // TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears asserts the retained spool

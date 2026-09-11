@@ -107,6 +107,15 @@ type Tracker struct {
 	// bootUnknownSaid keeps the "no boot time" statement to once per process:
 	// the sweep runs on a timer, and repeating it every tick would bury it.
 	bootUnknownSaid bool
+	// processStartMs is when this sidecar began producing. It is the boundary
+	// between a run that was ALREADY stale before we started — backlog the first
+	// sweep catches up on and states as ONE summary per class — and one that
+	// went stale WHILE we watched, a newly-arising condition stated per item.
+	// The clock is the run's own last-activity mtime, never our read time, so
+	// this joins the same fact swept_up already reads (mtime < bootMs). Zero
+	// means unset: nothing is treated as catch-up and the tracker states every
+	// conclusion per item, exactly as it did before this policy existed.
+	processStartMs int64
 }
 
 // New builds a Tracker.
@@ -134,6 +143,20 @@ func New(opt Options, log *logging.Bound) *Tracker {
 // where it is parsed: a window that never reached the tracker is a flag that
 // does nothing.
 func (t *Tracker) Windows() Options { return t.opt }
+
+// SetProcessStart records when this sidecar began producing, so the sweep can
+// tell a run that was ALREADY stale before we started (backlog, summarized as
+// startup catch-up) from one that went stale while we watched (stated per
+// item). It is set ONCE, at the first production cycle; a later call is ignored
+// so a store bounce that re-enters the first cycle cannot move the boundary
+// forward and reclassify runs it once summarized.
+func (t *Tracker) SetProcessStart(ms int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.processStartMs == 0 {
+		t.processStartMs = ms
+	}
+}
 
 // Observe records that a run's file is being watched. Re-observing a known run
 // refreshes what the reader has since learned about it (its owner, its run
@@ -290,14 +313,72 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []Lost {
 }
 
 // state logs each conclusion and returns them in a stable order. Caller holds mu.
+//
+// A CONCLUSION ABOUT A BACKLOG RUN IS CATCH-UP, NOT A NEW EVENT. A restarted
+// sidecar re-derives every historical run from its files, and one that was
+// already stale before we started (its last growth predates processStartMs) was
+// concluded once, long ago; re-stating each of hundreds per restart is the same
+// inverted-pyramid flood the discover-meta holds already fixed. So a run whose
+// last activity predates the process start is accumulated per class and stated
+// as ONE summary; only a run that went stale WHILE we watched is stated per
+// item. Nothing is silenced: the totals ride the summary.
 func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	catchup := map[Reason]*catchupCount{}
 	for _, lost := range out {
+		if t.processStartMs != 0 && lost.LastActivityMs < t.processStartMs {
+			c := catchup[lost.Reason]
+			if c == nil {
+				c = &catchupCount{oldestMs: lost.LastActivityMs}
+				catchup[lost.Reason] = c
+			}
+			c.add(lost.LastActivityMs)
+			t.bound(lost.Work).With(logging.Context{Level: "debug", Reason: string(lost.Reason)}).LogVerbose(
+				"run concluded LOST during startup catch-up reason=%s: it was already stale before this sidecar started, so it is summarized rather than stated on its own (last_activity_ms=%d observed_at_ms=%d)",
+				lost.Reason, lost.LastActivityMs, nowMs)
+			continue
+		}
 		t.bound(lost.Work).With(logging.Context{Level: "warn"}).Log(
 			"run concluded LOST reason=%s: we stopped seeing it, which is not a claim that it failed (last_activity_ms=%d observed_at_ms=%d)",
 			lost.Reason, lost.LastActivityMs, nowMs)
 	}
+	t.summarizeCatchup(catchup, nowMs)
 	return out
+}
+
+// catchupCount is one stale class's running tally during a startup catch-up
+// sweep: how many pre-existing runs it concluded and the oldest one's clock.
+type catchupCount struct {
+	count    int
+	oldestMs int64
+}
+
+func (c *catchupCount) add(activityMs int64) {
+	c.count++
+	if activityMs < c.oldestMs {
+		c.oldestMs = activityMs
+	}
+}
+
+// summarizeCatchup states ONE warning per stale class the sweep caught up on,
+// naming the class, the count and the oldest run's age, so the owner sees "N
+// runs concluded" without N lines. Caller holds mu. A sweep that caught nothing
+// up states nothing.
+func (t *Tracker) summarizeCatchup(catchup map[Reason]*catchupCount, nowMs int64) {
+	reasons := make([]Reason, 0, len(catchup))
+	for reason := range catchup {
+		reasons = append(reasons, reason)
+	}
+	sort.Slice(reasons, func(i, j int) bool { return reasons[i] < reasons[j] })
+	for _, reason := range reasons {
+		c := catchup[reason]
+		age := time.Duration(nowMs-c.oldestMs) * time.Millisecond
+		t.log.With(logging.Context{
+			Operation: "catchup-summary", Level: "warn",
+			Reason: string(reason), Repeat: logging.Repeat(c.count),
+		}).Log("startup catch-up concluded %d pre-existing run(s) LOST reason=%s; the oldest last grew %s ago — these predate this sidecar and are summarized here, not stated one by one",
+			c.count, reason, age)
+	}
 }
 
 // silence is the per-kind window a quiet file is given before it counts as
