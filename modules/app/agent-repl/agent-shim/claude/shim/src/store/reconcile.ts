@@ -385,6 +385,7 @@ function describeDetachable(
 export function announceLiveWork(
   entries: readonly conversationv1.HistoryEntryAt[],
   work: readonly conversationv1.DetachedWorkId[],
+  onUndescribed?: (handle: conversationv1.DetachedWorkId) => void,
 ): conversationv1.AgentDetachedWork[] {
   const announcements: conversationv1.AgentDetachedWork[] = [];
   for (const handle of work) {
@@ -392,6 +393,17 @@ export function announceLiveWork(
     const unit = create(conversationv1.AgentActivityIdSchema, { value: handle.value });
     const described = describeDetachable(findUnit(entries, unit));
     if (described === undefined) {
+      // WHO OWNS THE RECORD DEPENDS ON WHO CAN TELL THE TWO CASES APART, and
+      // this function cannot. `GetLiveWork` is the store's GLOBAL open-obligation
+      // set by contract, so a handle with no start in THIS book is either work
+      // whose own start the record lost -- a defect -- or another conversation's
+      // obligation, which is the ordinary state of a shared set. Only the
+      // caller can ask the vendor which, so a caller that passes this hands
+      // over the record and gets the handle instead.
+      if (onUndescribed !== undefined) {
+        onUndescribed(handle);
+        continue;
+      }
       LOGGER.debug(
         { work: handle.value },
         "the record holds no describable start for this live work; it is not announced",

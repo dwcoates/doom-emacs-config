@@ -4757,6 +4757,19 @@ function logContextFor(from: number, needle: string): Record<string, unknown> | 
   return undefined;
 }
 
+/** The LEVEL of the first record since `from` whose message carries `needle`. */
+function logLevelFor(from: number, needle: string): string | undefined {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
+  for (const [, bytes, offset, length] of calls.slice(from)) {
+    const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
+      message: string;
+      level: string;
+    };
+    if (record.message.includes(needle)) return record.level;
+  }
+  return undefined;
+}
+
 /** Every fault detail the session's diagnostics carried while `act` ran. */
 async function faultDetailsWhile(h: Harness, act: () => Promise<void>): Promise<string[]> {
   const seen = await pushedUpdates(
@@ -6349,5 +6362,125 @@ describe("a component that recovers", () => {
 
     // Assert.
     expect(faultyComponents(h)).toEqual(["vendor-query"]);
+  });
+});
+
+/**
+ * LIVE WORK THIS SESSION HAS NO START FOR, and which of two states it is in.
+ *
+ * WHAT THIS GUARDS: `GetLiveWork` is the store's GLOBAL open-obligation set by
+ * contract — an empty request, answering "every started thing the record holds
+ * no terminal for", across every conversation the store holds. So a handle with
+ * no start in THIS session's book is usually another conversation's obligation
+ * and not a defect at all, and reporting every one of them as a record-plane
+ * loss made a healthy shim look broken on every new watch. The vendor is the
+ * authority that separates the two.
+ */
+describe("re-announcing live work the record cannot describe", () => {
+  /** A session whose store holds one live handle with no start in this book. */
+  async function sessionWithForeignHandle(holdsIt: boolean): Promise<Harness> {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.backgroundTasks = (): Promise<boolean> => Promise.resolve(holdsIt);
+      },
+    });
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_foreign" })],
+    });
+    return h;
+  }
+
+  /** Open one WatchSession far enough to take its re-announcement. */
+  async function reannounce(h: Harness): Promise<void> {
+    const stream = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}));
+    const watch = stream[Symbol.asyncIterator]();
+    await watch.next();
+    await watch.next();
+    await watch.return?.();
+  }
+
+  it("says the work belongs to another conversation when the vendor does not hold it", async () => {
+    // Arrange.
+    const h = await sessionWithForeignHandle(false);
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(logContextFor(before, "belongs to another conversation")?.work_id).toBe(
+      "toolu_foreign",
+    );
+  });
+
+  // NOT A DEFECT, SO NOT A WARNING. The shared set carrying other
+  // conversations' obligations is its ordinary state.
+  it("states another conversation's obligation below warning level", async () => {
+    // Arrange.
+    const h = await sessionWithForeignHandle(false);
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(logLevelFor(before, "belongs to another conversation")).toBe("debug");
+  });
+
+  it("reports a defect when the vendor DOES still hold the undescribable work", async () => {
+    // Arrange.
+    const h = await sessionWithForeignHandle(true);
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(logLevelFor(before, "work the vendor still has")).toBe("warn");
+  });
+
+  // A VENDOR THAT CANNOT ANSWER IS NOT A VENDOR THAT SAID "NOT MINE": the
+  // handle might be this conversation's, so it is reported as the defect it
+  // might be rather than dismissed.
+  it("treats an unanswerable probe as this conversation's work", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.backgroundTasks = (): Promise<boolean> =>
+          Promise.reject(new Error("the vendor is not answering"));
+      },
+    });
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_unknown" })],
+    });
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(
+      logContextFor(before, "could not be asked whether it holds this undescribable live work")
+        ?.work_id,
+    ).toBe("toolu_unknown");
+  });
+
+  it("announces nothing for a handle it cannot describe", async () => {
+    // Arrange.
+    const h = await sessionWithForeignHandle(false);
+
+    // Act.
+    const stream = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}));
+    const watch = stream[Symbol.asyncIterator]();
+    await watch.next();
+    const second = await watch.next();
+    await watch.return?.();
+
+    // Assert.
+    const response = second.value as shimv1.WatchSessionResponse | undefined;
+    const frame = response?.frame;
+    expect(frame?.case === "sessionStarted" ? frame.value.liveWork : undefined).toEqual([]);
   });
 });

@@ -2165,7 +2165,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const survives = (work: conversationv1.DetachedWorkId): boolean =>
       surviving.has(work.value);
-    const readopted = announceLiveWork(book, open.liveDetached.filter(survives));
+    // A SURVIVING HANDLE THE RECORD CANNOT DESCRIBE IS A DEFECT, and here it is
+    // provably one: this vendor process was just ASKED and said it still holds
+    // the work, so the missing start belongs to work that really is this
+    // conversation's. Nothing is written for it -- an announcement with an
+    // invented description is worse than a missing one -- but it is stated as
+    // the record-plane loss it is.
+    const readopted = announceLiveWork(book, open.liveDetached.filter(survives), (handle) => {
+      reportUndescribableWork(handle);
+    });
 
     for (const work of open.liveDetached) {
       if (survives(work)) continue;
@@ -2529,7 +2537,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         requireIdentity().agentId,
         RECONCILE_PAGE_SIZE,
       );
-      return announceLiveWork(page.entries, handles);
+      const undescribed: conversationv1.DetachedWorkId[] = [];
+      const announcements = announceLiveWork(page.entries, handles, (handle) => {
+        undescribed.push(handle);
+      });
+      for (const handle of undescribed) await recordUndescribedHandle(handle);
+      return announcements;
     } catch (err) {
       // LOUD, NEVER SILENT: the watch still opens — a consumer told nothing at
       // all is worse off than one told the opening with an empty membership —
@@ -2549,6 +2562,65 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return [];
     }
+  }
+
+  /**
+   * Work this conversation owns whose own start the record cannot describe.
+   *
+   * ONE SITE FOR ONE FACT, so the two callers that reach this conclusion by
+   * different routes -- StartSession, which has already asked the vendor about
+   * every handle, and a re-announcement, which asks about this one -- cannot
+   * drift into saying it differently.
+   */
+  function reportUndescribableWork(handle: conversationv1.DetachedWorkId): void {
+    // warn: a defect because the vendor still holds work whose start the record cannot describe.
+    LOGGER.warn(
+      { work_id: handle.value, detail: "the vendor confirmed it holds this work" },
+      "the record holds no describable start for work the vendor still has; it cannot be announced",
+    );
+  }
+
+  /**
+   * Say WHICH STATE an undescribable live handle is in, and never guess.
+   *
+   * THE OBLIGATION SET IS GLOBAL BY CONTRACT. `GetLiveWork` takes an empty
+   * request and answers "every started thing the record holds no terminal for",
+   * across every conversation the store holds -- so a handle with no start in
+   * THIS session's book is the ordinary state of a shared set, not a defect,
+   * and reporting every one of them as a record-plane loss is what made a
+   * healthy shim look broken on every new watch.
+   *
+   * The vendor is the authority that separates the two, exactly as it is at
+   * StartSession: if this vendor process still holds the handle then the work
+   * is this conversation's and its missing start is a real loss; if it does not,
+   * the handle is another conversation's and another shim's to terminalize.
+   * A vendor that cannot answer is not a vendor that said "not mine", so an
+   * unanswerable probe is reported as the defect it might be.
+   */
+  async function recordUndescribedHandle(
+    handle: conversationv1.DetachedWorkId,
+  ): Promise<void> {
+    const active = query;
+    let held = true;
+    if (active !== undefined) {
+      try {
+        held = await active.backgroundTasks(handle.value);
+      } catch (err) {
+        // warn: a defect because the vendor could not say whether it holds work the record cannot describe.
+        LOGGER.warn(
+          { work_id: handle.value, cause: err instanceof Error ? err.message : String(err) },
+          "the vendor could not be asked whether it holds this undescribable live work; treating it as this conversation's",
+        );
+      }
+    }
+    if (!held) {
+      LOGGER.debug(
+        { work_id: handle.value },
+        "this live work belongs to another conversation; the open-obligation set spans them all and this session has no start for it",
+      );
+      return;
+    }
+    reportUndescribableWork(handle);
   }
 
   function sessionLive(): conversationv1.SessionLive {

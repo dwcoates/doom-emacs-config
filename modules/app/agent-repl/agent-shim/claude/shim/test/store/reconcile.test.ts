@@ -425,6 +425,37 @@ describe("announceLiveWork", () => {
     expect(announceLiveWork([], [HANDLE])).toEqual([]);
   });
 
+  // WHO OWNS THE RECORD is whoever can tell the two cases apart, and this
+  // function cannot: the obligation set is store-global, so an undescribable
+  // handle is either a lost start or another conversation's work.
+  it("hands an undescribable handle to a caller that asked for it", () => {
+    // Arrange.
+    const undescribed: conversationv1.DetachedWorkId[] = [];
+
+    // Act.
+    const announced = announceLiveWork([], [HANDLE], (handle) => {
+      undescribed.push(handle);
+    });
+
+    // Assert.
+    expect(announced).toEqual([]);
+    expect(undescribed.map((handle) => handle.value)).toEqual(["run-1"]);
+  });
+
+  it("does not hand over a handle it could describe", () => {
+    // Arrange.
+    const undescribed: conversationv1.DetachedWorkId[] = [];
+
+    // Act.
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], (handle) => {
+      undescribed.push(handle);
+    });
+
+    // Assert.
+    expect(announced).toHaveLength(1);
+    expect(undescribed).toEqual([]);
+  });
+
   it("omits a unit whose kind cannot detach at all", () => {
     const read = create(conversationv1.HistoryEntryAtSchema, {
       at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
