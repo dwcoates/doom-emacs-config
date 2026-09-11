@@ -393,8 +393,51 @@ lands in another run's card.
 - An unclaimed spool is HELD: discovered, re-checked every rescan, not tailed.
 - AN AGED UNOWNED SPOOL IS NEVER DROPPED. Past the hold window
   (`UnownedSpoolWindow`, replaceable with `--unowned-spool-window`) its bytes
-  are INGESTED as unparsed residue naming the spool as their source (one
-  WARNING), and IT KEEPS BEING TAILED so nothing appended later is lost either.
+  are INGESTED as unparsed residue naming the spool as their source, and IT
+  KEEPS BEING TAILED so nothing appended later is lost either. The demotion is
+  stated per file (WARNING) only for a spool that appeared while the sidecar was
+  already running; a spool that was ALREADY on disk when the reader first
+  scanned is startup backlog and is summarized instead (see "Startup catch-up").
+
+## Startup catch-up summarizes the backlog
+
+A HOLD IS A CONDITION, NOT AN EVENT — and so is a LOST run and a transcript
+whose workspace will not resolve. A restarted sidecar re-derives the owner's
+whole historical corpus from files: hundreds of spools whose spawning sessions
+are long gone, runs that went silent weeks ago, transcripts from directories
+that no longer exist. Each of those was a single WARNING once, long ago; a
+restart that re-stated every one wrote 1063 warnings in one realtest window (405
+`hold-expired`, 403 `lost-policy`, 210 `resolve-transcript-workspace`). This is
+the same inverted-pyramid flood-on-rescan the `discover-meta` holds already
+leveled, arriving through three more paths.
+
+- THE BOUNDARY IS THE FIRST PRODUCTION CYCLE. `beginCycle` stamps
+  `processStartMs` off the cycle's own clock, once, the first time reading
+  begins; a store bounce that re-enters the cycle leaves it where it is. Both
+  the LOST tracker (`stale.SetProcessStart`) and the rescan-driven paths key on
+  that one instant.
+- AN ITEM IS BACKLOG IFF ITS OWN CLOCK PREDATES THE START. The clock is the
+  file's mtime (a spool's, a transcript's) or the run's last-activity mtime,
+  never our read time — the same fact `swept_up` already reads. A backlog item's
+  stale condition was already true before we started, so it is CATCH-UP; an item
+  whose clock is at or after the start went stale WHILE we watched, so it is a
+  newly-arising condition.
+- CATCH-UP IS SUMMARIZED, STEADY STATE IS STATED PER ITEM. A catch-up
+  conclusion is accumulated per class and stated once, at WARN, through the one
+  `catchup-summary` operation, carrying the class in `reason`, the count in
+  `repeat_count`, and the oldest item's age in the message
+  (`spool_unclaimed`, `workspace_unattributed`, and the LOST arms
+  `went_silent`/`swept_up`/`file_vanished`). A steady-state item warns per item
+  exactly as before.
+- NOTHING IS SILENCED. Every catch-up item is still stated, dropped to DEBUG, so
+  the per-file detail is retrievable behind the summary, and the totals always
+  ride the summary. The owner still sees "405 spools expired" — just not as 405
+  lines.
+- THE SUMMARY IS A PER-PASS EDGE. The rescan-driven tallies
+  (`catchupSpools`, `catchupWorkspaces` in `held.go`) are flushed at the end of
+  each rescan (deferred, so an abandoned pass still reports what it demoted) and
+  reset; the LOST tracker summarizes the backlog subset of each sweep inside
+  `state`. An empty backlog states nothing.
 
 ## The LOST policy
 
@@ -417,6 +460,12 @@ instant we read it. Our own read is not evidence of life: a spool full of
 pre-reboot bytes is not alive because we got round to reading it, and stamping
 the read time onto it would make `swept_up` unreachable for exactly the runs it
 exists to conclude.
+
+A CONCLUSION ABOUT A BACKLOG RUN IS CATCH-UP, NOT A NEW EVENT. A restart
+re-derives every historical run at once, so a run whose last activity predates
+`processStartMs` is summarized rather than stated on its own (see "Startup
+catch-up"); only a run that went stale while the sidecar watched is a per-item
+WARNING. `state` partitions each sweep — the boot sweep included — into the two.
 
 A VANISHED FILE KEEPS ITS TAILER until its terminal has been stated. The
 converter that spells the terminal is reached through the watcher entry, so

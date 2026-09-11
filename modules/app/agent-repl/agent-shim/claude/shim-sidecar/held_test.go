@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -170,5 +171,149 @@ func TestAConfiguredHoldWindowReplacesTheDefault(t *testing.T) {
 	// Assert.
 	if held.window != 15*time.Millisecond {
 		t.Fatalf("hold window = %s, want the configured 15ms", held.window)
+	}
+}
+
+// backlogGap is how far the fake clock is advanced between writing a fixture and
+// the first production cycle, so the fixture's mtime is comfortably before the
+// process-start boundary and reads as pre-existing backlog.
+const backlogGap = 5 * time.Minute
+
+func TestStartupCatchUpSummarizesABacklogOfUnclaimedSpools(t *testing.T) {
+	// Arrange: three spools already on disk before the sidecar starts, none of
+	// which any transcript will ever claim.
+	h := newHarness(t, &fakeStore{})
+	for _, task := range []string{"b1", "b2", "b3"} {
+		h.spoolFile(t, task, "orphaned\n")
+	}
+	h.advance(backlogGap)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: the hold window lapses and the whole backlog demotes on one rescan.
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+
+	// Assert: one summary at warn naming the count, not three per-spool warnings.
+	rec := h.requireOnce(t, "catchup-summary", "warn")
+	if got := ctxString(t, rec, "reason"); got != "spool_unclaimed" {
+		t.Fatalf("summary reason = %q, want spool_unclaimed", got)
+	}
+	if got := ctxInt(t, rec, "repeat_count"); got != 3 {
+		t.Fatalf("summary repeat_count = %d, want 3", got)
+	}
+	if got := len(h.opsAt(t, "hold-expired", "warn")); got != 0 {
+		t.Fatalf("catch-up stated %d per-spool hold-expiry warnings, want none", got)
+	}
+}
+
+func TestABacklogSpoolIsDemotedAtDebugNotWarn(t *testing.T) {
+	// Arrange: one pre-existing unclaimed spool.
+	h := newHarness(t, &fakeStore{})
+	h.spoolFile(t, "b1", "orphaned\n")
+	h.advance(backlogGap)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+
+	// Assert: nothing is silenced — the demotion is still stated, at debug.
+	if got := len(h.opsAt(t, "hold-expired", "debug")); got != 1 {
+		t.Fatalf("the backlog demotion was stated at debug %d times, want once", got)
+	}
+}
+
+func TestASpoolThatAppearsAfterCatchUpWarnsPerItem(t *testing.T) {
+	// Arrange: the sidecar is already running when the spool appears.
+	h := newHarness(t, &fakeStore{})
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(time.Second)
+	h.spoolFile(t, "b1", "appeared while running\n")
+	h.sc.rescan()
+
+	// Act: its window lapses.
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+
+	// Assert: a newly-arising unclaimed spool is a per-file degradation.
+	h.requireOnce(t, "hold-expired", "warn")
+	if got := len(h.opsAt(t, "catchup-summary", "")); got != 0 {
+		t.Fatalf("a steady-state spool produced %d catch-up summaries, want none", got)
+	}
+}
+
+func TestAnEmptySpoolBacklogEmitsNoSummary(t *testing.T) {
+	// Arrange: nothing unclaimed on disk.
+	h := newHarness(t, &fakeStore{})
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+
+	// Assert.
+	if got := len(h.opsAt(t, "catchup-summary", "")); got != 0 {
+		t.Fatalf("an empty spool backlog emitted %d summaries, want none", got)
+	}
+}
+
+// unresolvableTranscript writes a session transcript whose only line carries no
+// cwd, so workspace attribution cannot be resolved and the transcript is held.
+func (h *harness) unresolvableTranscript(t *testing.T, session string) string {
+	t.Helper()
+	path := filepath.Join(h.rootA, "projects", "proj", session+".jsonl")
+	h.write(t, path, promptLine+"\n")
+	return normalized(path)
+}
+
+func TestStartupCatchUpSummarizesUnattributableTranscripts(t *testing.T) {
+	// Arrange: two pre-existing transcripts whose workspace cannot be resolved.
+	h := newHarness(t, &fakeStore{})
+	h.unresolvableTranscript(t, "70000000-0000-4000-8000-000000000001")
+	h.unresolvableTranscript(t, "70000000-0000-4000-8000-000000000002")
+	h.advance(backlogGap)
+
+	// Act: the first cycle's rescan catches up on the whole backlog at once.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert: one summary at warn, not one warning per transcript.
+	rec := h.requireOnce(t, "catchup-summary", "warn")
+	if got := ctxString(t, rec, "reason"); got != "workspace_unattributed" {
+		t.Fatalf("summary reason = %q, want workspace_unattributed", got)
+	}
+	if got := ctxInt(t, rec, "repeat_count"); got != 2 {
+		t.Fatalf("summary repeat_count = %d, want 2", got)
+	}
+	if got := len(h.opsAt(t, "resolve-transcript-workspace", "warn")); got != 0 {
+		t.Fatalf("catch-up stated %d per-transcript warnings, want none", got)
+	}
+}
+
+func TestAnUnattributableTranscriptAfterCatchUpWarnsPerItem(t *testing.T) {
+	// Arrange: the sidecar is already running when the transcript appears.
+	h := newHarness(t, &fakeStore{})
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(time.Second)
+	h.unresolvableTranscript(t, "80000000-0000-4000-8000-000000000001")
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert.
+	h.requireOnce(t, "resolve-transcript-workspace", "warn")
+	if got := len(h.opsAt(t, "catchup-summary", "")); got != 0 {
+		t.Fatalf("a steady-state transcript produced %d catch-up summaries, want none", got)
 	}
 }
