@@ -182,7 +182,53 @@ done
 printf 'nil\n'
 STUB
 
-    chmod +x "$dir"/*.sh "$dir/emacsclient"
+    # THE PROCESS TABLE IS THE TEST'S. pgrep and ps answer out of STUB_PROCS,
+    # a file of "<pid> <command line>" lines where the command line carries
+    # whatever environment the case wants the kernel to be holding — which is
+    # the only way to assert a refusal about a process without running one.
+    cat > "$dir/pgrep" <<'STUB'
+#!/usr/bin/env bash
+pattern=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -f) ;;
+        *) pattern="$1" ;;
+    esac
+    shift
+done
+[ -f "${STUB_PROCS:-}" ] || exit 1
+found=0
+while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if printf '%s' "${line#* }" | grep -Eq -- "$pattern"; then
+        printf '%s\n' "${line%% *}"
+        found=1
+    fi
+done < "$STUB_PROCS"
+[ "$found" = 1 ]
+STUB
+
+    cat > "$dir/ps" <<'STUB'
+#!/usr/bin/env bash
+pid=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -p) pid="$2"; shift ;;
+    esac
+    shift
+done
+[ -f "${STUB_PROCS:-}" ] || exit 1
+while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if [ "${line%% *}" = "$pid" ]; then
+        printf '%s\n' "${line#* }"
+        exit 0
+    fi
+done < "$STUB_PROCS"
+exit 1
+STUB
+
+    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps"
     printf '%s' "$dir"
 }
 
@@ -208,6 +254,8 @@ run_script() {
     shift
     set +e
     HOME="$SCRATCH/home" \
+    PATH="$dir:$PATH" \
+    STUB_PROCS="${STUB_PROCS:-$SCRATCH/procs}" \
     STUB_READINESS_JSON="$SCRATCH/readiness.json" \
     STUB_SLOT_MARKER="$SCRATCH/slot-reached" \
     STUB_KILL_MARKER="$SCRATCH/killed" \
@@ -221,6 +269,7 @@ run_script() {
 
 prepare_home() {
     rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed"
+    : > "$SCRATCH/procs"
     mkdir -p "$SCRATCH/home/.claude-emacs" "$SCRATCH/home/.cache/agent-repl/store"
     printf 'workspaces' > "$SCRATCH/home/.claude-emacs/wsm.db"
     printf 'events' > "$SCRATCH/home/.cache/agent-repl/store/events.db"
@@ -351,6 +400,126 @@ test_records_the_deployed_revisions() {
     pass "$name"
 }
 
+test_declines_when_a_listening_shim_lacks_the_guard() {
+    local name="the script DECLINES when a listening shim lacks the vendor guard"
+    local dir out status=0
+    dir="$(scratch_bin unguarded-shim)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    # A shim left behind by an earlier, unguarded daemon. The daemon this run
+    # brings up would ADOPT it, so the guard on the daemon never reaches it.
+    printf '94292 node /opt/agent-shim/claude/shim/dist/main.js --listen %s/.claude-emacs/sock/0100059cb65649bc.n1.sock PATH=/usr/bin\n' \
+        "$SCRATCH/home" > "$SCRATCH/procs"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q '94292'; then
+        fail "$name" "the refusal does not name the pid to stop: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q '0100059cb65649bc.n1.sock'; then
+        fail "$name" "the refusal does not name the socket the shim is listening on: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "the run was reached despite the refusal"
+        return
+    fi
+    pass "$name"
+}
+
+test_runs_when_every_listening_shim_carries_the_guard() {
+    local name="the script runs when a listening shim carries the vendor guard"
+    local dir out status=0
+    dir="$(scratch_bin guarded-shim)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    printf '94292 node /opt/agent-shim/claude/shim/dist/main.js --listen %s/.claude-emacs/sock/aaaa.n1.sock AGENT_REPL_FORBID_VENDOR_CALLS=1\n' \
+        "$SCRATCH/home" > "$SCRATCH/procs"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ ! -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "the run was never reached; output: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_ignores_a_shim_listening_under_another_state_directory() {
+    local name="the script ignores an unguarded shim listening outside this state directory"
+    local dir out status=0
+    dir="$(scratch_bin foreign-shim)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    # Another checkout's shim is not a process this run would adopt, and
+    # declining on it would send the operator after the wrong thing.
+    printf '77001 node /opt/agent-shim/claude/shim/dist/main.js --listen /var/other-state/sock/bbbb.n1.sock PATH=/usr/bin\n' \
+        > "$SCRATCH/procs"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ ! -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "the run was never reached; output: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_declines_when_a_shim_lock_lacks_the_guard() {
+    local name="the script DECLINES when a running shim-lock lacks the vendor guard"
+    local dir out status=0
+    dir="$(scratch_bin unguarded-lock)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    # shim-lock inherits the shim's environment, so it tells the same story
+    # about the shim that spawned it.
+    printf '81003 /Users/someone/.cache/agent-repl/bin/shim-lock --hold /tmp/lock PATH=/usr/bin\n' > "$SCRATCH/procs"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'shim-lock pid 81003'; then
+        fail "$name" "the refusal does not name the shim-lock pid: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_declines_when_the_daemon_lacks_the_guard() {
+    local name="the script DECLINES when the running daemon lacks the vendor guard"
+    local dir out status=0
+    dir="$(scratch_bin unguarded-daemon)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    # The daemon is matched by its path under the module root, which is the
+    # copied script's own parent in this arrangement.
+    printf '55501 %s/daemon/bin/claude-repld --state-dir /tmp PATH=/usr/bin\n' \
+        "$(cd "$dir/.." && pwd)" > "$SCRATCH/procs"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q '55501'; then
+        fail "$name" "the refusal does not name the daemon pid to stop: $out"
+        return
+    fi
+    pass "$name"
+}
+
 # ---- run ------------------------------------------------------------------
 
 test_backup_copies_the_database
@@ -363,6 +532,11 @@ test_declines_when_emacs_is_running_without_a_takeover
 test_backs_up_before_refusing_the_takeover
 test_runs_when_nothing_stands_in_the_way
 test_records_the_deployed_revisions
+test_declines_when_the_daemon_lacks_the_guard
+test_declines_when_a_listening_shim_lacks_the_guard
+test_runs_when_every_listening_shim_carries_the_guard
+test_ignores_a_shim_listening_under_another_state_directory
+test_declines_when_a_shim_lock_lacks_the_guard
 
 echo
 echo "$PASS passed, $FAIL failed"
