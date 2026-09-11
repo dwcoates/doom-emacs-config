@@ -181,7 +181,7 @@ func TestTheLoserDoesNotDisturbTheIncumbentsAdvertisement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if strings.TrimSpace(string(published)) != incumbent.Address() {
+	if daemonaddr.ParseAdvertisement(string(published)).Address != incumbent.Address() {
 		t.Fatalf("daemon.addr = %q, want the incumbent's %q", string(published), incumbent.Address())
 	}
 }
