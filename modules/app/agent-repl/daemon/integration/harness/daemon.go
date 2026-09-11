@@ -169,6 +169,12 @@ type Opts struct {
 	NoFake bool
 	// JSONCodec dials the daemon with the JSON codec instead of binary.
 	JSONCodec bool
+	// KeepStaleAddr leaves a predecessor's daemon.addr in place instead of
+	// removing it, so the DAEMON's own handling of a stale advertisement is
+	// the subject of the test. The harness then waits for the file's contents
+	// to CHANGE rather than merely to exist, so the address it reports is
+	// always this daemon's own.
+	KeepStaleAddr bool
 	// ExpectEarlyExit stops the harness from failing when the daemon exits on
 	// its own, for the tests whose subject is a refusal to boot.
 	ExpectEarlyExit bool
@@ -211,6 +217,9 @@ type Daemon struct {
 	Addr string
 	// ProfileDir holds the fake shim's per-workspace startup profiles.
 	ProfileDir string
+	// staleAddr is the predecessor's daemon.addr content a KeepStaleAddr start
+	// left standing, which awaitFile must not mistake for this daemon's.
+	staleAddr string
 	// LockDir is the redirected kernel-lock directory.
 	LockDir string
 	// Browser, Deploy record what the daemon invoked.
@@ -533,8 +542,16 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// with a live incumbent that owns the file, so it is left alone — and so is
 	// a start the test expects to be REFUSED, which is a second daemon against
 	// a live incumbent whose file must survive its refusal untouched.
+	//
+	// A test whose SUBJECT is that handling passes KeepStaleAddr, and the
+	// harness then reads the standing address so it can wait for a different
+	// one instead of accepting the dead port as this daemon's.
 	if opts.Joining == "" && !opts.ExpectEarlyExit {
-		if err := os.Remove(filepath.Join(d.StateDir, "daemon.addr")); err != nil && !os.IsNotExist(err) {
+		if opts.KeepStaleAddr {
+			if body, err := os.ReadFile(filepath.Join(d.StateDir, "daemon.addr")); err == nil {
+				d.staleAddr = string(body)
+			}
+		} else if err := os.Remove(filepath.Join(d.StateDir, "daemon.addr")); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("harness: remove the stale daemon.addr: %v", err)
 		}
 	}
@@ -674,6 +691,16 @@ func (d *Daemon) AwaitAddrFile() string {
 	return addr
 }
 
+// staleFor is the content awaitFile must NOT accept for a path: the
+// predecessor's advertisement, when the test asked for it to be kept. Empty
+// for every other path, which no file's content can equal.
+func (d *Daemon) staleFor(path string) string {
+	if path == d.AddrFile() {
+		return d.staleAddr
+	}
+	return ""
+}
+
 // awaitFile polls for a file, bounded by ONE wait's bound off the run budget.
 func (d *Daemon) awaitFile(path string) string {
 	d.t.Helper()
@@ -682,7 +709,7 @@ func (d *Daemon) awaitFile(path string) string {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		if body, err := os.ReadFile(path); err == nil && len(body) > 0 {
+		if body, err := os.ReadFile(path); err == nil && len(body) > 0 && string(body) != d.staleFor(path) {
 			return string(body)
 		}
 		if d.Exited() && !d.expectedExit() {

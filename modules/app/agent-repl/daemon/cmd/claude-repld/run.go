@@ -201,6 +201,17 @@ func run(ctx context.Context, opts options, h hooks) error {
 			"incumbent": opts.joining,
 		})
 	} else {
+		// A STALE ADVERTISEMENT IS RECORDED BEFORE IT IS REPLACED. This
+		// daemon holds the boot claim, so any address standing here is a
+		// predecessor's; one that does not answer is what the next client
+		// would have dialled and timed out on, and the record is the only
+		// thing that says the predecessor went without withdrawing.
+		if stale, isStale := daemonaddr.StaleAdvertisement(layout.DaemonAddr()); isStale {
+			log.Warn("daemon.cmd.claim", "a stale daemon.addr names an address nobody answers; overwriting it", dlog.Context{
+				"stale_address": stale,
+				"addr_path":     layout.DaemonAddr(),
+			})
+		}
 		if err := claim.Publish(); err != nil {
 			log.Error("daemon.cmd.claim", "daemon.addr could not be published", dlog.Context{
 				"address": claim.Address(),
@@ -212,14 +223,36 @@ func run(ctx context.Context, opts options, h hooks) error {
 			"address": claim.Address(),
 		})
 	}
-	// THE ORDERLY EXIT WITHDRAWS THE ADVERTISEMENT. A daemon.addr left behind
-	// names a listener nobody is serving, and the next client dials it.
+	// EVERY OBSERVABLE EXIT WITHDRAWS THE ADVERTISEMENT. A daemon.addr left
+	// behind names a listener nobody is serving, and the next client dials it
+	// and times out: realtest 1 caught Emacs probing 127.0.0.1:58161 minutes
+	// after the daemon that bound it had gone.
+	//
+	// This defer is the ONE withdrawal site, and it covers every path this
+	// process can observe: a cancelled context, SIGINT or SIGTERM (main's
+	// signal.NotifyContext cancels ctx, which ends the serve), `Serve`
+	// returning on its own, and every boot error that returns from here.
+	// SIGKILL is not observable by anything, which is what the boot's own
+	// staleness check above exists for.
 	defer func() {
-		if err := claim.Withdraw(); err != nil {
+		withdrawn, err := claim.Withdraw()
+		if err != nil {
 			log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
 				"error": err.Error(),
 			})
+			return
 		}
+		if withdrawn {
+			log.Info("daemon.cmd.exit", "daemon.addr was withdrawn", dlog.Context{
+				"address": claim.Address(),
+			})
+			return
+		}
+		// The file names somebody else -- a successor that took over and
+		// published its own address -- or nothing at all.
+		log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", dlog.Context{
+			"address": claim.Address(),
+		})
 	}()
 
 	db, err := openState(ctx, layout, log, joining)
