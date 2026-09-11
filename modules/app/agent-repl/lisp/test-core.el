@@ -220,6 +220,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
               calls)
       '(("core.el" agent-repl--do-log-to-file write-region)
         ("core.el" agent-repl--emit-log-record agent-repl--log-record)
+        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
+        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
         ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
         ("core.el" agent-repl--emit-log-record agent-repl--log-record)
         ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file))))))
@@ -1652,22 +1654,23 @@ one to its caller.  A caller that must abort signals for itself."
       (delete-directory dir t))))
 
 (ert-deftest agent-repl-test-log-workspace-without-directory-records-routing-error ()
-  "An unroutable workspace writes only a central routing error and aborts."
+  "An unroutable workspace writes a central routing error."
   (agent-repl-test--with-clean-state
     (let* ((dir (make-temp-file "agent-repl-routing-error-" t))
            (global (expand-file-name "global.log" dir))
            (agent-repl-log-to-file t)
            (agent-repl-log-file-name global)
+           (agent-repl-log-file-level 'debug)
            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
       (unwind-protect
           (cl-letf (((symbol-function 'display-warning) #'ignore))
-            (should-error (agent-repl--log "missing-ws" "must not reroute"))
+            (agent-repl--log "missing-ws" "must not reroute")
             (should (file-exists-p global))
             (with-temp-buffer
               (insert-file-contents global)
-              (should (string-match-p "log-routing-error" (buffer-string)))
-              (should-not (string-match-p "must not reroute" (buffer-string)))))
+              (should (string-match-p "log-routing-error" (buffer-string)))))
         (delete-directory dir t)))))
+
 
 (ert-deftest agent-repl-test-workspace-log-replaces-hostile-canonical-symlink ()
   "A workspace-provided symlink is replaced without writing its target."
@@ -2665,6 +2668,17 @@ tests pollution-free).  Every retained generation is removed afterwards."
     (insert-file-contents path)
     (buffer-string)))
 
+(defun agent-repl-test--log-records (path)
+  "Return every JSONL record written to PATH, parsed, oldest first."
+  (mapcar (lambda (line) (json-parse-string line :object-type 'alist))
+          (split-string (agent-repl-test--read-file path) "\n" t)))
+
+(defun agent-repl-test--log-record-for (path operation)
+  "Return the first record in PATH whose `operation' contains OPERATION."
+  (seq-find (lambda (record)
+              (string-match-p operation (or (alist-get 'operation record) "")))
+            (agent-repl-test--log-records path)))
+
 (ert-deftest agent-repl-test-log-always-writes-file-when-debug-off ()
   "`agent-repl--log' must write to file even when `agent-repl-debug' is nil.
 This is the core decoupling guarantee — the file is the canonical
@@ -3157,8 +3171,8 @@ ladder made a debug line abort `doom-init-ui-hook'."
         ;; Assert
         (should (null sink-workspace))))))
 
-(ert-deftest agent-repl-test-deleted-worktree-aborts-its-caller ()
-  "A workspace whose sink vanished is a routing invariant violation."
+(ert-deftest agent-repl-test-deleted-worktree-does-not-abort-its-caller ()
+  "A workspace whose sink vanished must not take its logging caller down."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       (let ((project (make-temp-file "agent-repl-vanished-" t))
@@ -3166,36 +3180,78 @@ ladder made a debug line abort `doom-init-ui-hook'."
         (agent-repl--ws-put "vanished-ws" :project-dir project)
         (delete-directory project t)
         (cl-letf (((symbol-function 'display-warning) #'ignore))
-          (should-error
-           (agent-repl--log "vanished-ws" "line after the worktree went away")))))))
+          ;; Act / Assert: a returned record, not a signal.
+          (should (agent-repl--log "vanished-ws" "line after the worktree went away")))))))
 
-(ert-deftest agent-repl-test-unroutable-workspace-original-does-not-reach-global-sink ()
-  "Only the routing error is central; the workspace-owned record is dropped."
+(ert-deftest agent-repl-test-deleted-worktree-still-records-the-routing-error ()
+  "Not signalling must not cost the routing-error record."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((project (make-temp-file "agent-repl-vanished-record-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (agent-repl--ws-put "vanished-record-ws" :project-dir project)
+        (delete-directory project t)
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (agent-repl--log "vanished-record-ws" "line after the worktree went away"))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
+          (should (equal (alist-get 'level record) "error")))))))
+
+(ert-deftest agent-repl-test-unroutable-workspace-original-reaches-the-global-sink ()
+  "The workspace-owned record lands centrally rather than being dropped."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
         (cl-letf (((symbol-function 'display-warning) #'ignore))
-          (should-error (agent-repl--log "no-such-ws" "owned secret payload")))
+          ;; Act
+          (agent-repl--log "no-such-ws" "owned payload"))
+        ;; Assert
         (with-temp-buffer
           (insert-file-contents path)
-          (should (string-match-p "log-routing-error" (buffer-string)))
-          (should-not (string-match-p "owned secret payload" (buffer-string))))))))
+          (should (string-match-p "owned payload" (buffer-string))))))))
 
-(ert-deftest agent-repl-test-unroutable-workspace-error-names-the-operation ()
-  "The user-visible invariant error identifies the logger site that failed."
-  ;; Arrange.
-  (let ((agent-repl--log-context-workspace nil)
-        (agent-repl-log-to-file t))
-    (cl-letf (((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) nil))
-              ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
-              ((symbol-function 'agent-repl--do-log-to-file) #'ignore)
-              ((symbol-function 'display-warning) #'ignore))
-      ;; Act.
-      (let ((err (should-error
-                  (agent-repl--log nil "elisp.test.unattributed value=%s" "x"))))
-        ;; Assert.
-        (should (string-match-p "operation=agent-repl.elisp-test-unattributed-value-s"
-                                (error-message-string err)))))))
+(ert-deftest agent-repl-test-unroutable-workspace-original-names-the-workspace ()
+  "The rerouted original still says which workspace it is about."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (agent-repl--log "no-such-ws" "elisp.test.marked payload"))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "elisp-test-marked")))
+          (should (equal (alist-get 'unroutable_workspace record) "no-such-ws")))))))
+
+(ert-deftest agent-repl-test-unroutable-workspace-original-claims-no-sink-identity ()
+  "The rerouted original is central, so it carries no workspace identity."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (agent-repl--log "no-such-ws" "elisp.test.identity payload"))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "elisp-test-identity")))
+          (should-not (alist-get 'workspace_id record)))))))
+
+(ert-deftest agent-repl-test-unroutable-workspace-record-names-the-operation ()
+  "The routing-error record identifies the logger site that failed."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--log-context-workspace nil)
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) nil))
+                  ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+                  ((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (agent-repl--log nil "elisp.test.unattributed value=%s" "x"))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
+          (should (string-match-p
+                   "original-operation=agent-repl.elisp-test-unattributed-value-s"
+                   (alist-get 'message record))))))))
 
 (ert-deftest agent-repl-test-unroutable-workspace-error-keeps-the-request-id ()
   "A routing failure remains correlated to the request edge that exposed it."
@@ -3206,10 +3262,9 @@ ladder made a debug line abort `doom-init-ui-hook'."
             (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
         (cl-letf (((symbol-function 'display-warning) #'ignore))
           ;; Act
-          (should-error (agent-repl--log "no-such-ws" "owned event")))
+          (agent-repl--log "no-such-ws" "owned event"))
         ;; Assert
-        (let ((record (json-parse-string (agent-repl-test--read-file path)
-                                         :object-type 'alist)))
+        (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
           (should (equal (alist-get 'request_id record) "request-1")))))))
 
 (ert-deftest agent-repl-test-unroutable-workspace-is-named-in-a-user-warning ()
@@ -3220,11 +3275,11 @@ ladder made a debug line abort `doom-init-ui-hook'."
             (warning nil))
         (cl-letf (((symbol-function 'display-warning)
                    (lambda (_type text &rest _) (setq warning text))))
-          (should-error (agent-repl--log "no-such-ws" "probe")))
+          (agent-repl--log "no-such-ws" "probe"))
         (should (string-match-p "no-such-ws" warning))))))
 
 (ert-deftest agent-repl-test-unroutable-workspace-warns-only-once ()
-  "Repeated routing failures signal every time but display one warning."
+  "Repeated routing failures record every time but display one warning."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
@@ -3232,7 +3287,7 @@ ladder made a debug line abort `doom-init-ui-hook'."
         (cl-letf (((symbol-function 'display-warning)
                    (lambda (&rest _) (cl-incf warnings))))
           (dotimes (_ 5)
-            (should-error (agent-repl--log "no-such-ws" "repeated probe"))))
+            (agent-repl--log "no-such-ws" "repeated probe")))
         (should (= warnings 1))))))
 
 (ert-deftest agent-repl-test-routable-workspace-still-uses-its-own-target ()
@@ -3680,8 +3735,8 @@ survives into the rest of the batch run."
 (ert-deftest agent-repl-test-heartbeat-assertion-defers-on-a-cold-load ()
   "A cold load (owners not yet defined) defers instead of erroring or stranding."
   ;; Arrange — this is exactly core.el's own load-time state in a fresh
-  ;; batch process: core.el is evaluated before status.el, autosave.el,
-  ;; workspace-status-export.el, and readiness.el define the arm functions.
+  ;; batch process: core.el is evaluated before status.el and autosave.el
+  ;; define the arm functions.
   (agent-repl-test--with-timer-registry
     (let ((agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fn-that-does-not-exist)))
@@ -3712,6 +3767,25 @@ survives into the rest of the batch run."
           (should (equal '(:test-heartbeat) (plist-get (cdr outcome) :rearmed)))
           (should (null agent-repl--heartbeat-assert-deferral-timer)))))))
 
+(ert-deftest agent-repl-test-every-required-timer-key-names-a-loadable-owner ()
+  "A required key whose owner file does not exist can never be satisfied.
+`:readiness-poll' and `:workspace-status-export' outlived readiness.el
+and workspace-status-export.el, so every cold start warned
+`outcome=unavailable reason=owner-not-loaded' twice, a second after the
+module loaded, about jobs nothing owns any more."
+  ;; Arrange: the arm functions the production sources actually define.
+  (let ((defined nil))
+    (dolist (file (agent-repl-test--production-lisp-files))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (re-search-forward "^(defun \\([^ \t\n()]+\\)" nil t)
+          (push (intern (match-string 1)) defined))))
+    ;; Act / Assert: every required key's owner is one of them.  Read off
+    ;; the SOURCES, never `fboundp', because the suite's own process has
+    ;; loaded files a cold start would not have reached yet.
+    (dolist (entry agent-repl--required-timer-keys)
+      (should (memq (cdr entry) defined)))))
 
 (ert-deftest agent-repl-test-core-input-buffer-name-carries-the-title ()
   "The title rides after the identity segment, inside the name form."
@@ -4005,16 +4079,23 @@ that froze Emacs; this pins the equivalence the bound relies on."
 ;;;; ---- Tests: registration does not bypass sink ownership ----
 
 (ert-deftest agent-repl-test-preregistration-record-fails-routing ()
-  "A declared creation window cannot reroute a workspace-owned record."
+  "A declared creation window cannot reroute a workspace-owned record.
+The record is still written -- centrally, stamped with the unroutable
+name -- but it never claims the unregistered workspace as its sink."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl--log-preregistration-workspace "being-created")
-          (agent-repl--log-context-workspace nil)
-          (agent-repl--workspace-log-buffer-enabled t))
-      (cl-letf (((symbol-function 'display-warning) #'ignore))
-        ;; Act / Assert
-        (should-error
-         (agent-repl--log "being-created" "creation prologue probe"))))))
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--log-preregistration-workspace "being-created")
+            (agent-repl--log-context-workspace nil)
+            (agent-repl--workspace-log-buffer-enabled t)
+            (sinks nil))
+        (cl-letf (((symbol-function 'display-warning) #'ignore)
+                  ((symbol-function 'agent-repl--do-log-to-file)
+                   (lambda (_record ws) (push ws sinks))))
+          ;; Act
+          (agent-repl--log "being-created" "creation prologue probe"))
+        ;; Assert
+        (should (equal sinks '(nil nil)))))))
 
 ;;;; ---- Tests: user-facing minibuffer copy ----
 ;;
@@ -4465,8 +4546,7 @@ workspace name rather than to a second, unroutable spelling."
       (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
         ;; Act
         (cl-letf (((symbol-function 'display-warning) #'ignore))
-          (should-error
-           (agent-repl--log "/no/such/worktree/anywhere" "probe")))
+          (agent-repl--log "/no/such/worktree/anywhere" "probe"))
         ;; Assert
         (with-temp-buffer
           (insert-file-contents path)

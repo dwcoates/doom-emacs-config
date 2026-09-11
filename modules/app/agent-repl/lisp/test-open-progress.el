@@ -373,5 +373,96 @@ placement is recorded rather than performed."
   (should (memq #'agent-repl--open-progress-note-host-state
                 agent-repl-host-update-functions)))
 
+
+;;;; ---- Publishing the pending-open set ---------------------------------
+;;
+;; The daemon's mode-line segment reports the cold start's workspace
+;; bring-up by READING this registry.  These pin the reader and its
+;; notification, because a second tally kept elsewhere is how a progress
+;; display starts disagreeing with itself.
+
+(ert-deftest agent-repl-test-open-progress-a-pending-open-is-reported-as-opening ()
+  "A workspace whose open is in flight has not been painted yet."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    ;; Act / Assert
+    (should (equal '("alpha-ws") (agent-repl-open-progress-opening-workspaces)))))
+
+(ert-deftest agent-repl-test-open-progress-a-loaded-open-is-not-reported-as-opening ()
+  "`:loaded' is the webview's own load-finished event -- the panel is up."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (agent-repl--open-progress-note "alpha-ws" :host-state)
+    (agent-repl-open-progress-note-loaded "alpha-ws")
+    ;; Act / Assert
+    (should (null (agent-repl-open-progress-opening-workspaces)))))
+
+(ert-deftest agent-repl-test-open-progress-a-failed-open-is-not-reported-as-opening ()
+  "A standing failure is a resolved open, not work still in progress."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (agent-repl--open-progress-fail "alpha-ws" "the daemon refused")
+    ;; Act / Assert
+    (should (null (agent-repl-open-progress-opening-workspaces)))))
+
+(ert-deftest agent-repl-test-open-progress-a-finished-open-is-not-reported-as-opening ()
+  "A torn-down placeholder holds no entry, so it is absent by construction."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (agent-repl--open-progress-finish "alpha-ws")
+    ;; Act / Assert
+    (should (null (agent-repl-open-progress-opening-workspaces)))))
+
+(ert-deftest agent-repl-test-open-progress-a-started-open-publishes-the-change ()
+  "Raising a placeholder tells the readers the answer moved."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (let* ((runs 0)
+           (agent-repl-open-progress-change-functions
+            (list (lambda () (setq runs (1+ runs))))))
+      ;; Act
+      (agent-repl--open-progress-start "alpha-ws")
+      ;; Assert
+      (should (= runs 1)))))
+
+(ert-deftest agent-repl-test-open-progress-an-advance-publishes-the-change ()
+  "A phase advance can be the moment a workspace becomes painted."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (let* ((runs 0)
+           (agent-repl-open-progress-change-functions
+            (list (lambda () (setq runs (1+ runs))))))
+      ;; Act
+      (agent-repl--open-progress-note "alpha-ws" :host-state)
+      ;; Assert
+      (should (= runs 1)))))
+
+(ert-deftest agent-repl-test-open-progress-a-finish-publishes-the-change ()
+  "Tearing the placeholder down is the commonest way the answer moves."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (let* ((runs 0)
+           (agent-repl-open-progress-change-functions
+            (list (lambda () (setq runs (1+ runs))))))
+      ;; Act
+      (agent-repl--open-progress-finish "alpha-ws")
+      ;; Assert
+      (should (= runs 1)))))
+
+(ert-deftest agent-repl-test-open-progress-a-signalling-change-handler-is-contained ()
+  "A display handler that breaks must not take down the open it reports on."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (let ((agent-repl-open-progress-change-functions
+           (list (lambda () (error "the mode line blew up")))))
+      ;; Act / Assert
+      (should (agent-repl--open-progress-start "alpha-ws")))))
+
 (provide 'test-open-progress)
 ;;; test-open-progress.el ends here
