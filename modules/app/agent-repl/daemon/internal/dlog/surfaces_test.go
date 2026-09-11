@@ -1,6 +1,8 @@
 package dlog
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +14,10 @@ import (
 	"testing"
 	"time"
 )
+
+// mintedIDWidth is wsm.IDLength. It is spelled out rather than imported: wsm
+// imports dlog, so a test import of wsm would be a cycle.
+const mintedIDWidth = 16
 
 // readRecords parses a JSONL file into records. A path that does not exist is
 // no records, which is what "nothing was written here" looks like.
@@ -54,6 +60,20 @@ func hasOperation(records []map[string]any, operation string) bool {
 	return false
 }
 
+// mintedTestID stands in for the daemon-minted ids.WorkspaceID of one
+// directory: 16 hex characters, as wsm mints, derived from the directory only
+// so a test can predict it. Production resolves the real roster.
+func mintedTestID(dir string) string {
+	sum := md5.Sum([]byte("minted:" + filepath.Clean(dir)))
+	return hex.EncodeToString(sum[:])[:mintedIDWidth]
+}
+
+// bindTestWorkspaceIDs installs the minted-id lookup every workspace-owned
+// record needs. Unbound surfaces REFUSE, which is its own test.
+func bindTestWorkspaceIDs(s *surfaces) {
+	s.BindWorkspaceIDs(func(dir string) (string, error) { return mintedTestID(dir), nil })
+}
+
 // testSurfaces opens real surfaces over temp paths with a discarded terminal.
 func testSurfaces(t *testing.T) (*surfaces, string) {
 	t.Helper()
@@ -62,6 +82,7 @@ func testSurfaces(t *testing.T) (*surfaces, string) {
 	if err != nil {
 		t.Fatalf("openSurfaces: %v", err)
 	}
+	bindTestWorkspaceIDs(s)
 	t.Cleanup(func() { s.Close() })
 	return s, runLogPath
 }
@@ -138,10 +159,7 @@ func TestWorkspaceStampsTheIdentityFields(t *testing.T) {
 	// Arrange.
 	s, _ := testSurfaces(t)
 	dir := t.TempDir()
-	want, err := LogWorkspaceID(dir)
-	if err != nil {
-		t.Fatalf("LogWorkspaceID: %v", err)
-	}
+	want := mintedTestID(dir)
 	log, err := s.Workspace(dir)
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
@@ -919,6 +937,7 @@ func TestAWorkspaceSinkTargetLivesUnderTheStateRootsLogsDirectory(t *testing.T) 
 	if err != nil {
 		t.Fatalf("openSurfaces: %v", err)
 	}
+	bindTestWorkspaceIDs(s)
 	t.Cleanup(func() { s.Close() })
 	dir := t.TempDir()
 
@@ -1027,5 +1046,164 @@ func TestWorkspaceAfterCloseStillRejectsAnUnusableDirectory(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatalf("Workspace(\"\") after Close = nil error, want the caller's own argument refused")
+	}
+}
+
+// A record's workspace_id is the DAEMON-MINTED id — the same id the shim, the
+// webapp and the store state — and the directory hash the kernel lock file is
+// named after is separate evidence beside it.
+func TestWorkspaceRecordCarriesTheMintedIDAndTheDirectoryHashSeparately(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	wantID := mintedTestID(dir)
+	wantHash, err := WorkspaceDirHash(dir)
+	if err != nil {
+		t.Fatalf("WorkspaceDirHash: %v", err)
+	}
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	log.Info("daemon.workspace.opened", "opened", nil)
+
+	// Assert.
+	records := workspaceRecords(t, dir, "daemon")
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	if records[0]["workspace_id"] != wantID {
+		t.Fatalf("workspace_id = %v, want the minted %q", records[0]["workspace_id"], wantID)
+	}
+	ctx, ok := records[0]["context"].(map[string]any)
+	if !ok {
+		t.Fatalf("context = %v, want an object carrying the directory hash", records[0]["context"])
+	}
+	if ctx[KeyWorkspaceDirHash] != wantHash {
+		t.Fatalf("context.%s = %v, want %q", KeyWorkspaceDirHash, ctx[KeyWorkspaceDirHash], wantHash)
+	}
+}
+
+// Unbound, the surfaces REFUSE a workspace sink rather than attribute the
+// record to anything derived from the path.
+func TestWorkspaceRefusesWhenNoMintedIDLookupIsBound(t *testing.T) {
+	// Arrange: surfaces with no lookup bound.
+	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
+	s, err := openSurfaces(runLogPath, LevelDebug, io.Discard)
+	if err != nil {
+		t.Fatalf("openSurfaces: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	// Act.
+	_, err = s.Workspace(t.TempDir())
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Workspace succeeded with no id lookup bound; it must refuse")
+	}
+	if !strings.Contains(err.Error(), "no workspace id lookup is bound") {
+		t.Fatalf("error = %v, want the unbound-lookup refusal", err)
+	}
+}
+
+func TestWorkspaceRefusesWhenTheLookupCannotNameTheWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		lookup WorkspaceIDLookup
+		want   string
+	}{
+		{
+			name:   "the lookup failed",
+			lookup: func(string) (string, error) { return "", errors.New("roster is closed") },
+			want:   "roster is closed",
+		},
+		{
+			name:   "the lookup knows no such workspace",
+			lookup: func(string) (string, error) { return "", nil },
+			want:   "named no workspace",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			s.BindWorkspaceIDs(tc.lookup)
+
+			// Act.
+			_, err := s.Workspace(t.TempDir())
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("Workspace succeeded; an unresolved workspace must be refused")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to carry %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// The id scheme every sink name carries is stated in the run log, so a reader
+// meeting an older directory-hash-named target beside a minted-id one can
+// tell from the log which scheme minted which.
+func TestSinkOpenRecordsTheIDScheme(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	if _, err := s.Workspace(dir); err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Assert.
+	var opened map[string]any
+	for _, rec := range readRecords(t, runLogPath) {
+		if rec["operation"] == "daemon.dlog.sink_opened" {
+			opened = rec
+		}
+	}
+	if opened == nil {
+		t.Fatalf("the run log carries no daemon.dlog.sink_opened record")
+	}
+	if opened["workspace_id"] != mintedTestID(dir) {
+		t.Fatalf("workspace_id = %v, want the minted %q", opened["workspace_id"], mintedTestID(dir))
+	}
+	ctx, ok := opened["context"].(map[string]any)
+	if !ok {
+		t.Fatalf("context = %v, want an object", opened["context"])
+	}
+	if ctx["id_scheme"] != "daemon_minted_workspace_id" {
+		t.Fatalf("context.id_scheme = %v, want daemon_minted_workspace_id", ctx["id_scheme"])
+	}
+}
+
+// A forwarded client record is attributed with the same minted id.
+func TestClientLogStampsTheMintedID(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	if err := s.ClientLog(dir, ClientRecord{
+		ClientKind: RuntimeWebapp,
+		Level:      LevelInfo,
+		Operation:  "webapp.test.record",
+		Message:    "m",
+	}); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	records := workspaceRecords(t, dir, "webapp")
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	if records[0]["workspace_id"] != mintedTestID(dir) {
+		t.Fatalf("workspace_id = %v, want the minted %q", records[0]["workspace_id"], mintedTestID(dir))
 	}
 }

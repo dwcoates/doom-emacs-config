@@ -45,6 +45,12 @@ const (
 	KeyRequestID          = "request_id"
 )
 
+// KeyWorkspaceDirHash is an ORDINARY context key, not a reserved one: the
+// workspace directory hash is evidence about the workspace's kernel lock file
+// name, never the workspace's identity. It stays inside `context` so nothing
+// can mistake it for `workspace_id`.
+const KeyWorkspaceDirHash = "workspace_dir_hash"
+
 // reservedKeys is the promotion order, which is also the order the fields
 // appear in a record.
 var reservedKeys = []string{
