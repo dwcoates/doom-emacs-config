@@ -23,12 +23,15 @@ import (
 // the fake's own Profile; the harness keeps its own copy so a test never
 // imports a `main` package.
 type ShimProfile struct {
-	BuildSHA         string         `json:"build_sha,omitempty"`
-	DelayDiagnostics bool           `json:"delay_diagnostics,omitempty"`
-	ExitOn           string         `json:"exit_on,omitempty"`
-	ExitCode         int            `json:"exit_code,omitempty"`
-	Stderr           string         `json:"stderr,omitempty"`
-	ColdOnResume     *ShimColdFacts `json:"cold_on_resume,omitempty"`
+	BuildSHA         string `json:"build_sha,omitempty"`
+	DelayDiagnostics bool   `json:"delay_diagnostics,omitempty"`
+	// OpeningFault makes the opening diagnostics push of every session stream
+	// unhealthy, carrying one store_unreachable fault with this detail.
+	OpeningFault string         `json:"opening_fault,omitempty"`
+	ExitOn       string         `json:"exit_on,omitempty"`
+	ExitCode     int            `json:"exit_code,omitempty"`
+	Stderr       string         `json:"stderr,omitempty"`
+	ColdOnResume *ShimColdFacts `json:"cold_on_resume,omitempty"`
 	// VendorStartFailed answers every StartSession with the shim's
 	// `vendor_start_failed` refusal carrying this detail: the shim process is
 	// healthy and only the vendor failed to start inside it.

@@ -31,6 +31,14 @@ type Profile struct {
 	// bring-up, and withholding on every stream would hang the session watcher
 	// the daemon opens once bring-up has already succeeded.
 	DelayDiagnostics bool `json:"delay_diagnostics,omitempty"`
+	// OpeningFault makes the opening diagnostics push of EVERY session stream
+	// UNHEALTHY, carrying one store_unreachable fault with this detail. It
+	// models the shim that answers at once and stands on a fault it never
+	// clears — the realtest-1 survivor — so the daemon's bring-up is offered
+	// an ANSWER rather than silence. It is a PROFILE rather than a scripted
+	// answer because the opening frame of the daemon's very first stream is
+	// what it governs.
+	OpeningFault string `json:"opening_fault,omitempty"`
 	// ExitOn kills the process at a named moment: "startup", "start_session"
 	// or "watch_session".
 	ExitOn string `json:"exit_on,omitempty"`

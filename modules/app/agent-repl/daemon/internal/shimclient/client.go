@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -818,11 +819,25 @@ func (c *client) redial(ctx context.Context) (Stream[*shimv1.WatchSessionRespons
 	}
 }
 
-// awaitHealthy consumes session frames until the first diagnostics arm says
-// healthy. Unhealthy is an ANSWER, not readiness: the client keeps waiting.
+// awaitDiagnostics consumes session frames until the FIRST diagnostics arm,
+// whichever it is. A shim that pushes diagnostics has ANSWERED, and answering
+// is what bring-up waits for: a shim standing on a fault it will not clear
+// answers in milliseconds, and treating that answer as silence burned the
+// caller's whole bound and left the workspace with no client at all — which is
+// strictly worse than a client whose session carries faults, because a fault
+// the daemon holds a client for is one the frontend gets to see.
+//
+// THE FAULTS ARE NOT SWALLOWED. They reach the workspace health path the same
+// way an already-adopted shim's later verdict does: every WatchSession the
+// shim serves opens with its current diagnostics, so the watcher the fleet
+// attaches on install folds this same verdict into the session's faults.
+//
+// The bound the caller holds is therefore back to guarding the one condition
+// it can: a shim that sends no diagnostics frame at all.
+//
 // The frames come from the ONE receive loop the stream has; a second loop on
 // the same stream would be two concurrent receivers.
-func (c *client) awaitHealthy(ctx context.Context, frames <-chan *shimv1.WatchSessionResponse, errs <-chan error) error {
+func (c *client) awaitDiagnostics(ctx context.Context, frames <-chan *shimv1.WatchSessionResponse, errs <-chan error) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -842,10 +857,48 @@ func (c *client) awaitHealthy(ctx context.Context, frames <-chan *shimv1.WatchSe
 				})
 				return nil
 			}
-			c.log.Warn("daemon.shimclient.ready", "shim reported unhealthy; still waiting", dlog.Context{
-				"workspace_id": string(c.ws), "faults": len(diagnostics.GetUnhealthy().GetFaults()),
+			faults := diagnostics.GetUnhealthy().GetFaults()
+			c.log.Warn("daemon.shimclient.ready", "shim reported unhealthy", dlog.Context{
+				"workspace_id": string(c.ws), "faults": len(faults),
 			})
+			c.log.Info("daemon.shimclient.ready", "adopted an unhealthy shim; faults reported", dlog.Context{
+				"workspace_id": string(c.ws), "uds": c.udsPath,
+				"faults": len(faults), "fault_kinds": FaultKinds(faults),
+			})
+			return nil
 		}
+	}
+}
+
+// FaultKinds names the kind arm of every fault, comma-joined, so a record
+// carries WHAT the shim is standing on rather than only how many things it is.
+func FaultKinds(faults []*conversationv1.SessionFault) string {
+	kinds := make([]string, 0, len(faults))
+	for _, fault := range faults {
+		kinds = append(kinds, FaultKind(fault))
+	}
+	return strings.Join(kinds, ",")
+}
+
+// FaultKind names the SessionFault kind arm the shim set. It is the daemon's
+// ONE spelling of those arm names: the health reporter keeps it as a recorded
+// fault's evidence and the adoption record logs it, and the two must never
+// drift. An arm this build does not know is named rather than dropped, so a
+// kind list and a fault count always agree.
+func FaultKind(fault *conversationv1.SessionFault) string {
+	switch fault.GetKind().(type) {
+	case *conversationv1.SessionFault_StoreUnreachable:
+		return "store_unreachable"
+	case *conversationv1.SessionFault_ConverterDefect:
+		return "converter_defect"
+	case *conversationv1.SessionFault_LogSinkPoisoned:
+		return "log_sink_poisoned"
+	case *conversationv1.SessionFault_KeepaliveFailed:
+		return "keepalive_failed"
+	case *conversationv1.SessionFault_VendorQueryFailed:
+		return "vendor_query_failed"
+	default:
+		return "unclassified"
 	}
 }
 

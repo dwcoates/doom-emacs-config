@@ -261,11 +261,21 @@ func adoptReady(t *testing.T, f *fakeShim, dir, udsPath string, opts ...Option) 
 func newSupervisor(t *testing.T, opts ...Option) Supervisor {
 	t.Helper()
 
-	sup, err := NewSupervisor(newTestSurfaces(), append([]Option{testBackoff()}, opts...)...)
+	sup, _ := newSupervisorLogging(t, opts...)
+	return sup
+}
+
+// newSupervisorLogging is newSupervisor for a test that reads the records the
+// supervisor wrote, rather than only its behavior.
+func newSupervisorLogging(t *testing.T, opts ...Option) (Supervisor, testSurfaces) {
+	t.Helper()
+
+	surfaces := newTestSurfaces()
+	sup, err := NewSupervisor(surfaces, append([]Option{testBackoff()}, opts...)...)
 	if err != nil {
 		t.Fatalf("NewSupervisor() error = %v", err)
 	}
-	return sup
+	return sup, surfaces
 }
 
 // waitForSessionOpen blocks until the fake has an open WatchSession stream.
@@ -303,3 +313,46 @@ func alive(pid int) bool { return syscall.Kill(pid, syscall.Signal(0)) == nil }
 
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s testSurfaces) Evict(_ string) error { return nil }
+
+// bringUpProbeWindow is the NEGATIVE bound: how long a test waits to be
+// satisfied that bring-up has NOT returned. The fake shim is in-process and
+// every measured bring-up in this package answers in single-digit
+// milliseconds, so 200ms is a wide multiple of the behavior it rules out and
+// is paid in full on a green run at exactly one site.
+const bringUpProbeWindow = 200 * time.Millisecond
+
+// bringUpAnswerBound is the POSITIVE bound: how long a bring-up that the shim
+// has already answered may take to return. Same measured basis, and it is
+// paid only by a red test.
+const bringUpAnswerBound = 2 * time.Second
+
+// spawnResult is one asynchronous Spawn's outcome.
+type spawnResult struct {
+	c   Client
+	err error
+}
+
+// spawnAsync starts a Spawn on its own goroutine so the test can push the
+// frames bring-up is waiting for and then observe whether it returned.
+func spawnAsync(t *testing.T, sup Supervisor, spec Spec) <-chan spawnResult {
+	t.Helper()
+
+	done := make(chan spawnResult, 1)
+	go func() {
+		c, err := sup.Spawn(context.Background(), spec)
+		done <- spawnResult{c: c, err: err}
+	}()
+	return done
+}
+
+// adoptTestClient fails the test on a spawn error and arms the kill that
+// leaves no process behind.
+func adoptTestClient(t *testing.T, r spawnResult) Client {
+	t.Helper()
+
+	if r.err != nil {
+		t.Fatalf("Spawn() error = %v", r.err)
+	}
+	t.Cleanup(func() { _ = r.c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "cleanup"}) })
+	return r.c
+}

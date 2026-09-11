@@ -42,6 +42,24 @@ func HealthyDiagnostics() *conversationv1.SessionUpdate {
 	}
 }
 
+// UnhealthyDiagnostics is the opening push of a shim standing on a fault it
+// does not clear: an ANSWER, and never readiness.
+func UnhealthyDiagnostics(detail string) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
+			Health: &conversationv1.SessionDiagnostics_Unhealthy{Unhealthy: &conversationv1.SessionUnhealthy{
+				Faults: []*conversationv1.SessionFault{{
+					Component: "store client",
+					Detail:    detail,
+					Kind: &conversationv1.SessionFault_StoreUnreachable{
+						StoreUnreachable: &conversationv1.SessionFaultStoreUnreachable{},
+					},
+				}},
+			}},
+		}},
+	}
+}
+
 // DefaultContextUsage is the opening context-usage push. The real shim states
 // the session's usage at its own cadence starting at the session's start, and
 // the topbar draws NO view at all until it has one, so the fake states it

@@ -158,7 +158,7 @@ func (s *supervisor) StandDownEverySpawn(ctx context.Context, reason string) err
 }
 
 // Spawn starts a shim, dials it, and returns once WatchSession is connected
-// and the first pushed diagnostics arm says healthy.
+// and the shim has pushed its first diagnostics arm, healthy or not.
 func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	if err := validateSpec(spec); err != nil {
 		return nil, err
@@ -429,9 +429,10 @@ func validateSpec(spec Spec) error {
 	return nil
 }
 
-// bringUp dials the shim until the link is connected AND the first pushed
-// diagnostics arm says healthy. A process that dies ends this at once with its
-// exit decoding and stderr ring — the correlation is a select on the death
+// bringUp dials the shim until the link is connected AND the shim has pushed
+// its first diagnostics arm. An UNHEALTHY arm is an answer and completes the
+// bring-up: see awaitDiagnostics. A process that dies ends this at once with
+// its exit decoding and stderr ring — the correlation is a select on the death
 // channel, never a timeout.
 func (c *client) bringUp(parent context.Context) error {
 	c.link.publish(LinkDialing)
@@ -449,7 +450,7 @@ func (c *client) bringUp(parent context.Context) error {
 		c.link.publish(LinkConnected)
 
 		frames, errs := recvLoop(stream, c.monitorCtx.Done())
-		err = c.awaitHealthy(parent, frames, errs)
+		err = c.awaitDiagnostics(parent, frames, errs)
 		if err == nil {
 			go c.monitor(stream, frames, errs)
 			return nil
