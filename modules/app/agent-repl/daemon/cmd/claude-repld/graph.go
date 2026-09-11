@@ -543,6 +543,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TestRunner:   scripts,
 		Painter:      painter,
 		StartSession: fleet.Start,
+		StopSession:  fleet.KillSession,
 		Occupy:       fleet.Occupy,
 		AwaitTurnEnd: fleet.AwaitTurnEnd,
 		CaptureDisplaced: func(ctx context.Context, ws ids.WorkspaceID) (merge.Displaced, bool, error) {

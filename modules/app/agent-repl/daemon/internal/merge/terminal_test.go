@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,71 @@ func TestMergedWorktreeIsRemovedByTheDaemon(t *testing.T) {
 	defer h.git.mu.Unlock()
 	if len(h.git.removedWorktrees) != 1 || h.git.removedWorktrees[0] != h.sourceD {
 		t.Fatalf("removed worktrees are %v, want the merged source alone", h.git.removedWorktrees)
+	}
+}
+
+// TestMergedWorkspaceSessionStopsBeforeWorktreeRemoval covers the process/tree
+// boundary: the shim can write through its working directory until it is
+// reaped, so git cannot remove that directory first.
+func TestMergedWorkspaceSessionStopsBeforeWorktreeRemoval(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.mu.Lock()
+	stopped := append([]ids.WorkspaceID(nil), h.stoppedSessions...)
+	forces := append([]bool(nil), h.stopForces...)
+	stopAt := h.stopAt
+	h.mu.Unlock()
+	h.git.mu.Lock()
+	removeAt := h.git.at["remove_worktree"]
+	h.git.mu.Unlock()
+	if len(stopped) != 1 || stopped[0] != theWorkspace || len(forces) != 1 || !forces[0] {
+		t.Fatalf("session stops = %v forces=%v, want one forced stop for %s", stopped, forces, theWorkspace)
+	}
+	if stopAt == 0 || removeAt == 0 || stopAt >= removeAt {
+		t.Fatalf("stop sequence=%d remove sequence=%d, want the session reaped before removal", stopAt, removeAt)
+	}
+	record, found := recordWith(h, "debug", "daemon.merge.teardown")
+	if !found || record.Context["workspace"] != string(theWorkspace) || record.Context["worktree"] != h.sourceD || record.Context["force"] != true {
+		t.Fatalf("teardown record = %+v found=%v, want the workspace, worktree, and force=true", record, found)
+	}
+}
+
+// TestFailedSessionStopKeepsTheMergedWorktree covers the failure edge: a live
+// process's working directory remains intact and the teardown records why.
+func TestFailedSessionStopKeepsTheMergedWorktree(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	h.stopErr = errors.New("shim did not reap")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if h.git.seen("remove_worktree") {
+		t.Fatal("the merged worktree was removed after its session failed to stop")
+	}
+	record, found := recordWith(h, "error", "daemon.merge.teardown")
+	if !found || record.Context["error"] != "shim did not reap" || record.Context["force"] != true {
+		t.Fatalf("teardown record = %+v found=%v, want the stand-down failure and force=true", record, found)
 	}
 }
 

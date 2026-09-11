@@ -165,9 +165,11 @@ const (
 // and the workspace's next mount takes the bring-up again.
 func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger, record wsm.Workspace, created bool) {
 	if created || record.Closed {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "created || record.Closed"})
 		return
 	}
 	if v.deps.Sessions.Live(record.ID) {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "v.deps.Sessions.Live(record.ID)"})
 		return
 	}
 	session, exists, err := v.deps.DB.Session(ctx, record.ID)
@@ -178,6 +180,7 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 		return
 	}
 	if !exists || session.VendorSessionID == "" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!exists || session.VendorSessionID == \"\""})
 		return
 	}
 	if session.Terminal != nil && (session.Terminal.Kind == terminalDeleted || session.Terminal.Kind == terminalHibernated) {

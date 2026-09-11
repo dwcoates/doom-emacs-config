@@ -27,6 +27,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	unitID := act.GetActivityId().GetValue()
 	state, ok := s.subagents[unitID]
 	if !ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 		state = &subagentState{}
 		s.subagents[unitID] = state
 	}
@@ -36,9 +37,11 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	// nothing ever drew.
 	_, announcedDetached := s.claimDetached(unitID)
 	if detached || announcedDetached {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "detached || announcedDetached"})
 		state.detached = true
 	}
 	if state.bubble == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.bubble == nil"})
 		state.bubble = &frontendv1.FeedSubagent{}
 	}
 
@@ -50,6 +53,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	namesAgent := isStart || namedCreatedAgent(spawn).GetValue() != ""
 	if !namesAgent && state.created.GetValue() == "" {
 		if !subagentArmDraws(spawn) {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!subagentArmDraws(spawn)"})
 			return nil, errNotARow
 		}
 		// THE PLACEMENT IS RECORDED WITH THE HOLD: the frames were carried on
@@ -72,10 +76,12 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	held := state.held
 	state.held = nil
 	if !isStart {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!isStart"})
 		r.foldHeldSubagentFrames(s, unitID, state, held, "when a later frame named the created agent")
 		held = nil
 	}
 	if err := r.foldSubagentFrame(s, unitID, state, spawn); err != nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "err := r.foldSubagentFrame(s, unitID, state, spawn); err != nil"})
 		// THE HOLD IS PUT BACK rather than lost with the frame that failed:
 		// this frame drew nothing, so nothing has named the created agent yet
 		// and what was waiting is still waiting.
@@ -133,6 +139,7 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 	bubble := state.bubble
 	switch frame := spawn.GetResult().(type) {
 	case *conversationv1.AgentSubagent_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Start"})
 		state.created = frame.Start.GetCreatedAgentId()
 		applyPrompt(bubble, frame.Start.GetPrompt())
 		// The ORIGINAL instant: a start is re-announced on the work's own
@@ -144,24 +151,29 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 		// that has ALREADY SETTLED, and taking it as live would un-settle a
 		// finished bubble that nothing will ever settle again.
 		if _, settled := bubble.GetState().(*frontendv1.FeedSubagent_Settled); !settled {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, settled := bubble.GetState().(*frontendv1.FeedSubagent_Settled); !settled"})
 			bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{}}
 		}
 	case *conversationv1.AgentSubagent_Update:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Update"})
 		applyPrompt(bubble, frame.Update.GetPrompt())
 		progress := frame.Update.GetProgress()
 		if progress.GetTotalTokens() > 0 {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "progress.GetTotalTokens() > 0"})
 			bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(progress.GetTotalTokens()) + " tok"}
 		}
 		bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{
 			LastProgress: &frontendv1.FeedSubagentLastProgress{AtMs: r.deps.Now().UnixMilli()},
 		}}
 	case *conversationv1.AgentSubagent_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Success"})
 		// A SETTLED FRAME MAY NAME THE CREATED AGENT, and when it does this is
 		// the only place the row's identity can come from — no start is coming
 		// on a settled-only delivery. It never OVERWRITES with nothing: a
 		// producer that did not know the id leaves it unset, and whatever the
 		// start already told us stands.
 		if created := frame.Success.GetCreatedAgentId(); created.GetValue() != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "created := frame.Success.GetCreatedAgentId(); created.GetValue() != \"\""})
 			state.created = created
 		}
 		applyPrompt(bubble, frame.Success.GetPrompt())
@@ -171,10 +183,12 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 			Outcome:   &frontendv1.FeedSubagentSettled_Succeeded{Succeeded: &frontendv1.FeedSubagentSucceeded{}},
 		}}
 	case *conversationv1.AgentSubagent_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Failure"})
 		settled := &frontendv1.FeedSubagentSettled{EndedAtMs: failureSettledMs(frame.Failure.GetError())}
 		subagentFailureOutcome(r.logger(s.id), unitID, frame.Failure)(settled)
 		bubble.State = &frontendv1.FeedSubagent_Settled{Settled: settled}
 	default:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "default"})
 		return errNotARow
 	}
 	return nil
@@ -185,9 +199,11 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, state *subagentState, commission *conversationv1.AgentSubagentPrompt) *frontendv1.FeedRow {
 	bubble := state.bubble
 	if bubble.Runtime == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "bubble.Runtime == nil"})
 		bubble.Runtime = &frontendv1.FeedSubagentRuntime{StartedAtMs: 0}
 	}
 	if bubble.Label == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "bubble.Label == nil"})
 		bubble.Label = &frontendv1.FeedSubagentLabel{Text: "Agent"}
 	}
 
@@ -200,12 +216,14 @@ func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, stat
 	// The bubble's own FeedId IS the sub-feed's address; recording it is what
 	// makes an expand's OpenFeed resolve and a page's crumbs draw.
 	if state.created.GetValue() != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.created.GetValue() != \"\""})
 		r.mintSubFeed(s, id, feedid.Feed{Agent: state.created}, bubbleLabel(bubble))
 		r.drawCommission(s, at, unitID, state, commission)
 	}
 
 	row := &frontendv1.FeedRow{Id: id}
 	if state.detached {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.detached"})
 		row.Row = &frontendv1.FeedRow_DetachedSubagent{DetachedSubagent: &frontendv1.FeedDetachedSubagent{
 			Subagent: bubble,
 		}}
@@ -232,6 +250,7 @@ func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
 	log := r.logger(s.id)
 	for unitID, state := range s.subagents {
 		if len(state.held) == 0 {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "len(state.held) == 0"})
 			continue
 		}
 		held := state.held
@@ -248,6 +267,7 @@ func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
 				continue
 			}
 			if p := commissionOf(frame); p != nil {
+				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "p := commissionOf(frame); p != nil"})
 				commission = p
 			}
 		}
@@ -305,6 +325,7 @@ func commissionOf(spawn *conversationv1.AgentSubagent) *conversationv1.AgentSuba
 // description, and the contract reserves the head for exactly those.
 func (r *resolver) drawCommission(s *wsState, at placement, unitID string, state *subagentState, prompt *conversationv1.AgentSubagentPrompt) {
 	if prompt.GetText() == "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "prompt.GetText() == \"\""})
 		// A COMMISSION WITH NO INSTRUCTION DRAWS NOTHING rather than an empty
 		// bubble body: the field is the whole row, and a blank one would say
 		// the caller asked for nothing.
@@ -418,6 +439,7 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 			return
 		}
 		if r.detachForegroundShell(s, at, unitID, workID) {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "r.detachForegroundShell(s, at, unitID, workID)"})
 			return
 		}
 		// A UNIT WHOSE KIND DRAWS NOTHING is not a unit that has yet to draw.
@@ -442,15 +464,18 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 	case *conversationv1.AgentDetachedWork_Created:
 		switch created := origin.Created.GetWorkCreated().GetWork().(type) {
 		case *conversationv1.DetachableWork_Subagent:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedWork", "branch": "case *conversationv1.DetachableWork_Subagent"})
 			act := &conversationv1.AgentActivity{
 				ActivityId: &conversationv1.AgentActivityId{Value: workID},
 				Item:       &conversationv1.AgentActivity_Subagent{Subagent: created.Subagent},
 			}
 			row, err := r.drawSubagent(s, at, act, created.Subagent, true)
 			if err != nil {
+				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "err != nil"})
 				return
 			}
 			if row == nil {
+				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "row == nil"})
 				// HELD: the announcement carried a frame that is not the
 				// spawn's start, so nothing names the created agent yet.
 				return
@@ -458,6 +483,7 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 			r.stampTurn(s, row, nil)
 			r.upsert(s, at, row, true)
 		case *conversationv1.DetachableWork_Bash:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedWork", "branch": "case *conversationv1.DetachableWork_Bash"})
 			sh := s.shell(workID)
 			sh.feed = at
 			r.drawDetachedShell(s, work.GetWork(), created.Bash)
@@ -475,6 +501,7 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workID string) bool {
 	u, ok := s.units[unitID]
 	if !ok || u.input == "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok || u.input == \"\""})
 		return false
 	}
 	sh := s.shell(workID)
@@ -523,9 +550,11 @@ func (r *resolver) moveToolCard(s *wsState, at placement, unitID string, u *unit
 func (r *resolver) applyHeldDetachment(s *wsState, at placement, unitID string) {
 	work, held := s.claimDetached(unitID)
 	if !held {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!held"})
 		return
 	}
 	if r.detachForegroundShell(s, at, unitID, work) {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "r.detachForegroundShell(s, at, unitID, work)"})
 		return
 	}
 	// NOT DRAWABLE AS A SHELL AND NOT A SPAWN: the mark goes back, so the
@@ -540,6 +569,7 @@ func (r *resolver) applyHeldDetachment(s *wsState, at placement, unitID string) 
 func (r *resolver) retireDetachment(s *wsState, unitID string) {
 	work, held := s.claimDetached(unitID)
 	if !held {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!held"})
 		return
 	}
 	r.logger(s.id).Debug("daemon.feed.detachment_retired",
@@ -551,6 +581,7 @@ func (r *resolver) retireDetachment(s *wsState, unitID string) {
 func (r *resolver) republishSubagent(s *wsState, unitID string, state *subagentState) {
 	row := &frontendv1.FeedRow{Id: state.row}
 	if state.detached {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.detached"})
 		row.Row = &frontendv1.FeedRow_DetachedSubagent{DetachedSubagent: &frontendv1.FeedDetachedSubagent{
 			Subagent: state.bubble,
 		}}
@@ -570,14 +601,17 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	workID := work.GetValue()
 	sh := s.shell(workID)
 	if sh.feed.feed == (feedid.Feed{}) {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.feed.feed == (feedid.Feed{})"})
 		sh.feed = placement{feed: feedid.Feed{Root: true}}
 	}
 
 	var settled *frontendv1.FeedShellSettled
 	switch frame := bash.GetResult().(type) {
 	case *conversationv1.AgentBash_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedShell", "branch": "case *conversationv1.AgentBash_Start"})
 		sh.stateCommand(frame.Start.GetCommand().GetLine())
 		if sh.startedAtMs == 0 {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.startedAtMs == 0"})
 			sh.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
 		}
 	case *conversationv1.AgentBash_Update:
@@ -602,6 +636,7 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 		if from < sh.nextOffset {
 			overlap := sh.nextOffset - from
 			if overlap > uint64(len(out)) {
+				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "overlap > uint64(len(out))"})
 				overlap = uint64(len(out))
 			}
 			if sh.spool[from:from+overlap] != out[:overlap] {
@@ -623,6 +658,7 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 		// observer at this ONE point is the whole of it.
 		sh.lastProgressMs = r.deps.Now().UnixMilli()
 	case *conversationv1.AgentBash_Progress:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedShell", "branch": "case *conversationv1.AgentBash_Progress"})
 		// A BEAT MOVES NOTHING HERE, deliberately.
 		//
 		// This used to overwrite lastProgressMs with
@@ -648,6 +684,7 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 		// the producer's instant through. Two fields, two meanings, one
 		// observer each.
 	case *conversationv1.AgentBash_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedShell", "branch": "case *conversationv1.AgentBash_Success"})
 		sh.stateCommand(frame.Success.GetCommand().GetLine())
 		settled = shellSettled(log, workID, frame.Success)
 	case *conversationv1.AgentBash_Failure:
@@ -675,9 +712,11 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 		Runtime: &frontendv1.FeedShellRuntime{StartedAtMs: sh.startedAtMs},
 	}
 	if sh.spool != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.spool != \"\""})
 		tail, omittedLines := capSpool(sh.spool)
 		spool := &frontendv1.FeedShellSpool{Text: tail}
 		if omittedLines > 0 {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "omittedLines > 0"})
 			spool.Omitted = &frontendv1.FeedShellOmitted{Text: formatEarlierLines(omittedLines)}
 		}
 		shell.Spool = spool
@@ -687,13 +726,16 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 	// a replayed announcement, the other plane's spool replay, a beat — carries
 	// no ending at all and would otherwise draw the finished run live again.
 	if settled != nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "settled != nil"})
 		sh.settled = settled
 	}
 	if sh.settled != nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.settled != nil"})
 		shell.State = &frontendv1.FeedShell_Settled{Settled: sh.settled}
 	} else {
 		live := &frontendv1.FeedShellLive{}
 		if sh.lastProgressMs > 0 {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.lastProgressMs > 0"})
 			live.LastProgress = &frontendv1.FeedShellLastProgress{AtMs: sh.lastProgressMs}
 		}
 		shell.State = &frontendv1.FeedShell_Live{Live: live}
