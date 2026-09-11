@@ -6096,7 +6096,7 @@ describe("the durable log sink being poisoned", () => {
     const freshFs = await import("node:fs");
     const freshLog = await import("../../src/log.js");
     const { createEngine: freshCreateEngine } = await import("../../src/engine/session.js");
-    freshLog.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "poison-suite" });
+    freshLog.configureLog({ fd: 3, cwd: "/ws", workspaceId: "000000000000ab01", agentReplSessionId: "poison-suite" });
     vi.mocked(freshFs.writeSync).mockImplementationOnce(() => {
       throw new Error("fd 3 is gone");
     });
