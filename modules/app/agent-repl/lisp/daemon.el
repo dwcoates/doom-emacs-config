@@ -13,8 +13,15 @@
 ;; adopted and never killed.
 ;;
 ;;   daemon.addr absent            → build, start, wait for the file
+;;   daemon.addr names a dead pid  → advertiser dead: retire it, build (no dial)
 ;;   daemon.addr present, answers  → ADOPT it, healthy or unhealthy alike
 ;;   daemon.addr present, silent   → a stale file; treat it as absent
+;;
+;; The dead-pid arm is what a legacy, pid-less advertisement cannot take: it
+;; falls through to the dial, and a predecessor that died without withdrawing
+;; then costs a refused connection and its transport records before the file
+;; is retired.  An advertisement that carries a live-checkable pid is retired
+;; before any dial.
 ;;
 ;; UNHEALTHY IS AN ANSWER.  `DaemonHealth' returns a typed verdict, never
 ;; a transport error, so an unhealthy daemon is a daemon — it is adopted
@@ -67,6 +74,7 @@
 (declare-function agent-repl-connect-open "connect" (address))
 (declare-function agent-repl-connect-close "connect" (conn))
 (declare-function agent-repl-connect-read-daemon-addr "connect" ())
+(declare-function agent-repl-connect-read-daemon-addr-pid "connect" ())
 (declare-function agent-repl-connect-daemon-addr-file "connect" ())
 (declare-function agent-repl-rpc-daemon-health "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "rpc" (conn request &rest keys))
@@ -1170,6 +1178,34 @@ is stated on the spawn rather than assumed."
   (when on-ready (funcall on-ready outcome))
   outcome)
 
+(defun agent-repl-daemon--advertiser-alive-p (pid)
+  "Return non-nil when PID names a process alive on this host.
+`process-attributes' answers nil for a pid no process holds and never
+signals, so a dead advertiser is detected WITHOUT a dial -- which is the
+whole point: a dead advertiser is absent, not a transport fault."
+  (and (integerp pid) (> pid 0) (process-attributes pid) t))
+
+(defun agent-repl-daemon--retire-dead-advertiser-addr (address pid)
+  "Remove the `daemon.addr' whose advertiser PID is no longer alive.
+An advertisement whose advertiser is dead is ABSENT, not a transport
+failure: it is retired at INFO and the boot proceeds straight to a spawn,
+with NO dial -- so none of the connect/transport records a live-but-
+unreachable daemon would earn ever fires on a plain cold start after a
+predecessor died without withdrawing (crash, SIGKILL, or a restart path
+that skipped withdraw)."
+  (let ((file (agent-repl-connect-daemon-addr-file)))
+    (when (file-exists-p file)
+      (condition-case err
+          (progn
+            (delete-file file)
+            (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                              "elisp.daemon.addr-retired-dead-advertiser address=%S pid=%S file=%S"
+                              address pid file))
+        (error
+         (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                            "elisp.daemon.addr-retire-dead-advertiser-failed address=%S pid=%S file=%S error=%S"
+                            address pid file err))))))
+
 (defun agent-repl-daemon--retire-stale-addr (address reason)
   "Remove the `daemon.addr' file whose ADDRESS was just proven dead.
 REASON names which proof retired it, for the record.
@@ -1238,19 +1274,37 @@ WHOLE decision, signals included."
         (progn
           (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.addr-absent")
           (agent-repl-daemon--build-and-start on-ready))
-      (agent-repl-daemon--probe
-       address
-       (lambda (verdict)
-         (agent-repl-daemon--report-verdict address verdict)
-         (agent-repl-daemon--settle on-ready (agent-repl-link-connect)))
-       (lambda (detail)
-         (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stale-addr address=%S detail=%S"
-                           address detail)
-         ;; The corpse's file goes FIRST, before anything can mistake it for
-         ;; the daemon about to be built, and the address travels with the
-         ;; boot wait so a file that somehow survives still cannot.
-         (agent-repl-daemon--retire-stale-addr address "probe-refused")
-         (agent-repl-daemon--build-and-start on-ready address))))))
+      ;; AN ADVERTISEMENT CARRIES ITS ADVERTISER'S PID.  A pid that names no
+      ;; live process is a dead advertiser, and a dead advertiser's address
+      ;; is ABSENT -- retire it at INFO and go straight to a spawn, with NO
+      ;; dial, so a predecessor that died without withdrawing costs the cold
+      ;; start none of the dial-failed / transport-failure records a
+      ;; live-but-unreachable daemon rightly earns.  A LEGACY file names no
+      ;; pid (nil), and an ALIVE pid is a real daemon: both dial and probe.
+      (let ((pid (condition-case err
+                     (agent-repl-connect-read-daemon-addr-pid)
+                   (error
+                    (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.addr-pid-unreadable error=%S" err)
+                    nil))))
+        (if (and pid (not (agent-repl-daemon--advertiser-alive-p pid)))
+            (progn
+              (agent-repl-daemon--retire-dead-advertiser-addr address pid)
+              ;; The address travels with the boot wait so a file that somehow
+              ;; survives the retire is never read back as the new daemon.
+              (agent-repl-daemon--build-and-start on-ready address))
+          (agent-repl-daemon--probe
+           address
+           (lambda (verdict)
+             (agent-repl-daemon--report-verdict address verdict)
+             (agent-repl-daemon--settle on-ready (agent-repl-link-connect)))
+           (lambda (detail)
+             (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stale-addr address=%S detail=%S"
+                               address detail)
+             ;; The corpse's file goes FIRST, before anything can mistake it for
+             ;; the daemon about to be built, and the address travels with the
+             ;; boot wait so a file that somehow survives still cannot.
+             (agent-repl-daemon--retire-stale-addr address "probe-refused")
+             (agent-repl-daemon--build-and-start on-ready address))))))))
 
 (defun agent-repl-daemon-schedule-ensure ()
   "Schedule `agent-repl-daemon-ensure' on an idle timer and return the timer.
