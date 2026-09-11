@@ -49,10 +49,6 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
-// EmacsAppBinary is the executable inside the bundle, for the launch method
-// that spawns it directly.
-const EmacsAppBinary = "/Applications/Emacs.app/Contents/MacOS/Emacs"
-
 // probeBound is how long ONE read-only probe may take.
 //
 // It is a bound on the ROUND TRIP, not on Emacs's work: a probe here reads a

@@ -19,11 +19,19 @@ Input is what the owner would send: real key events into the real Emacs
 process (`s-}`, `M-2`, `SPC TAB n`, typed prompt text), never an elisp call
 that performs the act. Elisp is read-only, for reading state and asserting.
 
-The editor must not disturb the owner: Emacs is launched without taking focus
-(or focus returns to the owner's application immediately), and NO pictures are
-taken at this stage, so Emacs is never brought frontmost. If key delivery to an
-unfocused Emacs is impossible on macOS, that is surfaced to the owner before
-any alternative is chosen.
+The editor must not disturb the owner: Emacs is launched without taking focus,
+and NO pictures are taken at this stage, so Emacs is never brought frontmost.
+If key delivery to an unfocused Emacs is impossible on macOS, that is surfaced
+to the owner before any alternative is chosen.
+
+There is exactly one launch method, `open -g` (owner ruling, 2026-09-11): it
+asks LaunchServices not to bring the application forward, and it never brings
+Emacs forward and then corrects for it. An earlier method that spawned the
+bundle's executable directly and reactivated the owner's application afterward
+was removed once realtest 1's first run traced a focus theft under `open -g`
+itself to this module's own webview pre-creation on link-up, not to the launch
+method (fixed in commit 3db3d6271; see docs/REALTEST-JUDGEMENT-CALLS.md,
+realtest 1, row 24). A realtest starts Emacs once per test.
 
 ## The loop, for every realtest
 
@@ -127,9 +135,11 @@ confirmed.
 
 ### Realtest 1, run 1 — 2026-09-11 12:13, FAILED
 
-Three cold starts, all failed the plan's own assertion: no tab was drawn for any
-of the three workspaces the state database holds. Run record:
-`~/.claude-emacs/realtest/realtest-20260911-121357/MANIFEST.md`.
+This run predates the owner's 2026-09-11 ruling that a realtest starts Emacs
+once per test; it ran three cold starts, rotating between two launch methods to
+find one that left focus alone. All three failed the plan's own assertion: no
+tab was drawn for any of the three workspaces the state database holds. Run
+record: `~/.claude-emacs/realtest/realtest-20260911-121357/MANIFEST.md`.
 
 Phases measured (all three starts agreed to within half a second):
 

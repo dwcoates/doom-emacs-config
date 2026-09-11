@@ -5,7 +5,6 @@ package realtest
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,27 +14,28 @@ import (
 // owner keeps typing wherever they were: focus never moves, and no picture is
 // ever taken, so Emacs is never brought frontmost either.
 //
-// Two launch methods are implemented and BOTH are measured, because which one
-// actually leaves focus alone on this machine is a question about macOS, not a
-// question about this code, and the answer belongs in the run's report rather
-// than in a comment:
+// There is exactly one launch method (owner ruling, 2026-09-11):
 //
 //	LaunchOpenBackground   `open -g -a Emacs`, where -g ("--background") asks
 //	                       LaunchServices not to bring the application
-//	                       forward. It is the documented way to do this and it
-//	                       is tried FIRST because it asks the window server
-//	                       for the behavior instead of correcting for it.
+//	                       forward. It is the documented way to do this, and
+//	                       it asks the window server for the behavior instead
+//	                       of correcting for it.
 //
-//	LaunchDirectRestoring  the bundle's own executable, spawned directly, with
-//	                       the frontmost application captured before and
-//	                       reactivated the moment the frame maps. This one
-//	                       CORRECTS a focus steal rather than preventing it,
-//	                       so the owner may see a flicker; it is the fallback.
+// A second method used to exist here: the bundle's own executable spawned
+// directly, with the frontmost application captured before and reactivated
+// once the frame mapped, correcting a focus steal rather than preventing it.
+// It was kept as a hedge because realtest 1's first run saw focus move even
+// under `open -g`. That move's cause was not the launch method: it was this
+// module's own webview pre-creation on link-up, which macOS answers by
+// activating Emacs regardless of how it was launched, fixed in commit
+// 3db3d6271. With the cause found and fixed, the hedge and the rotation that
+// picked between the two methods across cold starts were removed
+// (docs/REALTEST-JUDGEMENT-CALLS.md, realtest 1, row 24).
 //
-// Focus is measured, not assumed: FrontmostApp reads the frontmost process from
-// System Events before and after, and the test reports which method left it
-// alone. A method that moved focus is reported as having moved it even if
-// everything else about the run was clean.
+// Focus is still measured, not assumed: FrontmostApp reads the frontmost
+// process from System Events before and after, and the test reports whether
+// the launch left it alone.
 
 // FrontmostApp is the name of the application currently frontmost.
 //
@@ -55,31 +55,11 @@ func FrontmostApp(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ActivateApp brings a named application forward.
-//
-// It exists for exactly one purpose: putting the owner's application back after
-// a launch method took focus away from it. Nothing else in a realtest may call
-// it, because a realtest that activates Emacs has stopped being unobtrusive.
-func ActivateApp(ctx context.Context, name string) error {
-	if name == "" {
-		return fmt.Errorf("no application was named to reactivate")
-	}
-	script := fmt.Sprintf(`tell application %q to activate`, name)
-	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(callCtx, "osascript", "-e", script).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("reactivate %q: %w; osascript said: %s", name, err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
 // LaunchMethod names how an Emacs was started, for the report.
 type LaunchMethod string
 
 const (
 	MethodOpenBackground LaunchMethod = "open -g -a Emacs"
-	MethodDirectRestore  LaunchMethod = "Emacs.app binary, frontmost app reactivated"
 )
 
 // Launch is one launch attempt's whole account.
@@ -95,9 +75,6 @@ type Launch struct {
 	FrontBefore    string
 	FrontAfter     string
 	DisturbedOwner bool
-	// Reactivated is whether this method had to put the owner's application
-	// back.
-	Reactivated bool
 }
 
 // vendorGuardEnv is the ONE substitution a realtest makes: no real Claude call
@@ -139,46 +116,6 @@ func LaunchOpenBackground(ctx context.Context) (Launch, error) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return result, fmt.Errorf("launch Emacs in the background: %w; open said: %s",
 			err, strings.TrimSpace(string(out)))
-	}
-	return result, nil
-}
-
-// LaunchDirectRestoring spawns the bundle's executable and puts the owner's
-// application back.
-//
-// The child is deliberately NOT waited on and NOT parented to the test: an
-// Emacs whose parent exits keeps running, which is the point — the owner's
-// editor is left standing after the run.
-func LaunchDirectRestoring(ctx context.Context) (Launch, error) {
-	result := Launch{Method: MethodDirectRestore}
-
-	before, err := FrontmostApp(ctx)
-	if err != nil {
-		return result, err
-	}
-	result.FrontBefore = before
-
-	cmd := exec.Command(EmacsAppBinary)
-	cmd.Env = append(os.Environ(), vendorGuardEnv+"=1")
-	// The process must outlive this one, so its standard streams go nowhere
-	// rather than to a pipe this side will close.
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
-	result.SpawnedAt = time.Now()
-	if err := cmd.Start(); err != nil {
-		return result, fmt.Errorf("spawn %s: %w", EmacsAppBinary, err)
-	}
-	if err := cmd.Process.Release(); err != nil {
-		return result, fmt.Errorf("release the spawned Emacs so it outlives this run: %w", err)
-	}
-
-	// Putting focus back is the whole reason this method exists, and it is
-	// done as soon as the process is spawned rather than after the frame maps:
-	// waiting for the frame means waiting through the steal.
-	if before != "" {
-		if err := ActivateApp(ctx, before); err != nil {
-			return result, err
-		}
-		result.Reactivated = true
 	}
 	return result, nil
 }
