@@ -87,6 +87,22 @@ func operationLevels(records []logRecord) []string {
 	return out
 }
 
+// ctxInt reads one correlation key as an integer, failing when the record does
+// not carry it. JSON numbers decode as float64, so a count rides back through
+// that and is checked exactly.
+func ctxInt(t *testing.T, r logRecord, key string) int {
+	t.Helper()
+	raw, ok := r.Context[key]
+	if !ok {
+		t.Fatalf("record %q carries no %q; its context was %v", r.Operation, key, r.Context)
+	}
+	value, ok := raw.(float64)
+	if !ok {
+		t.Fatalf("record %q carries %q as %T, want a number", r.Operation, key, raw)
+	}
+	return int(value)
+}
+
 // ctxString reads one correlation key as a string, failing when the record does
 // not carry it. A missing key is the defect the subject exists to catch, so it
 // is never defaulted away.
