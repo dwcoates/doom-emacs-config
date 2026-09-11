@@ -2044,13 +2044,19 @@ func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRe
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	// ExpectStartTurn BLOCKS for the next request, so this is the
-	// resubmission's own arrival -- not a race against the merge's teardown.
-	resubmit := f.shim.ExpectStartTurn()
+	// ExpectStartTurnWithCount BLOCKS for the next request, so this is the
+	// resubmission's own arrival -- not a race against the merge's teardown --
+	// AND IT ANSWERS THE COUNT AT THE POP. The same teardown step that
+	// resubmits this turn then force-stops the session before removing the
+	// worktree, so a separate Count call afterwards dials a fake shim that is
+	// deliberately on its way out and reads a clean EOF from its control
+	// socket; observed once under the suite's -parallel 8 load as
+	// "no reply to count: <nil>".
+	resubmit, turns := f.shim.ExpectStartTurnWithCount()
 
 	// Assert: exactly one further StartTurn arrived -- the resubmission --
-	// and the count read right after it is the negative probe for a third.
-	if got := f.shim.Count(harness.RPCStartTurn); got != beforeMerge+1 {
+	// and the count observed at its pop is the negative probe for a third.
+	if got := turns; got != beforeMerge+1 {
 		t.Fatalf("StartTurn count once the resubmission arrived = %d, want exactly %d (beforeMerge+1: the one resubmission, never a third)", got, beforeMerge+1)
 	}
 	if got := text(resubmit.GetSaid()); got != "keep going" {
