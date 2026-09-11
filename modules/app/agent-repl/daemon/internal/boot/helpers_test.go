@@ -37,14 +37,23 @@ type fakeSupervisor struct {
 	adopted []ids.WorkspaceID
 	// err, when set, is what Adopt answers instead of a client.
 	err error
+	// hang makes Adopt wait out its context instead of answering, which is
+	// what the real supervisor does for a survivor whose lock reads HELD and
+	// whose socket path is gone: shimclient.bringUp redials that forever.
+	hang bool
 }
 
-func (s *fakeSupervisor) Adopt(_ context.Context, ws ids.WorkspaceID, _, _ string) (shimclient.Client, error) {
+func (s *fakeSupervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, _, _ string) (shimclient.Client, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.adopted = append(s.adopted, ws)
-	if s.err != nil {
-		return nil, s.err
+	hang, err := s.hang, s.err
+	s.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, err
 	}
 	return nil, nil
 }
