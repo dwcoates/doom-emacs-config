@@ -3,13 +3,146 @@ package workspace
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
+
+func TestWorkspaceFleetTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  string
+		before any
+		after  any
+		act    func(*testing.T, *fleetFixture, ids.WorkspaceID)
+	}{
+		{
+			name: "a replacement advances the shim generation", state: "shim_generation", before: 0, after: 1,
+			act: func(_ *testing.T, f *fleetFixture, ws ids.WorkspaceID) { f.fleet.freshSocketPath(ws) },
+		},
+		{
+			name: "a session enters the live fleet", state: "session_live", before: false, after: true,
+			act: func(_ *testing.T, f *fleetFixture, ws ids.WorkspaceID) { f.fleet.remember(ws, &live{client: f.client}) },
+		},
+		{
+			name: "an answered cold gate retires", state: "cold_gate_standing", before: true, after: false,
+			act: func(_ *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+				f.fleet.coldGates[ws] = ServedColdGate{}
+				f.fleet.ClearColdGate(ws)
+			},
+		},
+		{
+			name: "a session leaves the live fleet", state: "session_live", before: true, after: false,
+			act: func(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+				f.fleet.remember(ws, &live{client: f.client})
+				if err := f.fleet.Stop(context.Background(), ws, true); err != nil {
+					t.Fatalf("Stop: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1").ID
+			beforeRecords := len(f.log.logger.Records())
+
+			// Act.
+			tt.act(t, f, ws)
+
+			// Assert.
+			for _, record := range f.log.logger.Records()[beforeRecords:] {
+				if record.Level == "debug" && record.Operation == "daemon.workspace.state_transition" &&
+					record.Context["workspace"] == string(ws) && record.Context["state"] == tt.state &&
+					reflect.DeepEqual(record.Context["before"], tt.before) && reflect.DeepEqual(record.Context["after"], tt.after) {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want %s before=%v after=%v", f.log.logger.Records()[beforeRecords:], tt.state, tt.before, tt.after)
+		})
+	}
+}
+
+func TestFleetLifecycleEdgesRecordTheirCompletionAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		message   string
+		act       func(*fleetFixture, ids.WorkspaceID) error
+	}{
+		{
+			name: "an inert replacement finishes prelaunching", operation: opFleetRollout,
+			message: "the replacement shim is prelaunched and inert",
+			act: func(f *fleetFixture, ws ids.WorkspaceID) error {
+				_, err := f.fleet.Prelaunch(context.Background(), ws)
+				return err
+			},
+		},
+		{
+			name: "a replacement client finishes installing", operation: opFleetRollout,
+			message: "installed the replacement shim client",
+			act: func(f *fleetFixture, ws ids.WorkspaceID) error {
+				return f.fleet.Install(context.Background(), ws, f.client)
+			},
+		},
+		{
+			name: "a live session finishes hibernating", operation: opFleetRollout,
+			message: "hibernated the workspace session",
+			act: func(f *fleetFixture, ws ids.WorkspaceID) error {
+				f.fleet.remember(ws, &live{client: f.client})
+				_, err := f.fleet.Hibernate(context.Background(), ws)
+				return err
+			},
+		},
+		{
+			name: "a live session finishes stopping", operation: opBringUp,
+			message: "stopped the workspace session",
+			act: func(f *fleetFixture, ws ids.WorkspaceID) error {
+				f.fleet.remember(ws, &live{client: f.client})
+				return f.fleet.Stop(context.Background(), ws, true)
+			},
+		},
+		{
+			name: "a cold session finishes parking", operation: opBringUp,
+			message: "the session is parked at its cold gate",
+			act: func(f *fleetFixture, ws ids.WorkspaceID) error {
+				f.db.sessions[ws] = wsm.Session{Workspace: ws, VendorSessionID: "vendor-1"}
+				f.client.response = coldResponse()
+				return f.fleet.Start(context.Background(), ws)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1").ID
+			before := len(f.log.logger.Records())
+
+			// Act.
+			if err := tt.act(f, ws); err != nil {
+				t.Fatalf("lifecycle act: %v", err)
+			}
+
+			// Assert.
+			for _, record := range f.log.logger.Records()[before:] {
+				if record.Level == "info" && record.Operation == tt.operation && record.Message == tt.message &&
+					record.Context["workspace"] == string(ws) {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want INFO %s %q for %s", f.log.logger.Records()[before:], tt.operation, tt.message, ws)
+		})
+	}
+}
 
 // TestRouteGuidanceRefusesAnUnspecifiedOrigin covers the origin the contract
 // never delivers: an unlabeled prompt cannot be traced to the situation that

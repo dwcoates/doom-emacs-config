@@ -349,6 +349,14 @@ func (w *watcher) TurnInFlight() *ids.TurnID {
 	return &turn
 }
 
+// turnIDValue renders an optional turn for transition records.
+func turnIDValue(turn *ids.TurnID) string {
+	if turn == nil {
+		return ""
+	}
+	return string(*turn)
+}
+
 // Free reports freeness: no turn in flight AND an empty live-work set.
 func (w *watcher) Free() bool {
 	w.mu.Lock()
@@ -361,13 +369,14 @@ func (w *watcher) Free() bool {
 func (w *watcher) SetOutputAddress(addr *OutputAddress) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	before := w.addr.Feed.Root
 	if addr == nil {
 		w.addr = rootAddress()
 	} else {
 		w.addr = *addr
 	}
 	w.log.Debug("daemon.sessionwatcher.set_output_address", "output address installed", dlog.Context{
-		"root": w.addr.Feed.Root,
+		"state": "output_feed_root", "before": before, "after": w.addr.Feed.Root,
 	})
 }
 
@@ -389,9 +398,10 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 		return
 	}
 	if w.mainAgent == nil {
+		before := ""
 		w.mainAgent = agent
 		w.log.Debug("daemon.sessionwatcher.main_agent", "main agent named", dlog.Context{
-			"agent_id": agent.GetValue(), "source": source,
+			"state": "main_agent", "before": before, "after": agent.GetValue(), "source": source,
 		})
 		// THE RELEASE IS NOT DONE HERE. Naming is a precondition for it, not
 		// the moment for it: the caller may still owe the views the turn's
@@ -401,12 +411,16 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 		return
 	}
 	if w.mainAgent.GetValue() != agent.GetValue() {
+		before := w.mainAgent.GetValue()
 		w.log.Warn("daemon.sessionwatcher.main_agent_changed", "the session's main agent was renamed", dlog.Context{
 			"previous_agent_id": w.mainAgent.GetValue(),
 			"agent_id":          agent.GetValue(),
 			"source":            source,
 		})
 		w.mainAgent = agent
+		w.log.Debug("daemon.sessionwatcher.state_transition", "the main-agent identity changed", dlog.Context{
+			"state": "main_agent", "before": before, "after": agent.GetValue(), "source": source,
+		})
 	}
 }
 
@@ -426,9 +440,10 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 		return
 	}
 	opening := turn
+	before := turnIDValue(w.turn)
 	w.turn = &opening
 	w.log.Debug("daemon.sessionwatcher.turn_opening", "a turn is going to the shim", dlog.Context{
-		"turn_id": string(turn),
+		"state": "turn_in_flight", "before": before, "after": string(turn),
 	})
 }
 
@@ -441,9 +456,10 @@ func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	if ws != w.ws || w.turn == nil || *w.turn != turn {
 		return
 	}
+	before := turnIDValue(w.turn)
 	w.turn = nil
 	w.log.Debug("daemon.sessionwatcher.turn_open_failed", "the shim refused a turn; it no longer stands in flight", dlog.Context{
-		"turn_id": string(turn),
+		"state": "turn_in_flight", "before": before, "after": "",
 	})
 	// The refusal IS the answer that would have named the main agent, so a
 	// terminal held for that name has nothing left to wait on.
@@ -478,7 +494,11 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 				dlog.Context{"turn_id": turnID})
 			return
 		}
+		before := turnIDValue(w.turn)
 		w.turn = &turn
+		w.log.Debug("daemon.sessionwatcher.state_transition", "the accepted turn became the turn in flight", dlog.Context{
+			"state": "turn_in_flight", "before": before, "after": turnID,
+		})
 		// The TURN-OPEN EDGE reaches the footer here and nowhere else: no
 		// stream frame states that a turn was accepted.
 		w.sinks.Footer.OnTurnOpened(ws, turn)
@@ -519,7 +539,11 @@ func (w *watcher) SessionEnding(reason string) {
 	if w.sessionEnded {
 		return
 	}
+	before := w.sessionEnded
 	w.sessionEnded = true
+	w.log.Debug("daemon.sessionwatcher.state_transition", "the session-ending latch changed", dlog.Context{
+		"state": "session_ended", "before": before, "after": true,
+	})
 	w.log.Info("daemon.sessionwatcher.session_ending",
 		"the daemon is ending the session; its standing streams end with it",
 		dlog.Context{"reason": reason})
@@ -533,8 +557,14 @@ func (w *watcher) Close() error {
 		w.mu.Unlock()
 		return nil
 	}
+	beforeClosed := w.closed
+	beforeGeneration := w.gen
 	w.closed = true
 	w.gen++
+	w.log.Debug("daemon.sessionwatcher.state_transition", "the watch fleet entered its closed generation", dlog.Context{
+		"state": "closed", "before": beforeClosed, "after": true,
+		"generation_before": beforeGeneration, "generation_after": w.gen,
+	})
 	w.failWaitersLocked()
 	closing := w.takeStreamsLocked()
 	w.log.Info("daemon.sessionwatcher.close", "closing the session's watch fleet", dlog.Context{
@@ -696,6 +726,9 @@ func (w *watcher) setLinkLocked(state LinkState) {
 	w.log.Info("daemon.sessionwatcher.link", "link state changed", dlog.Context{
 		"previous": int(w.link), "link": int(state),
 	})
+	w.log.Debug("daemon.sessionwatcher.state_transition", "the link state changed", dlog.Context{
+		"state": "link", "before": int(w.link), "after": int(state),
+	})
 	w.link = state
 	w.linkNow.Store(int32(state))
 	// THE EVIDENCE IS RECORDED BEFORE THE VIEWS DRAW THE LOSS. A client that
@@ -758,10 +791,16 @@ func (w *watcher) severedLocked(operation, detail string, err error) {
 // from the newest pointer it was served. The generation bump is what makes the
 // old goroutines' errors stale rather than a second severing.
 func (w *watcher) reopenLocked(reason string) {
+	beforeGeneration := w.gen
+	beforeDegraded := w.degraded
 	w.gen++
 	// The fleet is whole again from here: any open below that fails calls
 	// severedLocked, which sets the flag afresh.
 	w.degraded = false
+	w.log.Debug("daemon.sessionwatcher.state_transition", "the watch fleet entered a fresh generation", dlog.Context{
+		"state": "watch_generation", "before": beforeGeneration, "after": w.gen,
+		"degraded_before": beforeDegraded, "degraded_after": false,
+	})
 	// The closers run OFF the lock, for the reason takeStreamsLocked states:
 	// a stream's Close drains its response body and does not return until the
 	// SERVER ends the stream, and a standing watch is never ended by the
@@ -964,8 +1003,10 @@ func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*shimv1.WatchS
 		w.retryRefusedMainLocked()
 		switch {
 		case frame.GetUpdate() != nil:
+			w.log.Debug("daemon.sessionwatcher.transition_decision", "selected a watcher transition branch", dlog.Context{"function": "watcher", "branch": "case frame.GetUpdate() != nil"})
 			w.routeSessionUpdateLocked(frame.GetUpdate())
 		case frame.GetSessionStarted() != nil:
+			w.log.Debug("daemon.sessionwatcher.transition_decision", "selected a watcher transition branch", dlog.Context{"function": "watcher", "branch": "case frame.GetSessionStarted() != nil"})
 			w.reannouncedLocked(frame.GetSessionStarted())
 		default:
 			// The shim client validates the oneof before a frame ever reaches

@@ -74,16 +74,19 @@ func (q *queue) runAct(ctx context.Context, ws ids.WorkspaceID, act Act, log dlo
 
 	switch act.Kind {
 	case ActSetModel:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActSetModel"})
 		if err := sender.SetModel(ctx, act.Value); err != nil {
 			log.Error(opAct, "the shim refused the model change", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("set model on %q: %w", ws, err)
 		}
 	case ActSetPermissionMode:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActSetPermissionMode"})
 		if err := sender.SetPermissionMode(ctx, act.Value); err != nil {
 			log.Error(opAct, "the shim refused the permission-mode change", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("set permission mode on %q: %w", ws, err)
 		}
 	case ActClear, ActCompact:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActClear, ActCompact"})
 		if err := q.runContextCut(ctx, ws, act, sender, log); err != nil {
 			return err
 		}

@@ -189,6 +189,18 @@ func merge(base, extra dlog.Context) dlog.Context {
 	return out
 }
 
+// logTransition records one workspace-scoped rollout state change. The
+// before/after pair makes the in-memory ledger reconstructible from a trace.
+func (c *controller) logTransition(operation string, ws ids.WorkspaceID, state string, before, after any, extra dlog.Context) {
+	fields := merge(dlog.Context{
+		"state":  state,
+		"before": before,
+		"after":  after,
+	}, extra)
+	c.log.With(dlog.Context{"workspace": string(ws)}).Debug(operation,
+		"rollout state changed", fields)
+}
+
 // milliseconds renders an instant as the epoch milliseconds the contract's
 // *_ms fields carry.
 func milliseconds(at time.Time) int64 { return at.UnixNano() / int64(time.Millisecond) }
