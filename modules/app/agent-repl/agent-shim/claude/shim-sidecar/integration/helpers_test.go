@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -228,6 +230,41 @@ func shortSocketPath(t *testing.T, tag string) string {
 	p := filepath.Join(os.TempDir(), fmt.Sprintf("ar-%s-%s.sock", tag, hex.EncodeToString(buf)))
 	t.Cleanup(func() { os.Remove(p) })
 	return p
+}
+
+// shimListenSocketPath answers a socket path for the REAL shim's `--listen`
+// flag: `workspaceIdFromListenSocket` (agent-shim/claude/shim/src/main.ts)
+// refuses to start unless the basename is `<16 hex characters>.sock`, because
+// that is how the daemon spells a workspace id, and this suite's mocked-vendor
+// drive spawns the real shim binary rather than a fake.
+//
+// The id is DETERMINISTIC per test rather than random, so a failure is
+// reproducible from the test name alone: it is the first 16 hex characters of
+// sha256(t.Name()), which also happens to satisfy `^[0-9a-f]{16}$` by
+// construction since a hex digest is already lower-case hex.
+func shimListenSocketPath(t *testing.T) string {
+	t.Helper()
+	sum := sha256.Sum256([]byte(t.Name()))
+	id := hex.EncodeToString(sum[:])[:16]
+	p := filepath.Join(os.TempDir(), id+".sock")
+	t.Cleanup(func() { os.Remove(p) })
+	return p
+}
+
+// TestShimListenSocketPathIsNamedAfterAWorkspaceID pins the contract this
+// helper exists to satisfy: the real shim (workspaceIdFromListenSocket in
+// agent-shim/claude/shim/src/main.ts) refuses to start unless its --listen
+// socket's basename is exactly <16 hex characters>[.n<generation>].sock. A
+// regression here would silently fail every mocked-vendor drive with "the
+// --listen socket ... is not named after a workspace id" instead of failing
+// this narrow, obvious check.
+func TestShimListenSocketPathIsNamedAfterAWorkspaceID(t *testing.T) {
+	p := shimListenSocketPath(t)
+	base := filepath.Base(p)
+	stem := strings.TrimSuffix(base, ".sock")
+	if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(stem) {
+		t.Fatalf("shimListenSocketPath basename %q is not <16 hex characters>.sock", base)
+	}
 }
 
 // ---------------------------------------------------------------------------
