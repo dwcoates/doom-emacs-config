@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,7 +61,10 @@ func serveClientLog(t *testing.T, response *agentreplv1.ClientLogResponse) (*Cli
 	t.Cleanup(func() {
 		_ = server.Shutdown(context.Background())
 	})
-	if err := os.WriteFile(filepath.Join(stateDir, "daemon.addr"), []byte(listener.Addr().String()+"\n"), 0o600); err != nil {
+	// The daemon publishes the address on the first line and its pid on the
+	// second; the forwarder must resolve the address from that shape.
+	advertisement := listener.Addr().String() + "\npid=" + strconv.Itoa(os.Getpid()) + "\n"
+	if err := os.WriteFile(filepath.Join(stateDir, "daemon.addr"), []byte(advertisement), 0o600); err != nil {
 		t.Fatalf("write daemon.addr: %v", err)
 	}
 	return New(stateDir), recorder
@@ -225,4 +229,27 @@ func rosterResponse(ref *workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRo
 			}}},
 		}}},
 	}}
+}
+
+func TestAddressLineTakesTheFirstLineOfTheAdvertisement(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "legacy bare address", raw: "127.0.0.1:41234\n", want: "127.0.0.1:41234"},
+		{name: "address with a pid line", raw: "127.0.0.1:41234\npid=4242\n", want: "127.0.0.1:41234"},
+		{name: "no trailing newline", raw: "127.0.0.1:9", want: "127.0.0.1:9"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := addressLine(tc.raw)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("addressLine(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
 }
