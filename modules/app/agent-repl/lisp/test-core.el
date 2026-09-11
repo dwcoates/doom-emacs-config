@@ -5033,3 +5033,237 @@ restores them afterwards."
     ;; Assert
     (should (equal (list (nth 0 scheduled) (nth 1 scheduled)) '(0 nil)))
     (should-not called)))
+
+(ert-deftest agent-repl-test-workspace-log-joins-the-standing-target ()
+  "A second runtime appends to the target the canonical link already names."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((project (make-temp-file "agent-repl-standing-project-" t))
+           (ws "standing-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+           (first nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put ws :project-dir project)
+            (let ((agent-repl-log-to-file t))
+              (agent-repl--log ws "first instance"))
+            (setq first (plist-get (agent-repl--workspace-log-target-entry ws) :target))
+            ;; Act: a fresh runtime's registry knows nothing.
+            (let ((agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+                  (agent-repl-log-to-file t))
+              (agent-repl--log ws "second instance")
+              ;; Assert
+              (should (equal (plist-get (agent-repl--workspace-log-target-entry ws) :target)
+                             first))
+              (should (equal (file-symlink-p
+                              (expand-file-name ".claude/emacs/emacs.log" project))
+                             first))
+              (should (string-match-p
+                       "second instance"
+                       (with-temp-buffer (insert-file-contents first) (buffer-string))))))
+        (when (and first (file-exists-p first)) (delete-file first))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-workspace-log-mints-under-the-state-logs-directory ()
+  "A minted target lives in ~/.claude-emacs/logs and carries the workspace identity."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((project (make-temp-file "agent-repl-mint-project-" t))
+           (ws "mint-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          ;; Act
+          (progn
+            (agent-repl--ws-put ws :project-dir project)
+            (let ((agent-repl-log-to-file t))
+              (agent-repl--log ws "mint"))
+            ;; Assert
+            (let ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
+              (should (equal (directory-file-name (file-name-directory target))
+                             (directory-file-name (agent-repl--emacs-log-target-directory))))
+              (should (string-prefix-p
+                       (format "agent-repl-%s-emacs-"
+                               (agent-repl--ws-dir-hash-cached ws))
+                       (file-name-nondirectory target)))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-workspace-log-mints-past-an-over-cap-standing-target ()
+  "A standing target at the cap is rotated and a fresh target is minted."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((project (make-temp-file "agent-repl-overcap-project-" t))
+           (ws "overcap-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl-log-size-cap-bytes 64)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+           (first nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put ws :project-dir project)
+            (let ((agent-repl-log-to-file t))
+              (agent-repl--log ws "first instance"))
+            (setq first (plist-get (agent-repl--workspace-log-target-entry ws) :target))
+            (write-region (make-string 200 ?x) nil first nil 'silent)
+            ;; Act
+            (let ((agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+                  (agent-repl-log-to-file t))
+              (agent-repl--log ws "second instance")
+              ;; Assert
+              (let ((second (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
+                (should-not (equal second first))
+                (should (equal (file-symlink-p
+                                (expand-file-name ".claude/emacs/emacs.log" project))
+                               second))
+                (should (file-regular-p first)))))
+        (when (and first (file-exists-p first)) (delete-file first))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-workspace-log-remints-past-a-dangling-link ()
+  "A canonical link naming a deleted target is displaced, never followed."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((project (make-temp-file "agent-repl-dangling-project-" t))
+           (ws "dangling-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+           (first nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put ws :project-dir project)
+            (let ((agent-repl-log-to-file t))
+              (agent-repl--log ws "first instance"))
+            (setq first (plist-get (agent-repl--workspace-log-target-entry ws) :target))
+            (delete-file first)
+            ;; Act
+            (let ((agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+                  (agent-repl-log-to-file t))
+              (agent-repl--log ws "second instance")
+              ;; Assert
+              (should-not (equal (plist-get (agent-repl--workspace-log-target-entry ws) :target)
+                                 first))))
+        (when (and first (file-exists-p first)) (delete-file first))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-workspace-log-standing-target-accepts-a-legacy-temp-target ()
+  "A target an older instance minted into the temporary root is joined, not renamed."
+  ;; Arrange
+  (let* ((project (make-temp-file "agent-repl-legacy-project-" t))
+         (canonical (expand-file-name ".claude/emacs/emacs.log" project))
+         (legacy (make-temp-file agent-repl--emacs-log-target-prefix nil ".log")))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory canonical) t)
+          (make-symbolic-link legacy canonical)
+          ;; Act / Assert
+          (should (equal (agent-repl--emacs-log-standing-target canonical) legacy)))
+      (delete-file legacy)
+      (delete-directory project t))))
+
+(ert-deftest agent-repl-test-workspace-log-standing-target-refuses-a-foreign-target ()
+  "A link naming a file outside this module's naming is not joined."
+  ;; Arrange
+  (let* ((project (make-temp-file "agent-repl-foreign-project-" t))
+         (canonical (expand-file-name ".claude/emacs/emacs.log" project))
+         (foreign (make-temp-file "somebody-elses-" nil ".log")))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory canonical) t)
+          (make-symbolic-link foreign canonical)
+          ;; Act / Assert
+          (should-not (agent-repl--emacs-log-standing-target canonical)))
+      (delete-file foreign)
+      (delete-directory project t))))
+
+(ert-deftest agent-repl-test-log-sweep-deletes-only-unreferenced-old-targets ()
+  "The sweep deletes an old orphan and spares a referenced one and a young one."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((dir (make-temp-file "agent-repl-sweep-" t))
+           (orphan (expand-file-name "agent-repl-emacs-orphan.log" dir))
+           (referenced (expand-file-name "agent-repl-emacs-referenced.log" dir))
+           (young (expand-file-name "agent-repl-emacs-young.log" dir))
+           (unrelated (expand-file-name "somebody-elses.log" dir))
+           (old (time-subtract (current-time) (* 3 86400)))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (dolist (path (list orphan referenced young unrelated))
+              (write-region "x" nil path nil 'silent))
+            (dolist (path (list orphan referenced unrelated))
+              (set-file-times path old))
+            (puthash "key" (list :target referenced) agent-repl--workspace-log-targets)
+            ;; Act
+            (let ((result (agent-repl--sweep-orphan-log-targets dir)))
+              ;; Assert
+              (should (equal (plist-get result :deleted) 1))
+              (should-not (file-exists-p orphan))
+              (should (file-exists-p referenced))
+              (should (file-exists-p young))
+              (should (file-exists-p unrelated))))
+        (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-log-sweep-is-bounded-per-tick ()
+  "One sweep tick deletes at most `agent-repl-log-sweep-max-files' targets."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((dir (make-temp-file "agent-repl-sweep-bound-" t))
+           (old (time-subtract (current-time) (* 3 86400)))
+           (agent-repl-log-sweep-max-files 2)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (dotimes (i 5)
+              (let ((path (expand-file-name (format "agent-repl-emacs-%d.log" i) dir)))
+                (write-region "x" nil path nil 'silent)
+                (set-file-times path old)))
+            ;; Act
+            (let ((result (agent-repl--sweep-orphan-log-targets dir)))
+              ;; Assert
+              (should (equal (plist-get result :deleted) 2))
+              (should (equal (plist-get result :remaining) 3))
+              (should (equal (length (directory-files dir nil "\\.log\\'")) 3))))
+        (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-log-sweep-deletes-a-swept-target-s-generations ()
+  "A swept target's `.N' generations are orphans too and go with it."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((dir (make-temp-file "agent-repl-sweep-gen-" t))
+           (base (expand-file-name "agent-repl-emacs-gen.log" dir))
+           (generation (concat base ".1"))
+           (old (time-subtract (current-time) (* 3 86400)))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (dolist (path (list base generation))
+              (write-region "x" nil path nil 'silent)
+              (set-file-times path old))
+            ;; Act
+            (agent-repl--sweep-orphan-log-targets dir)
+            ;; Assert
+            (should-not (file-exists-p generation)))
+        (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-log-sweep-spares-a-referenced-target-s-generations ()
+  "A live target's retained generations are not swept out from under a reader."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((dir (make-temp-file "agent-repl-sweep-live-gen-" t))
+           (base (expand-file-name "agent-repl-emacs-live.log" dir))
+           (generation (concat base ".1"))
+           (old (time-subtract (current-time) (* 3 86400)))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (dolist (path (list base generation))
+              (write-region "x" nil path nil 'silent)
+              (set-file-times path old))
+            (puthash "key" (list :target base) agent-repl--workspace-log-targets)
+            ;; Act
+            (agent-repl--sweep-orphan-log-targets dir)
+            ;; Assert
+            (should (file-exists-p generation))
+            (should (file-exists-p base)))
+        (delete-directory dir t)))))
