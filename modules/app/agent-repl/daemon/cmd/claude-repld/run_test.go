@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/boot"
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/rollout"
@@ -427,5 +428,96 @@ func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T)
 	want := []string{"AwaitQuiet", "AwaitWritesQuiet"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("the exit's waits = %v, want %v — the answers being written first, then the standing streams' own last push", got, want)
+	}
+}
+
+// stalledSequence is a boot reconciliation that never finishes, which is what
+// an unreachable surviving shim's adoption was: the workspace lock reads held,
+// so shimclient redials it forever.
+type stalledSequence struct {
+	// entered is closed once Run has started, so the test waits on an event
+	// rather than on a clock.
+	entered chan struct{}
+}
+
+func (s *stalledSequence) Run(ctx context.Context) (boot.Report, error) {
+	close(s.entered)
+	<-ctx.Done()
+	return boot.Report{}, ctx.Err()
+}
+
+func (s *stalledSequence) Joining() bool { return false }
+
+// answeringSequence is a reconciliation that completes at once.
+type answeringSequence struct {
+	report boot.Report
+}
+
+func (s *answeringSequence) Run(context.Context) (boot.Report, error) { return s.report, nil }
+func (s *answeringSequence) Joining() bool                            { return false }
+
+// TestReconcileRefusesAStalledBoot pins the watchdog. The listener is bound and
+// daemon.addr published before the reconciliation runs, so a step that never
+// returns leaves the daemon listening on a socket nothing accepts on — pid
+// 31984's accept queue stood at 128/128 for ten hours. Exiting is what lets
+// Emacs respawn it.
+func TestReconcileRefusesAStalledBoot(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	stalled := &stalledSequence{entered: make(chan struct{})}
+
+	// Act.
+	_, err := reconcile(context.Background(), log, stalled, 20*time.Millisecond)
+
+	// Assert.
+	<-stalled.entered
+	if err == nil {
+		t.Fatalf("reconcile = nil error, want a refusal: a boot that never finishes must end the process")
+	}
+}
+
+// TestReconcileDumpsTheGoroutinesOfAStalledBoot pins the evidence the next
+// wedge needs: no debugger can attach on this host, so the blocked
+// goroutine's own stack is the only thing that names the blocking call.
+func TestReconcileDumpsTheGoroutinesOfAStalledBoot(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	stalled := &stalledSequence{entered: make(chan struct{})}
+
+	// Act.
+	_, _ = reconcile(context.Background(), log, stalled, 20*time.Millisecond)
+	<-stalled.entered
+
+	// Assert.
+	var dumped bool
+	for _, record := range log.Records() {
+		if record.Level != dlog.LevelError || record.Operation != "daemon.cmd.boot" {
+			continue
+		}
+		if dump, ok := record.Context["goroutine_dump"].(string); ok && strings.Contains(dump, "goroutine") {
+			dumped = true
+		}
+	}
+	if !dumped {
+		t.Fatalf("records = %+v, want an error daemon.cmd.boot record carrying a goroutine dump", log.Records())
+	}
+}
+
+// TestReconcileAnswersACompletedBoot pins that the watchdog is not in the way
+// of an ordinary boot: the report comes back whole.
+func TestReconcileAnswersACompletedBoot(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	want := boot.Report{HoldsRestored: 3}
+
+	// Act.
+	report, err := reconcile(context.Background(), log, &answeringSequence{report: want}, time.Second)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if report.HoldsRestored != want.HoldsRestored {
+		t.Fatalf("report.HoldsRestored = %d, want %d", report.HoldsRestored, want.HoldsRestored)
 	}
 }

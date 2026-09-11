@@ -67,14 +67,20 @@ type hooks struct {
 	Server func(server.Deps) (server.Server, error)
 	// Serve runs the http server until ctx ends.
 	Serve func(ctx context.Context, l net.Listener, h http.Handler) error
+	// BootStall bounds the whole boot reconciliation; zero means
+	// bootStallBound. It is a seam because the behavior under test is a
+	// reconciliation that never finishes, and a test must not wait out a
+	// production last resort to observe it.
+	BootStall time.Duration
 }
 
 // productionHooks are the real seams.
 func productionHooks() hooks {
 	return hooks{
-		Graph:  buildGraph,
-		Server: server.New,
-		Serve:  serve,
+		Graph:     buildGraph,
+		Server:    server.New,
+		Serve:     serve,
+		BootStall: bootStallBound,
 	}
 }
 
@@ -131,6 +137,13 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"joining":    joining,
 		"state_root": layout.Dir(),
 	})
+
+	// SIGQUIT IS TAKEN OVER BEFORE ANYTHING CAN WEDGE. Emacs launches the
+	// daemon with its stderr discarded, so the runtime's own SIGQUIT dump goes
+	// nowhere: pid 31984 spent ten hours listening and accepting nothing, and
+	// the one gesture that would have named its blocking call produced no
+	// evidence at all. The dump now lands in the run log.
+	defer armGoroutineDump(log)()
 
 	// PPROF BEFORE ANY DEPENDENCY. A wildcard or routable bind is refused here
 	// rather than opened, and an empty setting is OFF, which is the default.
@@ -274,7 +287,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if err != nil {
 		return fmt.Errorf("claude-repld: build the boot sequence: %w", err)
 	}
-	report, err := sequence.Run(ctx)
+	report, err := reconcile(ctx, log, sequence, h.BootStall)
 	if err != nil {
 		return err
 	}
@@ -336,7 +349,71 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"address": claim.Address(),
 		"joining": joining,
 	})
-	return h.Serve(serving, claim.Listener(), server.H2C(srv, log))
+	// THE ACCEPT LOOP IS WRAPPED, and its errors are the daemon's own. A
+	// listener that stops accepting while this process keeps running is a
+	// daemon that is listening and dead — the state Emacs cannot tell from a
+	// healthy one, because daemon.addr still names a bound port — so an accept
+	// error is reported at ERROR, a transient one is retried with backoff, and
+	// anything else ends the serve and the process with it.
+	if err := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log)); err != nil {
+		log.Error("daemon.cmd.serve", "the daemon stopped serving its listener", dlog.Context{
+			"address": claim.Address(),
+			"error":   err.Error(),
+		})
+		return err
+	}
+	return nil
+}
+
+// bootStallBound is the LAST RESORT on the whole boot reconciliation.
+//
+// The listener is bound and daemon.addr published before the reconciliation
+// runs and http.Server.Serve is not reached until after it, so a step that
+// blocks forever is a daemon that listens and accepts nothing: pid 31984 held
+// its accept queue at 128/128 for ten hours while Emacs and curl timed out on
+// connect. Every step the sequence runs is itself bounded — boot.DefaultAdoptBound
+// covers the one that produced that wedge — so this covers a step whose bound
+// somebody forgot, and its expiry is a dumped stack rather than a guess.
+//
+// Sized above the worst LEGITIMATE boot: a handful of workspaces adopted
+// serially at boot.DefaultAdoptBound (10s) apiece, plus the manifest, the
+// holds, the orphan closes and the merge recovery, all of which are local
+// sqlite work measured in milliseconds. 90s is that with room over it, and it
+// is never paid on a healthy boot.
+const bootStallBound = 90 * time.Second
+
+// reconcile runs the boot reconciliation under a watchdog, so a step that never
+// returns ends the PROCESS instead of leaving it listening on a socket nothing
+// accepts on. Emacs respawns a daemon that exited; it cannot tell a wedged one
+// from a healthy one.
+//
+// The dump is what makes the next one diagnosable: the blocked goroutine's own
+// stack names the call, which on this host no debugger can recover (dlv and
+// lldb both hang on task_for_pid).
+func reconcile(ctx context.Context, log dlog.Logger, sequence boot.Sequence, bound time.Duration) (boot.Report, error) {
+	if bound <= 0 {
+		bound = bootStallBound
+	}
+	type outcome struct {
+		report boot.Report
+		err    error
+	}
+	finished := make(chan outcome, 1)
+	go func() {
+		report, err := sequence.Run(ctx)
+		finished <- outcome{report: report, err: err}
+	}()
+	watchdog := time.NewTimer(bound)
+	defer watchdog.Stop()
+	select {
+	case done := <-finished:
+		return done.report, done.err
+	case <-watchdog.C:
+		recordGoroutineDump(log, "daemon.cmd.boot",
+			"the boot reconciliation did not finish within its bound; exiting rather than listening on a socket nothing accepts",
+			dlog.Context{"bound_ms": bound.Milliseconds()})
+		return boot.Report{}, fmt.Errorf("claude-repld: the boot reconciliation did not finish within %s", bound)
+	}
 }
 
 // openState opens the state client. A JOINING daemon opens it READ-ONLY: until
