@@ -111,7 +111,13 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			continue
 		}
 		state, err := s.probe(s.deps.RunDir, ws.Dir)
-		socketPath := s.deps.Layout.ShimSocket(string(ws.ID))
+		// THE SOCKET PATH IS THE SHIM'S CURRENT GENERATION, not the layout's
+		// base name. A relaunch moved the workspace's shim onto
+		// `<base>.nN.sock` and the counter that minted N lived in the last
+		// daemon's memory, so a boot that dials the base path dials a path the
+		// survivor has not held since; its lock still reads HELD, so the
+		// redial ladder never stops. See shimsocket.NewestLive.
+		socketPath, socket, socketErr := shimsocket.NewestLive(s.socketProbe, s.deps.Layout.ShimSocket(string(ws.ID)))
 		// THE SOCKET IS THE SECOND KERNEL FACT. A lock that reads FREE says
 		// no shim CLAIMS this conversation; it does not say no shim is
 		// LISTENING for it. A survivor still bound to the path is reachable,
@@ -121,7 +127,6 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 		// and the turn was lost to a shim nobody adopted. So a live listener
 		// is adopted whatever the lock says, and the disagreement is recorded
 		// rather than resolved silently.
-		socket, socketErr := s.socketProbe(socketPath)
 		if state == sessionlock.StateFree && socket == shimsocket.StateLive {
 			log.Warn("daemon.boot.adopt", "the workspace lock reads free but a shim is listening; adopting the survivor",
 				dlog.Context{
