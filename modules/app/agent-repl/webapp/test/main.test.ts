@@ -258,9 +258,13 @@ afterEach(() => {
   addressPage("");
 });
 
-describe("the boot", () => {
-  // This first full-graph mount reached 872ms under coverage instrumentation;
-  // keep its host-contention budget local rather than raising the 850ms global.
+// These full-graph boot cases repeatedly reached 1.5s under the isolated
+// Istanbul coverage workers while completing normally. Their five-second
+// local bound keeps the 850ms unit-test default intact and still detects a
+// boot that stops making progress.
+const coverageBootTimeoutMS = 5_000;
+
+describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
   test("mounts every component on the shell element that names it", async () => {
     await bootMain();
 
@@ -270,7 +274,7 @@ describe("the boot", () => {
     expect(mounts.holdTray.mock.calls[0]?.[0]).toBe(document.getElementById("hold-tray"));
     expect(mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
     expect(mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
-  }, 1_500);
+  });
 
   test("has the ClientLog-forwarding logger installed before the first mount", async () => {
     await bootMain();
@@ -421,7 +425,7 @@ describe("the boot", () => {
   });
 });
 
-describe("a boot that fails", () => {
+describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
   test("files boot_failed on the overlay when adoption never completes", async () => {
     adopt = () => Promise.reject(new Error("adoption refused"));
 
