@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 
+	"claude-repld/internal/boot"
 	"claude-repld/internal/sessionlock"
 	"os"
 	"path/filepath"
@@ -212,5 +213,59 @@ func TestAdoptedDeathWitnessSurfacesACouldNotTellProbe(t *testing.T) {
 	// Assert.
 	if free || err == nil {
 		t.Fatalf("witness() = %t, %v, want false and the probe error", free, err)
+	}
+}
+
+// TestResolveAdoptBoundDefaultsToTheProductionBound pins that an unset knob
+// leaves the production last resort in force.
+func TestResolveAdoptBoundDefaultsToTheProductionBound(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveAdoptBound("")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveAdoptBound(\"\") = error %v", err)
+	}
+	if got != boot.DefaultAdoptBound {
+		t.Fatalf("resolveAdoptBound(\"\") = %v, want %v", got, boot.DefaultAdoptBound)
+	}
+}
+
+// TestResolveAdoptBoundRefusesAMalformedValue pins that a knob which cannot be
+// read is a refusal: a run that silently ignored it would report a bound it
+// never used.
+func TestResolveAdoptBoundRefusesAMalformedValue(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveAdoptBound("soon")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("resolveAdoptBound(\"soon\") = nil error, want a refusal")
+	}
+}
+
+// TestResolveAdoptBoundRefusesANonPositiveValue pins the other refusal: a zero
+// bound would make every adoption overrun before it began.
+func TestResolveAdoptBoundRefusesANonPositiveValue(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveAdoptBound("0s")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("resolveAdoptBound(\"0s\") = nil error, want a refusal")
+	}
+}
+
+// TestResolveAdoptBoundReadsADuration pins the ordinary case.
+func TestResolveAdoptBoundReadsADuration(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveAdoptBound("250ms")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveAdoptBound(\"250ms\") = error %v", err)
+	}
+	if got != 250*time.Millisecond {
+		t.Fatalf("resolveAdoptBound(\"250ms\") = %v, want 250ms", got)
 	}
 }
