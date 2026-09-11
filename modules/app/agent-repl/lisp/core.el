@@ -1554,7 +1554,7 @@ newer durable one can tell from the log which is which."
              (plist-get entry :origin)
              (plist-get entry :id-scheme))
           (agent-repl--warn
-           agent-repl--global-log-scope
+           '(:agent-repl-central "the sink-open decision outlived its workspace's routability")
            "elisp.core.sink-opened-unattributed: workspace=%S sink=%s target=%s target_origin=%s id_scheme=%s"
            ws "emacs.log"
            (plist-get entry :target)
@@ -1654,6 +1654,132 @@ the day of invisible records that keying by name cost."
                 (unless installed
                   (when (file-exists-p target)
                     (delete-file target)))))))))))
+
+;;; Orphaned log-target sweep
+
+(defcustom agent-repl-log-sweep-max-files 200
+  "Most orphaned Emacs log targets one sweep tick deletes.
+The sweep runs in the editor's own process, so it is BOUNDED rather than
+exhaustive: 22,112 orphans had accumulated in the temporary root by
+2026-09-11, and unlinking them all in one tick would stall the command loop.
+Whatever the tick does not reach is reached by the next Emacs instance's."
+  :type 'integer
+  :group 'agent-repl)
+
+(defcustom agent-repl-log-sweep-min-age-seconds 86400
+  "Age an orphaned Emacs log target must reach before the sweep deletes it.
+One day.  A target younger than this may belong to an Emacs instance that
+has not yet written the canonical link a sweep would read, so age is what
+keeps the sweep from deleting a live sink out from under its owner."
+  :type 'integer
+  :group 'agent-repl)
+
+(defconst agent-repl--emacs-log-target-re
+  (concat "\\`" (regexp-quote agent-repl--emacs-log-target-prefix)
+          ".*\\.log\\(\\.[0-9]+\\)?\\'")
+  "Matches a basename this module minted into the OS temporary root.
+The optional generation suffix is included so a swept target does not leave
+its `.1'-`.5' generations behind as a second class of orphan.")
+
+(defun agent-repl--log-target-generation-base (path)
+  "Return PATH with a trailing `.N' log generation suffix removed.
+A generation is referenced exactly when its current target is, because the
+canonical link names the current target alone."
+  (if (string-match "\\`\\(.*\\.log\\)\\.[0-9]+\\'" path)
+      (match-string 1 path)
+    path))
+
+(defun agent-repl--referenced-log-targets ()
+  "Return a hash table of every log target a canonical link or this runtime names.
+Both sources are consulted because either alone is incomplete: the in-memory
+registry knows only this Emacs instance's sinks, and the canonical links know
+only workspaces this instance has registered.  A target named by either is
+NOT an orphan."
+  (let ((referenced (make-hash-table :test #'equal)))
+    (maphash (lambda (_key entry)
+               (when-let ((target (plist-get entry :target)))
+                 (puthash target t referenced)))
+             agent-repl--workspace-log-targets)
+    (dolist (ws (and (fboundp 'agent-repl--ws-all-names)
+                     (agent-repl--ws-all-names)))
+      (when (agent-repl--ws-log-routable-p ws)
+        (let* ((dir (plist-get (agent-repl--workspace-log-identity ws) :project-dir))
+               (dest (file-symlink-p (agent-repl--workspace-emacs-log-path dir))))
+          (when (stringp dest)
+            (puthash dest t referenced)))))
+    referenced))
+
+(defun agent-repl--sweep-orphan-log-targets (&optional directory)
+  "Delete unreferenced, day-old Emacs log targets in DIRECTORY, bounded.
+DIRECTORY defaults to `temporary-file-directory', which is where every
+target minted before the durable-directory change landed.  A file is deleted
+only when all three hold: its basename is one this module mints, no
+canonical link and no in-memory sink names it
+\\(`agent-repl--referenced-log-targets'), and it is older than
+`agent-repl-log-sweep-min-age-seconds'.  At most
+`agent-repl-log-sweep-max-files' are deleted per call.
+
+Returns a plist of the counts it records."
+  (let* ((dir (file-name-as-directory
+               (expand-file-name (or directory temporary-file-directory))))
+         (referenced (agent-repl--referenced-log-targets))
+         (cutoff (- (float-time) agent-repl-log-sweep-min-age-seconds))
+         (examined 0) (deleted 0) (kept-referenced 0) (kept-young 0)
+         (failed 0) (remaining 0))
+    (dolist (name (or (ignore-errors (directory-files dir nil
+                                                      agent-repl--emacs-log-target-re
+                                                      t))
+                      nil))
+      (let ((path (expand-file-name name dir)))
+        (cond
+         ((>= deleted agent-repl-log-sweep-max-files)
+          (setq remaining (1+ remaining)))
+         (t
+          (setq examined (1+ examined))
+          (cond
+           ((gethash (agent-repl--log-target-generation-base path) referenced)
+            (setq kept-referenced (1+ kept-referenced)))
+           ((let ((attrs (file-attributes path)))
+              (or (null attrs)
+                  (file-symlink-p path)
+                  (> (float-time (file-attribute-modification-time attrs)) cutoff)))
+            (setq kept-young (1+ kept-young)))
+           (t
+            (condition-case err
+                (progn (delete-file path)
+                       (setq deleted (1+ deleted)))
+              (error
+               (setq failed (1+ failed))
+               (agent-repl--warn
+                '(:agent-repl-central "the orphan log-target sweep spans workspaces")
+                "elisp.core.log-sweep-delete-failed: path=%s error=%S" path err)))))))))
+    (agent-repl--info
+     '(:agent-repl-central "the orphan log-target sweep spans workspaces")
+     (concat "elisp.core.log-sweep: directory=%s examined=%d deleted=%d "
+             "kept_referenced=%d kept_young=%d failed=%d remaining=%d")
+     dir examined deleted kept-referenced kept-young failed remaining)
+    (list :examined examined :deleted deleted :kept-referenced kept-referenced
+          :kept-young kept-young :failed failed :remaining remaining)))
+
+(defcustom agent-repl-log-sweep-idle-seconds 30
+  "Idle seconds before the startup orphan-log-target sweep runs.
+The sweep is scheduled on an IDLE timer rather than run from the startup
+hook: the hook runs before the first redisplay, and a sweep that unlinks
+files there would hold the frame off screen to tidy a directory."
+  :type 'integer
+  :group 'agent-repl)
+
+(defun agent-repl-schedule-orphan-log-sweep ()
+  "Arm the one-shot idle timer that sweeps orphaned Emacs log targets."
+  (prog1 (run-with-idle-timer agent-repl-log-sweep-idle-seconds nil
+                              #'agent-repl--sweep-orphan-log-targets)
+    (agent-repl--info
+     '(:agent-repl-central "the orphan log-target sweep spans workspaces")
+     "elisp.core.log-sweep-scheduled: idle=%s max_files=%s min_age_seconds=%s"
+     agent-repl-log-sweep-idle-seconds
+     agent-repl-log-sweep-max-files
+     agent-repl-log-sweep-min-age-seconds)))
+
 
 (defun agent-repl--secure-log-file-mode (path)
   "Require PATH to be a regular file and force its permissions to 0600.
