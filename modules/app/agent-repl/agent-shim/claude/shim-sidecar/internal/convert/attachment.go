@@ -193,7 +193,7 @@ func diagnosticSeverity(s string) conversationv1.AgentDiagnosticSeverity {
 func (c *Converter) injectedMemory(attachment map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
 	content := obj(attachment["content"])
 	path := firstNonEmpty(str(attachment["path"]), str(content["path"]))
-	unitID := "context:memory:" + env.uuid
+	unitID := ContextInjectedUnitID("memory", agent, env.uuid)
 
 	c.log.With(at.ctxFor("context-injected")).With(logging.Context{ActivityID: unitID, UpsertKey: ActivityKey(unitID)}).
 		LogVerbose("memory file %q injected", path)
@@ -259,7 +259,7 @@ func (c *Converter) contextBudgetWarning(attachment map[string]any, at Attributi
 
 // injectedSkills carries skills discovered or invoked WITHOUT a tool call.
 func (c *Converter) injectedSkills(kind string, attachment map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	unitID := "context:skills:" + env.uuid
+	unitID := ContextInjectedUnitID("skills", agent, env.uuid)
 	injected := &conversationv1.AgentInjectedSkills{}
 
 	for _, raw := range list(attachment["skills"]) {
