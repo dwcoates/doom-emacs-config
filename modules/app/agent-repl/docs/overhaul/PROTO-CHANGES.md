@@ -608,4 +608,17 @@ row is the record of the run.
 Also this session, comment-only: frontend.v1 RosterRow.attention states both
 clears (selection, and the last open ask settling).
 
+## Logging plain-data fields (2026-09-10/11)
+
+- agentrepl.v1 ClientLogRecord gains `timestamp` (8, the client's own RFC 3339
+  instant; unset = daemon arrival clock), `verbose` (9, the record's own
+  verbosity class), and `oneof runtime { webapp = 10; sidecar = 11 }` (which
+  client wrote it, so the daemon files it in that runtime's per-workspace
+  sink; unset = webapp). Why: every forwarded record persisted with the
+  arrival clock and a recomputed class, and `sidecar.log` was never written
+  because the daemon hardcoded the webapp.
+- agentrepl.v1 DaemonHealth gains `DaemonIdentity identity` (instance_id, pid,
+  build_sha). Why: Emacs's restart verb answered "completed" on a link cycle
+  with no new daemon; completion now requires observing a different instance.
+
 Claude-Session: https://claude.ai/code/session_01MydqUQAkLfSwBAz9wL5scJ
