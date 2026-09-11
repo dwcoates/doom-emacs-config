@@ -624,7 +624,7 @@ func TestManifestSaysTheLaunchMethodOnTheFocusLine(t *testing.T) {
 		Title: "fixture",
 		Runs: []ManifestRun{{
 			Index:       1,
-			Method:      MethodDirectRestore,
+			Method:      MethodOpenBackground,
 			FrontBefore: "Google Chrome",
 			FrontAfter:  "Emacs",
 			Disturbed:   true,
@@ -644,7 +644,7 @@ func TestManifestSaysTheLaunchMethodOnTheFocusLine(t *testing.T) {
 	// Assert.
 	for _, line := range strings.Split(string(body), "\n") {
 		if strings.Contains(line, "FOCUS MOVED") {
-			if !strings.Contains(line, string(MethodDirectRestore)) {
+			if !strings.Contains(line, string(MethodOpenBackground)) {
 				t.Errorf("the focus line %q does not name the launch method", line)
 			}
 			return
