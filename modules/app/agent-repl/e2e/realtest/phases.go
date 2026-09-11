@@ -145,23 +145,78 @@ type Phases struct {
 	DaemonPath string
 }
 
-// ReadPhases reads a cold start's phases out of the module log.
+// ReadPhases reads a cold start's phases out of the Emacs log sinks.
 //
-// It reads from `offset` — the snapshot byte offset — and keeps only records at
-// or after `spawnedAt`, which together bound the run exactly: the offset
-// excludes everything a previous Emacs wrote, and the timestamp excludes a
+// THE GLOBAL MODULE LOG IS NOT ENOUGH. The workspace-agnostic markers
+// (module-loaded, daemon-spawned, link-up, roster-subscribed, first-roster)
+// land in `agent-repl-log-file-name`, but the two PER-WORKSPACE markers this
+// run asserts — `tab-open` and the panel's `watch-load: load-changed` — are
+// workspace-owned records, and lisp/core.el's `agent-repl--do-log-to-file`
+// routes those to the workspace's own canonical `.claude/emacs/emacs.log` sink,
+// never to the global log. A reader that opened only the global log would find
+// every startup timing except the two it exists to assert, which is exactly how
+// run 3 reported a startup that had drawn every tab as "no tab drawn".
+//
+// So it reads every Emacs sink: the global module log and each workspace's
+// `emacs.log`. Each is resolved through `resolveReads`, which takes its read
+// offset from the resolved target's inode rather than from the symlink path, so
+// a workspace sink whose target changed between the run-start snapshot and this
+// read (a new instance appended to the standing target, minted a fresh one, or
+// a cap rotation replaced it) is still read from the right place instead of
+// from past the end of a file this run never wrote (row 28 of the judgement
+// ledger).
+//
+// Only records at or after `spawnedAt` are kept, which together with the
+// snapshot offset bounds the run exactly: the offset excludes everything a
+// previous Emacs wrote to the same bytes, and the timestamp excludes a
 // straggler the outgoing process wrote after the offset was taken.
-func ReadPhases(moduleLog string, offset int64, spawnedAt time.Time) (Phases, error) {
+func ReadPhases(sources []Source, snap Snapshot, spawnedAt time.Time) (Phases, error) {
 	phases := Phases{SpawnedAt: spawnedAt}
+	for _, src := range sources {
+		if !isEmacsPhaseSource(src) {
+			continue
+		}
+		reads, _, err := resolveReads(src, snap)
+		if err != nil {
+			return phases, err
+		}
+		for _, r := range reads {
+			if err := readPhaseRecords(&phases, r.path, r.offset, spawnedAt); err != nil {
+				return phases, err
+			}
+		}
+	}
+	return phases, nil
+}
 
-	file, err := os.Open(moduleLog)
+// isEmacsPhaseSource is true for the two sinks the startup markers land in: the
+// module's global sink and each workspace's own `emacs.log`. The other four
+// per-workspace sinks and the two service sinks carry no `elisp.*` marker, so
+// reading them here would be wasted work on files that reach gigabytes.
+func isEmacsPhaseSource(src Source) bool {
+	return src.Name == "emacs.global" || src.Name == "workspace.emacs.log"
+}
+
+// readPhaseRecords reads ONE file from `offset` to end and folds its markers
+// into `phases`.
+//
+// A file that does not exist is not an error: an early poll runs before the
+// module log exists, and a workspace whose sink holds no records yet has no
+// file behind its link. `FirstRecord` is the earliest record across every file
+// read, which on a cold start is the global log's first line — the earliest
+// evidence the process reached lisp at all.
+func readPhaseRecords(phases *Phases, path string, offset int64, spawnedAt time.Time) error {
+	file, err := os.Open(path)
 	if err != nil {
-		return phases, fmt.Errorf("open the module log %s to read the startup phases: %w", moduleLog, err)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("open the Emacs log %s to read the startup phases: %w", path, err)
 	}
 	defer file.Close()
 	if offset > 0 {
 		if _, err := file.Seek(offset, 0); err != nil {
-			return phases, fmt.Errorf("seek the module log to the snapshot offset %d: %w", offset, err)
+			return fmt.Errorf("seek %s to the snapshot offset %d: %w", path, offset, err)
 		}
 	}
 
@@ -183,7 +238,7 @@ func ReadPhases(moduleLog string, offset int64, spawnedAt time.Time) (Phases, er
 		if err != nil || at.Before(spawnedAt) {
 			continue
 		}
-		if phases.FirstRecord.IsZero() {
+		if phases.FirstRecord.IsZero() || at.Before(phases.FirstRecord) {
 			phases.FirstRecord = at
 		}
 		for _, m := range markers {
@@ -220,9 +275,9 @@ func ReadPhases(moduleLog string, offset int64, spawnedAt time.Time) (Phases, er
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return phases, fmt.Errorf("read the module log %s: %w", moduleLog, err)
+		return fmt.Errorf("read the Emacs log %s: %w", path, err)
 	}
-	return phases, nil
+	return nil
 }
 
 // Measurement is one phase's elapsed time from spawn.
