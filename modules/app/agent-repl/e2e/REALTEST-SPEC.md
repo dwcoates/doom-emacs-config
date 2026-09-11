@@ -143,10 +143,15 @@ standing here having it.
 ## Input is real key events
 
 `e2e/realtest/keydriver.swift`, compiled with `swiftc` into the run directory,
-posts key events with `CGEventPostToPid` addressed to the Emacs pid. The event
-lands on that process's own input queue without the window server making it
-frontmost, which is what lets a run drive Emacs while the owner keeps typing
-somewhere else.
+posts key events with `CGEventPostToPid` addressed to the Emacs pid. A
+no-activation post reached nothing in run 3: a background app launched hidden
+(`open -gj`) has no key window for AppKit to dispatch the event to, so it was
+dropped with no error. The helper therefore activates the target Emacs for the
+instant of the keypress, posts the event, and restores the previously frontmost
+application. That momentary focus is the ONE place a realtest brings Emacs
+forward, bounded to the keypress and reversed immediately, and it is distinct
+from startup, which never activates Emacs (docs/REALTEST-JUDGEMENT-CALLS.md,
+realtest 1, row 30; lead verifies delivery and restore on the next run).
 
 Elisp NEVER performs an act. An elisp call that performs the act tests the
 function and says nothing about whether the chord reaches it, which is exactly
