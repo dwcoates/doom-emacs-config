@@ -207,10 +207,10 @@ row 40). Realtest 1 therefore reads the startup in two windows:
 
 - **Hidden** — every phase up through `tab-drawn`, plus `webview-armed`.
   Nothing here requires a painted panel.
-- **Show** — `panel-painted` and `total`, read only AFTER the key self-test
-  (below) brings Emacs forward for the first time. That activation is the
-  focus edge the parked queue was waiting on, and once it fires, panels are
-  asserted to paint within their own ceiling.
+- **Show** — `focus-edge` and `panel-painted`, read only AFTER the key
+  self-test (below) brings Emacs forward for the first time. That activation
+  IS `focus-edge` — the focus edge the parked queue was waiting on — and once
+  it fires, panels are asserted to paint within their own ceiling.
 
 | phase | window | ends at |
 |---|---|---|
@@ -223,17 +223,51 @@ row 40). Realtest 1 therefore reads the startup in two windows:
 | `first-roster` | hidden | `elisp.roster.reconcile:` |
 | `tab-drawn` | hidden | `elisp.roster.tab-open:`, per workspace |
 | `webview-armed` | hidden | the LARGEST `queued=N` seen on `elisp.webview-recovery.precreate-all:` or `precreate-parked`, reaching the number of open workspaces. Both markers are written on the module's central sink with no per-workspace attribution — the queue reports a COUNT, not names — so this is judged run-wide rather than per workspace the way `tab-drawn` is |
+| `total` (startup-usable) | hidden | the LATEST of `tab-drawn` (every workspace), `link-up`, `roster-subscribed`, `first-roster` and `webview-armed`. This is the number the owner actually waits on while the editor launches hidden |
+| `focus-edge` | **show** | `elisp.webview-recovery.precreate-drained-on-focus`: the harness bringing Emacs forward for the key self-test, which is also what releases the parked pre-creation queue |
 | `panel-painted` | **show** | `elisp.frontend.watch-load: load-changed`, per workspace — the page's own account of its load finishing — OR `elisp.webview-recovery.precreate-created ws=NAME reason=focused`, the parked drain resuming on the focus edge and mounting directly. The second marker carries no `workspace_id` either (same central sink as `webview-armed`), so it is matched by the workspace's registered NAME rather than its daemon id |
-| `total` | **show** | the last marker of the run — now "spawn to shown-and-painted", not "spawn to hidden-usable" |
 
 Two rules that are easy to get wrong:
 
-- **Every phase is measured FROM SPAWN**, not from the phase before it. The user
-  is waiting from the moment they launched the editor, so a phase that is fast
-  in isolation but starts late is exactly as slow to them.
+- **Every phase except `panel-painted` is measured FROM SPAWN**, not from the
+  phase before it. The user is waiting from the moment they launched the
+  editor, so a phase that is fast in isolation but starts late is exactly as
+  slow to them.
 - **The log is what is read, never a poll.** A poll answers "by the time I
   asked, it had happened", which carries no timestamp. Emacs is polled only to
   decide WHEN TO STOP WAITING; every number reported comes from a record.
+
+## Latency is always an intrinsic log-edge delta, never harness overhead (owner ruling, 2026-09-11)
+
+A realtest launches Emacs hidden (`open -gj`) and only brings it forward
+partway through the run, for the key self-test, deliberately protecting the
+owner's focus for as long as possible. The gap between "Emacs is spawned
+hidden" and "the harness decides to show it" is an artifact of how THIS
+HARNESS is built, not something the owner ever experiences when they launch
+the editor themselves — and it is entirely arbitrary, since nothing about the
+product requires the harness to wait as long as it does before revealing the
+frame.
+
+So every latency figure this realtest reports is the delta between two REAL,
+instrumented log edges — never a delta that passes through the harness's own
+hidden-to-shown gap:
+
+- **`total` (startup-usable)** is spawn to the latest of the five real hidden-
+  window edges (`tab-drawn`, `link-up`, `roster-subscribed`, `first-roster`,
+  `webview-armed`). It is measured from spawn because spawn is itself a real
+  edge — the process actually starting — and every one of those five edges
+  really did happen by then, with no reveal-the-frame wait folded in.
+- **`panel-painted`** is `focus-edge` to the load, NOT spawn to the load. A
+  panel cannot start loading before the harness reveals Emacs, so a
+  spawn-based number would be "the panel's real paint cost" PLUS "however
+  long the harness felt like waiting first" — and the second term is not
+  latency, it is the harness's own overhead. Reporting it as intrinsic
+  (`focus-edge` to load, observed around 0.4s) instead of inflated (spawn to
+  load, which bakes in the ~6s reveal wait) is what this rule requires.
+
+There is deliberately no "total (spawn to shown-and-painted)" row: that
+number is exactly the harness's hidden-to-shown gap plus the panel's real
+cost, restated as if it were one latency, and it is never reported.
 
 `daemon-spawned` reports whether the daemon was spawned or adopted because those
 are different work, and comparing their times would be comparing different
