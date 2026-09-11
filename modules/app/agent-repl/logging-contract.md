@@ -17,9 +17,14 @@ workspace:
 - `<workspace>/.claude/emacs/sidecar.log`
 
 Each link points to an external target created and opened by the runtime that
-owns the sink. Emacs targets live under the operating system's temporary
-directory; daemon-owned targets live beside `daemon.run.log` under the daemon
-state root's `logs/` directory. The runtime must never follow a workspace-provided
+owns the sink. Emacs-owned and daemon-owned targets alike live beside
+`daemon.run.log` under the state root's `logs/` directory: an Emacs target a
+person is asked to read must not sit where the operating system may sweep it
+or where a per-launcher `TMPDIR` moves it. Emacs targets minted into the
+operating system's temporary directory before that rule are appended to
+wherever a canonical link still names one, under the standing-target rule
+below; nothing is renamed, and a bounded idle sweep removes only the
+unreferenced ones left behind there. The runtime must never follow a workspace-provided
 regular file or symlink as its durable sink. Link replacement is atomic. An
 owned target is reused from the runtime's in-memory workspace map during that
 runtime lifetime. After a runtime restart, the runtime APPENDS to the target
