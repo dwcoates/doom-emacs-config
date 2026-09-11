@@ -894,16 +894,14 @@ type wlChild struct {
 // The slot therefore covers the whole area, and is released at test cleanup,
 // after the world's own teardown has run.
 //
-// SIZED AT THREE, and the figure below is the measurement it is sized on.
+// SIZED AT TWO, and the figure below is the measurement it is sized on.
 // Against its neighbours at `-parallel 8` on a 16-core host: cap 2 took 31.2s,
-// cap 3 took 20.7s, and cap 4 at `-parallel 12` lost a test. Three is the
-// fastest setting measured green.
-//
-// (This comment read "Sized at 2 …" until 2026-09-09, describing a value the
-// constant has not held since the cap landed — the same kind of stale
-// derivation that made WebappLayerTimeout fail green areas for a year of runs.
-// A number whose stated basis contradicts it cannot be checked by anyone.)
-const wlMaxConcurrentAreas = 3
+// cap 3 took 20.7s, and cap 4 at `-parallel 12` lost a test. The faster cap 3
+// later let a vitest worker's source-transform RPC time out during a full
+// package run while the child itself exited after 10.8s. Two keeps the heavy
+// node worker pools below that saturation point; the extra package wall is
+// queueing before a world's own context starts, as required above.
+const wlMaxConcurrentAreas = 2
 
 var wlAreaSlots = make(chan struct{}, wlMaxConcurrentAreas)
 
