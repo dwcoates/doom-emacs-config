@@ -2,9 +2,11 @@ package daemonclient
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -329,5 +331,192 @@ func TestReadyRejectsANonLoopbackDaemonAddress(t *testing.T) {
 	// Assert.
 	if ready {
 		t.Fatalf("Ready = true for a non-loopback daemon address")
+	}
+}
+
+// deadPID spawns a trivial child process and waits for it to exit, reaping
+// it. The returned pid then names no live process for the rest of the test —
+// unlike an arbitrary large number, which risks colliding with a real process
+// on a loaded machine, cmd.Wait's reap is a deterministic "this pid is gone".
+func deadPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", "-c", "true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run a throwaway child to reap: %v", err)
+	}
+	return cmd.Process.Pid
+}
+
+// writeAdvertisement writes a daemon.addr payload with an optional pid line,
+// mirroring the on-disk shape daemonaddr.Publish writes.
+func writeAdvertisement(t *testing.T, dir, address string, pid int) {
+	t.Helper()
+	payload := address + "\npid=" + strconv.Itoa(pid) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "daemon.addr"), []byte(payload), 0o600); err != nil {
+		t.Fatalf("write daemon.addr: %v", err)
+	}
+}
+
+// dialUnavailable is the connect-go shape a real dial/connection-refused
+// failure takes: client.go's own transport wraps such a failure as
+// CodeUnavailable (see connectrpc.com/connect's client.go and
+// duplex_http_call.go), which is exactly the class classifyForward acts on.
+func dialUnavailable() error {
+	return connect.NewError(connect.CodeUnavailable, errors.New("dial tcp 127.0.0.1:9: connect: connection refused"))
+}
+
+func TestClassifyForwardMarksADeadAdvertiserPidAsTargetNotThere(t *testing.T) {
+	// Arrange: daemon.addr still names the pid this attempt dialed, but that
+	// pid is now dead — the daemon exited or was replaced without withdrawing.
+	stateDir := t.TempDir()
+	pid := deadPID(t)
+	writeAdvertisement(t, stateDir, "127.0.0.1:9999", pid)
+	client := New(stateDir)
+
+	// Act.
+	err := client.classifyForward(dialUnavailable(), "127.0.0.1:9999", pid, true)
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("classifyForward against a dead advertiser pid = %v, want ErrForwardTargetNotThere", err)
+	}
+}
+
+func TestClassifyForwardMarksAChangedAdvertisementAsTargetNotThere(t *testing.T) {
+	// Arrange: a replacement daemon published a DIFFERENT address after this
+	// attempt started dialing the old one.
+	stateDir := t.TempDir()
+	writeAdvertisement(t, stateDir, "127.0.0.1:8888", os.Getpid())
+	client := New(stateDir)
+
+	// Act.
+	err := client.classifyForward(dialUnavailable(), "127.0.0.1:9999", os.Getpid(), true)
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("classifyForward against a changed advertisement = %v, want ErrForwardTargetNotThere", err)
+	}
+}
+
+func TestClassifyForwardMarksAVanishedAdvertisementAsTargetNotThere(t *testing.T) {
+	// Arrange: daemon.addr itself is gone by the time the failure is
+	// classified — the "addr file is absent ... since the attempt began" half
+	// of the invariant.
+	stateDir := t.TempDir()
+	client := New(stateDir)
+
+	// Act.
+	err := client.classifyForward(dialUnavailable(), "127.0.0.1:9999", os.Getpid(), true)
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("classifyForward against a vanished advertisement = %v, want ErrForwardTargetNotThere", err)
+	}
+}
+
+func TestClassifyForwardKeepsAnAliveUnreachableTargetAsARealFailure(t *testing.T) {
+	// Arrange: daemon.addr still names the exact address and a still-live pid
+	// this attempt dialed — a genuinely stuck daemon, not a restart.
+	stateDir := t.TempDir()
+	pid := os.Getpid()
+	writeAdvertisement(t, stateDir, "127.0.0.1:9999", pid)
+	client := New(stateDir)
+	dialErr := dialUnavailable()
+
+	// Act.
+	err := client.classifyForward(dialErr, "127.0.0.1:9999", pid, true)
+
+	// Assert.
+	if errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("classifyForward against a live, unchanged advertiser = %v, want the failure left unchanged", err)
+	}
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("classifyForward changed the underlying error: got %v, want %v unchanged", err, dialErr)
+	}
+}
+
+func TestClassifyForwardIgnoresNonDialFailures(t *testing.T) {
+	// Arrange: an app-level refusal, not a connection/dial failure, against a
+	// dead pid. Only connection/dial failures earn the not-there check.
+	stateDir := t.TempDir()
+	pid := deadPID(t)
+	writeAdvertisement(t, stateDir, "127.0.0.1:9999", pid)
+	client := New(stateDir)
+	appErr := connect.NewError(connect.CodeInvalidArgument, errors.New("bad request"))
+
+	// Act.
+	err := client.classifyForward(appErr, "127.0.0.1:9999", pid, true)
+
+	// Assert.
+	if errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("classifyForward reclassified a non-dial failure against a dead pid = %v, want it left unchanged", err)
+	}
+	if err != appErr {
+		t.Fatalf("classifyForward changed a non-dial error: got %v, want %v", err, appErr)
+	}
+}
+
+// TestForwardMarksADeadAdvertiserAsTargetNotThereEndToEnd exercises the whole
+// Forward path — not just classifyForward directly — against a daemon.addr
+// whose listener is closed (nothing answers) and whose advertised pid is
+// dead: the shape a realtest hit when the deployed daemon died and a
+// persistent sidecar kept retrying its stale advertisement.
+func TestForwardMarksADeadAdvertiserAsTargetNotThereEndToEnd(t *testing.T) {
+	// Arrange.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a port: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close the reserved listener: %v", err)
+	}
+	stateDir := t.TempDir()
+	pid := deadPID(t)
+	writeAdvertisement(t, stateDir, address, pid)
+
+	// Act.
+	_, err = New(stateDir).Forward(logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", WorkspaceDir: t.TempDir(), WorkspaceID: "deadbeef",
+	})
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("Forward against a dead advertiser = %v, want ErrForwardTargetNotThere", err)
+	}
+}
+
+func TestParseAdvertisementReadsTheAddressAndPid(t *testing.T) {
+	tests := []struct {
+		name         string
+		raw          string
+		wantAddress  string
+		wantPID      int
+		wantPIDKnown bool
+	}{
+		{name: "legacy bare address", raw: "127.0.0.1:41234\n", wantAddress: "127.0.0.1:41234"},
+		{name: "address with a pid line", raw: "127.0.0.1:41234\npid=4242\n", wantAddress: "127.0.0.1:41234", wantPID: 4242, wantPIDKnown: true},
+		{name: "malformed pid line", raw: "127.0.0.1:41234\npid=not-a-number\n", wantAddress: "127.0.0.1:41234"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			address, pid, pidKnown := parseAdvertisement(tc.raw)
+
+			// Assert.
+			if address != tc.wantAddress || pid != tc.wantPID || pidKnown != tc.wantPIDKnown {
+				t.Fatalf("parseAdvertisement(%q) = (%q, %d, %t), want (%q, %d, %t)",
+					tc.raw, address, pid, pidKnown, tc.wantAddress, tc.wantPID, tc.wantPIDKnown)
+			}
+		})
+	}
+}
+
+func TestProcessAliveReportsTheOwnProcessAliveAndAReapedChildDead(t *testing.T) {
+	if processAlive(deadPID(t)) {
+		t.Fatal("processAlive(deadPID) = true, want a reaped child to read as dead")
+	}
+	if !processAlive(os.Getpid()) {
+		t.Fatal("processAlive(os.Getpid()) = false, want the running test process to read as alive")
 	}
 }
