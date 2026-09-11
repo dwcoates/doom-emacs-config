@@ -731,3 +731,182 @@ func TestAdoptionDialsTheShimsRolledGeneration(t *testing.T) {
 		t.Fatalf("Adopt paths = %v, want [%q]: the survivor listens on its rolled generation", got, rolled)
 	}
 }
+
+// TestSilentSurvivorsPayTheAdoptionBoundOnce pins the concurrency of the dial
+// pass. Every instant this step spends is an instant the daemon's already-bound
+// listener queues connections nobody accepts, so N survivors that never answer
+// must cost ONE bound rather than N: the realtest-1 boot paid its full 10s
+// before it served at all.
+func TestSilentSurvivorsPayTheAdoptionBoundOnce(t *testing.T) {
+	// Arrange: four survivors whose locks read held and whose dials hang.
+	const bound = 100 * time.Millisecond
+	const survivors = 4
+	h := newHarness(t, func(deps *Deps, _ *harness) { deps.AdoptBound = bound })
+	h.supervisor.hang = true
+	for i := 0; i < survivors; i++ {
+		h.register(t, t.TempDir(), sessionlock.StateHeld)
+	}
+
+	// Act.
+	started := time.Now()
+	report, err := h.seq.Run(context.Background())
+	elapsed := time.Since(started)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.Undetermined) != survivors {
+		t.Fatalf("report.Undetermined = %v, want all %d survivors undetermined", report.Undetermined, survivors)
+	}
+	// Two bounds is the generous ceiling that still fails a SERIAL pass, which
+	// would take four.
+	if ceiling := 2 * bound; elapsed >= ceiling {
+		t.Fatalf("the boot spent %v adopting %d silent survivors, want under %v: the bound is paid once for all of them",
+			elapsed, survivors, ceiling)
+	}
+}
+
+// TestSurvivorsAreReportedInWorkspaceOrder pins what the concurrent dial pass
+// must not cost: the report is built on the boot's own goroutine in the order
+// the registry lists the workspaces, never in the order the dials answered.
+func TestSurvivorsAreReportedInWorkspaceOrder(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var want []ids.WorkspaceID
+	for i := 0; i < 5; i++ {
+		want = append(want, h.register(t, t.TempDir(), sessionlock.StateHeld).ID)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.Adopted) != len(want) {
+		t.Fatalf("report.Adopted = %v, want %v", report.Adopted, want)
+	}
+	for i := range want {
+		if report.Adopted[i] != want[i] {
+			t.Fatalf("report.Adopted = %v, want the registry's order %v", report.Adopted, want)
+		}
+	}
+}
+
+// TestAWorkspaceWhoseDirectoryIsGoneIsClosed pins the owner's ruling: a
+// registry row naming a directory that no longer exists is closed by the
+// daemon, so Emacs never reads it as a live workspace and opens a tab it
+// cannot then serve.
+func TestAWorkspaceWhoseDirectoryIsGoneIsClosed(t *testing.T) {
+	// Arrange: a registered workspace whose directory is then removed.
+	h := newHarness(t)
+	dir := t.TempDir()
+	ws := h.register(t, dir, sessionlock.StateFree)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.MissingDirClosed) != 1 || report.MissingDirClosed[0] != ws.ID {
+		t.Fatalf("report.MissingDirClosed = %v, want [%v]", report.MissingDirClosed, ws.ID)
+	}
+	record, err := h.db.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace(%v): %v", ws.ID, err)
+	}
+	if !record.Closed {
+		t.Fatalf("workspace %v is still open; a directory that is gone must close the row", ws.ID)
+	}
+}
+
+// TestAWorkspaceWhoseDirectoryExistsIsLeftOpen is the negative arm: the step
+// closes nothing it was not asked to.
+func TestAWorkspaceWhoseDirectoryExistsIsLeftOpen(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.MissingDirClosed) != 0 {
+		t.Fatalf("report.MissingDirClosed = %v, want none", report.MissingDirClosed)
+	}
+	record, err := h.db.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace(%v): %v", ws.ID, err)
+	}
+	if record.Closed {
+		t.Fatalf("workspace %v was closed though its directory is there", ws.ID)
+	}
+}
+
+// TestAnAlreadyClosedMissingDirectoryIsNotReClosed pins the merged and nuked
+// case: those rows keep their directory removed and are already closed, so the
+// step passes over them and the report does not claim them.
+func TestAnAlreadyClosedMissingDirectoryIsNotReClosed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dir := t.TempDir()
+	ws := h.register(t, dir, sessionlock.StateFree)
+	if err := h.db.SetClosed(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("SetClosed: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.MissingDirClosed) != 0 {
+		t.Fatalf("report.MissingDirClosed = %v, want none: the row was already closed", report.MissingDirClosed)
+	}
+}
+
+// TestAClosedMissingDirectoryIsNeverAdopted pins the ORDER: the close runs
+// before the adopt walk, so a workspace whose directory is gone is never
+// dialled for a surviving shim.
+func TestAClosedMissingDirectoryIsNeverAdopted(t *testing.T) {
+	// Arrange: the lock reads HELD, which is what would otherwise select the
+	// adopt path.
+	h := newHarness(t)
+	dir := t.TempDir()
+	ws := h.register(t, dir, sessionlock.StateHeld)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.Adopted) != 0 {
+		t.Fatalf("report.Adopted = %v, want none: a workspace with no directory is closed, not adopted", report.Adopted)
+	}
+	if got := len(h.supervisor.calls()); got != 0 {
+		t.Fatalf("Adopt was called %d times for a workspace whose directory is gone, want 0", got)
+	}
+	if len(report.MissingDirClosed) != 1 || report.MissingDirClosed[0] != ws.ID {
+		t.Fatalf("report.MissingDirClosed = %v, want [%v]", report.MissingDirClosed, ws.ID)
+	}
+}

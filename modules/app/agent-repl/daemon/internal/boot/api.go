@@ -36,8 +36,9 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// DefaultAdoptBound is how long ONE surviving shim's adoption may take before
-// the boot stops waiting on it.
+// DefaultAdoptBound is how long a surviving shim's adoption may take before
+// the boot stops waiting on it. Every survivor is dialed CONCURRENTLY, so the
+// bound is paid once for a whole boot rather than once per workspace.
 //
 // IT IS WHY THE DAEMON SERVES AT ALL. The listener is bound and daemon.addr is
 // published BEFORE this reconciliation runs (cmd/claude-repld/run.go steps 5
@@ -50,7 +51,9 @@ import (
 // `shimclient.bringUp` redials THAT forever by design.
 //
 // Sized as a small multiple of a healthy adoption, which is a local AF_UNIX
-// connect plus the shim's first pushed diagnostics frame — milliseconds, and
+// connect plus the shim's first pushed diagnostics frame — healthy or not,
+// because an unhealthy arm is an ANSWER and adopts (internal/shimclient's
+// awaitDiagnostics); milliseconds, and
 // `shimsocket.DialTimeout` already bounds the connect at 2s. 10s is ~5x that
 // one bounded connect, so a shim that is merely busy is still adopted and one
 // that is unreachable costs the boot ten seconds instead of the whole run.
@@ -61,6 +64,11 @@ const DefaultAdoptBound = 10 * time.Second
 type Report struct {
 	// Adopted are the workspaces whose surviving shims were reconnected.
 	Adopted []ids.WorkspaceID
+	// MissingDirClosed are the workspaces this boot CLOSED because their
+	// directory no longer exists. They are counted separately from Orphaned
+	// because closing a row is a registry decision about the workspace, while
+	// an orphan close is about one workspace's unterminated turns.
+	MissingDirClosed []ids.WorkspaceID
 	// Orphaned are the turns closed because they had no terminal.
 	Orphaned []ids.TurnID
 	// HoldsRestored is how many held prompts came back.

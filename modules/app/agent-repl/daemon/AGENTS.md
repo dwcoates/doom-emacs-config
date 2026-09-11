@@ -162,15 +162,25 @@ environment. Every flag is optional.
    adopting a workspace is the moment it starts writing that workspace's rows,
    and the incumbent stopped writing them at its transfer notice, so the
    one-writer invariant holds across the swap;
-8. the component graph, then `boot.Sequence.Run`: adopt the shims whose
-   workspace lock is still held (never kill-and-restart), reconcile the intent
+8. the component graph, then `boot.Sequence.Run`: CLOSE every open workspace
+   whose directory is gone (a row naming a path that is not there is a tab
+   Emacs cannot serve; counted as `missing_dir_closed`, and a stat that does
+   not say "not exist" is never read as gone), adopt the shims whose
+   workspace lock is still held (never kill-and-restart, and EVERY survivor is
+   dialled concurrently so one adoption bound covers the whole boot), reconcile the intent
    manifest (all four dispositions persisted as faults), restore the holds
    all-or-nothing, close the orphaned turns of the CLIENT-LESS workspaces in one
    transaction each (an adopted workspace's in-flight turns are re-opened by its
    sessionwatcher instead), recover the in-flight merges, and — for a successor
-   — `rollout.Controller.Join`;
+   — `rollout.Controller.Join`. A JOINING SUCCESSOR RECONCILES NOTHING, so the
+   missing-directory close is also done by `verbs.PublishRegistry`, the walk
+   that publishes the opening roster;
 9. `server.New` behind `server.H2C` on the claimed listener;
-10. an orderly exit on SIGINT/SIGTERM: the advertisement is withdrawn, the
+10. an orderly exit on SIGINT/SIGTERM: the advertisement is withdrawn (only
+    while it still names THIS daemon's address, so a handover successor's
+    advertisement survives its predecessor's exit; recorded at INFO either
+    way, and a boot that finds an address nobody answers records the stale one
+    at WARN before overwriting it), the
     streams are closed, the BACKGROUND LOOPS and the PROMPT QUEUE's own
     goroutines are joined (both bounded by `loopJoinBound`, 2s, and an overrun
     is reported, never waited on), and then
@@ -303,7 +313,17 @@ an invariant violation, never a global write.
 `daemon.log`, `webapp.log`, and `sidecar.log` rotate synchronously at 64 MiB
 through `agentrepl/logging.OpenRotating`, retain `logging.DefaultBackups`
 generations, and atomically refresh their canonical symlink after each roll.
-An already-open reader remains on the retired inode. `shim.log` cannot rotate
+An already-open reader remains on the retired inode.
+
+A NEW DAEMON INSTANCE APPENDS TO THE TARGET THE CANONICAL LINK ALREADY NAMES,
+so one file spans instances and rotation happens only at the cap. Retargeting
+the link on every boot made `bin/logs.sh --workspace` show the current
+instance alone, and the previous daemon's boot -- its adoption records
+included -- sat on an inode nothing named any more. The standing target is
+joined only when the canonical path is a symlink naming a regular file
+directly inside `<state>/logs/` and that file is under the cap; a
+workspace-provided regular file, a foreign symlink, a swept target and a
+target at the cap are each displaced by a fresh one, as before. `shim.log` cannot rotate
 under the shim because descriptor `3` is inherited and the shim never receives
 a path. The cap scanner therefore marks it at 64 MiB; `ShimSink` rotates the
 marked target when the next replacement shim is prelaunched. At 110% the

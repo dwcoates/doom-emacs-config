@@ -23,12 +23,15 @@ import (
 // the fake's own Profile; the harness keeps its own copy so a test never
 // imports a `main` package.
 type ShimProfile struct {
-	BuildSHA         string         `json:"build_sha,omitempty"`
-	DelayDiagnostics bool           `json:"delay_diagnostics,omitempty"`
-	ExitOn           string         `json:"exit_on,omitempty"`
-	ExitCode         int            `json:"exit_code,omitempty"`
-	Stderr           string         `json:"stderr,omitempty"`
-	ColdOnResume     *ShimColdFacts `json:"cold_on_resume,omitempty"`
+	BuildSHA         string `json:"build_sha,omitempty"`
+	DelayDiagnostics bool   `json:"delay_diagnostics,omitempty"`
+	// OpeningFault makes the opening diagnostics push of every session stream
+	// unhealthy, carrying one store_unreachable fault with this detail.
+	OpeningFault string         `json:"opening_fault,omitempty"`
+	ExitOn       string         `json:"exit_on,omitempty"`
+	ExitCode     int            `json:"exit_code,omitempty"`
+	Stderr       string         `json:"stderr,omitempty"`
+	ColdOnResume *ShimColdFacts `json:"cold_on_resume,omitempty"`
 	// VendorStartFailed answers every StartSession with the shim's
 	// `vendor_start_failed` refusal carrying this detail: the shim process is
 	// healthy and only the vendor failed to start inside it.
@@ -430,7 +433,10 @@ func (s *ShimControl) Count(rpc string) int {
 }
 
 // expect pops the oldest unread request for a verb into a message.
-func (s *ShimControl) expect(rpc string, into proto.Message) {
+// It answers the verb's TOTAL at pop time, observed by the fake under the same
+// lock as the pop, so a caller that needs both never pays a second round trip
+// to a shim a production step may already be ending.
+func (s *ShimControl) expect(rpc string, into proto.Message) int {
 	s.t.Helper()
 	reply := s.send(controlCommand{Op: "expect", RPC: rpc})
 	raw, err := base64.StdEncoding.DecodeString(reply.Payload)
@@ -440,6 +446,7 @@ func (s *ShimControl) expect(rpc string, into proto.Message) {
 	if err := proto.Unmarshal(raw, into); err != nil {
 		s.t.Fatalf("fake shim control: decode the %s request: %v", rpc, err)
 	}
+	return reply.Count
 }
 
 // ExpectStartSession pops the next StartSession request.
@@ -461,9 +468,22 @@ func (s *ShimControl) ExpectWatchSession() *shimv1.WatchSessionRequest {
 // ExpectStartTurn pops the next StartTurn request.
 func (s *ShimControl) ExpectStartTurn() *shimv1.StartTurnRequest {
 	s.t.Helper()
-	msg := &shimv1.StartTurnRequest{}
-	s.expect(RPCStartTurn, msg)
+	msg, _ := s.ExpectStartTurnWithCount()
 	return msg
+}
+
+// ExpectStartTurnWithCount pops the next StartTurn request AND the number of
+// StartTurns the fake had received when it popped it.
+//
+// It exists for the assertion that a step sent EXACTLY ONE further turn when
+// the same step then ends the shim: the merge teardown resubmits the displaced
+// turn and immediately force-stops the session before removing the worktree,
+// so a separate Count call afterwards races a process that is deliberately on
+// its way out. The count observed at the pop cannot.
+func (s *ShimControl) ExpectStartTurnWithCount() (*shimv1.StartTurnRequest, int) {
+	s.t.Helper()
+	msg := &shimv1.StartTurnRequest{}
+	return msg, s.expect(RPCStartTurn, msg)
 }
 
 // ExpectUpdateAgent pops the next UpdateAgent request.

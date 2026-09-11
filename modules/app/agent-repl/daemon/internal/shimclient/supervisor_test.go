@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/envc"
 	"claude-repld/internal/ids"
 )
@@ -197,44 +198,138 @@ func TestSpawnGivesTheShimItsOwnProcessGroup(t *testing.T) {
 	}
 }
 
-// TestSpawnIsReadyOnlyAfterHealthyDiagnostics asserts an unhealthy answer is
-// not readiness: bring-up keeps waiting until the health arm says healthy.
-func TestSpawnIsReadyOnlyAfterHealthyDiagnostics(t *testing.T) {
+// TestSpawnIsNotReadyBeforeAnyDiagnosticsArm asserts a session frame that is
+// not diagnostics is not an answer: bring-up is still waiting for the health
+// verdict the shim owes it.
+func TestSpawnIsNotReadyBeforeAnyDiagnosticsArm(t *testing.T) {
 	// Arrange.
 	dir := shortDir(t)
 	f, uds := startFakeShim(t, dir)
 	spec, _ := newTestSpec(t, dir, uds, helperIdle)
 	sup := newSupervisor(t)
+	done := spawnAsync(t, sup, spec)
+	waitForSessionOpen(t, f)
 
+	// Act.
+	f.push(compactingUpdate())
+
+	// Assert.
+	select {
+	case r := <-done:
+		t.Fatalf("Spawn() returned before any diagnostics push: %+v", r)
+	case <-time.After(bringUpProbeWindow):
+	}
+	f.push(healthyUpdate())
+	adoptTestClient(t, <-done)
+}
+
+// TestSpawnIsReadyOnAnUnhealthyDiagnosticsArm asserts the realtest-1 finding:
+// a shim that pushes UNHEALTHY has ANSWERED, so bring-up completes on it
+// rather than burning the caller's whole bound waiting for a verdict the shim
+// has already given and will not revise.
+func TestSpawnIsReadyOnAnUnhealthyDiagnosticsArm(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	sup := newSupervisor(t)
+	done := spawnAsync(t, sup, spec)
+	waitForSessionOpen(t, f)
+
+	// Act.
+	f.push(unhealthyUpdate())
+
+	// Assert.
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Spawn() error = %v, want the unhealthy shim brought up", r.err)
+		}
+		adoptTestClient(t, r)
+	case <-time.After(bringUpAnswerBound):
+		t.Fatal("Spawn() did not return on the unhealthy diagnostics answer")
+	}
+}
+
+// TestAdoptIsReadyOnAnUnhealthyDiagnosticsArm asserts the same for the boot's
+// verb: a survivor standing on a fault is adopted, never abandoned.
+func TestAdoptIsReadyOnAnUnhealthyDiagnosticsArm(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	sup := newSupervisor(t)
 	type result struct {
 		c   Client
 		err error
 	}
 	done := make(chan result, 1)
 	go func() {
-		c, err := sup.Spawn(context.Background(), spec)
+		c, err := sup.Adopt(context.Background(), ids.WorkspaceID("ws-1"), dir, uds)
 		done <- result{c: c, err: err}
 	}()
 	waitForSessionOpen(t, f)
 
-	// Act: a non-health frame and an unhealthy answer are both delivered
-	// before any healthy one.
-	f.push(compactingUpdate())
+	// Act.
 	f.push(unhealthyUpdate())
 
-	// Assert: still not ready.
+	// Assert.
 	select {
 	case r := <-done:
-		t.Fatalf("Spawn() returned before a healthy diagnostics push: %+v", r)
-	default:
+		if r.err != nil {
+			t.Fatalf("Adopt() error = %v, want the unhealthy survivor adopted", r.err)
+		}
+		t.Cleanup(r.c.Detach)
+	case <-time.After(bringUpAnswerBound):
+		t.Fatal("Adopt() did not return on the unhealthy diagnostics answer")
 	}
+}
 
-	f.push(healthyUpdate())
+// TestUnhealthyBringUpRecordsTheFaultKinds asserts the adoption is auditable:
+// the WARN that the shim reported unhealthy stands, and an INFO names how many
+// faults it is standing on and which arms they are.
+func TestUnhealthyBringUpRecordsTheFaultKinds(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	sup, surfaces := newSupervisorLogging(t)
+	done := spawnAsync(t, sup, spec)
+	waitForSessionOpen(t, f)
+
+	// Act.
+	f.push(unhealthyUpdate())
 	r := <-done
 	if r.err != nil {
 		t.Fatalf("Spawn() error = %v", r.err)
 	}
-	t.Cleanup(func() { _ = r.c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "cleanup"}) })
+	adoptTestClient(t, r)
+
+	// Assert.
+	var warned bool
+	var adopted *dlog.Record
+	for i, rec := range surfaces.log.Records() {
+		if rec.Operation != "daemon.shimclient.ready" {
+			continue
+		}
+		if rec.Level == "warn" && rec.Message == "shim reported unhealthy" {
+			warned = true
+		}
+		if rec.Level == "info" && rec.Message == "adopted an unhealthy shim; faults reported" {
+			adopted = &surfaces.log.Records()[i]
+		}
+	}
+	if !warned {
+		t.Fatal("no WARN recorded that the shim reported unhealthy")
+	}
+	if adopted == nil {
+		t.Fatal("no INFO recorded that an unhealthy shim was adopted")
+	}
+	if got := adopted.Context["fault_kinds"]; got != "unclassified" {
+		t.Fatalf("fault_kinds = %v, want the one fault's arm name", got)
+	}
+	if got := adopted.Context["faults"]; got != 1 {
+		t.Fatalf("faults = %v, want 1", got)
+	}
 }
 
 // TestSpawnDeathDuringBringUpSurfacesExitAndStderr asserts a process that dies

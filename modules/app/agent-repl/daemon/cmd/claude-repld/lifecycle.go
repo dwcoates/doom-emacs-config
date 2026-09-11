@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -290,20 +291,9 @@ func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *co
 
 // shimFaultKind names the SessionFault kind arm the shim set, kept as the
 // recorded fault's evidence so SessionFaultShimReported.kind carries the
-// shim's own classification rather than a re-derivation of it.
+// shim's own classification rather than a re-derivation of it. The naming
+// itself lives in shimclient, which is the one module that reads shim frames,
+// so the adoption record and this evidence can never spell an arm differently.
 func shimFaultKind(fault *conversationv1.SessionFault) string {
-	switch fault.GetKind().(type) {
-	case *conversationv1.SessionFault_StoreUnreachable:
-		return "store_unreachable"
-	case *conversationv1.SessionFault_ConverterDefect:
-		return "converter_defect"
-	case *conversationv1.SessionFault_LogSinkPoisoned:
-		return "log_sink_poisoned"
-	case *conversationv1.SessionFault_KeepaliveFailed:
-		return "keepalive_failed"
-	case *conversationv1.SessionFault_VendorQueryFailed:
-		return "vendor_query_failed"
-	default:
-		return "unclassified"
-	}
+	return shimclient.FaultKind(fault)
 }

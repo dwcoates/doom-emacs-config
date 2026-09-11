@@ -21,7 +21,7 @@ func TestRecorderExpectReturnsAlreadyReceivedRequest(t *testing.T) {
 	rec.Record(RPCStartTurn, turnRequest("t-1"))
 
 	// Act
-	got, err := rec.Expect(context.Background(), RPCStartTurn)
+	got, _, err := rec.Expect(context.Background(), RPCStartTurn)
 
 	// Assert
 	if err != nil {
@@ -42,7 +42,7 @@ func TestRecorderExpectWaitsForALaterRequest(t *testing.T) {
 	}()
 
 	// Act
-	got, err := rec.Expect(context.Background(), RPCStartTurn)
+	got, _, err := rec.Expect(context.Background(), RPCStartTurn)
 	<-recorded
 
 	// Assert
@@ -61,8 +61,8 @@ func TestRecorderExpectPopsInArrivalOrder(t *testing.T) {
 	rec.Record(RPCStartTurn, turnRequest("second"))
 
 	// Act
-	first, err1 := rec.Expect(context.Background(), RPCStartTurn)
-	second, err2 := rec.Expect(context.Background(), RPCStartTurn)
+	first, _, err1 := rec.Expect(context.Background(), RPCStartTurn)
+	second, _, err2 := rec.Expect(context.Background(), RPCStartTurn)
 
 	// Assert
 	if err1 != nil || err2 != nil {
@@ -80,7 +80,7 @@ func TestRecorderExpectSurfacesContextCancellation(t *testing.T) {
 	cancel()
 
 	// Act
-	_, err := rec.Expect(ctx, RPCStartTurn)
+	_, _, err := rec.Expect(ctx, RPCStartTurn)
 
 	// Assert
 	if !errors.Is(err, context.Canceled) {
@@ -95,7 +95,7 @@ func TestRecorderExpectKeepsVerbsSeparate(t *testing.T) {
 	rec.Record(RPCStartTurn, turnRequest("s-1"))
 
 	// Act
-	got, err := rec.Expect(context.Background(), RPCStartTurn)
+	got, _, err := rec.Expect(context.Background(), RPCStartTurn)
 
 	// Assert
 	if err != nil {
@@ -111,7 +111,7 @@ func TestRecorderCountReportsEveryReceipt(t *testing.T) {
 	rec := NewRecorder()
 	rec.Record(RPCStartTurn, turnRequest("a"))
 	rec.Record(RPCStartTurn, turnRequest("b"))
-	if _, err := rec.Expect(context.Background(), RPCStartTurn); err != nil {
+	if _, _, err := rec.Expect(context.Background(), RPCStartTurn); err != nil {
 		t.Fatalf("Expect = error %v, want to consume one request", err)
 	}
 
@@ -145,7 +145,7 @@ func TestRecorderRecordsACopyOfTheRequest(t *testing.T) {
 	req.Turn.Value = "mutated"
 
 	// Act
-	got, err := rec.Expect(context.Background(), RPCStartTurn)
+	got, _, err := rec.Expect(context.Background(), RPCStartTurn)
 
 	// Assert
 	if err != nil {
@@ -153,5 +153,55 @@ func TestRecorderRecordsACopyOfTheRequest(t *testing.T) {
 	}
 	if got.(*shimv1.StartTurnRequest).GetTurn().GetValue() != "original" {
 		t.Fatalf("recorded turn = %q, want the value as received", got.(*shimv1.StartTurnRequest).GetTurn().GetValue())
+	}
+}
+
+// TestExpectAnswersTheVerbsTotalAtThePop pins the count that rides a pop: a
+// caller that needs both the request and the verb's total must not have to ask
+// twice, because a production step may end this process between the two asks.
+func TestExpectAnswersTheVerbsTotalAtThePop(t *testing.T) {
+	// Arrange.
+	rec := NewRecorder()
+	rec.Record(RPCStartTurn, turnRequest("t-1"))
+	rec.Record(RPCStartTurn, turnRequest("t-2"))
+
+	// Act.
+	_, first, err := rec.Expect(context.Background(), RPCStartTurn)
+	if err != nil {
+		t.Fatalf("Expect (first): %v", err)
+	}
+	_, second, err := rec.Expect(context.Background(), RPCStartTurn)
+	if err != nil {
+		t.Fatalf("Expect (second): %v", err)
+	}
+
+	// Assert: the TOTAL RECEIVED, never the number read, so a pop of the
+	// oldest request still reports everything that has arrived.
+	if first != 2 || second != 2 {
+		t.Fatalf("Expect totals = (%d, %d), want (2, 2): the total received at the pop", first, second)
+	}
+}
+
+// TestExpectCountsARequestThatArrivesWhileWaiting is the waiting arm: a pop
+// that blocked for its request reports the total the arrival made.
+func TestExpectCountsARequestThatArrivesWhileWaiting(t *testing.T) {
+	// Arrange.
+	rec := NewRecorder()
+	popped := make(chan int, 1)
+	go func() {
+		_, total, err := rec.Expect(context.Background(), RPCStartTurn)
+		if err != nil {
+			popped <- -1
+			return
+		}
+		popped <- total
+	}()
+
+	// Act.
+	rec.Record(RPCStartTurn, turnRequest("t-1"))
+
+	// Assert.
+	if got := <-popped; got != 1 {
+		t.Fatalf("Expect total = %d, want 1", got)
 	}
 }
