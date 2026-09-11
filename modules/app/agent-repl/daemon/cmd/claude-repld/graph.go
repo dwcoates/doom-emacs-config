@@ -564,9 +564,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- health, login, the verbs ----
 
 	healthReporter, err := health.New(health.Deps{
-		DB:   p.DB,
-		Live: fleet.Health,
-		Log:  p.Surfaces,
+		DB:       p.DB,
+		Live:     fleet.Health,
+		Log:      p.Surfaces,
+		Instance: p.Instance,
+		PID:      os.Getpid(),
+		BuildSHA: deployStamp(paths.BuiltSHA),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the health reporter: %w", err)

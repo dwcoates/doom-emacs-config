@@ -931,13 +931,12 @@ build-and-start half of the restart."
             (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))))))))
 
 ;; audit-3 #12
-(ert-deftest agent-repl-itest-daemon-restart-departure-timeout-adopts-the-still-live-daemon ()
-  "A departure wait that times out still leaves the daemon ADOPTED.
+(ert-deftest agent-repl-itest-daemon-restart-departure-timeout-aborts-with-the-still-live-daemon ()
+  "A departure wait that times out aborts without adopting the old daemon.
 `agent-repl-daemon-boot-timeout-seconds' doubles as the departure-wait
 deadline (cross-suite note); a daemon that never removes `daemon.addr'
-inside it is not gone, and the ensure that follows finds it still
-answering -- so it is adopted again, never built or started a second
-time."
+inside it is not gone, so the restart must remain failed rather than
+re-linking to the same process and reporting success."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--with-cold-start
@@ -952,24 +951,29 @@ time."
                (agent-repl-daemon-command (list start))
                (agent-repl-daemon-boot-timeout-seconds 0.5)
                (agent-repl-link-up-functions nil)
-               (agent-repl-link-no-daemon-functions nil))
+               (agent-repl-link-no-daemon-functions nil)
+               (messages nil))
           (agent-repl-daemon-ensure)
           (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
                                         nil "the link to come up")
           ;; Act: restart, but the fake is NEVER asked to exit -- it answers
           ;; the stop and simply keeps running, exactly like a departure
           ;; that never actually completes.
-          (agent-repl-frontend-daemon-restart)
-          (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
-          ;; Assert: the wait gives up ...
-          (agent-repl-itest--await-log daemon "elisp.daemon.departure-timeout" "warn")
-          ;; ... and the ensure that follows ADOPTS the still-live daemon:
-          ;; no build, no start, and the link stands again.
-          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
-                                        nil "the link to come back up")
-          (should (agent-repl-link-up-p))
+          (cl-letf (((symbol-function 'message)
+                     (lambda (fmt &rest args)
+                       (push (if args (apply #'format fmt args) fmt) messages)
+                       nil)))
+            (agent-repl-frontend-daemon-restart)
+            (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+            ;; Assert: the wait gives up and preserves a failed restart.
+            (agent-repl-itest--await-log daemon "elisp.daemon.departure-timeout" "warn")
+            (agent-repl-itest--await-log daemon "elisp.daemon.restart-abandoned" "error")
+            (should (member "agent-repl: not restarted: the accepted daemon stop never completed"
+                            messages)))
+          (should-not (agent-repl-link-up-p))
           (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+          (should (process-live-p (agent-repl-itest-daemon-process daemon))))))))
 
 ;; audit-3 #13
 (ert-deftest agent-repl-itest-daemon-restart-abandoned-on-stop-refusal ()
@@ -1009,7 +1013,7 @@ that never happened."
             (agent-repl-itest--await-log daemon "elisp.daemon.stop-refused" "error")
             (agent-repl-itest--await-log daemon "elisp.daemon.restart-abandoned" "error")
             (agent-repl-itest--wait-until
-             (lambda () (seq-some (lambda (m) (string-match-p "not restarting" m)) messages))
+             (lambda () (seq-some (lambda (m) (string-match-p "not restarted: daemon refused" m)) messages))
              3 "the abandonment to be told to the user"))
           ;; Assert: nothing was built or started, the link never came down,
           ;; and the fake is still there to prove nothing killed it.
@@ -1123,9 +1127,10 @@ come."
         ;; Act.  A raw call, with no `condition-case': an unhandled signal
         ;; here would fail this test on its own, which is the whole proof
         ;; of "no signal".
-        (agent-repl-frontend-daemon-stop (lambda (accepted) (setq outcome accepted)))
-        ;; Assert: the callback ran, with nil -- refused, not abandoned.
-        (should (eq outcome nil)))
+        (agent-repl-frontend-daemon-stop (lambda (value) (setq outcome value)))
+        ;; Assert: the callback ran with the explicit non-restart outcome.
+        (should (eq (plist-get outcome :arm) :not-restarted))
+        (should (equal (plist-get outcome :reason) "no daemon link is available")))
       (should (seq-some (lambda (m) (string-match-p "no daemon link to stop" m)) messages)))
     (should (agent-repl-itest--logged-p daemon "elisp.daemon.stop-skipped" "warn"))))
 
