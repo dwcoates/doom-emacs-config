@@ -184,6 +184,13 @@ type ForwardRecord struct {
 // failure record per destination without knowing how daemon.addr is resolved.
 type Forwarder interface {
 	Forward(ForwardRecord) (daemonAddress string, err error)
+	// Ready reports whether the daemon has PUBLISHED a live address and is
+	// accepting connections. It is what separates a daemon that is still
+	// booting — address absent or its listener not yet answering — from one
+	// that was serving and then went unreachable. The address is the probed
+	// destination, returned even when it is not yet live so the logger can key
+	// its records on it.
+	Ready() (daemonAddress string, ready bool)
 }
 
 // Logger writes records at or above one process-wide severity threshold.
@@ -210,11 +217,15 @@ type Logger struct {
 	files                 map[string]Context
 	forwarder             Forwarder
 	lastForwardFailure    string
-	forwardMu             sync.Mutex
-	forwardReady          *sync.Cond
-	forwardQueue          []ForwardRecord
-	forwardClosing        bool
-	forwardDone           chan struct{}
+	// lastForwardDeferred rate-limits the DEBUG startup-transient narration the
+	// same way lastForwardFailure rate-limits the WARN, per daemon address and
+	// boot window, so a slow boot does not narrate a rung per record.
+	lastForwardDeferred string
+	forwardMu           sync.Mutex
+	forwardReady        *sync.Cond
+	forwardQueue        []ForwardRecord
+	forwardClosing      bool
+	forwardDone         chan struct{}
 	// forwardStop is closed by Close. It is what lets a retry ladder ABANDON
 	// its wait at shutdown: a booting daemon is worth a dozen seconds of
 	// backoff while the process runs, and nothing at all while it exits.
@@ -546,13 +557,25 @@ func (l *Logger) forwardLoop() {
 		l.forwardQueue = l.forwardQueue[1:]
 		l.forwardMu.Unlock()
 
-		address, attempts, err := l.forwardWithRetry(rec)
+		address, attempts, seenServing, err := l.forwardWithRetry(rec)
 		if err != nil {
 			now := l.now().Local()
-			l.reportForwardFailure(now, address, attempts, record{
+			target := record{
 				Operation: rec.Operation, WorkspaceDir: rec.WorkspaceDir,
 				WorkspaceID: rec.WorkspaceID, ClaudeSessionID: rec.ClaudeSessionID,
-			}, err)
+			}
+			if seenServing {
+				// A daemon that WAS serving and then failed the forward is a
+				// genuine outage, stated once at WARN.
+				l.reportForwardFailure(now, address, attempts, target, err)
+			} else {
+				// A daemon that never began serving during the ladder is a
+				// STARTUP TRANSIENT, not an outage: the record forwarded before
+				// its producer published a live address. Narrate it at DEBUG so
+				// a boot does not manufacture a WARN, and add the distinguishing
+				// record rather than demoting the failure path.
+				l.reportForwardDeferred(now, address, attempts, target, err)
+			}
 			// THE DIAGNOSTIC ITSELF IS NOT LOST. The workspace sink is the
 			// daemon's and is unreachable, so the record lands in the global
 			// durable sink instead, marked as undelivered. Dropping it was the
@@ -563,38 +586,77 @@ func (l *Logger) forwardLoop() {
 		}
 		l.mu.Lock()
 		l.lastForwardFailure = ""
+		l.lastForwardDeferred = ""
 		l.mu.Unlock()
 	}
 }
 
 // forwardWithRetry climbs the retry ladder, answering the daemon address, how
-// many attempts were made, and the LAST error when every one of them failed.
+// many attempts were made, whether the daemon was ever SEEN SERVING across the
+// ladder, and the LAST error when every attempt failed.
 //
 // The ladder exists for the booting daemon: during its boot reconciliation it
 // is listening but answering nothing, so the first attempt fails with a
-// deadline and the second or third succeeds.
-func (l *Logger) forwardWithRetry(rec ForwardRecord) (string, int, error) {
+// deadline and the second or third succeeds. A resource forwarded before its
+// producer has published is a STARTUP TRANSIENT: each rung first probes
+// readiness and does not forward at all until the daemon has published a live
+// address. seenServing latches true the first rung the daemon answers a probe
+// or a forward, so an outage that begins AFTER the daemon was seen serving is
+// still reported as a failure, while a daemon that never came up during the
+// ladder is reported as a transient instead.
+func (l *Logger) forwardWithRetry(rec ForwardRecord) (address string, attempts int, seenServing bool, err error) {
 	backoff := l.forwardBackoffMin
-	var address string
-	var err error
 	for attempt := 1; attempt <= l.forwardAttempts; attempt++ {
+		if !seenServing {
+			if probed, ready := l.forwarder.Ready(); ready {
+				seenServing = true
+			} else {
+				// The daemon has not published a live address. Do not forward
+				// prematurely; wait out this rung and re-probe.
+				address = probed
+				err = fmt.Errorf("daemon at %s has not begun serving", addrOrUnresolved(probed))
+				if attempt == l.forwardAttempts {
+					return address, attempt, false, err
+				}
+				if !l.waitBeforeRetry(backoff) {
+					return address, attempt, false, err
+				}
+				backoff = growBackoff(backoff, l.forwardBackoffMax)
+				continue
+			}
+		}
 		address, err = l.forwarder.Forward(rec)
 		if err == nil {
-			return address, attempt, nil
+			return address, attempt, true, nil
 		}
 		if attempt == l.forwardAttempts {
-			return address, attempt, err
+			return address, attempt, true, err
 		}
 		if !l.waitBeforeRetry(backoff) {
 			// Shutdown abandoned the ladder. The record is still accounted for
 			// by the caller, which writes it to the durable sink.
-			return address, attempt, err
+			return address, attempt, true, err
 		}
-		if backoff *= 2; backoff > l.forwardBackoffMax {
-			backoff = l.forwardBackoffMax
-		}
+		backoff = growBackoff(backoff, l.forwardBackoffMax)
 	}
-	return address, l.forwardAttempts, err
+	return address, l.forwardAttempts, seenServing, err
+}
+
+// growBackoff doubles a backoff rung, capped at the ladder's maximum.
+func growBackoff(backoff, max time.Duration) time.Duration {
+	if backoff *= 2; backoff > max {
+		return max
+	}
+	return backoff
+}
+
+// addrOrUnresolved names an empty address the way the durable records do, so a
+// probe that could not even read daemon.addr still has a stable rate-limit key.
+func addrOrUnresolved(address string) string {
+	if address == "" {
+		return "unresolved"
+	}
+	return address
 }
 
 // waitBeforeRetry sleeps between attempts, answering false when the wait was
@@ -661,6 +723,39 @@ func (l *Logger) reportForwardFailure(now time.Time, address string, attempts in
 		Timestamp: sharedlogging.Timestamp(now), Runtime: "sidecar", PID: l.pid(),
 		Level: "warn", Verbosity: "normal", Operation: "sidecar.logging.forward-failure",
 		Message: "a file-scoped diagnostic could not be forwarded to the daemon; it was retried and then written to the global sink",
+		Context: map[string]any{
+			"daemon_address": address, "error": cause.Error(), "attempt": attempts,
+			"target_operation": target.Operation, "target_workspace_dir": target.WorkspaceDir,
+			"target_workspace_id": target.WorkspaceID, "target_claude_session_id": target.ClaudeSessionID,
+		},
+	}, now, target.Operation)
+}
+
+// reportForwardDeferred narrates a STARTUP TRANSIENT at DEBUG: the daemon never
+// published a live address across the whole ladder, so the file-scoped record
+// forwarded before its producer was serving. It is the distinguishing record
+// the invariant asks for — added beside the WARN path, never replacing it — so a
+// boot no longer manufactures a forward-failure WARN. It is rate-limited per
+// address and boot window like the WARN, and it is withheld unless the durable
+// threshold admits DEBUG, so production INFO logs stay silent through a boot
+// while the undelivered record itself is still persisted.
+func (l *Logger) reportForwardDeferred(now time.Time, address string, attempts int, target record, cause error) {
+	if !l.minimumLevel.Allows("debug") {
+		return
+	}
+	address = addrOrUnresolved(address)
+	l.mu.Lock()
+	if l.lastForwardDeferred == address {
+		l.mu.Unlock()
+		return
+	}
+	l.lastForwardDeferred = address
+	l.mu.Unlock()
+
+	l.writeGlobal(record{
+		Timestamp: sharedlogging.Timestamp(now), Runtime: "sidecar", PID: l.pid(),
+		Level: "debug", Verbosity: "normal", Operation: "sidecar.logging.forward-deferred",
+		Message: "a file-scoped diagnostic was not forwarded because the daemon has not begun serving; it was written to the global sink",
 		Context: map[string]any{
 			"daemon_address": address, "error": cause.Error(), "attempt": attempts,
 			"target_operation": target.Operation, "target_workspace_dir": target.WorkspaceDir,

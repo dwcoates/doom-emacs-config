@@ -38,8 +38,13 @@ type recordingForwarder struct {
 	address string
 	err     error
 	errors  []error
-	mu      sync.Mutex
-	records []ForwardRecord
+	// notReadyFor is how many leading Ready probes report the daemon is not yet
+	// serving; zero (the default) means the daemon is serving from the first
+	// probe, so a forward that fails is a genuine outage.
+	notReadyFor int
+	mu          sync.Mutex
+	records     []ForwardRecord
+	readyProbes int
 }
 
 func (f *recordingForwarder) Forward(record ForwardRecord) (string, error) {
@@ -50,6 +55,13 @@ func (f *recordingForwarder) Forward(record ForwardRecord) (string, error) {
 		return f.address, f.errors[index]
 	}
 	return f.address, f.err
+}
+
+func (f *recordingForwarder) Ready() (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readyProbes++
+	return f.address, f.readyProbes > f.notReadyFor
 }
 
 func (f *recordingForwarder) Records() []ForwardRecord {
@@ -63,6 +75,8 @@ type blockingForwarder struct {
 	release chan struct{}
 	once    sync.Once
 }
+
+func (f *blockingForwarder) Ready() (string, bool) { return "127.0.0.1:8123", true }
 
 func (f *blockingForwarder) Forward(ForwardRecord) (string, error) {
 	f.once.Do(func() { close(f.started) })
@@ -705,5 +719,157 @@ func TestDurableOnlyStillNarratesAnEmergencyToTheTerminal(t *testing.T) {
 	// Assert.
 	if got := decode(t, stderr.String()).Operation; got != "store-write" {
 		t.Fatalf("emergency record = %q, want the caller's operation on the terminal", got)
+	}
+}
+
+// A resource forwarded before its producer has published is a STARTUP
+// TRANSIENT. A daemon that is merely not-yet-serving and then becomes reachable
+// within the ladder is delivered to, so nothing is warned and the record is not
+// forwarded prematurely.
+func TestANotYetServingDaemonThatBecomesReachableIsNotWarned(t *testing.T) {
+	// Arrange: the daemon is not serving for the first two readiness probes,
+	// then answers and the forward lands.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", notReadyFor: 2}
+	l, _, global := forwardingSinks(t, true, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert: it forwarded exactly once, only after the daemon was live, and
+	// nothing was reported as a failure or a lost transient.
+	if got := len(forwarder.Records()); got != 1 {
+		t.Fatalf("forward attempts = %d, want one forward after the daemon began serving", got)
+	}
+	if strings.Contains(global.String(), "forward-failure") {
+		t.Fatalf("a booting daemon that became reachable was reported as a failure: %q", global.String())
+	}
+	if strings.Contains(global.String(), "forward-deferred") {
+		t.Fatalf("a delivered record was still recorded as a deferred transient: %q", global.String())
+	}
+}
+
+// A daemon that never begins serving across the whole ladder is a STARTUP
+// TRANSIENT, not an outage: no WARN, the transient is narrated at DEBUG, and the
+// record is not forwarded prematurely.
+func TestADaemonThatNeverBeginsServingIsNotWarned(t *testing.T) {
+	// Arrange: readiness never reports the daemon live.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", notReadyFor: defaultForwardAttempts}
+	l, _, global := forwardingSinks(t, true, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert: it never forwarded prematurely, and the transient is DEBUG, not a
+	// WARN.
+	if got := len(forwarder.Records()); got != 0 {
+		t.Fatalf("forward attempts = %d, want none against a daemon that never served", got)
+	}
+	if strings.Contains(global.String(), "forward-failure") {
+		t.Fatalf("a daemon that never began serving manufactured a failure WARN: %q", global.String())
+	}
+	var deferred record
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		if got := decode(t, line); got.Operation == "sidecar.logging.forward-deferred" {
+			deferred = got
+		}
+	}
+	if deferred.Level != "debug" {
+		t.Fatalf("forward-deferred level = %q, want debug: %q", deferred.Level, global.String())
+	}
+}
+
+// The startup-transient DEBUG narration is withheld from a production INFO log,
+// so a boot leaves no forward record at all while the undelivered diagnostic is
+// still persisted.
+func TestTheStartupTransientNarrationIsWithheldBelowDebug(t *testing.T) {
+	// Arrange: a production-level (INFO) forwarding logger and a daemon that
+	// never begins serving.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", notReadyFor: defaultForwardAttempts}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert.
+	if strings.Contains(global.String(), "forward-deferred") {
+		t.Fatalf("the DEBUG transient narration leaked into an INFO log: %q", global.String())
+	}
+	if strings.Contains(global.String(), "forward-failure") {
+		t.Fatalf("a startup transient manufactured a failure WARN: %q", global.String())
+	}
+}
+
+// AN UNDELIVERABLE DIAGNOSTIC IS NOT A DISCARDED ONE, even when the daemon never
+// began serving: the record still lands in the global durable sink.
+func TestAStartupTransientStillPersistsItsRecord(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", notReadyFor: defaultForwardAttempts}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert.
+	var kept record
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		if got := decode(t, line); got.Operation == "poll" {
+			kept = got
+		}
+	}
+	if kept.Message != "polling" {
+		t.Fatalf("the undelivered record is not in the global sink: %q", global.String())
+	}
+	if kept.Context["forward_undelivered"] != true {
+		t.Fatalf("the kept record does not say it was never delivered: %v", kept.Context)
+	}
+	if kept.WorkspaceDir != "/work/repo" {
+		t.Fatalf("the kept record lost its workspace attribution: %+v", kept)
+	}
+}
+
+// A daemon that WAS serving and then fails the forward is a genuine outage,
+// stated once at WARN — the ready-then-unreachable case the transient path must
+// not swallow.
+func TestAServingDaemonThatBecomesUnreachableIsWarned(t *testing.T) {
+	// Arrange: the daemon is live on every readiness probe, but the forward
+	// itself fails throughout.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", err: errors.New("connection reset")}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert.
+	var failure record
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		if got := decode(t, line); got.Operation == "sidecar.logging.forward-failure" {
+			failure = got
+		}
+	}
+	if failure.Level != "warn" {
+		t.Fatalf("a serving daemon that went unreachable was not warned: %q", global.String())
+	}
+	if got := len(forwarder.Records()); got != defaultForwardAttempts {
+		t.Fatalf("forward attempts = %d, want the whole ladder against a serving daemon", got)
 	}
 }

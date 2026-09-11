@@ -210,7 +210,26 @@ type server struct {
 	// it, because HTTP/1.1 caps a browser at about six connections per host and
 	// a server-streaming call pins one for its whole life (page.go).
 	pages map[string]*pageStream
+	// hostIdentityAwaited records when a workspace's host view was FIRST
+	// withheld because its session record carries no host identity yet. Right
+	// after Emacs subscribes to WatchHostWorkspace, the shim may not have
+	// described the session, so the identity is legitimately absent for a
+	// moment: the first withholding per workspace is a STARTUP TRANSIENT logged
+	// at DEBUG, and only a withholding that persists past
+	// hostIdentityDescribeBound escalates to the ERROR that names a genuine
+	// mint defect. A successful compose clears the entry.
+	hostIdentityAwaited map[ids.WorkspaceID]time.Time
+	// now is the clock, injected in tests so the transient-versus-defect
+	// escalation can be exercised without waiting real seconds.
+	now func() time.Time
 }
+
+// hostIdentityDescribeBound is how long a session record may carry no host
+// identity after WatchHostWorkspace subscribes before the missing identity
+// stops being a startup transient and becomes a defect. It mirrors the boot
+// adoption window within which the shim adopts a workspace and describes its
+// session; past it, an unminted identity is the real defect the ERROR names.
+const hostIdentityDescribeBound = 10 * time.Second
 
 // tokenTarget is the workspace and feed one minted watch token addresses.
 type tokenTarget struct {
@@ -270,19 +289,21 @@ func New(deps Deps) (Server, error) {
 
 	life, cancel := context.WithCancel(context.Background())
 	s := &server{
-		deps:            deps,
-		log:             deps.Log.Global(),
-		life:            life,
-		cancel:          cancel,
-		hostTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
-		hostStateTopics: make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
-		webStateTopics:  make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
-		webTopics:       make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
-		daemonWatchers:  make(map[*daemonWatcher]struct{}),
-		hostHeld:        make(map[ids.WorkspaceID]int),
-		webHeld:         make(map[ids.WorkspaceID]int),
-		watchTokens:     make(map[string]tokenTarget),
-		pages:           make(map[string]*pageStream),
+		deps:                deps,
+		log:                 deps.Log.Global(),
+		life:                life,
+		cancel:              cancel,
+		hostTopics:          make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
+		hostStateTopics:     make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
+		webStateTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
+		webTopics:           make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
+		daemonWatchers:      make(map[*daemonWatcher]struct{}),
+		hostHeld:            make(map[ids.WorkspaceID]int),
+		webHeld:             make(map[ids.WorkspaceID]int),
+		watchTokens:         make(map[string]tokenTarget),
+		pages:               make(map[string]*pageStream),
+		hostIdentityAwaited: make(map[ids.WorkspaceID]time.Time),
+		now:                 time.Now,
 	}
 
 	mux := http.NewServeMux()
