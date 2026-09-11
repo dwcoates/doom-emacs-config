@@ -2670,8 +2670,15 @@ resolving an identity that would raise."
                          (buffer-string))))))
         (delete-directory project t)))))
 
-(ert-deftest agent-repl-test-a-record-after-ws-del-mints-a-fresh-target ()
-  "Ownership really is released: the NEXT record for the name gets a new sink."
+(ert-deftest agent-repl-test-a-record-after-ws-del-rejoins-the-standing-target ()
+  "Ownership is released and re-resolved, and re-resolving REJOINS the file.
+The assertion inverted on 2026-09-11 because the contract it tests did.
+This test used to require a fresh target after a teardown; the
+standing-target rule says a runtime APPENDS to the target the canonical
+link names, precisely so a workspace\='s history is not split into a new
+file every time ownership is re-resolved.  What the teardown must still do
+-- drop the registry entry so the sink is resolved again rather than served
+from memory -- is what this now pins, plus the rejoin that follows it."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-del-fresh-" t))
@@ -2682,10 +2689,12 @@ resolving an identity that would raise."
             (agent-repl--ws-put "del-fresh-ws" :project-dir project)
             (let ((target (agent-repl--workspace-emacs-log-target "del-fresh-ws")))
               (agent-repl--ws-del "del-fresh-ws")
+              (should-not (agent-repl--workspace-log-target-entry "del-fresh-ws"))
+              (agent-repl--ws-put "del-fresh-ws" :project-dir project)
               ;; Act
               (let ((next (agent-repl--workspace-emacs-log-target "del-fresh-ws")))
                 ;; Assert
-                (should-not (equal target next)))))
+                (should (equal target next)))))
         (delete-directory project t)))))
 
 ;;;; ---- agent-repl--call-in-background-workspace ----
