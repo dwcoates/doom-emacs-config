@@ -35,6 +35,9 @@ type fakeSupervisor struct {
 	mu sync.Mutex
 	// adopted records every workspace Adopt was called for, in order.
 	adopted []ids.WorkspaceID
+	// dialed records the socket path each Adopt was handed, which is what the
+	// generation resolution's own test reads back.
+	dialed []string
 	// err, when set, is what Adopt answers instead of a client.
 	err error
 	// hang makes Adopt wait out its context instead of answering, which is
@@ -43,9 +46,10 @@ type fakeSupervisor struct {
 	hang bool
 }
 
-func (s *fakeSupervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, _, _ string) (shimclient.Client, error) {
+func (s *fakeSupervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, _, udsPath string) (shimclient.Client, error) {
 	s.mu.Lock()
 	s.adopted = append(s.adopted, ws)
+	s.dialed = append(s.dialed, udsPath)
 	hang, err := s.hang, s.err
 	s.mu.Unlock()
 	if hang {
@@ -56,6 +60,12 @@ func (s *fakeSupervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, _, _ str
 		return nil, err
 	}
 	return nil, nil
+}
+
+func (s *fakeSupervisor) paths() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.dialed...)
 }
 
 func (s *fakeSupervisor) calls() []ids.WorkspaceID {
