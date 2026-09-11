@@ -735,3 +735,85 @@ func TestBootRefusesWithoutAnAccountRoot(t *testing.T) {
 		})
 	}
 }
+
+// TestBootServesThoughASurvivingShimIsUnreachable is the ten-hour accept wedge
+// in one test.
+//
+// The daemon binds its listener and publishes daemon.addr at boot steps 5 and
+// 6 and does not reach `http.Server.Serve` until the reconciliation has
+// finished, so a reconciliation that blocks is a daemon that listens and
+// accepts nothing: pid 31984 held its accept queue at 128/128 for ten hours
+// with four clients in SYN_SENT while Emacs and curl timed out on connect, and
+// its run log carried nothing but the redial ladder's own lock probe.
+//
+// The arrangement is exactly that state. The shim outlives the SIGKILLed
+// daemon and keeps its workspace lock, so the boot takes the ADOPT path; its
+// socket PATH is then unlinked, which is what a relaunch's rolled generation
+// does to a base path, so the dial can never succeed while the lock says a
+// living process owns the conversation. `shimclient.bringUp` redials that
+// forever by design, so the bound is the only thing that lets the daemon
+// serve.
+func TestBootServesThoughASurvivingShimIsUnreachable(t *testing.T) {
+	t.Parallel()
+	// Arrange: a live session, then the daemon alone is killed. SysProcAttr
+	// puts the shim in its own process group, so it survives holding the lock.
+	f := newOpened(t, harness.Opts{})
+	socket := f.d.SocketPath(f.ws)
+	f.d.Kill()
+	if err := os.Remove(socket); err != nil {
+		t.Fatalf("unlink the surviving shim's socket path %s: %v", socket, err)
+	}
+
+	// Act: restart on the same state root and the same redirected lock
+	// directory, so the probe finds the survivor's lock held and the dial finds
+	// nothing at the path.
+	nd := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir,
+		ExtraEnv: []string{
+			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
+			"AGENT_REPL_BOOT_ADOPT_BOUND=300ms",
+		},
+	})
+	// The sweep covers every test; the declared records are the overrun
+	// adoption this test arranges, reported by the supervisor and by the boot.
+	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt")
+
+	// Assert: the daemon answers. StartDaemon already waited for the serving
+	// record, and this is the socket actually accepting a connection.
+	if _, err := nd.Client().DaemonHealth(nd.Ctx(), healthRequest()); err != nil {
+		t.Fatalf("DaemonHealth = error %v, want a success: one unreachable survivor must not stop the daemon accepting connections", err)
+	}
+}
+
+// TestAnUnreachableSurvivorsAdoptionIsRecordedAtError pins the evidence. The
+// workspace is left undetermined — neither adopted nor orphan-closed, because
+// its lock says a living process owns the conversation — and this record is
+// the only thing that says why.
+func TestAnUnreachableSurvivorsAdoptionIsRecordedAtError(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	f := newOpened(t, harness.Opts{})
+	socket := f.d.SocketPath(f.ws)
+	f.d.Kill()
+	if err := os.Remove(socket); err != nil {
+		t.Fatalf("unlink the surviving shim's socket path %s: %v", socket, err)
+	}
+
+	// Act.
+	nd := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir,
+		ExtraEnv: []string{
+			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
+			"AGENT_REPL_BOOT_ADOPT_BOUND=300ms",
+		},
+	})
+	// The sweep covers every test; the declared records are the overrun
+	// adoption this test arranges, reported by the supervisor and by the boot.
+	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt")
+
+	// Assert.
+	nd.AwaitLogRecord(nd.RunLogPath(), "the overrun adoption's error record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.boot.adopt" && r.Level == "error" &&
+			strings.Contains(r.Message, "adoption bound")
+	})
+}
