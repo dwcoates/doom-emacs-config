@@ -93,24 +93,52 @@ const (
 	// bug that was never there; what "usable while hidden" means for a
 	// panel is that it is QUEUED to paint the moment it is shown.
 	PhaseWebviewArmed PhaseName = "webview-armed"
-	// PhasePanelPainted is spawn to a WORKSPACE'S webview reporting its load
-	// finished, which now happens on FIRST SHOW, not while hidden (see
-	// PhaseWebviewArmed): either `elisp.frontend.watch-load: load-changed`,
-	// the page's own account of its load, or `elisp.webview-recovery.
-	// precreate-created ws=NAME reason=focused`, the parked drain resuming
-	// on the focus edge and mounting directly. Measured per workspace.
+	// PhaseFocusEdge is spawn to the harness bringing Emacs forward for the
+	// first time: `elisp.webview-recovery.precreate-drained-on-focus`, the
+	// parked pre-creation queue releasing on that focus change. This is a
+	// REAL observed edge — Emacs really was brought forward at this instant —
+	// but it is also where the harness's own deliberate hidden-window wait
+	// ends, so it is never folded into PhaseTotal (owner ruling 2026-09-11):
+	// a realtest measurement is never allowed to bake in the harness's own
+	// arbitrary delay before it chooses to show Emacs. It exists so
+	// PhasePanelPainted can be reported as the delta FROM this edge, which is
+	// the panel's own intrinsic paint cost, rather than from spawn, which
+	// would be paint cost plus however long the harness felt like waiting.
+	PhaseFocusEdge PhaseName = "focus-edge"
+	// PhasePanelPainted is a WORKSPACE'S webview reporting its load finished,
+	// which happens on FIRST SHOW, not while hidden (see PhaseWebviewArmed):
+	// either `elisp.frontend.watch-load: load-changed`, the page's own
+	// account of its load, or `elisp.webview-recovery.precreate-created
+	// ws=NAME reason=focused`, the parked drain resuming on the focus edge
+	// and mounting directly. Measured per workspace.
 	// `load-changed` is attributed to the workspace normally (its JSON
 	// record carries `workspace_id`); `precreate-created` is written on the
 	// central sink like PhaseWebviewArmed's markers, so it carries no
 	// `workspace_id` either — its `ws=` names the workspace by its
 	// registered NAME, not its daemon id, and the reader falls back to that
 	// name when no id is present (readPhaseRecords, wsEqualsRe).
+	//
+	// UNLIKE EVERY OTHER PHASE, THIS ONE IS NOT MEASURED FROM SPAWN (owner
+	// ruling 2026-09-11). It is measured from PhaseFocusEdge: the panel
+	// cannot start loading before the harness decides to show Emacs, so a
+	// spawn-based elapsed time would report the harness's own wait as if it
+	// were product latency. What is reported here is the panel's INTRINSIC
+	// paint cost — focus edge to load — and nothing else. See Measure.
 	PhasePanelPainted PhaseName = "panel-painted"
-	// PhaseTotal is spawn to the last workspace's panel painted: usable.
-	// Since PhasePanelPainted now lands on first show rather than during the
-	// hidden window, PhaseTotal reads as "spawn to shown-and-painted" — the
-	// manifest labels it so a reader does not mistake it for the old,
-	// hidden-window meaning.
+	// PhaseTotal is startup-usable: spawn to the LATEST of tab-drawn (across
+	// every workspace), link-up, roster-subscribed, first-roster and
+	// webview-armed. This is the number the owner actually experiences
+	// waiting for the editor to be usable while it launches hidden.
+	//
+	// PhasePanelPainted is DELIBERATELY EXCLUDED from this set (owner ruling
+	// 2026-09-11). A panel does not paint until the harness brings Emacs
+	// forward, which happens only for the key self-test at the end of the
+	// run — an artifact of how this harness protects the owner's focus, not
+	// something the owner ever waits on. A PhaseTotal that included it would
+	// report "spawn to shown-and-painted", which bakes in the harness's own
+	// arbitrary wait before it reveals Emacs. That is never reported as
+	// latency; PhasePanelPainted's own intrinsic cost is reported instead,
+	// separately, from PhaseFocusEdge.
 	PhaseTotal PhaseName = "total"
 )
 
@@ -146,6 +174,7 @@ var markers = []marker{
 	{name: PhaseFirstRoster, re: regexp.MustCompile(`^elisp\.roster\.reconcile:`)},
 	{name: PhaseTabDrawn, re: regexp.MustCompile(`^elisp\.roster\.tab-open:`), perWorkspace: true},
 	{name: PhaseWebviewArmed, re: regexp.MustCompile(`^elisp\.webview-recovery\.precreate-(all|parked)(:|\s)`), valueRe: queuedRe},
+	{name: PhaseFocusEdge, re: regexp.MustCompile(`^elisp\.webview-recovery\.precreate-drained-on-focus(\s|$)`)},
 	{name: PhasePanelPainted, re: regexp.MustCompile(`^elisp\.frontend\.watch-load: load-changed|^elisp\.webview-recovery\.precreate-created ws=\S+ reason=focused`), perWorkspace: true},
 }
 
@@ -344,12 +373,18 @@ func readPhaseRecords(phases *Phases, path string, offset int64, spawnedAt time.
 	return nil
 }
 
-// Measurement is one phase's elapsed time from spawn.
+// Measurement is one phase's elapsed time.
 //
-// EVERY phase is measured FROM SPAWN, not from the phase before it. A
-// per-phase delta would hide the one thing a startup measurement is for: the
-// user is waiting from the moment they launched the editor, and a phase that
-// is fast in isolation but starts late is exactly as slow to them.
+// EVERY phase except PhasePanelPainted is measured FROM SPAWN, not from the
+// phase before it. A per-phase delta would hide the one thing a startup
+// measurement is for: the user is waiting from the moment they launched the
+// editor, and a phase that is fast in isolation but starts late is exactly as
+// slow to them.
+//
+// PhasePanelPainted is the one exception, and it is measured from
+// PhaseFocusEdge instead (owner ruling 2026-09-11): the panel cannot paint
+// before the harness decides to show Emacs, so a spawn-based number would
+// report the harness's own wait as if it were the panel's cost. See Measure.
 type Measurement struct {
 	Phase     PhaseName
 	Workspace string
@@ -358,11 +393,27 @@ type Measurement struct {
 	Note string
 }
 
-// Measure turns observed markers into elapsed times from spawn.
+// usableEdges is the set of phases whose LATEST observation bounds
+// PhaseTotal (startup-usable). PhasePanelPainted (and PhaseFocusEdge, the
+// harness's own show-edge) are deliberately absent: including either would
+// let the harness's arbitrary hidden-window wait leak into a number reported
+// as product latency (owner ruling 2026-09-11; PhaseTotal's doc says why).
+var usableEdges = map[PhaseName]bool{
+	PhaseTabDrawn:         true,
+	PhaseLinkUp:           true,
+	PhaseRosterSubscribed: true,
+	PhaseFirstRoster:      true,
+	PhaseWebviewArmed:     true,
+}
+
+// Measure turns observed markers into elapsed times.
 //
 // A once-per-run phase takes its FIRST observation: the marker firing again
 // later is a reconnect or a re-reconcile, not the startup. A per-workspace
 // phase takes the first per workspace, for the same reason.
+//
+// Every phase is measured from spawn EXCEPT PhasePanelPainted, which is
+// measured from PhaseFocusEdge — its own doc, and usableEdges above, say why.
 func (p Phases) Measure() []Measurement {
 	var out []Measurement
 
@@ -391,24 +442,52 @@ func (p Phases) Measure() []Measurement {
 
 	out = append(out, daemonAnswered(p.SpawnedAt, seen))
 
-	latest := p.FirstRecord
+	focusEdgeAt, haveFocusEdge := seen[string(PhaseFocusEdge)+"\x00"+GlobalWorkspace]
+
+	var usableLatest time.Time
+	haveUsableLatest := false
+
 	for key, at := range seen {
 		parts := strings.SplitN(key, "\x00", 2)
+		phase := PhaseName(parts[0])
+		workspace := parts[1]
+
+		if phase == PhasePanelPainted {
+			// The panel's own intrinsic cost: focus edge to load, never
+			// spawn to load (owner ruling 2026-09-11 — PhasePanelPainted's
+			// doc says why).
+			m := Measurement{Phase: phase, Workspace: workspace}
+			switch {
+			case !haveFocusEdge:
+				m.Note = "the focus edge (elisp.webview-recovery.precreate-drained-on-focus) was never observed, " +
+					"so the panel-paint cost cannot be computed as an intrinsic delta"
+			case at.Before(focusEdgeAt):
+				m.Note = "the panel paint was recorded before the focus edge, which should never happen; " +
+					"not reporting a negative delta"
+			default:
+				m.Elapsed = at.Sub(focusEdgeAt)
+			}
+			out = append(out, m)
+			continue
+		}
+
 		out = append(out, Measurement{
-			Phase:     PhaseName(parts[0]),
-			Workspace: parts[1],
+			Phase:     phase,
+			Workspace: workspace,
 			Elapsed:   at.Sub(p.SpawnedAt),
 		})
-		if at.After(latest) {
-			latest = at
+
+		if usableEdges[phase] && (!haveUsableLatest || at.After(usableLatest)) {
+			usableLatest = at
+			haveUsableLatest = true
 		}
 	}
 
-	if !latest.IsZero() {
+	if haveUsableLatest {
 		out = append(out, Measurement{
 			Phase:     PhaseTotal,
 			Workspace: GlobalWorkspace,
-			Elapsed:   latest.Sub(p.SpawnedAt),
+			Elapsed:   usableLatest.Sub(p.SpawnedAt),
 		})
 	}
 
