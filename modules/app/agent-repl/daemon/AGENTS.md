@@ -303,7 +303,17 @@ an invariant violation, never a global write.
 `daemon.log`, `webapp.log`, and `sidecar.log` rotate synchronously at 64 MiB
 through `agentrepl/logging.OpenRotating`, retain `logging.DefaultBackups`
 generations, and atomically refresh their canonical symlink after each roll.
-An already-open reader remains on the retired inode. `shim.log` cannot rotate
+An already-open reader remains on the retired inode.
+
+A NEW DAEMON INSTANCE APPENDS TO THE TARGET THE CANONICAL LINK ALREADY NAMES,
+so one file spans instances and rotation happens only at the cap. Retargeting
+the link on every boot made `bin/logs.sh --workspace` show the current
+instance alone, and the previous daemon's boot -- its adoption records
+included -- sat on an inode nothing named any more. The standing target is
+joined only when the canonical path is a symlink naming a regular file
+directly inside `<state>/logs/` and that file is under the cap; a
+workspace-provided regular file, a foreign symlink, a swept target and a
+target at the cap are each displaced by a fresh one, as before. `shim.log` cannot rotate
 under the shim because descriptor `3` is inherited and the shim never receives
 a path. The cap scanner therefore marks it at 64 MiB; `ShimSink` rotates the
 marked target when the next replacement shim is prelaunched. At 110% the
