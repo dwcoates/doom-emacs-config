@@ -41,6 +41,44 @@ func TestDaemonHealthOnAFreshDaemonIsHealthy(t *testing.T) {
 	}
 }
 
+func TestDaemonHealthIdentityChangesAfterAProcessRestart(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	first := newDaemon(t, harness.Opts{})
+	firstResponse, err := first.Client().DaemonHealth(first.Ctx(), healthRequest())
+	if err != nil {
+		t.Fatalf("first DaemonHealth = error %v, want a success", err)
+	}
+	firstIdentity := firstResponse.Msg.GetSuccess().GetIdentity()
+	stateDir := first.StateDir
+	first.Stop()
+
+	// Act.
+	second := harness.StartDaemon(t, harness.Opts{StateDir: stateDir})
+	secondResponse, err := second.Client().DaemonHealth(second.Ctx(), healthRequest())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("second DaemonHealth = error %v, want a success", err)
+	}
+	secondIdentity := secondResponse.Msg.GetSuccess().GetIdentity()
+	if firstIdentity.GetInstanceId() == "" || secondIdentity.GetInstanceId() == "" {
+		t.Fatalf("daemon identities = first %v, second %v; want both instance ids", firstIdentity, secondIdentity)
+	}
+	if firstIdentity.GetInstanceId() == secondIdentity.GetInstanceId() {
+		t.Fatalf("daemon instance id after restart = %q, want a new identity", secondIdentity.GetInstanceId())
+	}
+	if firstIdentity.GetPid() == secondIdentity.GetPid() {
+		t.Fatalf("daemon pid after restart = %d, want a new process", secondIdentity.GetPid())
+	}
+	if secondIdentity.GetPid() != int64(second.PID()) {
+		t.Fatalf("DaemonHealth pid = %d, want serving pid %d", secondIdentity.GetPid(), second.PID())
+	}
+	if firstIdentity.GetBuildSha() != secondIdentity.GetBuildSha() || secondIdentity.GetBuildSha() == "" {
+		t.Fatalf("daemon build identity = first %q, second %q; want one non-empty deployed build", firstIdentity.GetBuildSha(), secondIdentity.GetBuildSha())
+	}
+}
+
 func TestDaemonHealthWithAnOpenFaultIsUnhealthy(t *testing.T) {
 	t.Parallel()
 	// Arrange: the prompts directory the daemon booted with is taken away, the
