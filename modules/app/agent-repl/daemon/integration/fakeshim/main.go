@@ -349,7 +349,7 @@ func (p *process) apply(line []byte) Reply {
 	case OpExpect:
 		ctx, cancel := commandContext(cmd)
 		defer cancel()
-		msg, err := p.rec.Expect(ctx, cmd.RPC)
+		msg, total, err := p.rec.Expect(ctx, cmd.RPC)
 		if err != nil {
 			return Reply{Error: err.Error()}
 		}
@@ -357,7 +357,8 @@ func (p *process) apply(line []byte) Reply {
 		if err != nil {
 			return Reply{Error: fmt.Sprintf("fakeshim: encode %s request: %v", cmd.RPC, err)}
 		}
-		return Reply{OK: true, Payload: base64.StdEncoding.EncodeToString(raw)}
+		// The COUNT RIDES THE POP: see Recorder.Expect.
+		return Reply{OK: true, Payload: base64.StdEncoding.EncodeToString(raw), Count: total}
 
 	case OpAnswer:
 		var msg proto.Message
