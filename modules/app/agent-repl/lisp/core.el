@@ -2529,6 +2529,35 @@ FMT and ARGS keep the ladder's format-string signature, so the persisted
 value."
   (agent-repl--emit-log-record ws "info" "normal" fmt args :message-mode 'backend))
 
+(defun agent-repl--minibuffer-busy-p ()
+  "Return non-nil when the user is currently working in the minibuffer.
+
+A STARTUP PHASE MUST NOT TYPE OVER THE USER.  The echo area and the
+minibuffer are the same screen real estate, so a background phase line
+arriving while a `find-file' prompt or an `M-x' completion is up either
+covers what the user is reading or shoves their own prompt aside.  The
+phase is still WORTH RECORDING at that moment -- it just is not worth
+interrupting for -- so callers route it to the quiet sink instead of
+dropping it."
+  (or (> (minibuffer-depth) 0)
+      (and (minibufferp) t)))
+
+(defun agent-repl--phase-echo (ws fmt &rest args)
+  "Record a high-level startup phase for WS and echo it when the user is free.
+
+The same one-call contract as `agent-repl--backend-phase' -- the log
+record and the echo-area line are produced by a single call, never by a
+log call plus a bare `message' -- with the minibuffer guard
+`agent-repl--minibuffer-busy-p' describes: a phase reached while the user
+is typing is recorded QUIETLY and never echoed.
+
+Only high-level, once-per-transition phases belong here: the daemon
+build, spawn, link-up and outcome, and the workspace bring-up count.
+Anything finer-grained is log chatter and belongs on `agent-repl--info'."
+  (agent-repl--emit-log-record
+   ws "info" "normal" fmt args
+   :message-mode (if (agent-repl--minibuffer-busy-p) 'quiet 'backend)))
+
 (defun agent-repl--fatal (ws fmt &rest args)
   "Record a fatal condition for WS and then SIGNAL it.
 WS is the workspace name for context (or nil).  FMT and ARGS are formatted
