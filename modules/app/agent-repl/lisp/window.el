@@ -511,9 +511,13 @@ frame reclaim (`agent-repl--reclaim-frame-fullscreen') — so their
 eligibility checks cannot drift."
   (let* ((view-buf (agent-repl-window--panel-buffer :view ws))
          (restorable (buffer-live-p view-buf)))
-    (agent-repl--log-verbose ws
-                             "window--panels-restorable-p: view-buffer=%S live=%s"
-                             view-buf restorable)
+    ;; Screened through `--ws-log-name': the panels-open default now
+    ;; consults this for the workspace a persp switch just activated, which
+    ;; includes persp-mode's own "main"/"none" placeholders that own no
+    ;; durable sink — an unscreened record for one is unroutable.
+    (agent-repl--log-verbose (agent-repl--ws-log-name ws)
+                             "window--panels-restorable-p: ws=%s view-buffer=%S live=%s"
+                             ws view-buf restorable)
     restorable))
 
 (defvar agent-repl-window--ensure-layout-in-progress nil

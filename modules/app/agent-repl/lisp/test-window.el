@@ -427,6 +427,22 @@ nil) — defensive for callers passing stale buffer references."
       (kill-buffer buf)
       (should-not (agent-repl-window--panels-restorable-p "ws")))))
 
+(ert-deftest agent-repl-window-test-panels-restorable-p-screens-placeholder-log ()
+  "restorable-p emits no unroutable record for a persp placeholder ws.
+The panels-open default now consults this for whatever perspective a
+switch activated, including persp-mode built-ins that own no sink."
+  (agent-repl-test--with-clean-state
+    (let ((raw nil))
+      (cl-letf (((symbol-function (quote agent-repl--log-verbose))
+                 (lambda (ws &rest _)
+                   (when (and (stringp ws)
+                              (not (agent-repl--ws-log-routable-p ws))
+                              (not (agent-repl--central-log-scope-reason ws))
+                              (not (agent-repl--context-log-scope-reason ws)))
+                     (push ws raw)))))
+        (agent-repl-window--panels-restorable-p "main")
+        (should-not raw)))))
+
 (ert-deftest agent-repl-window-test-panels-restorable-p-nil-when-view-missing ()
   "A workspace with no view buffer recorded is non-restorable."
   (agent-repl-test--with-clean-state
