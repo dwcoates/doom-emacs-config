@@ -308,8 +308,10 @@ func (s *sequence) mergeLeases(ctx context.Context, log dlog.Logger, workspaces 
 }
 
 // join runs the successor's half of a handover: read the intent manifest, arm
-// the rendezvous, and adopt every headless workspace at once. A daemon that is
-// not joining owns its workspaces already and does nothing here.
+// the rendezvous, and start each headless adoption without a participant call.
+// Adoption itself remains behind the incumbent's serving release at freeness.
+// A daemon that is not joining owns its workspaces already and does nothing
+// here.
 func (s *sequence) join(ctx context.Context, log dlog.Logger) error {
 	if !s.Joining() {
 		log.Debug("daemon.boot.join", "this daemon is the incumbent; nothing to join", nil)
