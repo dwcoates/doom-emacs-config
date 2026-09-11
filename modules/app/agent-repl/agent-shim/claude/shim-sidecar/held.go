@@ -29,6 +29,59 @@ type workspaceAttribution struct {
 	id  string
 }
 
+// catchupTally accumulates, during a startup catch-up rescan, the pre-existing
+// items of one stale class so the pass states ONE summary instead of one
+// warning per item. The clock it keeps is each item's own last-write mtime,
+// never our read time, so the oldest age it reports is a fact about the file
+// rather than about when we got round to it.
+type catchupTally struct {
+	count    int
+	oldestMs int64 // 0 = nothing accumulated yet
+}
+
+func (c *catchupTally) add(itemMs int64) {
+	c.count++
+	if c.oldestMs == 0 || itemMs < c.oldestMs {
+		c.oldestMs = itemMs
+	}
+}
+
+func (c *catchupTally) reset() { *c = catchupTally{} }
+
+// isBacklog reports whether a file whose relevant activity is at itemMs was
+// already present before the sidecar started producing, and so belongs to the
+// startup catch-up rather than to steady state. A zero process start (no
+// boundary set yet) means nothing is catch-up: every item is stated per item,
+// exactly as before this policy existed.
+func (s *sidecar) isBacklog(itemMs int64) bool {
+	return s.processStartMs != 0 && itemMs < s.processStartMs
+}
+
+// flushCatchupSummaries states, at the end of a rescan pass, ONE warning per
+// stale class the pass caught up on, naming the count and the oldest item's
+// age. A class with nothing accumulated states nothing. Both tallies are reset,
+// so the summary is a per-pass edge rather than a running total.
+func (s *sidecar) flushCatchupSummaries(nowMs int64) {
+	if s.catchupWorkspaces.count > 0 {
+		age := time.Duration(nowMs-s.catchupWorkspaces.oldestMs) * time.Millisecond
+		s.log.With(logging.Context{
+			Operation: "catchup-summary", Level: "warn",
+			Reason: "workspace_unattributed", Repeat: logging.Repeat(s.catchupWorkspaces.count),
+		}).Log("startup catch-up held %d pre-existing transcript(s) without workspace attribution; the oldest was last written %s ago — these predate this sidecar and are summarized here, not stated one by one",
+			s.catchupWorkspaces.count, age)
+		s.catchupWorkspaces.reset()
+	}
+	if s.catchupSpools.count > 0 {
+		age := time.Duration(nowMs-s.catchupSpools.oldestMs) * time.Millisecond
+		s.log.With(logging.Context{
+			Operation: "catchup-summary", Level: "warn",
+			Reason: "spool_unclaimed", Repeat: logging.Repeat(s.catchupSpools.count),
+		}).Log("startup catch-up ingested %d pre-existing unclaimed spool(s) as residue; the oldest was last written %s ago — these predate this sidecar and are summarized here, not stated one by one",
+			s.catchupSpools.count, age)
+		s.catchupSpools.reset()
+	}
+}
+
 // UnownedSpoolWindow is how long a spool may sit unclaimed before its bytes are
 // ingested as residue rather than waited on any longer. It is the DEFAULT:
 // --unowned-spool-window replaces it, so the residue path can be exercised in
@@ -135,8 +188,23 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 	// The wait expired. The bytes are ingested as residue rather than waited on
 	// forever, and the file keeps being tailed.
 	if s.held.demote(target.Path) {
-		s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Level: "warn"}).
-			Log("spool unclaimed after %s: its bytes are ingested as unparsed residue naming the spool as their source, and it keeps being tailed", s.held.window)
+		mtimeMs := fileActivityMs(target.Path, now.UnixMilli())
+		if s.isBacklog(mtimeMs) {
+			// A spool that already existed unclaimed before this sidecar started
+			// is backlog: its spawning session is long gone and it will never be
+			// claimed. A restart re-derives hundreds of these at once, so it is
+			// accumulated and summarized by flushCatchupSummaries rather than
+			// warned per file. The demotion itself still happens; only its record
+			// is leveled to debug.
+			s.catchupSpools.add(mtimeMs)
+			s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Reason: "spool_unclaimed", Level: "debug"}).
+				LogVerbose("spool unclaimed after %s during startup catch-up: its bytes are ingested as unparsed residue and it keeps being tailed; it is summarized rather than stated on its own", s.held.window)
+		} else {
+			// A spool that appeared while the sidecar was already running and then
+			// aged out unclaimed is a newly-arising condition, stated per file.
+			s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Level: "warn"}).
+				Log("spool unclaimed after %s: its bytes are ingested as unparsed residue naming the spool as their source, and it keeps being tailed", s.held.window)
+		}
 	}
 	target.Kind = tail.KindResidueSpool
 	target.Raw = true
@@ -155,12 +223,28 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 				ClaudeSessionID: target.SessionID, Level: "warn",
 			}
 			if s.workspaceFailures[key] == detail {
+				// The same failure was already stated or counted; a rescan
+				// re-checks the transcript every pass, so restating it here is
+				// exactly the per-pass flood this leveling exists to prevent.
 				ctx.Level = "debug"
 				s.log.With(ctx).LogVerbose("transcript still held without workspace attribution: %v", err)
-			} else {
-				s.workspaceFailures[key] = detail
-				s.log.With(ctx).Log("transcript held: workspace attribution is required before any bytes are read: %v", err)
+				return discover.Target{}, false
 			}
+			firstFailure := s.workspaceFailures[key] == ""
+			s.workspaceFailures[key] = detail
+			mtimeMs := fileActivityMs(target.Path, s.now().UnixMilli())
+			if firstFailure && s.isBacklog(mtimeMs) {
+				// A pre-existing transcript whose workspace cannot be resolved is
+				// backlog the restart is catching up on. A restart re-derives
+				// hundreds at once, so it is accumulated and summarized rather
+				// than warned per file; only a transcript whose session appears
+				// while the sidecar runs steady-state warns per item.
+				s.catchupWorkspaces.add(mtimeMs)
+				ctx.Level = "debug"
+				s.log.With(ctx).LogVerbose("transcript held without workspace attribution during startup catch-up; it is summarized rather than stated on its own: %v", err)
+				return discover.Target{}, false
+			}
+			s.log.With(ctx).Log("transcript held: workspace attribution is required before any bytes are read: %v", err)
 			return discover.Target{}, false
 		}
 		workspace = workspaceAttribution{dir: dir, id: id}
