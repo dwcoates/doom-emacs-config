@@ -50,8 +50,10 @@ type Budget struct {
 var budgets = []Budget{
 	{Phase: PhaseDoomBoot, Limit: unmeasured},
 	{Phase: PhaseModuleLoaded, Limit: unmeasured},
+	{Phase: PhaseDaemonSpawned, Limit: unmeasured},
 	{Phase: PhaseDaemonAnswered, Limit: unmeasured},
 	{Phase: PhaseLinkUp, Limit: unmeasured},
+	{Phase: PhaseRosterSubscribed, Limit: unmeasured},
 	{Phase: PhaseFirstRoster, Limit: unmeasured},
 	{Phase: PhaseTabDrawn, Limit: unmeasured},
 	{Phase: PhasePanelPainted, Limit: unmeasured},

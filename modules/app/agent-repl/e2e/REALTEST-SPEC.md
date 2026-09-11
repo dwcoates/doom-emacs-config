@@ -181,8 +181,10 @@ outside, because it precedes the process that would otherwise report it.
 |---|---|
 | `doom-boot` | the first module record of the run — the earliest evidence the process reached lisp at all |
 | `module-loaded` | `elisp.daemon.ensure-command` |
-| `daemon-answered` | `elisp.daemon.adopted` or `elisp.daemon.booted`, reported as which |
-| `link-up` | `elisp.link.up` |
+| `daemon-spawned` | `elisp.daemon.started` (this launch spawned it) or `elisp.daemon.adopted` (one was already answering), reported as which |
+| `daemon-answered` | the LATER of `link-up` and `roster-subscribed`: the daemon is answering this frontend |
+| `link-up` | `elisp.link.up`, `elisp.link.reconnected` or `elisp.host.link-up` |
+| `roster-subscribed` | `elisp.roster.subscribed` — written from the daemon's ACCEPTANCE, not from the request |
 | `first-roster` | `elisp.roster.reconcile:` |
 | `tab-drawn` | `elisp.roster.tab-open:`, per workspace |
 | `panel-painted` | `elisp.frontend.watch-load: load-changed`, per workspace — the only signal in the whole startup that comes from the PAGE, and a fact the widget emits rather than an answer to a question, which is what makes it trustworthy for a page too broken to answer one |
@@ -197,9 +199,23 @@ Two rules that are easy to get wrong:
   asked, it had happened", which carries no timestamp. Emacs is polled only to
   decide WHEN TO STOP WAITING; every number reported comes from a record.
 
-`daemon-answered` reports whether the daemon was adopted or booted because those
+`daemon-spawned` reports whether the daemon was spawned or adopted because those
 are different work, and comparing their times would be comparing different
 things.
+
+`daemon-answered` is COMPUTED, not read off a marker, and it deliberately does
+not end at `elisp.daemon.booted`. Realtest 1's first run wrote that record three
+milliseconds after the spawn, against an address file a dead daemon had left
+behind, while the link the frontend actually talks over came up ten seconds
+later: a phase ending at the boot claim measures the claim. A link with no
+roster has nothing to draw and a subscription with no link cannot be delivered,
+so the phase ends at whichever of the two is later, and when either is missing
+it reports WHICH — the two send a reader to different places.
+
+The marker boundaries are spelled `(\s|$)` rather than `\b`, because `-` is not
+a word character: `link-up\b` also matches `link-up-skipped` and `adopted\b`
+also matches `adopted-unhealthy`, each the opposite of the phase it would be
+credited to.
 
 ## Budgets, and why they ship unmeasured
 
