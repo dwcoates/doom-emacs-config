@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+	"unicode"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -16,6 +18,18 @@ import (
 )
 
 const requestIDHeader = "X-Agent-Repl-Request-Id"
+
+func boundaryOperation(rpc string) string {
+	var name strings.Builder
+	name.WriteString("daemon.server.")
+	for i, letter := range rpc {
+		if i > 0 && unicode.IsUpper(letter) {
+			name.WriteByte('_')
+		}
+		name.WriteRune(unicode.ToLower(letter))
+	}
+	return name.String()
+}
 
 type requestBoundary struct {
 	log       dlog.Logger
