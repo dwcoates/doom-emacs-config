@@ -42,6 +42,7 @@ See `docs/REALTEST-PLAN.md` for run status.
 | 2026-09-11 | Where the missing-directory check runs | Boot reconciliation and the opening roster publish only, not the per-verb republish | The per-verb republish is the hot path, and paying one stat per workspace per verb there was not worth it | Add the stat to republishRegistry |
 | 2026-09-11 | An integration flake in the displaced-turn test | Root-caused to the test's Count call racing the merge teardown's force-stop; the recorder now answers count under the pop lock (daemon commit 6f96daad0); production unchanged | The flake was a test-only race, not a production defect | Not applicable |
 | 2026-09-11 | The proto suite failed on generator drift (unpinned npx fetched v2.15.0) | Pin to v2.14.1 and gate the header version rather than regenerate with the newer tool | An upgrade is a deliberate commit that regenerates the tree, not a side effect of a test run | Bump the pin and regenerate |
+| 2026-09-11 | Three cold starts and two launch methods per run | One cold start per test, `open -g` only; the direct-binary method deleted | The extra method existed to hedge a focus problem whose cause was ours | Restore coldStarts and the method from git history |
 
 ## Pending
 
