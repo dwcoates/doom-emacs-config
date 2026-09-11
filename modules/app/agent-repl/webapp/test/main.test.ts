@@ -129,6 +129,11 @@ async function bootMain(): Promise<void> {
         clientLogs.push(request);
         return Promise.resolve({});
       },
+      watchPage: async function* (_request: unknown, options: { signal: AbortSignal }) {
+        await new Promise<void>((resolve) => {
+          options.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      },
     })),
   }));
   vi.doMock("../src/lifecycle/lifecycle.js", () => ({
@@ -251,6 +256,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // A successful boot owns one standing page stream. Stop it at the same
+  // boundary production uses so no retry or iterator survives into the next
+  // fresh module graph.
+  bootedContext?.quiesce();
   consoleError.mockRestore();
   vi.unstubAllGlobals();
   vi.resetModules();
@@ -259,8 +268,9 @@ afterEach(() => {
 });
 
 describe("the boot", () => {
-  // This first full-graph mount reached 872ms under coverage instrumentation;
-  // keep its host-contention budget local rather than raising the 850ms global.
+  // This first full-graph mount reached 1,547ms while the package coverage
+  // workers transformed their own graphs; keep its ~3x budget local rather
+  // than raising the 850ms global for ordinary already-loaded unit tests.
   test("mounts every component on the shell element that names it", async () => {
     await bootMain();
 
@@ -270,7 +280,7 @@ describe("the boot", () => {
     expect(mounts.holdTray.mock.calls[0]?.[0]).toBe(document.getElementById("hold-tray"));
     expect(mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
     expect(mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
-  }, 1_500);
+  }, 5_000);
 
   test("has the ClientLog-forwarding logger installed before the first mount", async () => {
     await bootMain();
