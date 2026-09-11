@@ -137,6 +137,11 @@ under the temp root rather than the session's state dir.")
          (agent-repl-test-daemon--displayed nil)
          (agent-repl--frontend-daemon-process nil)
          (agent-repl-daemon-build-failure nil)
+         ;; A scenario that boots into a timeout or a refused launch SETS
+         ;; this, and without the reset it stood for the rest of the run --
+         ;; "daemon: launch failed" outranks every other arm, so the next
+         ;; scenario's segment assertion read the previous one's failure.
+         (agent-repl-daemon-launch-failure nil)
          (agent-repl-daemon-mode-line-segment nil)
          (agent-repl-daemon--build-state nil)
          (agent-repl-daemon--build-duration nil)
@@ -153,6 +158,14 @@ under the temp root rather than the session's state dir.")
          (agent-repl-daemon--boot-continuation nil)
          (agent-repl-daemon--boot-rejected-address nil)
          (agent-repl-daemon--own-address nil)
+         (agent-repl-daemon--lifecycle nil)
+         (agent-repl-daemon--lifecycle-timer nil)
+         ;; The segment reads the roster's order and the pending-open set,
+         ;; so both are reset per scenario: a tab order left standing by an
+         ;; earlier test would put a workspace bring-up note in this one's
+         ;; mode line.
+         (agent-repl-roster--tab-order nil)
+         (agent-repl--open-progress (make-hash-table :test 'equal))
          (agent-repl-test-daemon--addr-file
           (make-temp-file "agent-repl-test-daemon-addr-"))
          (agent-repl-test-daemon--addr-file-contents nil)
@@ -1380,6 +1393,184 @@ the spawn, called the daemon booted, and linked to a refused port."
     (agent-repl-daemon--clear-build-status)
     ;; Assert
     (should (null agent-repl-daemon-mode-line-segment))))
+
+;;;; ---- The bring-up lifecycle in the mode line ----
+;;
+;; Everything between the spawn and link-up used to leave the segment empty,
+;; which reads exactly like an editor that has finished starting.  On the
+;; cold start these tests come from, that silence covered ten seconds.
+
+(ert-deftest agent-repl-test-daemon-a-spawn-says-the-daemon-is-starting ()
+  "From the spawn until an address exists the mode line says so."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment "daemon: starting…"))))
+
+(ert-deftest agent-repl-test-daemon-a-published-address-says-linking ()
+  "An address exists but the link does not yet: that is its own state."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (agent-repl-daemon-ensure)
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-daemon--boot-tick)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment "daemon: linking…"))))
+
+(ert-deftest agent-repl-test-daemon-link-up-on-an-own-daemon-says-ready ()
+  "A daemon this Emacs started and linked to is ready."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl--frontend-daemon-process 'the-daemon-process)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (object) (eq object 'the-daemon-process))))
+      ;; Act
+      (agent-repl-daemon-on-link-up 'the-connection))
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment "daemon: ready"))))
+
+(ert-deftest agent-repl-test-daemon-link-up-on-a-foreign-daemon-says-adopted ()
+  "A daemon this Emacs merely attached to is adopted, not started."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl--frontend-daemon-process nil)
+    ;; Act
+    (agent-repl-daemon-on-link-up 'the-connection)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment "daemon: adopted"))))
+
+(ert-deftest agent-repl-test-daemon-a-settled-lifecycle-clears-itself ()
+  "An outcome is worth saying and not worth keeping."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon--set-lifecycle 'ready)
+    ;; Act
+    (agent-repl-daemon--clear-lifecycle)
+    ;; Assert
+    (should (null agent-repl-daemon-mode-line-segment))))
+
+(ert-deftest agent-repl-test-daemon-a-settled-lifecycle-schedules-its-own-clear ()
+  "`ready' takes itself down after the status display window."
+  (agent-repl-test-daemon--with-harness
+    ;; Act
+    (agent-repl-daemon--set-lifecycle 'ready)
+    ;; Assert
+    (should (equal (car (car agent-repl-test-daemon--timers))
+                   agent-repl-daemon-build-status-display-seconds))))
+
+(ert-deftest agent-repl-test-daemon-an-in-flight-lifecycle-schedules-no-clear ()
+  "`starting' is not an outcome, so nothing takes it down but the next state."
+  (agent-repl-test-daemon--with-harness
+    ;; Act
+    (agent-repl-daemon--set-lifecycle 'starting)
+    ;; Assert
+    (should (null agent-repl-daemon--lifecycle-timer))))
+
+(ert-deftest agent-repl-test-daemon-every-lifecycle-transition-is-recorded ()
+  "A transition nobody can read afterwards is not a transition."
+  (agent-repl-test-daemon--with-harness
+    ;; Act
+    (agent-repl-daemon--set-lifecycle 'linking)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.lifecycle state=linking"))))
+
+(ert-deftest agent-repl-test-daemon-a-build-failure-outranks-the-lifecycle ()
+  "A standing failure is what the user has to act on, whatever else is up."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon--set-lifecycle 'starting)
+    ;; Act
+    (setq agent-repl-daemon-build-failure "exit 2")
+    (agent-repl-daemon--refresh-segment)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment "daemon: build failed"))))
+
+(ert-deftest agent-repl-test-daemon-a-running-build-outranks-the-lifecycle ()
+  "The build is the longest leg, so it keeps the segment while it runs."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon--set-lifecycle 'starting)
+    ;; Act
+    (agent-repl-daemon--set-build-status 'building nil)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment
+                   "building agent-repl stack…"))))
+
+(ert-deftest agent-repl-test-daemon-the-lifecycle-outranks-the-just-built-note ()
+  "\"built in 1.0s\" must not hide the bring-up that is still going."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon--set-build-status 'built 1.0)
+    ;; Act
+    (agent-repl-daemon--set-lifecycle 'linking)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment "daemon: linking…"))))
+
+;;;; ---- The workspace bring-up count ----
+
+(ert-deftest agent-repl-test-daemon-opening-workspaces-are-counted-in-the-segment ()
+  "While roster tabs are still painting the mode line says how many are up."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1" "ws-2" "ws-3"))
+    (puthash "ws-1" (list :phase :requested) agent-repl--open-progress)
+    ;; Act
+    (agent-repl-daemon--refresh-segment)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment
+                   "workspaces: opening 2/3"))))
+
+(ert-deftest agent-repl-test-daemon-a-painted-workspace-leaves-the-count ()
+  "A workspace whose webview finished loading is painted, not opening."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
+    (puthash "ws-1" (list :phase :loaded) agent-repl--open-progress)
+    ;; Act
+    (agent-repl-daemon--refresh-segment)
+    ;; Assert
+    (should (null agent-repl-daemon-mode-line-segment))))
+
+(ert-deftest agent-repl-test-daemon-a-workspace-with-no-tab-is-not-counted ()
+  "The denominator is the ROSTER's tabs, so an open elsewhere is not ours."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1"))
+    (puthash "ws-other" (list :phase :requested) agent-repl--open-progress)
+    ;; Act
+    (agent-repl-daemon--refresh-segment)
+    ;; Assert
+    (should (null agent-repl-daemon-mode-line-segment))))
+
+(ert-deftest agent-repl-test-daemon-an-open-progress-change-repaints-the-segment ()
+  "open-progress publishing a change is what moves the count."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
+    (puthash "ws-1" (list :phase :requested) agent-repl--open-progress)
+    (agent-repl-daemon--refresh-segment)
+    (remhash "ws-1" agent-repl--open-progress)
+    ;; Act
+    (agent-repl-daemon-on-open-progress-change)
+    ;; Assert
+    (should (null agent-repl-daemon-mode-line-segment))))
+
+(ert-deftest agent-repl-test-daemon-the-lifecycle-outranks-the-workspace-count ()
+  "The daemon has to be up before its workspaces mean anything."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
+    (puthash "ws-1" (list :phase :requested) agent-repl--open-progress)
+    ;; Act
+    (agent-repl-daemon--set-lifecycle 'linking)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment "daemon: linking…"))))
 
 (ert-deftest agent-repl-test-daemon-a-second-build-cancels-the-pending-clear ()
   "The earlier build's clear timer must not wipe the later build's status."

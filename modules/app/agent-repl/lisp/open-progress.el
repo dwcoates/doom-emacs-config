@@ -173,6 +173,49 @@ The guard `agent-repl--toggle' consults before dispatching an open, and
 the reason a second keypress cannot stack a second placeholder."
   (and (agent-repl--open-progress-entry ws) t))
 
+(defvar agent-repl-open-progress-change-functions nil
+  "Abnormal hook run with no arguments after the pending-open set changes.
+
+THE ONE PUBLICATION OF THIS FILE'S STATE.  Surfaces outside this file
+(the daemon's mode-line segment reports the cold start's workspace
+bring-up) need to know when an open advances or resolves, and the answer
+must come from THIS registry rather than from a second count kept
+somewhere else -- two answers to \"is this workspace painted yet\" is
+exactly the drift that makes a progress display lie.  Readers call
+`agent-repl-open-progress-opening-workspaces'; this hook is only the
+notification that the answer moved.")
+
+(defun agent-repl--open-progress-changed ()
+  "Run `agent-repl-open-progress-change-functions', containing each handler.
+A display handler that signals must not take down the open it is
+reporting on."
+  (dolist (fn agent-repl-open-progress-change-functions)
+    (condition-case err
+        (funcall fn)
+      (error
+       (agent-repl--warn
+        '(:agent-repl-central "the pending-open set spans every workspace")
+        "open-progress: change handler failed fn=%s error=%s"
+        fn (error-message-string err))))))
+
+(defun agent-repl-open-progress-opening-workspaces ()
+  "Return the workspace names whose open is in flight and NOT yet painted.
+
+A workspace is still opening while it holds a registry entry that has
+neither reached `:loaded' -- the xwidget's own load-finished event, the
+only honest report that the page is up -- nor resolved to a terminal
+phase, which is a standing failure rather than work in progress.  A
+workspace whose open FINISHED holds no entry at all, so it is absent
+here, which is what makes this the painted/unpainted answer."
+  (let (opening)
+    (maphash (lambda (ws entry)
+               (let ((phase (plist-get entry :phase)))
+                 (unless (or (eq phase :loaded)
+                             (memq phase agent-repl--open-progress-terminal-phases))
+                   (push ws opening))))
+             agent-repl--open-progress)
+    (nreverse opening)))
+
 (defun agent-repl--open-progress-buffer-name (ws)
   "Return the placeholder buffer name for workspace WS."
   (format agent-repl-open-progress-buffer-name-format
@@ -297,6 +340,7 @@ asynchronous is even attempted."
         (agent-repl--open-progress-render ws)
         (agent-repl--open-progress-show ws buf)
         (agent-repl--log ws "open-progress: STARTED buffer=%s" (buffer-name buf))
+        (agent-repl--open-progress-changed)
         ;; Forced, because the caller has synchronous work left (xwidget
         ;; validation, the daemon ensure's first leg) before its command
         ;; returns and the command loop would redisplay on its own.
@@ -329,6 +373,7 @@ BACKWARDS.  Returns the new phase, or nil when nothing moved."
                  agent-repl--open-progress)
         (agent-repl--open-progress-render ws)
         (agent-repl--log ws "open-progress: phase %s -> %s" current phase)
+        (agent-repl--open-progress-changed)
         phase)))))
 
 (defun agent-repl--open-progress-fail (ws detail)
@@ -343,7 +388,8 @@ the buffer, or nil when WS had no pending open."
                            :timer nil)
              agent-repl--open-progress)
     (agent-repl--warn ws "open-progress: FAILED detail=%s" detail)
-    (agent-repl--open-progress-render ws)))
+    (prog1 (agent-repl--open-progress-render ws)
+      (agent-repl--open-progress-changed))))
 
 (defun agent-repl--open-progress-stall-diagnosis (phase)
   "Return the stall diagnosis for an open stuck at PHASE.
@@ -377,7 +423,8 @@ waiting.  A placeholder already resolved is left exactly as it is."
                  agent-repl--open-progress)
         (agent-repl--warn ws "open-progress: ESCALATED after %ss stage=%s"
                           agent-repl-open-progress-escalate-seconds phase)
-        (agent-repl--open-progress-render ws)))))
+        (agent-repl--open-progress-render ws)
+        (agent-repl--open-progress-changed)))))
 
 (defun agent-repl--open-progress-finish (ws)
   "Tear down WS's placeholder because the view is really up.
@@ -391,6 +438,7 @@ non-nil when a placeholder was actually torn down."
       (when (buffer-live-p buf) (kill-buffer buf)))
     (agent-repl--log ws "open-progress: FINISHED elapsed=%.3fs"
                      (- (float-time) (plist-get entry :started)))
+    (agent-repl--open-progress-changed)
     t))
 
 (defun agent-repl--open-progress-abandon (ws)
@@ -419,6 +467,7 @@ Returns non-nil when a placeholder was actually torn down."
       (when (buffer-live-p buf) (kill-buffer buf)))
     (agent-repl--log ws "open-progress: ABANDONED phase=%s reason=workspace-deleted"
                      (plist-get entry :phase))
+    (agent-repl--open-progress-changed)
     t))
 
 ;; Registered here though the hook lives in workspace.el, for the same
