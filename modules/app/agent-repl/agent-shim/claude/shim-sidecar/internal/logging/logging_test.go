@@ -405,6 +405,48 @@ func TestATargetGoneAfterSeenServingIsTransientNotAWarn(t *testing.T) {
 	}
 }
 
+// A NEVER-SERVED ADDRESS IS A BOOTING ADDRESS, EVEN WITH A GLOBALLY-LATCHED
+// seenServing. The forwarder wraps a connection failure with
+// ErrForwardTargetBooting when the address this attempt dialed has never once
+// been seen accepting, regardless of this ladder's own seenServing (which
+// tracks only whether SOME daemon answered a probe or forward, never which
+// address). forwardLoop must not manufacture a WARN for that per-address
+// startup transient — the realtest 1 shape: daemon A was seen serving, and
+// daemon B's address then refuses during its own boot window.
+func TestATargetBootingIsTransientNotAWarn(t *testing.T) {
+	// Arrange: Ready answers true from the first probe (seenServing latches
+	// true), but every Forward attempt fails because the address this record
+	// targets has never itself been seen accepting.
+	forwarder := &recordingForwarder{
+		address: "127.0.0.1:8123",
+		err:     fmt.Errorf("ClientLog at 127.0.0.1:8123: dial tcp: connection refused: %w", ErrForwardTargetBooting),
+	}
+	l, _, global := forwardingSinks(t, true, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert: no WARN was manufactured, but the transient is narrated at DEBUG
+	// and the record itself is still kept in the global sink.
+	if strings.Contains(global.String(), "forward-failure") {
+		t.Fatalf("a booting-target failure was reported as a WARN outage: %q", global.String())
+	}
+	operations := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		operations[decode(t, line).Operation]++
+	}
+	want := map[string]int{"sidecar.logging.forward-deferred": 1, "poll": 1}
+	for operation, count := range want {
+		if operations[operation] != count {
+			t.Fatalf("global operations = %v, want %v", operations, want)
+		}
+	}
+}
+
 // The count is what separates "the daemon was slow to boot" from "the daemon is
 // not there", so the one failure record carries it.
 func TestTheForwardFailureRecordCarriesItsAttemptCount(t *testing.T) {

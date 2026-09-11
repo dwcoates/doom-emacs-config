@@ -49,6 +49,12 @@ type Client struct {
 	cachedAddress string
 	cachedDir     string
 	cachedRef     *workspacev1.WorkspaceRef
+	// seenServing is the set of addresses this Client has ever seen ACCEPTING —
+	// a successful Ready probe or a successful Forward — keyed by the bare
+	// "host:port" the address names. daemon.addr publishes an address before
+	// its listener answers, so an address absent from this set is presumed
+	// BOOTING regardless of its advertised pid's liveness; see classifyForward.
+	seenServing map[string]struct{}
 }
 
 // New constructs the forwarding boundary for one resolved agent-repl state
@@ -94,7 +100,30 @@ func (c *Client) Ready() (string, bool) {
 		return address, false
 	}
 	_ = conn.Close()
+	c.markServing(address)
 	return address, true
+}
+
+// markServing records that address has now been seen accepting at least
+// once, for classifyForward's per-address boot tolerance.
+func (c *Client) markServing(address string) {
+	if address == "" {
+		return
+	}
+	c.mu.Lock()
+	if c.seenServing == nil {
+		c.seenServing = map[string]struct{}{}
+	}
+	c.seenServing[address] = struct{}{}
+	c.mu.Unlock()
+}
+
+// hasSeenServing reports whether address has ever been seen accepting.
+func (c *Client) hasSeenServing(address string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.seenServing[address]
+	return ok
 }
 
 // Forward resolves the current daemon and sends one record. The returned
@@ -152,6 +181,7 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	}
 	switch response.Msg.GetResult().(type) {
 	case *agentreplv1.ClientLogResponse_Success:
+		c.markServing(address)
 		return address, nil
 	case *agentreplv1.ClientLogResponse_Error:
 		c.invalidateWorkspace(address, workspace.GetId())
@@ -166,12 +196,17 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 // logging.ErrForwardTargetNotThere when the daemon THIS ATTEMPT dialed is
 // provably gone: its advertised pid has died, or daemon.addr no longer names
 // the same address (a replacement daemon published, or the file itself
-// vanished) since the attempt began. It leaves every other failure unchanged
-// — including a connection/dial failure against a still-live, still-named
-// daemon, which is a genuinely stuck daemon and must remain a real WARN
-// candidate — and it never reclassifies an app-level failure (an explicit
-// ClientLog refusal, a malformed roster) that was never a dial failure to
-// begin with.
+// vanished) since the attempt began. Failing that, it marks the failure with
+// logging.ErrForwardTargetBooting when the address this attempt dialed has
+// never once been seen accepting (Ready or a prior successful Forward): a
+// daemon publishes its address and pid before its listener answers, so an
+// alive-but-unreachable pid at a never-served address is presumed BOOTING,
+// not stuck. It leaves every other failure unchanged — including a
+// connection/dial failure against an address that WAS previously seen
+// accepting and whose advertised pid is still alive, which is a genuinely
+// stuck daemon and must remain a real WARN candidate — and it never
+// reclassifies an app-level failure (an explicit ClientLog refusal, a
+// malformed roster) that was never a dial failure to begin with.
 func (c *Client) classifyForward(err error, usedAddress string, usedPID int, usedPIDKnown bool) error {
 	if err == nil || connect.CodeOf(err) != connect.CodeUnavailable {
 		return err
@@ -188,6 +223,9 @@ func (c *Client) classifyForward(err error, usedAddress string, usedPID int, use
 		(!usedPIDKnown && curPIDKnown && !processAlive(curPID))
 	if notThere {
 		return fmt.Errorf("%w: %w", err, logging.ErrForwardTargetNotThere)
+	}
+	if !c.hasSeenServing(usedAddress) {
+		return fmt.Errorf("%w: %w", err, logging.ErrForwardTargetBooting)
 	}
 	return err
 }

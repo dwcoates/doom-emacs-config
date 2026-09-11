@@ -416,11 +416,14 @@ func TestClassifyForwardMarksAVanishedAdvertisementAsTargetNotThere(t *testing.T
 
 func TestClassifyForwardKeepsAnAliveUnreachableTargetAsARealFailure(t *testing.T) {
 	// Arrange: daemon.addr still names the exact address and a still-live pid
-	// this attempt dialed — a genuinely stuck daemon, not a restart.
+	// this attempt dialed — a genuinely stuck daemon, not a restart — and the
+	// address WAS previously seen accepting, so the boot-tolerance check must
+	// not demote this to a transient either.
 	stateDir := t.TempDir()
 	pid := os.Getpid()
 	writeAdvertisement(t, stateDir, "127.0.0.1:9999", pid)
 	client := New(stateDir)
+	client.markServing("127.0.0.1:9999")
 	dialErr := dialUnavailable()
 
 	// Act.
@@ -430,8 +433,63 @@ func TestClassifyForwardKeepsAnAliveUnreachableTargetAsARealFailure(t *testing.T
 	if errors.Is(err, logging.ErrForwardTargetNotThere) {
 		t.Fatalf("classifyForward against a live, unchanged advertiser = %v, want the failure left unchanged", err)
 	}
+	if errors.Is(err, logging.ErrForwardTargetBooting) {
+		t.Fatalf("classifyForward against a previously-serving address = %v, want the failure left unchanged", err)
+	}
 	if !errors.Is(err, dialErr) {
 		t.Fatalf("classifyForward changed the underlying error: got %v, want %v unchanged", err, dialErr)
+	}
+}
+
+// TestClassifyForwardMarksANeverServedAddressAsBooting is the per-address
+// boot-tolerance invariant: an address whose advertisement is unchanged and
+// whose pid is alive, but which this Client has NEVER seen accepting, is a
+// startup transient — not a stuck daemon — even when a wholly different
+// address was seen serving earlier (the realtest 1 shape: daemon A was seen
+// serving, daemon B's boot window then refuses).
+func TestClassifyForwardMarksANeverServedAddressAsBooting(t *testing.T) {
+	// Arrange: daemon.addr names the exact address and a live pid this attempt
+	// dialed, but this address has never been marked as seen serving.
+	stateDir := t.TempDir()
+	pid := os.Getpid()
+	writeAdvertisement(t, stateDir, "127.0.0.1:9999", pid)
+	client := New(stateDir)
+	// A different address was seen serving earlier; it must not vouch for the
+	// one this attempt dialed.
+	client.markServing("127.0.0.1:8888")
+
+	// Act.
+	err := client.classifyForward(dialUnavailable(), "127.0.0.1:9999", pid, true)
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardTargetBooting) {
+		t.Fatalf("classifyForward against a never-served address = %v, want ErrForwardTargetBooting", err)
+	}
+	if errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("classifyForward against a never-served, live-pid address = %v, want it left OUT of the gone sentinel", err)
+	}
+}
+
+// TestReadyMarksItsAddressAsSeenServing exercises Ready() itself as the
+// serving-witness path: a subsequent classifyForward against the same address
+// must then treat a failure there as a real WARN candidate, not a boot
+// transient.
+func TestReadyMarksItsAddressAsSeenServing(t *testing.T) {
+	// Arrange: serveClientLog starts a real listener and publishes its address.
+	client, _ := serveClientLog(t, &agentreplv1.ClientLogResponse{
+		Result: &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}},
+	})
+	address, ready := client.Ready()
+	if !ready {
+		t.Fatalf("Ready = false, want the fake daemon to answer")
+	}
+
+	// Act.
+	err := client.classifyForward(dialUnavailable(), address, os.Getpid(), true)
+
+	// Assert.
+	if errors.Is(err, logging.ErrForwardTargetBooting) {
+		t.Fatalf("classifyForward after a successful Ready probe = %v, want the address treated as previously served", err)
 	}
 }
 
@@ -483,6 +541,39 @@ func TestForwardMarksADeadAdvertiserAsTargetNotThereEndToEnd(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, logging.ErrForwardTargetNotThere) {
 		t.Fatalf("Forward against a dead advertiser = %v, want ErrForwardTargetNotThere", err)
+	}
+}
+
+// TestForwardMarksANeverServedAddressAsBootingEndToEnd exercises the whole
+// Forward path against a daemon.addr whose listener is closed (connection
+// refused) and whose advertised pid IS alive: the realtest 1 shape, where
+// daemon B publishes its address and a live pid before its listener answers.
+// A fresh Client — one that has never seen this address accept — must treat
+// the refusal as a boot transient, not a WARN.
+func TestForwardMarksANeverServedAddressAsBootingEndToEnd(t *testing.T) {
+	// Arrange.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a port: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close the reserved listener: %v", err)
+	}
+	stateDir := t.TempDir()
+	writeAdvertisement(t, stateDir, address, os.Getpid())
+
+	// Act.
+	_, err = New(stateDir).Forward(logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", WorkspaceDir: t.TempDir(), WorkspaceID: "deadbeef",
+	})
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardTargetBooting) {
+		t.Fatalf("Forward against a never-served, live-pid address = %v, want ErrForwardTargetBooting", err)
+	}
+	if errors.Is(err, logging.ErrForwardTargetNotThere) {
+		t.Fatalf("Forward against a never-served, live-pid address = %v, want it left OUT of the gone sentinel", err)
 	}
 }
 
