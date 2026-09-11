@@ -550,8 +550,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     void draining;
   };
 
-  const reader = createReader({ client: options.client });
-  const reconciler = createReconciler({ client: options.client });
+  // THE SAME SCHEDULE ON BOTH HALVES. A busy store is one condition, so the
+  // read half backs off exactly as the write half replays.
+  const reader = createReader({ client: options.client, retry, sleep });
+  const reconciler = createReconciler({ client: options.client, retry, sleep });
 
   /**
    * Tell the reader which shell-run rows this batch wrote.

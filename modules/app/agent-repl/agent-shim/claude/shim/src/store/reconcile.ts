@@ -36,6 +36,7 @@ import type { StoreClient } from "./client.js";
 import { activityUpsertKey, bashTerminalUpsertKey, terminalUpsertKey } from "./keys.js";
 import { PersistenceError, type PersistEntry } from "./persistence.js";
 import { readFailure, transportFailure } from "./reader.js";
+import { readWithRetry, type ReadRetryOptions } from "./retry.js";
 
 const LOGGER = bindLog({ component: "shim-store-reconcile", operation: "shim.store.reconcile" });
 
@@ -296,7 +297,7 @@ function sweptUp(): conversationv1.DetachedLost {
 }
 
 /** What a reconciler needs to exist. */
-interface ReconcilerOptions {
+interface ReconcilerOptions extends ReadRetryOptions {
   readonly client: StoreClient;
 }
 
@@ -415,47 +416,54 @@ export function announceLiveWork(
 }
 
 export function createReconciler(options: ReconcilerOptions): Reconciler {
-  return {
-    async liveWork(): Promise<storev1.GetLiveWorkSuccess> {
-      let response: storev1.GetLiveWorkResponse;
-      try {
-        response = await options.client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
-      } catch (error) {
-        LOGGER.error(
-          { detail: String(error) },
-          "the store could not be reached for the open obligations",
-        );
-        throw transportFailure(error);
-      }
-      const result = response.result;
-      if (result.case === "failure") {
-        // warn: a defect because the store refused the obligation read needed for reconciliation.
-        LOGGER.warn(
-          { detail: result.value.detail },
-          "the store refused to state the open obligations",
-        );
-        // GetLiveWork declares ONE arm (`storage_failure`); an unset arm is
-        // handled by the same default, so a store that answers with no reason
-        // is unavailable rather than silently benign.
-        throw readFailure(result.value);
-      }
-      if (result.case !== "success") {
-        throw new PersistenceError(
-          "store_unavailable",
-          "the store answered GetLiveWork with no result arm set",
-        );
-      }
-      LOGGER.debug(
-        {
-          live_agents: result.value.liveAgents.length,
-          live_detached: result.value.liveDetached.length,
-          live_workflows: result.value.liveWorkflows.length,
-        },
-        "read the record's open obligations",
+  /** The open obligations, as the store answered them once. */
+  const liveWorkOnce = async (): Promise<storev1.GetLiveWorkSuccess> => {
+    let response: storev1.GetLiveWorkResponse;
+    try {
+      response = await options.client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    } catch (error) {
+      LOGGER.error(
+        { detail: String(error) },
+        "the store could not be reached for the open obligations",
       );
-      return result.value;
-    },
+      throw transportFailure(error);
+    }
+    const result = response.result;
+    if (result.case === "failure") {
+      // warn: a defect because the store refused the obligation read needed for reconciliation.
+      LOGGER.warn(
+        { detail: result.value.detail },
+        "the store refused to state the open obligations",
+      );
+      // GetLiveWork declares ONE arm (`storage_failure`); an unset arm is
+      // handled by the same default, so a store that answers with no reason
+      // is unavailable rather than silently benign.
+      throw readFailure(result.value);
+    }
+    if (result.case !== "success") {
+      throw new PersistenceError(
+        "store_unavailable",
+        "the store answered GetLiveWork with no result arm set",
+      );
+    }
+    LOGGER.debug(
+      {
+        live_agents: result.value.liveAgents.length,
+        live_detached: result.value.liveDetached.length,
+        live_workflows: result.value.liveWorkflows.length,
+      },
+      "read the record's open obligations",
+    );
+    return result.value;
+  };
 
+  return {
+    // ON THE RETRY SCHEDULE. This read is what StartSession reconciles from and
+    // what every joining WatchSession re-announces from, and it was the read a
+    // single `SQLITE_BUSY` used to turn into a session fault that never lifted.
+    liveWork(): Promise<storev1.GetLiveWorkSuccess> {
+      return readWithRetry("GetLiveWork", liveWorkOnce, options);
+    },
     closingAgentTerminal,
     closingSubagentTerminal,
     closingBashTerminal,
