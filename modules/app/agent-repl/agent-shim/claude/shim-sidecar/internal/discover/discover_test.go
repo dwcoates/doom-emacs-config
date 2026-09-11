@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -604,5 +605,169 @@ func TestAnUnknownSpoolPrefixIsStatedOncePerPath(t *testing.T) {
 	stated := opsAt(parseLogLines(t, *logs), "classify-spool", "error")
 	if len(stated) != 1 {
 		t.Fatalf("the classification defect was stated %d times across three scans, want exactly once", len(stated))
+	}
+}
+
+// A WORKFLOW AGENT'S META IS A DIFFERENT DOCUMENT, NOT AN UNREADABLE ONE. The
+// vendor writes no toolUseId for an agent no tool call spawned; the run and the
+// parent session on the path are what attribute it, so the transcript is
+// ingestible and nothing is held.
+func TestWorkflowAgentTranscriptIsNotHeldForAMissingToolUseID(t *testing.T) {
+	// Arrange.
+	const rel = "config-a/projects/proj/sess-1/subagents/workflows/wf_0297f159-ca1/agent-a1e.jsonl"
+	d, base, _, logs := fixture(t, rel)
+	writeRaw(t, filepath.Join(base, strings.TrimSuffix(rel, ".jsonl")+".meta.json"), []byte(workflowMetaBody))
+
+	// Act.
+	got := find(t, d.Scan(), "agent-a1e.jsonl")
+
+	// Assert.
+	if got.MetaMissing {
+		t.Fatal("a workflow agent's transcript was held for a toolUseId the vendor never writes")
+	}
+	if got.Meta.Shape != ShapeWorkflow || got.Meta.AgentType != "workflow-subagent" {
+		t.Fatalf("meta = %+v, want the parsed workflow shape", got.Meta)
+	}
+	if got.AgentID != "" {
+		t.Fatalf("AgentID = %q; a workflow agent is attributed to its run, never to a spawning call", got.AgentID)
+	}
+	if got.RunID != "wf_0297f159-ca1" {
+		t.Fatalf("RunID = %q, want the workflow run the path names", got.RunID)
+	}
+	if records := opsAt(parseLogLines(t, *logs), "discover-meta", "warn"); len(records) != 0 {
+		t.Fatalf("a legitimate workflow meta was warned about: %v", records)
+	}
+}
+
+// A workflow-SHAPED meta outside a workflow run names nothing: there is no run
+// to attribute it to and no spawning call either.
+func TestWorkflowShapedMetaOutsideAWorkflowRunIsHeld(t *testing.T) {
+	// Arrange.
+	d, base, _, _ := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	writeRaw(t, filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json"),
+		[]byte(workflowMetaBody))
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if !got.MetaMissing {
+		t.Fatal("a meta naming neither a run nor a spawning call must hold its transcript")
+	}
+}
+
+// A HOLD IS A CONDITION, NOT AN EVENT: the rescan that re-enters it must say
+// something new — the running count — at a level a reader is not drowned by.
+func TestARepeatedHoldIsRestatedVerboselyWithItsCount(t *testing.T) {
+	// Arrange.
+	d, _, _, logs := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+
+	// Act: the first scan holds it, two more re-enter the same hold.
+	d.Scan()
+	d.Scan()
+	d.Scan()
+
+	// Assert.
+	records := opsAt(parseLogLines(t, *logs), "discover-meta", "debug")
+	if len(records) != 2 {
+		t.Fatalf("repeat records = %d, want one per re-entered hold: %v", len(records), records)
+	}
+	if got := records[1].Context["repeat_count"]; got != float64(2) {
+		t.Fatalf("repeat_count = %v, want 2", got)
+	}
+	if got := ctxString(t, records[1], "reason"); got != holdMetaAbsent {
+		t.Fatalf("reason = %q, want %q", got, holdMetaAbsent)
+	}
+}
+
+// A DIFFERENT REASON IS A DIFFERENT FACT and is stated again, rather than
+// swallowed as a repeat of the hold it replaced.
+func TestAChangedHoldReasonIsStatedAgain(t *testing.T) {
+	// Arrange: held first for an absent meta.
+	d, base, _, logs := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	d.Scan()
+
+	// Act: the meta appears and is unreadable, which is a different condition.
+	writeRaw(t, filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json"),
+		[]byte("not json at all"))
+	d.Scan()
+
+	// Assert: the change itself is a warning, and the new reason is stated at
+	// its own level.
+	records := parseLogLines(t, *logs)
+	warns := opsAt(records, "discover-meta", "warn")
+	if len(warns) != 2 {
+		t.Fatalf("warn records = %d, want the first hold plus the reason change: %v", len(warns), operationLevels(records))
+	}
+	if got := ctxString(t, warns[1], "reason"); got != holdMetaUnreadable {
+		t.Fatalf("reason = %q, want %q", got, holdMetaUnreadable)
+	}
+	requireOnceIn(t, records, "discover-meta", "error")
+}
+
+// A RELEASE IS A LIFECYCLE EDGE: it is stated once, at info, and carries how
+// long the hold had been repeating.
+func TestAReleasedHoldIsStatedAtInfoWithItsRepeatCount(t *testing.T) {
+	// Arrange.
+	d, base, _, logs := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	d.Scan()
+	d.Scan()
+
+	// Act.
+	write(t, filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json"))
+	d.Scan()
+
+	// Assert.
+	records := parseLogLines(t, *logs)
+	released := requireOnceIn(t, records, "discover-meta", "info")
+	if got := released.Context["repeat_count"]; got != float64(1) {
+		t.Fatalf("repeat_count = %v, want the one repeat the hold accumulated", got)
+	}
+	// A released transcript stops being held, so a later scan repeats nothing.
+	d.Scan()
+	if got := opsAt(parseLogLines(t, *logs), "discover-meta", "info"); len(got) != 1 {
+		t.Fatalf("release records = %d, want exactly one", len(got))
+	}
+}
+
+// The STANDING set is what a reader needs when nothing changes, and one
+// periodic record carries it without a record per file per pass.
+func TestTheStandingHoldSetIsSummarizedPeriodically(t *testing.T) {
+	// Arrange.
+	d, _, _, logs := fixture(t,
+		"config-a/projects/proj/sess-1/subagents/agent-abc.jsonl",
+		"config-a/projects/proj/sess-1/subagents/agent-def.jsonl")
+	clock := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+	d.now = func() time.Time { return clock }
+
+	// Act: the first pass summarizes, the second is inside the interval, the
+	// third is past it.
+	d.Scan()
+	d.Scan()
+	clock = clock.Add(DefaultHoldSummaryInterval)
+	d.Scan()
+
+	// Assert.
+	records := opsAt(parseLogLines(t, *logs), "discover-holds", "info")
+	if len(records) != 2 {
+		t.Fatalf("hold summaries = %d, want one per elapsed interval: %v", len(records), records)
+	}
+	if !strings.Contains(records[0].Message, "2 transcript(s) held") {
+		t.Fatalf("summary message = %q, want the held count", records[0].Message)
+	}
+}
+
+// Nothing held is nothing to say.
+func TestNoHoldsMeansNoSummary(t *testing.T) {
+	// Arrange.
+	d, base, _, logs := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	write(t, filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json"))
+
+	// Act.
+	d.Scan()
+
+	// Assert.
+	if got := opsAt(parseLogLines(t, *logs), "discover-holds", ""); len(got) != 0 {
+		t.Fatalf("hold summaries with nothing held = %d, want none", len(got))
 	}
 }
