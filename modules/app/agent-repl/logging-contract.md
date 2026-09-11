@@ -101,6 +101,37 @@ Other modes summarize sink findings on stderr.
 diagnostic for callers that need its session, process, span, or gap queries;
 it is not the canonical whole-system reader.
 
+## Daemon address advertisement
+
+The daemon advertises its one loopback listener in `<state>/daemon.addr`,
+written atomically (a temporary sibling, then a rename) once the listener is
+bound and removed on orderly exit. Its payload is two lines:
+
+```
+127.0.0.1:<port>
+pid=<n>
+```
+
+The first line is the bare `host:port` a client dials; the second names the
+advertising daemon's process id. The format is forward-compatible: a reader
+that needs only the address takes the first line, which is exactly what a
+legacy daemon wrote, and a file that carries no `pid=<n>` line reads as
+`pid-unknown`. `daemonaddr.ReadAdvertisement` (Go) and
+`agent-repl-connect-read-daemon-addr` / `agent-repl-connect-read-daemon-addr-pid`
+(Emacs) are the readers.
+
+The pid makes a dead advertiser distinguishable from a live-but-unreachable
+one WITHOUT a dial. When Emacs reads a `daemon.addr` whose pid names no live
+process — a predecessor that died without withdrawing (crash, SIGKILL, or a
+restart that skipped withdraw) — it treats the advertisement as ABSENT: it
+retires the file at INFO (`elisp.daemon.addr-retired-dead-advertiser`, with the
+address and pid) and proceeds straight to a spawn, with no dial and so none of
+the transport records (`elisp.connect.dial-failed`, `elisp.connect.unary-failure`,
+`elisp.rpc.transport-failure`, `elisp.daemon.stale-addr`) a live-but-unreachable
+daemon would rightly earn. A pid that names a live process, and a legacy file
+that names no pid, are dialed as before; a live-but-unreachable daemon remains a
+real WARN/ERROR.
+
 ## JSONL schema
 
 Every persisted line is exactly one JSON object. Human-formatted persisted
