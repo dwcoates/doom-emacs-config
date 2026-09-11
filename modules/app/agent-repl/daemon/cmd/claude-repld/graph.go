@@ -158,6 +158,19 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			len(unwired), strings.Join(unwired, "\n  - "))
 	}
 
+	// THE ADOPTION BOUND IS A TEST KNOB, not a product window: the suite
+	// proves that an UNREACHABLE survivor does not wedge the boot, and waiting
+	// out the production last resort to observe it would cost every such test
+	// ten seconds. A malformed or non-positive value is REFUSED rather than
+	// ignored, so a run that set it cannot lie about what bound it measured.
+	adoptBound, err := resolveAdoptBound(os.Getenv(envBootAdoptBound))
+	if err != nil {
+		log.Error(graphOperation, "the boot adoption bound was refused", dlog.Context{
+			"cause": err.Error(),
+		})
+		return nil, err
+	}
+
 	paths, err := resolvePaths(p.Opts)
 	if err != nil {
 		log.Error(graphOperation, "the checkout's paths could not be resolved", dlog.Context{
@@ -687,6 +700,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			RunDir:         lockDir(),
 			JoiningAddress: p.Opts.joining,
 			Adopted:        fleet.Install,
+			AdoptBound:     adoptBound,
 			Log:            p.Surfaces,
 		},
 		// PRIME IS WHERE A STANDING DRAIN COMES BACK. The daemon topic replays
@@ -1104,4 +1118,26 @@ func adoptedDeathWitness(probe func(string) (sessionlock.State, error)) func(str
 		}
 		return state == sessionlock.StateFree, nil
 	}
+}
+
+// envBootAdoptBound overrides boot.DefaultAdoptBound. It exists for the
+// integration suite, whose subject includes a survivor that never answers.
+const envBootAdoptBound = "AGENT_REPL_BOOT_ADOPT_BOUND"
+
+// resolveAdoptBound reads the adoption bound's override. Empty is
+// boot.DefaultAdoptBound; a malformed or non-positive value is a REFUSAL,
+// because a knob that silently did nothing would make the run it was set for
+// report a bound it never used.
+func resolveAdoptBound(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return boot.DefaultAdoptBound, nil
+	}
+	bound, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envBootAdoptBound, value, err)
+	}
+	if bound <= 0 {
+		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envBootAdoptBound, value)
+	}
+	return bound, nil
 }
