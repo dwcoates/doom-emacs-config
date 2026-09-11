@@ -113,9 +113,13 @@ func (m Manifest) render() string {
 		fmt.Fprintf(&b, "- launch method: `%s`\n", run.Method)
 		fmt.Fprintf(&b, "- spawned at: `%s`\n", run.SpawnedAt.Format(time.RFC3339Nano))
 		fmt.Fprintf(&b, "- daemon: %s\n", orUnknown(run.DaemonPath))
-		fmt.Fprintf(&b, "- frontmost application before: %s; after: %s%s\n",
+		// The launch method is repeated ON the focus line rather than left to
+		// the line above it: whether focus moved is a fact ABOUT a method, and
+		// a reader comparing the three cold starts is comparing methods.
+		fmt.Fprintf(&b, "- frontmost application before: %s; after: %s%s (launch method `%s`)\n",
 			orUnknown(run.FrontBefore), orUnknown(run.FrontAfter),
-			map[bool]string{true: " — **FOCUS MOVED**", false: " — focus unchanged"}[run.Disturbed])
+			map[bool]string{true: " — **FOCUS MOVED**", false: " — focus unchanged"}[run.Disturbed],
+			run.Method)
 		b.WriteString("\n| phase | workspace | from spawn | budget |\n|---|---|---|---|\n")
 		for _, measurement := range run.Measurements {
 			budget := "not measured yet"
