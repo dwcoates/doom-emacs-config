@@ -185,6 +185,44 @@ second closed — the two-press-to-close bug."
      "panels-any-visible-p: result=%s" (if result "visible" "hidden"))
     result))
 
+;;;; Panel-open default and the explicit-close preference
+
+(defun agent-repl--ws-panels-open-preferred-p (ws)
+  "Return non-nil unless the user has EXPLICITLY closed WS's panels.
+Panels default to OPEN: a workspace with no recorded panel-visibility
+preference shows its panels when it becomes current / is switched to, so
+the user never has to open them.  An explicit `SPC o c'/`SPC o C' close
+records `:panels-closed-by-user'
+\(`agent-repl--note-panels-closed-by-user'), and that preference is
+honored until the panels are shown again
+\(`agent-repl--note-panels-shown' clears it) so an explicit close is not
+fought on the next switch.
+
+This is the switch-restore gate in
+`agent-repl--ensure-own-panels-on-persp-switch'.  It replaced the old
+`:panels-were-visible' gate, whose nil value could not tell a
+never-recorded workspace (which should default open) from one recorded
+hidden."
+  (not (agent-repl--ws-get ws :panels-closed-by-user)))
+
+(defun agent-repl--note-panels-closed-by-user (ws)
+  "Record that the user EXPLICITLY closed WS's panels.
+Sets `:panels-closed-by-user' so `agent-repl--ws-panels-open-preferred-p'
+stops treating WS as panels-open until the panels are shown again.  No-op
+for a nil WS."
+  (when ws
+    (agent-repl--ws-put ws :panels-closed-by-user t)
+    (agent-repl--log ws "note-panels-closed-by-user: ws=%s" ws)))
+
+(defun agent-repl--note-panels-shown (ws)
+  "Clear WS's explicit-close preference because its panels are being shown.
+Restores the panels-open default so a later switch re-shows them
+\(`agent-repl--ws-panels-open-preferred-p').  No-op when WS is nil or was
+not marked closed, so it is cheap to call from every show path."
+  (when (and ws (agent-repl--ws-get ws :panels-closed-by-user))
+    (agent-repl--ws-put ws :panels-closed-by-user nil)
+    (agent-repl--log ws "note-panels-shown: ws=%s cleared explicit-close" ws)))
+
 ;;;; Panel display and hide
 
 ;; `agent-repl--safe-buffer-name' now lives in window.el, the layer below
@@ -473,11 +511,13 @@ in fullscreen (via `agent-repl--reclaim-frame-fullscreen').  The
 foreign buffers are NOT killed and stay attached to their home
 workspace.
 
-After purging stale panels, restores this workspace's own panels if
-they were visible when this workspace was last deactivated
-\(`:panels-were-visible' flag set by `--before-persp-deactivate').
+After purging stale panels, shows this workspace's own panels unless the
+user EXPLICITLY closed them: panels default to open, so a workspace with
+no recorded panel-visibility preference shows itself on arrival
+\(`agent-repl--ws-panels-open-preferred-p'), and only an explicit
+`SPC o c'/`SPC o C' close keeps them hidden.
 
-The visibility flag is per-workspace rather than global because each
+The preference is per-workspace rather than global because each
 workspace has its own panel buffers.
 
 WS arrives from the persp activation path, so it can be persp-mode's own
@@ -507,18 +547,23 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       ;; workspace's buffers no longer surfaces another workspace's
       ;; agent panel.  The buffers stay alive in their home workspace.
       (agent-repl--detach-foreign-panel-buffers ws foreign-bufs))
-    ;; If this workspace's panels were visible before its last deactivation
-    ;; but are not visible now (persp dropped them or we just purged stale
-    ;; ones), re-show them.  The re-show dispatches through WS's own
+    ;; Panels default to OPEN: unless the user EXPLICITLY closed this
+    ;; workspace's panels, show them when they are not visible now (persp
+    ;; dropped them, we just purged stale ones, or the workspace has never
+    ;; been stood in and has no saved configuration).  A workspace with no
+    ;; recorded preference is treated as panels-open, so it shows itself on
+    ;; switch/startup without the user having to open it
+    ;; (`agent-repl--ws-panels-open-preferred-p'); an explicit close is
+    ;; honored and not fought.  The re-show dispatches through WS's own
     ;; frontend, which lays out the webview and input panel together from
     ;; scratch, so there is no separate half-shown repair to make.
-    (when (and (agent-repl--ws-get ws :panels-were-visible)
+    (when (and (agent-repl--ws-panels-open-preferred-p ws)
                (not (agent-repl--panels-visible-p))
                ;; Eligibility is a live VIEW buffer only: the mount
                ;; recreates a dead/nil input buffer itself
                ;; (`agent-repl--ensure-input-buffer').
                (agent-repl-window--panels-restorable-p ws))
-      (agent-repl--log log-ws "ensure-own-panels: ws=%s re-showing panels (were-visible but now missing)" ws)
+      (agent-repl--log log-ws "ensure-own-panels: ws=%s re-showing panels (default-open, now missing)" ws)
       (agent-repl--frontend-dispatch-show ws))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
     ;; replacing every visible window with the input+view panels — when a
@@ -765,10 +810,16 @@ did."
     (agent-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
-      ;; NO STATE IS WRITTEN.  Panel visibility is a LOCAL presentation
-      ;; fact, and it reaches the tab through the bracket-only paint that
-      ;; reads the live window layout; the workspace's lifecycle is the
-      ;; roster's and closing a panel says nothing about it.
+      ;; NO LIFECYCLE STATE IS WRITTEN.  Panel visibility is a LOCAL
+      ;; presentation fact, and it reaches the tab through the bracket-only
+      ;; paint that reads the live window layout; the workspace's lifecycle
+      ;; is the roster's and closing a panel says nothing about it.
+      ;;
+      ;; The ONE local preference this records: an EXPLICIT close, so the
+      ;; panels-open default (`agent-repl--ws-panels-open-preferred-p') does
+      ;; not fight the user by re-showing panels they just dismissed on the
+      ;; next switch.
+      (agent-repl--note-panels-closed-by-user ws)
       (agent-repl--log ws "elisp.panels.simple-close: ws=%s panels=hidden" ws))
     (agent-repl--close-view ws (lambda ()
                                   (agent-repl--restore-fullscreen-config ws)
@@ -836,7 +887,10 @@ hides panels but skips the bookkeeping write and the tab shuffle."
     (agent-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
-      ;; NO STATE IS WRITTEN — see `agent-repl--on-simple-close'.
+      ;; NO LIFECYCLE STATE IS WRITTEN — see `agent-repl--on-simple-close'.
+      ;; Records the one local preference an explicit close carries so the
+      ;; panels-open default does not re-show on the next switch.
+      (agent-repl--note-panels-closed-by-user ws)
       (agent-repl--log ws "elisp.panels.close: ws=%s panels=hidden" ws))
     (agent-repl--close-view
      ws
@@ -1210,14 +1264,20 @@ push it to the back, not re-show or launch the agent."
      ;; placeholder the user is already looking at.
      ((agent-repl--open-progress-active-p ws)
       (agent-repl--log ws "toggle: branch=already-opening")
+      (agent-repl--note-panels-shown ws)
       (agent-repl--open-progress-start ws))
      ((funcall (agent-repl-frontend-running-p-fn fe) ws)
       (agent-repl--log ws "toggle: branch=show")
+      (agent-repl--note-panels-shown ws)
       (agent-repl--open-progress-start ws)
       (agent-repl--settle-placeholder
        ws (funcall (agent-repl-frontend-show-fn fe) ws)))
      (t
       (agent-repl--log ws "toggle: branch=open")
+      ;; The user is opening the panels: clear any explicit-close
+      ;; preference so the panels-open default applies again on later
+      ;; switches (`agent-repl--ws-panels-open-preferred-p').
+      (agent-repl--note-panels-shown ws)
       ;; Raised BEFORE the dispatch, inside the command that read the key:
       ;; the first redisplay after `SPC o c' must already carry the
       ;; workspace's name, not the frame the user pressed it on.
