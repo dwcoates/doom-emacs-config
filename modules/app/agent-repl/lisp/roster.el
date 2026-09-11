@@ -72,6 +72,7 @@
 (declare-function agent-repl--ws-rename-persp "workspace" (old new))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
+(declare-function agent-repl--ws-log-name "workspace" (ws))
 (declare-function agent-repl--refresh-magit-status-for-dir "session" (dir &optional ws))
 (declare-function agent-repl--maybe-notify-finished "session" (ws))
 ;; W2-A's names (host.el, daemon-link.el).  Declared, never defined here.
@@ -421,33 +422,78 @@ leaves it alone rather than tearing down something it does not own."
   (cl-remove-if-not (lambda (name) (agent-repl--ws-get name :ref))
                     (agent-repl--live-ws-names)))
 
+(defun agent-repl-roster--log-row-failure (ws fmt &rest args)
+  "Record a per-row reconcile failure for WS at ERROR.
+A row whose reconcile failed is exactly the row whose workspace may own no
+durable sink — a worktree deleted underneath us is the commonest way to get
+here — so the scope is screened through `agent-repl--ws-log-name' and falls
+back to the central sink, with the name kept in the message text."
+  (apply #'agent-repl--error
+         (or (and ws (agent-repl--ws-log-name ws))
+             '(:agent-repl-central
+               "a roster row whose reconcile failed may own no workspace sink"))
+         fmt args))
+
+(defun agent-repl-roster--reconcile-row (want wanted-ids)
+  "Reconcile one roster row WANT, recording its id in WANTED-IDS.
+Returns the tab name the row settled on, or nil when the row FAILED.
+
+EACH ROW IS ISOLATED.  A tab's birth touches persp-mode, the workspace
+registry and the host subscription, any of which can signal on something
+the roster knows nothing about — a worktree deleted under a `:project-dir',
+a persp kill that hit a live process buffer.  An escape aborts the walk
+mid-list and every remaining row goes untabbed: that is exactly how one
+workspace with a vanished directory left a whole cold start with no tabs
+at all.  So a failed row is recorded at ERROR and DROPPED from the order,
+and every other row is still opened and ordered."
+  (puthash (plist-get want :id) t wanted-ids)
+  (let* ((id (plist-get want :id))
+         (name (plist-get want :name))
+         (existing (agent-repl--ws-by-ref-id id)))
+    (condition-case err
+        (cond
+         ((null existing)
+          (agent-repl-roster--open-tab want))
+         ((equal existing name)
+          (agent-repl--ws-put name :ref (plist-get want :ref))
+          (agent-repl--log name "elisp.roster.tab-kept: ws=%s id=%s" name id)
+          name)
+         (t
+          (agent-repl-roster--rename-tab existing name (plist-get want :ref))))
+      (error
+       (agent-repl-roster--log-row-failure
+        (or existing name)
+        "elisp.roster.row-reconcile-failed: ws=%s id=%s error=%s"
+        name id (error-message-string err))
+       nil))))
+
 (defun agent-repl-roster-reconcile (roster)
   "Bring the tab bar in line with ROSTER and return the tab names in order.
 Opens a tab for each `closed = false' row that has none, renames the tab
 whose row's name changed, tears down every roster-owned tab whose row is
-gone or closed, and sets the tab ORDER to the walk order strictly."
+gone or closed, and sets the tab ORDER to the walk order strictly.
+
+A row that fails to reconcile is contained rather than fatal; see
+`agent-repl-roster--reconcile-row'."
   (let* ((desired (agent-repl-roster-desired-tabs roster))
          (wanted-ids (make-hash-table :test 'equal))
          (names nil))
     (dolist (want desired)
-      (puthash (plist-get want :id) t wanted-ids)
-      (let* ((id (plist-get want :id))
-             (name (plist-get want :name))
-             (existing (agent-repl--ws-by-ref-id id)))
-        (cond
-         ((null existing)
-          (push (agent-repl-roster--open-tab want) names))
-         ((equal existing name)
-          (agent-repl--ws-put name :ref (plist-get want :ref))
-          (agent-repl--log name "elisp.roster.tab-kept: ws=%s id=%s" name id)
-          (push name names))
-         (t
-          (push (agent-repl-roster--rename-tab existing name (plist-get want :ref))
-                names)))))
+      (let ((name (agent-repl-roster--reconcile-row want wanted-ids)))
+        (when name (push name names))))
     (dolist (name (agent-repl-roster--roster-owned-names))
       (let ((id (plist-get (agent-repl--ws-get name :ref) :id)))
         (unless (gethash id wanted-ids)
-          (agent-repl-roster--tear-down-tab name))))
+          ;; The teardown contains its own signals step by step, but the
+          ;; registry writes BETWEEN those steps are covered by none of them,
+          ;; and a signal here would abort the walk over the remaining torn
+          ;; down rows for the same reason a failed open must not.
+          (condition-case err
+              (agent-repl-roster--tear-down-tab name)
+            (error
+             (agent-repl-roster--log-row-failure
+              name "elisp.roster.row-teardown-failed: ws=%s error=%s"
+              name (error-message-string err)))))))
     (setq agent-repl-roster--tab-order (nreverse names))
     (agent-repl--log '(:agent-repl-central "roster reconciliation spans every workspace")
                      "elisp.roster.reconcile: tabs=%d order=%S"

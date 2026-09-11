@@ -1586,6 +1586,71 @@ would adopt onto a connection the link has let go of."
       (should (member (list "RegisterWorkspace" conn '(:dir "/tmp/ws-1"))
                       agent-repl-test-host--calls)))))
 
+(ert-deftest agent-repl-test-host-link-up-does-not-warn-about-a-pseudo-perspective ()
+  "persp-mode's own `none' is not a workspace, so skipping it is not a fault.
+It warned `link-up-skipped ws=none reason=no-dir' on every single
+link-up, which teaches a reader to ignore the warnings that matter."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (persp-nil-name "none"))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("none" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws &rest _) (and (equal ws "ws-1") "/tmp/ws-1"))))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should-not (agent-repl-test-host--logged-p
+                   :warn "elisp.host.link-up-skipped")))))
+
+(ert-deftest agent-repl-test-host-link-up-records-the-pseudo-perspectives-it-filtered ()
+  "The filtering is stated at DEBUG rather than being invisible."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (persp-nil-name "none"))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("none" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws &rest _) (and (equal ws "ws-1") "/tmp/ws-1"))))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :log "elisp.host.link-up-pseudo-filtered")))))
+
+(ert-deftest agent-repl-test-host-link-up-still-registers-the-real-workspace ()
+  "Filtering the pseudo names must not cost the workspace beside them."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (persp-nil-name "none"))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("none" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws &rest _) (and (equal ws "ws-1") "/tmp/ws-1"))))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (member (list "RegisterWorkspace" conn '(:dir "/tmp/ws-1"))
+                      agent-repl-test-host--calls)))))
+
+(ert-deftest agent-repl-test-host-link-up-still-warns-about-a-real-workspace-with-no-dir ()
+  "A REAL workspace missing its directory is an anomaly and keeps warning."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (persp-nil-name "none"))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("none" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :warn "elisp.host.link-up-skipped ws=ws-1")))))
+
 (ert-deftest agent-repl-test-host-link-up-subscribes-after-registering ()
   "Register then subscribe: the subscription is addressed by the minted ref."
   (agent-repl-test-host--with-harness

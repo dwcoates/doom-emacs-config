@@ -51,18 +51,25 @@ same job replaces its timer rather than adding one.  Reset alongside
 `agent-repl--timers' by `agent-repl--cancel-all-timers'.")
 
 (defconst agent-repl--required-timer-keys
-  '((:state-poll               . agent-repl--arm-state-poll-timer)
-    (:workspace-status-export  . agent-repl--arm-workspace-status-export-timer)
-    (:autosave                 . agent-repl--arm-autosave-timer)
-    (:readiness-poll           . agent-repl--readiness-start-timer))
+  '((:state-poll . agent-repl--arm-state-poll-timer)
+    (:autosave   . agent-repl--arm-autosave-timer))
   "Alist of (KEY . ARM-FUNCTION) for every timer the module must keep armed.
 
 This is the contract `agent-repl--assert-heartbeat-armed' enforces: each
 KEY names a job that must have exactly one live timer once the module is
 loaded, and ARM-FUNCTION is the owner file's entry point for (re-)arming
-it.  The owners are `status.el' (:state-poll, the 1Hz heartbeat that
-repaints the tab bar), `workspace-status-export.el', `autosave.el', and
-`readiness.el'.
+it.  The owners are `status.el' (:state-poll, the heartbeat that repaints
+the tab bar) and `autosave.el' (:autosave).
+
+EVERY KEY HERE MUST HAVE A LIVE OWNER.  Two did not: `:readiness-poll' and
+`:workspace-status-export' outlived `readiness.el' and
+`workspace-status-export.el', both deleted in the overhaul's dead-module
+pre-pass, so their arm functions are defined nowhere.  No load order can
+satisfy a key whose owner does not exist, and the deferral cannot either:
+every cold start spent its idle second waiting and then warned
+`outcome=unavailable reason=owner-not-loaded' twice, for jobs the daemon's
+own roster push and address file had already taken over.  A key added here
+without an owner is that warning again, forever.
 
 Declared HERE rather than accumulated by the owners so a core.el loaded
 by itself still knows what is supposed to be running — which is exactly
@@ -1285,13 +1292,21 @@ A nil WS adds nothing.
                    ws field value)))))))
   record)
 
-(defun agent-repl--log-record (ws level verbosity fmt args &optional pseudo-ws operation-fmt)
+(defun agent-repl--log-record (ws level verbosity fmt args
+                                  &optional pseudo-ws operation-fmt unroutable-ws)
   "Serialize WS / LEVEL / VERBOSITY / FMT / ARGS as one JSONL record.
 PSEUDO-WS, when non-nil, is the persp-mode pseudo-perspective the caller
 attributed this record to (see `agent-repl--pseudo-workspace-name-p').  Such a
 name owns no durable sink, so WS is nil and the record lands globally; the name
 is preserved on the record as `pseudo_workspace' so the line still says which
 perspective it is about.
+
+UNROUTABLE-WS, when non-nil, is the workspace the caller attributed this
+record to which is NOT a registered sink and not a pseudo perspective — an
+invariant violation the routing-error record beside this one reports.  The
+record still lands globally rather than being dropped, and the name is
+preserved as `unroutable_workspace' for the same reason `pseudo_workspace'
+is: the line must still say which workspace it is about.
 
 OPERATION-FMT, when non-nil, is the format string the stable `operation'
 name is derived from, INSTEAD of FMT.  The severity rungs
@@ -1328,6 +1343,8 @@ to be stable, so the BARE format string travels here separately."
       (puthash "request_id" agent-repl--log-context-request-id record))
     (when pseudo-ws
       (puthash "pseudo_workspace" pseudo-ws record))
+    (when unroutable-ws
+      (puthash "unroutable_workspace" unroutable-ws record))
     (json-serialize record)))
 
 (defun agent-repl--workspace-emacs-log-path (project-dir)
@@ -1615,7 +1632,18 @@ The durable sink deliberately ranks only by LEVEL; see
   "Build, route, persist, and present one log record.
 Every logging rung calls this function directly.  MESSAGE-MODE is nil,
 `quiet', or `echo'.  FATAL signals after persistence.  OPERATION-FMT preserves
-the untagged operation template used by warning and error wrappers."
+the untagged operation template used by warning and error wrappers.
+
+A ROUTING FAILURE IS NOT THE CALLER'S ERROR TO HANDLE.  Logging is called
+from everywhere, including from the middle of loops whose remaining
+iterations matter; a rung that signalled into its caller turned one
+workspace with a deleted worktree into a whole roster push aborting on its
+first row and zero tabs drawn.  So an unroutable workspace still records
+the `log-routing-error' line at ERROR and still shouts through
+`agent-repl--note-unroutable-log-workspace', and then the ORIGINAL record
+is written to the global sink carrying `unroutable_workspace' — the
+diagnosis is louder than before, and the caller returns normally.  FATAL is
+the one exception: it is a control-flow act, not a rung, and still signals."
   (let* ((routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
          (routing-error (plist-get routing :routing-error))
          (sink-ws (plist-get routing :workspace))
@@ -1626,15 +1654,27 @@ the untagged operation template used by warning and error wrappers."
                (route-fmt "elisp.core.log-routing-error workspace=%S reason=%s original-operation=%s")
                (route-args (list offender reason
                                  (agent-repl--log-operation (or operation-fmt fmt))))
-              (record (agent-repl--log-record nil "error" "normal"
-                                               route-fmt route-args)))
+               (record (agent-repl--log-record nil "error" "normal"
+                                               route-fmt route-args))
+               (original (agent-repl--log-record nil level verbosity fmt args
+                                                 nil operation-fmt offender))
+               (text (agent-repl--build-log-text nil fmt args)))
           (when agent-repl-log-to-file
             (agent-repl--do-log-to-file record nil))
           (agent-repl--note-unroutable-log-workspace offender)
-          (error
-           "agent-repl log routing invariant violated: workspace=%S reason=%s operation=%s"
-           offender reason
-           (agent-repl--log-operation (or operation-fmt fmt))))
+          (when (and agent-repl-log-to-file
+                     (agent-repl--log-record-persists-p level verbosity))
+            (agent-repl--do-log-to-file original nil))
+          (unless fatal
+            (pcase message-mode
+              ('quiet (agent-repl--emit-message text nil))
+              ('echo (agent-repl--emit-message text t))
+              ('backend
+               (agent-repl--emit-message
+                (concat "agent-repl: " (apply #'format fmt args)) t))))
+          (when fatal
+            (error "%s" text))
+          original)
       (let* ((record (agent-repl--log-record sink-ws level verbosity fmt args
                                              pseudo-ws operation-fmt))
              (text (agent-repl--build-log-text sink-ws fmt args))
@@ -3078,8 +3118,8 @@ it exists to check for.")
 (defcustom agent-repl-heartbeat-assert-defer-delay 1.0
   "Idle seconds to wait before re-checking the timer contract on a cold load.
 Only used when core.el is loaded before its timer owners, which is the
-normal cold-boot order: config.el loads core.el first, then status.el,
-workspace-status-export.el, autosave.el, and readiness.el."
+normal cold-boot order: config.el loads core.el first, then status.el
+and autosave.el."
   :type 'number
   :group 'agent-repl)
 
