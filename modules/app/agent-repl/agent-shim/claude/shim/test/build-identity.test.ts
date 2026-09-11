@@ -169,7 +169,7 @@ describe("reading the SDK's metadata when it is not what it should be", () => {
       };
     });
     const log = await import("../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "build-identity-suite" });
+    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000cc", agentReplSessionId: "build-identity-suite" });
     return import("../src/build-identity.js");
   }
 

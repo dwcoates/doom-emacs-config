@@ -47,6 +47,8 @@ interface Harness {
   submitRejects: Error | undefined;
   /** Every store_unreachable the turn verbs reported to the session. */
   readonly storeFaults: string[];
+  /** How many reads this shim SERVED, which is what lifts a store fault. */
+  readonly storeRecoveries: number[];
   /** What this session's `knowsAgent` answers. */
   knows: boolean;
   /** When set, `SessionContext.query()` answers absence, as a dead query does. */
@@ -81,6 +83,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     identity,
     submitRejects: undefined,
     storeFaults: [] as string[],
+    storeRecoveries: [] as number[],
     knows: true,
     queryDead: false,
   };
@@ -98,6 +101,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     concludeStoppedRuns: () => undefined,
     knowsAgent: () => state.knows,
     reportStoreUnreachable: (detail: string) => state.storeFaults.push(detail),
+    reportStoreReadable: () => state.storeRecoveries.push(1),
     submit: (said, keepalive) => {
       if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
       state.submitted.push({ said, keepalive });

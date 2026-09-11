@@ -36,6 +36,7 @@ import type { StoreClient } from "./client.js";
 import { activityUpsertKey, bashTerminalUpsertKey, terminalUpsertKey } from "./keys.js";
 import { PersistenceError, type PersistEntry } from "./persistence.js";
 import { readFailure, transportFailure } from "./reader.js";
+import { readWithRetry, type ReadRetryOptions } from "./retry.js";
 
 const LOGGER = bindLog({ component: "shim-store-reconcile", operation: "shim.store.reconcile" });
 
@@ -296,7 +297,7 @@ function sweptUp(): conversationv1.DetachedLost {
 }
 
 /** What a reconciler needs to exist. */
-interface ReconcilerOptions {
+interface ReconcilerOptions extends ReadRetryOptions {
   readonly client: StoreClient;
 }
 
@@ -384,6 +385,7 @@ function describeDetachable(
 export function announceLiveWork(
   entries: readonly conversationv1.HistoryEntryAt[],
   work: readonly conversationv1.DetachedWorkId[],
+  onUndescribed?: (handle: conversationv1.DetachedWorkId) => void,
 ): conversationv1.AgentDetachedWork[] {
   const announcements: conversationv1.AgentDetachedWork[] = [];
   for (const handle of work) {
@@ -391,6 +393,17 @@ export function announceLiveWork(
     const unit = create(conversationv1.AgentActivityIdSchema, { value: handle.value });
     const described = describeDetachable(findUnit(entries, unit));
     if (described === undefined) {
+      // WHO OWNS THE RECORD DEPENDS ON WHO CAN TELL THE TWO CASES APART, and
+      // this function cannot. `GetLiveWork` is the store's GLOBAL open-obligation
+      // set by contract, so a handle with no start in THIS book is either work
+      // whose own start the record lost -- a defect -- or another conversation's
+      // obligation, which is the ordinary state of a shared set. Only the
+      // caller can ask the vendor which, so a caller that passes this hands
+      // over the record and gets the handle instead.
+      if (onUndescribed !== undefined) {
+        onUndescribed(handle);
+        continue;
+      }
       LOGGER.debug(
         { work: handle.value },
         "the record holds no describable start for this live work; it is not announced",
@@ -415,47 +428,54 @@ export function announceLiveWork(
 }
 
 export function createReconciler(options: ReconcilerOptions): Reconciler {
-  return {
-    async liveWork(): Promise<storev1.GetLiveWorkSuccess> {
-      let response: storev1.GetLiveWorkResponse;
-      try {
-        response = await options.client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
-      } catch (error) {
-        LOGGER.error(
-          { detail: String(error) },
-          "the store could not be reached for the open obligations",
-        );
-        throw transportFailure(error);
-      }
-      const result = response.result;
-      if (result.case === "failure") {
-        // warn: a defect because the store refused the obligation read needed for reconciliation.
-        LOGGER.warn(
-          { detail: result.value.detail },
-          "the store refused to state the open obligations",
-        );
-        // GetLiveWork declares ONE arm (`storage_failure`); an unset arm is
-        // handled by the same default, so a store that answers with no reason
-        // is unavailable rather than silently benign.
-        throw readFailure(result.value);
-      }
-      if (result.case !== "success") {
-        throw new PersistenceError(
-          "store_unavailable",
-          "the store answered GetLiveWork with no result arm set",
-        );
-      }
-      LOGGER.debug(
-        {
-          live_agents: result.value.liveAgents.length,
-          live_detached: result.value.liveDetached.length,
-          live_workflows: result.value.liveWorkflows.length,
-        },
-        "read the record's open obligations",
+  /** The open obligations, as the store answered them once. */
+  const liveWorkOnce = async (): Promise<storev1.GetLiveWorkSuccess> => {
+    let response: storev1.GetLiveWorkResponse;
+    try {
+      response = await options.client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    } catch (error) {
+      LOGGER.error(
+        { detail: String(error) },
+        "the store could not be reached for the open obligations",
       );
-      return result.value;
-    },
+      throw transportFailure(error);
+    }
+    const result = response.result;
+    if (result.case === "failure") {
+      // warn: a defect because the store refused the obligation read needed for reconciliation.
+      LOGGER.warn(
+        { detail: result.value.detail },
+        "the store refused to state the open obligations",
+      );
+      // GetLiveWork declares ONE arm (`storage_failure`); an unset arm is
+      // handled by the same default, so a store that answers with no reason
+      // is unavailable rather than silently benign.
+      throw readFailure(result.value);
+    }
+    if (result.case !== "success") {
+      throw new PersistenceError(
+        "store_unavailable",
+        "the store answered GetLiveWork with no result arm set",
+      );
+    }
+    LOGGER.debug(
+      {
+        live_agents: result.value.liveAgents.length,
+        live_detached: result.value.liveDetached.length,
+        live_workflows: result.value.liveWorkflows.length,
+      },
+      "read the record's open obligations",
+    );
+    return result.value;
+  };
 
+  return {
+    // ON THE RETRY SCHEDULE. This read is what StartSession reconciles from and
+    // what every joining WatchSession re-announces from, and it was the read a
+    // single `SQLITE_BUSY` used to turn into a session fault that never lifted.
+    liveWork(): Promise<storev1.GetLiveWorkSuccess> {
+      return readWithRetry("GetLiveWork", liveWorkOnce, options);
+    },
     closingAgentTerminal,
     closingSubagentTerminal,
     closingBashTerminal,
