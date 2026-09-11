@@ -69,24 +69,34 @@ func activityArm(act *conversationv1.AgentActivity) string {
 func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, unit string, act *conversationv1.AgentActivity) {
 	switch item := act.GetItem().(type) {
 	case *conversationv1.AgentActivity_Response:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Response"})
 		r.applyResponse(s, unit, item.Response)
 	case *conversationv1.AgentActivity_Hook:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Hook"})
 		r.applyHook(s, item.Hook)
 	case *conversationv1.AgentActivity_Subagent:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Subagent"})
 		r.applySubagent(s, unit, item.Subagent)
 	case *conversationv1.AgentActivity_Bash:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Bash"})
 		r.applyBash(s, unit, item.Bash)
 	case *conversationv1.AgentActivity_TaskAct:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_TaskAct"})
 		r.applyTaskAct(ws, s, item.TaskAct)
 	case *conversationv1.AgentActivity_Monitor:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Monitor"})
 		r.applyMonitor(s, unit, item.Monitor)
 	case *conversationv1.AgentActivity_Cron:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Cron"})
 		r.applyCron(s, item.Cron)
 	case *conversationv1.AgentActivity_ScheduleWakeup:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_ScheduleWakeup"})
 		r.applyWakeup(s, item.ScheduleWakeup)
 	case *conversationv1.AgentActivity_ContextInjected:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_ContextInjected"})
 		r.applyInjection(ws, s, item.ContextInjected)
 	case *conversationv1.AgentActivity_PushNotification:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_PushNotification"})
 		r.applyNotification(s, item.PushNotification)
 	}
 }
@@ -248,12 +258,15 @@ func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversatio
 	}
 	switch status := state.GetStatus().(type) {
 	case *conversationv1.AgentTaskState_Running:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Running"})
 		row.status = taskRunning
 		row.activeForm = status.Running.GetActiveForm()
 	case *conversationv1.AgentTaskState_Completed:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Completed"})
 		row.status = taskCompleted
 		row.activeForm = ""
 	case *conversationv1.AgentTaskState_Pending:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Pending"})
 		row.status = taskPending
 		row.activeForm = ""
 	}
@@ -347,8 +360,10 @@ func (r *resolver) applyInjection(ws ids.WorkspaceID, s *wsState, injected *conv
 	now := r.opts.clock.Now()
 	switch item := injected.GetInjected().(type) {
 	case *conversationv1.AgentContextInjected_Memory:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentContextInjected_Memory"})
 		s.loading = &loadingState{kind: loadingMemory, line: item.Memory.GetPath(), at: now}
 	case *conversationv1.AgentContextInjected_Skills:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentContextInjected_Skills"})
 		skills := item.Skills.GetSkills()
 		withContent := 0
 		for _, skill := range skills {
@@ -358,15 +373,19 @@ func (r *resolver) applyInjection(ws ids.WorkspaceID, s *wsState, injected *conv
 		}
 		switch {
 		case withContent == 1 && len(skills) == 1:
+			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case withContent == 1 && len(skills) == 1"})
 			s.loading = &loadingState{kind: loadingInvoked, line: skills[0].GetName(), at: now}
 		case withContent > 0:
+			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case withContent > 0"})
 			s.loading = &loadingState{
 				kind: loadingDiscovered, line: plural(len(skills), "skill"), at: now}
 		default:
+			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "default"})
 			s.loading = &loadingState{
 				kind: loadingListing, line: plural(len(skills), "skill"), at: now}
 		}
 	default:
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "default"})
 		return
 	}
 	s.injected = &standing{text: s.loading.line, at: now}
