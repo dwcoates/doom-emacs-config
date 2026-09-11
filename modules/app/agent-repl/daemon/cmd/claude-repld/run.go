@@ -261,6 +261,14 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 	defer db.Close()
 
+	// THE LOG SURFACES LEARN THE MINTED WORKSPACE IDS HERE, the moment the
+	// roster is readable and before any workspace-owned record can be
+	// written. Every record's `workspace_id` and every log target this
+	// runtime mints is named by the daemon-minted ids.WorkspaceID, which is
+	// the id the shim, the webapp and the store all carry; nothing derives it
+	// from the directory.
+	surfaces.BindWorkspaceIDs(workspaceIDLookup(ctx, db))
+
 	// SERVING IS ITS OWN LIFETIME, cancelled either by the process's signal
 	// context or by the daemon's own orderly exit — the drain's deadline and
 	// the handover's last transfer both end the process through it.
@@ -469,6 +477,21 @@ func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, jo
 		return nil, fmt.Errorf("claude-repld: open the state client: %w", err)
 	}
 	return db, nil
+}
+
+// workspaceIDLookup answers a workspace directory's daemon-minted id out of
+// the roster. A directory the roster does not know is an ERROR, never a
+// path-derived stand-in: the caller that asked for the sink reports it, and
+// the record is refused rather than attributed to an id no other runtime
+// would ever state.
+func workspaceIDLookup(ctx context.Context, db wsm.DB) dlog.WorkspaceIDLookup {
+	return func(dir string) (string, error) {
+		record, err := db.WorkspaceByDir(ctx, dir)
+		if err != nil {
+			return "", fmt.Errorf("look up the workspace registered at %q: %w", dir, err)
+		}
+		return string(record.ID), nil
+	}
 }
 
 // serve runs the http server on the claimed listener until ctx ends, then shuts
