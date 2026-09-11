@@ -423,7 +423,7 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 	}
 	t.Cleanup(func() { _ = logFile.Close() })
 
-	socket := shortSocketPath(t, "fakeshim")
+	socket := shimListenSocketPath(t)
 	cmd := exec.Command("node", entry,
 		"--listen", socket,
 		"--store-socket", vendorStoreSocket,
