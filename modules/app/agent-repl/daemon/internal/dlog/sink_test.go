@@ -442,3 +442,205 @@ func TestCreateTargetRefusesWithNoLogsDirectory(t *testing.T) {
 		t.Fatal("createTarget with no logs directory = nil, want a loud refusal")
 	}
 }
+
+// TestANewRuntimeAppendsToTheStandingTarget pins the realtest-1 finding: a new
+// daemon instance used to mint a fresh generation and retarget the link at it,
+// so the workspace's canonical daemon.log named only the current instance and
+// the previous one's records were on an inode nothing named any more.
+func TestANewRuntimeAppendsToTheStandingTarget(t *testing.T) {
+	// Arrange: one runtime writes a record and closes its sink.
+	dir, id := newWorkspace(t)
+	logs := t.TempDir()
+	first, err := openSink(logs, dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink (first runtime): %v", err)
+	}
+	if err := first.write([]byte("{\"instance\":1}\n")); err != nil {
+		t.Fatalf("write (first runtime): %v", err)
+	}
+	first.close()
+
+	// Act: the NEXT runtime opens the same workspace sink knowing no target.
+	second, err := openSink(logs, dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink (second runtime): %v", err)
+	}
+	t.Cleanup(func() { second.close() })
+	if err := second.write([]byte("{\"instance\":2}\n")); err != nil {
+		t.Fatalf("write (second runtime): %v", err)
+	}
+
+	// Assert.
+	if second.target != first.target {
+		t.Fatalf("the second runtime opened %q, want the standing target %q", second.target, first.target)
+	}
+	body, err := os.ReadFile(second.target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if !strings.Contains(string(body), "\"instance\":1") || !strings.Contains(string(body), "\"instance\":2") {
+		t.Fatalf("target = %q, want both instances' records in one file", body)
+	}
+}
+
+// TestANewRuntimeLeavesTheStandingLinkInPlace is the reader's half: the
+// canonical path keeps naming the file that spans both instances, so
+// `bin/logs.sh --workspace` sees the whole narrative.
+func TestANewRuntimeLeavesTheStandingLinkInPlace(t *testing.T) {
+	// Arrange.
+	dir, id := newWorkspace(t)
+	logs := t.TempDir()
+	first, err := openSink(logs, dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink (first runtime): %v", err)
+	}
+	first.close()
+	link := filepath.Join(dir, ".claude", "emacs", "daemon.log")
+	before, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+
+	// Act.
+	second, err := openSink(logs, dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink (second runtime): %v", err)
+	}
+	t.Cleanup(func() { second.close() })
+
+	// Assert.
+	after, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if after != before {
+		t.Fatalf("the canonical link moved from %q to %q across instances", before, after)
+	}
+}
+
+// TestANewRuntimeStartsAGenerationAtTheCap pins the one condition that DOES
+// start a fresh file: a standing target already at the cap is a generation to
+// roll, never one to join.
+func TestANewRuntimeStartsAGenerationAtTheCap(t *testing.T) {
+	// Arrange: an 8-byte cap and a standing target that has reached it.
+	dir, id := newWorkspace(t)
+	logs := t.TempDir()
+	first, err := openSinkSized(logs, dir, id, "daemon", "", 8, 2)
+	if err != nil {
+		t.Fatalf("openSinkSized (first runtime): %v", err)
+	}
+	if err := first.write([]byte("12345678\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	first.close()
+
+	// Act.
+	second, err := openSinkSized(logs, dir, id, "daemon", "", 8, 2)
+	if err != nil {
+		t.Fatalf("openSinkSized (second runtime): %v", err)
+	}
+	t.Cleanup(func() { second.close() })
+
+	// Assert.
+	if second.target == first.target {
+		t.Fatalf("the second runtime joined a target already at the cap (%q)", second.target)
+	}
+}
+
+// TestANewRuntimeNeverAppendsToAForeignTarget pins that the appending rule
+// does not weaken the ownership rule: a canonical link the workspace pointed
+// somewhere of its own choosing is displaced, never joined.
+func TestANewRuntimeNeverAppendsToAForeignTarget(t *testing.T) {
+	// Arrange.
+	dir, id := newWorkspace(t)
+	linkDir := filepath.Join(dir, ".claude", "emacs")
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	foreign := filepath.Join(t.TempDir(), "foreign.log")
+	if err := os.WriteFile(foreign, []byte("someone else's records\n"), 0o644); err != nil {
+		t.Fatalf("write foreign: %v", err)
+	}
+	if err := os.Symlink(foreign, filepath.Join(linkDir, "daemon.log")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Act.
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { s.close() })
+
+	// Assert.
+	if s.target == foreign {
+		t.Fatalf("the foreign target %q was joined; the daemon must own its target", foreign)
+	}
+}
+
+// TestANewRuntimeNeverAppendsToAWorkspaceProvidedRegularFile is the other
+// ownership arm: a regular file at the canonical path is not a symlink to
+// anything, so there is nothing to join.
+func TestANewRuntimeNeverAppendsToAWorkspaceProvidedRegularFile(t *testing.T) {
+	// Arrange.
+	dir, id := newWorkspace(t)
+	linkDir := filepath.Join(dir, ".claude", "emacs")
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	link := filepath.Join(linkDir, "daemon.log")
+	if err := os.WriteFile(link, []byte("someone else's file\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act.
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { s.close() })
+
+	// Assert.
+	if s.target == link {
+		t.Fatalf("the workspace-provided regular file %q was joined", link)
+	}
+	body, err := os.ReadFile(s.target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if strings.Contains(string(body), "someone else's") {
+		t.Fatalf("the foreign file's content leaked into the owned target")
+	}
+}
+
+// TestAStandingTargetThatIsGoneIsNotJoined pins the dangling link: the
+// generation the last instance named has been swept, so there is nothing to
+// append to and a fresh target is minted.
+func TestAStandingTargetThatIsGoneIsNotJoined(t *testing.T) {
+	// Arrange.
+	dir, id := newWorkspace(t)
+	logs := t.TempDir()
+	first, err := openSink(logs, dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink (first runtime): %v", err)
+	}
+	first.close()
+	if err := os.Remove(first.target); err != nil {
+		t.Fatalf("remove the standing target: %v", err)
+	}
+
+	// Act.
+	second, err := openSink(logs, dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink (second runtime): %v", err)
+	}
+	t.Cleanup(func() { second.close() })
+
+	// Assert.
+	if second.target == first.target {
+		t.Fatalf("the second runtime joined the swept target %q", second.target)
+	}
+	if _, err := os.Stat(second.target); err != nil {
+		t.Fatalf("stat the minted target: %v", err)
+	}
+}

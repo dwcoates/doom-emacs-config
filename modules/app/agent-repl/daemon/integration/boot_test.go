@@ -944,3 +944,54 @@ func TestTheWithdrawalIsRecordedOnAnOrderlyExit(t *testing.T) {
 		return r.Operation == "daemon.cmd.exit" && strings.Contains(r.Message, "daemon.addr was withdrawn")
 	})
 }
+
+// TestARestartKeepsThePreviousInstancesWorkspaceRecordsReadable pins the third
+// realtest-1 finding. `<ws>/.claude/emacs/daemon.log` was retargeted onto a
+// fresh generation on every daemon boot, so the canonical path -- the ONLY
+// path the reader resolves -- named the current instance alone, and the
+// adoption records of the daemon four minutes older were on an inode nothing
+// named any more. One file now spans instances, and rotation happens only at
+// the byte cap.
+func TestARestartKeepsThePreviousInstancesWorkspaceRecordsReadable(t *testing.T) {
+	t.Parallel()
+	// Arrange: an opened workspace, whose bring-up wrote workspace-bound
+	// records, and the pid that wrote them.
+	f := newOpened(t, harness.Opts{})
+	firstPID := f.d.PID()
+	if len(f.d.WorkspaceLog(f.repo.Dir, "daemon")) == 0 {
+		t.Fatal("the first daemon wrote no workspace records to append to")
+	}
+	f.d.Kill()
+
+	// Act: restart on the same state root, which adopts the surviving shim and
+	// writes its own workspace-bound records.
+	nd := harness.StartDaemon(t, harness.Opts{
+		StateDir:      f.d.StateDir,
+		KeepStaleAddr: true,
+		ExtraEnv:      []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
+	})
+	// The crash-restart's own evidence: the stale advertisement, the
+	// predecessor's missing intent manifest, and the adoption it drives.
+	nd.ExpectWarnings("daemon.cmd.claim", "daemon.rollout.reconcile", "daemon.boot.adopt",
+		"daemon.shimclient.adopt")
+	nd.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "a record from the restarted daemon",
+		func(r harness.LogRecord) bool { return r.PID == nd.PID() })
+
+	// Assert: BOTH instances are in the file the canonical path names.
+	var sawFirst, sawSecond bool
+	for _, r := range nd.WorkspaceLog(f.repo.Dir, "daemon") {
+		switch r.PID {
+		case firstPID:
+			sawFirst = true
+		case nd.PID():
+			sawSecond = true
+		}
+	}
+	if !sawFirst {
+		t.Fatalf("%s carries no record from pid %d; the restart retargeted the link and hid the previous instance",
+			harness.WorkspaceLogPath(f.repo.Dir, "daemon"), firstPID)
+	}
+	if !sawSecond {
+		t.Fatalf("%s carries no record from pid %d", harness.WorkspaceLogPath(f.repo.Dir, "daemon"), nd.PID())
+	}
+}
