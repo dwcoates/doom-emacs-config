@@ -51,9 +51,12 @@
 package discover
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -119,16 +122,61 @@ func (t Target) Codec() tail.Codec {
 	return tail.JSONLCodec{}
 }
 
+// DefaultHoldSummaryInterval bounds how often the standing hold set is
+// restated at info. A summary per rescan would be the same flood the per-file
+// warning was, one level quieter.
+const DefaultHoldSummaryInterval = 10 * time.Minute
+
+// Hold reasons. THE REASON IS THE IDENTITY OF THE CONDITION: a record is
+// restated at warn when a transcript's reason CHANGES, because that is a
+// different fact about the same file, and only then.
+const (
+	// holdMetaAbsent — the required companion meta is not on disk yet. It
+	// usually fixes itself within a rescan or two.
+	holdMetaAbsent = "meta_absent"
+	// holdMetaUnreadable — the meta is there but could not be read or parsed.
+	holdMetaUnreadable = "meta_unreadable"
+	// holdMetaNamesNoCall — the meta parsed as the WORKFLOW shape, but this
+	// transcript is not under a workflow directory, so there is no workflow run
+	// to attribute it to and no spawning call either.
+	holdMetaNamesNoCall = "meta_names_no_spawning_call"
+)
+
+// hold is one transcript's standing hold.
+type hold struct {
+	reason  string
+	since   time.Time
+	repeats int
+}
+
 // Discoverer holds the configured roots and performs discovery.
 type Discoverer struct {
 	configRoots []string
 	spoolRoot   string
 	log         *logging.Bound
 
-	// warnedMeta remembers which held transcripts have already had their
-	// warning, so a rescan every few seconds does not repeat one line forever
-	// while a meta file is being written.
-	warnedMeta map[string]bool
+	// holds is the per-transcript hold state, keyed by transcript path.
+	//
+	// A HOLD IS A CONDITION, NOT AN EVENT. Every rescan re-evaluates every
+	// transcript, so a transcript whose meta will never arrive re-enters the
+	// hold on every pass — and a warning per pass per file is how one stuck
+	// agent wrote five thousand identical records in a quarter of an hour. The
+	// state here makes each record say something new: the FIRST hold of a
+	// transcript is stated at warn, a hold whose REASON changed is stated at
+	// warn again (it is a different condition), a repeat of the same reason is
+	// verbose and carries the count, and a RELEASE is stated at info. The
+	// periodic summary below keeps the standing set visible without one record
+	// per file per pass.
+	holds map[string]*hold
+
+	// now is the hold clock, injected in tests. Hold ages are wall-clock facts
+	// a reader compares against the vendor's own timestamps.
+	now func() time.Time
+	// summaryInterval bounds how often the standing hold set is restated, and
+	// lastSummary is when it last was. A zero lastSummary means the first pass
+	// with any hold states one.
+	summaryInterval time.Duration
+	lastSummary     time.Time
 
 	// statedUnclassifiable remembers which spools have already had their
 	// classification defect stated.
@@ -156,7 +204,10 @@ func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer
 		configRoots: resolved,
 		spoolRoot:   Normalize(spoolRoot),
 		log:         log,
-		warnedMeta:  map[string]bool{},
+		holds:       map[string]*hold{},
+
+		now:             time.Now,
+		summaryInterval: DefaultHoldSummaryInterval,
 
 		statedUnclassifiable: map[string]bool{},
 	}
@@ -201,6 +252,7 @@ func (d *Discoverer) Scan() []Target {
 	) {
 		add(d.Classify(match))
 	}
+	d.reportHolds()
 	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan complete targets=%d", len(out))
 	return out
 }
@@ -304,40 +356,122 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 // re-checked until the meta appears.
 func (d *Discoverer) withMeta(target Target) Target {
 	target.MetaPath = strings.TrimSuffix(target.Path, ".jsonl") + ".meta.json"
-	if _, err := os.Stat(target.MetaPath); err == nil {
-		meta, err := ReadMeta(target.MetaPath)
-		if err != nil {
-			// A meta file that is THERE but unreadable is held exactly as a
-			// missing one is: the agent has no identity either way, and naming
-			// it by its filename would mint a second book for one agent. Loud,
-			// because unlike a missing file this one will not fix itself.
-			target.MetaMissing = true
-			d.log.With(logging.Context{
-				Operation: "discover-meta", Path: target.Path, Level: "error",
-			}).Log("transcript held: its meta file could not be read, so the agent has no identity and its records cannot be attributed: %v", err)
-			return target
+	if _, err := os.Stat(target.MetaPath); err != nil {
+		return d.holdTranscript(target, holdMetaAbsent, "warn",
+			"transcript held: its required meta file %s is not on disk yet, so the agent has no identity (its spawning call is stated only there); it is re-checked every rescan and never dropped", target.MetaPath)
+	}
+	meta, err := ReadMeta(target.MetaPath)
+	if err != nil {
+		// A meta file that is THERE but unreadable is held exactly as a missing
+		// one is: the agent has no identity either way, and naming it by its
+		// filename would mint a second book for one agent. Loud, because unlike
+		// a missing file this one will not fix itself.
+		return d.holdTranscript(target, holdMetaUnreadable, "error",
+			"transcript held: its meta file could not be read, so the agent has no identity and its records cannot be attributed: %v", err)
+	}
+	if meta.Shape == ShapeWorkflow {
+		// A WORKFLOW AGENT IS ATTRIBUTED TO ITS WORKFLOW. The vendor writes no
+		// toolUseId for one because no tool call spawned it; its run is the
+		// wf_<id> the path carries and its parent session is the transcript
+		// directory above that, both already on the Target. So the transcript is
+		// INGESTIBLE — as workflow residue, which is all workflow converts to
+		// this wave — and holding it for an id the vendor never writes held
+		// every workflow agent forever.
+		if target.RunID == "" {
+			// The same shape OUTSIDE a workflow directory names nothing at all:
+			// there is no run to attribute it to and no spawning call either.
+			// Loud, like an unreadable meta and unlike an absent one: a meta
+			// that is THERE and names no agent will not fix itself.
+			return d.holdTranscript(target, holdMetaNamesNoCall, "error",
+				"transcript held: %s states no toolUseId and this transcript is not under a workflow run, so nothing names its agent", target.MetaPath)
 		}
-		// THE AGENT'S IDENTITY IS THE SPAWNING CALL, per the cross-plane minting
-		// rule: the same id the stream plane names this agent by.
 		target.Meta = meta
-		target.AgentID = meta.ToolUseID
-		if d.warnedMeta[target.Path] {
-			delete(d.warnedMeta, target.Path)
-			d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID}).
-				Log("the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
-		}
+		d.releaseTranscript(target, "the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
+		d.log.With(logging.Context{
+			Operation: "discover-meta", Path: target.Path, TaskID: target.VendorAgentID,
+		}).LogVerbose("workflow agent attributed to its run %s in session %s (agent_type=%s, no spawning call exists for a workflow agent)",
+			target.RunID, target.SessionID, meta.AgentType)
 		return target
 	}
-	target.MetaMissing = true
-	if !d.warnedMeta[target.Path] {
-		d.warnedMeta[target.Path] = true
-		d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, TaskID: target.VendorAgentID, Level: "warn"}).
-			Log("transcript held: its required meta file %s is not on disk yet, so the agent has no identity (its spawning call is stated only there); it is re-checked every rescan and never dropped", target.MetaPath)
-		return target
-	}
-	d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID}).
-		LogVerbose("transcript still held: %s has not appeared", target.MetaPath)
+	// THE AGENT'S IDENTITY IS THE SPAWNING CALL, per the cross-plane minting
+	// rule: the same id the stream plane names this agent by.
+	target.Meta = meta
+	target.AgentID = meta.ToolUseID
+	d.releaseTranscript(target, "the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
 	return target
+}
+
+// holdTranscript records that a transcript cannot be ingested yet, and states
+// it ONCE PER CONDITION rather than once per rescan.
+//
+// The level argument is how loud a FIRST statement of this reason is; repeats
+// are always verbose, and carry the running count so a reader can tell "seen
+// once" from "seen five thousand times" without five thousand records.
+func (d *Discoverer) holdTranscript(target Target, reason, level, format string, args ...any) Target {
+	target.MetaMissing = true
+	bound := d.log.With(logging.Context{
+		Operation: "discover-meta", Path: target.Path, TaskID: target.VendorAgentID, Reason: reason,
+	})
+	existing, held := d.holds[target.Path]
+	if held && existing.reason == reason {
+		existing.repeats++
+		bound.With(logging.Context{Repeat: logging.Repeat(existing.repeats)}).
+			LogVerbose("transcript still held for the same reason since %s", existing.since.Format(time.RFC3339))
+		return target
+	}
+	if held {
+		// A DIFFERENT REASON IS A DIFFERENT FACT and is stated, not swallowed:
+		// a meta that appeared but does not parse is not the meta that had not
+		// appeared yet.
+		bound.With(logging.Context{Level: "warn"}).
+			Log("the held transcript's hold reason changed from %s to %s after %d repeat(s)", existing.reason, reason, existing.repeats)
+	}
+	d.holds[target.Path] = &hold{reason: reason, since: d.now()}
+	bound.With(logging.Context{Level: level}).Log(format, args...)
+	return target
+}
+
+// releaseTranscript states, at info and exactly once, that a held transcript
+// became ingestible. A transcript that was never held states nothing.
+func (d *Discoverer) releaseTranscript(target Target, format string, args ...any) {
+	existing, held := d.holds[target.Path]
+	if !held {
+		return
+	}
+	delete(d.holds, target.Path)
+	d.log.With(logging.Context{
+		Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID,
+		Reason: existing.reason, Repeat: logging.Repeat(existing.repeats),
+	}).Log(format, args...)
+}
+
+// reportHolds states the STANDING hold set periodically, so a set that never
+// changes stays visible without a record per file per pass. Nothing held means
+// nothing stated.
+func (d *Discoverer) reportHolds() {
+	if len(d.holds) == 0 {
+		return
+	}
+	now := d.now()
+	if !d.lastSummary.IsZero() && now.Sub(d.lastSummary) < d.summaryInterval {
+		return
+	}
+	d.lastSummary = now
+	oldest, oldestPath := now, ""
+	reasons := map[string]int{}
+	for path, h := range d.holds {
+		reasons[h.reason]++
+		if !h.since.After(oldest) {
+			oldest, oldestPath = h.since, path
+		}
+	}
+	kinds := make([]string, 0, len(reasons))
+	for reason, count := range reasons {
+		kinds = append(kinds, fmt.Sprintf("%s=%d", reason, count))
+	}
+	sort.Strings(kinds)
+	d.log.With(logging.Context{Operation: "discover-holds", Path: oldestPath}).
+		Log("%d transcript(s) held (%s); oldest since %s", len(d.holds), strings.Join(kinds, " "), oldest.Format(time.RFC3339))
 }
 
 func (d *Discoverer) classifySpool(path string) (Target, bool) {

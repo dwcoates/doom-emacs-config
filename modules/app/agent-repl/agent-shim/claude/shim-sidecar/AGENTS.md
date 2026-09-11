@@ -295,8 +295,40 @@ because neither spelling may make a spool invisible.
   mandate forbids.
 - A TRANSCRIPT WITHOUT ITS META IS HELD, NEVER DROPPED: `agent-<id>.meta.json`
   is the ONLY source of the agent's type, spawn depth, model and worktree, so
-  the transcript is discovered, warned about ONCE, re-checked every rescan, and
-  not tailed until the meta appears.
+  the transcript is discovered, stated ONCE, re-checked every rescan, and not
+  tailed until the meta appears.
+- THE VENDOR WRITES ONE FILE NAME FOR TWO DOCUMENTS, and the second is not a
+  defect:
+  - the SUBAGENT shape (`subagents/agent-<id>.meta.json`) always states
+    `toolUseId` beside `agentType`, `description` and `spawnDepth` (and,
+    variously, `parentAgentId`, `model`, `isFork`, `cwd`, `stoppedByUser`,
+    `worktreePath`/`worktreeBranch`/`spawnedWithWorktree`/`inheritedWorktreePath`,
+    `worktreeCleanlyRemoved`). `toolUseId` IS the identity.
+  - the WORKFLOW shape (`subagents/workflows/wf_<id>/agent-<id>.meta.json`)
+    states `agentType` (`workflow-subagent`), `spawnDepth` and `model`, plus
+    `worktreePath`/`spawnedWithWorktree` when the agent got a worktree. IT
+    CARRIES NO `toolUseId` AND NO `description`, because NO TOOL CALL SPAWNED
+    IT. Such an agent is attributed to its WORKFLOW RUN and PARENT SESSION,
+    both of which the path already carries, and its transcript is ingestible —
+    as workflow residue, which is all workflow converts to this wave. Holding
+    it for an id the vendor never writes held every workflow agent forever.
+  - a meta naming NEITHER a `toolUseId` nor an `agentType` names nothing at
+    all, and so does a workflow-shaped meta found OUTSIDE a `wf_<id>`
+    directory: both are held, at ERROR, because they will not fix themselves.
+- A HOLD IS A CONDITION, NOT AN EVENT. Every rescan re-evaluates every
+  transcript, so a per-pass warning is a record per file per pass forever —
+  one stuck agent wrote 4988 identical `discover-meta` records in 13 minutes.
+  The per-transcript hold state (`internal/discover`, keyed by path, carrying
+  the REASON, the instant it began and a repeat count) makes each record say
+  something new: the FIRST hold is stated at its own level (`warn` for an
+  absent meta, `error` for one that is present and unusable), a hold whose
+  REASON CHANGED is stated again at `warn` (it is a different fact about the
+  same file), a repeat of the same reason is VERBOSE and carries
+  `repeat_count`, and a RELEASE is an `info` lifecycle edge. Every one of them
+  carries the hold `reason` in its own context key. The STANDING set is
+  restated as one periodic `discover-holds` info record ("N transcript(s) held
+  ...; oldest since T"), bounded by `DefaultHoldSummaryInterval`; nothing held
+  states nothing.
 - WORKFLOW IS KICKED this wave: journals and workflow per-agent transcripts are
   discovered and cursor-tailed, but they convert to DECLARED residue only —
   `workflow_journal/<type>` for the journal, `workflow/agent_transcript` for a
