@@ -31,6 +31,25 @@ package convert
 // vendor's tool_use_id, a text or thinking block by message id + block index.
 func ActivityKey(id string) string { return "activity:" + id }
 
+// ContextInjectedUnitID names an injected-context unit — a memory file or a
+// skills injection — SCOPED TO THE BOOK it was injected into, so the upsert key
+// deterministically implies its book and a re-ingest never moves the row.
+//
+// WHY THE BOOK IS IN THE KEY. The vendor pulls context in with no tool call and
+// copies the SAME attachment record — uuid and all — into every sidechain
+// transcript that inherits it, so one record uuid recurs under several books
+// (the main agent's and each subagent's). Keyed by the uuid alone the identical
+// key named different books across two files, and re-converting the second file
+// tried to MOVE the row's book, which the store rightly refuses
+// (upsert_changes_identity) — dropping the skills-context write. Scoping the
+// unit id by its book gives each book its own row, which is the truth: the
+// injection happened in each of those agents' contexts. Both `agent` and the
+// record uuid are properties of the transcript, so the key is stable across
+// re-conversions.
+func ContextInjectedUnitID(kind, agent, recordUUID string) string {
+	return "context:" + kind + ":" + agent + ":" + recordUUID
+}
+
 // TerminalKey names one agent's stream terminal, which is per RECORD rather
 // than per agent: a transcript can carry several terminals for one agent over a
 // session's life and none of them supersedes another.
