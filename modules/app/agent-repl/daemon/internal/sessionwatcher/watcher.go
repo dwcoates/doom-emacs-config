@@ -376,7 +376,7 @@ func (w *watcher) SetOutputAddress(addr *OutputAddress) {
 		w.addr = *addr
 	}
 	w.log.Debug("daemon.sessionwatcher.set_output_address", "output address installed", dlog.Context{
-		"state": "output_feed_root", "before": before, "after": w.addr.Feed.Root,
+		"root": w.addr.Feed.Root, "state": "output_feed_root", "before": before, "after": w.addr.Feed.Root,
 	})
 }
 
@@ -401,7 +401,7 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 		before := ""
 		w.mainAgent = agent
 		w.log.Debug("daemon.sessionwatcher.main_agent", "main agent named", dlog.Context{
-			"state": "main_agent", "before": before, "after": agent.GetValue(), "source": source,
+			"agent_id": agent.GetValue(), "state": "main_agent", "before": before, "after": agent.GetValue(), "source": source,
 		})
 		// THE RELEASE IS NOT DONE HERE. Naming is a precondition for it, not
 		// the moment for it: the caller may still owe the views the turn's
@@ -443,7 +443,7 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 	before := turnIDValue(w.turn)
 	w.turn = &opening
 	w.log.Debug("daemon.sessionwatcher.turn_opening", "a turn is going to the shim", dlog.Context{
-		"state": "turn_in_flight", "before": before, "after": string(turn),
+		"turn_id": string(turn), "state": "turn_in_flight", "before": before, "after": string(turn),
 	})
 }
 
@@ -459,7 +459,7 @@ func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	before := turnIDValue(w.turn)
 	w.turn = nil
 	w.log.Debug("daemon.sessionwatcher.turn_open_failed", "the shim refused a turn; it no longer stands in flight", dlog.Context{
-		"state": "turn_in_flight", "before": before, "after": "",
+		"turn_id": string(turn), "state": "turn_in_flight", "before": before, "after": "",
 	})
 	// The refusal IS the answer that would have named the main agent, so a
 	// terminal held for that name has nothing left to wait on.

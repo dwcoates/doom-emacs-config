@@ -23,22 +23,32 @@ func TestWatcherStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 		state     string
 		before    any
 		after     any
+		legacyKey string
+		legacy    any
 		act       func(*harness)
 	}{
 		{
 			name: "an output route leaves the root feed", operation: "daemon.sessionwatcher.set_output_address",
-			state: "output_feed_root", before: true, after: false,
+			state: "output_feed_root", before: true, after: false, legacyKey: "root", legacy: false,
 			act: func(h *harness) { h.w.SetOutputAddress(&OutputAddress{Feed: feedFor("sub-1")}) },
 		},
 		{
 			name: "the main agent is named", operation: "daemon.sessionwatcher.main_agent",
-			state: "main_agent", before: "", after: "main-9",
+			state: "main_agent", before: "", after: "main-9", legacyKey: "agent_id", legacy: "main-9",
 			act: func(h *harness) { h.w.SetMainAgent(agentID("main-9")) },
 		},
 		{
 			name: "a turn enters flight", operation: "daemon.sessionwatcher.turn_opening",
-			state: "turn_in_flight", before: "", after: "turn-9",
+			state: "turn_in_flight", before: "", after: "turn-9", legacyKey: "turn_id", legacy: "turn-9",
 			act: func(h *harness) { h.w.OnTurnOpening("ws-1", "turn-9") },
+		},
+		{
+			name: "a refused turn leaves flight", operation: "daemon.sessionwatcher.turn_open_failed",
+			state: "turn_in_flight", before: "turn-9", after: "", legacyKey: "turn_id", legacy: "turn-9",
+			act: func(h *harness) {
+				h.w.OnTurnOpening("ws-1", "turn-9")
+				h.w.OnTurnOpenFailed("ws-1", "turn-9")
+			},
 		},
 		{
 			name: "the session-ending latch rises", operation: "daemon.sessionwatcher.state_transition",
@@ -68,11 +78,12 @@ func TestWatcherStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 			// Assert.
 			for _, record := range h.log.Records()[beforeRecords:] {
 				if record.Level == "debug" && record.Operation == tt.operation && record.Context["state"] == tt.state &&
-					reflect.DeepEqual(record.Context["before"], tt.before) && reflect.DeepEqual(record.Context["after"], tt.after) {
+					reflect.DeepEqual(record.Context["before"], tt.before) && reflect.DeepEqual(record.Context["after"], tt.after) &&
+					(tt.legacyKey == "" || reflect.DeepEqual(record.Context[tt.legacyKey], tt.legacy)) {
 					return
 				}
 			}
-			t.Fatalf("records = %+v, want %s state %s before=%v after=%v", h.log.Records()[beforeRecords:], tt.operation, tt.state, tt.before, tt.after)
+			t.Fatalf("records = %+v, want %s state %s before=%v after=%v %s=%v", h.log.Records()[beforeRecords:], tt.operation, tt.state, tt.before, tt.after, tt.legacyKey, tt.legacy)
 		})
 	}
 }
