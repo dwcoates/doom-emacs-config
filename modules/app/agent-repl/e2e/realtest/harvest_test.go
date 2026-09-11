@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -447,4 +448,207 @@ func TestSnapshotOffsetForFollowsARenamedFile(t *testing.T) {
 	if got := snapshot.OffsetFor(path + ".prev"); got != before {
 		t.Errorf("the renamed file's offset is %d, want the %d it had under its old name", got, before)
 	}
+}
+
+func collapseFixture(source, operation, level, message string, count int) []Finding {
+	var findings []Finding
+	for i := 0; i < count; i++ {
+		findings = append(findings, Finding{
+			Kind:      KindRecord,
+			Source:    source,
+			Path:      "/tmp/" + source + ".log",
+			Line:      i + 1,
+			Level:     level,
+			Operation: operation,
+			Message:   fmt.Sprintf("%s #%d", message, i),
+			Workspace: "aaaa",
+			Raw:       fmt.Sprintf(`{"message":"%s #%d"}`, message, i),
+		})
+	}
+	return findings
+}
+
+func TestCollapseFindingsCountsARepeatedClassOnce(t *testing.T) {
+	// Arrange: the sidecar's discover-meta flood — one class, many records.
+	findings := collapseFixture("sidecar", "sidecar.discover-meta", "warn", "no meta", 4988)
+
+	// Act.
+	classes := CollapseFindings(findings)
+
+	// Assert.
+	if len(classes) != 1 {
+		t.Fatalf("the flood collapsed to %d classes, want 1", len(classes))
+	}
+	if classes[0].Count != 4988 {
+		t.Errorf("the class counts %d records, want 4988", classes[0].Count)
+	}
+}
+
+func TestCollapseFindingsKeepsTheFirstRecordAsTheSample(t *testing.T) {
+	// Arrange: the sample is evidence, so it is a real record rather than a
+	// synthesized one.
+	findings := collapseFixture("shim", "shim.engine.session", "warn", "routing", 3)
+
+	// Act.
+	classes := CollapseFindings(findings)
+
+	// Assert.
+	if classes[0].Sample.Raw != findings[0].Raw {
+		t.Errorf("the sample reads %q, want the first record %q", classes[0].Sample.Raw, findings[0].Raw)
+	}
+}
+
+func TestCollapseFindingsSeparatesTwoLevelsOfTheSameOperation(t *testing.T) {
+	// Arrange: a warn and an error from one call site are different news.
+	findings := append(
+		collapseFixture("daemon", "daemon.serve", "warn", "slow", 2),
+		collapseFixture("daemon", "daemon.serve", "error", "refused", 2)...)
+
+	// Act.
+	classes := CollapseFindings(findings)
+
+	// Assert.
+	if len(classes) != 2 {
+		t.Fatalf("a warn and an error collapsed into %d classes, want 2", len(classes))
+	}
+}
+
+func TestCollapseFindingsSeparatesTwoRuntimesOfTheSameOperation(t *testing.T) {
+	// Arrange: which runtime wrote it is part of what a class is.
+	findings := append(
+		collapseFixture("shim", "session.keepalive", "warn", "keepalive", 2),
+		collapseFixture("daemon", "session.keepalive", "warn", "keepalive", 2)...)
+
+	// Act.
+	classes := CollapseFindings(findings)
+
+	// Assert.
+	if len(classes) != 2 {
+		t.Fatalf("two runtimes collapsed into %d classes, want 2", len(classes))
+	}
+}
+
+func TestWriteFullHarvestKeepsEveryRecord(t *testing.T) {
+	// Arrange: the manifest reports a class once, so the sibling file is the
+	// only place every record survives.
+	dir := t.TempDir()
+	findings := collapseFixture("sidecar", "sidecar.discover-meta", "warn", "no meta", 12)
+
+	// Act.
+	path, err := WriteFullHarvest(dir, findings)
+	if err != nil {
+		t.Fatalf("write the full harvest: %v", err)
+	}
+
+	// Assert.
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	lines := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		if line != "" {
+			lines++
+		}
+	}
+	if lines != 12 {
+		t.Errorf("%s holds %d records, want all 12", path, lines)
+	}
+}
+
+func TestWriteFullHarvestNamesTheFileBesideTheManifest(t *testing.T) {
+	// Arrange/Act: the manifest points at this name, so the name is asserted.
+	dir := t.TempDir()
+	path, err := WriteFullHarvest(dir, nil)
+	if err != nil {
+		t.Fatalf("write the full harvest: %v", err)
+	}
+
+	// Assert.
+	if filepath.Base(path) != "HARVEST-FULL.jsonl" {
+		t.Errorf("the full harvest landed at %s, want HARVEST-FULL.jsonl", path)
+	}
+}
+
+func TestManifestReportsARepeatedClassOnceWithItsCount(t *testing.T) {
+	// Arrange: 6000 lines of one class is a document nobody can rule on.
+	dir := t.TempDir()
+	manifest := Manifest{
+		Title:    "fixture",
+		Started:  testWindow(t).Start,
+		Ended:    testWindow(t).End,
+		Findings: collapseFixture("shim", "shim.engine.session", "warn", "routing", 2500),
+	}
+
+	// Act.
+	path, err := manifest.Write(dir)
+	if err != nil {
+		t.Fatalf("write the manifest: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	// Assert.
+	if !strings.Contains(string(body), "**2500 records**") {
+		t.Errorf("the manifest does not report the class's count")
+	}
+	if strings.Count(string(body), "shim.engine.session") > 3 {
+		t.Errorf("the manifest still reproduces the whole class: %d mentions",
+			strings.Count(string(body), "shim.engine.session"))
+	}
+}
+
+func TestManifestWritesTheFullHarvestBesideItself(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	manifest := Manifest{Title: "fixture", Findings: collapseFixture("shim", "op", "warn", "m", 4)}
+
+	// Act.
+	if _, err := manifest.Write(dir); err != nil {
+		t.Fatalf("write the manifest: %v", err)
+	}
+
+	// Assert.
+	if _, err := os.Stat(filepath.Join(dir, "HARVEST-FULL.jsonl")); err != nil {
+		t.Errorf("the manifest was written without the full harvest beside it: %v", err)
+	}
+}
+
+
+func TestManifestSaysTheLaunchMethodOnTheFocusLine(t *testing.T) {
+	// Arrange: whether focus moved is a fact ABOUT a launch method.
+	dir := t.TempDir()
+	manifest := Manifest{
+		Title: "fixture",
+		Runs: []ManifestRun{{
+			Index:       1,
+			Method:      MethodDirectRestore,
+			FrontBefore: "Google Chrome",
+			FrontAfter:  "Emacs",
+			Disturbed:   true,
+		}},
+	}
+
+	// Act.
+	path, err := manifest.Write(dir)
+	if err != nil {
+		t.Fatalf("write the manifest: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	// Assert.
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.Contains(line, "FOCUS MOVED") {
+			if !strings.Contains(line, string(MethodDirectRestore)) {
+				t.Errorf("the focus line %q does not name the launch method", line)
+			}
+			return
+		}
+	}
+	t.Errorf("the manifest has no focus line at all")
 }

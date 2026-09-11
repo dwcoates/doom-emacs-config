@@ -41,15 +41,33 @@ const (
 	// the daemon ensure being COMMANDED, which config.el schedules once the
 	// module is loaded.
 	PhaseModuleLoaded PhaseName = "module-loaded"
-	// PhaseDaemonAnswered is the ensure being commanded to the daemon
-	// answering: adopted (an already-answering daemon) or booted (one this
-	// launch spawned). Which of the two happened is reported, because the
-	// two paths are different work and comparing their times would be
-	// comparing different things.
+	// PhaseDaemonSpawned is spawn to the daemon process existing:
+	// `elisp.daemon.started` for one this launch spawned, or
+	// `elisp.daemon.adopted` for one that was already answering. Which of
+	// the two happened is reported, because the two paths are different work
+	// and comparing their times would be comparing different things.
+	//
+	// IT IS NOT THE DAEMON BEING USABLE. Realtest 1 run 1 recorded
+	// `elisp.daemon.booted` three milliseconds after the spawn, against an
+	// address file a dead daemon had left behind, while the link the frontend
+	// actually talks over came up ten seconds later. A phase that ends at the
+	// boot claim measures the claim.
+	PhaseDaemonSpawned PhaseName = "daemon-spawned"
+	// PhaseDaemonAnswered is spawn to the daemon ANSWERING THIS FRONTEND:
+	// the primary link is up AND the roster subscription was accepted. It
+	// ends at the LATER of the two, because either one alone leaves the
+	// frontend unable to draw anything — a link with no roster has nothing to
+	// draw, and a subscription with no link cannot be delivered.
 	PhaseDaemonAnswered PhaseName = "daemon-answered"
-	// PhaseLinkUp is spawn to `elisp.link.up`: the frontend holds a live
-	// link to the daemon.
+	// PhaseLinkUp is spawn to the primary link being up: `elisp.link.up`, or
+	// `elisp.link.reconnected` / `elisp.host.link-up` for a link that came up
+	// on a retry, which is what a cold start against a stale address file
+	// actually produces.
 	PhaseLinkUp PhaseName = "link-up"
+	// PhaseRosterSubscribed is spawn to `elisp.roster.subscribed`: the daemon
+	// ACCEPTED the roster subscription. It is written from the acceptance
+	// rather than from the request, which is what makes it evidence.
+	PhaseRosterSubscribed PhaseName = "roster-subscribed"
 	// PhaseFirstRoster is spawn to the first roster reconcile: the daemon
 	// pushed the workspace set and Emacs applied it.
 	PhaseFirstRoster PhaseName = "first-roster"
@@ -82,10 +100,15 @@ type marker struct {
 	perWorkspace bool
 }
 
+// The boundaries are spelled with an explicit `(\s|$)` rather than `\b`,
+// because `-` is not a word character: `link-up\b` also matches
+// `link-up-skipped`, and `adopted\b` also matches `adopted-unhealthy`. Both of
+// those are the OPPOSITE of the phase they would be credited to.
 var markers = []marker{
 	{name: PhaseModuleLoaded, re: regexp.MustCompile(`^elisp\.daemon\.ensure-command`)},
-	{name: PhaseDaemonAnswered, re: regexp.MustCompile(`^elisp\.daemon\.(adopted|booted)\b`)},
-	{name: PhaseLinkUp, re: regexp.MustCompile(`^elisp\.link\.up\b`)},
+	{name: PhaseDaemonSpawned, re: regexp.MustCompile(`^elisp\.daemon\.(started|adopted)(\s|$)`)},
+	{name: PhaseLinkUp, re: regexp.MustCompile(`^elisp\.(link\.(up|reconnected)|host\.link-up)(\s|$)`)},
+	{name: PhaseRosterSubscribed, re: regexp.MustCompile(`^elisp\.roster\.subscribed(\s|$)`)},
 	{name: PhaseFirstRoster, re: regexp.MustCompile(`^elisp\.roster\.reconcile:`)},
 	{name: PhaseTabDrawn, re: regexp.MustCompile(`^elisp\.roster\.tab-open:`), perWorkspace: true},
 	{name: PhasePanelPainted, re: regexp.MustCompile(`^elisp\.frontend\.watch-load: load-changed`), perWorkspace: true},
@@ -117,8 +140,8 @@ type Phases struct {
 	FirstRecord time.Time
 	// Observations is every recognized marker, in log order.
 	Observations []Observation
-	// DaemonPath is "adopted" or "booted", read off whichever
-	// PhaseDaemonAnswered marker fired. Empty when neither did.
+	// DaemonPath is "adopted" or "spawned", read off whichever
+	// PhaseDaemonSpawned marker fired. Empty when neither did.
 	DaemonPath string
 }
 
@@ -179,12 +202,12 @@ func ReadPhases(moduleLog string, offset int64, spawnedAt time.Time) (Phases, er
 					ws = GlobalWorkspace
 				}
 			}
-			if m.name == PhaseDaemonAnswered && phases.DaemonPath == "" {
+			if m.name == PhaseDaemonSpawned && phases.DaemonPath == "" {
 				switch {
-				case strings.Contains(rec.Message, "adopted"):
+				case strings.HasPrefix(rec.Message, "elisp.daemon.adopted"):
 					phases.DaemonPath = "adopted"
-				case strings.Contains(rec.Message, "booted"):
-					phases.DaemonPath = "booted"
+				case strings.HasPrefix(rec.Message, "elisp.daemon.started"):
+					phases.DaemonPath = "spawned"
 				}
 			}
 			phases.Observations = append(phases.Observations, Observation{
@@ -247,6 +270,8 @@ func (p Phases) Measure() []Measurement {
 		seen[key] = obs.At
 	}
 
+	out = append(out, daemonAnswered(p.SpawnedAt, seen))
+
 	latest := p.FirstRecord
 	for key, at := range seen {
 		parts := strings.SplitN(key, "\x00", 2)
@@ -299,4 +324,35 @@ func (p Phases) workspacesFor(phase PhaseName) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// daemonAnswered is the composite phase: the daemon answering THIS frontend.
+//
+// It is computed rather than read off a marker because no single record says
+// it. The link coming up says the frontend can talk; the roster subscription
+// being accepted says the daemon is answering what the frontend asked for. The
+// phase ends at the later of the two, and when either is missing it reports
+// WHICH, because "the daemon never answered" and "the roster was never
+// subscribed" send a reader to different places.
+func daemonAnswered(spawnedAt time.Time, seen map[string]time.Time) Measurement {
+	measurement := Measurement{Phase: PhaseDaemonAnswered, Workspace: GlobalWorkspace}
+	linkUp, haveLink := seen[string(PhaseLinkUp)+"\x00"+GlobalWorkspace]
+	subscribed, haveRoster := seen[string(PhaseRosterSubscribed)+"\x00"+GlobalWorkspace]
+	switch {
+	case !haveLink && !haveRoster:
+		measurement.Note = "the primary link never came up and the roster was never subscribed: the daemon never answered this frontend"
+		return measurement
+	case !haveLink:
+		measurement.Note = "the roster subscription was accepted but no link-up record was written: the phase has no end"
+		return measurement
+	case !haveRoster:
+		measurement.Note = "the primary link came up but the roster subscription was never accepted: the frontend has a link and nothing to draw"
+		return measurement
+	}
+	at := linkUp
+	if subscribed.After(at) {
+		at = subscribed
+	}
+	measurement.Elapsed = at.Sub(spawnedAt)
+	return measurement
 }
