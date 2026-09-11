@@ -97,13 +97,11 @@ overwrite costs the thing the backup was for.
 
 ## Launching without disturbing the owner
 
-Two methods, both measured, because which one leaves focus alone on macOS is a
-question about the operating system rather than about this code:
+There is exactly one launch method (owner ruling, 2026-09-11):
 
 | method | how |
 |---|---|
-| `open -g -a /Applications/Emacs.app --env AGENT_REPL_FORBID_VENDOR_CALLS=1` | asks LaunchServices not to bring the application forward. Tried first, because it asks for the behavior instead of correcting for it |
-| the bundle's own executable, spawned directly, with the frontmost application reactivated immediately | corrects a focus steal rather than preventing it, so the owner may see a flicker |
+| `open -g -a /Applications/Emacs.app --env AGENT_REPL_FORBID_VENDOR_CALLS=1` | asks LaunchServices not to bring the application forward. It is used because it asks for the behavior instead of correcting for it |
 
 `--env` is not decoration. `open` hands the application to launchd, which does
 NOT pass this process's environment along, so a variable merely exported by the
@@ -112,10 +110,20 @@ forbidden while the real SDK was one prompt away would spend the owner's tokens
 finding out.
 
 Focus is READ, not assumed: `System Events` is asked which application is
-frontmost before and after each launch, and the run reports which method left it
-alone. Realtest 1 uses the first method for cold start 1, the second for cold
-start 2, and repeats whichever worked for cold start 3, so the answer arrives
-with evidence on both sides.
+frontmost before and after the launch, and the run reports whether it left
+focus alone.
+
+A second method used to exist: the bundle's own executable, spawned directly,
+with the frontmost application reactivated immediately — correcting a focus
+steal rather than preventing it. It was kept as a hedge and rotated with the
+first method across three cold starts, because realtest 1's first run moved
+focus even under `open -g` and the cause was not yet known. The cause turned
+out to be this module's own webview pre-creation on link-up, which macOS
+answers by activating Emacs regardless of the launch method, fixed in commit
+3db3d6271. With the cause found and fixed, the owner ruled that a realtest
+starts Emacs once per test, and the second method and the rotation between
+methods were removed entirely (docs/REALTEST-JUDGEMENT-CALLS.md, realtest 1,
+row 24).
 
 The vendor guard is then VERIFIED against the kernel's copy of each process's
 environment (`ps -Eww`), for the Emacs process and for the daemon — whether that
@@ -243,7 +251,7 @@ measured, not guessed").
 So realtest 1 is a measurement first and a gate second, and the two are
 distinguished in the open:
 
-- `AGENT_REPL_REALTEST_MEASURE=1` — the three cold starts run, every phase timing
+- `AGENT_REPL_REALTEST_MEASURE=1` — the one cold start runs, every phase timing
   is reported at the site, the manifest is written, the LOG HARVEST is enforced,
   and the output says once that the phase budgets are not. Nothing green here
   can be mistaken for a passed budget.

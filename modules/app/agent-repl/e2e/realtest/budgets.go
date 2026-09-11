@@ -19,19 +19,24 @@ import (
 // So realtest 1 is a MEASUREMENT run first and a gate second, and the two are
 // distinguished in the open:
 //
-//   - With AGENT_REPL_REALTEST_MEASURE=1 the test performs its three cold
-//     starts, reports every phase timing at the site, writes the manifest, and
+//   - With AGENT_REPL_REALTEST_MEASURE=1 the test performs its one cold start,
+//     reports every phase timing at the site, writes the manifest, and
 //     enforces the LOG HARVEST — which is the actual remediation bar — while
-//     saying in its output, once per run, that the phase budgets are NOT
-//     enforced. Nothing green here can be mistaken for a passed budget.
+//     saying in its output that the phase budgets are NOT enforced. Nothing
+//     green here can be mistaken for a passed budget.
 //
 //   - Without it the test enforces the table below, and while any entry is
 //     still `unmeasured` it FAILS immediately, naming this file and the phase.
 //     A run cannot quietly skip a gate that has no number in it.
 //
-// After the first authorized three-run measurement the numbers land here with
-// the observed maximum recorded beside each one, the way the bounds table in
-// AGENTS.md records the run behind every value it holds.
+// A realtest now starts Emacs once per run (owner ruling, 2026-09-11), so one
+// run no longer produces a set on its own the way three cold starts used to.
+// The set a phase's healthy maximum is sized from is whatever MANIFEST.md
+// files the realtest run directory history actually holds — each one a single
+// cold start — accumulated across however many authorized runs have happened
+// by the time the budget is filled in. Where only one such run exists yet, the
+// budget is sized from that one run alone and its Basis says so, rather than
+// waiting on a set size this file no longer assumes.
 
 // unmeasured is the sentinel for a budget no run has sized yet.
 const unmeasured time.Duration = -1
