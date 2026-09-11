@@ -494,9 +494,11 @@ older generations, and writes the complete new record to a fresh file."
   :type 'integer
   :group 'agent-repl)
 
-(defcustom agent-repl-workspace-id-length 8
-  "Number of hex characters from MD5 hash used for workspace IDs.
-Longer values reduce collision risk in setups with many workspaces."
+(defcustom agent-repl-workspace-dir-hash-length 8
+  "Number of hex characters from the MD5 of a workspace's canonical directory.
+This is the width of `workspace_dir_hash', the shim-held kernel lock file's
+derivation (`dlog.WorkspaceDirHashLength').  It is NOT a `workspace_id':
+that identity is minted by the daemon and only received here."
   :type 'integer
   :group 'agent-repl)
 
@@ -623,18 +625,44 @@ state.")
 
 ;;; Logging
 
-(defun agent-repl--ws-id-cached (ws)
-  "Return the cached workspace ID hash for WS, computing if needed.
-Uses :project-dir from the workspace state to derive the 8-char MD5 hash.
-Caches the result under :ws-id to avoid repeated `file-truename' calls.
-Returns nil if WS is nil or no :project-dir is set."
+(defun agent-repl--ws-dir-hash-cached (ws)
+  "Return the cached workspace DIRECTORY HASH for WS, computing if needed.
+Uses :project-dir from the workspace state to derive
+md5hex(canonical dir)[:`agent-repl-workspace-dir-hash-length'] -- the
+derivation the shim-held kernel lock file uses, recorded on every workspace
+record as `workspace_dir_hash'.  Caches the result under :ws-dir-hash to
+avoid repeated `file-truename' calls.  Returns nil if WS is nil or no
+:project-dir is set.
+
+THIS IS NOT A `workspace_id'.  A record's `workspace_id' is the
+daemon-minted 16-hex identity every runtime shares
+(`agent-repl--ws-daemon-log-id'); the two never substitute for each other.
+See logging-contract.md (\"JSONL schema\")."
   (when ws
-    (or (plist-get (gethash ws agent-repl--workspaces) :ws-id)
+    (or (plist-get (gethash ws agent-repl--workspaces) :ws-dir-hash)
         (when-let ((dir (plist-get (gethash ws agent-repl--workspaces) :project-dir)))
-          (let ((id (substring (md5 (directory-file-name (file-truename dir))) 0 agent-repl-workspace-id-length)))
-            (puthash ws (plist-put (gethash ws agent-repl--workspaces) :ws-id id)
+          (let ((hash (substring (md5 (directory-file-name (file-truename dir)))
+                                 0 agent-repl-workspace-dir-hash-length)))
+            (puthash ws (plist-put (gethash ws agent-repl--workspaces) :ws-dir-hash hash)
                      agent-repl--workspaces)
-            id)))))
+            hash)))))
+
+(defun agent-repl--ws-daemon-log-id (ws)
+  "Return the DAEMON-MINTED workspace id for WS, or nil when unknown.
+The roster push is what teaches Emacs this id: each reconciled row writes
+its ref onto the workspace (`agent-repl--ws-put name :ref ref'), and the
+ref carries `:id' -- the 16-hex `wsm.IDLength' identity the daemon minted
+and every other runtime stamps as `workspace_id'.  Emacs RECEIVES it; it
+never computes one.
+
+Nil is the honest answer before the first roster push has reached this
+workspace, and `agent-repl--log-add-workspace-identity' then omits
+`workspace_id' entirely rather than stamping a path-derived stand-in that
+would make one workspace look like two in a harvest grouped by that field."
+  (when ws
+    (let ((id (or (plist-get (agent-repl--ws-get ws :ref) :id)
+                  (agent-repl--ws-get ws :id))))
+      (and (stringp id) (not (string-empty-p id)) id))))
 
 (defun agent-repl--format-ws-metadata (ws)
   "Return a context string with all workspace metadata for WS, or \"\".
@@ -647,7 +675,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
     (let ((plist (gethash ws agent-repl--workspaces)))
       (if (null plist)
           (format " {ws=%s}" ws)
-        (let* ((id       (agent-repl--ws-id-cached ws))
+        (let* ((id       (agent-repl--ws-dir-hash-cached ws))
                (dir      (plist-get plist :project-dir))
                (cstate   (plist-get plist :agent-state))
                (rstate   (plist-get plist :repl-state))
@@ -779,12 +807,18 @@ one target and one link, whatever names resolve to it.")
 (defun agent-repl--workspace-log-target-key (identity)
   "Return the durable-target registry key for IDENTITY.
 IDENTITY is an `agent-repl--workspace-log-identity' plist.  Both halves
-are in the key because either changing rebinds the sink: a workspace-id
+are in the key because either changing rebinds the sink: a directory-hash
 change is a different workspace at the same path, and a project-dir
 change is the same workspace at a different path.  NUL-joined because it
 is the one byte a path cannot contain, so two identities can never
-collide by concatenation."
-  (concat (plist-get identity :workspace-id)
+collide by concatenation.
+
+The DIRECTORY HASH is the half used, not the daemon-minted `workspace_id':
+the id is unknown until the roster push arrives, so keying by it would give
+one directory two sinks — one for its pre-registration records and one for
+the rest — which is exactly the split of records this registry exists to
+make unrepresentable."
+  (concat (plist-get identity :workspace-dir-hash)
           "\0"
           (plist-get identity :project-dir)))
 
@@ -880,7 +914,7 @@ cannot be confused with a workspace-owned record."
        (let ((dir (agent-repl--ws-get ws :project-dir)))
          (and (stringp dir)
               (file-directory-p dir)
-              (agent-repl--ws-id-cached ws)
+              (agent-repl--ws-dir-hash-cached ws)
               t))))
 
 ;; persp-mode and Doom own these; core.el only reads them, and only when the
@@ -1266,8 +1300,12 @@ through `agent-repl--ws-log-routable-p' first and pass nil when it does not."
     (unless (and (stringp dir) (file-directory-p dir))
       (error "agent-repl log routing invariant violated: workspace %S has no registered project directory" ws))
     (list :project-dir (directory-file-name (file-truename dir))
-          :workspace-id (or (agent-repl--ws-id-cached ws)
-                            (error "agent-repl log routing invariant violated: workspace %S has no workspace ID" ws)))))
+          ;; The directory hash is what this runtime can always derive, so it
+          ;; is what the sink is keyed and named by.  `:workspace-id' is the
+          ;; daemon's, so it is nil until the roster push carries it here.
+          :workspace-dir-hash (or (agent-repl--ws-dir-hash-cached ws)
+                                  (error "agent-repl log routing invariant violated: workspace %S has no workspace directory hash" ws))
+          :workspace-id (agent-repl--ws-daemon-log-id ws))))
 
 (defun agent-repl--log-add-workspace-identity (record ws)
   "Add WS identity and its known session identifiers to JSON RECORD.
@@ -1275,9 +1313,20 @@ A nil WS adds nothing.
 `agent_repl_session_id' is the daemon session echo token and
 `claude_session_id' is the vendor conversation uuid."
   (when ws
-    (let ((identity (agent-repl--workspace-log-identity ws)))
+    (let ((identity (agent-repl--workspace-log-identity ws))
+          (context (gethash "context" record)))
       (puthash "workspace_dir" (plist-get identity :project-dir) record)
-      (puthash "workspace_id" (plist-get identity :workspace-id) record)
+      ;; The daemon mints `workspace_id' and the roster push delivers it.  A
+      ;; record written before that push OMITS the field rather than stamping
+      ;; the directory hash in its place: a harvest groups by `workspace_id',
+      ;; and a path-derived stand-in would split one workspace into two groups
+      ;; and put the Emacs half in neither runtime's.  Absent, the record
+      ;; still routes by `workspace_dir'.
+      (when-let ((id (plist-get identity :workspace-id)))
+        (puthash "workspace_id" id record))
+      (when (hash-table-p context)
+        (puthash "workspace_dir_hash" (plist-get identity :workspace-dir-hash)
+                 context))
       (dolist (field-value
                `(("agent_repl_session_id" . ,(agent-repl--ws-observed-agent-repl-session-id ws))
                  ("claude_session_id" . ,(agent-repl--ws-observed-claude-session-id ws))))
@@ -1418,7 +1467,8 @@ the day of invisible records that keying by name cost."
     (if cached
         (let ((target (plist-get cached :target)))
           (unless (and (equal (plist-get cached :project-dir) (plist-get identity :project-dir))
-                       (equal (plist-get cached :workspace-id) (plist-get identity :workspace-id)))
+                       (equal (plist-get cached :workspace-dir-hash)
+                              (plist-get identity :workspace-dir-hash)))
             (error "agent-repl log routing invariant violated: workspace %S retained a target after identity rebinding" ws))
           (unless (file-regular-p target)
             (error "agent-repl log routing invariant violated: owned target vanished: %s" target))
@@ -2780,17 +2830,21 @@ one; see that variable for the scope a memo is valid in."
         (puthash path (directory-file-name (file-truename path))
                  agent-repl--path-canonical-cache))))
 
-(defun agent-repl--workspace-id ()
-  "Return a short identifier for the current git workspace.
-Uses an MD5 hash of the canonical project root path from the workspace hashmap.
+(defun agent-repl--workspace-dir-hash ()
+  "Return the directory hash of the current workspace, or nil.
+The hash is md5hex of the canonical project root from the workspace hashmap,
+truncated to `agent-repl-workspace-dir-hash-length'.  It identifies a
+DIRECTORY, not a workspace: a record's `workspace_id' is the daemon-minted
+id (`agent-repl--ws-daemon-log-id').
 Returns nil when no workspace has a registered `:project-dir' — callers are
 expected to only invoke this from contexts where a workspace is active."
   (let* ((ws (agent-repl--ws-current-name))
          (root (ignore-errors (agent-repl--ws-dir ws)))
-         (id (when root
-               (substring (md5 (agent-repl--path-canonical root)) 0 agent-repl-workspace-id-length))))
-    (agent-repl--log-verbose ws "workspace-id: ws=%s root=%s id=%s" ws root id)
-    id))
+         (hash (when root
+               (substring (md5 (agent-repl--path-canonical root))
+                          0 agent-repl-workspace-dir-hash-length))))
+    (agent-repl--log-verbose ws "workspace-dir-hash: ws=%s root=%s hash=%s" ws root hash)
+    hash))
 
 ;;; Workspace state management
 ;;
@@ -2802,7 +2856,7 @@ expected to only invoke this from contexts where a workspace is active."
 ;; that hash and exposes the wrapper API every other file uses; see
 ;; AGENTS.md ("Workspace state encapsulation") for the contract.
 ;;
-;; Two helpers in this file (`--ws-id-cached' and
+;; Two helpers in this file (`--ws-dir-hash-cached' and
 ;; `--format-ws-metadata' above) still `gethash' / `puthash' on the
 ;; var directly.  They are core logging primitives — wrapping them
 ;; via `--ws-get'/`--ws-put' would create a logging-to-workspace

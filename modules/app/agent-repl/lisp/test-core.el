@@ -57,11 +57,11 @@
       (should-error (agent-repl--warn-once "ws" "" "impossible")))
     (should (= (hash-table-count agent-repl--warn-once-fingerprints) 0))))
 
-(ert-deftest agent-repl-test-workspace-id-from-project-root ()
-  "Workspace ID should be first 8 chars of MD5 of the canonical ws-dir path."
+(ert-deftest agent-repl-test-workspace-dir-hash-from-project-root ()
+  "The workspace dir hash is the first 8 chars of MD5 of the canonical ws-dir."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
             ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/test/project")))
-    (should (equal (agent-repl--workspace-id)
+    (should (equal (agent-repl--workspace-dir-hash)
                    (substring (md5 (agent-repl--path-canonical "/test/project")) 0 8)))))
 
 ;;;; ---- Tests: Buffer naming ----
@@ -1500,6 +1500,18 @@ one to its caller.  A caller that must abort signals for itself."
 
 ;;;; ---- Tests: JSONL workspace logging contract ----
 
+(defun agent-repl-test--workspace-log-record (ws)
+  "Return the LAST JSONL record written to WS's durable Emacs log sink."
+  (let ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
+    (should target)
+    (with-temp-buffer
+      (insert-file-contents target)
+      (goto-char (point-max))
+      (skip-chars-backward "\n")
+      (json-parse-string
+       (buffer-substring (line-beginning-position) (point))
+       :object-type 'alist))))
+
 (ert-deftest agent-repl-test-log-workspace-record-is-jsonl-and-uses-external-target ()
   "Workspace logging writes the complete Emacs JSONL schema through a symlink."
   (agent-repl-test--with-clean-state
@@ -1510,6 +1522,7 @@ one to its caller.  A caller that must abort signals for itself."
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
+            (agent-repl--ws-put ws :ref (list :id "0123456789abcdef" :dir project))
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'message) #'ignore))
                 (agent-repl--log ws "started request %s" "r-1")))
@@ -1528,6 +1541,134 @@ one to its caller.  A caller that must abort signals for itself."
               (should (equal (alist-get 'message record) "started request r-1"))
               (should (equal (alist-get 'workspace_dir record)
                              (directory-file-name (file-truename project))))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-workspace-id-is-the-daemon-minted-id ()
+  "After the roster push, `workspace_id' is the id the daemon minted."
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-wsid-daemon-" t))
+           (ws "daemon-id-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            ;; Arrange: the roster push writes the row's ref, which carries
+            ;; the daemon's 16-hex workspace id.
+            (agent-repl--ws-put ws :project-dir project)
+            (agent-repl--ws-put ws :ref (list :id "fedcba9876543210" :dir project))
+            ;; Act.
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "elisp.test.daemon-id probe")))
+            ;; Assert.
+            (let ((record (agent-repl-test--workspace-log-record ws)))
+              (should (equal (alist-get 'workspace_id record) "fedcba9876543210"))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-workspace-id-absent-before-the-roster-push ()
+  "Before the roster push the id is unknown, so the field is omitted.
+Stamping the directory hash in its place would split one workspace into two
+groups in a harvest grouped by `workspace_id'."
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-wsid-preroster-" t))
+           (ws "pre-roster-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            ;; Arrange: a registered workspace that no roster row has reached.
+            (agent-repl--ws-put ws :project-dir project)
+            ;; Act.
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "elisp.test.pre-roster probe")))
+            ;; Assert.
+            (let ((record (agent-repl-test--workspace-log-record ws)))
+              (should-not (assoc 'workspace_id record))
+              (should (equal (alist-get 'workspace_dir record)
+                             (directory-file-name (file-truename project))))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-workspace-dir-hash-present-before-the-roster-push ()
+  "The directory hash is derivable here, so it is stamped with no roster row."
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-dirhash-preroster-" t))
+           (ws "pre-roster-hash-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            ;; Arrange.
+            (agent-repl--ws-put ws :project-dir project)
+            ;; Act.
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "elisp.test.dirhash-pre probe")))
+            ;; Assert.
+            (let ((record (agent-repl-test--workspace-log-record ws)))
+              (should (equal (alist-get 'workspace_dir_hash
+                                        (alist-get 'context record))
+                             (substring (md5 (directory-file-name
+                                              (file-truename project)))
+                                        0 agent-repl-workspace-dir-hash-length)))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-workspace-dir-hash-present-after-the-roster-push ()
+  "The directory hash stays on the record once the daemon id is also known."
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-dirhash-postroster-" t))
+           (ws "post-roster-hash-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            ;; Arrange.
+            (agent-repl--ws-put ws :project-dir project)
+            (agent-repl--ws-put ws :ref (list :id "00112233445566aa" :dir project))
+            ;; Act.
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "elisp.test.dirhash-post probe")))
+            ;; Assert.
+            (let ((record (agent-repl-test--workspace-log-record ws)))
+              (should (equal (alist-get 'workspace_dir_hash
+                                        (alist-get 'context record))
+                             (substring (md5 (directory-file-name
+                                              (file-truename project)))
+                                        0 agent-repl-workspace-dir-hash-length)))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-sink-survives-the-roster-push ()
+  "The roster push does not rebind the sink: one directory keeps one target.
+The durable target is keyed by the DIRECTORY HASH precisely so a workspace's
+pre-registration records and the rest of its records land in one file."
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-sink-stable-" t))
+           (ws "sink-stable-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            ;; Arrange: one record before the roster push.
+            (agent-repl--ws-put ws :project-dir project)
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "elisp.test.sink-before probe")))
+            (let ((before (plist-get (agent-repl--workspace-log-target-entry ws)
+                                     :target)))
+              ;; Act: the roster push arrives and a second record is written.
+              (agent-repl--ws-put ws :ref (list :id "aabbccddeeff0011" :dir project))
+              (let ((agent-repl-log-to-file t))
+                (cl-letf (((symbol-function 'message) #'ignore))
+                  (agent-repl--log ws "elisp.test.sink-after probe")))
+              ;; Assert.
+              (should (equal (plist-get (agent-repl--workspace-log-target-entry ws)
+                                        :target)
+                             before))
+              (with-temp-buffer
+                (insert-file-contents before)
+                (should (string-match-p "elisp.test.sink-before probe" (buffer-string)))
+                (should (string-match-p "elisp.test.sink-after probe" (buffer-string))))))
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-workspace-record-attributes-known-sessions ()
@@ -2275,40 +2416,40 @@ path, where the default sentinel fires during the wait's
   (let ((result (agent-repl--path-canonical "")))
     (should (stringp result))))
 
-;;;; ---- Tests: workspace-id ----
+;;;; ---- Tests: workspace-dir-hash ----
 
-(ert-deftest agent-repl-test-workspace-id-nil-when-no-ws-dir ()
-  "workspace-id should return nil when no workspace has a :project-dir."
+(ert-deftest agent-repl-test-workspace-dir-hash-nil-when-no-ws-dir ()
+  "workspace-dir-hash should return nil when no workspace has a :project-dir."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
             ((symbol-function 'agent-repl--ws-dir)
              (lambda (_ws) (error "no dir"))))
-    (should-not (agent-repl--workspace-id))))
+    (should-not (agent-repl--workspace-dir-hash))))
 
-(ert-deftest agent-repl-test-workspace-id-hash-length ()
-  "workspace-id should return exactly 8 characters."
+(ert-deftest agent-repl-test-workspace-dir-hash-hash-length ()
+  "workspace-dir-hash should return exactly 8 characters."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
             ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/test/project")))
-    (let ((id (agent-repl--workspace-id)))
+    (let ((id (agent-repl--workspace-dir-hash)))
       (should (= (length id) 8)))))
 
-(ert-deftest agent-repl-test-workspace-id-different-roots ()
-  "Two different roots should produce different IDs."
+(ert-deftest agent-repl-test-workspace-dir-hash-different-roots ()
+  "Two different roots should produce different hashes."
   (let (id1 id2)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/path/one")))
-      (setq id1 (agent-repl--workspace-id)))
+      (setq id1 (agent-repl--workspace-dir-hash)))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws2"))
               ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/path/two")))
-      (setq id2 (agent-repl--workspace-id)))
+      (setq id2 (agent-repl--workspace-dir-hash)))
     (should-not (equal id1 id2))))
 
-(ert-deftest agent-repl-test-workspace-id-deterministic ()
-  "Same root should always produce the same ID."
+(ert-deftest agent-repl-test-workspace-dir-hash-deterministic ()
+  "Same root should always produce the same hash."
   (let (id1 id2)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/stable/path")))
-      (setq id1 (agent-repl--workspace-id))
-      (setq id2 (agent-repl--workspace-id)))
+      (setq id1 (agent-repl--workspace-dir-hash))
+      (setq id2 (agent-repl--workspace-dir-hash)))
     (should (equal id1 id2))))
 
 ;;;; ---- Tests: create-buffer ----
@@ -3074,7 +3215,7 @@ violating the invariant, which only holds while they agree."
             (agent-repl--ws-put "agree-ws" :project-dir project)
             (should (agent-repl--ws-log-routable-p "agree-ws"))
             (should (plist-get (agent-repl--workspace-log-identity "agree-ws")
-                               :workspace-id)))
+                               :workspace-dir-hash)))
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-from-persp-placeholder-reaches-global-sink ()
@@ -4727,19 +4868,19 @@ the theft would land in a file no reader opens."
   "The key's NUL join makes two identities unable to collide by concatenation."
   ;; Arrange / Act
   (let ((a (agent-repl--workspace-log-target-key
-            (list :workspace-id "ab" :project-dir "/c")))
+            (list :workspace-dir-hash "ab" :project-dir "/c")))
         (b (agent-repl--workspace-log-target-key
-            (list :workspace-id "a" :project-dir "b/c"))))
+            (list :workspace-dir-hash "a" :project-dir "b/c"))))
     ;; Assert
     (should-not (equal a b))))
 
-(ert-deftest agent-repl-test-target-key-changes-when-the-workspace-id-rebinds ()
+(ert-deftest agent-repl-test-target-key-changes-when-the-dir-hash-rebinds ()
   "A different workspace at the same path is a different sink."
   ;; Arrange / Act
   (let ((a (agent-repl--workspace-log-target-key
-            (list :workspace-id "one" :project-dir "/p")))
+            (list :workspace-dir-hash "one" :project-dir "/p")))
         (b (agent-repl--workspace-log-target-key
-            (list :workspace-id "two" :project-dir "/p"))))
+            (list :workspace-dir-hash "two" :project-dir "/p"))))
     ;; Assert
     (should-not (equal a b))))
 
