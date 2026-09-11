@@ -421,32 +421,230 @@ func TestHarvestFollowsARenamedLogWithoutReportingALoss(t *testing.T) {
 	}
 }
 
-func TestSnapshotOffsetForFollowsARenamedFile(t *testing.T) {
-	// Arrange: the phase reader asks the snapshot where its own records start,
-	// and it asks by PATH. After a rename the path holds different bytes, and
-	// the honest answer is zero — all of them are this run's.
+// TestResolveReadsAppliesTheSymlinkReResolutionInvariant is the finding-1
+// invariant, one row per case (docs/REALTEST-JUDGEMENT-CALLS.md, realtest 1,
+// row 28). A per-workspace sink is a symlink whose target can change between
+// the run-start snapshot and the read, and the offset every read starts from
+// must come from the resolved target's inode rather than from the link path.
+func TestResolveReadsAppliesTheSymlinkReResolutionInvariant(t *testing.T) {
+	// findLine returns the read whose file is `path`, and whether it was
+	// present. It matches by base name because resolveReads returns paths run
+	// through filepath.EvalSymlinks, which on macOS rewrites the /var tempdir
+	// prefix to /private/var; the base names in these fixtures are distinct.
+	findLine := func(reads []sourceRead, path string) (sourceRead, bool) {
+		for _, r := range reads {
+			if filepath.Base(r.path) == filepath.Base(path) {
+				return r, true
+			}
+		}
+		return sourceRead{}, false
+	}
+
+	tests := []struct {
+		name string
+		// build lays out the filesystem, takes the snapshot at the right
+		// moment, mutates the sink, and returns the source plus the snapshot.
+		// It also returns the paths the assertions name.
+		build func(t *testing.T) (src Source, snap Snapshot, target, prior string)
+		check func(t *testing.T, reads []sourceRead, dangling bool, target, prior string)
+	}{
+		{
+			name: "target unchanged is read from the snapshot offset",
+			build: func(t *testing.T) (Source, Snapshot, string, string) {
+				dir := t.TempDir()
+				target := filepath.Join(dir, "target.log")
+				writeLines(t, target, rec("2026-09-10T12:00:01.000000-04:00", "emacs", "info", "elisp.a.b", "before", ""))
+				info, err := os.Stat(target)
+				if err != nil {
+					t.Fatalf("stat the target: %v", err)
+				}
+				src := Source{Name: "workspace.emacs.log", Path: target, Kind: KindJSONL, Workspace: "ws1"}
+				snap := TakeSnapshot([]Source{src})
+				if snap.Sizes == nil || info.Size() == 0 {
+					t.Fatalf("the snapshot recorded no size for a file with content")
+				}
+				appendLines(t, target, rec("2026-09-10T12:00:05.000000-04:00", "emacs", "warn", "elisp.a.b", "after", ""))
+				return src, snap, target, ""
+			},
+			check: func(t *testing.T, reads []sourceRead, dangling bool, target, _ string) {
+				if dangling {
+					t.Errorf("an unchanged file was reported as dangling")
+				}
+				read, ok := findLine(reads, target)
+				if !ok {
+					t.Fatalf("the unchanged target is not among the reads: %+v", reads)
+				}
+				if read.offset == 0 {
+					t.Errorf("the unchanged target reads from 0, want the snapshot offset")
+				}
+				if read.shrankFrom != 0 {
+					t.Errorf("the unchanged target was reported as shrunk: %+v", read)
+				}
+			},
+		},
+		{
+			name: "target replaced by a new inode is read whole from 0, and the prior target from its offset",
+			build: func(t *testing.T) (Source, Snapshot, string, string) {
+				dir := t.TempDir()
+				link := filepath.Join(dir, ".claude", "emacs", "emacs.log")
+				first := filepath.Join(dir, "target-1.log")
+				second := filepath.Join(dir, "target-2.log")
+				writeLines(t, first, rec("2026-09-10T12:00:01.000000-04:00", "emacs", "info", "elisp.a.b", "prior", ""))
+				if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+					t.Fatalf("create the sink directory: %v", err)
+				}
+				if err := os.Symlink(first, link); err != nil {
+					t.Fatalf("install the link: %v", err)
+				}
+				src := Source{Name: "workspace.emacs.log", Path: link, Kind: KindJSONL, Workspace: "ws1"}
+				snap := TakeSnapshot([]Source{src})
+				// The relink: a fresh target takes the link.
+				writeLines(t, second, rec("2026-09-10T12:00:06.000000-04:00", "emacs", "warn", "elisp.a.b", "new", ""))
+				if err := os.Remove(link); err != nil {
+					t.Fatalf("remove the old link: %v", err)
+				}
+				if err := os.Symlink(second, link); err != nil {
+					t.Fatalf("install the new link: %v", err)
+				}
+				return src, snap, second, first
+			},
+			check: func(t *testing.T, reads []sourceRead, dangling bool, target, prior string) {
+				if dangling {
+					t.Errorf("a relink was reported as dangling")
+				}
+				newRead, ok := findLine(reads, target)
+				if !ok {
+					t.Fatalf("the new target is not among the reads: %+v", reads)
+				}
+				if newRead.offset != 0 {
+					t.Errorf("the new target reads from %d, want 0 (its inode is unknown to the snapshot)", newRead.offset)
+				}
+				priorRead, ok := findLine(reads, prior)
+				if !ok {
+					t.Fatalf("the prior target is not among the reads: %+v", reads)
+				}
+				if priorRead.offset == 0 {
+					t.Errorf("the prior target reads from 0, want the offset it had at snapshot")
+				}
+			},
+		},
+		{
+			name: "target rotated to a smaller file under the same inode is read from 0 and reported",
+			build: func(t *testing.T) (Source, Snapshot, string, string) {
+				dir := t.TempDir()
+				target := filepath.Join(dir, "target.log")
+				writeLines(t, target,
+					rec("2026-09-10T12:00:01.000000-04:00", "emacs", "info", "elisp.a.b", "a long line to make the file big", ""),
+					rec("2026-09-10T12:00:02.000000-04:00", "emacs", "info", "elisp.a.b", "another long line", ""))
+				src := Source{Name: "workspace.emacs.log", Path: target, Kind: KindJSONL, Workspace: "ws1"}
+				snap := TakeSnapshot([]Source{src})
+				// Truncate in place: the same inode, fewer bytes.
+				writeLines(t, target, rec("2026-09-10T12:00:30.000000-04:00", "emacs", "info", "elisp.a.b", "x", ""))
+				return src, snap, target, ""
+			},
+			check: func(t *testing.T, reads []sourceRead, dangling bool, target, _ string) {
+				if dangling {
+					t.Errorf("a truncation was reported as dangling")
+				}
+				read, ok := findLine(reads, target)
+				if !ok {
+					t.Fatalf("the truncated target is not among the reads: %+v", reads)
+				}
+				if read.offset != 0 {
+					t.Errorf("the truncated target reads from %d, want 0", read.offset)
+				}
+				if read.shrankFrom == 0 {
+					t.Errorf("the truncation was not reported: %+v", read)
+				}
+			},
+		},
+		{
+			name: "a dangling link is reported and yields no read",
+			build: func(t *testing.T) (Source, Snapshot, string, string) {
+				dir := t.TempDir()
+				link := filepath.Join(dir, ".claude", "emacs", "emacs.log")
+				target := filepath.Join(dir, "target.log")
+				writeLines(t, target, rec("2026-09-10T12:00:01.000000-04:00", "emacs", "info", "elisp.a.b", "before", ""))
+				if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+					t.Fatalf("create the sink directory: %v", err)
+				}
+				if err := os.Symlink(target, link); err != nil {
+					t.Fatalf("install the link: %v", err)
+				}
+				src := Source{Name: "workspace.emacs.log", Path: link, Kind: KindJSONL, Workspace: "ws1"}
+				snap := TakeSnapshot([]Source{src})
+				// The target vanishes; the link is left behind, now dangling.
+				if err := os.Remove(target); err != nil {
+					t.Fatalf("remove the target: %v", err)
+				}
+				return src, snap, target, ""
+			},
+			check: func(t *testing.T, reads []sourceRead, dangling bool, target, _ string) {
+				if !dangling {
+					t.Errorf("a dangling link was not reported as dangling")
+				}
+				// The prior target is the removed file, so it contributes no
+				// read either.
+				if _, ok := findLine(reads, target); ok {
+					t.Errorf("the removed target yielded a read: %+v", reads)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			src, snap, target, prior := tc.build(t)
+
+			// Act.
+			reads, dangling, err := resolveReads(src, snap)
+			if err != nil {
+				t.Fatalf("resolveReads: %v", err)
+			}
+
+			// Assert.
+			tc.check(t, reads, dangling, target, prior)
+		})
+	}
+}
+
+// TestHarvestReportsADanglingSink is the harvest-level projection of the
+// dangling case: a canonical sink link with no target becomes a finding of its
+// own so the report says the records it would have named are unreachable.
+func TestHarvestReportsADanglingSink(t *testing.T) {
+	// Arrange.
 	dir := t.TempDir()
-	path := filepath.Join(dir, "doom-agent-repl.log")
-	writeLines(t, path, rec("2026-09-10T12:00:01.000000-04:00", "emacs", "info", "elisp.a.b", "old", ""))
-	snapshot := TakeSnapshot([]Source{{Name: "emacs.global", Path: path, Kind: KindJSONL}})
-	before := snapshot.OffsetFor(path)
-	if before == 0 {
-		t.Fatalf("the snapshot reports offset 0 for a file it saw with content")
+	link := filepath.Join(dir, ".claude", "emacs", "emacs.log")
+	target := filepath.Join(dir, "target.log")
+	writeLines(t, target, rec("2026-09-10T12:00:01.000000-04:00", "emacs", "info", "elisp.a.b", "before", ""))
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatalf("create the sink directory: %v", err)
 	}
-	if err := os.Rename(path, path+".prev"); err != nil {
-		t.Fatalf("rotate the module log: %v", err)
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("install the link: %v", err)
 	}
-	writeLines(t, path, rec("2026-09-10T12:00:09.000000-04:00", "emacs", "info", "elisp.a.b", "new", ""))
+	src := Source{Name: "workspace.emacs.log", Path: link, Kind: KindJSONL, Workspace: "ws1"}
+	snapshot := TakeSnapshot([]Source{src})
+	if err := os.Remove(target); err != nil {
+		t.Fatalf("remove the target: %v", err)
+	}
 
 	// Act.
-	after := snapshot.OffsetFor(path)
+	harvest, err := HarvestSources([]Source{src}, snapshot, testWindow(t), []Workspace{{ID: "ws1", Dir: dir}})
+	if err != nil {
+		t.Fatalf("harvest a dangling sink: %v", err)
+	}
 
 	// Assert.
-	if after != 0 {
-		t.Errorf("the snapshot reports offset %d for a freshly created file, want 0", after)
+	found := false
+	for _, finding := range harvest.Findings {
+		if finding.Kind == KindDangling {
+			found = true
+		}
 	}
-	if got := snapshot.OffsetFor(path + ".prev"); got != before {
-		t.Errorf("the renamed file's offset is %d, want the %d it had under its old name", got, before)
+	if !found {
+		t.Fatalf("a dangling sink produced no dangling finding: %+v", harvest.Findings)
 	}
 }
 
@@ -615,7 +813,6 @@ func TestManifestWritesTheFullHarvestBesideItself(t *testing.T) {
 		t.Errorf("the manifest was written without the full harvest beside it: %v", err)
 	}
 }
-
 
 func TestManifestSaysTheLaunchMethodOnTheFocusLine(t *testing.T) {
 	// Arrange: whether focus moved is a fact ABOUT a launch method.

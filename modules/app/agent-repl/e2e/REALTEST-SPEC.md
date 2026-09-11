@@ -101,7 +101,13 @@ There is exactly one launch method (owner ruling, 2026-09-11):
 
 | method | how |
 |---|---|
-| `open -g -a /Applications/Emacs.app --env AGENT_REPL_FORBID_VENDOR_CALLS=1` | asks LaunchServices not to bring the application forward. It is used because it asks for the behavior instead of correcting for it |
+| `open -gj -a /Applications/Emacs.app --env AGENT_REPL_FORBID_VENDOR_CALLS=1` | `-g` asks LaunchServices not to bring the application forward and `-j` launches it hidden. It is used because it asks for the behavior instead of correcting for it |
+
+`-g` alone did not hold on run 3's cold launch: a GUI app's first launch
+activated Emacs despite `-g` and moved focus from Chrome to Emacs. `-j` launches
+the app hidden, so there is no window for the window server to bring forward
+(docs/REALTEST-JUDGEMENT-CALLS.md, realtest 1, row 29; lead verifies focus on
+the next run).
 
 `--env` is not decoration. `open` hands the application to launchd, which does
 NOT pass this process's environment along, so a variable merely exported by the
@@ -137,10 +143,15 @@ standing here having it.
 ## Input is real key events
 
 `e2e/realtest/keydriver.swift`, compiled with `swiftc` into the run directory,
-posts key events with `CGEventPostToPid` addressed to the Emacs pid. The event
-lands on that process's own input queue without the window server making it
-frontmost, which is what lets a run drive Emacs while the owner keeps typing
-somewhere else.
+posts key events with `CGEventPostToPid` addressed to the Emacs pid. A
+no-activation post reached nothing in run 3: a background app launched hidden
+(`open -gj`) has no key window for AppKit to dispatch the event to, so it was
+dropped with no error. The helper therefore activates the target Emacs for the
+instant of the keypress, posts the event, and restores the previously frontmost
+application. That momentary focus is the ONE place a realtest brings Emacs
+forward, bounded to the keypress and reversed immediately, and it is distinct
+from startup, which never activates Emacs (docs/REALTEST-JUDGEMENT-CALLS.md,
+realtest 1, row 30; lead verifies delivery and restore on the next run).
 
 Elisp NEVER performs an act. An elisp call that performs the act tests the
 function and says nothing about whether the chord reaches it, which is exactly

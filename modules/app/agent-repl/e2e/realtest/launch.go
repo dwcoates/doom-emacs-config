@@ -14,28 +14,31 @@ import (
 // owner keeps typing wherever they were: focus never moves, and no picture is
 // ever taken, so Emacs is never brought frontmost either.
 //
-// There is exactly one launch method (owner ruling, 2026-09-11):
+// There is exactly one launch method:
 //
-//	LaunchOpenBackground   `open -g -a Emacs`, where -g ("--background") asks
-//	                       LaunchServices not to bring the application
-//	                       forward. It is the documented way to do this, and
-//	                       it asks the window server for the behavior instead
-//	                       of correcting for it.
+//	LaunchOpenBackground   `open -gj -a Emacs`. -g ("--background") asks
+//	                       LaunchServices not to bring the application forward,
+//	                       and -j ("--hide") launches it hidden. -g alone still
+//	                       ACTIVATED Emacs on run 3's cold launch: a GUI app's
+//	                       first launch activates despite -g, and moved focus
+//	                       from Chrome to Emacs. -j launches the app hidden, so
+//	                       there is no window for the window server to bring
+//	                       forward and nothing to steal focus with. It asks the
+//	                       window server for the behavior instead of correcting
+//	                       for it (docs/REALTEST-JUDGEMENT-CALLS.md, realtest 1,
+//	                       row 29).
 //
 // A second method used to exist here: the bundle's own executable spawned
 // directly, with the frontmost application captured before and reactivated
 // once the frame mapped, correcting a focus steal rather than preventing it.
-// It was kept as a hedge because realtest 1's first run saw focus move even
-// under `open -g`. That move's cause was not the launch method: it was this
-// module's own webview pre-creation on link-up, which macOS answers by
-// activating Emacs regardless of how it was launched, fixed in commit
-// 3db3d6271. With the cause found and fixed, the hedge and the rotation that
-// picked between the two methods across cold starts were removed
-// (docs/REALTEST-JUDGEMENT-CALLS.md, realtest 1, row 24).
+// It was removed (row 24) once run 1's focus move was traced to this module's
+// own webview pre-creation on link-up (commit 3db3d6271), which macOS answers
+// by activating Emacs regardless of how it was launched.
 //
 // Focus is still measured, not assumed: FrontmostApp reads the frontmost
 // process from System Events before and after, and the test reports whether
-// the launch left it alone.
+// the launch left it alone. That detection is what proves the invariant and it
+// stays whatever the launch flags are.
 
 // FrontmostApp is the name of the application currently frontmost.
 //
@@ -59,8 +62,24 @@ func FrontmostApp(ctx context.Context) (string, error) {
 type LaunchMethod string
 
 const (
-	MethodOpenBackground LaunchMethod = "open -g -a Emacs"
+	MethodOpenBackground LaunchMethod = "open -gj -a Emacs"
 )
+
+// emacsBundle is the application bundle a realtest launches.
+const emacsBundle = "/Applications/Emacs.app"
+
+// openBackgroundArgs is the argv `open` is invoked with, factored out so a test
+// can assert the flags without launching anything.
+//
+// -g keeps LaunchServices from bringing the app forward, and -j launches it
+// HIDDEN so there is no window for the window server to activate — the pair is
+// what keeps a GUI app's first launch from stealing focus, which -g alone did
+// not on run 3 (row 29). --env states the vendor guard on the command line
+// because `open` hands the app to launchd, which does not pass this process's
+// environment along.
+func openBackgroundArgs() []string {
+	return []string{"-gj", "-a", emacsBundle, "--env", vendorGuardEnv + "=1"}
+}
 
 // Launch is one launch attempt's whole account.
 type Launch struct {
@@ -87,9 +106,9 @@ type Launch struct {
 // (daemon/internal/shimclient/supervisor.go, `spawnEnv`).
 const vendorGuardEnv = "AGENT_REPL_FORBID_VENDOR_CALLS"
 
-// LaunchOpenBackground starts Emacs.app without bringing it forward.
+// LaunchOpenBackground starts Emacs.app hidden, without bringing it forward.
 //
-// `open -g` returns as soon as LaunchServices has accepted the request, not
+// `open -gj` returns as soon as LaunchServices has accepted the request, not
 // when Emacs is up, which is correct here: SpawnedAt is the moment the process
 // was asked for, and every phase after it is read off the log.
 //
@@ -110,8 +129,7 @@ func LaunchOpenBackground(ctx context.Context) (Launch, error) {
 
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(callCtx, "open", "-g", "-a", "/Applications/Emacs.app",
-		"--env", vendorGuardEnv+"=1")
+	cmd := exec.CommandContext(callCtx, "open", openBackgroundArgs()...)
 	result.SpawnedAt = time.Now()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return result, fmt.Errorf("launch Emacs in the background: %w; open said: %s",
