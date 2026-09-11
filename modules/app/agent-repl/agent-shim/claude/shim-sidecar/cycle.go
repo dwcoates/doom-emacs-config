@@ -203,6 +203,21 @@ type sidecar struct {
 	attempts       int
 	suspendedSince time.Time
 	bootSwept      bool
+	// processStartMs is when production first began (the first successful cycle),
+	// captured off the cycle's own clock. It is the boundary between an item that
+	// was ALREADY stale in the historical corpus a restart re-derives — backlog,
+	// summarized once per class as startup catch-up — and one that arose while
+	// the sidecar ran steady-state, which is stated per item. Zero until the
+	// first cycle sets it; a store bounce that re-enters beginCycle leaves it
+	// where it is, so the boundary never moves.
+	processStartMs int64
+	// catchupSpools and catchupWorkspaces tally the backlog demotions and
+	// backlog workspace-attribution failures of ONE rescan pass, so the pass
+	// states one summary per class rather than one warning per file — the same
+	// flood the discover-meta holds already leveled, seen here through the
+	// hold-expired and resolve-transcript-workspace paths.
+	catchupSpools     catchupTally
+	catchupWorkspaces catchupTally
 	// suspensionStated remembers that the WARNING opening this outage has been
 	// written. THE OUTAGE IS STATED ONCE, and a process that starts with no
 	// store is in an outage exactly like one whose store died mid-run — so the
@@ -413,6 +428,16 @@ func (s *sidecar) beginCycle() error {
 	s.cursors = indexCursorsByFileID(cursors)
 	// The outage is over, so the next one gets its own opening WARNING.
 	s.suspensionStated = false
+	// THE CATCH-UP BOUNDARY IS THE FIRST PRODUCTION CYCLE. Everything already on
+	// disk when reading first begins is historical backlog; a stale conclusion
+	// about it is a catch-up summary, not a per-item warning. It is set once — a
+	// store bounce re-enters this path, and moving the boundary then would
+	// reclassify runs a later cycle already summarized. Both the LOST tracker
+	// (its own package) and the rescan-driven paths key on the same instant.
+	if s.processStartMs == 0 {
+		s.processStartMs = s.now().UnixMilli()
+		s.tracker.SetProcessStart(s.processStartMs)
+	}
 	s.log.With(logging.Context{Operation: "recover-cursors", StoreSocket: s.options.StoreSocket}).Log(
 		"production cycle begins: recovered %d cursor(s) from the store", len(s.cursors))
 
@@ -580,6 +605,11 @@ func (s *sidecar) reportResumed() {
 func (s *sidecar) rescan() {
 	s.requireCursors("rescan")
 	now := s.now()
+	// One summary per stale class the pass caught up on, stated at the end of
+	// the pass — deferred so an abandoned pass (a store that went unreachable
+	// mid-scan) still summarizes what it demoted before it stopped, rather than
+	// stranding the count in a tally the gated re-scan will never re-accumulate.
+	defer s.flushCatchupSummaries(now.UnixMilli())
 	s.watchedThisPass = 0
 	// THE IDENTITY RECORDS ARE RE-READ BEFORE ANYTHING IS DISCOVERED OR
 	// RE-KEYED, so a rotation that happened since the last pass is already
