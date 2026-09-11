@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -74,14 +75,42 @@ const (
 	// PhaseTabDrawn is spawn to a WORKSPACE'S tab appearing
 	// (`elisp.roster.tab-open`). Measured per workspace.
 	PhaseTabDrawn PhaseName = "tab-drawn"
+	// PhaseWebviewArmed is spawn to the pre-creation queue reporting every
+	// open workspace queued, or parked awaiting focus:
+	// `elisp.webview-recovery.precreate-all: queued=N` and
+	// `elisp.webview-recovery.precreate-parked queued=N`. Both fire on the
+	// module's central sink with no per-workspace attribution at all — the
+	// queue reports a COUNT, not names — so this is judged run-wide, by the
+	// largest `queued=` seen reaching the number of open workspaces, not by
+	// naming each one the way PhaseTabDrawn does.
+	//
+	// THIS IS THE HIDDEN-STARTUP GATE, REPLACING PANEL-PAINTED THERE (owner
+	// ruling 2026-09-11). `open -gj` leaves the frame visible-but-unfocused
+	// on this machine, and the settled webview invariant PARKS pre-creation
+	// in that state rather than steal focus — so a workspace's panel does
+	// not paint until the first focus edge, no matter how long the hidden
+	// window runs. Requiring a painted panel while hidden was asserting a
+	// bug that was never there; what "usable while hidden" means for a
+	// panel is that it is QUEUED to paint the moment it is shown.
+	PhaseWebviewArmed PhaseName = "webview-armed"
 	// PhasePanelPainted is spawn to a WORKSPACE'S webview reporting its load
-	// finished (`elisp.frontend.watch-load: load-changed`). Measured per
-	// workspace. This is the only signal in the whole startup that comes
-	// from the PAGE, and it is a fact the widget emits rather than an answer
-	// to a question — which is what makes it trustworthy for a page too
-	// broken to answer one.
+	// finished, which now happens on FIRST SHOW, not while hidden (see
+	// PhaseWebviewArmed): either `elisp.frontend.watch-load: load-changed`,
+	// the page's own account of its load, or `elisp.webview-recovery.
+	// precreate-created ws=NAME reason=focused`, the parked drain resuming
+	// on the focus edge and mounting directly. Measured per workspace.
+	// `load-changed` is attributed to the workspace normally (its JSON
+	// record carries `workspace_id`); `precreate-created` is written on the
+	// central sink like PhaseWebviewArmed's markers, so it carries no
+	// `workspace_id` either — its `ws=` names the workspace by its
+	// registered NAME, not its daemon id, and the reader falls back to that
+	// name when no id is present (readPhaseRecords, wsEqualsRe).
 	PhasePanelPainted PhaseName = "panel-painted"
 	// PhaseTotal is spawn to the last workspace's panel painted: usable.
+	// Since PhasePanelPainted now lands on first show rather than during the
+	// hidden window, PhaseTotal reads as "spawn to shown-and-painted" — the
+	// manifest labels it so a reader does not mistake it for the old,
+	// hidden-window meaning.
 	PhaseTotal PhaseName = "total"
 )
 
@@ -98,6 +127,11 @@ type marker struct {
 	// than once per run, so the reader keeps every occurrence keyed by the
 	// record's workspace instead of the first one.
 	perWorkspace bool
+	// valueRe, when set, pulls a trailing count out of the message (the
+	// pre-creation queue's `queued=N`) into the Observation's Value. Only
+	// PhaseWebviewArmed uses it; every other marker leaves it nil and gets
+	// Value 0, which is never read for them.
+	valueRe *regexp.Regexp
 }
 
 // The boundaries are spelled with an explicit `(\s|$)` rather than `\b`,
@@ -111,7 +145,8 @@ var markers = []marker{
 	{name: PhaseRosterSubscribed, re: regexp.MustCompile(`^elisp\.roster\.subscribed(\s|$)`)},
 	{name: PhaseFirstRoster, re: regexp.MustCompile(`^elisp\.roster\.reconcile:`)},
 	{name: PhaseTabDrawn, re: regexp.MustCompile(`^elisp\.roster\.tab-open:`), perWorkspace: true},
-	{name: PhasePanelPainted, re: regexp.MustCompile(`^elisp\.frontend\.watch-load: load-changed`), perWorkspace: true},
+	{name: PhaseWebviewArmed, re: regexp.MustCompile(`^elisp\.webview-recovery\.precreate-(all|parked)(:|\s)`), valueRe: queuedRe},
+	{name: PhasePanelPainted, re: regexp.MustCompile(`^elisp\.frontend\.watch-load: load-changed|^elisp\.webview-recovery\.precreate-created ws=\S+ reason=focused`), perWorkspace: true},
 }
 
 // tabOpenRe pulls the workspace out of `elisp.roster.tab-open: ws=NAME id=ID
@@ -121,12 +156,27 @@ var markers = []marker{
 // `id=` is read as a fallback rather than trusted to be in the fields.
 var tabOpenRe = regexp.MustCompile(`\bid=([^\s]+)`)
 
+// wsEqualsRe pulls the workspace out of `... ws=NAME ...` for the ONE other
+// marker that can carry no `workspace_id`: `precreate-created`, written on
+// the module's central sink (lisp/webview-recovery.el) rather than on the
+// workspace's own, because the drain that emits it runs before any one
+// workspace is "current". Its `ws=` is the workspace's registered NAME, not
+// its daemon id — see the PaintedWorkspace matching in the test file, which
+// checks a workspace's Name as well as its ID for exactly this marker.
+var wsEqualsRe = regexp.MustCompile(`\bws=([^\s]+)`)
+
+// queuedRe pulls the count out of `precreate-all: queued=N` and
+// `precreate-parked queued=N`.
+var queuedRe = regexp.MustCompile(`\bqueued=(\d+)`)
+
 // Observation is one marker seen in the log.
 type Observation struct {
 	Phase     PhaseName
 	Workspace string // GlobalWorkspace for a once-per-run marker
 	At        time.Time
 	Raw       string
+	// Value is the marker's `valueRe` capture, or 0 when the marker has none.
+	Value int
 }
 
 // Phases is what a cold start's log says happened, and when.
@@ -148,14 +198,17 @@ type Phases struct {
 // ReadPhases reads a cold start's phases out of the Emacs log sinks.
 //
 // THE GLOBAL MODULE LOG IS NOT ENOUGH. The workspace-agnostic markers
-// (module-loaded, daemon-spawned, link-up, roster-subscribed, first-roster)
-// land in `agent-repl-log-file-name`, but the two PER-WORKSPACE markers this
-// run asserts — `tab-open` and the panel's `watch-load: load-changed` — are
+// (module-loaded, daemon-spawned, link-up, roster-subscribed, first-roster,
+// webview-armed) land in `agent-repl-log-file-name`, but `tab-open` and one
+// of panel-painted's two markers — `watch-load: load-changed` — are
 // workspace-owned records, and lisp/core.el's `agent-repl--do-log-to-file`
 // routes those to the workspace's own canonical `.claude/emacs/emacs.log` sink,
-// never to the global log. A reader that opened only the global log would find
-// every startup timing except the two it exists to assert, which is exactly how
-// run 3 reported a startup that had drawn every tab as "no tab drawn".
+// never to the global log. (Panel-painted's other marker, `precreate-created`,
+// is written on the central sink like webview-armed's markers, and so lands
+// in the global log even though it names a workspace.) A reader that opened
+// only the global log would find every startup timing except tab-open, which
+// is exactly how run 3 reported a startup that had drawn every tab as "no tab
+// drawn".
 //
 // So it reads every Emacs sink: the global module log and each workspace's
 // `emacs.log`. Each is resolved through `resolveReads`, which takes its read
@@ -251,6 +304,8 @@ func readPhaseRecords(phases *Phases, path string, offset int64, spawnedAt time.
 				if ws == "" {
 					if got := tabOpenRe.FindStringSubmatch(rec.Message); got != nil {
 						ws = got[1]
+					} else if got := wsEqualsRe.FindStringSubmatch(rec.Message); got != nil {
+						ws = got[1]
 					}
 				}
 				if ws == "" {
@@ -265,11 +320,20 @@ func readPhaseRecords(phases *Phases, path string, offset int64, spawnedAt time.
 					phases.DaemonPath = "spawned"
 				}
 			}
+			value := 0
+			if m.valueRe != nil {
+				if got := m.valueRe.FindStringSubmatch(rec.Message); got != nil {
+					if n, convErr := strconv.Atoi(got[1]); convErr == nil {
+						value = n
+					}
+				}
+			}
 			phases.Observations = append(phases.Observations, Observation{
 				Phase:     m.name,
 				Workspace: ws,
 				At:        at,
 				Raw:       rec.Message,
+				Value:     value,
 			})
 			break
 		}
@@ -365,6 +429,26 @@ func (p Phases) Measure() []Measurement {
 // state database holds.
 func (p Phases) DrawnWorkspaces() []string   { return p.workspacesFor(PhaseTabDrawn) }
 func (p Phases) PaintedWorkspaces() []string { return p.workspacesFor(PhasePanelPainted) }
+
+// MaxArmed is the largest `queued=` count seen on any PhaseWebviewArmed
+// marker (`precreate-all` or `precreate-parked`) across the whole run.
+//
+// It is a MAXIMUM, not a first-or-last: `precreate-all` reports how many were
+// newly added to the queue by that one call (a cold start's link-up edge
+// typically adds 0, since no workspace ref exists yet, and the first roster
+// push then adds the rest), while `precreate-parked` reports the queue's
+// full remaining length at the moment it was held. Either can be the largest
+// depending on timing, and the largest is what proves every open workspace
+// was, at some point, accounted for by the pre-creation queue.
+func (p Phases) MaxArmed() int {
+	max := 0
+	for _, obs := range p.Observations {
+		if obs.Phase == PhaseWebviewArmed && obs.Value > max {
+			max = obs.Value
+		}
+	}
+	return max
+}
 
 func (p Phases) workspacesFor(phase PhaseName) []string {
 	set := make(map[string]bool)

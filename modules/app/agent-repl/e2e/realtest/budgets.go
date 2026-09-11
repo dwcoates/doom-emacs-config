@@ -61,6 +61,16 @@ var budgets = []Budget{
 	{Phase: PhaseRosterSubscribed, Limit: unmeasured},
 	{Phase: PhaseFirstRoster, Limit: unmeasured},
 	{Phase: PhaseTabDrawn, Limit: unmeasured},
+	// PhaseWebviewArmed replaces PhasePanelPainted as the hidden-startup
+	// gate (owner ruling 2026-09-11; phases.go says why). It is still
+	// measured from spawn like every other row here.
+	{Phase: PhaseWebviewArmed, Limit: unmeasured},
+	// PhasePanelPainted and PhaseTotal are now measured in the SHOW phase —
+	// after the key self-test brings Emacs forward, not during hidden
+	// startup — so a future healthy-maximum measurement for either of these
+	// two rows is sized from "spawn to shown-and-painted", not "spawn to
+	// hidden-usable". Still measured from spawn, per this file's rule; only
+	// WHEN the marker fires moved.
 	{Phase: PhasePanelPainted, Limit: unmeasured},
 	{Phase: PhaseTotal, Limit: unmeasured},
 }
