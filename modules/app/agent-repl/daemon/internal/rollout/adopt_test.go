@@ -102,6 +102,61 @@ func TestAdoptHostCompletesASingleHostRendezvous(t *testing.T) {
 	}
 }
 
+func TestAdoptionWaitsForTheIncumbentServingRelease(t *testing.T) {
+	tests := []struct {
+		name     string
+		outgoing ids.InstanceID
+	}{
+		{name: "an early participant call waits on the serving latch", outgoing: "daemon-outgoing-previous"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: the participant calls the successor while the manifest's
+			// incumbent still owns the workspace, exactly as a shutdown
+			// announcement can race a busy incumbent's freeness gate.
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			arm(t, h, ws, Participants{Host: true})
+			if err := h.db.ClaimServing(context.Background(), ws, test.outgoing); err != nil {
+				t.Fatalf("ClaimServing(outgoing): %v", err)
+			}
+
+			// Act: call adoption before the incumbent releases its serving
+			// claim.
+			done := make(chan error, 1)
+			go func() { done <- h.c.AdoptHost(context.Background(), ws) }()
+			h.clock.awaitArmed(t, manifestPoll)
+
+			// Assert: no shim adoption starts on timing alone. It begins only
+			// after the serving row becomes the durable released latch and the
+			// test advances the controller's observation clock.
+			if got := h.fleet.Adoptions(); len(got) != 0 {
+				t.Fatalf("adoptions before serving release = %v, want none", got)
+			}
+			if err := h.db.ReleaseServing(context.Background(), ws, test.outgoing); err != nil {
+				t.Fatalf("ReleaseServing(outgoing): %v", err)
+			}
+			h.clock.Fire(manifestPoll)
+			if err := <-done; err != nil {
+				t.Fatalf("AdoptHost after serving release: %v", err)
+			}
+			if got := h.fleet.Adoptions(); len(got) != 1 || got[0] != ws {
+				t.Fatalf("adoptions after serving release = %v, want %q once", got, ws)
+			}
+			infos := levelRecords(records(h.log, opAdopt), "info")
+			waits := 0
+			for _, record := range infos {
+				if record.Message == "waiting for the incumbent to release serving ownership at freeness" {
+					waits++
+				}
+			}
+			if waits != 1 {
+				t.Fatalf("adoption INFO records = %+v, want the serving-release wait named once", infos)
+			}
+		})
+	}
+}
+
 // TestEveryExpectedParticipantSucceedsTogether pins the rendezvous's meaning:
 // the participants call CONCURRENTLY and "all calls succeed together", so the
 // caller that arrives first waits for the one that completes it rather than

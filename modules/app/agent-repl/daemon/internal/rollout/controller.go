@@ -107,6 +107,11 @@ type controller struct {
 
 // entry is one workspace's rendezvous state.
 type entry struct {
+	// outgoing is the incumbent whose serving claim must be released before
+	// this successor may adopt. The nil serving row is the durable handover
+	// latch: unlike process timing, it says the incumbent has passed freeness,
+	// quiesced intake and detached from the shim.
+	outgoing ids.InstanceID
 	// expected is who owed an adoption call at announcement.
 	expected Participants
 	// hostCalled and webCalled record who has since called. The web slot is

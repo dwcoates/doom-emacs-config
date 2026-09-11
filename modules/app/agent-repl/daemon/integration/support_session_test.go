@@ -63,12 +63,20 @@ func restartGracefulInFlight(t *testing.T, key string) (*fixture, *harness.ShimC
 // Daemon.ExpectFileUnchanged.
 func expectNoRPC(t *testing.T, s *harness.ShimControl, rpc string, probe time.Duration) {
 	t.Helper()
+	expectRPCCount(t, s, rpc, 0, probe)
+}
+
+// expectRPCCount asserts a shim's total receipt count for rpc stays at want
+// throughout the probe window. Unlike expectNoRPC, it can observe that a
+// successor did not add a second stream to one the incumbent already opened.
+func expectRPCCount(t *testing.T, s *harness.ShimControl, rpc string, want int, probe time.Duration) {
+	t.Helper()
 	deadline := time.Now().Add(probe)
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for time.Now().Before(deadline) {
-		if got := s.Count(rpc); got != 0 {
-			t.Fatalf("%s count = %d, want 0 within the probe window", rpc, got)
+		if got := s.Count(rpc); got != want {
+			t.Fatalf("%s count = %d, want %d throughout the probe window", rpc, got, want)
 		}
 		<-ticker.C
 	}
