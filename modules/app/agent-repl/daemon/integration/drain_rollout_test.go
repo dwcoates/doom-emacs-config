@@ -895,6 +895,78 @@ func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsIn
 	}
 }
 
+func TestASuccessorDoesNotAdoptABusyWorkspaceBeforeTheIncumbentTransfersIt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		prompt string
+		key    string
+	}{
+		{name: "an adoption call arriving during a turn waits for transfer", prompt: "still running", key: "k-adopt-before-free"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange: one host participant calls the successor while the
+			// workspace's turn still holds the incumbent behind its freeness
+			// gate.
+			selfRepo, d := drainSelfRepoDaemon(t)
+			f := drainOpenWorkspace(t, d)
+			f.shim.ExpectStartSession()
+			f.shim.ExpectWatchSession()
+			watchesBefore := f.shim.Count(harness.RPCWatchSession)
+			host := d.WatchHost(f.ws)
+			harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+			if got := f.submit(test.prompt, test.key, conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
+				t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
+			}
+			f.shim.ExpectStartTurn()
+			daemonStream := d.WatchDaemonStream()
+			drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+			announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+				return r.GetShutdownAnnounced() != nil
+			}).GetShutdownAnnounced()
+			successor := drainDial(announced.GetAddress())
+
+			// Act: this is the early call the webapp-layer handover driver
+			// makes as soon as the successor address is announced.
+			adopted := make(chan *connect.Response[agentreplv1.AdoptHostWorkspaceResponse], 1)
+			adoptFailed := make(chan error, 1)
+			go func() {
+				resp, err := successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws}))
+				adopted <- resp
+				adoptFailed <- err
+			}()
+
+			// Assert: elapsed time cannot start successor ownership while the
+			// incumbent is still serving. A new WatchSession would prove the
+			// successor dialed and adopted the live shim too early.
+			expectRPCCount(t, f.shim, harness.RPCWatchSession, watchesBefore, harness.ProbeWindow)
+
+			// Act: the turn terminal releases freeness; the incumbent
+			// quiesces, detaches and clears serving ownership before the
+			// successor may proceed.
+			f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+			harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+				return r.GetTransferred() != nil
+			})
+
+			// Assert: the pending adoption now succeeds and opens exactly the
+			// successor's session watch.
+			resp := <-adopted
+			if err := <-adoptFailed; err != nil {
+				t.Fatalf("AdoptHostWorkspace after incumbent transfer = error %v, want success", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("AdoptHostWorkspace after incumbent transfer = %v, want success", resp.Msg)
+			}
+			ftAwaitTrue(t, d.Ctx(), func() bool {
+				return f.shim.Count(harness.RPCWatchSession) > watchesBefore
+			}, "the successor's WatchSession after serving ownership was released")
+		})
+	}
+}
+
 // TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout is critique 11's
 // first half: a workspace that never falls free leaves both daemons up
 // forever, naming the holdout in a periodic WARN
