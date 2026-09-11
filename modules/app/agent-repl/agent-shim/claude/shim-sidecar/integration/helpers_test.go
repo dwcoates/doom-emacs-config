@@ -2362,6 +2362,18 @@ func awaitLog(ctx context.Context, t *testing.T, path string, what string, match
 	}
 }
 
+// awaitFirstProductionCycle blocks until the reader's first cursor recovery has
+// run, which is when the startup catch-up boundary is fixed. A file created
+// after this point is steady state, not backlog: the reader was already running
+// when it appeared, so its stale conditions are stated per file rather than
+// summarized as catch-up.
+func awaitFirstProductionCycle(ctx context.Context, t *testing.T, path string) logRecord {
+	t.Helper()
+	return awaitLog(ctx, t, path, "the first production cycle", func(r logRecord) bool {
+		return r.Operation == "recover-cursors"
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Small assertion helpers.
 // ---------------------------------------------------------------------------
