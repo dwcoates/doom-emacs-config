@@ -827,6 +827,15 @@ never set it.
 
 ## Realtest orchestration (owner rulings, 2026-09-11)
 
+- **No subagent ever launches, evals into, kills, or drives ANY Emacs process
+  on this machine (Emacs.app, `emacs` interactive, emacsclient, probe
+  instances included); only the lead does, and only through
+  `bin/realtest.sh` or a deliberate owner-facing action.**
+  - Batch ERT suites (`emacs -batch -Q -l ert -l lisp/test-*.el ...`) remain
+    allowed because they open no frame and no server.
+  - A realtest starts Emacs once per test with `open -g -a Emacs` only.
+  - Reason (owner, 2026-09-11): an agent's repeated `Emacs -Q` probes stole
+    the owner's focus over and over and launched the wrong Emacs.
 - Realtests run against the real Emacs.app on the host: real keystrokes, no
   sandbox, no focus grab, no pictures.
   - A realtest is remediated only when the harvest of ALL logs in the run
