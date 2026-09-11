@@ -6186,6 +6186,26 @@ describe("a component that recovers", () => {
     expect(windows.map((window) => window.extent.case)).toEqual(["closed"]);
   });
 
+  // A CLOSED WINDOW WITH NOTHING TO CLOSE IS STILL A FACT. If the open
+  // announcement never reached this session -- a watch that attached after it,
+  // or a plane that only ever announced the closing -- the hole still happened
+  // and a consumer is still entitled to it.
+  it("records a closing window that matches nothing standing", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+
+    // Act.
+    h.persistence.closeDegradedWindow("a hole this session never saw open", 2);
+
+    // Assert.
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("diagnostics is the only arm here");
+    expect(
+      update.value.degradedWindows.map((window) => [window.reason, window.extent.case]),
+    ).toEqual([["a hole this session never saw open", "closed"]]);
+  });
+
   it("clears the context-usage probe's fault when the next sample answers", async () => {
     // Arrange: the vendor refuses the first probe only.
     let probes = 0;
@@ -6465,6 +6485,55 @@ describe("re-announcing live work the record cannot describe", () => {
       logContextFor(before, "could not be asked whether it holds this undescribable live work")
         ?.work_id,
     ).toBe("toolu_unknown");
+  });
+
+  // NO VENDOR LEFT TO ASK IS NOT AN ANSWER EITHER. A shim whose query died
+  // still serves WatchSession, and the handle might well be this
+  // conversation's, so it is reported as the defect it might be.
+  it("treats a handle as this conversation's when there is no query left to ask", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_orphan" })],
+    });
+    h.queries[0]?.query.fail(new Error("the vendor process is gone"));
+    await vi.waitFor(() => {
+      expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
+    });
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(logContextFor(before, "work the vendor still has")?.work_id).toBe("toolu_orphan");
+  });
+
+  // THE SDK IS A FOREIGN BOUNDARY, so a rejection that is not an `Error` is
+  // exactly what the cause's `String(...)` arm exists for.
+  it("records a non-Error probe rejection with the words it used", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.backgroundTasks = (): Promise<boolean> =>
+          Promise.reject("the vendor is not answering");
+      },
+    });
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_bare" })],
+    });
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(
+      logContextFor(before, "could not be asked whether it holds this undescribable live work")
+        ?.cause,
+    ).toBe("the vendor is not answering");
   });
 
   it("announces nothing for a handle it cannot describe", async () => {
