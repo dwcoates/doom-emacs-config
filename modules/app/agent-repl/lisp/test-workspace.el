@@ -75,11 +75,11 @@
 ;;;; ---- Tests: ws-rename-state -------------------------------------------
 
 (ert-deftest agent-repl-test-ws-rename-state-moves-complete-live-state ()
-  "State rename moves the full plist, rewrites its dir, and clears ws-id."
+  "State rename moves the full plist, rewrites its dir, and clears its dir hash."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "old" :project-dir "/old/path")
     (agent-repl--ws-put "old" :priority :p1)
-    (agent-repl--ws-put "old" :ws-id "stale")
+    (agent-repl--ws-put "old" :ws-dir-hash "stale")
     (cl-letf (((symbol-function 'agent-repl--path-canonical)
                (lambda (path) (concat "CANON:" path))))
       (should (equal (agent-repl--ws-rename-state
@@ -90,7 +90,7 @@
     (should (eq (agent-repl--ws-get "new" :priority) :p1))
     (should (equal (agent-repl--ws-get "new" :project-dir)
                    "CANON:/new/path"))
-    (should-not (agent-repl--ws-get "new" :ws-id))))
+    (should-not (agent-repl--ws-get "new" :ws-dir-hash))))
 
 (ert-deftest agent-repl-test-ws-rename-state-rejects-unknown-source ()
   "State rename rejects an unregistered source without creating a target."

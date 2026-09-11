@@ -277,7 +277,7 @@ the rest of its life."
     (cl-letf (((symbol-function 'agent-repl--ws-create)
                (lambda (ws &optional _dir)
                  (push ws agent-repl-test-roster--created)
-                 (agent-repl--ws-put ws :ws-id ws)
+                 (agent-repl--ws-put ws :ws-dir-hash ws)
                  ws)))
       (let ((roster (agent-repl-test-roster--roster
                      :sections (list (agent-repl-test-roster--section
