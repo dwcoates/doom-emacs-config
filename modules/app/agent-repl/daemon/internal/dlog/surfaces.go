@@ -28,7 +28,14 @@ type surfaces struct {
 	pid     int
 	now     func() time.Time
 
-	mu         sync.Mutex
+	mu sync.Mutex
+	// lookup resolves a workspace directory to its daemon-minted
+	// ids.WorkspaceID. It is bound once, after the state client is open, and
+	// every workspace record's workspace_id and every minted sink name comes
+	// from it. Unbound, a workspace sink cannot be resolved at all: the
+	// surfaces REFUSE rather than attribute a record to a path-derived
+	// stand-in.
+	lookup     WorkspaceIDLookup
 	workspaces map[string]*workspaceSinks
 	// targets remembers each workspace sink's daemon-owned file for this
 	// runtime's whole lifetime, so an EVICTED sink that is re-opened keeps
@@ -51,9 +58,14 @@ type surfaces struct {
 // workspaceSinks are one workspace's durable sinks, opened lazily: a
 // workspace that never spawns a shim never grows a shim.log.
 type workspaceSinks struct {
-	dir   string
-	id    string
-	sinks map[string]*sink
+	dir string
+	// id is the daemon-minted ids.WorkspaceID, the record's workspace_id and
+	// the name of every target minted for this workspace.
+	id string
+	// dirHash is md5hex(dir)[:8], the kernel lock file's derivation, recorded
+	// as ordinary evidence under workspace_dir_hash.
+	dirHash string
+	sinks   map[string]*sink
 }
 
 // OpenSurfaces opens the daemon's log surfaces under the state root's logs
@@ -96,6 +108,15 @@ func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write(
 	return s, nil
 }
 
+// BindWorkspaceIDs installs the minted-workspace-id lookup. The daemon calls
+// it once the state client is open; until then only Global records are
+// possible, because Workspace, ShimSink and ClientLog all need the id.
+func (s *surfaces) BindWorkspaceIDs(lookup WorkspaceIDLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lookup = lookup
+}
+
 // Global is the service logger, backed by the size-rotated run log. The
 // state root layout names no second global file, so the run log IS the global
 // sink. Only events with no conceptual workspace may use it.
@@ -136,11 +157,15 @@ func (s *surfaces) Workspace(dir string) (Logger, error) {
 		if cerr != nil {
 			return nil, cerr
 		}
+		hash, herr := WorkspaceDirHash(clean)
+		if herr != nil {
+			return nil, herr
+		}
 		return &logger{
 			s:       s,
 			dest:    droppedSink{s: s},
 			runtime: RuntimeDaemon,
-			base:    Context{KeyWorkspaceDir: clean},
+			base:    Context{KeyWorkspaceDir: clean, KeyWorkspaceDirHash: hash},
 		}, nil
 	}
 	if err != nil {
@@ -150,7 +175,7 @@ func (s *surfaces) Workspace(dir string) (Logger, error) {
 		s:       s,
 		dest:    sk,
 		runtime: RuntimeDaemon,
-		base:    Context{KeyWorkspaceDir: ws.dir, KeyWorkspaceID: ws.id},
+		base:    Context{KeyWorkspaceDir: ws.dir, KeyWorkspaceID: ws.id, KeyWorkspaceDirHash: ws.dirHash},
 	}, nil
 }
 
@@ -212,8 +237,9 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 		return err
 	}
 	ctx := merge(rec.Context, Context{
-		KeyWorkspaceDir: ws.dir,
-		KeyWorkspaceID:  ws.id,
+		KeyWorkspaceDir:     ws.dir,
+		KeyWorkspaceID:      ws.id,
+		KeyWorkspaceDirHash: ws.dirHash,
 	})
 	if stamped {
 		// The client sent no instant; say whose clock the timestamp is,
@@ -313,24 +339,72 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		if !info.IsDir() {
 			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: not a directory", clean)
 		}
-		id, err := LogWorkspaceID(clean)
+		id, err := s.mintedIDLocked(clean)
 		if err != nil {
 			return nil, nil, err
 		}
-		ws = &workspaceSinks{dir: clean, id: id, sinks: make(map[string]*sink, len(SinkNames))}
+		hash, err := WorkspaceDirHash(clean)
+		if err != nil {
+			return nil, nil, err
+		}
+		ws = &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames))}
 		s.workspaces[clean] = ws
 	}
 	if sk, ok := ws.sinks[name]; ok {
 		return ws, sk, nil
 	}
 	key := ws.id + "/" + name
+	remembered := s.targets[key] != ""
 	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, s.targets[key])
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s.log for workspace %s: %w", name, ws.id, err)
 	}
 	s.targets[key] = sk.target
 	ws.sinks[name] = sk
+	s.reportSinkOpened(ws, name, sk, remembered)
 	return ws, sk, nil
+}
+
+// mintedIDLocked resolves a workspace directory to its daemon-minted
+// ids.WorkspaceID. There is NO fallback: an unbound lookup and a lookup that
+// cannot name the workspace are both refusals, recorded by the caller that
+// asked for the sink, because a record attributed to a path-derived
+// stand-in would split one workspace into two in every reader.
+func (s *surfaces) mintedIDLocked(dir string) (string, error) {
+	if s.lookup == nil {
+		return "", fmt.Errorf(
+			"resolve the minted workspace id for %q: no workspace id lookup is bound to the log surfaces", dir)
+	}
+	id, err := s.lookup(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve the minted workspace id for %q: %w", dir, err)
+	}
+	if id == "" {
+		return "", fmt.Errorf("resolve the minted workspace id for %q: the lookup named no workspace", dir)
+	}
+	return id, nil
+}
+
+// reportSinkOpened records the id scheme every sink name and every record of
+// this workspace carries, so a reader that meets an older md5-named target
+// beside a newer minted-id one can tell from the log which is which.
+func (s *surfaces) reportSinkOpened(ws *workspaceSinks, name string, sk *sink, remembered bool) {
+	origin := "minted_target"
+	switch {
+	case remembered:
+		origin = "runtime_memory"
+	case !sk.mintedTarget:
+		origin = "standing_canonical_link"
+	}
+	s.Global().Info("daemon.dlog.sink_opened", "opened a workspace log sink", Context{
+		KeyWorkspaceDir:     ws.dir,
+		KeyWorkspaceID:      ws.id,
+		KeyWorkspaceDirHash: ws.dirHash,
+		"sink":              name + ".log",
+		"target":            sk.target,
+		"target_origin":     origin,
+		"id_scheme":         "daemon_minted_workspace_id",
+	})
 }
 
 // scanLoop runs the periodic cap scan until Close.
@@ -432,10 +506,11 @@ func (s *surfaces) reportSinkFailure(ws *workspaceSinks, name string, cause erro
 		"daemon.dlog.sink_poisoned",
 		"a workspace log sink failed cap maintenance and stopped accepting records",
 		Context{
-			KeyWorkspaceDir: ws.dir,
-			KeyWorkspaceID:  ws.id,
-			"sink":          name + ".log",
-			"cause":         cause.Error(),
+			KeyWorkspaceDir:     ws.dir,
+			KeyWorkspaceID:      ws.id,
+			KeyWorkspaceDirHash: ws.dirHash,
+			"sink":              name + ".log",
+			"cause":             cause.Error(),
 		}, s.pid)
 	line := rec.marshal()
 	s.mirror.enqueue(line)

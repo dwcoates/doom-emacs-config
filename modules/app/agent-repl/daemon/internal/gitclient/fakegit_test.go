@@ -414,6 +414,11 @@ func (s *testSurfaces) Workspace(string) (dlog.Logger, error) {
 func (s *testSurfaces) ShimSink(string) (dlog.Borrowed, error) {
 	panic("gitclient must never borrow a shim sink")
 }
+
+// BindWorkspaceIDs implements dlog.Surfaces. This double answers its own
+// workspace ids, so there is no lookup to install.
+func (s *testSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
+
 func (s *testSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 func (s *testSurfaces) ClientLog(string, dlog.ClientRecord) error {

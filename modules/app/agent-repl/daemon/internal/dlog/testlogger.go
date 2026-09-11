@@ -1,7 +1,10 @@
 package dlog
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"sync"
 )
 
@@ -125,6 +128,13 @@ type TestSurfaces struct {
 	logger *TestLogger
 
 	mu sync.Mutex
+	// lookup is the bound minted-id lookup, when a test binds one. Unbound,
+	// the double synthesizes a stable 16-character stand-in per directory:
+	// a unit test of an unrelated component must not have to own a workspace
+	// roster, and the SHAPE of the id is what its assertions can rely on.
+	// The real surfaces refuse instead -- that refusal is asserted against
+	// them, in this package.
+	lookup WorkspaceIDLookup
 	// clientRecords captures what ClientLog was asked to persist, keyed by
 	// nothing: order is the assertion.
 	clientRecords []ClientLogCall
@@ -147,11 +157,37 @@ func (s *TestSurfaces) Global() Logger { return s.logger }
 // Workspace implements Surfaces. It never fails: a test that wants the
 // resolution failure asserts it against the real surfaces.
 func (s *TestSurfaces) Workspace(dir string) (Logger, error) {
-	id, err := LogWorkspaceID(dir)
+	id, err := s.workspaceID(dir)
 	if err != nil {
 		return nil, err
 	}
-	return s.logger.With(Context{KeyWorkspaceDir: dir, KeyWorkspaceID: id}), nil
+	hash, err := WorkspaceDirHash(dir)
+	if err != nil {
+		return nil, err
+	}
+	return s.logger.With(Context{
+		KeyWorkspaceDir:     dir,
+		KeyWorkspaceID:      id,
+		KeyWorkspaceDirHash: hash,
+	}), nil
+}
+
+// BindWorkspaceIDs implements Surfaces.
+func (s *TestSurfaces) BindWorkspaceIDs(lookup WorkspaceIDLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lookup = lookup
+}
+
+// workspaceID answers the bound lookup's id, or the synthetic stand-in.
+func (s *TestSurfaces) workspaceID(dir string) (string, error) {
+	s.mu.Lock()
+	lookup := s.lookup
+	s.mu.Unlock()
+	if lookup != nil {
+		return lookup(dir)
+	}
+	return syntheticWorkspaceID(dir)
 }
 
 // ShimSink implements Surfaces. No test process should inherit a fake
@@ -202,4 +238,17 @@ func (s *TestSurfaces) Evicted() []string {
 	out := make([]string, len(s.evicted))
 	copy(out, s.evicted)
 	return out
+}
+
+// syntheticWorkspaceID is the TEST DOUBLE's stand-in for a minted workspace
+// id: 16 hex characters, the width wsm mints, derived from the directory so a
+// double's records for one directory agree with each other. Production never
+// reaches it -- the real surfaces refuse an unresolved workspace instead.
+func syntheticWorkspaceID(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace dir %q for a synthetic test id: %w", dir, err)
+	}
+	sum := md5.Sum([]byte(filepath.Clean(abs)))
+	return hex.EncodeToString(sum[:])[:16], nil
 }
