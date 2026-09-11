@@ -1352,7 +1352,7 @@ func drainAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if body, err := os.ReadFile(d.AddrFile()); err == nil && strings.TrimSuffix(string(body), "\n") == want {
+		if body, err := os.ReadFile(d.AddrFile()); err == nil && harness.AddrLine(string(body)) == want {
 			return
 		}
 		select {

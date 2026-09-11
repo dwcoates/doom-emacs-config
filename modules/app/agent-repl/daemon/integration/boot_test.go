@@ -912,7 +912,7 @@ func TestAStaleAddressFileIsReportedAndOverwritten(t *testing.T) {
 	nd.ExpectWarnings("daemon.cmd.claim")
 
 	// Assert: the stale address is named in the record.
-	staleAddr := strings.TrimSpace(string(stale))
+	staleAddr := harness.AddrLine(string(stale))
 	nd.AwaitLogRecord(nd.RunLogPath(), "the stale advertisement's record", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.cmd.claim" && strings.Contains(r.Message, "stale daemon.addr") &&
 			r.Context["stale_address"] == staleAddr
