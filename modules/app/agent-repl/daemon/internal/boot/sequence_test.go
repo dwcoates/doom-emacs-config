@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
 )
 
@@ -602,5 +603,131 @@ func TestRunDoesNotRecoverMergesAfterAnUnreadableLease(t *testing.T) {
 	// Assert.
 	if got := h.merge.recoveries(); got != 0 {
 		t.Fatalf("Recover calls = %d, want 0", got)
+	}
+}
+
+// TestAnUnreachableSurvivorDoesNotWedgeTheBoot pins the bound that keeps the
+// daemon serving. The listener is already bound and daemon.addr already
+// published while this reconciliation runs, so an adoption that never answers
+// is a daemon that listens and accepts nothing — observed on pid 31984, whose
+// accept queue stood at 128/128 for ten hours because one workspace's lock
+// read HELD for a shim whose socket path was gone.
+func TestAnUnreachableSurvivorDoesNotWedgeTheBoot(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(deps *Deps, _ *harness) { deps.AdoptBound = 20 * time.Millisecond })
+	h.supervisor.hang = true
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot: one unreachable survivor must not fail the boot", err)
+	}
+	if len(report.Undetermined) != 1 || report.Undetermined[0] != ws.ID {
+		t.Fatalf("report.Undetermined = %v, want [%v]: the lock reads held, so the workspace is owned and undetermined", report.Undetermined, ws.ID)
+	}
+}
+
+// TestAnUnreachableSurvivorKeepsItsInFlightTurns pins the other half of the
+// undetermined disposition: the lock says a living process owns the
+// conversation, so its turns are NOT closed as orphans just because this
+// daemon could not reach it.
+func TestAnUnreachableSurvivorKeepsItsInFlightTurns(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(deps *Deps, _ *harness) { deps.AdoptBound = 20 * time.Millisecond })
+	h.supervisor.hang = true
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+	turn := wsm.NewTurnID()
+	if err := h.db.PutTurn(context.Background(), wsm.Turn{ID: turn, Workspace: ws.ID, Text: "hi", Origin: "PROMPT_ORIGIN_USER", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.Orphaned) != 0 {
+		t.Fatalf("report.Orphaned = %v, want nothing closed: a held lock is a living owner, reachable or not", report.Orphaned)
+	}
+}
+
+// TestAnOverrunAdoptionIsReportedAtError pins that the bound's expiry is LOUD.
+// It is the only record that says why a workspace the daemon was serving
+// yesterday is undetermined today.
+func TestAnOverrunAdoptionIsReportedAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(deps *Deps, _ *harness) { deps.AdoptBound = 20 * time.Millisecond })
+	h.supervisor.hang = true
+	h.register(t, t.TempDir(), sessionlock.StateHeld)
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	var found bool
+	for _, r := range h.log.Records() {
+		if r.Level == "error" && r.Operation == "daemon.boot.adopt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want an error daemon.boot.adopt record for the overrun adoption", h.log.Records())
+	}
+}
+
+// TestABoundedAdoptionIsNotCancelledByTheBoundWhenItAnswers pins that the
+// bound does not cut an ordinary adoption short: a survivor that answers is
+// adopted, and the report says so.
+func TestABoundedAdoptionIsNotCancelledByTheBoundWhenItAnswers(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(deps *Deps, _ *harness) { deps.AdoptBound = time.Second })
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.Adopted) != 1 || report.Adopted[0] != ws.ID {
+		t.Fatalf("report.Adopted = %v, want [%v]", report.Adopted, ws.ID)
+	}
+}
+
+// TestAdoptionDialsTheShimsRolledGeneration pins the path the boot dials. A
+// relaunch moved the workspace's shim onto `<base>.nN.sock` and the counter
+// that minted N lived in the last daemon's memory, so a boot that dials the
+// layout's base name dials a path the survivor has not held since — while its
+// lock reads HELD, which is what makes the redial ladder endless.
+func TestAdoptionDialsTheShimsRolledGeneration(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+	base := h.deps.Layout.ShimSocket(string(ws.ID))
+	if err := os.MkdirAll(filepath.Dir(base), 0o755); err != nil {
+		t.Fatalf("create the socket directory: %v", err)
+	}
+	rolled := strings.TrimSuffix(base, ".sock") + ".n1.sock"
+	if err := os.WriteFile(rolled, nil, 0o600); err != nil {
+		t.Fatalf("create the rolled socket path: %v", err)
+	}
+	h.socketProbes[rolled] = shimsocket.StateLive
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if got := h.supervisor.paths(); len(got) != 1 || got[0] != rolled {
+		t.Fatalf("Adopt paths = %v, want [%q]: the survivor listens on its rolled generation", got, rolled)
 	}
 }
