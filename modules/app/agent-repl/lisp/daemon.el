@@ -235,6 +235,32 @@ running right now, and a build that just finished (shown for
 (defvar agent-repl-daemon--build-state nil
   "`building', `built', or nil — what the status segment is reporting.")
 
+(defvar agent-repl-daemon--lifecycle nil
+  "Where the daemon bring-up has got to, or nil when nothing is in flight.
+
+`starting' from the spawn until an address is published, `linking' from
+the address until the primary link stands, then `adopted' or `ready' for
+a moment before it clears.
+
+THE STARTUP COST IS NOT ALLOWED TO BE INVISIBLE.  The segment used to
+report the BUILD and nothing else, so everything between the spawn and
+link-up -- on a real cold start ten seconds of it, spent waiting out a
+stale address -- left the mode line saying nothing at all, which reads
+exactly like an editor that has finished starting.")
+
+(defvar agent-repl-daemon--lifecycle-timer nil
+  "Timer that clears a settled `adopted'/`ready' lifecycle note, or nil.")
+
+(defconst agent-repl-daemon--lifecycle-labels
+  '((starting . "daemon: starting\u2026")
+    (linking  . "daemon: linking\u2026")
+    (adopted  . "daemon: adopted")
+    (ready    . "daemon: ready"))
+  "The mode-line text for each `agent-repl-daemon--lifecycle' state.")
+
+(defconst agent-repl-daemon--lifecycle-settled-states '(adopted ready)
+  "Lifecycle states that are an OUTCOME, shown briefly and then cleared.")
+
 (defvar agent-repl-daemon--build-duration nil
   "Wall seconds the last successful build took, or nil.")
 
@@ -273,6 +299,23 @@ Each is called with nil on success, or the failure detail string.")
 
 (defvar agent-repl-daemon--boot-continuation nil
   "The continuation the current boot wait will call, or nil.")
+
+(defvar agent-repl-daemon--boot-rejected-address nil
+  "An address this ensure ALREADY judged stale, which the boot wait refuses.
+The file's appearance is the readiness signal, so a boot wait that starts
+with a stale `daemon.addr' still on disk reads the DEAD address on its
+first tick and calls the daemon booted milliseconds after the spawn.  That
+happened on a real cold start: `stale-addr 127.0.0.1:58161' and
+`booted 127.0.0.1:58161' three milliseconds apart, a link refused on the
+spot, and ten seconds of nothing until the daemon we started published its
+own address.  The stale file is removed before the build, and this is the
+second half of the same guard: whatever is read back, the address already
+proven dead is never mistaken for the new daemon's.")
+
+(defvar agent-repl-daemon--own-address nil
+  "The address the daemon THIS Emacs spawned published, or nil.
+Kept so its exit can retire its own `daemon.addr' without ever retiring a
+successor's: a file whose content has moved on belongs to another daemon.")
 
 (defvar agent-repl-daemon--departure-timer nil
   "The pending poll waiting for a stopped daemon to remove `daemon.addr'.")
@@ -369,20 +412,84 @@ caller a blank where the reason belongs."
 
 ;;;; ---- The mode-line segment ----
 
+(defun agent-repl-daemon--workspace-bringup-label ()
+  "Return \"workspaces: opening n/m\" while roster tabs are still painting.
+Nil once every roster workspace's panel is painted, and nil before there
+is a roster at all.
+
+THE COUNT IS READ, NEVER KEPT.  open-progress.el owns the per-workspace
+phases and `agent-repl-open-progress-opening-workspaces' is its answer to
+\"which of these is not painted yet\"; a second tally maintained here
+would be a second answer to the same question, and a progress display
+whose two answers disagree is worse than none."
+  (when (and (fboundp 'agent-repl-roster-tab-order)
+             (fboundp 'agent-repl-open-progress-opening-workspaces))
+    (let* ((tabs (agent-repl-roster-tab-order))
+           (total (length tabs))
+           (opening (seq-intersection
+                     tabs (agent-repl-open-progress-opening-workspaces))))
+      (when (and (> total 0) opening)
+        (format "workspaces: opening %d/%d" (- total (length opening)) total)))))
+
+(defun agent-repl-daemon--clear-lifecycle ()
+  "Take a settled lifecycle note down and repaint."
+  (setq agent-repl-daemon--lifecycle-timer nil
+        agent-repl-daemon--lifecycle nil)
+  (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                    "elisp.daemon.lifecycle state=cleared")
+  (agent-repl-daemon--refresh-segment))
+
+(defun agent-repl-daemon--set-lifecycle (state)
+  "Move the bring-up lifecycle to STATE, record it, and repaint.
+A SETTLED state (`adopted', `ready') schedules its own clearing after
+`agent-repl-daemon-build-status-display-seconds' -- an outcome is worth
+saying and not worth keeping -- and any pending clear is cancelled first
+so an earlier outcome's timer cannot wipe a later one's note."
+  (when (timerp agent-repl-daemon--lifecycle-timer)
+    (cancel-timer agent-repl-daemon--lifecycle-timer))
+  (setq agent-repl-daemon--lifecycle-timer nil
+        agent-repl-daemon--lifecycle state)
+  (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                    "elisp.daemon.lifecycle state=%s" state)
+  (when (memq state agent-repl-daemon--lifecycle-settled-states)
+    (setq agent-repl-daemon--lifecycle-timer
+          (run-with-timer agent-repl-daemon-build-status-display-seconds nil
+                          #'agent-repl-daemon--clear-lifecycle)))
+  (agent-repl-daemon--refresh-segment)
+  state)
+
+(defun agent-repl-daemon-on-link-up (&optional _conn)
+  "Settle the bring-up lifecycle once the primary link stands.
+Registered on `agent-repl-link-up-functions'.  Which outcome it is turns
+on the same liveness question the provenance line asks: a daemon this
+Emacs started is `ready', one it attached to is `adopted'."
+  (agent-repl-daemon--set-lifecycle
+   (if (agent-repl-daemon--spawned-here-p) 'ready 'adopted)))
+
+(defun agent-repl-daemon-on-open-progress-change ()
+  "Repaint the segment because the pending-open set moved.
+Registered on `agent-repl-open-progress-change-functions', which is
+open-progress.el's one publication of its own state."
+  (agent-repl-daemon--refresh-segment))
+
 (defun agent-repl-daemon--refresh-segment ()
-  "Recompute `agent-repl-daemon-mode-line-segment' from the build state.
+  "Recompute `agent-repl-daemon-mode-line-segment' from the bring-up state.
 Precedence: a standing failure outranks a running build, which outranks
-the short-lived \"just built\" note."
+the daemon's own bring-up lifecycle, which outranks the short-lived
+\"just built\" note, which outranks the workspace bring-up count."
   (setq agent-repl-daemon-mode-line-segment
         (cond
          (agent-repl-daemon-launch-failure "daemon: launch failed")
          (agent-repl-daemon-build-failure "daemon: build failed")
          ((eq agent-repl-daemon--build-state 'building)
           "building agent-repl stack\u2026")
+         ((cdr (assq agent-repl-daemon--lifecycle
+                     agent-repl-daemon--lifecycle-labels)))
          ((and (eq agent-repl-daemon--build-state 'built)
                agent-repl-daemon--build-duration)
           (format "agent-repl stack built in %.1fs"
-                  agent-repl-daemon--build-duration))))
+                  agent-repl-daemon--build-duration))
+         ((agent-repl-daemon--workspace-bringup-label))))
   (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.segment segment=%S"
                    agent-repl-daemon-mode-line-segment)
   (force-mode-line-update t)
@@ -767,6 +874,11 @@ A FOREIGN daemon — one this Emacs did not spawn — is the normal
 cold-start outcome and not a fault, but which daemon a session attached
 to is the first thing anyone reading the log needs, so it is STATED
 rather than inferred from the absence of a start line."
+  ;; BOTH bring-up paths pass through here with an address in hand -- the
+  ;; adopt path from the probe verdict and the cold start from the boot
+  ;; wait -- so this is the one place the lifecycle can learn that an
+  ;; address exists without either path having to remember to say so.
+  (agent-repl-daemon--set-lifecycle 'linking)
   (if (agent-repl-daemon--spawned-here-p)
       (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.own-adopted address=%S" address)
     (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.foreign-adopted address=%S" address)))
@@ -794,9 +906,10 @@ rather than inferred from the absence of a start line."
   (setq agent-repl-daemon--boot-timer nil
         agent-repl-daemon--boot-deadline nil
         agent-repl-daemon--boot-process nil
+        agent-repl-daemon--boot-rejected-address nil
         agent-repl-daemon--boot-continuation nil))
 
-(defun agent-repl-daemon--await-address (on-ready &optional process)
+(defun agent-repl-daemon--await-address (on-ready &optional process rejected-address)
   "Poll `daemon.addr\=' until it appears, then call ON-READY with the address.
 ON-READY receives nil when the boot timeout elapses first.  A TIMER poll,
 never a sleep: the daemon writes its address atomically when it is ready
@@ -806,11 +919,15 @@ be probed.
 PROCESS is the daemon THIS Emacs spawned, when there is one.  A process
 that EXITS ends the wait at once, with the tail of its run log: a daemon
 that died is never going to publish an address, and waiting out the full
-timeout to say so buries the reason it died."
+timeout to say so buries the reason it died.
+
+REJECTED-ADDRESS is an address this ensure already PROVED dead.  Reading
+it back is never readiness; see `agent-repl-daemon--boot-rejected-address'."
   (agent-repl-daemon--cancel-boot-wait)
   (setq agent-repl-daemon--boot-deadline
         (+ (float-time) agent-repl-daemon-boot-timeout-seconds)
         agent-repl-daemon--boot-process process
+        agent-repl-daemon--boot-rejected-address rejected-address
         agent-repl-daemon--boot-continuation on-ready)
   (agent-repl-daemon--boot-tick))
 
@@ -819,13 +936,20 @@ timeout to say so buries the reason it died."
 Named and argument-free so a test drives the wait by calling it, with no
 dependence on the scheduler and no sleep anywhere."
   (setq agent-repl-daemon--boot-timer nil)
-  (let ((address (condition-case err
-                     (agent-repl-connect-read-daemon-addr)
-                   (error
-                    (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.boot-addr-unreadable error=%S" err)
-                    nil)))
-        (on-ready agent-repl-daemon--boot-continuation)
-        (deadline (or agent-repl-daemon--boot-deadline 0)))
+  (let* ((read (condition-case err
+                   (agent-repl-connect-read-daemon-addr)
+                 (error
+                  (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.boot-addr-unreadable error=%S" err)
+                  nil)))
+         (rejected (and read agent-repl-daemon--boot-rejected-address
+                        (equal read agent-repl-daemon--boot-rejected-address)))
+         (address (and (not rejected) read))
+         (on-ready agent-repl-daemon--boot-continuation)
+         (deadline (or agent-repl-daemon--boot-deadline 0)))
+    (when rejected
+      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                        "elisp.daemon.boot-addr-rejected address=%S reason=already-judged-stale"
+                        read))
     (cond
      (address
       (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.booted address=%S" address)
@@ -916,7 +1040,32 @@ notices and recovers."
     (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.exited status=%S event=%s"
                       (process-exit-status proc) (string-trim (or event "")))
     (when (eq proc agent-repl--frontend-daemon-process)
+      (agent-repl-daemon--retire-own-addr)
       (setq agent-repl--frontend-daemon-process nil))))
+
+(defun agent-repl-daemon--retire-own-addr ()
+  "Remove `daemon.addr' when it still names the daemon THIS Emacs spawned.
+A daemon that exits cleanly removes its own file; one that is killed, or
+that dies, does not — and the file it leaves is the stale address the next
+cold start reads back as readiness.  The content is checked against the
+address our own daemon published, so a SUCCESSOR's file (a blue-green
+rollout writes a different address into the same path) is never retired."
+  (let ((own agent-repl-daemon--own-address))
+    (when own
+      (let ((current (condition-case nil
+                         (agent-repl-connect-read-daemon-addr)
+                       (error nil))))
+        (cond
+         ((null current)
+          (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                           "elisp.daemon.own-addr-already-gone address=%S" own))
+         ((equal current own)
+          (agent-repl-daemon--retire-stale-addr own "own-daemon-exited"))
+         (t
+          (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                            "elisp.daemon.own-addr-kept own=%S current=%S reason=successor-published"
+                            own current))))
+      (setq agent-repl-daemon--own-address nil))))
 
 (defun agent-repl-daemon--exited-p (proc)
   "Return non-nil when PROC is a real process that is no longer live.
@@ -1008,6 +1157,7 @@ is stated on the spawn rather than assumed."
         (setq agent-repl--frontend-daemon-process proc)
         (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.started argv=%S state-dir=%S"
                           argv (agent-repl--global-state-dir))
+        (agent-repl-daemon--set-lifecycle 'starting)
         proc)))))
 
 ;;;; ---- The entry point ----
@@ -1020,10 +1170,35 @@ is stated on the spawn rather than assumed."
   (when on-ready (funcall on-ready outcome))
   outcome)
 
-(defun agent-repl-daemon--build-and-start (on-ready)
+(defun agent-repl-daemon--retire-stale-addr (address reason)
+  "Remove the `daemon.addr' file whose ADDRESS was just proven dead.
+REASON names which proof retired it, for the record.
+The file is the readiness signal, so leaving a dead one on disk while a
+fresh daemon boots makes the boot wait read the corpse's address on its
+first tick and declare the new daemon booted at an address nothing is
+listening on.  Removing it is not a repair of someone else's state: the
+address behind it refused a connection, and only the daemon that owns a
+live one ever writes the file."
+  (let ((file (agent-repl-connect-daemon-addr-file)))
+    (when (file-exists-p file)
+      (condition-case err
+          (progn
+            (delete-file file)
+            (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                              "elisp.daemon.stale-addr-removed address=%S reason=%s file=%S"
+                              address reason file))
+        (error
+         (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                            "elisp.daemon.stale-addr-remove-failed address=%S reason=%s file=%S error=%S"
+                            address reason file err))))))
+
+(defun agent-repl-daemon--build-and-start (on-ready &optional rejected-address)
   "Build, start a daemon, wait for its address, and link to it.
 ON-READY receives the connection, or nil.  The build is asynchronous, so
-everything after it lives in the continuation."
+everything after it lives in the continuation.
+
+REJECTED-ADDRESS is an address this ensure already proved dead; the boot
+wait refuses to read it back as the new daemon's readiness."
   (agent-repl-daemon--build
    nil
    (lambda (failure)
@@ -1045,9 +1220,10 @@ everything after it lives in the continuation."
              ;; `foreign-adopted' would say the session attached to someone
              ;; else's daemon every single time it started its own.
              (agent-repl-daemon--report-provenance address)
+              (setq agent-repl-daemon--own-address address)
               (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.linking address=%S" address)
               (agent-repl-daemon--settle on-ready (agent-repl-link-connect))))
-          proc)))))))
+          proc rejected-address)))))))
 
 (defun agent-repl-daemon--begin (on-ready)
   "Take the cold-start decision for `agent-repl-daemon-ensure'.
@@ -1070,7 +1246,11 @@ WHOLE decision, signals included."
        (lambda (detail)
          (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stale-addr address=%S detail=%S"
                            address detail)
-         (agent-repl-daemon--build-and-start on-ready))))))
+         ;; The corpse's file goes FIRST, before anything can mistake it for
+         ;; the daemon about to be built, and the address travels with the
+         ;; boot wait so a file that somehow survives still cannot.
+         (agent-repl-daemon--retire-stale-addr address "probe-refused")
+         (agent-repl-daemon--build-and-start on-ready address))))))
 
 (defun agent-repl-daemon-schedule-ensure ()
   "Schedule `agent-repl-daemon-ensure' on an idle timer and return the timer.
@@ -1236,6 +1416,9 @@ the ensure."
               (message "agent-repl: not restarted: the accepted daemon stop never completed")))))))))
 
 (add-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure)
+(add-hook 'agent-repl-link-up-functions #'agent-repl-daemon-on-link-up)
+(add-hook 'agent-repl-open-progress-change-functions
+          #'agent-repl-daemon-on-open-progress-change)
 (agent-repl-daemon-install-segment)
 
 (provide 'daemon)

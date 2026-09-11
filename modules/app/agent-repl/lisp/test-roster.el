@@ -343,6 +343,105 @@ the rest of its life."
     ;; Assert
     (should (equal agent-repl-test-roster--unsubscribed '("fix-login")))))
 
+(ert-deftest agent-repl-test-roster-a-failed-open-leaves-the-later-tabs-open ()
+  "A row that cannot open its tab must not cost the rows behind it.
+One workspace whose worktree had been deleted aborted a whole cold
+start's reconcile on its first row and drew no tabs at all."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (cl-letf (((symbol-function 'agent-repl--ws-create)
+               (lambda (ws &optional dir)
+                 (when (equal ws "first") (error "no such directory"))
+                 (agent-repl--ws-put ws :project-dir (or dir "/w/x"))
+                 ws))
+              ((symbol-function 'agent-repl--error) #'ignore))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                      (agent-repl-test-roster--row "b" "second" :ready)
+                                      (agent-repl-test-roster--row "c" "third" :ready)))))))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--tabs) '("second" "third")))))
+
+(ert-deftest agent-repl-test-roster-a-failed-open-is-recorded-at-error ()
+  "The row that failed is loud: its name, its id, and the error ride a record."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((logs nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-create)
+                 (lambda (_ws &optional _dir) (error "no such directory")))
+                ((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "first" :ready)))))))
+      ;; Assert
+      (should (seq-some
+               (lambda (text)
+                 (string-search "elisp.roster.row-reconcile-failed: ws=first id=a" text))
+               logs)))))
+
+(ert-deftest agent-repl-test-roster-a-failed-open-of-an-unroutable-row-logs-centrally ()
+  "A failed row whose workspace owns no sink records against the central scope."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((scopes nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-create)
+                 (lambda (_ws &optional _dir) (error "no such directory")))
+                ((symbol-function 'agent-repl--ws-log-name) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--error)
+                 (lambda (ws _fmt &rest _args) (push ws scopes))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "first" :ready)))))))
+      ;; Assert
+      (should (equal (car (car scopes)) :agent-repl-central)))))
+
+(ert-deftest agent-repl-test-roster-a-failed-open-still-orders-the-survivors ()
+  "The tab ORDER after a failed row is the roster's walk order over the rest."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (cl-letf (((symbol-function 'agent-repl--ws-create)
+               (lambda (ws &optional dir)
+                 (when (equal ws "second") (error "no such directory"))
+                 (agent-repl--ws-put ws :project-dir (or dir "/w/x"))
+                 ws))
+              ((symbol-function 'agent-repl--error) #'ignore))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                      (agent-repl-test-roster--row "b" "second" :ready)
+                                      (agent-repl-test-roster--row "c" "third" :ready)))))))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--tabs) '("first" "third")))))
+
+(ert-deftest agent-repl-test-roster-a-failed-teardown-does-not-abort-the-walk ()
+  "A teardown that signals outside its own guards leaves the rest to run."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                    (agent-repl-test-roster--row "b" "second" :ready))))))
+    (cl-letf (((symbol-function 'agent-repl--ws-del)
+               (lambda (ws)
+                 (when (equal ws "first") (error "registry write failed"))
+                 (agent-repl--ws-put ws :killed-at (current-time))))
+              ((symbol-function 'agent-repl--error) #'ignore))
+      ;; Act
+      (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
+    ;; Assert: the walk still reached the second row's unsubscribe.
+    (should (member "second" agent-repl-test-roster--unsubscribed))))
+
 (ert-deftest agent-repl-test-roster-a-signalling-persp-kill-does-not-abort-the-walk ()
   "A persp kill that signals leaves the REST of the teardown walk to run.
 The kill runs against a live frame, so it can signal on something the
