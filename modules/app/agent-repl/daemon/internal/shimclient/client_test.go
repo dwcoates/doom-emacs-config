@@ -758,3 +758,63 @@ func TestKillAnswersItsCallerWhenTheContextEndsInsideTheGrace(t *testing.T) {
 		t.Fatalf("signal = %q, want %q: the escalation must go out even when the caller has stopped waiting", info.Signal, syscall.SIGKILL.String())
 	}
 }
+
+// TestFaultKindNamesEveryArm asserts the one spelling of the SessionFault arm
+// names covers each arm and never drops an unrecognized one.
+func TestFaultKindNamesEveryArm(t *testing.T) {
+	tests := []struct {
+		name  string
+		fault *conversationv1.SessionFault
+		want  string
+	}{
+		{"store", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_StoreUnreachable{}}, "store_unreachable"},
+		{"converter", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_ConverterDefect{}}, "converter_defect"},
+		{"log sink", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_LogSinkPoisoned{}}, "log_sink_poisoned"},
+		{"keepalive", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_KeepaliveFailed{}}, "keepalive_failed"},
+		{"vendor query", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_VendorQueryFailed{}}, "vendor_query_failed"},
+		{"no arm set", &conversationv1.SessionFault{}, "unclassified"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := FaultKind(tt.fault)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("FaultKind() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFaultKindsJoinsEveryFault asserts the kind list and the fault count
+// always agree, so a record's fault_kinds never under-reports what the shim
+// is standing on.
+func TestFaultKindsJoinsEveryFault(t *testing.T) {
+	// Arrange.
+	faults := []*conversationv1.SessionFault{
+		{Kind: &conversationv1.SessionFault_StoreUnreachable{}},
+		{},
+		{Kind: &conversationv1.SessionFault_KeepaliveFailed{}},
+	}
+
+	// Act.
+	got := FaultKinds(faults)
+
+	// Assert.
+	if want := "store_unreachable,unclassified,keepalive_failed"; got != want {
+		t.Fatalf("FaultKinds() = %q, want %q", got, want)
+	}
+}
+
+// TestFaultKindsOfNoFaultsIsEmpty asserts the empty case is an empty string
+// rather than a stray separator.
+func TestFaultKindsOfNoFaultsIsEmpty(t *testing.T) {
+	// Arrange, Act.
+	got := FaultKinds(nil)
+
+	// Assert.
+	if got != "" {
+		t.Fatalf("FaultKinds(nil) = %q, want the empty string", got)
+	}
+}

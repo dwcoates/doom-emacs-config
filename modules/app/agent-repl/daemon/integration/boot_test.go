@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
 	"claude-repld/internal/rollout"
@@ -816,4 +817,72 @@ func TestAnUnreachableSurvivorsAdoptionIsRecordedAtError(t *testing.T) {
 		return r.Operation == "daemon.boot.adopt" && r.Level == "error" &&
 			strings.Contains(r.Message, "adoption bound")
 	})
+}
+
+// TestAnUnhealthySurvivorIsAdoptedWithinTheBound pins the realtest-1 finding.
+// A surviving shim standing on a fault it never clears ANSWERS bring-up in
+// milliseconds; the daemon used to treat that answer as silence and burn the
+// whole adoption bound on it, then serve with the workspace undetermined and
+// no client at all.
+//
+// The bound here is set FAR ABOVE the harness's own serving wait, so a boot
+// that waited it out could not reach the serving record StartDaemon blocks on:
+// the arrangement itself is the assertion that the adoption did not wait.
+func TestAnUnhealthySurvivorIsAdoptedWithinTheBound(t *testing.T) {
+	t.Parallel()
+	// Arrange: the shim answers every stream unhealthy, and the daemon alone
+	// is killed so the shim survives holding the workspace lock.
+	f := newRegistered(t, harness.Opts{})
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{OpeningFault: "the store is unreachable"})
+	f.d.ExpectWarnings("daemon.shimclient.ready", "daemon.health.open_fault", "daemon.health.session")
+	f.open()
+	f.d.Kill()
+
+	// Act.
+	nd := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir,
+		ExtraEnv: []string{
+			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
+			"AGENT_REPL_BOOT_ADOPT_BOUND=60s",
+		},
+	})
+	// The rollout warnings are the SIGKILLed predecessor's missing intent
+	// manifest, which every crash-restart arrangement produces.
+	nd.ExpectWarnings("daemon.shimclient.ready", "daemon.health.open_fault", "daemon.health.session",
+		"daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile")
+
+	// Assert: the survivor was adopted, and the fault it is standing on
+	// reached the workspace health path rather than being a boot blocker.
+	// The adoption record is WORKSPACE-BOUND, as every record an adopted
+	// client writes is.
+	nd.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "the adopted unhealthy shim's record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.shimclient.ready" &&
+			strings.Contains(r.Message, "adopted an unhealthy shim")
+	})
+	awaitSessionFault(t, nd, f.ws)
+}
+
+// awaitSessionFault blocks until SessionHealth answers with a shim-reported
+// fault for the workspace. The fold from the adopted shim's opening
+// diagnostics runs on the session watcher's own goroutine, so the probe is
+// retried rather than read once.
+func awaitSessionFault(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+
+	deadline := time.Now().Add(harness.DefaultTimeout)
+	var last string
+	for time.Now().Before(deadline) {
+		resp, err := d.Client().SessionHealth(d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
+		if err != nil {
+			last = err.Error()
+			continue
+		}
+		for _, fault := range resp.Msg.GetSuccess().GetUnhealthy().GetFaults() {
+			if fault.GetShimReported() != nil {
+				return
+			}
+		}
+		last = resp.Msg.String()
+	}
+	t.Fatalf("SessionHealth never carried the adopted shim's fault; last answer %s", last)
 }
