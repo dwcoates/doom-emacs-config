@@ -447,3 +447,89 @@ func TestRegisterStillAnswersWhenTheRevivalFails(t *testing.T) {
 		t.Fatalf("records = %+v, want the failed revival recorded at error", f.log.logger.Records())
 	}
 }
+
+// TestPublishRegistryClosesAWorkspaceWhoseDirectoryIsGone pins the owner's
+// ruling on the roster walk. The boot reconciliation closes these rows, but a
+// JOINING SUCCESSOR reconciles nothing, so this walk -- the one that publishes
+// the opening roster -- is what keeps a successor from handing Emacs a live
+// row for a directory that is not there.
+func TestPublishRegistryClosesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	record, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	if err := f.verbs.PublishRegistry(context.Background()); err != nil {
+		t.Fatalf("PublishRegistry: %v", err)
+	}
+
+	// Assert.
+	if !f.db.closedFlags[record.ID] {
+		t.Fatalf("workspace %v is still open; a directory that is gone must close the row", record.ID)
+	}
+}
+
+// TestPublishRegistryPushesTheMissingDirectoryRowAsClosed is the frontend's
+// half: the roster Emacs receives must already carry the row as closed, or it
+// opens a tab on a path that is not there.
+func TestPublishRegistryPushesTheMissingDirectoryRowAsClosed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	record, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	if err := f.verbs.PublishRegistry(context.Background()); err != nil {
+		t.Fatalf("PublishRegistry: %v", err)
+	}
+
+	// Assert.
+	published := f.sidebar.registries[len(f.sidebar.registries)-1]
+	var found bool
+	for _, ws := range published.Workspaces {
+		if ws.ID != record.ID {
+			continue
+		}
+		found = true
+		if !ws.Closed {
+			t.Fatalf("the published row for %v is open; the roster must carry it closed", record.ID)
+		}
+	}
+	if !found {
+		t.Fatalf("the published roster has no row for %v at all", record.ID)
+	}
+}
+
+// TestPublishRegistryLeavesAPresentDirectoryOpen is the negative arm: the walk
+// closes nothing it was not asked to.
+func TestPublishRegistryLeavesAPresentDirectoryOpen(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	record, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Act.
+	if err := f.verbs.PublishRegistry(context.Background()); err != nil {
+		t.Fatalf("PublishRegistry: %v", err)
+	}
+
+	// Assert.
+	if f.db.closedFlags[record.ID] {
+		t.Fatalf("workspace %v was closed though its directory is there", record.ID)
+	}
+}
