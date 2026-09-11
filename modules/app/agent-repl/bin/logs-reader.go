@@ -150,10 +150,11 @@ func run() error {
 		return err
 	}
 
-	records, findings, readable, sequence, states, err := readInitial(sinks, filter)
+	records, findings, readable, sequence, states, orphanCount, err := readInitial(sinks, filter)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(os.Stderr, "logs-reader: included %d orphan generation(s) left by earlier daemon instances\n", orphanCount)
 	sortRecords(records)
 	if err := emit(records, findings, opts.mode); err != nil {
 		return err
@@ -253,16 +254,18 @@ func parseBound(value string, now time.Time, durationAllowed bool) (*time.Time, 
 	return &instant, nil
 }
 
-func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, int64, []followState, error) {
+func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, int64, []followState, int, error) {
 	var records []record
 	var findings []sinkFinding
 	var sequence int64
 	states := make([]followState, 0, len(sinks))
 	seen := make(map[string]struct{})
 	readable := 0
+	orphanCount := 0
 	for _, selectedSink := range sinks {
-		files, current, discovered := generationFiles(selectedSink)
+		files, current, discovered, orphans := generationFiles(selectedSink)
 		findings = append(findings, discovered...)
+		orphanCount += orphans
 		state := followState{sink: selectedSink, path: current, line: 1}
 		sinkReadable := false
 		for _, path := range files {
@@ -276,7 +279,7 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 					findings = append(findings, unreadableFinding(selectedSink, path, unreadable.err))
 					continue
 				}
-				return nil, nil, 0, 0, nil, err
+				return nil, nil, 0, 0, nil, 0, err
 			}
 			seen[path] = struct{}{}
 			sinkReadable = true
@@ -299,26 +302,26 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 		}
 		states = append(states, state)
 	}
-	return records, findings, readable, sequence, states, nil
+	return records, findings, readable, sequence, states, orphanCount, nil
 }
 
-func generationFiles(selectedSink sink) ([]string, string, []sinkFinding) {
+func generationFiles(selectedSink sink) ([]string, string, []sinkFinding, int) {
 	current := selectedSink.base
 	var findings []sinkFinding
 	if selectedSink.canonicalSymlink {
 		info, err := os.Lstat(selectedSink.base)
 		if os.IsNotExist(err) {
-			return nil, "", []sinkFinding{canonicalAbsentFinding(selectedSink)}
+			return nil, "", []sinkFinding{canonicalAbsentFinding(selectedSink)}, 0
 		}
 		if err != nil {
-			return nil, "", []sinkFinding{canonicalUnreadableFinding(selectedSink, err)}
+			return nil, "", []sinkFinding{canonicalUnreadableFinding(selectedSink, err)}, 0
 		}
 		if info.Mode()&os.ModeSymlink == 0 {
-			return nil, "", []sinkFinding{{selectedSink, "sink not a symlink: " + selectedSink.base}}
+			return nil, "", []sinkFinding{{selectedSink, "sink not a symlink: " + selectedSink.base}}, 0
 		}
 		target, err := os.Readlink(selectedSink.base)
 		if err != nil {
-			return nil, "", []sinkFinding{canonicalUnreadableFinding(selectedSink, err)}
+			return nil, "", []sinkFinding{canonicalUnreadableFinding(selectedSink, err)}, 0
 		}
 		// WHY: EvalSymlinks loses the named target when it is absent, which is
 		// exactly the expected sink state this reader must report and continue past.
@@ -327,7 +330,10 @@ func generationFiles(selectedSink sink) ([]string, string, []sinkFinding) {
 		}
 		current = filepath.Clean(target)
 	}
-	files := make([]string, 0, retainedGenerations+1)
+	orphans, orphanFindings := orphanSiblings(selectedSink, current)
+	findings = append(findings, orphanFindings...)
+	files := make([]string, 0, retainedGenerations+1+len(orphans))
+	files = append(files, orphans...)
 	for generation := retainedGenerations; generation >= 1; generation-- {
 		path := current + "." + strconv.Itoa(generation)
 		if present, finding := regularFilePresent(selectedSink, path, false); finding != nil {
@@ -340,9 +346,51 @@ func generationFiles(selectedSink sink) ([]string, string, []sinkFinding) {
 		findings = append(findings, *finding)
 	} else if present {
 		files = append(files, current)
-		return files, current, findings
+		return files, current, findings, len(orphans)
 	}
-	return files, "", findings
+	return files, "", findings, len(orphans)
+}
+
+// orphanSiblings answers the sibling unique targets an earlier daemon
+// instance minted for this same workspace sink before append-on-restart
+// (logging-contract.md) replaced per-restart minting. Every daemon-owned
+// workspace target is named "agent-repl-<workspaceID>-<runtime>-*.log"
+// (daemon/internal/dlog/sink.go createTarget); a workspace bounced across
+// several daemon instances before that fix can carry several such files
+// beside the one the canonical symlink currently names. They are distinct
+// files, never generations of one another, so every match is included and
+// none is deduplicated against another.
+func orphanSiblings(selectedSink sink, current string) ([]string, []sinkFinding) {
+	if !selectedSink.canonicalSymlink || selectedSink.workspaceID == "" || current == "" {
+		return nil, nil
+	}
+	dir := filepath.Dir(current)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, []sinkFinding{unreadableFinding(selectedSink, dir, err)}
+	}
+	prefix := "agent-repl-" + selectedSink.workspaceID + "-" + selectedSink.runtime + "-"
+	const suffix = ".log"
+	var orphans []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		if path == current {
+			continue
+		}
+		orphans = append(orphans, path)
+	}
+	sort.Strings(orphans)
+	return orphans, nil
 }
 
 func regularFilePresent(selectedSink sink, path string, required bool) (bool, *sinkFinding) {
@@ -666,7 +714,7 @@ func follow(mode string, states []followState, filter filters, sequence int64) e
 }
 
 func readFollow(state *followState, sequence int64, filter filters) ([]record, int64, error) {
-	_, current, _ := generationFiles(state.sink)
+	_, current, _, _ := generationFiles(state.sink)
 	if current == "" {
 		return nil, sequence, nil
 	}
