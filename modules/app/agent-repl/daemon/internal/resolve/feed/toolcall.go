@@ -453,15 +453,21 @@ func diffLine(line string) *frontendv1.FeedDiffLine {
 	}
 }
 
-// applyDiagnostics folds an injected diagnostics report onto the SETTLED card
-// it followed. It is a consequence, not a state: the report arrives after the
-// terminal and amends the card the consumer already has.
+// applyDiagnostics folds an injected diagnostics report onto its change card.
+// It is a consequence, not a state: when it arrives after the terminal it
+// amends the card the consumer already has; when it arrives first it is retained
+// until the stream plane draws the card.
 func (r *resolver) applyDiagnostics(s *wsState, unitID string, report *conversationv1.AgentDiagnosticsReport) (*frontendv1.FeedRow, error) {
 	u := s.unit(unitID)
 	u.diagnostics = composeDiagnostics(report)
 	if u.row == nil {
-		r.logger(s.id).Warn("daemon.feed.diagnostics_without_card",
-			"a diagnostics report arrived for a change with no drawn card",
+		// Transcript-plane diagnostics and stream-plane Edit/Write cards are
+		// independently delivered for the same unit, so either can arrive first.
+		// Nothing is lost: the unit retains these lines and the later card applies
+		// them. The daemon cannot distinguish this ordinary cross-plane ordering
+		// from a delayed card, so warning here can only ever be a false alarm.
+		r.logger(s.id).Debug("daemon.feed.diagnostics_without_card",
+			"a diagnostics attachment arrived before its change card and was retained for that card",
 			dlog.Context{"unit": unitID})
 		return nil, errNotARow
 	}

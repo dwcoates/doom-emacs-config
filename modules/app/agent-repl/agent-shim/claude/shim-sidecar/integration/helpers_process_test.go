@@ -93,6 +93,7 @@ func sidecarFlags(t *testing.T, tree *vendorTree, logPath string) []string {
 	t.Helper()
 	requireCommaFreeConfigRoots(t, tree.Root, tree.SpoolRoot)
 	return []string{
+		"--state-dir", t.TempDir(),
 		"--config-roots", tree.Root,
 		"--spool-root", tree.SpoolRoot,
 		"--log", logPath,

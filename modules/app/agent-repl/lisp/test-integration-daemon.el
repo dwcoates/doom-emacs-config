@@ -31,6 +31,8 @@
 
 ;; Production names this suite depends on (daemon.el, §11; daemon-link.el, §6).
 (declare-function agent-repl-daemon-ensure "daemon")
+(declare-function agent-repl-daemon--cancel-departure-wait "daemon")
+(declare-function agent-repl-daemon--departure-tick "daemon")
 (declare-function agent-repl-frontend-daemon-ensure "daemon")
 (declare-function agent-repl-link-up-p "daemon-link")
 (declare-function agent-repl-link-primary "daemon-link")
@@ -38,6 +40,9 @@
 (defvar agent-repl-daemon-command)
 (defvar agent-repl-daemon-boot-timeout-seconds)
 (defvar agent-repl-daemon-boot-poll-interval-seconds)
+(defvar agent-repl-daemon--departure-continuation)
+(defvar agent-repl-daemon--departure-deadline)
+(defvar agent-repl-daemon--departure-timer)
 (defvar agent-repl-daemon-mode-line-segment)
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-link-no-daemon-functions)
@@ -90,6 +95,23 @@ within one directory is atomic."
 (defun agent-repl-itest-daemon--ran-p (dir name)
   "Return non-nil when the stub NAME recorded a run in DIR."
   (file-exists-p (expand-file-name name dir)))
+
+(defun agent-repl-itest-daemon--take-departure-tick ()
+  "Cancel the scheduled departure tick without discarding its state.
+The test can then call `agent-repl-daemon--departure-tick' at the exact
+boundary it is asserting, without a scheduler race in between."
+  (unless (and agent-repl-daemon--departure-timer
+               (numberp agent-repl-daemon--departure-deadline)
+               (functionp agent-repl-daemon--departure-continuation))
+    (error "agent-repl-itest: incomplete departure wait timer=%S deadline=%S continuation=%S"
+           agent-repl-daemon--departure-timer
+           agent-repl-daemon--departure-deadline
+           agent-repl-daemon--departure-continuation))
+  (let ((deadline agent-repl-daemon--departure-deadline)
+        (continuation agent-repl-daemon--departure-continuation))
+    (agent-repl-daemon--cancel-departure-wait)
+    (setq agent-repl-daemon--departure-deadline deadline
+          agent-repl-daemon--departure-continuation continuation)))
 
 (defun agent-repl-itest-daemon--line-count (path)
   "Return the number of lines PATH holds, or 0 when it does not exist yet.
@@ -853,9 +875,9 @@ directly — so the registration itself is unpinned everywhere else.  Here
 (ert-deftest agent-repl-itest-daemon-restart-awaits-departure-before-ensuring ()
   "The restart's departure wait is a GATE, not a race with the ack.
 R-RED-MISC: \"stop ack -> teardown -> await daemon.addr removal -> ensure\".
-The fake is kept alive well past the stop's ack, so a bounded window with
-it still answering must show no re-probe and no ensure at all -- only once
-it actually exits does the build-and-start half of the restart run."
+One departure tick while the fake still answers must show no re-probe and
+no ensure at all -- only the tick after it actually exits may run the
+build-and-start half of the restart."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--with-cold-start
@@ -879,24 +901,26 @@ it actually exits does the build-and-start half of the restart run."
             (agent-repl-frontend-daemon-restart)
             (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
             (agent-repl-itest--await-log daemon "elisp.daemon.departure-waiting")
-            ;; Assert: a bounded window with the fake still alive.  Not a
-            ;; wait-until (there is no positive condition to wait for) -- an
-            ;; explicit deadline loop through `accept-process-output', never
-            ;; a sleep, so the daemon's own I/O keeps being served while the
-            ;; negative is held open.
-            (let ((deadline (+ (float-time) 1.0)))
-              (while (< (float-time) deadline)
-                (accept-process-output nil 0.05)))
+            ;; Assert: drive a complete pre-deadline poll while the fake is
+            ;; still alive.  The timeout behavior has its own test below; this
+            ;; subject fixes the deadline in the future so a host suspend
+            ;; cannot select that other branch between two assertions.
+            (setq agent-repl-daemon--departure-deadline most-positive-fixnum)
+            (agent-repl-itest-daemon--take-departure-tick)
+            (agent-repl-daemon--departure-tick)
+            (should agent-repl-daemon--departure-timer)
             (should (= health-calls-before (length (agent-repl-itest--calls daemon "DaemonHealth"))))
             (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
             (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
             ;; Act: only now does the fake actually leave.
+            (agent-repl-itest-daemon--take-departure-tick)
             (agent-repl-itest--exit daemon)
             (agent-repl-itest--wait-until
              (lambda () (null (agent-repl-itest--read-addr-file
                                (agent-repl-itest-daemon-state-dir daemon))))
              nil "the stopped daemon to remove daemon.addr")
             ;; Assert: the ensure half proceeds once the address is gone.
+            (agent-repl-daemon--departure-tick)
             (agent-repl-itest--wait-until
              (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
              3 "the restart's own ensure to run the build script")
