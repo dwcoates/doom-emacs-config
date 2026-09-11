@@ -17,6 +17,7 @@ package logging
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,18 @@ import (
 
 	sharedlogging "agentrepl/logging"
 )
+
+// ErrForwardTargetNotThere marks a forwarding failure whose target daemon is
+// PROVABLY GONE — its advertised pid died, or daemon.addr no longer names the
+// address this attempt dialed — rather than merely unreachable. A Forwarder
+// wraps it onto a connection/dial failure (see daemonclient.Client.Forward);
+// forwardLoop uses errors.Is to treat such a failure as a restart transient
+// (DEBUG, retried, still persisted undelivered) instead of manufacturing a
+// WARN against a daemon that was replaced or exited mid-flight. A forward
+// failure against a target whose advertised pid IS alive remains a genuine
+// WARN: this sentinel names an absence, not a fault, mirroring the
+// daemon.addr pid invariant (see logging-contract.md).
+var ErrForwardTargetNotThere = errors.New("sidecar logging: forward target daemon is not there")
 
 // Context is the structured attribution attached to a log record. Every field
 // is optional presence: an empty string (or a nil pointer, for the numeric
@@ -564,17 +577,27 @@ func (l *Logger) forwardLoop() {
 				Operation: rec.Operation, WorkspaceDir: rec.WorkspaceDir,
 				WorkspaceID: rec.WorkspaceID, ClaudeSessionID: rec.ClaudeSessionID,
 			}
-			if seenServing {
-				// A daemon that WAS serving and then failed the forward is a
-				// genuine outage, stated once at WARN.
-				l.reportForwardFailure(now, address, attempts, target, err)
-			} else {
+			switch {
+			case errors.Is(err, ErrForwardTargetNotThere):
+				// The daemon THIS RECORD targeted is provably gone — its
+				// advertised pid died, or daemon.addr now names someone else —
+				// mirroring the address-advertisement pid invariant: an absent
+				// advertiser costs no WARN, even after it was once seen serving.
+				l.reportForwardTransient(now, address, attempts, target, err,
+					"a file-scoped diagnostic could not be forwarded because the daemon that would have received it is no longer there (it exited or was replaced); it was written to the global sink")
+			case !seenServing:
 				// A daemon that never began serving during the ladder is a
 				// STARTUP TRANSIENT, not an outage: the record forwarded before
 				// its producer published a live address. Narrate it at DEBUG so
 				// a boot does not manufacture a WARN, and add the distinguishing
 				// record rather than demoting the failure path.
-				l.reportForwardDeferred(now, address, attempts, target, err)
+				l.reportForwardTransient(now, address, attempts, target, err,
+					"a file-scoped diagnostic was not forwarded because the daemon has not begun serving; it was written to the global sink")
+			default:
+				// A daemon that WAS serving, whose advertised pid is still
+				// alive, and that still failed the forward is a genuine outage,
+				// stated once at WARN.
+				l.reportForwardFailure(now, address, attempts, target, err)
 			}
 			// THE DIAGNOSTIC ITSELF IS NOT LOST. The workspace sink is the
 			// daemon's and is unreachable, so the record lands in the global
@@ -731,15 +754,19 @@ func (l *Logger) reportForwardFailure(now time.Time, address string, attempts in
 	}, now, target.Operation)
 }
 
-// reportForwardDeferred narrates a STARTUP TRANSIENT at DEBUG: the daemon never
-// published a live address across the whole ladder, so the file-scoped record
-// forwarded before its producer was serving. It is the distinguishing record
-// the invariant asks for — added beside the WARN path, never replacing it — so a
-// boot no longer manufactures a forward-failure WARN. It is rate-limited per
-// address and boot window like the WARN, and it is withheld unless the durable
-// threshold admits DEBUG, so production INFO logs stay silent through a boot
-// while the undelivered record itself is still persisted.
-func (l *Logger) reportForwardDeferred(now time.Time, address string, attempts int, target record, cause error) {
+// reportForwardTransient narrates a forwarding failure that is NOT a fault at
+// DEBUG: either the daemon never published a live address across the whole
+// ladder (a startup transient — the record forwarded before its producer was
+// serving), or the daemon this record targeted is provably gone (an
+// ErrForwardTargetNotThere restart transient — its advertised pid died, or
+// daemon.addr now names a replacement). Both are the distinguishing record the
+// invariant asks for — added beside the WARN path, never replacing it — so
+// neither a boot nor a daemon handover manufactures a forward-failure WARN. It
+// is rate-limited per address and outage window like the WARN, and it is
+// withheld unless the durable threshold admits DEBUG, so production INFO logs
+// stay silent through either window while the undelivered record itself is
+// still persisted.
+func (l *Logger) reportForwardTransient(now time.Time, address string, attempts int, target record, cause error, message string) {
 	if !l.minimumLevel.Allows("debug") {
 		return
 	}
@@ -755,7 +782,7 @@ func (l *Logger) reportForwardDeferred(now time.Time, address string, attempts i
 	l.writeGlobal(record{
 		Timestamp: sharedlogging.Timestamp(now), Runtime: "sidecar", PID: l.pid(),
 		Level: "debug", Verbosity: "normal", Operation: "sidecar.logging.forward-deferred",
-		Message: "a file-scoped diagnostic was not forwarded because the daemon has not begun serving; it was written to the global sink",
+		Message: message,
 		Context: map[string]any{
 			"daemon_address": address, "error": cause.Error(), "attempt": attempts,
 			"target_operation": target.Operation, "target_workspace_dir": target.WorkspaceDir,

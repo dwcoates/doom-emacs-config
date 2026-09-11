@@ -7,13 +7,16 @@ package daemonclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -101,12 +104,19 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	address := c.addrPath
 	raw, err := os.ReadFile(c.addrPath)
 	if err != nil {
-		return address, fmt.Errorf("read daemon address %q: %w", c.addrPath, err)
+		// The advertisement itself is gone — exactly the "addr file is absent
+		// ... since the attempt began" half of the not-there invariant (see
+		// logging.ErrForwardTargetNotThere): there is no target to be stuck
+		// against, so this is a transient, not a fault.
+		return address, fmt.Errorf("read daemon address %q: %w: %w", c.addrPath, err, logging.ErrForwardTargetNotThere)
 	}
 	// daemon.addr's first line is the bare address; an optional "pid=<n>" line
-	// may follow it (see daemonaddr.ReadAdvertisement). The forwarder needs
-	// only the address, so it takes the first line and ignores the rest.
-	address = addressLine(string(raw))
+	// may follow it (see daemonaddr.ReadAdvertisement, mirrored locally by
+	// parseAdvertisement). usedAddress/usedPID name the target THIS ATTEMPT is
+	// about to dial, so a later failure can tell whether that specific target
+	// is still there.
+	usedAddress, usedPID, usedPIDKnown := parseAdvertisement(string(raw))
+	address = usedAddress
 	if err := validateAddress(address); err != nil {
 		return address, fmt.Errorf("daemon address %q from %s: %w", address, c.addrPath, err)
 	}
@@ -130,7 +140,7 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	defer cancel()
 	workspace, err := c.resolveWorkspace(ctx, client, address, record.WorkspaceDir)
 	if err != nil {
-		return address, err
+		return address, c.classifyForward(err, usedAddress, usedPID, usedPIDKnown)
 	}
 	response, err := client.ClientLog(ctx, connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Workspace: workspace,
@@ -138,7 +148,7 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	}))
 	if err != nil {
 		c.invalidateWorkspace(address, workspace.GetId())
-		return address, fmt.Errorf("ClientLog at %s: %w", address, err)
+		return address, c.classifyForward(fmt.Errorf("ClientLog at %s: %w", address, err), usedAddress, usedPID, usedPIDKnown)
 	}
 	switch response.Msg.GetResult().(type) {
 	case *agentreplv1.ClientLogResponse_Success:
@@ -150,6 +160,36 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 		c.invalidateWorkspace(address, workspace.GetId())
 		return address, fmt.Errorf("ClientLog at %s returned neither success nor error", address)
 	}
+}
+
+// classifyForward marks a connection/dial failure with
+// logging.ErrForwardTargetNotThere when the daemon THIS ATTEMPT dialed is
+// provably gone: its advertised pid has died, or daemon.addr no longer names
+// the same address (a replacement daemon published, or the file itself
+// vanished) since the attempt began. It leaves every other failure unchanged
+// — including a connection/dial failure against a still-live, still-named
+// daemon, which is a genuinely stuck daemon and must remain a real WARN
+// candidate — and it never reclassifies an app-level failure (an explicit
+// ClientLog refusal, a malformed roster) that was never a dial failure to
+// begin with.
+func (c *Client) classifyForward(err error, usedAddress string, usedPID int, usedPIDKnown bool) error {
+	if err == nil || connect.CodeOf(err) != connect.CodeUnavailable {
+		return err
+	}
+	raw, readErr := os.ReadFile(c.addrPath)
+	if readErr != nil {
+		// The advertisement disappeared between the attempt and the failure:
+		// the target is gone, not merely unreachable.
+		return fmt.Errorf("%w: %w", err, logging.ErrForwardTargetNotThere)
+	}
+	curAddress, curPID, curPIDKnown := parseAdvertisement(string(raw))
+	notThere := curAddress != usedAddress ||
+		(usedPIDKnown && !processAlive(usedPID)) ||
+		(!usedPIDKnown && curPIDKnown && !processAlive(curPID))
+	if notThere {
+		return fmt.Errorf("%w: %w", err, logging.ErrForwardTargetNotThere)
+	}
+	return err
 }
 
 func (c *Client) resolveWorkspace(
@@ -323,6 +363,46 @@ func wireContext(in map[string]any) map[string]any {
 func addressLine(raw string) string {
 	first, _, _ := strings.Cut(raw, "\n")
 	return strings.TrimSpace(first)
+}
+
+// pidLinePrefix marks the second line of a daemon.addr advertisement, which
+// carries the advertising daemon's process id. This mirrors
+// daemon/internal/daemonaddr's ReadAdvertisement, which this package cannot
+// import: daemonaddr lives under a different module's internal tree, so the
+// on-disk shape is duplicated here rather than shared.
+const pidLinePrefix = "pid="
+
+// parseAdvertisement parses a daemon.addr payload into its bare address and,
+// when present, its advertiser's pid. pidKnown is false for a legacy
+// bare-address file, which names no pid — the same forward-compatible
+// contract daemonaddr.ParseAdvertisement implements.
+func parseAdvertisement(raw string) (address string, pid int, pidKnown bool) {
+	address = addressLine(raw)
+	for i, line := range strings.Split(raw, "\n") {
+		if i == 0 {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(trimmed, pidLinePrefix); ok {
+			if parsed, err := strconv.Atoi(strings.TrimSpace(rest)); err == nil {
+				pid, pidKnown = parsed, true
+			}
+		}
+	}
+	return address, pid, pidKnown
+}
+
+// processAlive reports whether pid names a live process, via the null signal:
+// ESRCH means the process is gone, EPERM means it exists but is owned by
+// someone else (still alive), and a nil error means it exists and is ours to
+// signal. This mirrors the liveness check daemon/internal/shimclient already
+// uses for an adopted shim's process group.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func validateAddress(address string) error {
