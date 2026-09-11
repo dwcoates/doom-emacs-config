@@ -195,7 +195,7 @@ describe("the workspace lock", () => {
       reuse: first.dirs,
       argv: [
         "--listen",
-        path.join(first.dirs.root, "shim-second.sock"),
+        path.join(first.dirs.root, "00000000000000a3.sock"),
         "--store-socket",
         first.dirs.storeSocket,
         "--log-fd",
@@ -423,17 +423,69 @@ describe("the durable log sink", () => {
     expect(serving.agent_repl_session_id).toBe("host-correlation-probe");
   });
 
-  test("without AGENT_REPL_SESSION_ID the shim names itself shim-<workspace-md5-8>-<pid>", async () => {
-    // The self-name CORRELATES: the workspace key is the same md5 prefix the
-    // lock file uses, so a log line, a lock file and a process match up with no
-    // session id in play at all.
+  test("without AGENT_REPL_SESSION_ID the shim names itself shim-<workspace-id>-<pid>", async () => {
+    // The self-name CORRELATES WITH THE DAEMON: it is keyed by the daemon's own
+    // workspace id -- the one this shim's listen socket is named after and the
+    // one every record's `workspace_id` carries -- so a self-named record joins
+    // the daemon's records for the same workspace with no session id in play.
+    // Keyed by the shim's md5 prefix it joined nothing outside this process.
     const shim = await spawnShim({ env: { AGENT_REPL_SESSION_ID: undefined } });
 
     const serving = await shim.log.record((record) => record.context.outcome === "serving");
 
     expect(serving.agent_repl_session_id).toBe(
-      `shim-${workspaceLockKey(workspaceRealPath(shim.dirs))}-${String(shim.child.pid)}`,
+      `shim-${path.basename(shim.dirs.listen, ".sock")}-${String(shim.child.pid)}`,
     );
+  });
+
+  test("every record carries the daemon's workspace id, read off the listen socket", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+
+    // Act.
+    const serving = await shim.log.record((record) => record.context.outcome === "serving");
+
+    // Assert.
+    expect(serving.workspace_id).toBe(path.basename(shim.dirs.listen, ".sock"));
+  });
+
+  test("every record keeps the shim's own md5 workspace key beside it", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+
+    // Act.
+    const serving = await shim.log.record((record) => record.context.outcome === "serving");
+
+    // Assert.
+    expect(serving.context.shim_workspace_hash).toBe(
+      workspaceLockKey(workspaceRealPath(shim.dirs)),
+    );
+  });
+
+  test("a listen socket that is not named after a workspace id is refused", async () => {
+    // A SPAWN-CONTRACT DISAGREEMENT, exactly like an unrecognized flag: the
+    // daemon always names the socket after the workspace, and a record filed
+    // under a workspace the fleet never heard of is worse than a refusal.
+    // Arrange.
+    const dirs = makeDirectories();
+
+    // Act.
+    const run = await runShim(
+      [
+        "--listen",
+        path.join(dirs.root, "not-a-workspace-id.sock"),
+        "--store-socket",
+        dirs.storeSocket,
+        "--log-fd",
+        "3",
+        "--fake",
+      ],
+      servingEnv(dirs),
+    );
+
+    // Assert.
+    expect(run.exit.code).not.toBe(0);
+    expect(run.stderr).toContain("not named after a workspace id");
   });
 
   test("a poisoned log sink keeps the shim serving and surfaces log_sink_poisoned", async () => {

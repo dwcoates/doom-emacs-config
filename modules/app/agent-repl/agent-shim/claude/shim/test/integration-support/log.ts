@@ -28,6 +28,9 @@ export interface LogRecord {
   readonly message: string;
   readonly context: Record<string, unknown>;
   readonly pid: number;
+  readonly workspace_dir: string;
+  /** The DAEMON's 16-hex workspace id, read off the shim's own listen socket. */
+  readonly workspace_id: string;
   readonly agent_repl_session_id: string;
   readonly claude_session_id?: string;
 }

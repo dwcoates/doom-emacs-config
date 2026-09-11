@@ -160,7 +160,10 @@ export function makeDirectories(): ShimDirectories {
     lockDir: path.join(root, "locks"),
     spoolRoot: path.join(root, "spool"),
     logPath: path.join(root, "shim.log"),
-    listen: path.join(root, "shim.sock"),
+    // NAMED AFTER A WORKSPACE ID, exactly as the daemon names it: the shim
+    // reads `workspace_id` off this basename and refuses a socket that does not
+    // spell one.
+    listen: path.join(root, "00000000000000a1.sock"),
     storeSocket: path.join(root, "store.sock"),
   };
   for (const dir of [dirs.workspace, dirs.configDir, dirs.stateDir, dirs.lockDir, dirs.spoolRoot]) {

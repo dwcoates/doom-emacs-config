@@ -73,7 +73,9 @@ interface Spawned {
 /** Spawn `dist/main.js` exactly the way the daemon does, in a fresh scratch tree. */
 function spawnShim(tag: string): Spawned {
   const scratch = mkdtempSync(path.join(os.tmpdir(), `shim-dist-smoke-${tag}-`));
-  const listen = path.join(scratch, "shim.sock");
+  // The daemon names this socket after the workspace id, and the shim reads
+  // `workspace_id` back off the basename, so the smoke spells it the same way.
+  const listen = path.join(scratch, "00000000000000a2.sock");
   const storeSocket = path.join(scratch, "store.sock");
   const logPath = path.join(scratch, "shim.log");
   const workspace = path.join(scratch, "workspace");
