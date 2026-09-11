@@ -3716,3 +3716,84 @@ void function from this suite."
         (agent-repl--on-close)
         ;; Assert
         (should (equal agent-repl-roster--tab-order '("b" "a")))))))
+
+;;;; ---- Tests: panels-any-visible-p ----
+
+(ert-deftest agent-repl-test-panels-any-visible-input-only ()
+  "panels-any-visible-p is non-nil when only the input panel is visible."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--input-visible-p) (lambda () t))
+              ((symbol-function 'agent-repl--view-visible-p) (lambda () nil)))
+      (should (agent-repl--panels-any-visible-p)))))
+
+(ert-deftest agent-repl-test-panels-any-visible-view-only ()
+  "panels-any-visible-p is non-nil when only the agent view is visible."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--input-visible-p) (lambda () nil))
+              ((symbol-function 'agent-repl--view-visible-p) (lambda () t)))
+      (should (agent-repl--panels-any-visible-p)))))
+
+(ert-deftest agent-repl-test-panels-any-visible-neither ()
+  "panels-any-visible-p is nil when no panel is visible."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--input-visible-p) (lambda () nil))
+              ((symbol-function 'agent-repl--view-visible-p) (lambda () nil)))
+      (should-not (agent-repl--panels-any-visible-p)))))
+
+;;;; ---- Tests: single-press close (agent-repl--toggle) ----
+
+(ert-deftest agent-repl-test-panels-toggle-closes-in-one-press-input-only ()
+  "One `SPC o c' closes when only the input composer is visible.
+Point-in-input / webview-window-absent is the case the old
+webview-only check let fall through to a re-show, forcing a second
+press."
+  (agent-repl-test--with-clean-state
+    (let ((close-calls 0)
+          (show-checked nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "tw"))
+                ((symbol-function 'agent-repl--ws-frontend) (lambda (_ws) nil))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'agent-repl--input-visible-p) (lambda () t))
+                ((symbol-function 'agent-repl--view-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl-frontend-running-p-fn)
+                 (lambda (_fe) (lambda (_ws) (setq show-checked t) t))))
+        (agent-repl--toggle (lambda () (cl-incf close-calls)))
+        (should (= close-calls 1))
+        (should-not show-checked)))))
+
+(ert-deftest agent-repl-test-panels-toggle-closes-in-one-press-webview-visible ()
+  "One `SPC o c' closes when the webview window is present."
+  (agent-repl-test--with-clean-state
+    (let ((close-calls 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "tw"))
+                ((symbol-function 'agent-repl--ws-frontend) (lambda (_ws) nil))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'agent-repl--input-visible-p) (lambda () t))
+                ((symbol-function 'agent-repl--view-visible-p) (lambda () t)))
+        (agent-repl--toggle (lambda () (cl-incf close-calls)))
+        (should (= close-calls 1))))))
+
+(ert-deftest agent-repl-test-panels-toggle-does-not-close-when-hidden ()
+  "With no panel visible the toggle opens rather than taking the close branch."
+  (agent-repl-test--with-clean-state
+    (let* ((close-calls 0)
+           (opened nil)
+           (fe (agent-repl-frontend-create
+                :name 'gui
+                :running-p-fn (lambda (_ws) nil)
+                :open-fn (lambda (_ws) (setq opened t) :done))))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "tw"))
+                ((symbol-function 'agent-repl--ws-frontend) (lambda (_ws) fe))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'agent-repl--input-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--view-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--open-progress-active-p)
+                 (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--open-progress-start) #'ignore)
+                ((symbol-function 'agent-repl--panels-ensure-host-subscription)
+                 (lambda (_ws) t))
+                ((symbol-function 'agent-repl--settle-placeholder)
+                 (lambda (_ws outcome) outcome)))
+        (agent-repl--toggle (lambda () (cl-incf close-calls)))
+        (should (= close-calls 0))
+        (should opened)))))

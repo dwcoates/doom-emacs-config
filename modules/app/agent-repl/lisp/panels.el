@@ -170,6 +170,21 @@ window is selected so the user can start typing immediately."
      "panels-visible-p: result=%s" (if result "visible" "hidden"))
     result))
 
+(defun agent-repl--panels-any-visible-p ()
+  "Return non-nil when EITHER the input panel or the agent view is visible.
+`agent-repl--panels-visible-p' requires BOTH windows; the toggle's close
+branch uses THIS so a single `SPC o c' closes whenever any panel is on
+screen.  A both-visible close check let the input-only case (webview
+window gone, or a no-ref open that showed only the composer) fall
+through to a re-show branch, so the first press re-opened and only the
+second closed — the two-press-to-close bug."
+  (let ((result (or (agent-repl--input-visible-p)
+                    (agent-repl--view-visible-p))))
+    (agent-repl--log-verbose
+     '(:agent-repl-context "panel visibility can be checked outside a workspace")
+     "panels-any-visible-p: result=%s" (if result "visible" "hidden"))
+    result))
+
 ;;;; Panel display and hide
 
 ;; `agent-repl--safe-buffer-name' now lives in window.el, the layer below
@@ -1142,7 +1157,6 @@ already closed / never-started should still mark it `:inactive' and
 push it to the back, not re-show or launch the agent."
   (let* ((ws (agent-repl--ws-current-name))
          (fe (agent-repl--ws-frontend ws))
-         (webview (agent-repl--ws-get ws :frontend-buffer))
          (selection (when (use-region-p)
                      (buffer-substring-no-properties (region-beginning) (region-end)))))
     (agent-repl--log ws "agent-repl selection=%s always-close=%s"
@@ -1163,7 +1177,13 @@ push it to the back, not re-show or launch the agent."
      (always-close
       (agent-repl--log ws "toggle: branch=always-close")
       (funcall close-fn))
-     ((and (buffer-live-p webview) (get-buffer-window webview))
+     ;; A single press closes whenever EITHER panel is on screen.  The
+     ;; old check keyed on the WEBVIEW window alone, so an input-only
+     ;; layout (composer up, webview window gone, or a no-ref open that
+     ;; showed only the composer) skipped this branch and fell through to
+     ;; the show branch below — re-opening on the first press and closing
+     ;; only on the second.
+     ((agent-repl--panels-any-visible-p)
       (agent-repl--log ws "toggle: branch=close")
       (funcall close-fn))
      ;; An open is ALREADY in flight for this workspace.  Re-show the
