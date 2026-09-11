@@ -127,9 +127,16 @@ workspace -- and a runtime that cannot resolve it refuses the record rather
 than substituting a path-derived stand-in, so a reader grouping by
 `workspace_id` sees one group per workspace across every runtime.
 
+Emacs receives the id from the daemon's roster push, which writes each row's
+ref (carrying its `:id`) onto the workspace. A record Emacs writes BEFORE that
+push has reached the workspace omits `workspace_id` entirely and is attributed
+by `workspace_dir` alone; it never carries a path-derived stand-in, which would
+split one workspace across two groups in a harvest.
+
 The workspace directory hash md5hex(clean absolute dir)[:8] -- the
 shim-held kernel lock file's derivation -- is separate evidence and travels in
-`context` as `workspace_dir_hash`. It is never a `workspace_id`.
+`context` as `workspace_dir_hash`, on every workspace record of every runtime.
+It is never a `workspace_id`.
 
 Identity fields are included whenever the owning runtime knows them:
 
