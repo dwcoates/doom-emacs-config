@@ -163,6 +163,10 @@ type Deps struct {
 	// StartSession starts a session for a workspace that has none, under the
 	// lease, because a configured prompt needs one (revival-is-implicit).
 	StartSession StartSessionFunc
+	// StopSession ends and reaps a merged workspace's session before its
+	// worktree is removed. The process must lose its working directory only
+	// after it has stopped writing through it.
+	StopSession StopSessionFunc
 	// PublishRegistry republishes the roster's DURABLE half. A landed merge
 	// stamps merged_at and closes the workspace in the registry, and the
 	// roster's `recently_merged` section is composed from exactly those
@@ -241,6 +245,10 @@ type ScriptRunner interface {
 // StartSessionFunc starts a workspace's session under the merge lease, for a
 // workspace that has none but has a configured prompt to run.
 type StartSessionFunc func(ctx context.Context, ws ids.WorkspaceID) error
+
+// StopSessionFunc ends and reaps one workspace session. Force is true when a
+// landed merge is retiring the worktree the process runs inside.
+type StopSessionFunc func(ctx context.Context, ws ids.WorkspaceID, force bool) error
 
 // OccupancyFunc takes the shim client's occupancy guard for a workspace,
 // returning the release. It reports false when the workspace has no live shim,
