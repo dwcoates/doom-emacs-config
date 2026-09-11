@@ -162,15 +162,25 @@ environment. Every flag is optional.
    adopting a workspace is the moment it starts writing that workspace's rows,
    and the incumbent stopped writing them at its transfer notice, so the
    one-writer invariant holds across the swap;
-8. the component graph, then `boot.Sequence.Run`: adopt the shims whose
-   workspace lock is still held (never kill-and-restart), reconcile the intent
+8. the component graph, then `boot.Sequence.Run`: CLOSE every open workspace
+   whose directory is gone (a row naming a path that is not there is a tab
+   Emacs cannot serve; counted as `missing_dir_closed`, and a stat that does
+   not say "not exist" is never read as gone), adopt the shims whose
+   workspace lock is still held (never kill-and-restart, and EVERY survivor is
+   dialled concurrently so one adoption bound covers the whole boot), reconcile the intent
    manifest (all four dispositions persisted as faults), restore the holds
    all-or-nothing, close the orphaned turns of the CLIENT-LESS workspaces in one
    transaction each (an adopted workspace's in-flight turns are re-opened by its
    sessionwatcher instead), recover the in-flight merges, and — for a successor
-   — `rollout.Controller.Join`;
+   — `rollout.Controller.Join`. A JOINING SUCCESSOR RECONCILES NOTHING, so the
+   missing-directory close is also done by `verbs.PublishRegistry`, the walk
+   that publishes the opening roster;
 9. `server.New` behind `server.H2C` on the claimed listener;
-10. an orderly exit on SIGINT/SIGTERM: the advertisement is withdrawn, the
+10. an orderly exit on SIGINT/SIGTERM: the advertisement is withdrawn (only
+    while it still names THIS daemon's address, so a handover successor's
+    advertisement survives its predecessor's exit; recorded at INFO either
+    way, and a boot that finds an address nobody answers records the stale one
+    at WARN before overwriting it), the
     streams are closed, the BACKGROUND LOOPS and the PROMPT QUEUE's own
     goroutines are joined (both bounded by `loopJoinBound`, 2s, and an overrun
     is reported, never waited on), and then
