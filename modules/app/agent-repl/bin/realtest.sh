@@ -242,10 +242,20 @@ note "every listening shim carries $VENDOR_GUARD_ENV"
 # ---- the backups ----------------------------------------------------------
 #
 # Before the takeover, unconditionally, and before anything is launched. See
-# lib-realtest-backup.sh for why an existing backup is never overwritten.
+# lib-realtest-backup.sh for why an existing backup is never overwritten, why
+# the copy is a clone rather than a full copy, and why it is pruned after.
 
 WSM_DB="$HOME/.claude-emacs/wsm.db"
 EVENTS_DB="$HOME/.cache/agent-repl/store/events.db"
+
+# A clone still needs a floor of real free space for its own metadata and for
+# the -wal/-shm plain-copy fallback; this is a cheap sanity floor, not the
+# thing that makes backups affordable (the clone is).
+readonly BACKUP_FREE_FLOOR_KIB=$((2 * 1024 * 1024))
+BACKUP_FREE_KIB="$(realtest_free_kib "$HOME")"
+if [ -n "$BACKUP_FREE_KIB" ] && [ "$BACKUP_FREE_KIB" -lt "$BACKUP_FREE_FLOOR_KIB" ]; then
+    decline "only ${BACKUP_FREE_KIB}KiB free on the volume backing \$HOME; a backup needs headroom even as a clone, and this run stops before touching anything with less than 2GiB free"
+fi
 
 note "backing up the owner's live state, stamp $RUN_STAMP"
 BACKUPS=""
@@ -263,6 +273,22 @@ printf '%s\n' "$BACKUPS" | while IFS= read -r path; do
     [ -n "$path" ] && printf '  %s\n' "$path"
 done
 printf '%s\n' "$BACKUPS" > "$RUN_DIR/backups.txt"
+
+# Prune AFTER a successful backup, never before: a run that is about to
+# decline over a failed backup must not first destroy an older one that a
+# human might still need to fall back to.
+BACKUP_KEEP="${AGENT_REPL_REALTEST_BACKUP_KEEP:-3}"
+note "pruning backups, keeping the $BACKUP_KEEP most recent set per database"
+PRUNED="$(realtest_prune_backups "$WSM_DB" "$BACKUP_KEEP")
+$(realtest_prune_backups "$EVENTS_DB" "$BACKUP_KEEP")"
+if [ -n "$(printf '%s' "$PRUNED" | tr -d '[:space:]')" ]; then
+    printf '[realtest] backups pruned:\n'
+    printf '%s\n' "$PRUNED" | while IFS= read -r path; do
+        [ -n "$path" ] && printf '  %s\n' "$path"
+    done
+else
+    note "nothing to prune"
+fi
 
 # ---- refusal 2: a human is using Emacs ------------------------------------
 

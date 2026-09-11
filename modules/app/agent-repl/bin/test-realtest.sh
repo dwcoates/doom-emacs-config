@@ -40,6 +40,38 @@ SCRATCH="$(mktemp -d)"
 cleanup() { rm -rf "$SCRATCH"; }
 trap cleanup EXIT
 
+# fake_cp_dir MODE — a directory holding a fake `cp` ahead of the real one on
+# PATH. "real" logs every invocation (to $STUB_CP_LOG, when set) and then
+# performs the real copy. "clone-fail" fails any invocation carrying `-c`
+# (simulating a non-APFS volume or a `cp` that does not understand the flag)
+# but performs the real copy otherwise. "total-fail" never copies anything.
+fake_cp_dir() {
+    local mode="$1" dir
+    dir="$SCRATCH/fake-cp-$mode/bin"
+    mkdir -p "$dir"
+    cat > "$dir/cp" <<STUB
+#!/usr/bin/env bash
+if [ -n "\${STUB_CP_LOG:-}" ]; then
+    printf '%s\n' "\$*" >> "\$STUB_CP_LOG"
+fi
+case "$mode" in
+    total-fail)
+        exit 1
+        ;;
+    clone-fail)
+        for a in "\$@"; do
+            case "\$a" in
+                -c) exit 1 ;;
+            esac
+        done
+        ;;
+esac
+exec /bin/cp "\$@"
+STUB
+    chmod +x "$dir/cp"
+    printf '%s' "$dir"
+}
+
 # ---- the backup helper ----------------------------------------------------
 
 test_backup_copies_the_database() {
@@ -144,6 +176,156 @@ test_backup_refuses_a_missing_stamp() {
     pass "$name"
 }
 
+test_backup_uses_a_clone() {
+    local name="the backup helper asks cp for a clone (-c) rather than a plain copy"
+    local dir="$SCRATCH/backup-clone-flag"
+    mkdir -p "$dir"
+    printf 'workspaces' > "$dir/wsm.db"
+    local cpdir logfile out status=0
+    cpdir="$(fake_cp_dir real)"
+    logfile="$SCRATCH/cp-args-clone"
+    : > "$logfile"
+
+    out="$(PATH="$cpdir:$PATH" STUB_CP_LOG="$logfile" realtest_backup_database "$dir/wsm.db" 20260911-000000 2>&1)" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "the helper failed: $out"
+        return
+    fi
+    if ! grep -q -- '-c' "$logfile"; then
+        fail "$name" "cp was never invoked with -c: $(cat "$logfile")"
+        return
+    fi
+    pass "$name"
+}
+
+test_clone_failure_falls_back_to_plain_copy() {
+    local name="a clone (-c) failure falls back to a plain copy rather than failing the backup"
+    local dir="$SCRATCH/backup-clone-fail"
+    mkdir -p "$dir"
+    printf 'the live database bytes' > "$dir/wsm.db"
+    local cpdir out status=0
+    cpdir="$(fake_cp_dir clone-fail)"
+
+    out="$(PATH="$cpdir:$PATH" realtest_backup_database "$dir/wsm.db" 20260911-000000 2>&1)" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "the helper failed instead of falling back: $out"
+        return
+    fi
+    if [ ! -f "$dir/wsm.db.realtest-bak-20260911-000000" ]; then
+        fail "$name" "no backup was written after the fallback"
+        return
+    fi
+    if [ "$(cat "$dir/wsm.db.realtest-bak-20260911-000000")" != "the live database bytes" ]; then
+        fail "$name" "the fallback copy does not hold the source's bytes"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'falling back to a plain copy'; then
+        fail "$name" "the fallback was not noted: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_total_copy_failure_fails_the_backup() {
+    local name="a total copy failure (clone and fallback both fail) still fails the backup"
+    local dir="$SCRATCH/backup-total-fail"
+    mkdir -p "$dir"
+    printf 'db' > "$dir/wsm.db"
+    local cpdir out status=0
+    cpdir="$(fake_cp_dir total-fail)"
+
+    out="$(PATH="$cpdir:$PATH" realtest_backup_database "$dir/wsm.db" 20260911-000000 2>&1)" || status=$?
+    if [ "$status" -eq 0 ]; then
+        fail "$name" "the helper succeeded despite every copy attempt failing"
+        return
+    fi
+    if [ -e "$dir/wsm.db.realtest-bak-20260911-000000" ]; then
+        fail "$name" "a backup file exists despite every copy attempt failing"
+        return
+    fi
+    pass "$name"
+}
+
+test_prune_keeps_n_most_recent() {
+    local name="pruning keeps only the N most recent backup sets"
+    local dir="$SCRATCH/prune-keep"
+    mkdir -p "$dir"
+    printf 'db' > "$dir/wsm.db"
+    local s
+    for s in 20260911-000001 20260911-000002 20260911-000003 20260911-000004 20260911-000005; do
+        realtest_backup_database "$dir/wsm.db" "$s" >/dev/null
+    done
+
+    realtest_prune_backups "$dir/wsm.db" 3 >/dev/null
+
+    local kept=0 f
+    for f in "$dir/wsm.db.realtest-bak-"*; do
+        [ -e "$f" ] && kept=$((kept + 1))
+    done
+    if [ "$kept" -ne 3 ]; then
+        fail "$name" "expected 3 sets kept, found $kept"
+        return
+    fi
+    if [ ! -f "$dir/wsm.db.realtest-bak-20260911-000005" ] ||
+       [ ! -f "$dir/wsm.db.realtest-bak-20260911-000004" ] ||
+       [ ! -f "$dir/wsm.db.realtest-bak-20260911-000003" ]; then
+        fail "$name" "the newest three sets were not the ones kept"
+        return
+    fi
+    if [ -e "$dir/wsm.db.realtest-bak-20260911-000001" ] ||
+       [ -e "$dir/wsm.db.realtest-bak-20260911-000002" ]; then
+        fail "$name" "an older set survived pruning"
+        return
+    fi
+    pass "$name"
+}
+
+test_prune_deletes_wal_and_shm_siblings() {
+    local name="pruning an old set deletes its -wal and -shm siblings too"
+    local dir="$SCRATCH/prune-siblings"
+    mkdir -p "$dir"
+    printf 'db' > "$dir/wsm.db"
+    printf 'wal' > "$dir/wsm.db-wal"
+    realtest_backup_database "$dir/wsm.db" 20260911-000001 >/dev/null
+    rm -f "$dir/wsm.db-wal"
+    realtest_backup_database "$dir/wsm.db" 20260911-000002 >/dev/null
+
+    realtest_prune_backups "$dir/wsm.db" 1 >/dev/null
+
+    if [ -e "$dir/wsm.db.realtest-bak-20260911-000001" ] || [ -e "$dir/wsm.db-wal.realtest-bak-20260911-000001" ]; then
+        fail "$name" "the older set (db or its -wal sibling) survived pruning"
+        return
+    fi
+    if [ ! -f "$dir/wsm.db.realtest-bak-20260911-000002" ]; then
+        fail "$name" "the kept set was removed"
+        return
+    fi
+    pass "$name"
+}
+
+test_prune_defaults_to_keeping_three() {
+    local name="pruning with no keep count given keeps 3 (realtest.sh's default)"
+    local dir="$SCRATCH/prune-default"
+    mkdir -p "$dir"
+    printf 'db' > "$dir/wsm.db"
+    local s
+    for s in 20260911-000001 20260911-000002 20260911-000003 20260911-000004; do
+        realtest_backup_database "$dir/wsm.db" "$s" >/dev/null
+    done
+
+    realtest_prune_backups "$dir/wsm.db" "${AGENT_REPL_REALTEST_BACKUP_KEEP:-3}" >/dev/null
+
+    local kept=0 f
+    for f in "$dir/wsm.db.realtest-bak-"*; do
+        [ -e "$f" ] && kept=$((kept + 1))
+    done
+    if [ "$kept" -ne 3 ]; then
+        fail "$name" "expected 3 sets kept by default, found $kept"
+        return
+    fi
+    pass "$name"
+}
+
 # ---- the script's refusals ------------------------------------------------
 
 # scratch_bin CASE — a copy of realtest.sh beside stub siblings, so THIS_DIR
@@ -228,7 +410,18 @@ done < "$STUB_PROCS"
 exit 1
 STUB
 
-    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps"
+    # STUB_CP_MODE lets a case make every copy fail (total-fail) without
+    # touching the other stubs; unset or any other value passes through to
+    # the real cp untouched.
+    cat > "$dir/cp" <<'STUB'
+#!/usr/bin/env bash
+case "${STUB_CP_MODE:-}" in
+    total-fail) exit 1 ;;
+esac
+exec /bin/cp "$@"
+STUB
+
+    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp"
     printf '%s' "$dir"
 }
 
@@ -381,6 +574,29 @@ test_runs_when_nothing_stands_in_the_way() {
     pass "$name"
 }
 
+test_declines_when_the_backup_copy_totally_fails() {
+    local name="the script DECLINES when the state backup cannot be copied at all"
+    local dir out status=0
+    dir="$(scratch_bin backup-copy-fails)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    out="$(STUB_CP_MODE=total-fail run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'could not be backed up'; then
+        fail "$name" "the refusal does not say the backup failed: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "the run was reached despite the backup failure"
+        return
+    fi
+    pass "$name"
+}
+
 test_records_the_deployed_revisions() {
     local name="the script records the deployed revisions it measured"
     local dir status=0
@@ -527,9 +743,16 @@ test_backup_carries_the_wal_siblings
 test_backup_refuses_to_overwrite
 test_backup_absent_file_is_not_a_failure
 test_backup_refuses_a_missing_stamp
+test_backup_uses_a_clone
+test_clone_failure_falls_back_to_plain_copy
+test_total_copy_failure_fails_the_backup
+test_prune_keeps_n_most_recent
+test_prune_deletes_wal_and_shm_siblings
+test_prune_defaults_to_keeping_three
 test_declines_when_a_system_is_not_deployed
 test_declines_when_emacs_is_running_without_a_takeover
 test_backs_up_before_refusing_the_takeover
+test_declines_when_the_backup_copy_totally_fails
 test_runs_when_nothing_stands_in_the_way
 test_records_the_deployed_revisions
 test_declines_when_the_daemon_lacks_the_guard
