@@ -239,7 +239,10 @@ export class RecordingPersistence implements Persistence {
     this.durable.push(...entries);
     return Promise.resolve();
   }
+  /** What `write` throws, the way a row the writer cannot envelope does. */
+  writeThrows: Error | undefined;
   write(entries: PersistEntry[]): void {
+    if (this.writeThrows !== undefined) throw this.writeThrows;
     this.buffered.push(...entries);
   }
   /** Every pointer a reading session was asked to conclude through. */
@@ -361,6 +364,27 @@ export class RecordingPersistence implements Persistence {
       reason,
       beganAtMs: 1n,
       extent: { case: "open", value: create(conversationv1.SessionDegradedOpenSchema, {}) },
+    });
+    for (const listener of this.windowListeners) listener(window);
+  }
+  /**
+   * Close that window, the way the writer does when the store answers again.
+   *
+   * The writer announces the SAME window twice — open, then closed — and the
+   * closed announcement is the record plane's only statement that it recovered.
+   */
+  closeDegradedWindow(reason: string, droppedCount: number): void {
+    const window = create(conversationv1.SessionDegradedWindowSchema, {
+      component: "store-writer",
+      reason,
+      beganAtMs: 1n,
+      extent: {
+        case: "closed",
+        value: create(conversationv1.SessionDegradedClosedSchema, {
+          endedAtMs: 2n,
+          droppedCount: BigInt(droppedCount),
+        }),
+      },
     });
     for (const listener of this.windowListeners) listener(window);
   }

@@ -227,8 +227,42 @@ interface OpenBashWatcher {
  */
 const WATCHER_CONCLUSION_BUDGET_MS = 1_000;
 
-/** The component name the log sink's own fault and degraded window carry. */
+/**
+ * The component name the log sink's own fault and degraded window carry.
+ *
+ * PERMANENT BY NATURE. Nothing restores a lost record, so this component has
+ * no recovery path and is the one fault meant to stand for the shim's life.
+ */
 const LOG_SINK_COMPONENT = "log-sink";
+
+/**
+ * ONE COMPONENT PER OPERATION THAT CAN FAULT, and why that matters.
+ *
+ * A recovery is stated per COMPONENT — `SessionPushes.resolveComponent` clears
+ * every standing fault a component holds — so a component shared by several
+ * operations makes one of them succeeding clear another's fault. Every
+ * fault-raising operation here therefore has its own name, and two names are
+ * shared ONLY where the operation genuinely is the same one: both readers of
+ * the record's open obligations answer to {@link LIVE_WORK_COMPONENT}, because
+ * either of them answering proves the store is reading again.
+ *
+ * The one component with NO recovery is {@link VENDOR_QUERY_COMPONENT}: a query
+ * this process lost is not restarted by this process, so its fault is
+ * permanent for the session by design rather than by omission.
+ */
+const VENDOR_QUERY_COMPONENT = "vendor-query";
+/** The context-usage probe: transient, recovered by the next sample. */
+const CONTEXT_USAGE_COMPONENT = "vendor-context-usage";
+/** The mcp health probe: transient, recovered by the next probe. */
+const MCP_STATUS_COMPONENT = "vendor-mcp-status";
+/** The model catalog read: transient, recovered by a later StartSession's read. */
+const MODEL_CATALOG_COMPONENT = "vendor-model-catalog";
+/** Reading the record's open obligations: transient, recovered by any later read. */
+const LIVE_WORK_COMPONENT = "store-live-work";
+/** Serving history out of the store: transient, recovered by the next served read. */
+const HISTORY_READ_COMPONENT = "shim-store-reader";
+/** The shim's own keep-alive prompt: transient, recovered by the next beat. */
+const KEEPALIVE_COMPONENT = "shim-engine-keepalive";
 
 /** How often the account's rate-limit windows are sampled. */
 const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
@@ -382,8 +416,22 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   deps.persistence.onFault((fault) => {
     pushes.fault(fault);
   });
+  // A CLOSED WINDOW IS A RECOVERY, NOT A SECOND OUTAGE. The record plane
+  // announces its window twice -- open when the store stops answering, closed
+  // when it answers again -- and relaying both as fresh windows left the
+  // session holding two windows for one outage AND a `store_unreachable` fault
+  // that nothing ever lifted. The closed announcement resolves the component
+  // instead: it closes the window already standing and clears the faults that
+  // window explains.
   deps.persistence.onDegradedWindow((window) => {
-    pushes.recordDegradedWindow(window);
+    if (window.extent.case !== "closed") {
+      pushes.recordDegradedWindow(window);
+      return;
+    }
+    const dropped = Number(window.extent.value.droppedCount);
+    if (!pushes.resolveComponent(window.component, dropped)) {
+      pushes.recordDegradedWindow(window);
+    }
   });
   // THE SHIM'S OWN LOG DYING IS A SESSION FACT. Once fd 3 is gone the shim has
   // no durable channel left to complain through, so WatchSession is the only
@@ -762,11 +810,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (active === undefined) return;
     try {
       pushes.push(contextUsageUpdate(await active.getContextUsage()));
+      // THE SAME OPERATION SUCCEEDING IS THE RECOVERY. A probe that answers
+      // proves the last refusal was a moment, not a state.
+      pushes.resolveComponent(CONTEXT_USAGE_COMPONENT, 0);
     } catch (err) {
       pushes.fault(
         sessionFault(
           { kind: "vendorQueryFailed" },
-          "shim-engine-session",
+          CONTEXT_USAGE_COMPONENT,
           `getContextUsage failed: ${err instanceof Error ? err.message : String(err)}`,
         ),
       );
@@ -898,6 +949,30 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (standingDown) return;
     await pushAccountUsage();
     await pushMcpServerStatus();
+    // THE CATALOG IS PULLED LIKE THE REST, so it is re-read like the rest. It
+    // was read exactly once, at StartSession, which made a single refusal there
+    // two permanent things at once: a session with no model list to offer, and
+    // an unhealthy verdict no later success could lift. A re-read is also the
+    // honest answer to a catalog that changed under the account.
+    await pushModelCatalog();
+  }
+
+  /** Re-read the account's model list, and state the health of that read. */
+  async function pushModelCatalog(): Promise<void> {
+    const active = query;
+    if (active === undefined) return;
+    try {
+      modelCatalog = modelOptions(await active.supportedModels());
+      pushes.resolveComponent(MODEL_CATALOG_COMPONENT, 0);
+    } catch (err) {
+      pushes.fault(
+        sessionFault(
+          { kind: "vendorQueryFailed" },
+          MODEL_CATALOG_COMPONENT,
+          `supportedModels failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    }
   }
 
   /** Probe every declared mcp server's health and state each one. */
@@ -906,11 +981,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (active === undefined) return;
     try {
       for (const status of await active.mcpServerStatus()) pushes.push(mcpUpdate(status));
+      pushes.resolveComponent(MCP_STATUS_COMPONENT, 0);
     } catch (err) {
       pushes.fault(
         sessionFault(
           { kind: "vendorQueryFailed" },
-          "shim-engine-session",
+          MCP_STATUS_COMPONENT,
           `mcpServerStatus failed: ${err instanceof Error ? err.message : String(err)}`,
         ),
       );
@@ -1398,7 +1474,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     writeQueryDeathTerminal(detail);
     open = undefined;
     cadence?.stop();
-    pushes.fault(sessionFault({ kind: "vendorQueryFailed" }, "shim-engine-session", detail));
+    // NO RECOVERY PATH, DELIBERATELY. Nothing in this process restarts a query
+    // it lost, so this fault is meant to stand for the session's life -- and it
+    // holds its own component so a probe that still answers cannot clear it.
+    pushes.fault(sessionFault({ kind: "vendorQueryFailed" }, VENDOR_QUERY_COMPONENT, detail));
   }
 
   // -- submission -----------------------------------------------------------
@@ -1669,17 +1748,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     started = true;
     const active = query;
     if (active !== undefined) {
-      try {
-        modelCatalog = modelOptions(await active.supportedModels());
-      } catch (err) {
-        pushes.fault(
-          sessionFault(
-            { kind: "vendorQueryFailed" },
-            "shim-engine-session",
-            `supportedModels failed: ${err instanceof Error ? err.message : String(err)}`,
-          ),
-        );
-      }
+      await pushModelCatalog();
       await pushMcpServerStatus();
     }
     const liveWork = await reconcile();
@@ -2028,11 +2097,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     let open;
     try {
       open = await deps.persistence.liveWork();
+      pushes.resolveComponent(LIVE_WORK_COMPONENT, 0);
     } catch (err) {
       pushes.fault(
         sessionFault(
           { kind: "storeUnreachable" },
-          "shim-engine-session",
+          LIVE_WORK_COMPONENT,
           `GetLiveWork failed: ${err instanceof Error ? err.message : String(err)}`,
         ),
       );
@@ -2186,12 +2256,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         { turn: turn.value, outcome: "keepalive_submitted" },
         "submitted one of the shim's own keep-alive prompts; its rows are recorded and never served",
       );
+      pushes.resolveComponent(KEEPALIVE_COMPONENT, 0);
     } catch (err) {
       open = undefined;
       pushes.fault(
         sessionFault(
           { kind: "keepaliveFailed" },
-          "shim-engine-keepalive",
+          KEEPALIVE_COMPONENT,
           err instanceof Error ? err.message : String(err),
         ),
       );
@@ -2216,7 +2287,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       else cadence?.pause();
     },
     reportStoreUnreachable: (detail) => {
-      pushes.fault(sessionFault({ kind: "storeUnreachable" }, "shim-store-reader", detail));
+      pushes.fault(sessionFault({ kind: "storeUnreachable" }, HISTORY_READ_COMPONENT, detail));
+    },
+    // THE SERVED READ IS THE RECOVERY. Without a counterpart to the refusal
+    // above, one history read that met a busy database made the session
+    // unhealthy for as long as the shim lived, however many reads it served
+    // afterwards.
+    reportStoreReadable: () => {
+      pushes.resolveComponent(HISTORY_READ_COMPONENT, 0);
     },
     watcherOpened: (agent, page) => {
       let settle: () => void = () => undefined;
@@ -2439,6 +2517,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function announceLiveWorkNow(): Promise<conversationv1.AgentDetachedWork[]> {
     try {
       const handles = (await deps.persistence.liveWork()).liveDetached;
+      // THE READ ANSWERING IS THE RECOVERY, whatever it answered. An empty set
+      // is as much proof the store is reading again as a full one, and
+      // resolving only on the non-empty path is why the owner's fault outlived
+      // a store that had been healthy for hours.
+      pushes.resolveComponent(LIVE_WORK_COMPONENT, 0);
       if (handles.length === 0) return [];
       // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
       // tail this description never stands.
@@ -2460,7 +2543,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       pushes.fault(
         sessionFault(
           { kind: "storeUnreachable" },
-          "shim-engine-session",
+          LIVE_WORK_COMPONENT,
           `re-announcing live work for a new WatchSession failed: ${detail}`,
         ),
       );

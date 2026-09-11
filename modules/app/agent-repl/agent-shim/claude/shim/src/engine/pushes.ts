@@ -290,7 +290,10 @@ export class SessionPushes {
       changed = true;
     }
     if (!changed) return false;
-    LOGGER.debug(
+    // INFO, NOT DEBUG. A recovery is the fact that lifts an unhealthy session,
+    // and a shim whose faults cleared while its log said nothing about it is
+    // indistinguishable, at default verbosity, from one that never recovered.
+    LOGGER.info(
       { component, dropped_count: droppedCount },
       "a component recovered; its faults are cleared and its degraded window is closed",
     );
