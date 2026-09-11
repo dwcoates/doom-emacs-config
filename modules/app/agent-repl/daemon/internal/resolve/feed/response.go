@@ -26,16 +26,19 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// direct call files what the sink would have filed.
 	s.fileAPIResponse(unit, act.GetUsage())
 	if stamp := s.apiResponseStamp(unit); stamp != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "stamp := s.apiResponseStamp(unit); stamp != \"\""})
 		fold.usage = stamp
 	}
 
 	bubble := &frontendv1.FeedResponse{}
 	if fold.usage != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "fold.usage != \"\""})
 		bubble.Usage = &frontendv1.FeedResponseUsageStamp{Text: fold.usage}
 	}
 
 	switch state := response.GetResult().(type) {
 	case *conversationv1.AgentResponse_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawResponse", "branch": "case *conversationv1.AgentResponse_Start"})
 		fold.markdown = ""
 		fold.settled = false
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
@@ -124,6 +127,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}
 	default:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawResponse", "branch": "default"})
 		return nil, errNotARow
 	}
 

@@ -69,11 +69,13 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 	separation := &frontendv1.FeedSessionSeparation{}
 	switch arm := cut.GetCut().(type) {
 	case *conversationv1.ContextCut_Cleared:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_Cleared"})
 		// The vendor's conversation-reset record carries NO token delta, so
 		// none is drawn: an invented figure would be worse than none.
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "context cleared"}
 		separation.Kind = &frontendv1.FeedSessionSeparation_Cleared{Cleared: &frontendv1.FeedContextCutCleared{}}
 	case *conversationv1.ContextCut_Compacted:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_Compacted"})
 		compacted := arm.Compacted
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: compactionLabel(compacted)}
 		separation.Kind = &frontendv1.FeedSessionSeparation_Compacted{Compacted: &frontendv1.FeedContextCutCompacted{
@@ -85,12 +87,14 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		// BOTH SIDES ARE FORMATTED HERE. The client renders them verbatim and
 		// does no arithmetic and no unit rounding of its own.
 		if tokens := compacted.GetTokens(); tokens != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "tokens := compacted.GetTokens(); tokens != nil"})
 			separation.Tokens = &frontendv1.FeedContextCutTokens{
 				BeforeText: figures.Tokens(uint64(tokens.GetTokensBefore())),
 				AfterText:  figures.Tokens(uint64(tokens.GetTokensAfter())),
 			}
 		}
 	case *conversationv1.ContextCut_CompactionFailed:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_CompactionFailed"})
 		// NOTHING WAS CUT, and the divider says so IN THE SLOT the compacted
 		// divider would have taken (landing 8): a compaction was offered and
 		// did not happen, which is neither a compaction nor silence. `tokens`
@@ -165,12 +169,14 @@ func (r *resolver) drawWorktree(s *wsState, at placement, act *conversationv1.Ag
 	unitID := act.GetActivityId().GetValue()
 	success, ok := worktree.GetState().(*conversationv1.AgentWorktree_Success)
 	if !ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 		return nil, errNotARow
 	}
 
 	separation := &frontendv1.FeedSessionSeparation{}
 	switch outcome := success.Success.GetAct().(type) {
 	case *conversationv1.AgentWorktreeSuccess_Entered:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWorktree", "branch": "case *conversationv1.AgentWorktreeSuccess_Entered"})
 		entered := outcome.Entered
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{
 			Text: "entered worktree " + entered.GetPath(),
@@ -179,10 +185,12 @@ func (r *resolver) drawWorktree(s *wsState, at placement, act *conversationv1.Ag
 			Path: &frontendv1.FeedWorktreePath{Text: entered.GetPath()},
 		}
 		if entered.Branch != nil && entered.GetBranch() != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "entered.Branch != nil && entered.GetBranch() != \"\""})
 			payload.Branch = &frontendv1.FeedWorktreeBranch{Text: entered.GetBranch()}
 		}
 		separation.Kind = &frontendv1.FeedSessionSeparation_WorktreeEntered{WorktreeEntered: payload}
 	case *conversationv1.AgentWorktreeSuccess_Exited:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWorktree", "branch": "case *conversationv1.AgentWorktreeSuccess_Exited"})
 		exited := outcome.Exited
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "left the worktree"}
 		separation.Kind = &frontendv1.FeedSessionSeparation_WorktreeLeft{WorktreeLeft: worktreeLeft(exited)}

@@ -4,6 +4,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 )
 
@@ -41,25 +42,31 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 
 	switch state := send.GetResult().(type) {
 	case *conversationv1.AgentSendMessage_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Start"})
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.sendAddressedTo = state.Start.GetAddressedTo()
 		// The summary is OPTIONAL on the wire; its absence is a fact, not a
 		// reason to reach for the body.
 		if state.Start.Summary != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.Start.Summary != nil"})
 			u.sendSummary = state.Start.GetSummary().GetText()
 		}
 	case *conversationv1.AgentSendMessage_Progress:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 	case *conversationv1.AgentSendMessage_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Success"})
 		u.sendResolved = state.Success.GetRecipientAgentId()
 		u.sendDelivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Failure"})
 		// A send that could not be delivered still HAPPENED, and its row is
 		// what explains the attempt. It is drawn against what the start said,
 		// and its delivery arm states the REFUSAL — never left unset, which a
 		// reader cannot tell apart from a producer that stated nothing.
 		u.sendDelivery = refusedOf(state.Failure)
 	default:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "default"})
 		return nil, errNotARow
 	}
 
@@ -75,6 +82,7 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	// THE DELIVERY IS THE UNIT'S, NOT THIS FRAME'S. See unitState.sendDelivery
 	// for the replay that made the difference matter.
 	if u.sendDelivery != nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.sendDelivery != nil"})
 		u.sendDelivery(row.GetAgentPrompt())
 	}
 	u.row = row
@@ -93,14 +101,18 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 //  4. the honest admission that nothing named the recipient.
 func (r *resolver) sendRecipientLabel(s *wsState, resolved *conversationv1.AgentId, addressedTo string) string {
 	if id := resolved.GetValue(); id != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id := resolved.GetValue(); id != \"\""})
 		if key, ok := s.agentFeeds[id]; ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "key, ok := s.agentFeeds[id]; ok"})
 			return feedLabel(s, key)
 		}
 	}
 	if addressedTo != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "addressedTo != \"\""})
 		return addressedTo
 	}
 	if id := resolved.GetValue(); id != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id := resolved.GetValue(); id != \"\""})
 		return id
 	}
 	return sendNotNamed

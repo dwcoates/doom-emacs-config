@@ -3,6 +3,7 @@ package footer
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/shimclient"
 )
 
@@ -38,29 +39,29 @@ var allowanceArms = []string{"allowed", "allowed_warning", "rejected"}
 //  10. waiting·wakeup — the fallback the contract admits ONLY where the footer
 //     would otherwise read idle, which is why it ranks below background.
 //  11. idle.
-func (r *resolver) status(s *wsState) *frontendv1.FooterStatus {
-	if arm := r.disconnected(s); arm != nil {
+func (r *resolver) status(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	if arm := r.disconnected(s, log); arm != nil {
 		return arm
 	}
-	if arm := r.closing(s); arm != nil {
+	if arm := r.closing(s, log); arm != nil {
 		return arm
 	}
-	if arm := r.interrupted(s); arm != nil {
+	if arm := r.interrupted(s, log); arm != nil {
 		return arm
 	}
-	if arm := r.loading(s); arm != nil {
+	if arm := r.loading(s, log); arm != nil {
 		return arm
 	}
-	if arm := r.blocked(s); arm != nil {
+	if arm := r.blocked(s, log); arm != nil {
 		return arm
 	}
-	if arm := r.merging(s); arm != nil {
+	if arm := r.merging(s, log); arm != nil {
 		return arm
 	}
-	if arm := r.waiting(s); arm != nil {
+	if arm := r.waiting(s, log); arm != nil {
 		return arm
 	}
-	if arm := r.thinking(s); arm != nil {
+	if arm := r.thinking(s, log); arm != nil {
 		return arm
 	}
 	if arm := r.background(s); arm != nil {
@@ -74,19 +75,22 @@ func (r *resolver) status(s *wsState) *frontendv1.FooterStatus {
 
 // disconnected resolves the link's step, or nil while the link serves without
 // degradation.
-func (r *resolver) disconnected(s *wsState) *frontendv1.FooterStatus {
+func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if !s.linkSeen {
 		return nil
 	}
 	arm := &frontendv1.FooterStatusDisconnected{}
 	switch {
 	case s.link == shimclient.LinkDialing:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDialing"})
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Starting{
 			Starting: &frontendv1.FooterSubStatusDisconnectedStarting{}}
 	case s.link == shimclient.LinkRedialing:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkRedialing"})
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
 			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
 	case s.link == shimclient.LinkDead && s.parked:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead && s.parked"})
 		// A PARKED SESSION IS IDLE, NOT BROKEN — the same ruling the roster
 		// states at resolve/sidebar/status.go, whose `linkArm` promises to
 		// mirror THIS step "fact for fact, so the dot and the strip cannot
@@ -100,12 +104,15 @@ func (r *resolver) disconnected(s *wsState) *frontendv1.FooterStatus {
 		// revives the session.
 		return nil
 	case s.link == shimclient.LinkDead && s.everConnected:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead && s.everConnected"})
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Dead{
 			Dead: &frontendv1.FooterSubStatusDisconnectedDead{}}
 	case s.link == shimclient.LinkDead:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead"})
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_StartFailed{
 			StartFailed: &frontendv1.FooterSubStatusDisconnectedStartFailed{}}
 	case !s.hostStream || !s.webStream:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case !s.hostStream || !s.webStream"})
 		// A HOP IS DOWN. The daemon-to-shim link serves, but one of the two
 		// client streams does not, so the workspace is not connected
 		// (daemon.md invariant 11) and the footer says so rather than drawing
@@ -113,9 +120,11 @@ func (r *resolver) disconnected(s *wsState) *frontendv1.FooterStatus {
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
 			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
 	case s.degraded:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.degraded"})
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Degraded{
 			Degraded: &frontendv1.FooterSubStatusDisconnectedDegraded{}}
 	default:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
 		return nil
 	}
 	arm.Activity = r.disconnectedActivity(s)
@@ -124,7 +133,7 @@ func (r *resolver) disconnected(s *wsState) *frontendv1.FooterStatus {
 }
 
 // closing resolves the close step, or nil when no close is blocked.
-func (r *resolver) closing(s *wsState) *frontendv1.FooterStatus {
+func (r *resolver) closing(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if s.closing == nil {
 		return nil
 	}
@@ -140,7 +149,7 @@ func (r *resolver) closing(s *wsState) *frontendv1.FooterStatus {
 }
 
 // interrupted resolves the momentary interrupted status.
-func (r *resolver) interrupted(s *wsState) *frontendv1.FooterStatus {
+func (r *resolver) interrupted(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if s.interrupted == nil {
 		return nil
 	}
@@ -158,22 +167,26 @@ func (r *resolver) interrupted(s *wsState) *frontendv1.FooterStatus {
 
 // loading resolves the momentary loading status. Its activity is REQUIRED: the
 // injection IS the status, so an item line always exists.
-func (r *resolver) loading(s *wsState) *frontendv1.FooterStatus {
+func (r *resolver) loading(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if s.loading == nil {
 		return nil
 	}
 	arm := &frontendv1.FooterStatusLoading{Activity: r.loadingActivity(s)}
 	switch s.loading.kind {
 	case loadingMemory:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case loadingMemory"})
 		arm.Substatus = &frontendv1.FooterStatusLoading_Memory{
 			Memory: &frontendv1.FooterSubStatusLoadingMemory{}}
 	case loadingInvoked:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case loadingInvoked"})
 		arm.Substatus = &frontendv1.FooterStatusLoading_Invoked{
 			Invoked: &frontendv1.FooterSubStatusLoadingInvoked{}}
 	case loadingDiscovered:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case loadingDiscovered"})
 		arm.Substatus = &frontendv1.FooterStatusLoading_Discovered{
 			Discovered: &frontendv1.FooterSubStatusLoadingDiscovered{}}
 	case loadingListing:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case loadingListing"})
 		arm.Substatus = &frontendv1.FooterStatusLoading_Listing{
 			Listing: &frontendv1.FooterSubStatusLoadingListing{}}
 	}
@@ -181,25 +194,30 @@ func (r *resolver) loading(s *wsState) *frontendv1.FooterStatus {
 }
 
 // blocked resolves the block, or nil when nothing blocks the session.
-func (r *resolver) blocked(s *wsState) *frontendv1.FooterStatus {
+func (r *resolver) blocked(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if s.blocked == nil {
 		return nil
 	}
 	arm := &frontendv1.FooterStatusBlocked{Activity: r.blockedActivity(s)}
 	switch s.blocked.kind {
 	case blockedAuth:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedAuth"})
 		arm.Substatus = &frontendv1.FooterStatusBlocked_Auth{
 			Auth: &frontendv1.FooterSubStatusBlockedAuth{}}
 	case blockedUsageLimit:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedUsageLimit"})
 		arm.Substatus = &frontendv1.FooterStatusBlocked_UsageLimit{
 			UsageLimit: &frontendv1.FooterSubStatusBlockedUsageLimit{}}
 	case blockedVendorError:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedVendorError"})
 		arm.Substatus = &frontendv1.FooterStatusBlocked_VendorError{
 			VendorError: &frontendv1.FooterSubStatusBlockedVendorError{}}
 	case blockedBilling:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedBilling"})
 		arm.Substatus = &frontendv1.FooterStatusBlocked_Billing{
 			Billing: &frontendv1.FooterSubStatusBlockedBilling{}}
 	case blockedQueryDied:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedQueryDied"})
 		arm.Substatus = &frontendv1.FooterStatusBlocked_QueryDied{
 			QueryDied: &frontendv1.FooterSubStatusBlockedQueryDied{}}
 	}
@@ -207,35 +225,44 @@ func (r *resolver) blocked(s *wsState) *frontendv1.FooterStatus {
 }
 
 // merging projects the merge orchestrator's facts onto the merging phase.
-func (r *resolver) merging(s *wsState) *frontendv1.FooterStatus {
+func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	arm := &frontendv1.FooterStatusMerging{Activity: r.mergingActivity(s)}
 	switch s.merge.State {
 	case "", "none":
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"\", \"none\""})
 		return nil
 	case "enqueuing":
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"enqueuing\""})
 		arm.Substatus = &frontendv1.FooterStatusMerging_Enqueuing{
 			Enqueuing: &frontendv1.FooterSubStatusMergingEnqueuing{}}
 	case "queued":
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"queued\""})
 		arm.Substatus = &frontendv1.FooterStatusMerging_Queued{
 			Queued: &frontendv1.FooterSubStatusMergingQueued{
 				Position: int32(s.merge.QueuePosition),
 				Depth:    int32(s.merge.QueueDepth),
 			}}
 	case "parked":
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"parked\""})
 		arm.Substatus = &frontendv1.FooterStatusMerging_Parked{
 			Parked: &frontendv1.FooterSubStatusMergingParked{Line: s.merge.ParkedLine}}
 	case "conflict":
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"conflict\""})
 		arm.Substatus = &frontendv1.FooterStatusMerging_Conflicts{
 			Conflicts: &frontendv1.FooterSubStatusMergingConflicts{}}
 	case "failed":
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"failed\""})
 		arm.Substatus = &frontendv1.FooterStatusMerging_Failed{
 			Failed: &frontendv1.FooterSubStatusMergingFailed{}}
 	case "merged":
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"merged\""})
 		arm.Substatus = &frontendv1.FooterStatusMerging_Merged{
 			Merged: &frontendv1.FooterSubStatusMergingMerged{}}
 	case "merging":
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case \"merging\""})
 		setMergingPhase(arm, s.merge.ActiveTab)
 	default:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
 		arm.Substatus = &frontendv1.FooterStatusMerging_Merge{
 			Merge: &frontendv1.FooterSubStatusMergingMerge{}}
 	}
@@ -270,22 +297,27 @@ func setMergingPhase(arm *frontendv1.FooterStatusMerging, tab string) {
 // waiting resolves the parked states other than the wakeup fallback. Its
 // activity is REQUIRED: every waiting state has a composable line by
 // construction.
-func (r *resolver) waiting(s *wsState) *frontendv1.FooterStatus {
+func (r *resolver) waiting(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	arm := &frontendv1.FooterStatusWaiting{}
 	switch {
 	case s.interrupting:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.interrupting"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_Interrupting{
 			Interrupting: &frontendv1.FooterSubStatusWaitingInterrupting{}}
 	case len(s.permissionOrder) > 0:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case len(s.permissionOrder) > 0"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_Permission{
 			Permission: &frontendv1.FooterSubStatusWaitingPermission{}}
 	case len(s.questionOrder) > 0:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case len(s.questionOrder) > 0"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_Question{
 			Question: &frontendv1.FooterSubStatusWaitingQuestion{}}
 	case s.coldGate.Standing:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.coldGate.Standing"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_ColdGate{
 			ColdGate: &frontendv1.FooterSubStatusWaitingColdGate{}}
 	default:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
 		return nil
 	}
 	arm.Activity = r.waitingActivity(s)
@@ -310,22 +342,26 @@ func (r *resolver) wakeup(s *wsState) *frontendv1.FooterStatus {
 }
 
 // thinking resolves the turn's step, or nil when no turn is in flight.
-func (r *resolver) thinking(s *wsState) *frontendv1.FooterStatus {
+func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if s.turn == nil {
 		return nil
 	}
 	arm := &frontendv1.FooterStatusThinking{Activity: r.thinkingActivity(s)}
 	switch {
 	case s.turn.Act == ActClear:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn.Act == ActClear"})
 		arm.Substatus = &frontendv1.FooterStatusThinking_Clearing{
 			Clearing: &frontendv1.FooterSubStatusThinkingClearing{}}
 	case s.turn.Act == ActCompact || s.compacting:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn.Act == ActCompact || s.compacting"})
 		arm.Substatus = &frontendv1.FooterStatusThinking_Compacting{
 			Compacting: &frontendv1.FooterSubStatusThinkingCompacting{}}
 	case !s.sawActivity:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case !s.sawActivity"})
 		arm.Substatus = &frontendv1.FooterStatusThinking_Submitting{
 			Submitting: &frontendv1.FooterSubStatusThinkingSubmitting{}}
 	default:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
 		arm.Substatus = &frontendv1.FooterStatusThinking_Thinking{
 			Thinking: &frontendv1.FooterSubStatusThinkingThinking{}}
 	}
