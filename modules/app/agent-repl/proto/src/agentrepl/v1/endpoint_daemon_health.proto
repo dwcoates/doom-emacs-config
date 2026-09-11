@@ -29,8 +29,22 @@ message DaemonHealthSuccess {
     DaemonHealthy healthy = 1;
     DaemonUnhealthy unhealthy = 2;
   }
+  // The serving process that produced this answer. Clients use this identity
+  // to distinguish a replacement daemon from a reconnect to the same one.
+  DaemonIdentity identity = 3;
 }
 message DaemonHealthy {}
+
+// One daemon process's immutable identity and deployed build.
+message DaemonIdentity {
+  // Minted once at process boot.
+  string instance_id = 1;
+  // The operating-system process id serving this response.
+  int64 pid = 2;
+  // The daemon artifact's .built-sha value; empty only in an unstamped
+  // development checkout.
+  string build_sha = 3;
+}
 
 // Unhealthy: the standing faults, each typed.
 message DaemonUnhealthy {

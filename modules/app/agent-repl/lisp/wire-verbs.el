@@ -58,6 +58,7 @@
 ;; the `agent-repl-wire-error' definition.
 (declare-function agent-repl-wire--fail "agent-repl-wire-common" (message field reason))
 (declare-function agent-repl-wire--decode-bool "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-int64 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-uint32 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
@@ -2057,6 +2058,14 @@ JSON."
   "Decode DaemonHealthy from JSON.  Empty: the arm is the whole verdict."
   (agent-repl-wire-verbs--decode-empty "DaemonHealthy" json))
 
+(defun agent-repl-wire-decode-daemon-identity (json)
+  "Decode DaemonIdentity into its immutable process and build fields."
+  (let ((message "DaemonIdentity"))
+    (agent-repl-wire-verbs--check-keys message json '(instanceId pid buildSha))
+    (list :instance-id (agent-repl-wire-verbs--decode-string message 'instanceId json)
+          :pid (agent-repl-wire--decode-int64 message 'pid json)
+          :build-sha (agent-repl-wire-verbs--decode-string message 'buildSha json))))
+
 (defun agent-repl-wire-decode-daemon-health-success-healthy (json)
   "Decode DaemonHealthSuccess's `healthy' verdict arm from JSON."
   (agent-repl-wire-decode-daemon-healthy json))
@@ -2066,15 +2075,25 @@ JSON."
   (agent-repl-wire-decode-daemon-unhealthy json))
 
 (defun agent-repl-wire-decode-daemon-health-success (json)
-  "Decode DaemonHealthSuccess from JSON into (:arm ARM :value V).
-UNHEALTHY IS AN ANSWER: it arrives inside success, never as an error."
+  "Decode DaemonHealthSuccess with its verdict and process identity.
+UNHEALTHY IS AN ANSWER: it arrives inside success, never as an error.
+An absent identity decodes as nil for the one-version transition from a
+daemon built before `agentrepl.v1.DaemonIdentity' existed; restart
+coordination refuses to declare a replacement until the new daemon states
+one."
   (let ((message "DaemonHealthSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(healthy unhealthy))
-    (agent-repl-wire-verbs--decode-oneof
-     message "health" json
-     (list (list 'healthy :healthy #'agent-repl-wire-decode-daemon-health-success-healthy)
-           (list 'unhealthy :unhealthy
-                 #'agent-repl-wire-decode-daemon-health-success-unhealthy)))))
+    (agent-repl-wire-verbs--check-keys message json '(healthy unhealthy identity))
+    (let ((verdict
+           (agent-repl-wire-verbs--decode-oneof
+            message "health" json
+            (list (list 'healthy :healthy #'agent-repl-wire-decode-daemon-health-success-healthy)
+                  (list 'unhealthy :unhealthy
+                        #'agent-repl-wire-decode-daemon-health-success-unhealthy))))
+          (identity (alist-get 'identity json)))
+      (append verdict
+              (list :identity
+                    (and identity
+                         (agent-repl-wire-decode-daemon-identity identity)))))))
 
 (defun agent-repl-wire-decode-daemon-health-error (json)
   "Decode DaemonHealthError from JSON.
