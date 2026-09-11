@@ -678,12 +678,17 @@ type sidecarProc struct {
 	t       *testing.T
 	cmd     *exec.Cmd
 	LogPath string
+	Daemon  *fakeClientLog
 	done    chan error
 	stopped bool
 }
 
 func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 	t.Helper()
+	if opts.StateDir == "" {
+		opts.StateDir = t.TempDir()
+	}
+	daemon := startFakeClientLog(t, opts.StateDir, opts.LogPath, opts.ConfigRoots)
 	mustMkdirAll(t, filepath.Dir(opts.LogPath))
 	args := []string{
 		"--store-socket", opts.StoreSocket,
@@ -740,7 +745,7 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sidecar: %v", err)
 	}
-	p := &sidecarProc{t: t, cmd: cmd, LogPath: opts.LogPath, done: make(chan error, 1)}
+	p := &sidecarProc{t: t, cmd: cmd, LogPath: opts.LogPath, Daemon: daemon, done: make(chan error, 1)}
 	go func() { p.done <- cmd.Wait() }()
 	t.Cleanup(p.Stop)
 	return p
@@ -2232,20 +2237,32 @@ func apiErrorOf(line *storev1.StorePageLine) *conversationv1.ApiRequestFailed {
 // logRecord mirrors the sidecar's canonical JSON record. `context` holds the
 // correlation keys (file_id, path, offset, write_id, agent_id, ...).
 type logRecord struct {
-	Timestamp string         `json:"timestamp"`
-	Runtime   string         `json:"runtime"`
-	PID       int            `json:"pid"`
-	Level     string         `json:"level"`
-	Verbosity string         `json:"verbosity"`
-	Operation string         `json:"operation"`
-	Message   string         `json:"message"`
-	RequestID string         `json:"request_id"`
-	Context   map[string]any `json:"context"`
+	Timestamp       string         `json:"timestamp"`
+	Runtime         string         `json:"runtime"`
+	PID             int            `json:"pid"`
+	Level           string         `json:"level"`
+	Verbosity       string         `json:"verbosity"`
+	Operation       string         `json:"operation"`
+	Message         string         `json:"message"`
+	WorkspaceDir    string         `json:"workspace_dir"`
+	WorkspaceID     string         `json:"workspace_id"`
+	ClaudeSessionID string         `json:"claude_session_id"`
+	RequestID       string         `json:"request_id"`
+	Context         map[string]any `json:"context"`
 }
 
 // readLog parses the sidecar log STRICTLY: every non-empty line must be a JSON
 // object, because the contract is JSONL and a stray plain-text line is a defect.
 func readLog(t *testing.T, path string) []logRecord {
+	t.Helper()
+	out := readLogFile(t, path)
+	if value, ok := clientLogsByGlobalPath.Load(path); ok {
+		out = append(out, value.(*fakeClientLog).recordsSnapshot()...)
+	}
+	return out
+}
+
+func readLogFile(t *testing.T, path string) []logRecord {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
