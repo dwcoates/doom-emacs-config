@@ -25,7 +25,7 @@ import (
 // `bin/e2e-sandbox.sh` has four verbs -- build, run, shell, preflight -- and
 // `run` is a one-shot `docker run --rm`: there is no persistent container and
 // no `exec` verb. Its documented usage is to run the WHOLE test binary inside
-// the container (`e2e-sandbox.sh run go test ./e2e/...`).
+// the container (`e2e-sandbox.sh run --dir e2e go test ./`).
 //
 // So this layer does not drive the container from the host. It detects
 // whether IT IS ITSELF running inside the sandbox, and every Exec is then an
@@ -115,7 +115,7 @@ func requireSandbox(t *testing.T) sandbox {
 	if !ok {
 		noteEnvironmentSkipAs(t,
 			"the Emacs client layer runs only INSIDE the e2e sandbox container "+
-				"(`"+sandboxScriptRel+" run go test ./e2e/ -run <name> -v`); it was not exercised by this run",
+				"(`"+sandboxRunCommand("<name>")+"`); it was not exercised by this run",
 			"emacs client layer needs the e2e sandbox: %s", reason)
 	}
 	ok, version := s.HasEmacs()
@@ -293,8 +293,29 @@ func (s *localSandbox) Available() (bool, string) {
 	return false, fmt.Sprintf(
 		"the sandbox image is ready, but this test process is running ON THE HOST. "+
 			"This layer starts a real Emacs that spawns a real daemon, so it must run INSIDE the container. Run:\n"+
-			"    %s run go test ./e2e/ -run %s -v",
-		sandboxScriptRel, s.t.Name())
+			"    %s",
+		sandboxRunCommand(s.t.Name()))
+}
+
+// sandboxRunCommand spells the module-aware invocation a host-side skip hands
+// back. The module root has no go.mod; the sandbox must enter e2e before Go
+// can discover e2e/go.mod.
+func sandboxRunCommand(testPattern string) string {
+	return fmt.Sprintf("%s run --dir e2e go test ./ -run %s -v", sandboxScriptRel, testPattern)
+}
+
+func TestSandboxRunCommandEntersTheE2EModule(t *testing.T) {
+	// Arrange.
+	const pattern = "TestEmacsExample"
+
+	// Act.
+	got := sandboxRunCommand(pattern)
+
+	// Assert.
+	want := sandboxScriptRel + " run --dir e2e go test ./ -run TestEmacsExample -v"
+	if got != want {
+		t.Fatalf("sandbox run command = %q, want %q", got, want)
+	}
 }
 
 // repoRoot is the checkout root, three levels above the module.
