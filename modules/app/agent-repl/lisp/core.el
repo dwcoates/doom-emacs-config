@@ -1451,11 +1451,137 @@ Never logs: this runs inside the file sink (see
   "Return non-nil when CANONICAL is a symlink naming TARGET."
   (equal (file-symlink-p canonical) target))
 
+(defun agent-repl--emacs-log-target-directory ()
+  "Return agent-repl's own durable directory for Emacs log targets.
+`~/.claude-emacs/logs/' — a STABLE directory, the same one the daemon keeps
+its targets in, never the OS temporary root.  A durable log a person is
+asked to read must not live where the operating system may sweep it, must
+not move with a per-launcher TMPDIR, and must not accumulate one orphan per
+Emacs instance in a directory nothing owns.  Creates nothing."
+  (file-name-as-directory (agent-repl--global-state-file "logs")))
+
+(defun agent-repl--emacs-log-owned-target-p (path)
+  "Return non-nil when PATH is a target THIS MODULE could have minted.
+Two shapes qualify: a file directly inside
+`agent-repl--emacs-log-target-directory', which is where targets are minted
+now, and a file whose basename carries
+`agent-repl--emacs-log-target-prefix', which is what every target minted
+into the OS temporary root before this change looks like.  The second shape
+is why MIGRATION IS BY REUSE: nothing is renamed or copied, the old target
+keeps being appended to for as long as a canonical link names it, and only
+a genuinely new target gets the durable-directory name."
+  (and (stringp path)
+       (file-name-absolute-p path)
+       (or (equal (directory-file-name (file-name-directory path))
+                  (directory-file-name (agent-repl--emacs-log-target-directory)))
+           (string-prefix-p agent-repl--emacs-log-target-prefix
+                            (file-name-nondirectory path)))))
+
+(defun agent-repl--emacs-log-standing-target (canonical)
+  "Return the target CANONICAL already names and may be appended to, else nil.
+A NEW EMACS INSTANCE JOINS THE FILE THE LAST ONE WROTE.  Minting a fresh
+target per instance and retargeting the link cost realtest 1 its whole
+verdict on 2026-09-11: the harvest had resolved the link before the instance
+under test started, so every record proving the tabs were drawn went to a
+file no reader was looking at, and 22,112 orphaned targets had piled up in
+the temporary root behind the same behaviour.
+
+The three things that make a target ours are all checked.  CANONICAL must be
+a SYMLINK — a regular file or foreign symlink the workspace put there is
+displaced, never written to — it must name a regular file this module could
+have minted \(`agent-repl--emacs-log-owned-target-p'), and that file must be
+under the cap, because a target at the cap is a generation to roll rather
+than one to join.  Anything else answers nil, which is the caller's signal
+to mint.
+
+Never logs: this runs inside the file sink."
+  (let ((dest (file-symlink-p canonical)))
+    (and (stringp dest)
+         (agent-repl--emacs-log-owned-target-p dest)
+         (file-regular-p dest)
+         (not (file-symlink-p dest))
+         (< (or (file-attribute-size (file-attributes dest)) 0)
+            agent-repl-log-size-cap-bytes)
+         dest)))
+
+(defun agent-repl--emacs-log-mint-target (identity)
+  "Create and return a fresh durable log target for IDENTITY.
+THE NAME CARRIES THE DAEMON-MINTED 16-hex `workspace_id' when the roster
+push has delivered it, the same identity every runtime's records carry and
+the same naming the daemon's own targets use.  Before that push the
+directory hash names the target instead: the workspace still needs a sink,
+and the hash is the only identity this runtime can always derive.
+
+Never logs: this runs inside the file sink."
+  (let* ((dir (agent-repl--emacs-log-target-directory))
+         (id (or (plist-get identity :workspace-id)
+                 (plist-get identity :workspace-dir-hash))))
+    (unless (and (stringp id) (not (string-empty-p id)))
+      (error "agent-repl log routing invariant violated: no identity to name a log target: %S"
+             identity))
+    (make-directory dir t)
+    (agent-repl--ensure-real-log-directory dir)
+    (let ((target (make-temp-file
+                   (expand-file-name (format "agent-repl-%s-emacs-" id) dir)
+                   nil ".log")))
+      target)))
+
+(defvar agent-repl--pending-sink-opened nil
+  "Sink-open decisions awaiting their INFO record.
+The decision is made inside the file sink, where the logging ladder cannot
+be re-entered, so the record is emitted from an idle timer once the target
+is installed and logging about it no longer recurses.")
+
+(defun agent-repl--flush-sink-opened-records ()
+  "Emit the INFO record for every pending sink-open decision.
+Mirrors the daemon's `daemon.dlog.sink_opened' shape: which target was
+opened and whether it was the workspace's STANDING target or one this
+instance MINTED.  A reader that meets an old temporary-root target beside a
+newer durable one can tell from the log which is which."
+  (let ((pending (prog1 agent-repl--pending-sink-opened
+                   (setq agent-repl--pending-sink-opened nil))))
+    (dolist (entry (nreverse pending))
+      (let ((ws (plist-get entry :ws)))
+        ;; The sink was installed for this workspace a moment ago, so it is
+        ;; routable; a name that stopped being routable in between still gets
+        ;; its decision recorded, centrally and at WARN, rather than dropped.
+        (if (agent-repl--ws-log-routable-p ws)
+            (agent-repl--info
+             ws
+             "elisp.core.sink-opened: sink=%s target=%s target_origin=%s id_scheme=%s"
+             "emacs.log"
+             (plist-get entry :target)
+             (plist-get entry :origin)
+             (plist-get entry :id-scheme))
+          (agent-repl--warn
+           agent-repl--global-log-scope
+           "elisp.core.sink-opened-unattributed: workspace=%S sink=%s target=%s target_origin=%s id_scheme=%s"
+           ws "emacs.log"
+           (plist-get entry :target)
+           (plist-get entry :origin)
+           (plist-get entry :id-scheme)))))))
+
+(defun agent-repl--note-sink-opened (ws target origin identity)
+  "Queue the INFO record for WS's sink open of TARGET with ORIGIN.
+Never logs directly: the caller is the file sink."
+  (push (list :ws ws :target target :origin origin
+              :id-scheme (if (plist-get identity :workspace-id)
+                             "daemon_minted_workspace_id"
+                           "workspace_dir_hash"))
+        agent-repl--pending-sink-opened)
+  (run-with-idle-timer 0 nil #'agent-repl--flush-sink-opened-records))
+
 (defun agent-repl--workspace-emacs-log-target (ws)
   "Return WS's runtime-owned external target and atomically install its link.
 WS must have a registered project directory.  Workspace-controlled paths are
-never opened for writing: the durable target is created in
-`temporary-file-directory' and the workspace path is only an atomic symlink.
+never opened for writing: the durable target lives in
+`agent-repl--emacs-log-target-directory' and the workspace path is only an
+atomic symlink.
+
+On the first open of this runtime the workspace's STANDING target is joined
+when the canonical link names one \(`agent-repl--emacs-log-standing-target');
+a new target is minted only when there is none, it is not ours, or it is at
+the cap.
 
 The registry is keyed by WS's IDENTITY rather than by WS, so every name
 that resolves to one directory shares that directory's single target and
@@ -1491,10 +1617,11 @@ the day of invisible records that keying by name cost."
           target)
       (let* ((project-dir (plist-get identity :project-dir))
              (canonical (agent-repl--workspace-emacs-log-path project-dir)))
-        ;; On a new Emacs runtime, the workspace path is untrusted even when it
-        ;; names an old temporary file.  Only this in-memory registry
-        ;; authorizes target reuse, which makes link poisoning structurally
-        ;; unable to redirect a durable write.
+        ;; The workspace path stays untrusted across runtimes: the standing
+        ;; target is joined ONLY when the canonical path is a symlink naming a
+        ;; regular file this module could have minted and under the cap, so a
+        ;; regular file or foreign symlink a workspace plants there is still
+        ;; displaced rather than written into.
         (agent-repl--ensure-real-log-directory (expand-file-name ".claude" project-dir))
         (agent-repl--ensure-real-log-directory (file-name-directory canonical))
         (when (file-directory-p canonical)
@@ -1502,18 +1629,31 @@ the day of invisible records that keying by name cost."
         ;; Target creation happens only after both workspace-controlled
         ;; directory components are proven real, so a hostile parent leaves no
         ;; runtime-owned temporary artifact behind.
-        (let ((target (make-temp-file agent-repl--emacs-log-target-prefix nil ".log"))
-              (installed nil))
-          (unwind-protect
+        (let ((standing (agent-repl--emacs-log-standing-target canonical)))
+          (if standing
+              ;; THE STANDING TARGET IS JOINED, NOT DISPLACED: the link keeps
+              ;; naming the file the previous instance wrote, so one file spans
+              ;; instances, a reader that resolved the link before this
+              ;; instance started still reads this instance's records, and a
+              ;; bounce loop cannot evict history by restarting.
               (progn
-                (agent-repl--install-workspace-log-link canonical target)
-                (puthash key (append (list :target target) identity)
+                (puthash key (append (list :target standing) identity)
                          agent-repl--workspace-log-targets)
-                (setq installed t)
-                target)
-            (unless installed
-              (when (file-exists-p target)
-                (delete-file target)))))))))
+                (agent-repl--note-sink-opened ws standing "standing_canonical_link" identity)
+                standing)
+            (let ((target (agent-repl--emacs-log-mint-target identity))
+                  (installed nil))
+              (unwind-protect
+                  (progn
+                    (agent-repl--install-workspace-log-link canonical target)
+                    (puthash key (append (list :target target) identity)
+                             agent-repl--workspace-log-targets)
+                    (setq installed t)
+                    (agent-repl--note-sink-opened ws target "minted_target" identity)
+                    target)
+                (unless installed
+                  (when (file-exists-p target)
+                    (delete-file target)))))))))))
 
 (defun agent-repl--secure-log-file-mode (path)
   "Require PATH to be a regular file and force its permissions to 0600.
