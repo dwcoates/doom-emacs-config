@@ -616,3 +616,39 @@ func TestManifestWritesTheFullHarvestBesideItself(t *testing.T) {
 	}
 }
 
+
+func TestManifestSaysTheLaunchMethodOnTheFocusLine(t *testing.T) {
+	// Arrange: whether focus moved is a fact ABOUT a launch method.
+	dir := t.TempDir()
+	manifest := Manifest{
+		Title: "fixture",
+		Runs: []ManifestRun{{
+			Index:       1,
+			Method:      MethodDirectRestore,
+			FrontBefore: "Google Chrome",
+			FrontAfter:  "Emacs",
+			Disturbed:   true,
+		}},
+	}
+
+	// Act.
+	path, err := manifest.Write(dir)
+	if err != nil {
+		t.Fatalf("write the manifest: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	// Assert.
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.Contains(line, "FOCUS MOVED") {
+			if !strings.Contains(line, string(MethodDirectRestore)) {
+				t.Errorf("the focus line %q does not name the launch method", line)
+			}
+			return
+		}
+	}
+	t.Errorf("the manifest has no focus line at all")
+}
