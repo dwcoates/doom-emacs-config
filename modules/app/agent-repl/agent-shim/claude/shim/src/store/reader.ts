@@ -29,6 +29,7 @@ import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
 import { PersistenceError, type AgentPageSession } from "./persistence.js";
+import { readWithRetry, type ReadRetryOptions } from "./retry.js";
 
 const LOGGER = bindLog({ component: "shim-store-reader", operation: "shim.store.reader" });
 
@@ -274,7 +275,7 @@ interface Reader {
 }
 
 /** What a reader needs to exist. */
-interface ReaderOptions {
+interface ReaderOptions extends ReadRetryOptions {
   readonly client: StoreClient;
 }
 
@@ -881,7 +882,7 @@ export function createReader(options: ReaderOptions): Reader {
    * the right one: an empty page invented over an unreachable store tells a
    * consumer this conversation has no history.
    */
-  const readFirstPage = async (
+  const readFirstPageOnce = async (
     agent: conversationv1.AgentId,
     pageSize: number,
     knownThrough?: conversationv1.HistoryPointer,
@@ -919,6 +920,79 @@ export function createReader(options: ReaderOptions): Reader {
     return toHistoryPage(opened.page);
   };
 
+  /**
+   * The one-shot read, ON THE RETRY SCHEDULE.
+   *
+   * A busy database is not an unreachable one. This read backs the history a
+   * consumer opens with and the re-announcement a joining WatchSession gets, and
+   * a single `SQLITE_BUSY` used to lose both.
+   */
+  const readFirstPage = (
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    knownThrough?: conversationv1.HistoryPointer,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPage> =>
+    readWithRetry(
+      "readFirstPage",
+      () => readFirstPageOnce(agent, pageSize, knownThrough, known),
+      options,
+    );
+
+  /**
+   * One older page, as the store answered it.
+   *
+   * Wrapped by the retried entry point below: an older page is as much a
+   * one-shot read as the newest one, and a busy database is not an answer.
+   */
+  const readAgentPageOnce = async (
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    after: conversationv1.HistoryPointer,
+  ): Promise<conversationv1.HistoryPage> => {
+    let response: storev1.ReadAgentPageResponse;
+    try {
+      response = await client.readAgentPage(
+        create(storev1.ReadAgentPageRequestSchema, {
+          book: agent,
+          pageSize,
+          after: toStorePointer(after),
+        }),
+      );
+    } catch (error) {
+      LOGGER.error(
+        { agent: agent.value, detail: String(error) },
+        "the store could not be reached to read an older page",
+      );
+      throw transportFailure(error);
+    }
+    const result = response.result;
+    if (result.case === "failure") {
+      LOGGER.debug(
+        { agent: agent.value, detail: result.value.detail },
+        "the store refused an older page",
+      );
+      throw readFailure(result.value);
+    }
+    if (result.case !== "success") {
+      throw new PersistenceError(
+        "store_unavailable",
+        "the store answered ReadAgentPage with no result arm set",
+      );
+    }
+    LOGGER.debug(
+      { agent: agent.value, entries: result.value.lines.length },
+      "served an older page of an agent's book",
+    );
+    // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page is
+    // a reconnect mark like any other, so nothing here is minted and nothing
+    // has to be refused if a caller echoes one back.
+    return create(conversationv1.HistoryPageSchema, {
+      entries: result.value.lines.map(toHistoryEntryAt),
+      boundary: toHistoryBoundary(result.value.boundary),
+    });
+  };
+
   return {
     openAgentPage(agent, pageSize, knownThrough, known) {
       return openBook(agent, pageSize, knownThrough, known);
@@ -928,50 +1002,9 @@ export function createReader(options: ReaderOptions): Reader {
       return readFirstPage(agent, pageSize, knownThrough, known);
     },
 
-    async readAgentPage(agent, pageSize, after) {
-      let response: storev1.ReadAgentPageResponse;
-      try {
-        response = await client.readAgentPage(
-          create(storev1.ReadAgentPageRequestSchema, {
-            book: agent,
-            pageSize,
-            after: toStorePointer(after),
-          }),
-        );
-      } catch (error) {
-        LOGGER.error(
-          { agent: agent.value, detail: String(error) },
-          "the store could not be reached to read an older page",
-        );
-        throw transportFailure(error);
-      }
-      const result = response.result;
-      if (result.case === "failure") {
-        LOGGER.debug(
-          { agent: agent.value, detail: result.value.detail },
-          "the store refused an older page",
-        );
-        throw readFailure(result.value);
-      }
-      if (result.case !== "success") {
-        throw new PersistenceError(
-          "store_unavailable",
-          "the store answered ReadAgentPage with no result arm set",
-        );
-      }
-      LOGGER.debug(
-        { agent: agent.value, entries: result.value.lines.length },
-        "served an older page of an agent's book",
-      );
-      // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page is
-      // a reconnect mark like any other, so nothing here is minted and nothing
-      // has to be refused if a caller echoes one back.
-      return create(conversationv1.HistoryPageSchema, {
-        entries: result.value.lines.map(toHistoryEntryAt),
-        boundary: toHistoryBoundary(result.value.boundary),
-      });
+    readAgentPage(agent, pageSize, after) {
+      return readWithRetry("readAgentPage", () => readAgentPageOnce(agent, pageSize, after), options);
     },
-
     async openBashRun(work, announcement) {
       // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
       // AgentActivityId.value`, the spawning call's own `tool_use_id`. So there

@@ -28,6 +28,15 @@ const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
 const RUN = unit("run-1");
 
+/**
+ * The backoff, taken instantly.
+ *
+ * A read now replays on the store's retry schedule; the schedule itself is
+ * asserted in `test/store/retry.test.ts`, and waiting it out here would cost
+ * seconds per refusal.
+ */
+const instantly = (): Promise<void> => Promise.resolve();
+
 let store: FakeStore | undefined;
 
 afterEach(async () => {
@@ -39,7 +48,7 @@ async function reconciler(name: string) {
   const started = await startFakeStore(socketPathForTest(name));
   store = started;
   const client = createStoreClient(started.socketPath);
-  return { started, client, reconciler: createReconciler({ client }) };
+  return { started, client, reconciler: createReconciler({ client, sleep: instantly }) };
 }
 
 /** One recorded bash start, as it would come back from the agent's own book. */
@@ -132,9 +141,66 @@ describe("liveWork", () => {
       },
     };
 
-    await expect(createReconciler({ client: refusing }).liveWork()).rejects.toBeInstanceOf(
+    await expect(createReconciler({ client: refusing, sleep: instantly }).liveWork()).rejects.toBeInstanceOf(
       PersistenceError,
     );
+  });
+
+  // THE READ THAT COST A DAY OF BRING-UPS. One `SQLITE_BUSY` on `begin read
+  // transaction` used to be a permanent session fault; it is one busy moment.
+  it("answers once a momentarily busy database lets go", async () => {
+    // Arrange: the store is busy for its first answer only.
+    let asked = 0;
+    const busyOnce: StoreClient = {
+      openAgentSession: async () => {
+        throw new Error("unused");
+      },
+      watchAgentSession: () => {
+        throw new Error("unused");
+      },
+      watchBashRun: () => {
+        throw new Error("unused");
+      },
+      readAgentPage: async () => {
+        throw new Error("unused");
+      },
+      getWorkflow: async () => {
+        throw new Error("unused");
+      },
+      getSidecarCursors: async () => {
+        throw new Error("unused");
+      },
+      getLiveWork: async () => {
+        asked += 1;
+        if (asked > 1) {
+          return create(storev1.GetLiveWorkResponseSchema, {
+            result: { case: "success", value: create(storev1.GetLiveWorkSuccessSchema, {}) },
+          });
+        }
+        return create(storev1.GetLiveWorkResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(storev1.GetLiveWorkFailureSchema, {
+              detail: "storage failure: begin read transaction: database is locked (5) (SQLITE_BUSY)",
+              kind: {
+                case: "storageFailure",
+                value: create(storev1.GetLiveWorkStorageFailureSchema, {}),
+              },
+            }),
+          },
+        });
+      },
+      writeBatch: async () => {
+        throw new Error("unused");
+      },
+    };
+
+    // Act.
+    const answer = await createReconciler({ client: busyOnce, sleep: instantly }).liveWork();
+
+    // Assert.
+    expect(asked).toBe(2);
+    expect(answer.liveDetached).toEqual([]);
   });
 
   it("raises loudly when the store answers with no result arm", async () => {
@@ -163,7 +229,7 @@ describe("liveWork", () => {
       },
     };
 
-    await expect(createReconciler({ client: empty }).liveWork()).rejects.toMatchObject({
+    await expect(createReconciler({ client: empty, sleep: instantly }).liveWork()).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -622,7 +688,7 @@ describe("liveWork against a store that cannot be reached", () => {
     };
 
     // Act, Assert.
-    await expect(createReconciler({ client }).liveWork()).rejects.toMatchObject({
+    await expect(createReconciler({ client, sleep: instantly }).liveWork()).rejects.toMatchObject({
       kind: "store_unavailable",
       message: "connect ECONNREFUSED",
     });
