@@ -410,6 +410,63 @@ zero-readable|absent|daemon|zero|2|zero readable sinks reports the finding and e
 EOF
 }
 
+test_orphan_generations() {
+    local workspace="$TMP/workspaces/orphan" targets_dir="$TMP/orphan-targets"
+    local canonical_target orphan_first orphan_second rows_orphan out err
+    local first_operation second_operation third_operation
+    mkdir -p "$workspace/.claude/emacs" "$targets_dir"
+    canonical_target="$targets_dir/agent-repl-ws-orphan-daemon-current.log"
+    orphan_first="$targets_dir/agent-repl-ws-orphan-daemon-1111111111.log"
+    orphan_second="$targets_dir/agent-repl-ws-orphan-daemon-2222222222.log"
+    cat >"$canonical_target" <<EOF
+{"timestamp":"2026-09-10T12:02:00.000000Z","runtime":"daemon","pid":90,"level":"info","verbosity":"normal","operation":"daemon.orphan.current","message":"current instance","context":{},"workspace_dir":"$workspace","workspace_id":"ws-orphan"}
+EOF
+    cat >"$orphan_first" <<EOF
+{"timestamp":"2026-09-10T12:00:00.000000Z","runtime":"daemon","pid":91,"level":"info","verbosity":"normal","operation":"daemon.orphan.first","message":"first orphaned instance","context":{},"workspace_dir":"$workspace","workspace_id":"ws-orphan"}
+EOF
+    cat >"$orphan_second" <<EOF
+{"timestamp":"2026-09-10T12:01:00.000000Z","runtime":"daemon","pid":92,"level":"info","verbosity":"normal","operation":"daemon.orphan.second","message":"second orphaned instance","context":{},"workspace_dir":"$workspace","workspace_id":"ws-orphan"}
+EOF
+    ln -s "$canonical_target" "$workspace/.claude/emacs/daemon.log"
+    make_empty_workspace_sink "$workspace" orphan emacs
+    make_empty_workspace_sink "$workspace" orphan shim
+    make_empty_workspace_sink "$workspace" orphan webapp
+    make_empty_workspace_sink "$workspace" orphan sidecar
+    rows_orphan="$TMP/orphan-workspaces.tsv"
+    cp "$rows" "$rows_orphan"
+    printf 'ws-orphan\t%s\torphan\n' "$workspace" >>"$rows_orphan"
+    out="$TMP/orphan.out"
+    err="$TMP/orphan.err"
+    AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_orphan" \
+        run_logs --workspace ws-orphan --runtime daemon >"$out" 2>"$err"
+    first_operation="$(sed -n '1p' "$out" | awk '{print $4}')"
+    second_operation="$(sed -n '2p' "$out" | awk '{print $4}')"
+    third_operation="$(sed -n '3p' "$out" | awk '{print $4}')"
+    if [ "$first_operation" = daemon.orphan.first ] &&
+        [ "$second_operation" = daemon.orphan.second ] &&
+        [ "$third_operation" = daemon.orphan.current ] &&
+        grep -q 'included 2 orphan generation(s)' "$err"; then
+        pass "sibling unique targets an earlier daemon instance minted are merged into the workspace stream"
+    else
+        fail "sibling unique targets an earlier daemon instance minted are merged into the workspace stream"
+        sed -n '1,40p' "$out" >&2
+        sed -n '1,40p' "$err" >&2
+    fi
+}
+
+test_orphan_generations_absent_when_none_minted() {
+    local out err
+    out="$TMP/no-orphan.out"
+    err="$TMP/no-orphan.err"
+    run_logs --workspace ws-a --runtime daemon >"$out" 2>"$err"
+    if grep -q 'included 0 orphan generation(s)' "$err"; then
+        pass "a workspace with no orphaned generations reports a zero count"
+    else
+        fail "a workspace with no orphaned generations reports a zero count"
+        sed -n '1,40p' "$err" >&2
+    fi
+}
+
 wait_for_pattern() {
     local pattern="$1" path="$2" pid="$3" started=$SECONDS
     while ! grep -q "$pattern" "$path" 2>/dev/null; do
@@ -476,6 +533,8 @@ test_empty_harvest_window
 test_harvest_incomplete_workspace_attribution
 test_malformed_line
 test_sink_findings
+test_orphan_generations
+test_orphan_generations_absent_when_none_minted
 test_follow
 
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
