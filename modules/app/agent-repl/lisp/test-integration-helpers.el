@@ -544,18 +544,19 @@ every scenario that pushes after subscribing must pass through here."
 (defvar agent-repl-itest--orphaned-log-targets nil
   "Durable workspace log targets production has stopped owning this scenario.
 
-A WORKSPACE TEARDOWN ORPHANS THE HISTORY THE CANONICAL LINK USED TO NAME.
+A WORKSPACE TEARDOWN RELEASES THE TARGET THE CANONICAL LINK NAMES.
 `agent-repl--ws-del\=' forgets the workspace\='s target
-(`agent-repl--ws-forget-emacs-log-target\='), and the very next
-workspace-owned record mints a fresh target and re-points
-`<workspace>/.claude/emacs/emacs.log\=' at it -- deliberately, so a future
-workspace reusing the name gets its own runtime-owned file.  The records
-written BEFORE the teardown are still durable, but the canonical link no
-longer names them, so a reader that followed only the link would conclude
-a verb never logged its success ack.
+(`agent-repl--ws-forget-emacs-log-target\='), so the next workspace-owned
+record re-resolves the sink from scratch.  Since the standing-target rule
+landed that usually REJOINS the same file, but it need not: a target at the
+cap, a link a scenario replaced, or a directory rebinding all put the older
+records somewhere the link no longer names, and a reader that followed only
+the link would conclude a verb never logged its success ack.
 
 The fixture therefore remembers each target at the ONE moment it is
-orphaned, and `agent-repl-itest--workspace-log-files\=' reads those too.")
+released, and `agent-repl-itest--workspace-log-files\=' reads those too --
+DEDUPED against the link, because a rejoined target is one file and reading
+it twice would count every record in it twice.")
 
 (defun agent-repl-itest--note-orphaned-log-targets (ws)
   "Remember the durable log targets WS owns, before production forgets them.
@@ -595,12 +596,30 @@ takes."
                (when (and (file-exists-p path) (not (member path paths)))
                  (push path paths))))))
        agent-repl--workspaces))
-    ;; The targets a teardown orphaned come FIRST, because they carry the
+    ;; The targets a teardown released come FIRST, because they carry the
     ;; older records and `agent-repl-itest--log-records\=' returns its
     ;; sinks in the order it is given them.
-    (append (seq-filter #'file-exists-p
-                        (reverse agent-repl-itest--orphaned-log-targets))
-            (nreverse paths))))
+    ;;
+    ;; DEDUPED BY THE FILE ITSELF, not by the path that reaches it.  A
+    ;; released target the workspace's link still names -- the ordinary case
+    ;; under the standing-target rule -- is reachable both ways, and reading
+    ;; one file through two names counted every record in it twice.
+    (agent-repl-itest--distinct-log-files
+     (append (seq-filter #'file-exists-p
+                         (reverse agent-repl-itest--orphaned-log-targets))
+             (nreverse paths)))))
+
+(defun agent-repl-itest--distinct-log-files (paths)
+  "Return PATHS with every path naming an already-listed FILE removed.
+Order is preserved, and the first name a file is reached by is the one
+kept, so the released-target-first ordering above survives deduplication."
+  (let ((seen (make-hash-table :test #'equal))
+        (kept nil))
+    (dolist (path paths (nreverse kept))
+      (let ((identity (file-truename path)))
+        (unless (gethash identity seen)
+          (puthash identity t seen)
+          (push path kept))))))
 
 (defun agent-repl-itest--log-records-in (path)
   "Return the JSONL records in PATH, oldest first.
