@@ -419,6 +419,25 @@ describe("a consumer that goes away", () => {
     await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
   });
 
+  // A CANCELLED CONSUMER IS GONE FROM THE FAN-OUT, not merely unblocked. A
+  // daemon that gives up an adoption cancels its standing WatchSession while
+  // nothing is pending, and a subscriber left in the set would go on taking
+  // every later fact into a queue nobody drains.
+  it("drops the subscriber from the fan-out when it leaves with nothing pending", async () => {
+    // Arrange.
+    const pushes = new SessionPushes(() => 1);
+    const iterator = pushes.subscribe()[Symbol.asyncIterator]();
+    await iterator.next();
+    const pending = iterator.next();
+
+    // Act.
+    await iterator.return?.();
+
+    // Assert.
+    await expect(pending).resolves.toEqual({ value: undefined, done: true });
+    expect(pushes.subscriberCount).toBe(0);
+  });
+
   it("also ends via a for-await break, which the runtime maps to return()", async () => {
     const pushes = new SessionPushes(() => 1);
 

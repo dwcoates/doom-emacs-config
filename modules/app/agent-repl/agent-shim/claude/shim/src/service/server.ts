@@ -110,6 +110,55 @@ export function isStreamingPath(url: string): boolean {
 }
 
 /**
+ * The two h2 reset codes this server has to tell apart (RFC 9113 s7).
+ *
+ * `NO_ERROR` on a stream is an ordinary end. `CANCEL` is THE PEER saying it is
+ * done with a stream this side was still serving — the daemon dropping its
+ * standing `WatchSession` when it gives up an adoption, or a consumer closing
+ * a tail — and nothing on this side failed.
+ */
+const H2_NO_ERROR = 0;
+const H2_CANCEL = 8;
+
+/**
+ * Record how one h2c stream ended.
+ *
+ * A CANCEL IS EXPLAINED, NEVER MOURNED. Reporting the peer's own cancel as an
+ * error made every ordinary consumer departure look like a transport defect of
+ * this server's, and buried the resets that ARE defects among them. The cancel
+ * is still RECORDED — a standing stream ending early is a fact the log is the
+ * only place to learn it — but it is recorded as the cancel it is, with the
+ * reason named, and only a reset this side cannot account for stays an error.
+ *
+ * Exported so the classification is testable for the codes no suite can
+ * provoke from a real peer.
+ */
+export function recordStreamReset(
+  rstCode: number | undefined,
+  streamId: number | undefined,
+  path: string | undefined,
+): void {
+  if (rstCode === undefined || rstCode === H2_NO_ERROR) return;
+  if (rstCode === H2_CANCEL) {
+    // warn: a decision because a peer cancel ends a stream this server was still serving.
+    LOGGER.warn(
+      {
+        stream_id: streamId,
+        rst_code: rstCode,
+        path,
+        reason: "the peer cancelled the stream; it stopped consuming what this server was serving",
+      },
+      "an h2c stream was cancelled by its peer; what it was serving did not finish",
+    );
+    return;
+  }
+  LOGGER.error(
+    { stream_id: streamId, rst_code: rstCode, path, detail: "the h2c stream ended before its response completed" },
+    "an h2c stream ended with a reset code; whatever it was serving did not finish",
+  );
+}
+
+/**
  * How long ONE connection has to stop producing bytes before the exit cuts it
  * anyway.
  *
@@ -332,7 +381,8 @@ export async function serve(
   // fault, and the shim's log — the only place that could say whether the
   // reset came from here — held nothing at all. `rstCode` names the code the
   // stream ended with; `NGHTTP2_NO_ERROR` is an ordinary end and is not
-  // recorded.
+  // recorded, and {@link recordStreamReset} decides whether what is left is
+  // the peer's own cancel or this server's defect.
   h2.on("session", (session) => {
     session.on("frameError", (type, code, id) => {
       LOGGER.error(
@@ -343,11 +393,7 @@ export async function serve(
     session.on("stream", (stream, headers) => {
       const path = headers[":path"];
       stream.once("close", () => {
-        if (stream.rstCode === undefined || stream.rstCode === 0) return;
-        LOGGER.error(
-          { stream_id: stream.id, rst_code: stream.rstCode, path, detail: "the h2c stream ended before its response completed" },
-          "an h2c stream ended with a reset code; whatever it was serving did not finish",
-        );
+        recordStreamReset(stream.rstCode, stream.id, path);
       });
     });
   });
