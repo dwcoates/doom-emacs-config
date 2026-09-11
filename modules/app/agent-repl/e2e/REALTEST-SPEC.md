@@ -218,6 +218,20 @@ a word character: `link-up\b` also matches `link-up-skipped` and `adopted\b`
 also matches `adopted-unhealthy`, each the opposite of the phase it would be
 credited to.
 
+## The harvest is collapsed, never filtered
+
+Realtest 1's first run produced 5926 findings, and about six thousand lines of
+its manifest were two classes repeated: every shim record in one workspace
+flagged for the same attribution conflict, and the sidecar's `discover-meta`
+4988 times. A document nobody can read is not evidence the owner can rule on.
+
+So the manifest reports one line per CLASS — keyed by (source runtime,
+operation, level, kind) within a workspace — carrying the class's COUNT and one
+sample record verbatim, and every record is written to `HARVEST-FULL.jsonl` in
+the run directory beside it. The count is what keeps this from being a filter:
+no record is dropped and no total is hidden, and a class of one reads exactly as
+a single finding does.
+
 ## Budgets, and why they ship unmeasured
 
 `e2e/realtest/budgets.go` ships with every entry `unmeasured`, on purpose. A
