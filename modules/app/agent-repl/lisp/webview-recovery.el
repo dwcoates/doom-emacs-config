@@ -34,6 +34,7 @@
 (declare-function agent-repl--ws-live-p "agent-repl-workspace" (ws))
 (declare-function agent-repl--ws-gui-frontend-p "agent-repl-frontends" (ws))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--emacs-focused-p "agent-repl-notifications" (&optional ws))
 
 (defvar agent-repl-link-up-functions)
 
@@ -56,6 +57,65 @@ one.  Raise this if a burst ever produces a visible hitch."
 (defvar agent-repl--webview-precreate-timer nil
   "The timer draining `agent-repl--webview-precreate-queue', or nil.")
 
+(defvar agent-repl--webview-precreate-parked nil
+  "Non-nil while the drain is HOLDING for Emacs to have desktop focus.
+The queue is kept whole; nothing is dropped and no timer stands.")
+
+(defun agent-repl--webview-precreate-arm ()
+  "Arm the paced drain for the queue's next workspace, if one is owed."
+  (when (and agent-repl--webview-precreate-queue
+             (null agent-repl--webview-precreate-timer))
+    (setq agent-repl--webview-precreate-timer
+          (run-at-time agent-repl-webview-precreate-stagger-seconds nil
+                       #'agent-repl--webview-precreate-drain)))
+  agent-repl--webview-precreate-timer)
+
+(defun agent-repl--webview-precreate-hold-p ()
+  "Return non-nil while a pre-creation must not mount a webview yet.
+
+MOUNTING A WEBVIEW TAKES THE DESKTOP.  Creating a WKWebView instantiates
+a native view, and macOS activates the owning process when it does --
+which is a thing `open -g' cannot suppress, because it is not the app
+launch doing it.  A link-up pre-creates every eligible workspace's page,
+and a link-up happens seconds into every cold start, so an Emacs launched
+DELIBERATELY IN THE BACKGROUND stole focus from whatever the user was
+looking at.  Three background launches, three focus moves, every time.
+
+Holding costs the warm page nothing it was for: pre-creation exists so
+the mount is not paid at first LOOK, and a look is a focus.  The hold is
+released by `agent-repl--webview-precreate-on-focus-change' the moment
+Emacs is frontmost, which is at or before that first look.
+
+The question is deliberately \"do we KNOW Emacs is unfocused\":
+`agent-repl--emacs-focused-p' counts an `unknown' focus state as
+focused, so an unanswerable frame drains as it always did rather than
+parking on a guess.  Under `noninteractive' nothing holds -- a batch
+process has no application to activate, and the suites drive this drain
+directly."
+  (and (not noninteractive)
+       (fboundp 'agent-repl--emacs-focused-p)
+       (not (agent-repl--emacs-focused-p))))
+
+(defun agent-repl--webview-precreate-park ()
+  "Hold the drain until Emacs has desktop focus, keeping the queue whole."
+  (setq agent-repl--webview-precreate-parked t)
+  (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
+                    "elisp.webview-recovery.precreate-parked queued=%d reason=emacs-not-focused"
+                    (length agent-repl--webview-precreate-queue))
+  t)
+
+(defun agent-repl--webview-precreate-on-focus-change ()
+  "Resume a parked drain once Emacs actually holds desktop focus.
+Registered on `after-focus-change-function', the same edge status.el
+repaints the tab bar on.  A no-op when nothing is parked."
+  (when (and agent-repl--webview-precreate-parked
+             (not (agent-repl--webview-precreate-hold-p)))
+    (setq agent-repl--webview-precreate-parked nil)
+    (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
+                      "elisp.webview-recovery.precreate-resumed queued=%d reason=emacs-focused"
+                      (length agent-repl--webview-precreate-queue))
+    (agent-repl--webview-precreate-arm)))
+
 (defun agent-repl--webview-precreate-needed-p (ws)
   "Return non-nil when WS is owed a webview and has none.
 
@@ -74,17 +134,17 @@ trusted from when the workspace was queued, so a workspace closed mid
 drain gets no page.  A mount that signals is warned about and the drain
 continues: one workspace's failure must not strand the rest of the queue."
   (setq agent-repl--webview-precreate-timer nil)
-  (let ((ws (pop agent-repl--webview-precreate-queue)))
-    (when ws
-      (condition-case err
-          (when (agent-repl--webview-precreate-needed-p ws)
-            (agent-repl--frontend-precreate-webview ws))
-        (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
-                                 ws err))))
-    (when agent-repl--webview-precreate-queue
-      (setq agent-repl--webview-precreate-timer
-            (run-at-time agent-repl-webview-precreate-stagger-seconds nil
-                         #'agent-repl--webview-precreate-drain)))))
+  (if (and agent-repl--webview-precreate-queue
+           (agent-repl--webview-precreate-hold-p))
+      (agent-repl--webview-precreate-park)
+    (let ((ws (pop agent-repl--webview-precreate-queue)))
+      (when ws
+        (condition-case err
+            (when (agent-repl--webview-precreate-needed-p ws)
+              (agent-repl--frontend-precreate-webview ws))
+          (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
+                                   ws err))))
+      (agent-repl--webview-precreate-arm))))
 
 (defun agent-repl--webview-precreate-schedule (workspaces)
   "Queue WORKSPACES for paced pre-creation, returning how many were queued.
@@ -97,11 +157,7 @@ workspace already queued is not queued twice."
         (setq agent-repl--webview-precreate-queue
               (append agent-repl--webview-precreate-queue (list ws)))
         (setq added (1+ added))))
-    (when (and agent-repl--webview-precreate-queue
-               (null agent-repl--webview-precreate-timer))
-      (setq agent-repl--webview-precreate-timer
-            (run-at-time agent-repl-webview-precreate-stagger-seconds nil
-                         #'agent-repl--webview-precreate-drain)))
+    (agent-repl--webview-precreate-arm)
     added))
 
 (defun agent-repl--webview-precreate-missing ()
@@ -129,6 +185,8 @@ workspace is buildable."
   (agent-repl-webview-precreate-all))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl--webview-precreate-on-link-up)
+(add-function :after after-focus-change-function
+              #'agent-repl--webview-precreate-on-focus-change)
 
 (provide 'webview-recovery)
 ;;; webview-recovery.el ends here
