@@ -36,6 +36,26 @@ import (
 	"claude-repld/internal/wsm"
 )
 
+// DefaultAdoptBound is how long ONE surviving shim's adoption may take before
+// the boot stops waiting on it.
+//
+// IT IS WHY THE DAEMON SERVES AT ALL. The listener is bound and daemon.addr is
+// published BEFORE this reconciliation runs (cmd/claude-repld/run.go steps 5
+// and 6) and `http.Server.Serve` is not reached until after it, so every
+// instant this step spends is an instant the kernel is queueing client
+// connections onto a socket nobody is accepting. An unbounded adoption is
+// therefore not a slow boot: it is a daemon that listens forever and answers
+// nothing, which is what pid 31984 did for ten hours with its accept queue at
+// 128/128 — its lock read HELD for a shim whose socket path was gone, and
+// `shimclient.bringUp` redials THAT forever by design.
+//
+// Sized as a small multiple of a healthy adoption, which is a local AF_UNIX
+// connect plus the shim's first pushed diagnostics frame — milliseconds, and
+// `shimsocket.DialTimeout` already bounds the connect at 2s. 10s is ~5x that
+// one bounded connect, so a shim that is merely busy is still adopted and one
+// that is unreachable costs the boot ten seconds instead of the whole run.
+const DefaultAdoptBound = 10 * time.Second
+
 // Report is what one boot reconciled. It is returned rather than only logged
 // so the daemon can answer for its own startup.
 type Report struct {
@@ -110,6 +130,11 @@ type Deps struct {
 	// it. It is required: an adoption nothing installed would leave the daemon
 	// believing it adopted a shim it cannot reach.
 	Adopted AdoptFunc
+	// AdoptBound bounds ONE surviving shim's adoption; zero means
+	// DefaultAdoptBound. An adoption that overruns it is reported at ERROR and
+	// the workspace is UNDETERMINED — neither adopted nor orphan-closed — which
+	// is the state the sequence already has for "the kernel would not say".
+	AdoptBound time.Duration
 	// Now supplies the instant an orphan close is stamped with; nil means
 	// time.Now.
 	Now func() time.Time
@@ -188,5 +213,9 @@ func New(deps Deps) (Sequence, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &sequence{deps: deps, probe: probe, socketProbe: socketProbe, now: now}, nil
+	adoptBound := deps.AdoptBound
+	if adoptBound <= 0 {
+		adoptBound = DefaultAdoptBound
+	}
+	return &sequence{deps: deps, probe: probe, socketProbe: socketProbe, now: now, adoptBound: adoptBound}, nil
 }

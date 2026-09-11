@@ -2,6 +2,7 @@ package boot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,6 +20,11 @@ type sequence struct {
 	probe       ProbeFunc
 	socketProbe SocketProbeFunc
 	now         func() time.Time
+	// adoptBound bounds ONE surviving shim's adoption. See DefaultAdoptBound:
+	// the daemon's listener is already bound and advertised while this step
+	// runs, so an unbounded adoption is a daemon that listens and never
+	// accepts.
+	adoptBound time.Duration
 }
 
 // Joining reports whether this daemon was spawned as a successor. The
@@ -140,7 +146,34 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 		}
 		switch {
 		case state == sessionlock.StateHeld:
-			client, adoptErr := s.deps.Supervisor.Adopt(ctx, ws.ID, ws.Dir, s.deps.Layout.ShimSocket(string(ws.ID)))
+			// THE ADOPTION IS BOUNDED, AND ITS OVERRUN IS NOT A BOOT FAILURE.
+			// `shimclient.bringUp` redials a shim whose lock reads held
+			// FOREVER — correctly, because a held lock is a living process —
+			// so a survivor whose socket path is gone (a rolled generation,
+			// an unlinked path) is a condition that never resolves. This step
+			// runs BEFORE the daemon serves, so waiting it out is a listener
+			// nobody accepts on: pid 31984 sat there for ten hours with its
+			// accept queue full while Emacs and curl timed out on connect.
+			//
+			// An overrun is therefore reported at ERROR and the workspace is
+			// UNDETERMINED: the lock says the conversation is owned, so its
+			// turns are NOT orphan-closed and no second shim is spawned onto
+			// it, exactly as for a probe that could not tell. The boot goes
+			// on and the daemon serves.
+			adoptCtx, cancelAdopt := context.WithTimeout(ctx, s.adoptBound)
+			client, adoptErr := s.deps.Supervisor.Adopt(adoptCtx, ws.ID, ws.Dir, socketPath)
+			overran := adoptErr != nil && errors.Is(adoptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+			cancelAdopt()
+			if overran {
+				log.Error("daemon.boot.adopt", "a surviving shim did not answer within the adoption bound; the workspace is left undetermined and the daemon serves", dlog.Context{
+					"workspace_id": string(ws.ID),
+					"socket_path":  socketPath,
+					"bound_ms":     s.adoptBound.Milliseconds(),
+					"error":        adoptErr.Error(),
+				})
+				report.Undetermined = append(report.Undetermined, ws.ID)
+				continue
+			}
 			if adoptErr != nil {
 				log.Error("daemon.boot.adopt", "a surviving shim could not be adopted", dlog.Context{
 					"workspace_id": string(ws.ID),
