@@ -140,11 +140,13 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 		text := selection.GetQuestion().GetText()
 		question, ok := asked[text]
 		if !ok {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!ok"})
 			return refuse(log, "AnswerQuestion", ArmUnservedAnswer,
 				fmt.Sprintf("question %q was never served in this batch", text), false)
 		}
 		single := question.GetSingleSelect() != nil
 		if single && len(selection.GetChosen()) > 1 {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "single && len(selection.GetChosen()) > 1"})
 			return refuse(log, "AnswerQuestion", ArmMultiPickOnSingleSelect,
 				fmt.Sprintf("question %q is single-select but %d choices were made", text, len(selection.GetChosen())), false)
 		}
@@ -157,6 +159,7 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 		}
 		for _, chosen := range selection.GetChosen() {
 			if !labels[chosen.GetLabel().GetLabel()] {
+				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!labels[chosen.GetLabel().GetLabel()]"})
 				return refuse(log, "AnswerQuestion", ArmUnservedAnswer,
 					fmt.Sprintf("question %q never offered the choice %q", text, chosen.GetLabel().GetLabel()), false)
 			}
@@ -233,20 +236,25 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 func coldRemediation(log dlog.Logger, served ServedColdGate, answer *frontendv1.FeedColdGateResolved, scope conversationv1.SessionCompactScope) (*conversationv1.SessionColdRemediation, error) {
 	switch {
 	case answer.GetPay() != nil:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case answer.GetPay() != nil"})
 		return &conversationv1.SessionColdRemediation{
 			Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
 		}, nil
 	case answer.GetClear() != nil:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case answer.GetClear() != nil"})
 		return &conversationv1.SessionColdRemediation{
 			Remediation: &conversationv1.SessionColdRemediation_Clear{Clear: &conversationv1.SessionColdClear{}},
 		}, nil
 	case answer.GetCompact() != nil:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case answer.GetCompact() != nil"})
 		model := answer.GetCompact().GetModel().GetModel()
 		if !servedModel(served.Models, model) {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedModel(served.Models, model)"})
 			return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
 				fmt.Sprintf("the compact menu never offered the model %q", model.GetName()), false)
 		}
 		if !servedScope(served.Scopes, scope) {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedScope(served.Scopes, scope)"})
 			return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
 				fmt.Sprintf("the compact menu never offered the scope %s", scope), false)
 		}
@@ -256,6 +264,7 @@ func coldRemediation(log dlog.Logger, served ServedColdGate, answer *frontendv1.
 			},
 		}, nil
 	default:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "default"})
 		return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation, "the answer names no choice", false)
 	}
 }

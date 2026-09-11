@@ -233,18 +233,22 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 // minted or written.
 func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 	if spec.OneShot && spec.Finish == nil {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "spec.OneShot && spec.Finish == nil"})
 		return refuse(log, "CreateWorkspace", ArmFinishRequired,
 			"a one-shot creation must name a finish action", false)
 	}
 	if !spec.OneShot && spec.Finish != nil {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!spec.OneShot && spec.Finish != nil"})
 		return refuse(log, "CreateWorkspace", ArmFinishNotOneShot,
 			"a finish action belongs only to the one-shot form", false)
 	}
 	if spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == "" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == \"\""})
 		return refuse(log, "CreateWorkspace", ArmNoSlug,
 			"a one-shot creation must carry the prompt it runs", false)
 	}
 	if UngatedPermissionModes[spec.PermissionMode] && spec.ConsentedUngatedMode != spec.PermissionMode {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "UngatedPermissionModes[spec.PermissionMode] && spec.ConsentedUngatedMode != spec.PermissionMode"})
 		return refuse(log, "CreateWorkspace", ArmUngatedWithoutConsent,
 			fmt.Sprintf("permission mode %q disables the consent gate and no consent was recorded", spec.PermissionMode), false)
 	}
@@ -259,7 +263,9 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 // stands; the prefix is applied only to a name this daemon derived.
 func (v *verbs) branchFor(log dlog.Logger, spec CreateSpec, minted wsm.WorkspaceID) (string, error) {
 	if supplied := strings.TrimSpace(spec.Name); supplied != "" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "supplied := strings.TrimSpace(spec.Name); supplied != \"\""})
 		if strings.Contains(supplied, "/") {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "strings.Contains(supplied, \"/\")"})
 			return supplied, nil
 		}
 		return Name(Prefix(), supplied), nil
@@ -275,6 +281,7 @@ func (v *verbs) branchFor(log dlog.Logger, spec CreateSpec, minted wsm.Workspace
 	}
 	slug, err := Slug(spec.InitialPrompt)
 	if err != nil {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
 		return "", refuse(log, "CreateWorkspace", ArmNoSlug,
 			"no name was supplied and no slug can be derived from the initial prompt", false)
 	}
@@ -330,13 +337,16 @@ func (s CreateSpec) parentWorkspace() *ids.WorkspaceID {
 func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID, child wsm.Workspace, childConfigDir string) (string, error) {
 	parentRecord, err := v.deps.DB.Workspace(ctx, parent)
 	if err != nil {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
 		return "", fmt.Errorf("fork from %q: %w", parent, err)
 	}
 	parentSession, ok, err := v.deps.DB.Session(ctx, parent)
 	if err != nil {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
 		return "", fmt.Errorf("fork from %q: read the parent session: %w", parent, err)
 	}
 	if !ok || parentSession.VendorSessionID == "" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!ok || parentSession.VendorSessionID == \"\""})
 		return "", refuse(log, "CreateWorkspace", ArmForkParentHasNoConversation,
 			fmt.Sprintf("workspace %q has no conversation to fork", parent), false)
 	}
@@ -362,6 +372,7 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 		"child_vendor_session_id":  forked,
 	})
 	if err := v.forkConversation(ctx, log, parent, child.ID, minted); err != nil {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err := v.forkConversation(ctx, log, parent, child.ID, minted); err != nil"})
 		return "", err
 	}
 	return forked, nil

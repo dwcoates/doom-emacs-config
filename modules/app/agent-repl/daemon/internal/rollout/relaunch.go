@@ -276,14 +276,20 @@ func (c *controller) CheckStaleness(ctx context.Context, ws ids.WorkspaceID, rep
 // rather than once per mount.
 func (c *controller) claimStaleBounce(ws ids.WorkspaceID, reported string) bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.bouncedStamp == nil {
 		c.bouncedStamp = map[ids.WorkspaceID]string{}
 	}
-	if c.bouncedStamp[ws] == reported {
+	previous := c.bouncedStamp[ws]
+	if previous == reported {
+		c.mu.Unlock()
+		c.logTransition(opStaleness, ws, "bounced_build_stamp", previous, previous,
+			dlog.Context{"changed": false})
 		return false
 	}
 	c.bouncedStamp[ws] = reported
+	c.mu.Unlock()
+	c.logTransition(opStaleness, ws, "bounced_build_stamp", previous, reported,
+		dlog.Context{"changed": true})
 	return true
 }
 
