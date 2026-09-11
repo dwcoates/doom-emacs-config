@@ -120,7 +120,50 @@ Scale
 | # | status | ruling |
 |---|---|---|
 | 0 | done (cc93abb9d) | retire the old playtest layer |
-| 1 | pending | |
+| 1 | run 1, 2026-09-11 12:13 — FAILED | the owner rules on the classes below |
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
+
+### Realtest 1, run 1 — 2026-09-11 12:13, FAILED
+
+Three cold starts, all failed the plan's own assertion: no tab was drawn for any
+of the three workspaces the state database holds. Run record:
+`~/.claude-emacs/realtest/realtest-20260911-121357/MANIFEST.md`.
+
+Phases measured (all three starts agreed to within half a second):
+
+| phase | measured |
+|---|---|
+| doom-boot | 2.0–2.5 s from spawn |
+| daemon spawn to serving | 10.0 s, every time — the adoption bound, not work |
+| link up | ~13.5 s from spawn |
+
+One line per distinct finding class:
+
+- the roster push aborted on a stale workspace, so no roster ever reached the
+  frontend and no tab was drawn — the run's actual failure;
+- `elisp.daemon.booted` fired 3 ms after the spawn against a stale address
+  file: the frontend reported a daemon it did not have;
+- the 10 s daemon bring-up is an adoption bound waiting on a surviving shim
+  that was never healthy, not work the daemon did;
+- the shim held a permanent `storeUnreachable` fault for the whole run;
+- nothing in the mode line said anything while bring-up ran, so the 13.5 s to a
+  link reads to the owner as a hang;
+- the vendor guard had a hole: a shim left listening by an earlier UNGUARDED
+  daemon was adopted by this run's guarded daemon and submitted a keepalive
+  prompt to the real vendor every four minutes (fixed — `bin/realtest.sh` now
+  enumerates and refuses on every unguarded listening shim and `shim-lock`);
+- two workspace-id schemes in log attribution: the shim stamps its own 8-hex id
+  while the daemon-side sink is keyed by the 16-hex id, which the harvester
+  reports as a broken routing invariant on every shim record — a CONTRACT
+  question for the owner;
+- the sidecar wrote 4988 `discover-meta` records inside the run window;
+- every launch moved focus (Chrome to Emacs), including under `open -g`;
+- the heartbeat warned repeatedly that the owner was not loaded;
+- `elisp.host.link-up-skipped ws=none` warned during bring-up.
+
+Harness fixes landed from this run: the vendor-guard hole above; `daemon-answered`
+re-keyed off the link and the roster subscription rather than the boot claim,
+with `daemon-spawned` split out; and the harvest collapsed per class with the
+full record list in `HARVEST-FULL.jsonl`.
