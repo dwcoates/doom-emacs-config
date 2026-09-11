@@ -6,6 +6,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 )
 
@@ -22,19 +23,24 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 	card := &frontendv1.FeedSkill{}
 	switch state := skill.GetResult().(type) {
 	case *conversationv1.AgentSkillUse_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Start"})
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = composeInvocation(state.Start.GetSkill().GetName(), state.Start.GetArgs(), state.Start.Args != nil)
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		if u.denied {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
 			card.Outcome = &frontendv1.FeedSkill_Denied{Denied: &frontendv1.FeedSkillDenied{}}
 			break
 		}
 		card.Outcome = &frontendv1.FeedSkill_Running{Running: &frontendv1.FeedSkillRunning{}}
 	case *conversationv1.AgentSkillUse_Progress:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Progress"})
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		card.Outcome = &frontendv1.FeedSkill_Running{Running: &frontendv1.FeedSkillRunning{}}
 	case *conversationv1.AgentSkillUse_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Success"})
 		if u.input == "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.input == \"\""})
 			u.input = composeInvocation(state.Success.GetSkill().GetName(), "", false)
 		}
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
@@ -44,17 +50,20 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		// The consent line: WHAT INVOKING IT PERMITS. Absent when the skill
 		// declared none — absence draws no line, never an empty one.
 		if allowed := state.Success.GetAllowedTools().GetToolNames(); len(allowed) > 0 {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "allowed := state.Success.GetAllowedTools().GetToolNames(); len(allowed) > 0"})
 			loaded.Allowances = &frontendv1.FeedSkillAllowances{
 				Text: "allows: " + strings.Join(allowed, ", "),
 			}
 		}
 		card.Outcome = &frontendv1.FeedSkill_Loaded{Loaded: loaded}
 	case *conversationv1.AgentSkillUse_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Failure"})
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		card.Outcome = &frontendv1.FeedSkill_Failed{Failed: &frontendv1.FeedSkillFailed{
 			Text: skillFailureText(state.Failure.GetError()),
 		}}
 	default:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "default"})
 		return nil, errNotARow
 	}
 

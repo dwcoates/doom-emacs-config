@@ -80,10 +80,13 @@ func (r *resolver) ResolveColdGate(ws ids.WorkspaceID, remediation *conversation
 	resolved := &frontendv1.FeedColdGateResolved{AtMs: r.deps.Now().UnixMilli()}
 	switch choice := remediation.GetRemediation().(type) {
 	case *conversationv1.SessionColdRemediation_Pay:
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "ResolveColdGate", "branch": "case *conversationv1.SessionColdRemediation_Pay"})
 		resolved.Choice = &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}
 	case *conversationv1.SessionColdRemediation_Clear:
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "ResolveColdGate", "branch": "case *conversationv1.SessionColdRemediation_Clear"})
 		resolved.Choice = &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}}
 	case *conversationv1.SessionColdRemediation_Compact:
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "ResolveColdGate", "branch": "case *conversationv1.SessionColdRemediation_Compact"})
 		compact := &frontendv1.FeedColdGateResolvedCompact{}
 		// The trace names the summarizer AND what it summarized: a compaction
 		// of the prompts alone bought something different from a compaction of

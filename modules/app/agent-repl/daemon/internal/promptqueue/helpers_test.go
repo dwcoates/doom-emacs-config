@@ -648,6 +648,7 @@ type harness struct {
 	holds   *fakeHolds
 	judge   *scriptedJudge
 	drain   *noteRecorder
+	log     *dlog.TestSurfaces
 
 	// finished records every one-shot finish hook call.
 	finishedMu sync.Mutex
@@ -680,6 +681,7 @@ func newHarness(t *testing.T) *harness {
 		holds:   &fakeHolds{},
 		judge:   &scriptedJudge{},
 		drain:   &noteRecorder{},
+		log:     dlog.NewTestSurfaces(),
 	}
 	q, err := newQueue(Deps{
 		// The harness's image resolver is a plain naming of the path, so a
@@ -718,7 +720,7 @@ func newHarness(t *testing.T) *harness {
 			return h.finishErr
 		},
 		Now: func() time.Time { return instant },
-		Log: dlog.NewTestSurfaces(),
+		Log: h.log,
 	})
 	if err != nil {
 		t.Fatalf("newQueue: %v", err)

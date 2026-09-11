@@ -66,6 +66,13 @@ func (c *controller) Handover(ctx context.Context) error {
 		c.rendezvous[ws.ID] = &entry{expected: p, done: make(chan struct{})}
 	}
 	c.mu.Unlock()
+	for _, ws := range workspaces {
+		p := snapshot[ws.ID]
+		c.logTransition(opHandover, ws.ID, "rendezvous", "unarmed", "armed", dlog.Context{
+			"expected_host": p.Host,
+			"expected_web":  p.Web,
+		})
+	}
 	c.log.Info(opHandover, "announced the stand-down and snapshotted the expected participants",
 		merge(fields, dlog.Context{"workspaces": len(workspaces)}))
 

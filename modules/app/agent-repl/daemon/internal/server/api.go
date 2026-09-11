@@ -286,7 +286,7 @@ func New(deps Deps) (Server, error) {
 	}
 
 	mux := http.NewServeMux()
-	path, handler := agentreplv1connect.NewAgentReplHandler(s)
+	path, handler := agentreplv1connect.NewAgentReplHandler(&requestLoggingServer{server: s})
 	mux.Handle(path, handler)
 	// The Connect routes and the image origin sit on their own longer
 	// prefixes, so http.ServeMux gives them precedence over the asset origin

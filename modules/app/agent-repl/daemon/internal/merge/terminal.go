@@ -194,11 +194,22 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 	r.resubmitDisplaced(ctx)
 
 	// The worktree goes only after the terminal was published, and only for a
-	// merge that landed: a failed merge's branch still holds work.
+	// merge that landed: a failed merge's branch still holds work. Its session
+	// is ended and REAPED first. A live shim still has this directory as its
+	// working directory and can write through it while git removes it; under
+	// concurrent load that recreated the just-removed tree between git's exit
+	// and the postcondition check. A failed stand-down leaves the tree intact,
+	// loudly, because deleting a live process's working directory is forbidden.
 	if out.failed == "" && out.landed != "" {
-		if err := r.o.deps.Git.RemoveWorktree(ctx, string(r.repo), r.job.Layout.SourceDir); err != nil {
+		if err := r.o.deps.StopSession(ctx, r.ws, true); err != nil {
+			log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
+				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "force": true, "error": err.Error()})
+		} else if err := r.o.deps.Git.RemoveWorktree(ctx, string(r.repo), r.job.Layout.SourceDir); err != nil {
 			log.Error(op, "could not remove the merged worktree", dlog.Context{
 				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "error": err.Error()})
+		} else {
+			log.Debug(op, "ensured the merged workspace has no live session before removing its worktree", dlog.Context{
+				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "force": true})
 		}
 	}
 	if err := r.lock.Release(); err != nil {

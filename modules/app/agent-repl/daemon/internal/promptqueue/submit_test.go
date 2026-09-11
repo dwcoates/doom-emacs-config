@@ -3,16 +3,96 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
+
+func TestQueueStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  string
+		before any
+		after  any
+		act    func(*harness, dlog.Logger) func()
+	}{
+		{
+			name: "a bring-up enters flight", state: "bring_ups", before: 0, after: 1,
+			act: func(h *harness, log dlog.Logger) func() {
+				h.q.noteBringUp("ws-1", 1, log)
+				return func() { h.q.noteBringUp("ws-1", -1, log) }
+			},
+		},
+		{
+			name: "a bring-up leaves flight", state: "bring_ups", before: 1, after: 0,
+			act: func(h *harness, log dlog.Logger) func() {
+				h.q.state("ws-1").bringUps = 1
+				h.q.noteBringUp("ws-1", -1, log)
+				return func() {}
+			},
+		},
+		{
+			name: "a background revival starts", state: "reviving", before: false, after: true,
+			act: func(h *harness, log dlog.Logger) func() {
+				entered := make(chan struct{})
+				release := make(chan struct{})
+				h.noSession = true
+				h.reviveHook = func() {
+					close(entered)
+					<-release
+					h.noSession = false
+				}
+				h.q.reviveInBackground(context.Background(), "ws-1", log)
+				<-entered
+				return func() { close(release); h.waitRevivals() }
+			},
+		},
+		{
+			name: "a background revival finishes", state: "reviving", before: true, after: false,
+			act: func(h *harness, log dlog.Logger) func() {
+				h.noSession = true
+				h.reviveHook = func() { h.noSession = false }
+				h.q.reviveInBackground(context.Background(), "ws-1", log)
+				h.waitRevivals()
+				return func() {}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			log, err := h.q.logger(context.Background(), "ws-1")
+			if err != nil {
+				t.Fatalf("logger: %v", err)
+			}
+			beforeRecords := len(h.log.Records())
+
+			// Act.
+			cleanup := tt.act(h, log)
+			defer cleanup()
+
+			// Assert.
+			for _, record := range h.log.Records()[beforeRecords:] {
+				if record.Level == "debug" && record.Operation == "daemon.promptqueue.state_transition" &&
+					record.Context["state"] == tt.state && reflect.DeepEqual(record.Context["before"], tt.before) &&
+					reflect.DeepEqual(record.Context["after"], tt.after) {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want %s before=%v after=%v", h.log.Records()[beforeRecords:], tt.state, tt.before, tt.after)
+		})
+	}
+}
 
 func TestSubmitRefusesAnUnspecifiedOrigin(t *testing.T) {
 	// Arrange

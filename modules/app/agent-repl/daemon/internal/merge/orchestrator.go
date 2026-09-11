@@ -174,6 +174,7 @@ func (d Deps) validate() error {
 	check(d.AwaitTurnEnd != nil, "AwaitTurnEnd")
 	check(d.Occupy != nil, "Occupy")
 	check(d.StartSession != nil, "StartSession")
+	check(d.StopSession != nil, "StopSession")
 	check(d.CaptureDisplaced != nil, "CaptureDisplaced")
 	check(d.ParkedRoute != nil, "ParkedRoute")
 	check(d.Rollout != nil, "Rollout")

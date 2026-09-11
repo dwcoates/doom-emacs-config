@@ -64,6 +64,10 @@ func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*
 	}, nil
 }
 
+func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
+	return &shimv1.HibernateResponse{}, nil
+}
+
 func (c *fakeClient) PID() int { return c.pid }
 
 func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) error {

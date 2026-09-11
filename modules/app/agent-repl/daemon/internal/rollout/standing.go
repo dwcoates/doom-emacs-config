@@ -76,9 +76,11 @@ func (c *controller) recordTransfer(ws ids.WorkspaceID, successor string) {
 	if c.transferred == nil {
 		c.transferred = map[ids.WorkspaceID]string{}
 	}
+	previous := c.transferred[ws]
 	c.transferred[ws] = successor
 	c.successor = successor
 	c.mu.Unlock()
+	c.logTransition(opTransfer, ws, "serving_standing", previous, successor, nil)
 	c.log.Debug(opTransfer, "the workspace's serving standing is transferring_away", dlog.Context{
 		"workspace": string(ws), "successor": successor,
 	})

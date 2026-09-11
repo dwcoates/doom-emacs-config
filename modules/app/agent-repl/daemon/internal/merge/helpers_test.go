@@ -925,6 +925,12 @@ type harness struct {
 	turnCloses []wsm.TurnClose
 	// startedSessions records the revivals a configured prompt caused.
 	startedSessions []ids.WorkspaceID
+	// stoppedSessions records the landed workspaces whose sessions were reaped
+	// before their worktrees were removed.
+	stoppedSessions []ids.WorkspaceID
+	stopForces      []bool
+	stopAt          int
+	stopErr         error
 	// occupancyReleases counts the occupancy guards dropped.
 	occupancyReleases int
 	// displaced is what CaptureDisplaced answers with, nil for none.
@@ -1028,6 +1034,18 @@ func (h *harness) deps() Deps {
 			h.db.sessions[ws] = wsm.Session{Workspace: ws}
 			h.db.mu.Unlock()
 			return nil
+		},
+		StopSession: func(_ context.Context, ws ids.WorkspaceID, force bool) error {
+			at := h.next()
+			h.mu.Lock()
+			h.stoppedSessions = append(h.stoppedSessions, ws)
+			h.stopForces = append(h.stopForces, force)
+			if h.stopAt == 0 {
+				h.stopAt = at
+			}
+			err := h.stopErr
+			h.mu.Unlock()
+			return err
 		},
 		Occupy: func(ids.WorkspaceID, string) (func(), bool, error) {
 			return func() {

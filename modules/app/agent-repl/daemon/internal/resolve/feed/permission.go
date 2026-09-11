@@ -31,6 +31,7 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 
 	state, known := s.permissionRows[askID]
 	if !known {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!known"})
 		at := r.place(s, agent)
 		state = &permissionState{
 			feed: at,
@@ -43,18 +44,22 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 	// an adoption can meet the ask mid-flight, and an answer with no agent to
 	// deliver it to is an ask nobody can settle.
 	if agent.GetValue() != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "agent.GetValue() != \"\""})
 		state.agent = agent
 	}
 	card := state.card
 
 	switch frame := p.GetResult().(type) {
 	case *conversationv1.AgentPermission_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPermission", "branch": "case *conversationv1.AgentPermission_Start"})
 		start := frame.Start
 		card.Headline = &frontendv1.FeedPermissionHeadline{Text: start.GetPrompt().GetTitle()}
 		if start.GetPrompt().Description != nil && start.GetPrompt().GetDescription() != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start.GetPrompt().Description != nil && start.GetPrompt().GetDescription() != \"\""})
 			card.Subtitle = &frontendv1.FeedPermissionSubtitle{Text: start.GetPrompt().GetDescription()}
 		}
 		if note := triggerNote(start.GetTrigger()); note != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "note := triggerNote(start.GetTrigger()); note != \"\""})
 			card.Trigger = &frontendv1.FeedPermissionTriggerNote{Text: note}
 		}
 		card.Arguments = &frontendv1.FeedPermissionArguments{
@@ -62,24 +67,28 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		}
 		// PRESENCE IS THE FACT, and the token stays here.
 		if standing := start.GetOfferedStanding(); standing != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "standing := start.GetOfferedStanding(); standing != nil"})
 			card.StandingOffered = &frontendv1.FeedPermissionStandingOffered{}
 			s.standing[state.row.GetValue()] = standing
 		}
 		card.State = &frontendv1.FeedPermission_Open{Open: &frontendv1.FeedPermissionOpen{}}
 		s.gatedCalls[askID] = p.GetGatedCall().GetValue()
 	case *conversationv1.AgentPermission_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPermission", "branch": "case *conversationv1.AgentPermission_Success"})
 		answered := &frontendv1.FeedPermissionAnswered{AtMs: r.deps.Now().UnixMilli()}
 		decisionArm(frame.Success)(answered)
 		card.State = &frontendv1.FeedPermission_Answered{Answered: answered}
 		// A DENIED CALL NEVER RAN, so its own card says denied rather than
 		// sitting running forever waiting on a tool that will not start.
 		if denied, ok := frame.Success.GetDecision().(*conversationv1.AgentPermissionSuccess_Denied); ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "denied, ok := frame.Success.GetDecision().(*conversationv1.AgentPermissionSuccess_Denied); ok"})
 			// The unit is joined by id: `gated_call` when the frame names one,
 			// and otherwise the permission's OWN id, which the shim mints as
 			// the gated unit's AgentActivityId.
 			r.markCallDenied(s, gatedUnit(p), denialWord(denied.Denied))
 		}
 	case *conversationv1.AgentPermission_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPermission", "branch": "case *conversationv1.AgentPermission_Failure"})
 		card.State = &frontendv1.FeedPermission_Abandoned{Abandoned: &frontendv1.FeedPermissionAbandoned{
 			AtMs: r.deps.Now().UnixMilli(),
 		}}
@@ -96,9 +105,11 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 	// name (the gate defaults `title` to it), so the unasked card says the same
 	// thing rather than inventing a sentence the vendor never said.
 	if card.Headline == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "card.Headline == nil"})
 		card.Headline = &frontendv1.FeedPermissionHeadline{Text: r.unaskedHeadline(s, gatedUnit(p))}
 	}
 	if card.Arguments == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "card.Arguments == nil"})
 		card.Arguments = &frontendv1.FeedPermissionArguments{}
 	}
 	row := &frontendv1.FeedRow{
@@ -147,10 +158,12 @@ func triggerNote(trigger *conversationv1.AgentPermissionTrigger) string {
 // rather than a second phrasing that could disagree with the card.
 func (r *resolver) gatedArgumentLines(s *wsState, gatedCall string) []string {
 	if gatedCall == "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "gatedCall == \"\""})
 		return nil
 	}
 	u, ok := s.units[gatedCall]
 	if !ok || u.input == "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok || u.input == \"\""})
 		return nil
 	}
 	return []string{u.input}
@@ -171,11 +184,15 @@ func gatedUnit(p *conversationv1.AgentPermission) string {
 // name, and the card says so rather than claiming a tool it cannot identify.
 func (r *resolver) unaskedHeadline(s *wsState, gatedCall string) string {
 	if gatedCall != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "gatedCall != \"\""})
 		if u, ok := s.units[gatedCall]; ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u, ok := s.units[gatedCall]; ok"})
 			if name := u.row.GetActivity().GetSimpleToolCall().GetName().GetText(); name != "" {
+				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "name := u.row.GetActivity().GetSimpleToolCall().GetName().GetText(); name != \"\""})
 				return name
 			}
 			if skill := u.row.GetActivity().GetSkill(); skill != nil {
+				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "skill := u.row.GetActivity().GetSkill(); skill != nil"})
 				return skill.GetInvocation().GetText()
 			}
 		}
@@ -295,17 +312,21 @@ func denialWord(denied *conversationv1.AgentPermissionDenied) string {
 // markCallDenied flips the gated call's card to denied and re-pushes it.
 func (r *resolver) markCallDenied(s *wsState, gatedCall, by string) {
 	if gatedCall == "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "gatedCall == \"\""})
 		return
 	}
 	u := s.unit(gatedCall)
 	u.denied = true
 	if u.row == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.row == nil"})
 		return
 	}
 	card := u.row.GetActivity().GetSimpleToolCall()
 	if card == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "card == nil"})
 		// A skill the gate refused says so on its own card.
 		if skill := u.row.GetActivity().GetSkill(); skill != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "skill := u.row.GetActivity().GetSkill(); skill != nil"})
 			skill.Outcome = &frontendv1.FeedSkill_Denied{Denied: &frontendv1.FeedSkillDenied{}}
 			r.upsertUnitRow(s, u)
 		}
@@ -322,9 +343,11 @@ func (r *resolver) markCallDenied(s *wsState, gatedCall, by string) {
 func (r *resolver) upsertUnitRow(s *wsState, u *unitState) {
 	for key, f := range s.feeds {
 		if key != u.feedKey {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "key != u.feedKey"})
 			continue
 		}
 		if _, ok := f.rows[u.row.GetId().GetValue()]; ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[u.row.GetId().GetValue()]; ok"})
 			r.upsert(s, placement{feed: s.feedAddrs[key]}, u.row, true)
 			return
 		}

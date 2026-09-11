@@ -94,11 +94,13 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 
 	switch lease.Policy {
 	case wsm.PolicyRefuse:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyRefuse"})
 		log.Warn(opSubmit, "the submission is refused: a merge is in flight", fields)
 		q.noteDrainRefusal(lease.Holder, sub.WS)
 		return Disposition{RefusedArm: ArmMerging}, true, ErrMerging
 
 	case wsm.PolicyParked:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyParked"})
 		if q.deps.ParkedRoute == nil {
 			log.Error(opSubmit, "a parked lease stands but no parked route is wired", fields)
 			return Disposition{}, true, fmt.Errorf("route the parked submission on %q: no parked route is wired", sub.WS)
@@ -119,6 +121,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 		return Disposition{Delivered: true}, true, nil
 
 	case wsm.PolicyHold:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyHold"})
 		kind, scheduleID, err := q.holdForLease(ctx, lease, log)
 		if err != nil {
 			return Disposition{}, true, err
@@ -128,6 +131,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 		return disposition, true, err
 
 	default:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "default"})
 		log.Error(opSubmit, "the lease carries a policy the queue does not know", fields)
 		return Disposition{}, true, fmt.Errorf("lease policy %d on %q is unknown", lease.Policy, sub.WS)
 	}
@@ -150,6 +154,7 @@ type leaseHold struct {
 func (q *queue) holdForLease(ctx context.Context, lease wsm.Lease, log dlog.Logger) (wsm.HoldKind, string, error) {
 	switch lease.Holder {
 	case wsm.HolderDrain:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderDrain"})
 		schedule, err := q.deps.DB.DrainSchedule(ctx)
 		if err != nil {
 			log.Error(opHold, "could not read the drain schedule the hold waits on",
@@ -162,10 +167,13 @@ func (q *queue) holdForLease(ctx context.Context, lease wsm.Lease, log dlog.Logg
 		}
 		return wsm.HoldShutdown, drain.ScheduleID(*schedule), nil
 	case wsm.HolderRestart:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderRestart"})
 		return wsm.HoldBuildRefresh, "", nil
 	case wsm.HolderHibernate:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderHibernate"})
 		return wsm.HoldSessionStarting, "", nil
 	default:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "default"})
 		log.Error(opHold, "a holding lease names a holder with no hold kind",
 			dlog.Context{"holder": holderName(lease.Holder)})
 		return 0, "", fmt.Errorf("lease holder %d projects no hold kind", lease.Holder)
@@ -269,16 +277,25 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 		log.Debug(opSubmit, "a revival is already in flight; the hold waits on it", nil)
 		return
 	}
+	beforeReviving := s.reviving
 	s.reviving = true
 	q.mu.Unlock()
+	log.Debug("daemon.promptqueue.state_transition", "the workspace revival state changed", dlog.Context{
+		"state": "reviving", "before": beforeReviving, "after": true,
+	})
+	log.Info(opSubmit, "started the background session revival", nil)
 
 	q.reviving.Add(1)
 	go func() {
 		defer q.reviving.Done()
 		defer func() {
 			q.mu.Lock()
+			before := s.reviving
 			s.reviving = false
 			q.mu.Unlock()
+			log.Debug("daemon.promptqueue.state_transition", "the workspace revival state changed", dlog.Context{
+				"state": "reviving", "before": before, "after": false,
+			})
 		}()
 		revived, err := q.revive(ctx, ws, log)
 		if err != nil {
@@ -386,6 +403,7 @@ func (q *queue) releaseRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log
 		return
 	}
 	log.Debug(opSubmit, "the revival released its pending holds", dlog.Context{"released": released})
+	log.Info(opSubmit, "released the revival-pending prompts", dlog.Context{"released": released})
 	if err := q.pushTray(ctx, ws, log); err != nil {
 		return
 	}
@@ -402,8 +420,8 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger)
 		return false, nil
 	}
 	log.Debug(opSubmit, "no session is live; reviving the workspace for the submission", nil)
-	q.noteBringUp(ws, 1)
-	defer q.noteBringUp(ws, -1)
+	q.noteBringUp(ws, 1, log)
+	defer q.noteBringUp(ws, -1, log)
 	if err := q.deps.Revive(ctx, ws); err != nil {
 		log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
 			dlog.Context{"cause": err.Error()})
@@ -414,11 +432,16 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger)
 }
 
 // noteBringUp records one revival entering or leaving flight.
-func (q *queue) noteBringUp(ws ids.WorkspaceID, delta int) {
+func (q *queue) noteBringUp(ws ids.WorkspaceID, delta int, log dlog.Logger) {
 	s := q.state(ws)
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	before := s.bringUps
 	s.bringUps += delta
+	after := s.bringUps
+	q.mu.Unlock()
+	log.Debug("daemon.promptqueue.state_transition", "the workspace bring-up count changed", dlog.Context{
+		"state": "bring_ups", "before": before, "after": after, "delta": delta,
+	})
 }
 
 // isReviving reports whether a bring-up for a workspace is running or about to

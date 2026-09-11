@@ -27,6 +27,7 @@ func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 	durable := durableOrder(f)
 	start := len(durable) - r.deps.PageSize
 	if start < 0 {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start < 0"})
 		start = 0
 	}
 	page := r.composePage(s, f, durable, start)
@@ -89,6 +90,7 @@ func (r *resolver) NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 	end := w.oldest
 	start := end - r.deps.PageSize
 	if start < 0 {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start < 0"})
 		start = 0
 	}
 	page := r.composePageRange(s, f, durable, start, end)
@@ -136,6 +138,7 @@ func (r *resolver) composePageRange(s *wsState, f *feedState, order []string, st
 	rows := make([]*frontendv1.FeedRow, 0, end-start)
 	for _, id := range order[start:end] {
 		if row, ok := f.rows[id]; ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "row, ok := f.rows[id]; ok"})
 			rows = append(rows, row)
 		}
 	}
@@ -144,6 +147,7 @@ func (r *resolver) composePageRange(s *wsState, f *feedState, order []string, st
 		Breadcrumbs: r.breadcrumbs(s, f.key),
 	}
 	if start > 0 {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start > 0"})
 		success.Edge = &frontendv1.FeedPageSuccess_HasMore{HasMore: &frontendv1.FeedPageHasMore{}}
 	} else {
 		success.Edge = &frontendv1.FeedPageSuccess_AtStart{AtStart: &frontendv1.FeedPageAtStart{}}
@@ -159,6 +163,7 @@ func (r *resolver) breadcrumbs(s *wsState, feedKey string) *frontendv1.FeedBread
 	for depth := 0; depth < len(s.subFeeds)+1; depth++ {
 		head, ok := s.subFeeds[key]
 		if !ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 			break
 		}
 		reversed = append(reversed, &frontendv1.FeedBreadcrumb{Target: head.row, Label: head.label})

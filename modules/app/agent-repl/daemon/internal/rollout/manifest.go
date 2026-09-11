@@ -325,6 +325,10 @@ func (c *controller) flushDispositions(ctx context.Context) {
 	c.pendingDispositions = nil
 	c.mu.Unlock()
 	for _, p := range pending {
+		c.logTransition(opReconcile, p.session.Workspace, "disposition_deferred", true, false,
+			dlog.Context{"disposition": string(p.d.Kind)})
+	}
+	for _, p := range pending {
 		c.recordDisposition(ctx, p.session, p.d)
 	}
 	if len(pending) > 0 {
@@ -342,8 +346,12 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 	// is HELD, not dropped, and flushDispositions writes it at the promotion.
 	if c.deps.DB.ReadOnly() {
 		c.mu.Lock()
+		before := len(c.pendingDispositions)
 		c.pendingDispositions = append(c.pendingDispositions, pendingDisposition{session: session, d: d})
+		after := len(c.pendingDispositions)
 		c.mu.Unlock()
+		c.logTransition(opReconcile, ws, "pending_dispositions", before, after,
+			dlog.Context{"disposition": string(d.Kind)})
 		c.log.Debug(opReconcile, "deferred a bounce disposition until the state handle writes",
 			dlog.Context{"workspace": string(ws), "disposition": string(d.Kind)})
 		return

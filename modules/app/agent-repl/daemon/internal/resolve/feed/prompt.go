@@ -22,6 +22,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 	log := r.logger(s.id)
 	recipient := prompt.GetAgent()
 	if recipient.GetValue() == "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "recipient.GetValue() == \"\""})
 		recipient = agent
 	}
 	turn := prompt.GetId()
@@ -37,6 +38,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		// it: every later row this turn produces is stamped with it, and its
 		// terminal row is what clears it.
 		if turn.GetValue() != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "turn.GetValue() != \"\""})
 			running := ids.TurnID(turn.GetValue())
 			s.turnInFlight = &running
 			s.turnStamp = &running
@@ -52,10 +54,12 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 	recipientFeed := feedid.Feed{Agent: recipient}
 	senderFeedKey := "root"
 	if head, ok := s.subFeeds[subFeedKey]; ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "head, ok := s.subFeeds[subFeedKey]; ok"})
 		senderFeedKey = head.parentFeed
 	}
 	senderAddr, senderKnown := s.feedAddrs[senderFeedKey]
 	if !senderKnown {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!senderKnown"})
 		senderAddr = feedid.Feed{Root: true}
 	}
 

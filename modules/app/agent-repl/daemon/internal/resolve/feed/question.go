@@ -27,27 +27,33 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 	card := &frontendv1.FeedQuestion{}
 	served, known := s.questionAsks[askID]
 	if !known {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!known"})
 		served = &questionState{}
 		s.questionAsks[askID] = served
 	}
 	if agent.GetValue() != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "agent.GetValue() != \"\""})
 		served.agent = agent
 	}
 
 	switch frame := q.GetResult().(type) {
 	case *conversationv1.AgentQuestion_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Start"})
 		served.batch = frame.Start.GetBatch()
 		card.Questions = questionItems(frame.Start.GetBatch())
 		card.State = &frontendv1.FeedQuestion_Open{Open: &frontendv1.FeedQuestionOpen{}}
 	case *conversationv1.AgentQuestion_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Success"})
 		card.Questions = questionItems(frame.Success.GetBatch())
 		switch outcome := frame.Success.GetOutcome().(type) {
 		case *conversationv1.AgentQuestionSuccess_Answered:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Answered"})
 			card.State = &frontendv1.FeedQuestion_Answered{Answered: &frontendv1.FeedQuestionAnswered{
 				AtMs:    r.deps.Now().UnixMilli(),
 				Answers: givenAnswers(frame.Success.GetBatch(), outcome.Answered),
 			}}
 		case *conversationv1.AgentQuestionSuccess_Unanswered:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Unanswered"})
 			// NOBODY ANSWERING IS AN ANSWER to a legitimate ask: the agent
 			// proceeded without a choice, so the card is expired rather than
 			// pending forever.
@@ -55,9 +61,11 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 				AtMs: r.deps.Now().UnixMilli(),
 			}}
 		default:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "default"})
 			return
 		}
 	case *conversationv1.AgentQuestion_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Failure"})
 		// The ask could not be put to the user at all; nothing was chosen and
 		// nothing waits.
 		card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{
