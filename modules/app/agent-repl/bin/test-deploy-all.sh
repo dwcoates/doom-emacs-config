@@ -42,7 +42,11 @@ if [ "${READINESS_GATE_FAIL:-0}" = "1" ]; then
     printf '%s\n' '{"gate":{"system":"webapp","ready":false,"deployed_sha":"deployed-revision","source_sha":"source-revision","error":"required system is not ready"}}'
     exit 3
 fi
-printf '%s\n' '{"gate":{"system":"webapp","ready":true,"deployed_sha":"source-revision","source_sha":"source-revision"}}'
+if [ "${READINESS_DAEMON_GATE_FAIL:-0}" = "1" ] && [ "${2:-}" = "daemon" ]; then
+    printf '%s\n' '{"systems":[{"name":"daemon","deployed_sha":"new-deployed-revision","source_sha":"new-source-revision","running":{"pid":31984,"stale_binary":true},"ready":false}],"gate":{"system":"daemon","ready":false,"deployed_sha":"new-deployed-revision","source_sha":"new-source-revision","error":"required system is not ready"}}'
+    exit 3
+fi
+printf '%s\n' "{\"gate\":{\"system\":\"${2:-unknown}\",\"ready\":true,\"deployed_sha\":\"source-revision\",\"source_sha\":\"source-revision\"}}"
 EOF
     chmod +x "$mod/bin/readiness-report.sh"
     chmod +x "$mod/bin/deploy-all.sh"
@@ -190,6 +194,10 @@ case "$*" in
         exit 0
         ;;
     *runtime-restart-await*)
+        if [ "${EC_STUB_NOT_RESTARTED:-0}" = "1" ]; then
+            echo "*ERROR*: agent-repl: not restarted: no daemon link is available"
+            exit 1
+        fi
         if [ "${EC_STUB_REFUSE:-0}" = "1" ]; then
             echo "*ERROR*: agent-repl: refusing daemon stop — turn in flight"
             exit 1
@@ -293,8 +301,10 @@ if [ "$RC" -eq 0 ] \
    && ! log_has "frontend-client.el" \
    && log_before "kickstart -k gui/.*shim-claude-sidecar" "runtime-restart" \
    && log_has "readiness-report --require-ready webapp" \
+   && log_has "readiness-report --require-ready daemon" \
    && log_before "readiness-report --require-ready webapp" "kickstart -k gui/.*shim-store" \
-   && log_before "readiness-report --require-ready webapp" "runtime-restart"; then
+   && log_before "readiness-report --require-ready webapp" "runtime-restart" \
+   && log_before "runtime-restart" "readiness-report --require-ready daemon"; then
     pass "fresh tree runs the full chain in dependency order"
 else
     fail "fresh tree runs the full chain in dependency order" "rc=$RC log: $(cat "$STUB_LOG")"
@@ -527,6 +537,33 @@ if [ "$RC" -eq 3 ] \
 else
     fail "the revision gate is settled before the restart that can fail on it" \
          "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 6bb. a reasoned non-restart is surfaced distinctly --------------------
+d="$TMP/t6bb"; mkdir -p "$d"
+RUN_ENV="EC_STUB_NOT_RESTARTED=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && grep -q "daemon not restarted" "$d/stderr" \
+   && grep -q "no daemon link is available" "$d/stderr"; then
+    pass "a reasoned daemon non-restart is surfaced distinctly"
+else
+    fail "a reasoned daemon non-restart is surfaced distinctly" \
+         "rc=$RC stderr: $(cat "$d/stderr")"
+fi
+
+# --- 6c. a stale daemon after the bounce fails with process and revisions ---
+d="$TMP/t6c"; mkdir -p "$d"
+RUN_ENV="READINESS_DAEMON_GATE_FAIL=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && grep -q "daemon post-bounce revision gate failed" "$d/stderr" \
+   && grep -q '"pid":31984' "$d/stderr" \
+   && grep -q '"deployed_sha":"new-deployed-revision"' "$d/stderr" \
+   && grep -q '"source_sha":"new-source-revision"' "$d/stderr" \
+   && ! grep -q "deploy complete" "$d/stdout"; then
+    pass "a stale daemon after the bounce fails with its pid and both revision stamps"
+else
+    fail "a stale daemon after the bounce fails with its pid and both revision stamps" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
 # --- 7. --elisp loads changed non-test files only ---------------------------
