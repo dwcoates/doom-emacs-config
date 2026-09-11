@@ -127,6 +127,59 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
+func TestFeedDecisionsRecordTheirSelectedBranches(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		act       func(*resolver)
+	}{
+		{
+			name: "a cached workspace logger is selected", condition: "cached logger",
+			act: func(r *resolver) { r.logger(testWorkspace); r.logger(testWorkspace) },
+		},
+		{
+			name: "an existing workspace state is selected", condition: "ok",
+			act: func(r *resolver) { r.state(testWorkspace); r.state(testWorkspace) },
+		},
+		{
+			name: "a nonempty feed identity is selected", condition: "id.GetValue() != \"\"",
+			act: func(r *resolver) { r.feedKey(testWorkspace, rootFeed()) },
+		},
+		{
+			name: "an unset output address selects the root", condition: "s.address == nil",
+			act: func(r *resolver) { r.outputPlacement(r.state(testWorkspace)) },
+		},
+		{
+			name: "a missing row selects the no-retirement path", condition: "_, ok := f.rows[id]; !ok",
+			act: func(r *resolver) { r.retire(r.state(testWorkspace), rootFeed(), "missing") },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			tt.act(h.resolver)
+
+			// Assert.
+			for _, record := range h.records() {
+				if record.Level != "debug" || record.Operation != "daemon.feed.row_decision" {
+					continue
+				}
+				if tt.condition == "cached logger" && record.Context["cached"] == true {
+					return
+				}
+				if record.Context["condition"] == tt.condition {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want feed decision %q", h.records(), tt.condition)
+		})
+	}
+}
+
 // testEncode is a deterministic, delimiter-safe stand-in for feedid.Encode:
 // the same Ref always yields the same value, which is the only property this
 // package's tests depend on.

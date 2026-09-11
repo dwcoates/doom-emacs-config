@@ -303,6 +303,9 @@ func newResolver(deps Deps) (*resolver, error) {
 // workspace, which is why it is the one thing that may be global.
 func (r *resolver) logger(ws ids.WorkspaceID) dlog.Logger {
 	if l, ok := r.loggers[ws]; ok {
+		l.Debug("daemon.feed.row_decision", "selected the cached workspace logger", dlog.Context{
+			"function": "logger", "workspace": string(ws), "cached": true,
+		})
 		return l
 	}
 	global := r.deps.Log.Global()
@@ -343,6 +346,7 @@ func (r *resolver) logger(ws ids.WorkspaceID) dlog.Logger {
 func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 	s, ok := r.workspaces[ws]
 	if ok {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "ok"})
 		return s
 	}
 	s = &wsState{
@@ -383,6 +387,7 @@ func (r *resolver) feed(s *wsState, addr feedid.Feed) *feedState {
 	key := r.feedKey(s.id, addr)
 	f, ok := s.feeds[key]
 	if ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "ok"})
 		return f
 	}
 	f = &feedState{
@@ -419,6 +424,7 @@ func (f *feedState) insert(id string, rank rowRank) {
 func (r *resolver) feedKey(ws ids.WorkspaceID, addr feedid.Feed) string {
 	id := r.deps.EncodeFeed(ws, addr)
 	if id.GetValue() != "" {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id.GetValue() != \"\""})
 		return id.GetValue()
 	}
 	// A feedid implementation that has not landed yet encodes to the empty
@@ -451,20 +457,25 @@ type placement struct {
 // never dropped: a row nobody can place is still a row the user must see.
 func (r *resolver) place(s *wsState, agent *conversationv1.AgentId) placement {
 	if s.address != nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.address != nil"})
 		return r.outputPlacement(s)
 	}
 	id := agent.GetValue()
 	if id == "" || id == s.mainAgent {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id == \"\" || id == s.mainAgent"})
 		if s.mainAgent == "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.mainAgent == \"\""})
 			s.mainAgent = id
 		}
 		return placement{feed: feedid.Feed{Root: true}}
 	}
 	if s.mainAgent == "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.mainAgent == \"\""})
 		s.mainAgent = id
 		return placement{feed: feedid.Feed{Root: true}}
 	}
 	if _, ok := s.agentFeeds[id]; ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := s.agentFeeds[id]; ok"})
 		return placement{feed: feedid.Feed{Agent: agent}}
 	}
 	r.logger(s.id).Warn("daemon.feed.unplaceable_agent",
@@ -477,10 +488,12 @@ func (r *resolver) place(s *wsState, agent *conversationv1.AgentId) placement {
 // belongs: the standing output address, or the root feed when none stands.
 func (r *resolver) outputPlacement(s *wsState) placement {
 	if s.address == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.address == nil"})
 		return placement{feed: feedid.Feed{Root: true}}
 	}
 	p := placement{feed: s.address.Feed}
 	if s.address.Parent != nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.address.Parent != nil"})
 		p.parent = &frontendv1.FeedRowParent{Row: r.deps.Encode(*s.address.Parent)}
 	}
 	return p
@@ -499,6 +512,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		return
 	}
 	if at.parent != nil && row.Parent == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "at.parent != nil && row.Parent == nil"})
 		row.Parent = at.parent
 	}
 	// A ROW IS PUBLISHED AS A SNAPSHOT. A family composes its row from
@@ -526,14 +540,17 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	}
 	f.seq++
 	if !seen {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!seen"})
 		f.insert(id, rowRank{plane: s.plane, seq: f.seq})
 	}
 	f.rows[id] = snapshot
 	if !durable {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!durable"})
 		f.nonDurable[id] = true
 	}
 	f.log = append(f.log, &loggedRow{seq: f.seq, row: snapshot})
 	if len(f.log) > f.retention {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "len(f.log) > f.retention"})
 		f.log = f.log[len(f.log)-f.retention:]
 	}
 	for sub := range f.subs {
@@ -546,6 +563,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	f := r.feed(s, addr)
 	if _, ok := f.rows[id]; !ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
 		return false
 	}
 	delete(f.rows, id)
@@ -553,6 +571,7 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	delete(f.rank, id)
 	for i, existing := range f.order {
 		if existing == id {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "existing == id"})
 			f.order = append(f.order[:i], f.order[i+1:]...)
 			break
 		}
@@ -564,6 +583,7 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 func (r *resolver) rowID(ws ids.WorkspaceID, addr feedid.Feed, key feedid.RowKey) *frontendv1.FeedId {
 	id := r.deps.Encode(feedid.Ref{WS: ws, Feed: addr, Row: key})
 	if id.GetValue() != "" {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id.GetValue() != \"\""})
 		return id
 	}
 	// The same fallback the feed key takes, and for the same reason: an
@@ -581,6 +601,7 @@ func (r *resolver) SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.Out
 	s.address = addr
 	target := "root"
 	if addr != nil {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "addr != nil"})
 		target = r.feedKey(ws, addr.Feed)
 	}
 	r.logger(ws).Debug("daemon.feed.output_address",
@@ -643,6 +664,7 @@ func (r *resolver) UpsertCommandRefused(ws ids.WorkspaceID, command, reason stri
 		Reason:  &frontendv1.FeedCommandRefusedReason{Text: reason},
 	}
 	if addSupport {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "addSupport"})
 		refused.AddSupport = &frontendv1.FeedCommandAddSupportOffer{}
 	}
 	row := &frontendv1.FeedRow{Id: id, Row: &frontendv1.FeedRow_CommandRefused{CommandRefused: refused}}
@@ -694,6 +716,7 @@ func (r *resolver) ServedPermission(ws ids.WorkspaceID, ask string) (*conversati
 	s := r.state(ws)
 	state, ok := s.permissionRows[ask]
 	if !ok {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 		return nil, nil, false
 	}
 	return state.agent, s.standing[state.row.GetValue()], true
@@ -708,6 +731,7 @@ func (r *resolver) ServedQuestion(ws ids.WorkspaceID, ask string) (*conversation
 	s := r.state(ws)
 	state, ok := s.questionAsks[ask]
 	if !ok {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 		return nil, nil, false
 	}
 	return state.agent, state.batch, true
@@ -727,12 +751,14 @@ func (r *resolver) mintSubFeed(s *wsState, head *frontendv1.FeedId, sub feedid.F
 	parentKey := "root"
 	for existingKey, f := range s.feeds {
 		if _, ok := f.rows[head.GetValue()]; ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[head.GetValue()]; ok"})
 			parentKey = existingKey
 			break
 		}
 	}
 	s.subFeeds[key] = &subFeedHead{row: head, parentFeed: parentKey, label: label}
 	if sub.Agent != nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sub.Agent != nil"})
 		s.agentFeeds[sub.Agent.GetValue()] = key
 	}
 	r.feed(s, sub)

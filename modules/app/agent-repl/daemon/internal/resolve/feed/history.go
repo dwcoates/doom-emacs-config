@@ -59,6 +59,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	f := r.feed(s, at.feed)
 	switch boundary := page.GetBoundary().(type) {
 	case *conversationv1.HistoryPage_Floor:
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "OnHistoryPage", "branch": "case *conversationv1.HistoryPage_Floor"})
 		f.historyMore = nil
 	case *conversationv1.HistoryPage_More:
 		f.historyMore = &frontendv1.FailureHistoryReplayTruncated{
@@ -84,6 +85,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 // instead of half of it.
 func (r *resolver) portedPrompts(ws ids.WorkspaceID) []PortedPrompt {
 	if r.deps.PortedPrompts == nil {
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "r.deps.PortedPrompts == nil"})
 		return nil
 	}
 	ported, err := r.deps.PortedPrompts(context.Background(), ws)
@@ -100,6 +102,7 @@ func (r *resolver) portedPrompts(ws ids.WorkspaceID) []PortedPrompt {
 // plane that stands above everything else on the feed.
 func (r *resolver) replayPorted(s *wsState, ported []PortedPrompt) {
 	if s.portedDrawn || len(ported) == 0 {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.portedDrawn || len(ported) == 0"})
 		return
 	}
 	s.portedDrawn = true
@@ -117,10 +120,13 @@ func (r *resolver) replayPorted(s *wsState, ported []PortedPrompt) {
 func (r *resolver) replayEntry(s *wsState, agent *conversationv1.AgentId, entry *conversationv1.HistoryEntry, at *conversationv1.HistoryPointer) {
 	switch arm := entry.GetEntry().(type) {
 	case *conversationv1.HistoryEntry_UserPrompt:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_UserPrompt"})
 		r.drawAgentPrompt(s, agent, arm.UserPrompt)
 	case *conversationv1.HistoryEntry_AgentFrame:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_AgentFrame"})
 		r.replayFrame(s, arm.AgentFrame, at)
 	default:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "default"})
 		r.logger(s.id).Warn("daemon.feed.history_entry_unset",
 			"a replayed history entry carried no arm",
 			dlog.Context{"agent": agent.GetValue()})
@@ -136,12 +142,16 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 	case *conversationv1.AgentFrame_Update:
 		switch update := arm.Update.GetUpdate().(type) {
 		case *conversationv1.AgentUpdate_Activity:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Activity"})
 			r.drawActivity(s, agent, update.Activity, nil)
 		case *conversationv1.AgentUpdate_Question:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Question"})
 			r.drawQuestion(s, agent, update.Question)
 		case *conversationv1.AgentUpdate_Permission:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Permission"})
 			r.drawPermission(s, agent, update.Permission)
 		case *conversationv1.AgentUpdate_ContextCut:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ContextCut"})
 			r.drawContextCut(s, agent, update.ContextCut, at)
 		case *conversationv1.AgentUpdate_ContextBudgetWarning:
 			// The vendor's own context-budget warning is a PAGE LINE with
@@ -151,23 +161,29 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 				"a replayed context-budget warning draws no feed row",
 				dlog.Context{"agent": agent.GetValue()})
 		case *conversationv1.AgentUpdate_ApiError:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ApiError"})
 			// Mid-turn evidence, replayed as evidence: it was never a terminal
 			// and replaying it as one would invent a turn ending. The wording
 			// is the live sink's own, so a replayed turn reads exactly as the
 			// watched one did.
 			r.addEvidence(s, apiErrorEvidence(update.ApiError.GetMessage()))
 		default:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "default"})
 			r.logger(s.id).Warn("daemon.feed.history_update_unset",
 				"a replayed update carried no arm",
 				dlog.Context{"agent": agent.GetValue()})
 		}
 	case *conversationv1.AgentFrame_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_Success"})
 		r.replayTerminal(s, agent, arm.Success, nil)
 	case *conversationv1.AgentFrame_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_Failure"})
 		r.replayTerminal(s, agent, nil, arm.Failure)
 	case *conversationv1.AgentFrame_DetachedWork:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_DetachedWork"})
 		r.drawDetachedWork(s, agent, arm.DetachedWork)
 	default:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "default"})
 		r.logger(s.id).Warn("daemon.feed.history_frame_unset",
 			"a replayed frame carried no arm",
 			dlog.Context{"agent": agent.GetValue()})

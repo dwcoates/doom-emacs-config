@@ -35,8 +35,10 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 
 	switch {
 	case success != nil:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawTerminal", "branch": "case success != nil"})
 		r.concludedOutcome(s, success)(ended)
 	case failure != nil:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawTerminal", "branch": "case failure != nil"})
 		ended.Outcome = &frontendv1.FeedTurnEnded_Errored{Errored: r.erroredOutcome(s, string(*turn), failure)}
 	default:
 		log.Error("daemon.feed.terminal_without_outcome",
@@ -76,9 +78,11 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	delete(s.turnRefusals, string(*turn))
 	delete(s.turnQueryDeaths, string(*turn))
 	if s.turnInFlight != nil && *s.turnInFlight == *turn {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnInFlight != nil && *s.turnInFlight == *turn"})
 		s.turnInFlight = nil
 	}
 	if s.turnStamp != nil && *s.turnStamp == *turn {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnStamp != nil && *s.turnStamp == *turn"})
 		s.turnStamp = nil
 	}
 }
@@ -101,22 +105,27 @@ func terminalArm(ended *frontendv1.FeedTurnEnded) string {
 func (r *resolver) concludedOutcome(s *wsState, success *conversationv1.AgentSuccess) turnOutcome {
 	switch outcome := success.GetOutcome().(type) {
 	case *conversationv1.AgentSuccess_Completed:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Completed"})
 		concluded := &frontendv1.FeedTurnEndedConcluded{}
 		// THE ANSWERING RESPONSE, named by the producer rather than derived
 		// from position. Absence draws no final-answer border anywhere.
 		if answer := outcome.Completed.GetAnswer().GetValue(); answer != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "answer := outcome.Completed.GetAnswer().GetValue(); answer != \"\""})
 			if id, ok := s.answerRows[answer]; ok {
+				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id, ok := s.answerRows[answer]; ok"})
 				concluded.Answer = id
 			}
 		}
 		return concludedArm(concluded)
 	case *conversationv1.AgentSuccess_Interrupted:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Interrupted"})
 		return func(ended *frontendv1.FeedTurnEnded) {
 			ended.Outcome = &frontendv1.FeedTurnEnded_Interrupted{
 				Interrupted: &frontendv1.FeedTurnEndedInterrupted{},
 			}
 		}
 	case *conversationv1.AgentSuccess_Backgrounded:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Backgrounded"})
 		// The stream ended while the work did not. It is what was asked for,
 		// so the turn concluded — with no answering prose to point at.
 		return concludedArm(&frontendv1.FeedTurnEndedConcluded{})
@@ -152,6 +161,7 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 	// the arm for it, and drawing "the run broke while executing" over it
 	// loses the one fact that says the producer is gone.
 	if died, ok := s.turnQueryDeaths[turn]; ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "died, ok := s.turnQueryDeaths[turn]; ok"})
 		errored.Error = queryDiedArm(died)
 		applyHeadline(errored, headline{Text: queryDeathSentence(died)},
 			strings.Join(failure.GetErrors(), "; "))
@@ -160,6 +170,7 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 
 	var endedOn *conversationv1.ApiRequestFailed
 	if api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed); ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed); ok"})
 		endedOn = api.ApiRequestFailed
 		vendorMessage = endedOn.GetMessage()
 		sentence = apiErrorArm(errored, endedOn)
@@ -193,6 +204,7 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 			dlog.Context{"dropped": dropped, "turn": turn})
 	}
 	if len(evidence) > 0 {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "len(evidence) > 0"})
 		sentence = sentence + " (" + strings.Join(evidence, "; ") + ")"
 	}
 	applyHeadline(errored, headline{Text: sentence}, vendorMessage)
