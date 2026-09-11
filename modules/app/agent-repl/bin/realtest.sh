@@ -46,8 +46,13 @@
 #   3. THE VENDOR GUARD CANNOT BE HELD. A daemon already running without
 #      AGENT_REPL_FORBID_VENDOR_CALLS in its environment would be adopted by the
 #      new Emacs and would spawn shims without it, so a prompt could reach the
-#      real SDK. The daemon is left alone either way — Emacs adopts, never kills
-#      — so this declines and says which process to stop.
+#      real SDK. The SHIMS are checked in their own right for the same reason:
+#      a shim already listening on a workspace socket is ADOPTED by the daemon
+#      rather than respawned, so a shim that predates the guard keeps its old
+#      environment — which is exactly what happened in realtest 1's first run,
+#      where a day-old shim submitted a keepalive prompt to the real vendor
+#      every four minutes. Nothing is killed either way; this declines and names
+#      every process to stop.
 
 set -euo pipefail
 
@@ -155,10 +160,17 @@ emacs_answering() {
 # Before the backups and before the takeover, because a stack that cannot hold
 # the guard must not have the owner's editor quit for it.
 
+# process_carries_guard PID — does the KERNEL's copy of this process's
+# environment carry the guard? Not the launcher's intention, not this shell's
+# exported environment: the copy `ps -Eww` prints beside the command line.
+process_carries_guard() {
+    ps -Eww -o command= -p "$1" 2>/dev/null | tr ' ' '\n' | grep -q "^$VENDOR_GUARD_ENV="
+}
+
 DAEMON_PID="$(pgrep -f "$MODULE_ROOT/daemon/bin/claude-repld" 2>/dev/null | head -n1 || true)"
 if [ -n "$DAEMON_PID" ]; then
     note "a daemon is running as pid $DAEMON_PID; checking its environment for the vendor guard"
-    if ! ps -Eww -o command= -p "$DAEMON_PID" 2>/dev/null | tr ' ' '\n' | grep -q "^$VENDOR_GUARD_ENV="; then
+    if ! process_carries_guard "$DAEMON_PID"; then
         printf '[realtest] DECLINED: the running daemon (pid %s) does not carry %s.\n' "$DAEMON_PID" "$VENDOR_GUARD_ENV" >&2
         printf '[realtest] Emacs ADOPTS an answering daemon and never kills one, so the new Emacs would inherit\n' >&2
         printf '[realtest] this one and it would spawn shims with the real SDK reachable. Stop it (SPC o C-d from\n' >&2
@@ -169,6 +181,63 @@ if [ -n "$DAEMON_PID" ]; then
 else
     note "no daemon is running; the realtest's Emacs will spawn one under the guard"
 fi
+
+# ---- refusal 3, second half: the shims a dead daemon left behind ----------
+#
+# CHECKING THE DAEMON IS NOT ENOUGH, and realtest 1's first run is the proof. A
+# shim spawned the day before by an UNGUARDED daemon was still listening on its
+# socket; the guarded daemon this run's Emacs brought up ADOPTED it rather than
+# spawning a fresh one, and it submitted a keepalive prompt to the real vendor
+# every four minutes for the whole run. The guard the daemon carried never
+# reached that process, because that process predates it.
+#
+# So every listening shim under the state directory's sock/ is enumerated and
+# checked in its own right, and so is every shim-lock — the helper the shim
+# spawns to hold its lock, which inherits the shim's environment and therefore
+# tells the same story about it.
+
+STATE_DIR="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}"
+SOCK_DIR="${STATE_DIR%/}/sock"
+
+UNGUARDED=""
+note "checking every listening shim under $SOCK_DIR for the vendor guard"
+for pid in $(pgrep -f 'shim/dist/main\.js' 2>/dev/null || true); do
+    COMMAND_LINE="$(ps -Eww -o command= -p "$pid" 2>/dev/null || true)"
+    [ -n "$COMMAND_LINE" ] || continue
+    # Only a shim listening under THIS state directory: another checkout's
+    # shim is not a process this run would adopt, and declining on it would
+    # send the operator after the wrong thing.
+    case "$COMMAND_LINE" in
+        *"--listen $SOCK_DIR/"*) ;;
+        *) continue ;;
+    esac
+    SOCKET="$(printf '%s' "$COMMAND_LINE" | tr ' ' '\n' | grep "^$SOCK_DIR/" | head -n1)"
+    if ! process_carries_guard "$pid"; then
+        UNGUARDED="$UNGUARDED
+  shim pid $pid listening on ${SOCKET:-(no socket named on its command line)}"
+    fi
+done
+
+for pid in $(pgrep -f 'agent-repl/bin/shim-lock' 2>/dev/null || true); do
+    ps -Eww -o command= -p "$pid" >/dev/null 2>&1 || continue
+    if ! process_carries_guard "$pid"; then
+        UNGUARDED="$UNGUARDED
+  shim-lock pid $pid"
+    fi
+done
+
+if [ -n "$UNGUARDED" ]; then
+    printf '[realtest] DECLINED: these shim processes do not carry %s:\n' "$VENDOR_GUARD_ENV" >&2
+    printf '%s\n' "$UNGUARDED" >&2
+    printf '[realtest] A daemon ADOPTS a shim that is already listening on a workspace'"'"'s socket rather than\n' >&2
+    printf '[realtest] spawning a fresh one, so the guard this run puts on the daemon would never reach these.\n' >&2
+    printf '[realtest] One of them kept a keepalive prompt going to the real vendor through realtest 1'"'"'s first\n' >&2
+    printf '[realtest] run. Stop them (kill the pids above) so the run'"'"'s daemon spawns guarded shims, then\n' >&2
+    printf '[realtest] try again.\n' >&2
+    exit "$EXIT_DECLINED"
+fi
+note "every listening shim carries $VENDOR_GUARD_ENV"
+
 
 # ---- the backups ----------------------------------------------------------
 #
