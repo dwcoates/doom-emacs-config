@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // LoopbackHost is the only interface the daemon ever binds. The daemon serves
@@ -131,13 +133,79 @@ func (c *claim) Publish() error {
 	return nil
 }
 
-// Withdraw implements Claim. Removing an absent file is success: an orderly
-// exit that never published still withdraws.
-func (c *claim) Withdraw() error {
-	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove %q: %w", c.addrPath, err)
+// Withdraw implements Claim. It removes daemon.addr ONLY while the file still
+// names THIS claim's address, and answers whether it removed anything.
+//
+// THE ADVERTISEMENT IS NOT REMOVED BY WHOEVER EXITS LAST. A blue-green
+// handover ends with the SUCCESSOR publishing its own address into this same
+// path and the incumbent exiting afterwards; an unconditional remove here took
+// the successor's advertisement with it and left the state root naming no
+// daemon at all, while a daemon was serving. Reading the file first makes the
+// withdrawal this daemon's OWN, which is the only one it is entitled to.
+//
+// Removing an absent file is success: an orderly exit that never published
+// still withdraws.
+func (c *claim) Withdraw() (bool, error) {
+	raw, err := os.ReadFile(c.addrPath)
+	if os.IsNotExist(err) {
+		return false, nil
 	}
-	return nil
+	if err != nil {
+		return false, fmt.Errorf("read %q before withdrawing it: %w", c.addrPath, err)
+	}
+	if strings.TrimSpace(string(raw)) != c.address {
+		return false, nil
+	}
+	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("remove %q: %w", c.addrPath, err)
+	}
+	return true, nil
+}
+
+// ProbeBound is how long the staleness probe waits for a loopback connect. It
+// is a connect to a port on this machine's own loopback, which either answers
+// or is refused immediately; the bound covers only a kernel that is busy, and
+// it is paid in full ONLY by an advertised address whose listener is gone
+// without the port being closed, which a dead process's port cannot be.
+const ProbeBound = 250 * time.Millisecond
+
+// StaleAdvertisement reads daemon.addr and reports the address it names when
+// NOTHING ANSWERS there.
+//
+// It is the boot's evidence, not its permission: an incumbent holds the boot
+// claim, so a daemon that reached this point is the only one entitled to the
+// state root, and an advertisement it did not write is by definition its
+// predecessor's. The predecessor that exited without withdrawing -- SIGKILLed,
+// or killed with its whole session -- left Emacs an address to probe and time
+// out on, so the boot says so out loud before overwriting it.
+func StaleAdvertisement(addrPath string) (string, bool) {
+	return staleAdvertisement(addrPath, dialLoopback)
+}
+
+// staleAdvertisement is StaleAdvertisement's test seam: the probe is injected
+// so a test never depends on a port being free.
+func staleAdvertisement(addrPath string, dial func(addr string) error) (string, bool) {
+	raw, err := os.ReadFile(addrPath)
+	if err != nil {
+		return "", false
+	}
+	addr := strings.TrimSpace(string(raw))
+	if addr == "" {
+		return "", false
+	}
+	if dial(addr) == nil {
+		return addr, false
+	}
+	return addr, true
+}
+
+// dialLoopback is the staleness probe: a bounded TCP connect, closed at once.
+func dialLoopback(addr string) error {
+	conn, err := net.DialTimeout("tcp", addr, ProbeBound)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
 }
 
 // Close implements Claim: it closes the listener and releases the boot claim,

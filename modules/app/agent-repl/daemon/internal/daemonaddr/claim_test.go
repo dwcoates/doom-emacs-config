@@ -202,11 +202,15 @@ func TestWithdrawRemovesTheAdvertisement(t *testing.T) {
 	}
 
 	// Act.
-	if err := c.Withdraw(); err != nil {
+	withdrawn, err := c.Withdraw()
+	if err != nil {
 		t.Fatalf("Withdraw: %v", err)
 	}
 
 	// Assert.
+	if !withdrawn {
+		t.Fatal("Withdraw reported nothing removed, want its own advertisement withdrawn")
+	}
 	if _, err := os.Stat(addrPath); !os.IsNotExist(err) {
 		t.Fatalf("daemon.addr survived Withdraw (stat err = %v)", err)
 	}
@@ -217,11 +221,124 @@ func TestWithdrawingAnAbsentAdvertisementIsSuccess(t *testing.T) {
 	c := mustBind(t, newAddrPath(t))
 
 	// Act.
-	err := c.Withdraw()
+	withdrawn, err := c.Withdraw()
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("Withdraw = %v, want success", err)
+	}
+	if withdrawn {
+		t.Fatal("Withdraw reported a removal, want none: nothing was ever published")
+	}
+}
+
+// TestWithdrawLeavesASuccessorsAdvertisementAlone pins the handover's end: the
+// successor publishes its own address into this same path and the incumbent
+// exits afterwards, so an unconditional remove here would leave the state root
+// naming no daemon while a daemon serves.
+func TestWithdrawLeavesASuccessorsAdvertisementAlone(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	incumbent := mustBind(t, addrPath)
+	if err := incumbent.Publish(); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := os.WriteFile(addrPath, []byte("127.0.0.1:65000\n"), 0o644); err != nil {
+		t.Fatalf("write the successor's advertisement: %v", err)
+	}
+
+	// Act.
+	withdrawn, err := incumbent.Withdraw()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Withdraw = %v, want success", err)
+	}
+	if withdrawn {
+		t.Fatal("Withdraw removed an address it does not own")
+	}
+	if got := readAddrFile(t, addrPath); got != "127.0.0.1:65000" {
+		t.Fatalf("daemon.addr = %q, want the successor's address", got)
+	}
+}
+
+// TestStaleAdvertisementNamesAnAddressNobodyAnswers pins the boot's evidence:
+// a predecessor that exited without withdrawing left an address the next
+// client would dial and time out on.
+func TestStaleAdvertisementNamesAnAddressNobodyAnswers(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	if err := os.WriteFile(addrPath, []byte("127.0.0.1:58161\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act.
+	addr, stale := staleAdvertisement(addrPath, func(string) error { return errors.New("connection refused") })
+
+	// Assert.
+	if !stale {
+		t.Fatal("staleAdvertisement reported a live advertisement, want it stale")
+	}
+	if addr != "127.0.0.1:58161" {
+		t.Fatalf("stale address = %q, want the advertised one", addr)
+	}
+}
+
+// TestAnAnsweringAdvertisementIsNotStale is the other arm: an address a
+// listener answers on is never reported as stale.
+func TestAnAnsweringAdvertisementIsNotStale(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	if err := os.WriteFile(addrPath, []byte("127.0.0.1:58161\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act.
+	addr, stale := staleAdvertisement(addrPath, func(string) error { return nil })
+
+	// Assert.
+	if stale {
+		t.Fatal("staleAdvertisement reported an answering address stale")
+	}
+	if addr != "127.0.0.1:58161" {
+		t.Fatalf("address = %q, want the advertised one", addr)
+	}
+}
+
+// TestAnAbsentAdvertisementIsNotStale pins the ordinary first boot: there is
+// nothing to warn about, so nothing is reported.
+func TestAnAbsentAdvertisementIsNotStale(t *testing.T) {
+	// Arrange, Act.
+	addr, stale := staleAdvertisement(newAddrPath(t), func(string) error {
+		t.Fatal("the probe was called for an absent advertisement")
+		return nil
+	})
+
+	// Assert.
+	if stale || addr != "" {
+		t.Fatalf("staleAdvertisement of an absent file = (%q, %v), want (\"\", false)", addr, stale)
+	}
+}
+
+// TestAnEmptyAdvertisementIsNotStale pins the half-written file the atomic
+// publish cannot produce but a foreign writer can: there is no address to
+// probe, so nothing is reported rather than an empty one.
+func TestAnEmptyAdvertisementIsNotStale(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	if err := os.WriteFile(addrPath, []byte("\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act.
+	addr, stale := staleAdvertisement(addrPath, func(string) error {
+		t.Fatal("the probe was called for an empty advertisement")
+		return nil
+	})
+
+	// Assert.
+	if stale || addr != "" {
+		t.Fatalf("staleAdvertisement of an empty file = (%q, %v), want (\"\", false)", addr, stale)
 	}
 }
 

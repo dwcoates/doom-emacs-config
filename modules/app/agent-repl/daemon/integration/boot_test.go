@@ -517,7 +517,10 @@ func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
 	// directory so the probe finds the surviving shim's lock still held.
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the state row the test corrupts.
-	nd.ExpectWarnings("daemon.boot.adopt", "daemon.wsm.session")
+	// The crash-restart's own stale daemon.addr is reported by the boot that
+	// overwrites it; TestAStaleAddressFileIsReportedAndOverwritten is where
+	// that record is the subject.
+	nd.ExpectWarnings("daemon.boot.adopt", "daemon.wsm.session", "daemon.cmd.claim")
 	code := nd.AwaitExit()
 
 	// Assert
@@ -885,4 +888,59 @@ func awaitSessionFault(t *testing.T, d *harness.Daemon, ws *workspacev1.Workspac
 		last = resp.Msg.String()
 	}
 	t.Fatalf("SessionHealth never carried the adopted shim's fault; last answer %s", last)
+}
+
+// TestAStaleAddressFileIsReportedAndOverwritten pins the realtest-1 finding.
+// The daemon that had bound 127.0.0.1:58161 was gone, its daemon.addr was
+// still on disk, and the next Emacs probed the dead address and timed out. A
+// SIGKILLed daemon cannot withdraw anything, so the boot that takes the state
+// root over says the advertisement is stale before replacing it.
+func TestAStaleAddressFileIsReportedAndOverwritten(t *testing.T) {
+	t.Parallel()
+	// Arrange: a daemon that published an address and was SIGKILLed, so it
+	// never ran its withdrawal.
+	d := newDaemon(t, harness.Opts{})
+	stale, err := os.ReadFile(d.AddrFile())
+	if err != nil {
+		t.Fatalf("read the incumbent's daemon.addr: %v", err)
+	}
+	d.Kill()
+
+	// Act.
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
+	nd.ExpectWarnings("daemon.cmd.claim")
+
+	// Assert: the stale address is named in the record.
+	staleAddr := strings.TrimSpace(string(stale))
+	nd.AwaitLogRecord(nd.RunLogPath(), "the stale advertisement's record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.claim" && strings.Contains(r.Message, "stale daemon.addr") &&
+			r.Context["stale_address"] == staleAddr
+	})
+
+	// Assert: and it was replaced by this daemon's own, which answers.
+	if nd.Addr == staleAddr {
+		t.Fatalf("daemon.addr still names %q, want this daemon's own address", staleAddr)
+	}
+	if _, err := nd.Client().DaemonHealth(nd.Ctx(), healthRequest()); err != nil {
+		t.Fatalf("DaemonHealth = error %v, want the replaced advertisement to name a serving daemon", err)
+	}
+}
+
+// TestTheWithdrawalIsRecordedOnAnOrderlyExit pins the other half of the
+// finding's evidence: an orderly exit says out loud that it took the
+// advertisement down, so a reader can tell a withdrawn address from one a
+// crash left standing.
+func TestTheWithdrawalIsRecordedOnAnOrderlyExit(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{})
+	runLog := d.RunLogPath()
+
+	// Act.
+	d.Stop()
+
+	// Assert.
+	d.AwaitLogRecord(runLog, "the withdrawal's record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.exit" && strings.Contains(r.Message, "daemon.addr was withdrawn")
+	})
 }

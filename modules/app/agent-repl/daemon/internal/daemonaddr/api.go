@@ -22,9 +22,11 @@ type Claim interface {
 	// temporary file, then rename). A joining daemon calls it only once it
 	// owns every workspace.
 	Publish() error
-	// Withdraw removes the daemon.addr file. Orderly exit calls it; it is
-	// idempotent, and removing an absent file is success.
-	Withdraw() error
+	// Withdraw removes the daemon.addr file WHILE IT STILL NAMES THIS CLAIM'S
+	// ADDRESS, and answers whether it removed anything. Orderly exit calls it;
+	// it is idempotent, removing an absent file is success, and a successor's
+	// advertisement is left alone.
+	Withdraw() (bool, error)
 	// Close closes the listener. It does not withdraw the advertisement.
 	Close() error
 }
