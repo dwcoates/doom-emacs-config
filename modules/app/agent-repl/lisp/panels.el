@@ -335,10 +335,25 @@ the caller's workspace."
     (agent-repl--log-verbose (agent-repl--ws-log-name ws)
                               "drain-pending-initial-buffers: ws=%s branch=no-pending no-op" ws)))
 
+(defun agent-repl--input-enter-command-state ()
+  "Put evil into normal (command) state in the just-selected input window.
+Landing on a switch leaves the cursor in the composer ready for command
+keys, not mid-insert: a switch is navigation, so the user arrives in
+command state rather than typing.  No-op when evil is absent (batch
+tests, or a non-evil session).  Only ever called after the input window
+has been selected on a switch (`agent-repl--maybe-autoselect-input'), so
+it never forces normal state in an unrelated buffer."
+  (when (fboundp 'evil-normal-state)
+    (evil-normal-state)))
+
 (defun agent-repl--maybe-autoselect-input (ws)
   "Select the agent input window for WS if visible and autoselect is enabled.
 Respects `agent-repl-autoselect-input-on-workspace-switch'.
 Window lookup delegates to `agent-repl-window--panel-window'.
+
+After selecting the input window, puts evil in NORMAL (command) state
+via `agent-repl--input-enter-command-state' so a switch lands the cursor
+in the composer ready for command keys rather than mid-insert.
 
 WS reaches here straight off the persp activation path, so it may be a
 persp-mode placeholder that owns no log sink; the records go through
@@ -348,7 +363,8 @@ persp-mode placeholder that owns no log sink; the records go through
         (if-let ((win (agent-repl-window--panel-window :input ws)))
             (progn
               (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
-              (select-window win))
+              (select-window win)
+              (agent-repl--input-enter-command-state))
           (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))
       (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=disabled" ws))))
 

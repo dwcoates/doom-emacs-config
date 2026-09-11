@@ -3797,3 +3797,55 @@ press."
         (agent-repl--toggle (lambda () (cl-incf close-calls)))
         (should (= close-calls 0))
         (should opened)))))
+
+;;;; ---- Tests: input command-state on switch ----
+
+(ert-deftest agent-repl-test-panels-autoselect-enters-command-state ()
+  "maybe-autoselect-input puts evil in normal state after selecting input."
+  (agent-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*autoselect-cmd-input*"))
+          (new-win nil)
+          (normal-called nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win input-buf)
+            (select-window (car (window-list)))
+            (cl-letf (((symbol-function 'evil-normal-state)
+                       (lambda (&rest _)
+                         (setq normal-called
+                               (eq (window-buffer (selected-window)) input-buf)))))
+              (let ((agent-repl-autoselect-input-on-workspace-switch t))
+                (agent-repl--maybe-autoselect-input "test-ws")
+                (should (eq (window-buffer (selected-window)) input-buf))
+                (should normal-called))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest agent-repl-test-panels-autoselect-no-command-state-without-input-window ()
+  "maybe-autoselect-input does not enter command state when input is not visible."
+  (agent-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*autoselect-cmd-hidden*"))
+          (normal-called nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+            (switch-to-buffer (get-buffer-create "*other-cmd*"))
+            (cl-letf (((symbol-function 'evil-normal-state)
+                       (lambda (&rest _) (setq normal-called t))))
+              (let ((agent-repl-autoselect-input-on-workspace-switch t))
+                (agent-repl--maybe-autoselect-input "test-ws")
+                (should-not normal-called))))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (get-buffer "*other-cmd*") (kill-buffer "*other-cmd*"))))))
+
+(ert-deftest agent-repl-test-panels-input-enter-command-state-noop-without-evil ()
+  "input-enter-command-state is a no-op (no error) when evil is unavailable.
+The batch -Q harness does not load evil, so `evil-normal-state' is not
+`fboundp' and the helper must simply return without signalling."
+  (skip-unless (not (fboundp 'evil-normal-state)))
+  (agent-repl-test--with-clean-state
+    ;; Should not error, and returns nil since the guard short-circuits.
+    (should-not (agent-repl--input-enter-command-state))))
