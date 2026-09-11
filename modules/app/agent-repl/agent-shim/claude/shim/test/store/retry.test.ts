@@ -139,6 +139,71 @@ describe("a read on the retry schedule", () => {
     expect(slept).toEqual([]);
   });
 
+  // THE REAL BACKOFF IS THE THING UNDER TEST HERE, not a stand-in for
+  // synchronization: the default sleep is what a production read takes, and a
+  // suite that always injected one would never run it.
+  it("takes a real backoff when no sleep is injected", async () => {
+    // Arrange: one busy answer, so exactly one 1ms backoff is taken for real.
+    let attempts = 0;
+    const read = (): Promise<string> => {
+      attempts += 1;
+      return attempts === 1 ? Promise.reject(busy()) : Promise.resolve("page");
+    };
+
+    // Act.
+    const answer = await readWithRetry("liveWork", read, {
+      retry: { bufferCapacity: 4, backoffMs: [1], maxAttempts: 2 },
+    });
+
+    // Assert.
+    expect(answer).toBe("page");
+    expect(attempts).toBe(2);
+  });
+
+  // A SCHEDULE WITH NO BACKOFF STILL REPLAYS, immediately. The numbers are a
+  // deliberately overridable implementation detail, so an empty list is a legal
+  // override and must not become an undefined delay.
+  it("replays with no delay when the schedule names no backoff", async () => {
+    // Arrange.
+    const { slept, sleep } = recorder();
+
+    // Act.
+    await readWithRetry("liveWork", () => Promise.reject(busy()), {
+      retry: { bufferCapacity: 4, backoffMs: [], maxAttempts: 2 },
+      sleep,
+    }).catch(() => undefined);
+
+    // Assert.
+    expect(slept).toEqual([0]);
+  });
+
+  // THE STORE CLIENT IS A FOREIGN BOUNDARY, so a rejection that is not an
+  // `Error` is exactly what the detail's `String(...)` arm exists for.
+  it("records a non-Error rejection's own text before replaying", async () => {
+    // Arrange.
+    const { slept, sleep } = recorder();
+    let attempts = 0;
+    const read = (): Promise<string> => {
+      attempts += 1;
+      if (attempts > 1) return Promise.resolve("page");
+      const failure = busy();
+      // A PersistenceError whose message getter is gone is still the arm the
+      // retry switches on, and the detail must survive it.
+      Object.defineProperty(failure, "message", { value: undefined });
+      return Promise.reject(failure);
+    };
+
+    // Act.
+    const answer = await readWithRetry("liveWork", read, {
+      retry: { bufferCapacity: 4, backoffMs: [1], maxAttempts: 2 },
+      sleep,
+    });
+
+    // Assert.
+    expect(answer).toBe("page");
+    expect(slept).toEqual([1]);
+  });
+
   it("takes the default schedule when none is supplied", async () => {
     // Arrange: the default's first backoff, taken through an injected sleep.
     const { slept, sleep } = recorder();
