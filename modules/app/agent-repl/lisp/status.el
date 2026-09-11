@@ -31,6 +31,18 @@
 (declare-function agent-repl-roster-row-priority-label "roster")
 (declare-function agent-repl-roster-walk "roster")
 
+(defun agent-repl--status-log-scope (central-reason)
+  "Return the active workspace or an explicit CENTRAL-REASON marker.
+Status rendering and frame setup both run before workspace activation.  This
+helper keeps their log sites attributed when a workspace exists and makes the
+frame-wide case reviewable rather than returning an anonymous nil scope.
+
+This logging-boundary helper emits no record because doing so would recurse."
+  (let ((current (agent-repl--ws-current-name)))
+    (if (and current (agent-repl--ws-known-p current))
+        current
+      (list :agent-repl-central central-reason))))
+
 ;;; Priority badge images
 ;;
 ;; Each image is a small PNG loaded from the module's images/ directory and
@@ -210,7 +222,7 @@ Populates `agent-repl--priority-images' with display-ready image specs."
                    collect (cons name (create-image file 'png nil
                                                     :height height
                                                     :ascent 'center))))
-    (agent-repl--log nil "load-priority-images: loaded=%d" (length agent-repl--priority-images))))
+    (agent-repl--log '(:agent-repl-central "tab rendering and shared assets span workspaces") "load-priority-images: loaded=%d" (length agent-repl--priority-images))))
 
 (when (image-type-available-p 'png)
   (agent-repl--load-priority-images))
@@ -919,7 +931,7 @@ at ERROR rather than painted."
    ((null arm) "none")
    ((alist-get arm agent-repl-status-tab-bar-color-table))
    (t
-    (agent-repl--error nil "elisp.status.tab-color: unknown arm=%S" arm)
+    (agent-repl--error '(:agent-repl-central "tab rendering and shared assets span workspaces") "elisp.status.tab-color: unknown arm=%S" arm)
     "none")))
 
 (defun agent-repl-status-tab-glyph (ws arm)
@@ -1200,8 +1212,8 @@ for the cache-buster rationale."
       (when (agent-repl--tabbar-observation-due-p
              frame :redraw-signature :redraw-at signature)
         (agent-repl--log-verbose
-         (let ((current (agent-repl--ws-current-name)))
-           (and current (agent-repl--ws-known-p current) current))
+         (agent-repl--status-log-scope
+          "frame-wide redraw can run before workspace activation")
          "tabbar-redraw: frame=%S prior-toggle=%S toggle=%S tabs-set-available=%S tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S format=%S"
          frame prior-toggle agent-repl--tabline-space-toggle
          tabs-set-available (frame-parameter frame 'tab-bar-lines)
@@ -1665,8 +1677,8 @@ changes because tab-bar redisplay is an extremely hot path."
           (unless (equal signature agent-repl--tabline-last-truncation)
             (setq agent-repl--tabline-last-truncation signature)
             (agent-repl--log-verbose
-             (let ((current (agent-repl--ws-current-name)))
-               (and current (agent-repl--ws-known-p current) current))
+             (agent-repl--status-log-scope
+              "tab-row truncation can run before workspace activation")
              "tabline-truncate-row: budget=%d original-columns=%d original-chars=%d original=%S result-columns=%d result-chars=%d result=%S"
              width original-width (length row) (substring-no-properties row)
              result-width (length result) (substring-no-properties result)))
@@ -1954,7 +1966,7 @@ listed as inactive."
          (states (mapcar (lambda (n)
                            (cons n (agent-repl--ws-display-state n)))
                          resolved-names)))
-    (agent-repl--log-verbose nil "tabline-advice: current=%s states=%S"
+    (agent-repl--log-verbose '(:agent-repl-central "tab rendering and shared assets span workspaces") "tabline-advice: current=%s states=%S"
                               current-name states)
     (concat
      (mapconcat #'identity entries " ")
@@ -2041,7 +2053,8 @@ runs before the canonical logger."
     (when (agent-repl--tabbar-observation-due-p
            frame :render-signature :render-at signature)
       (agent-repl--log-verbose
-       (and current (agent-repl--ws-known-p current) current)
+       (agent-repl--status-log-scope
+        "tab-bar rendering can run before workspace activation")
        "tabbar-render: frame=%S frame-width=%d frame-pixel-width=%d frame-char-width=%d line-width=%d configured-rows=%d tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S inhibit-implied-resize=%S format=%S names=%S states=%S current=%S entry-widths=%S anchor-pos=%d rows=%S row-widths=%S padded-widths=%S centered=%S centered-widths=%S joined-newlines=%d output-newlines=%d output-chars=%d output=%S"
        frame width (frame-pixel-width frame) (frame-char-width frame)
        line-width agent-repl--tabline-row-count
@@ -2199,8 +2212,8 @@ logging every redisplay."
     (when (agent-repl--tabbar-observation-due-p
            frame :keymap-signature :keymap-at signature)
       (agent-repl--log-verbose
-       (let ((current (agent-repl--ws-current-name)))
-         (and current (agent-repl--ws-known-p current) current))
+       (agent-repl--status-log-scope
+        "the frame-wide keymap boundary can run before workspace activation")
        "tabbar-keymap-boundary: frame=%S tab-bar-lines=%S keep-state=%S auto-width=%S captions=%S"
        frame (frame-parameter frame 'tab-bar-lines)
        (frame-parameter frame 'tab-bar-lines-keep-state)
@@ -2260,8 +2273,8 @@ an error object.  BACKTRACE is captured before invoking the underlying API so
 the record identifies the caller that initiated the mutation."
   (let ((agent-repl--tabbar-frame-parameter-audit-active t))
     (agent-repl--log
-     (let ((current (agent-repl--ws-current-name)))
-       (and current (agent-repl--ws-known-p current) current))
+     (agent-repl--status-log-scope
+      "a frame parameter mutation can run before workspace activation")
      "tabbar-lines-mutation: api=%S frame=%S prior=%S requested=%S final=%S outcome=%S backtrace=%S"
      api frame prior requested final outcome backtrace)))
 
@@ -2379,8 +2392,8 @@ the outer window.  Returns ROWS after logging the complete transition."
          (prior-lines (frame-parameter frame 'tab-bar-lines))
          (prior-keep-state
           (frame-parameter frame 'tab-bar-lines-keep-state))
-         (ws (let ((current (agent-repl--ws-current-name)))
-               (and current (agent-repl--ws-known-p current) current)))
+         (ws (agent-repl--status-log-scope
+              "frame-height installation can run before workspace activation"))
          (stage 'keep-state)
          (zero-lines 'not-requested))
     (condition-case error-data
@@ -2428,8 +2441,8 @@ frame.  Returns the applied row count."
           (frame-parameter frame 'tab-bar-lines-keep-state)))
     (agent-repl--tabbar-pin-frame frame rows)
     (agent-repl--log
-     (let ((current (agent-repl--ws-current-name)))
-       (and current (agent-repl--ws-known-p current) current))
+     (agent-repl--status-log-scope
+      "manual frame-height repair can run outside a workspace")
      "tab-bar-apply-row-count: frame=%S rows=%d prior-lines=%S lines=%S prior-keep-state=%S keep-state=%S"
      frame rows prior-lines (frame-parameter frame 'tab-bar-lines)
      prior-keep-state
@@ -2513,8 +2526,8 @@ parameters, and the watchdog cleanup result."
     (add-hook 'persp-activated-functions
               #'agent-repl--tabbar-reassert-row-count t)
     (agent-repl--log
-     (let ((current (agent-repl--ws-current-name)))
-       (and current (agent-repl--ws-known-p current) current))
+     (agent-repl--status-log-scope
+      "tab-bar installation runs before workspace activation")
      "tab-bar-fixed-height: rows=%d frames=%d prior-auto-resize=%S auto-resize=%S prior-auto-width=%S auto-width=%S prior-format=%S format=%S prior-default-lines=%S default-lines=%S prior-default-keep-state=%S default-keep-state=%S prior-frame-state=%S frame-state=%S watchdog-cleanup=%S"
      rows (length frames) prior-auto-resize auto-resize-tab-bars
      prior-auto-width tab-bar-auto-width prior-format tab-bar-format
@@ -2579,8 +2592,8 @@ Returns the list of graphical frames that were actually re-pinned."
     (setq repinned (nreverse repinned))
     (when (or default-repaired repinned)
       (agent-repl--log
-       (let ((current (agent-repl--ws-current-name)))
-         (and current (agent-repl--ws-known-p current) current))
+       (agent-repl--status-log-scope
+        "frame-wide tab-bar repair can run before workspace activation")
        "tabbar-reassert: rows=%d default-repaired=%s prior-default-lines=%S prior-default-keep-state=%S repinned=%S"
        rows default-repaired prior-default-lines prior-default-keep-state
        repinned))
@@ -2717,10 +2730,15 @@ state while the frame was unfocused, and the tab bar simply has to draw
 what already arrived."
   (if (frame-focus-state)
       (progn
-        (agent-repl--log (agent-repl--ws-current-log-name) "elisp.status.frame-focus: focused")
+        (agent-repl--log
+         (agent-repl--status-log-scope
+          "frame focus can change before workspace activation")
+         "elisp.status.frame-focus: focused")
         (agent-repl--force-tab-bar-redraw))
-    (agent-repl--log-verbose (agent-repl--ws-current-log-name)
-                             "elisp.status.frame-focus: not focused")))
+    (agent-repl--log-verbose
+     (agent-repl--status-log-scope
+      "frame focus can change before workspace activation")
+     "elisp.status.frame-focus: not focused")))
 
 (add-function :after after-focus-change-function #'agent-repl--on-frame-focus)
 

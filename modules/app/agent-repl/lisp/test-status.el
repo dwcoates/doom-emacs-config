@@ -1711,6 +1711,19 @@ without a stub so the suite covers the live-runtime dependency surface."
         (should (string-match-p "prior=2 requested=0 final=0" record))
         (should (string-match-p "caller-trace" record))))))
 
+(ert-deftest agent-repl-test-tabbar-frame-lines-audit-is-central-before-workspace-activation ()
+  "A startup frame mutation explicitly uses the central log sink."
+  ;; Arrange.
+  (let (logged-workspace)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil))
+              ((symbol-function 'agent-repl--log)
+               (lambda (ws &rest _args) (setq logged-workspace ws))))
+      ;; Act.
+      (agent-repl--tabbar-log-frame-lines-mutation
+       'set-frame-parameter 'frame-a 0 1 1 'returned "trace")
+      ;; Assert.
+      (should (agent-repl--central-log-scope-reason logged-workspace)))))
+
 (ert-deftest agent-repl-test-tabbar-modify-frame-lines-audit-resignals-errors ()
   "The bulk setter boundary logs failures and preserves the original signal."
   ;; Arrange
@@ -2966,6 +2979,26 @@ bracket-only paint, which is the blessed treatment."
         (agent-repl--on-frame-focus)
         ;; Assert
         (should (equal repainted 1))))))
+
+(ert-deftest agent-repl-test-status-frame-focus-before-workspace-is-central ()
+  "A frame focus event before workspace activation names its central scope."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (logged-scope)
+      (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "none"))
+                ((symbol-function 'agent-repl--ws-known-p) (lambda (_) nil))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (scope &rest _args) (setq logged-scope scope)))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+        ;; Act
+        (agent-repl--on-frame-focus)
+        ;; Assert
+        (should
+         (equal logged-scope
+                '(:agent-repl-central
+                  "frame focus can change before workspace activation")))))))
 
 (ert-deftest agent-repl-test-status-losing-focus-repaints-nothing ()
   "An unfocused frame has nothing to redraw for."

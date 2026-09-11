@@ -68,18 +68,18 @@ then ABORTS the caller with the TYPED error every wire consumer catches —
 carrying which message, which field, and why.  There is no
 `condition-case' anywhere in the codec: `agent-repl--error' is a pure
 logging rung that never signals, so nothing here can swallow anything."
-  (agent-repl--error nil "elisp.wire.contract-breach message=%s field=%s reason=%s"
+  (agent-repl--error '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.contract-breach message=%s field=%s reason=%s"
                      message-name field reason)
   (signal 'agent-repl-wire-error (list message-name field reason)))
 
 (defun agent-repl-wire--decoded (message-name value)
   "Log a successful decode of MESSAGE-NAME at debug and return VALUE."
-  (agent-repl--log nil "elisp.wire.decoded message=%s" message-name)
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.decoded message=%s" message-name)
   value)
 
 (defun agent-repl-wire--encoded (message-name value)
   "Log a successful encode of MESSAGE-NAME at debug and return VALUE."
-  (agent-repl--log nil "elisp.wire.encoded message=%s" message-name)
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.encoded message=%s" message-name)
   value)
 
 ;;;; ---- Shared decode primitives ----

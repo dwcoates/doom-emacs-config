@@ -37,9 +37,9 @@ PATH must already exist — the caller checks, because a missing path is a
 refusal and not a buffer this function could invent."
   (if (file-directory-p path)
       (progn
-        (agent-repl--log nil "elisp.popup.buffer: kind=directory path=%s" path)
+        (agent-repl--log '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.buffer: kind=directory path=%s" path)
         (dired-noselect path))
-    (agent-repl--log nil "elisp.popup.buffer: kind=file path=%s" path)
+    (agent-repl--log '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.buffer: kind=file path=%s" path)
     (find-file-noselect path)))
 
 (defun agent-repl-popup--goto-line (buffer line)
@@ -50,7 +50,7 @@ still open the file."
   (with-current-buffer buffer
     (goto-char (point-min))
     (forward-line (1- line))
-    (agent-repl--log nil "elisp.popup.goto-line: buffer=%s line=%d point=%d"
+    (agent-repl--log '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.goto-line: buffer=%s line=%d point=%d"
                      (buffer-name buffer) line (point))
     (point)))
 
@@ -65,9 +65,9 @@ Returns the window."
                     (slot . 0)
                     (window-width . ,width)))))
     (if (window-live-p window)
-        (agent-repl--log nil "elisp.popup.display: buffer=%s width=%d window=%S"
+        (agent-repl--log '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.display: buffer=%s width=%d window=%S"
                          (buffer-name buffer) width window)
-      (agent-repl--warn nil "elisp.popup.display: no window buffer=%s width=%d"
+      (agent-repl--warn '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.display: no window buffer=%s width=%d"
                         (buffer-name buffer) width))
     window))
 
@@ -82,21 +82,21 @@ relay a location someone else observed, so inventing an empty buffer for
 a stale one would hide the staleness."
   (interactive "fOpen in popup: ")
   (unless (and (stringp path) (not (string-empty-p path)))
-    (agent-repl--error nil "elisp.popup.open: rejected reason=empty-path path=%S" path)
+    (agent-repl--error '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.open: rejected reason=empty-path path=%S" path)
     (user-error "agent-repl: no path to open"))
   (let ((expanded (expand-file-name path)))
     (unless (file-exists-p expanded)
-      (agent-repl--error nil "elisp.popup.open: rejected reason=missing-path path=%s"
+      (agent-repl--error '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.open: rejected reason=missing-path path=%s"
                          expanded)
       (user-error "agent-repl: no such path: %s" expanded))
     (let ((buffer (agent-repl-popup--buffer expanded)))
       (when (and line (not (file-directory-p expanded)))
         (agent-repl-popup--goto-line buffer line))
       (when (and line (file-directory-p expanded))
-        (agent-repl--log nil "elisp.popup.open: line ignored reason=directory path=%s line=%s"
+        (agent-repl--log '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.open: line ignored reason=directory path=%s line=%s"
                          expanded line))
       (agent-repl-popup--display buffer)
-      (agent-repl--info nil "elisp.popup.open: opened path=%s line=%s buffer=%s"
+      (agent-repl--info '(:agent-repl-central "the popup utility is path-scoped") "elisp.popup.open: opened path=%s line=%s buffer=%s"
                         expanded (or line "none") (buffer-name buffer))
       buffer)))
 

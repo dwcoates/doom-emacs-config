@@ -548,7 +548,7 @@ fire-and-forget and must not steal the user\'s place.
 Nothing else happens on success: THE DAEMON names and creates everything,
 and the new workspace\'s tab arrives through the roster push."
   (when (and fork (null parent))
-    (agent-repl--error nil "elisp.verbs.create-fork-without-parent repository=%S form=%S"
+    (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-fork-without-parent repository=%S form=%S"
                        repository form)
     (user-error "agent-repl: a fork needs a parent workspace"))
   (agent-repl-verbs--send
@@ -593,10 +593,15 @@ new workspace did not come up."
   (let ((dir (plist-get ref :dir))
         (id (plist-get ref :id)))
     (if (and dir (not (string-empty-p dir)))
-        (progn
-          (agent-repl--info nil "elisp.verbs.select-minted dir=%s" dir)
-          (if (agent-repl--ws-by-ref-id id)
-              (agent-repl-verbs--land-on ref "already-a-tab")
+        (let ((ws (agent-repl--ws-by-ref-id id)))
+          (agent-repl--info
+           (if ws
+               ws
+             '(:agent-repl-central
+               "a minted workspace awaiting its roster row has no sink"))
+           "elisp.verbs.select-minted dir=%s" dir)
+          (if ws
+              (agent-repl-verbs--land-on ref "already-a-tab" ws)
             ;; THE TAB IS NOT HERE YET.  The minted ref is the daemon's
             ;; ANSWER, and the workspace itself reaches Emacs on the ROSTER
             ;; stream -- `agent-repl-roster--open-tab' is the whole of its
@@ -613,7 +618,9 @@ new workspace did not come up."
             ;; the tab fires it. Nothing here polls, retries or schedules --
             ;; a tab that never arrives simply leaves the landing pending.
             (agent-repl-verbs--pending-landing-register ref)))
-      (agent-repl--error nil "elisp.verbs.select-minted-no-dir ref=%S" ref)
+      (agent-repl--error '(:agent-repl-central
+                           "a malformed minted reference owns no workspace sink")
+                         "elisp.verbs.select-minted-no-dir ref=%S" ref)
       (message "agent-repl: the new workspace carries no directory to switch to"))))
 
 (defvar agent-repl-verbs--pending-landing nil
@@ -623,15 +630,15 @@ the user stands in one place -- so a second mint supersedes a first that
 is still waiting rather than queueing behind it.  Cleared the moment it
 fires, so nothing here outlives the arrival it waits on.")
 
-(defun agent-repl-verbs--land-on (ref why)
-  "Stand on the workspace REF names, recording WHY the landing ran now."
+(defun agent-repl-verbs--land-on (ref why ws)
+  "Stand on workspace WS named by REF, recording WHY the landing ran now."
   (let ((dir (plist-get ref :dir)))
-    (agent-repl--info nil "elisp.verbs.land-on dir=%s why=%s" dir why)
+    (agent-repl--info ws "elisp.verbs.land-on ws=%s dir=%s why=%s" ws dir why)
     (agent-repl-switch-to-project dir)))
 
 (defun agent-repl-verbs--pending-landing-register (ref)
   "Record REF as the landing waiting for its tab to reach the roster."
-  (agent-repl--info nil "elisp.verbs.pending-landing-registered dir=%s id=%s"
+  (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.pending-landing-registered dir=%s id=%s"
                     (plist-get ref :dir) (plist-get ref :id))
   (setq agent-repl-verbs--pending-landing ref))
 
@@ -646,7 +653,7 @@ before the landing runs."
               (ws (agent-repl--ws-by-ref-id id)))
     (setq agent-repl-verbs--pending-landing nil)
     (agent-repl--info ws "elisp.verbs.pending-landing-arrived ws=%s id=%s" ws id)
-    (agent-repl-verbs--land-on ref "tab-arrived")))
+    (agent-repl-verbs--land-on ref "tab-arrived" ws)))
 
 ;; `agent-repl-roster-update-functions' is roster.el's, and roster.el loads
 ;; AFTER this file (config.el); `add-hook' binds the symbol itself, and a
@@ -743,7 +750,7 @@ arm-generic reporting by answering nil."
   (let* ((arm (agent-repl-verbs--refusal-arm value))
          (keyword (plist-get arm :arm)))
     (when (eq keyword :unknown-repository)
-      (agent-repl--warn nil "elisp.verbs.merge-queue-unknown-repository action=%S repository=%S"
+      (agent-repl--warn '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.merge-queue-unknown-repository action=%S repository=%S"
                         (plist-get action :arm) (plist-get action :repository))
       (message "merge-queue refused: the daemon's registry does not hold repository %S"
                (plist-get action :repository))
@@ -787,7 +794,7 @@ without one is loud rather than silently detail-only."
         (detail (plist-get fault :detail)))
     (if kind
         (format "%s- %s: %s" indent (substring (symbol-name kind) 1) detail)
-      (agent-repl--error nil "elisp.verbs.fault-without-kind detail=%S" detail)
+      (agent-repl--error '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.fault-without-kind detail=%S" detail)
       (format "%s- unknown-kind: %s" indent detail))))
 
 (defun agent-repl-verbs--fault-lines (faults)
@@ -800,18 +807,18 @@ UNHEALTHY IS AN ANSWER: it arrives inside success carrying its faults, so
 both arms render the same way and neither is treated as a failure."
   (pcase (plist-get verdict :arm)
     (:healthy
-     (agent-repl--info nil "elisp.verbs.health title=%s verdict=healthy" title)
+     (agent-repl--info '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health title=%s verdict=healthy" title)
      (agent-repl-verbs--health-insert (append (list "" (format "%s: HEALTHY" title)) extra)))
     (:unhealthy
      (let ((faults (plist-get (plist-get verdict :value) :faults)))
-       (agent-repl--warn nil "elisp.verbs.health title=%s verdict=unhealthy faults=%d"
+       (agent-repl--warn '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health title=%s verdict=unhealthy faults=%d"
                          title (length faults))
        (agent-repl-verbs--health-insert
         (append (list "" (format "%s: UNHEALTHY (%d fault(s))" title (length faults)))
                 (agent-repl-verbs--fault-lines faults)
                 extra))))
     (arm
-     (agent-repl--error nil "elisp.verbs.health-unknown-arm title=%s arm=%S" title arm))))
+     (agent-repl--error '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health-unknown-arm title=%s arm=%S" title arm))))
 
 (defun agent-repl-daemon-health ()
   "Pull the daemon's own health verdict into `*agent-repl-health*'."
@@ -877,7 +884,7 @@ unrecoverable by design."
       (user-error "agent-repl: the roster lists no closed workspaces"))
     (let* ((choice (completing-read "Open workspace: " (mapcar #'car candidates) nil t))
            (ref (cdr (assoc choice candidates))))
-      (agent-repl--info nil "elisp.verbs.open-chosen name=%s" choice)
+      (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.open-chosen name=%s" choice)
       (agent-repl-verb-open ref))))
 
 (defun agent-repl-merge-workspace (&optional ws)
@@ -946,7 +953,7 @@ the obvious default rather than something to retype."
          (initial (and buffered (not (string-empty-p (string-trim buffered)))
                        (string-trim buffered))))
     (unless ws
-      (agent-repl--log agent-repl--global-log-scope
+      (agent-repl--log '(:agent-repl-central "the current buffer has no workspace composer")
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
     (read-string prompt-text initial)))
 
@@ -979,7 +986,7 @@ answers -- the same step registering a directory takes."
          (base-ref (agent-repl-verbs--optional-string "Base ref (blank = default branch): "))
          (parent (when child
                    (agent-repl-verbs--ref (agent-repl--ws-current-name)))))
-    (agent-repl--info nil "elisp.verbs.create-standard child=%s named=%s based=%s"
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-standard child=%s named=%s based=%s"
                       (and child t) (and name t) (and base-ref t))
     (agent-repl-verb-create
      repository :standard
@@ -1000,7 +1007,7 @@ to work in the fork."
   (let* ((repository (agent-repl-verbs--read-repository))
          (prompt (agent-repl-verbs--read-prompt "Initial prompt: "))
          (parent (agent-repl-verbs--ref (agent-repl--ws-current-name))))
-    (agent-repl--info nil "elisp.verbs.create-fork")
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-fork")
     (agent-repl-verb-create
      repository :standard
      :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
@@ -1049,7 +1056,7 @@ which is what asks the daemon to choose.  A nil setting seeds nothing."
         (prompt (agent-repl-verbs--read-prompt "One-shot commission: ")))
     (when (string-empty-p (string-trim prompt))
       (user-error "agent-repl: a one-shot IS its prompt"))
-    (agent-repl--info nil "elisp.verbs.create-one-shot finish=%S model=%S" finish model)
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-one-shot finish=%S model=%S" finish model)
     (agent-repl-verb-create
      repository :one-shot
      :prompt prompt :finish finish

@@ -202,7 +202,7 @@ answers a bare success, which is what almost every verb's success is."
       (agent-repl-verbs--read-prompt "Commission: "))
     ;; Assert.
     (should-not read-workspace)
-    (should (eq logged-workspace agent-repl--global-log-scope))))
+    (should (agent-repl--central-log-scope-reason logged-workspace))))
 
 (defun agent-repl-test-verbs--stub (op)
   "Return an rpc stub for OP that records its request and answers it."

@@ -42,7 +42,7 @@ subdirectory of the global state root, resolved through core.el's
 `agent-repl--global-state-file' so the `AGENT_REPL_STATE_DIR' override
 governs it like every other piece of Emacs-local state."
   (let ((dir (file-name-as-directory (agent-repl--global-state-file "notes"))))
-    (agent-repl--log nil "elisp.notes.dir: dir=%s" dir)
+    (agent-repl--log '(:agent-repl-central "the notes directory is shared storage") "elisp.notes.dir: dir=%s" dir)
     dir))
 
 (defun agent-repl--notes-file (workspace)
@@ -51,7 +51,7 @@ Signals when WORKSPACE is not a nonempty string: a notes file with no
 workspace to name it would collide with every other workspace's, so the
 missing name is surfaced rather than defaulted."
   (unless (and (stringp workspace) (not (string-empty-p workspace)))
-    (agent-repl--error agent-repl--global-log-scope
+    (agent-repl--error '(:agent-repl-central "the rejected notes request names no workspace")
                        "elisp.notes.file: rejected workspace=%S reason=not-a-nonempty-string"
                        workspace)
     (error "agent-repl--notes-file: workspace must be a nonempty string, got %S" workspace))
@@ -102,7 +102,7 @@ by workspace and there is nothing to key them by."
   (interactive)
   (let ((workspace (agent-repl--ws-current-name)))
     (unless (and (stringp workspace) (not (string-empty-p workspace)))
-      (agent-repl--error agent-repl--global-log-scope
+      (agent-repl--error '(:agent-repl-central "the notes command has no current workspace")
                          "elisp.notes.open: rejected reason=no-current-workspace workspace=%S"
                          workspace)
       (user-error "agent-repl: no current workspace to open notes for"))
