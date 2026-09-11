@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
 )
 
@@ -698,5 +699,35 @@ func TestABoundedAdoptionIsNotCancelledByTheBoundWhenItAnswers(t *testing.T) {
 	}
 	if len(report.Adopted) != 1 || report.Adopted[0] != ws.ID {
 		t.Fatalf("report.Adopted = %v, want [%v]", report.Adopted, ws.ID)
+	}
+}
+
+// TestAdoptionDialsTheShimsRolledGeneration pins the path the boot dials. A
+// relaunch moved the workspace's shim onto `<base>.nN.sock` and the counter
+// that minted N lived in the last daemon's memory, so a boot that dials the
+// layout's base name dials a path the survivor has not held since — while its
+// lock reads HELD, which is what makes the redial ladder endless.
+func TestAdoptionDialsTheShimsRolledGeneration(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+	base := h.deps.Layout.ShimSocket(string(ws.ID))
+	if err := os.MkdirAll(filepath.Dir(base), 0o755); err != nil {
+		t.Fatalf("create the socket directory: %v", err)
+	}
+	rolled := strings.TrimSuffix(base, ".sock") + ".n1.sock"
+	if err := os.WriteFile(rolled, nil, 0o600); err != nil {
+		t.Fatalf("create the rolled socket path: %v", err)
+	}
+	h.socketProbes[rolled] = shimsocket.StateLive
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if got := h.supervisor.paths(); len(got) != 1 || got[0] != rolled {
+		t.Fatalf("Adopt paths = %v, want [%q]: the survivor listens on its rolled generation", got, rolled)
 	}
 }
