@@ -37,6 +37,7 @@
 (declare-function agent-repl--emacs-focused-p "agent-repl-notifications" (&optional ws))
 
 (defvar agent-repl-link-up-functions)
+(defvar agent-repl-roster-update-functions)
 
 
 (defcustom agent-repl-webview-precreate-stagger-seconds 0.02
@@ -250,6 +251,24 @@ workspace is buildable."
   (agent-repl-webview-precreate-all))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl--webview-precreate-on-link-up)
+
+(defun agent-repl--webview-precreate-on-roster-update (&optional _roster)
+  "Pre-create the pages a roster push made buildable.
+Registered on `agent-repl-roster-update-functions', which runs after
+every accepted push.  A COLD start has no workspaces registered at
+link-up -- their `WorkspaceRef's arrive seconds later on the first
+WatchWorkspaceRoster push, and until then every workspace refuses
+pre-creation with `:no-ref', so the link-up edge queues nothing.  This
+edge is the moment those refs exist, so it is the first moment a cold
+workspace is buildable.  It shares `agent-repl-webview-precreate-all'
+with the link-up edge, whose eligibility test skips a mounted page and
+whose queue skips a duplicate, so running on both hooks never double
+queues.  The roster argument is unused: the buildable set is read from
+live state, not from the push."
+  (agent-repl--log '(:agent-repl-central "webview recovery spans workspaces") "elisp.webview-recovery.roster-update: pre-creating")
+  (agent-repl-webview-precreate-all))
+
+(add-hook 'agent-repl-roster-update-functions #'agent-repl--webview-precreate-on-roster-update)
 (add-function :after after-focus-change-function
               #'agent-repl--webview-precreate-on-focus-change)
 
