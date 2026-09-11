@@ -324,10 +324,6 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("core.el" agent-repl-print-git-branch
      "agent-repl loaded on branch: %s"
      "answers the interactive branch-report command")
-    ("daemon.el" agent-repl-daemon--report-build-failure "agent-repl: %s"
-     "surfaces a daemon build failure that blocks the requested start")
-    ("daemon.el" agent-repl-daemon--report-launch-failure "agent-repl: %s"
-     "surfaces a daemon launch failure that blocks the requested start")
     ("daemon.el" agent-repl-frontend-daemon-ensure "agent-repl: %s"
      "surfaces a daemon readiness failure to the requesting user")
     ("daemon.el" agent-repl-frontend-daemon-stop

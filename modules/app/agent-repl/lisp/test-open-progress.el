@@ -464,5 +464,53 @@ placement is recorded rather than performed."
       ;; Act / Assert
       (should (agent-repl--open-progress-start "alpha-ws")))))
 
+
+;;;; ---- What the published change says in the minibuffer ----------------
+;;
+;; The count itself is open-progress's answer; the daemon's handler is the
+;; reader that turns it into a line the user reads.  These drive the REAL
+;; handler off the REAL publication, so the two cannot drift.
+
+(defmacro agent-repl-test--open-progress-capturing-echoes (&rest body)
+  "Run BODY with loud `agent-repl--emit-message' lines collected in `echoes'."
+  (declare (indent 0))
+  `(let ((echoes nil))
+     (cl-letf (((symbol-function 'agent-repl--emit-message)
+                (lambda (text &optional echo)
+                  (when echo (setq echoes (append echoes (list text))))
+                  text))
+               ((symbol-function 'agent-repl-daemon--refresh-segment)
+                (lambda () nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-open-progress-a-published-change-echoes-the-count ()
+  "An open that advances is what puts the bring-up count in the minibuffer."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (let ((agent-repl-roster--tab-order '("alpha-ws" "beta-ws"))
+          (agent-repl-daemon--workspace-echo-done nil)
+          (agent-repl-open-progress-change-functions
+           (list #'agent-repl-daemon-on-open-progress-change)))
+      (agent-repl-test--open-progress-capturing-echoes
+        ;; Act
+        (agent-repl--open-progress-start "alpha-ws")
+        ;; Assert
+        (should (equal echoes '("agent-repl: loading workspaces (1/2)…")))))))
+
+(ert-deftest agent-repl-test-open-progress-a-published-change-is-quiet-in-the-minibuffer ()
+  "An open advancing while the user is typing must not take their prompt."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (let ((agent-repl-roster--tab-order '("alpha-ws" "beta-ws"))
+          (agent-repl-daemon--workspace-echo-done nil)
+          (agent-repl-open-progress-change-functions
+           (list #'agent-repl-daemon-on-open-progress-change)))
+      (agent-repl-test--open-progress-capturing-echoes
+        (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
+          ;; Act
+          (agent-repl--open-progress-start "alpha-ws"))
+        ;; Assert
+        (should (null echoes))))))
+
 (provide 'test-open-progress)
 ;;; test-open-progress.el ends here

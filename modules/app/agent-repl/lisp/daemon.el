@@ -60,6 +60,7 @@
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl--backend-phase "core" (ws fmt &rest args))
+(declare-function agent-repl--phase-echo "core" (ws fmt &rest args))
 (declare-function agent-repl--logfile-path "core" ())
 (declare-function agent-repl--global-state-dir "core" ())
 (declare-function agent-repl--global-state-file "core" (relative))
@@ -258,6 +259,22 @@ exactly like an editor that has finished starting.")
     (ready    . "daemon: ready"))
   "The mode-line text for each `agent-repl-daemon--lifecycle' state.")
 
+(defconst agent-repl-daemon--lifecycle-echo-lines
+  '((starting . "starting the daemon\u2026")
+    (linking  . "linking to the daemon\u2026")
+    (adopted  . "daemon adopted")
+    (ready    . "daemon ready"))
+  "The MINIBUFFER line each `agent-repl-daemon--lifecycle' state echoes.
+
+THE MODE LINE IS NOT THE ONLY PLACE STARTUP IS REPORTED.  The segment
+above says where bring-up has got to, but it says it in a corner of the
+frame a user watching a cold start is not necessarily looking at, and it
+says nothing at all once the note clears.  So every transition also
+echoes exactly one short line, from `agent-repl-daemon--set-lifecycle' --
+the single chokepoint the state moves through, which is what makes
+\"exactly one echo per transition\" structural rather than a convention
+each caller has to remember.")
+
 (defconst agent-repl-daemon--lifecycle-settled-states '(adopted ready)
   "Lifecycle states that are an OUTCOME, shown briefly and then cleared.")
 
@@ -451,6 +468,11 @@ so an earlier outcome's timer cannot wipe a later one's note."
         agent-repl-daemon--lifecycle state)
   (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
                     "elisp.daemon.lifecycle state=%s" state)
+  (let ((line (cdr (assq state agent-repl-daemon--lifecycle-echo-lines))))
+    (when line
+      (agent-repl--phase-echo
+       '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+       "%s" line)))
   (when (memq state agent-repl-daemon--lifecycle-settled-states)
     (setq agent-repl-daemon--lifecycle-timer
           (run-with-timer agent-repl-daemon-build-status-display-seconds nil
@@ -466,11 +488,52 @@ Emacs started is `ready', one it attached to is `adopted'."
   (agent-repl-daemon--set-lifecycle
    (if (agent-repl-daemon--spawned-here-p) 'ready 'adopted)))
 
+(defvar agent-repl-daemon--workspace-echo-done nil
+  "Painted-workspace count the last bring-up echo reported, or nil.
+
+THE DEDUPE IS THE POINT.  `agent-repl-open-progress-change-functions'
+fires on every phase step of every pending open -- several times per
+workspace -- and echoing each one would turn the minibuffer into a
+scrolling log.  An echo is issued only when this number MOVES, so the
+user reads one line per workspace that finishes painting and nothing in
+between.")
+
+(defun agent-repl-daemon--reset-workspace-echo ()
+  "Forget the last bring-up echo so the next cold start starts from zero."
+  (setq agent-repl-daemon--workspace-echo-done nil))
+
 (defun agent-repl-daemon-on-open-progress-change ()
-  "Repaint the segment because the pending-open set moved.
+  "Repaint the segment and echo the workspace bring-up count when it moves.
 Registered on `agent-repl-open-progress-change-functions', which is
-open-progress.el's one publication of its own state."
-  (agent-repl-daemon--refresh-segment))
+open-progress.el's one publication of its own state.
+
+Two lines can come out of here, both through `agent-repl--phase-echo' so
+the record and the echo are one call and neither can arrive while the
+user is typing: \"loading workspaces (n/m)\" each time another workspace
+finishes painting, and \"N workspaces ready\" once the pending set empties
+after having been non-empty.  A change that moves neither -- a phase step
+inside a workspace still opening -- echoes nothing."
+  (agent-repl-daemon--refresh-segment)
+  (when (and (fboundp 'agent-repl-roster-tab-order)
+             (fboundp 'agent-repl-open-progress-opening-workspaces))
+    (let* ((tabs (agent-repl-roster-tab-order))
+           (total (length tabs))
+           (opening (seq-intersection
+                     tabs (agent-repl-open-progress-opening-workspaces)))
+           (done (- total (length opening))))
+      (cond
+       ((zerop total) nil)
+       (opening
+        (unless (equal done agent-repl-daemon--workspace-echo-done)
+          (setq agent-repl-daemon--workspace-echo-done done)
+          (agent-repl--phase-echo
+           '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+           "loading workspaces (%d/%d)\u2026" done total)))
+       (agent-repl-daemon--workspace-echo-done
+        (agent-repl-daemon--reset-workspace-echo)
+        (agent-repl--phase-echo
+         '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+         "%d workspaces ready" total))))))
 
 (defun agent-repl-daemon--refresh-segment ()
   "Recompute `agent-repl-daemon-mode-line-segment' from the bring-up state.
@@ -655,7 +718,7 @@ reason about must never be silently skipped."
                       (if (string-empty-p output) "<empty>" output))
     (if detail
         (agent-repl-daemon--set-build-status nil nil)
-      (agent-repl--backend-phase
+      (agent-repl--phase-echo
        '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
        "%s built (%.1fs)" (cdr labels) duration)
       (agent-repl-daemon--set-build-status 'built duration))
@@ -697,9 +760,9 @@ mode-line segment is raised, and the interactive ensure is the retry."
      (t
       (with-current-buffer (get-buffer-create agent-repl-daemon-build-buffer)
         (erase-buffer))
-      (agent-repl--backend-phase
+      (agent-repl--phase-echo
        '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
-       "rebuilding %s if stale..." running-label)
+       "building %s\u2026" running-label)
       (setq agent-repl-daemon--build-in-flight t
             agent-repl-daemon--build-continuations (list continuation)
             agent-repl-daemon--build-started (float-time)
@@ -729,7 +792,14 @@ mode-line segment is raised, and the interactive ensure is the retry."
   (setq agent-repl-daemon-build-failure detail)
   (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-failed detail=%s" detail)
   (display-buffer agent-repl-daemon-build-buffer)
-  (message "agent-repl: %s" detail)
+  ;; ONE CALL, NOT A LOG PLUS A BARE `message'.  The echo goes out through
+  ;; the module's own logging function in echo mode, so the line the user
+  ;; reads is the line the log file carries.  A FAILURE is deliberately not
+  ;; behind the minibuffer guard `agent-repl--phase-echo' applies to
+  ;; progress: a build that did not happen is worth interrupting for.
+  (agent-repl--backend-phase
+   '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+   "%s" detail)
   (agent-repl-daemon--refresh-segment))
 
 (defun agent-repl-daemon--report-launch-failure (detail)
@@ -740,7 +810,11 @@ a status-2 log line followed by a thirty-second boot timeout, with every
 verb afterwards failing on a nil connection."
   (setq agent-repl-daemon-launch-failure detail)
   (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.launch-failed detail=%s" detail)
-  (message "agent-repl: %s" detail)
+  ;; Same one-call rule as the build failure above, and loud for the same
+  ;; reason: a daemon that never launched is not progress chatter.
+  (agent-repl--backend-phase
+   '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+   "%s" detail)
   (agent-repl-daemon--refresh-segment))
 
 (defun agent-repl-daemon--clear-launch-failure ()
@@ -1148,7 +1222,11 @@ is stated on the spawn rather than assumed."
       nil)
      (t
       (agent-repl-daemon--clear-launch-failure)
-      (agent-repl--backend-phase
+      ;; RECORDED HERE, ECHOED BY THE TRANSITION.  The spawn's own line is
+      ;; kept for the log, but the minibuffer line for this phase is issued
+      ;; once by `agent-repl-daemon--set-lifecycle' a few forms below, so
+      ;; the user does not read "starting the daemon" twice in a row.
+      (agent-repl--info
        '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
        "starting the daemon...")
       (let* ((argv (agent-repl-daemon--argv))
