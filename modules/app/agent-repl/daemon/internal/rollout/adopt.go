@@ -198,12 +198,14 @@ func (c *controller) retryHeadless(ctx context.Context, ws ids.WorkspaceID) {
 // since been adopted, is claimed by somebody else, or is no longer armed.
 func (c *controller) reclaimHeadless(ws ids.WorkspaceID) bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	e, ok := c.rendezvous[ws]
 	if !ok || e.adopted || e.headlessClaimed {
+		c.mu.Unlock()
 		return false
 	}
 	e.headlessClaimed = true
+	c.mu.Unlock()
+	c.logTransition(opJoin, ws, "headless_claimed", false, true, nil)
 	return true
 }
 
@@ -220,8 +222,8 @@ func (c *controller) reclaimHeadless(ws ids.WorkspaceID) bool {
 // read must be additive.
 func (c *controller) armSessions(sessions []ManifestSession) int {
 	added := 0
+	armed := make([]ManifestSession, 0, len(sessions))
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.joining == nil {
 		c.joining = make(map[ids.WorkspaceID]bool, len(sessions))
 	}
@@ -235,7 +237,15 @@ func (c *controller) armSessions(sessions []ManifestSession) int {
 		expected := Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb}
 		c.rendezvous[session.Workspace] = &entry{expected: expected, done: make(chan struct{})}
 		c.joining[session.Workspace] = true
+		armed = append(armed, session)
 		added++
+	}
+	c.mu.Unlock()
+	for _, session := range armed {
+		c.logTransition(opJoin, session.Workspace, "rendezvous", "unarmed", "armed", dlog.Context{
+			"expected_host": session.ExpectedHost,
+			"expected_web":  session.ExpectedWeb,
+		})
 	}
 	return added
 }
@@ -247,7 +257,6 @@ func (c *controller) armSessions(sessions []ManifestSession) int {
 // it is handed.
 func (c *controller) claimHeadless() []ids.WorkspaceID {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	claimed := make([]ids.WorkspaceID, 0, len(c.rendezvous))
 	for ws, e := range c.rendezvous {
 		if e.expected.Count() != 0 || e.adopted || e.headlessClaimed {
@@ -255,6 +264,10 @@ func (c *controller) claimHeadless() []ids.WorkspaceID {
 		}
 		e.headlessClaimed = true
 		claimed = append(claimed, ws)
+	}
+	c.mu.Unlock()
+	for _, ws := range claimed {
+		c.logTransition(opJoin, ws, "headless_claimed", false, true, nil)
 	}
 	return claimed
 }
@@ -341,7 +354,9 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		c.log.Warn(operation, "this participant's stream was not open at announcement", fields)
 		return ErrParticipantNotExpected
 	}
+	before := dlog.Context{"host_called": e.hostCalled, "web_called": e.webCalled}
 	fill(e)
+	after := dlog.Context{"host_called": e.hostCalled, "web_called": e.webCalled}
 	if !e.satisfied() {
 		outstanding := dlog.Context{
 			"expected_host": e.expected.Host, "expected_web": e.expected.Web,
@@ -349,6 +364,8 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		}
 		done := e.done
 		c.mu.Unlock()
+		c.logTransition(operation, ws, "participants_called", before, after,
+			dlog.Context{"rendezvous_satisfied": false})
 		c.log.Debug(operation, "an expected participant has not called yet; waiting for the rendezvous",
 			merge(fields, outstanding))
 		// EVERY EXPECTED PARTICIPANT SUCCEEDS TOGETHER. The callers arrive
@@ -372,6 +389,8 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		}
 	}
 	c.mu.Unlock()
+	c.logTransition(operation, ws, "participants_called", before, after,
+		dlog.Context{"rendezvous_satisfied": true})
 
 	// THE ADOPTION IS THE DAEMON'S WORK, NOT THIS CALLER'S, so it runs on a
 	// context the caller cannot cancel. The rendezvous is satisfied by the
@@ -480,6 +499,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	}
 
 	c.mu.Lock()
+	wasOwned := c.owned[ws]
 	if e, ok := c.rendezvous[ws]; ok {
 		e.adopted = true
 	}
@@ -495,6 +515,8 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		}
 	}
 	c.mu.Unlock()
+	c.logTransition(opAdopt, ws, "owned", wasOwned, true,
+		dlog.Context{"all_joining_owned": complete})
 
 	c.log.Info(opAdopt, "adopted the workspace", fields)
 
@@ -543,8 +565,13 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 // releaseHeadless undoes a headless claim whose adoption failed.
 func (c *controller) releaseHeadless(ws ids.WorkspaceID) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	changed := false
 	if e, ok := c.rendezvous[ws]; ok {
+		changed = e.headlessClaimed
 		e.headlessClaimed = false
+	}
+	c.mu.Unlock()
+	if changed {
+		c.logTransition(opJoin, ws, "headless_claimed", true, false, nil)
 	}
 }

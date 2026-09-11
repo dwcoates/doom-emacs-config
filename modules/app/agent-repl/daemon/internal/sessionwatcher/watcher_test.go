@@ -2,6 +2,7 @@ package sessionwatcher
 
 import (
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,67 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
 )
+
+func TestWatcherStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		state     string
+		before    any
+		after     any
+		act       func(*harness)
+	}{
+		{
+			name: "an output route leaves the root feed", operation: "daemon.sessionwatcher.set_output_address",
+			state: "output_feed_root", before: true, after: false,
+			act: func(h *harness) { h.w.SetOutputAddress(&OutputAddress{Feed: feedFor("sub-1")}) },
+		},
+		{
+			name: "the main agent is named", operation: "daemon.sessionwatcher.main_agent",
+			state: "main_agent", before: "", after: "main-9",
+			act: func(h *harness) { h.w.SetMainAgent(agentID("main-9")) },
+		},
+		{
+			name: "a turn enters flight", operation: "daemon.sessionwatcher.turn_opening",
+			state: "turn_in_flight", before: "", after: "turn-9",
+			act: func(h *harness) { h.w.OnTurnOpening("ws-1", "turn-9") },
+		},
+		{
+			name: "the session-ending latch rises", operation: "daemon.sessionwatcher.state_transition",
+			state: "session_ended", before: false, after: true,
+			act: func(h *harness) { h.w.SessionEnding("test shutdown") },
+		},
+		{
+			name: "the connected link starts redialing", operation: "daemon.sessionwatcher.state_transition",
+			state: "link", before: int(shimclient.LinkConnected), after: int(shimclient.LinkRedialing),
+			act: func(h *harness) {
+				h.w.mu.Lock()
+				h.w.setLinkLocked(shimclient.LinkRedialing)
+				h.w.mu.Unlock()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			beforeRecords := len(h.log.Records())
+
+			// Act.
+			tt.act(h)
+
+			// Assert.
+			for _, record := range h.log.Records()[beforeRecords:] {
+				if record.Level == "debug" && record.Operation == tt.operation && record.Context["state"] == tt.state &&
+					reflect.DeepEqual(record.Context["before"], tt.before) && reflect.DeepEqual(record.Context["after"], tt.after) {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want %s state %s before=%v after=%v", h.log.Records()[beforeRecords:], tt.operation, tt.state, tt.before, tt.after)
+		})
+	}
+}
 
 // TestStartOpensTheSessionAndMainWatches covers the opening: WatchSession goes
 // up immediately and the main agent's watch is addressed by an UNSET target,

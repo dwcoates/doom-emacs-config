@@ -295,8 +295,12 @@ func (f *Fleet) ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool) {
 // leaves no session behind to clear it.
 func (f *Fleet) ClearColdGate(ws ids.WorkspaceID) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	_, stood := f.coldGates[ws]
 	delete(f.coldGates, ws)
+	f.mu.Unlock()
+	if stood {
+		f.logTransition(ws, "cold_gate_standing", true, false, nil)
+	}
 }
 
 // source is the decided way a session comes up: fresh, or a resume of one named
@@ -334,12 +338,15 @@ type source struct {
 //     workspace its live session.
 func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string, session wsm.Session, exists bool) (source, error) {
 	if !exists {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!exists"})
 		return source{Fresh: true}, nil
 	}
 	if session.Terminal != nil && session.Terminal.Kind == "deleted" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "session.Terminal != nil && session.Terminal.Kind == \"deleted\""})
 		return source{}, fmt.Errorf("the session was deleted: %s", session.Terminal.Detail)
 	}
 	if session.VendorSessionID == "" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "session.VendorSessionID == \"\""})
 		return source{Fresh: true}, nil
 	}
 	if _, err := f.deps.Accounts.FindTranscript(ctx, dir, session.VendorSessionID); err != nil {
@@ -522,6 +529,9 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		// ended.
 		f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
 		f.publishHost(ws)
+		log.Info(opBringUp, "the session is parked at its cold gate", dlog.Context{
+			"shim_pid": client.PID(), "host_session_id": hostSessionID,
+		})
 		return nil
 	}
 
@@ -570,6 +580,7 @@ func (f *Fleet) sessionUp(
 	f.remember(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID})
 
 	if err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil"})
 		return err
 	}
 	log.Info(opBringUp, "the session is up", dlog.Context{
@@ -763,6 +774,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		}
 		return client, false, nil
 	default:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "default"})
 		log.Error(opBringUp, "the workspace lock probe could not tell", dlog.Context{
 			"lock": lockPath, "cause": errText(err),
 		})
@@ -785,6 +797,7 @@ func (f *Fleet) noteStartFailed(ctx context.Context, log dlog.Logger, ws ids.Wor
 	}
 	var death *shimclient.BringUpDeathError
 	if errors.As(cause, &death) {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "errors.As(cause, &death)"})
 		fault.Evidence["exit_code"] = strconv.Itoa(death.Exit.Code)
 		fault.Evidence["stderr_tail"] = death.Exit.Stderr
 	}
@@ -843,6 +856,7 @@ func (f *Fleet) portAcrossAccounts(
 		"recorded_config_dir": session.ConfigDir, "routed_config_dir": routed, "fresh": src.Fresh,
 	})
 	if src.Fresh {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
 		return nil
 	}
 	transcript, err := f.deps.Accounts.FindTranscript(ctx, dir, src.VendorSessionID)
@@ -892,6 +906,7 @@ func freshModel(recorded string) *conversationv1.AgentModel {
 func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session) (*conversationv1.SessionStarted, error) {
 	req := &shimv1.StartSessionRequest{}
 	if src.Fresh {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
 		req.Source = &shimv1.StartSessionRequest_Fresh{Fresh: &shimv1.StartSessionFresh{
 			Model:          freshModel(session.Model),
 			PermissionMode: permissionMode(session.PermissionMode),
@@ -918,6 +933,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			return nil, nil
 		}
 		if failure.GetConversationOwned() != nil {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetConversationOwned() != nil"})
 			// ANOTHER SHIM HOLDS THIS CONVERSATION. It took the workspace
 			// kernel lock first, which is exactly what that lock is for: two
 			// vendor processes on one conversation is the state it prevents.
@@ -926,6 +942,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 				fmt.Sprintf("another shim holds workspace %q's conversation: %s", ws, failure.GetDetail()), false)
 		}
 		if failure.GetUnknownSession() != nil {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetUnknownSession() != nil"})
 			// THE RESUME NAMED A CONVERSATION THE SHIM HAS NO TRANSCRIPT FOR.
 			// The classifier is what keeps a never-turned session off this
 			// path; reaching it anyway is a real vanished transcript, and it
@@ -936,6 +953,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 				fmt.Sprintf("the shim has no transcript for conversation %q: %s", src.VendorSessionID, failure.GetDetail()), false)
 		}
 		if failure.GetVendorStartFailed() != nil {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetVendorStartFailed() != nil"})
 			// THE VENDOR FAILED TO START INSIDE A HEALTHY SHIM. The shim
 			// process is up and serving — only its StartSession answer is a
 			// refusal — so neither `spawn_failed` nor `shim_start_failed`,
@@ -948,6 +966,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 				map[string]any{"detail": failure.GetDetail()})
 		}
 		if failure.GetAlreadyStarted() != nil {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetAlreadyStarted() != nil"})
 			// THE SHIM ALREADY SERVES A SESSION. One shim serves exactly one,
 			// so this is a StartSession the daemon should never have sent: the
 			// bring-up dialed a shim that is already live. It is a NAMED state
@@ -986,9 +1005,12 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	}
 
 	f.mu.Lock()
+	_, stood := f.coldGates[ws]
 	f.coldGates[ws] = ServedColdGate{VendorSessionID: vendorSessionID, Models: models, Scopes: scopes}
 	f.lastCold[ws] = cold
 	f.mu.Unlock()
+	f.logTransition(ws, "cold_gate_standing", stood, true,
+		dlog.Context{"vendor_session_id": vendorSessionID})
 
 	ref := feedid.Ref{
 		WS:   ws,
@@ -1029,12 +1051,16 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		LastEngagementAt: now,
 	}
 	if next.StartedAt.IsZero() {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "next.StartedAt.IsZero()"})
 		next.StartedAt = now
 	}
 	if sha := started.GetRuntime().GetShimBuildSha(); sha != "" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "sha := started.GetRuntime().GetShimBuildSha(); sha != \"\""})
 		f.mu.Lock()
+		previousSHA := f.buildSHA[ws]
 		f.buildSHA[ws] = sha
 		f.mu.Unlock()
+		f.logTransition(ws, "shim_build_sha", previousSHA, sha, nil)
 	}
 	if err := f.deps.DB.PutSession(ctx, next); err != nil {
 		log.Error(opBringUp, "could not record the session facts", dlog.Context{"cause": err.Error()})
@@ -1066,6 +1092,7 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	if !ok {
 		return nil
 	}
+	f.logTransition(ws, "session_live", true, false, dlog.Context{"force": force})
 	// THE SESSION IS GONE from this daemon's point of view the moment it
 	// leaves the map: the host view's session arm changes here, whatever the
 	// teardown below then does.
@@ -1102,6 +1129,8 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	if killErr != nil {
 		return fmt.Errorf("stop session for %q: kill the shim: %w", ws, killErr)
 	}
+	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Info(opBringUp,
+		"stopped the workspace session", dlog.Context{"force": force, "shim_pid": session.client.PID()})
 	return nil
 }
 
@@ -1154,6 +1183,7 @@ func (f *Fleet) CloseWatchers() {
 // identity leaves the logger unstamped rather than writing an empty field.
 func stampSession(log dlog.Logger, hostSessionID string) dlog.Logger {
 	if hostSessionID == "" {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "hostSessionID == \"\""})
 		return log
 	}
 	return log.With(dlog.Context{dlog.KeyAgentReplSessionID: hostSessionID})
@@ -1183,6 +1213,8 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 	delete(f.lastCold, ws)
 	delete(f.buildSHA, ws)
 	f.mu.Unlock()
+	f.logTransition(ws, "session_live", true, false,
+		dlog.Context{"reason": "shim_reaped", "shim_pid": session.client.PID()})
 
 	// The watcher is closed OUTSIDE the lock: closing joins whatever sink work
 	// it still had in flight, and those sinks read the fleet.
@@ -1201,8 +1233,22 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 // remember records a workspace's live session.
 func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
 	f.mu.Lock()
+	_, stood := f.sessions[ws]
 	f.sessions[ws] = session
 	f.mu.Unlock()
+	f.logTransition(ws, "session_live", stood, true,
+		dlog.Context{"shim_pid": session.client.PID(), "watcher_attached": session.watcher != nil})
+}
+
+// logTransition records one workspace fleet state edge with enough context to
+// reconstruct the in-memory lifecycle from the trace.
+func (f *Fleet) logTransition(ws ids.WorkspaceID, state string, before, after any, extra dlog.Context) {
+	fields := dlog.Context{"state": state, "before": before, "after": after}
+	for key, value := range extra {
+		fields[key] = value
+	}
+	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Debug(
+		"daemon.workspace.state_transition", "workspace fleet state changed", fields)
 }
 
 // errText renders an error for a log context without a nil check at every site.

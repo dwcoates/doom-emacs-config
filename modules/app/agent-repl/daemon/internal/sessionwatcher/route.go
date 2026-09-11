@@ -70,9 +70,11 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_QueryDied:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "case *conversationv1.SessionUpdate_QueryDied"})
 		w.routeQueryDiedLocked(update)
 
 	default:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "default"})
 		w.log.Warn("daemon.sessionwatcher.session_update_unrouted", "a SessionUpdate arm has no route", dlog.Context{
 			"arm": sessionArm(update),
 		})
@@ -261,14 +263,19 @@ func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.Age
 
 	switch {
 	case frame.GetUpdate() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetUpdate() != nil"})
 		w.routeUpdateLocked(agent, frame.GetUpdate(), at)
 	case frame.GetSuccess() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetSuccess() != nil"})
 		w.routeTerminalLocked(a, agent, frame.GetSuccess(), nil)
 	case frame.GetFailure() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetFailure() != nil"})
 		w.routeTerminalLocked(a, agent, nil, frame.GetFailure())
 	case frame.GetDetachedWork() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetDetachedWork() != nil"})
 		w.routeDetachedWorkLocked(agent, frame.GetDetachedWork())
 	default:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "default"})
 		w.log.Warn("daemon.sessionwatcher.agent_frame_unrouted", "an AgentFrame carried no result arm", dlog.Context{
 			"agent_id": agent.GetValue(),
 		})
@@ -279,6 +286,7 @@ func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.Age
 func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conversationv1.AgentUpdate, at *conversationv1.HistoryPointer) {
 	switch {
 	case update.GetActivity() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetActivity() != nil"})
 		w.routeActivityLocked(agent, update.GetActivity())
 
 	case update.GetQuestion() != nil:
@@ -308,6 +316,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.sinks.Footer.OnContextCut(w.ws, agent, update.GetContextCut())
 
 	case update.GetApiError() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})
 		w.log.Warn("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
 			"agent_id": agent.GetValue(), "message": update.GetApiError().GetMessage(),
 		})
@@ -324,6 +333,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.sinks.Footer.OnContextBudgetWarning(w.ws, agent, update.GetContextBudgetWarning())
 
 	default:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "default"})
 		w.log.Warn("daemon.sessionwatcher.update_unrouted", "an AgentUpdate arm has no route", dlog.Context{
 			"agent_id": agent.GetValue(),
 		})
@@ -557,6 +567,7 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 
 	switch {
 	case isMain && turn != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeTerminalLocked", "branch": "case isMain && turn != nil"})
 		how := turnCloseOf(success, failure)
 		w.log.Info("daemon.sessionwatcher.turn_ended", "the turn closed", dlog.Context{
 			"turn_id": string(*turn), "close": int(how),
@@ -754,6 +765,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		w.publishLiveWorkLocked()
 
 	case kindMonitor:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeDetachedWorkLocked", "branch": "case kindMonitor"})
 		// FOOTER-ONLY: the contract gives a monitor no stream, so liveness is
 		// tracked from this announcement and dropped at the monitor
 		// activity's own terminal.
@@ -764,6 +776,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		w.publishLiveWorkLocked()
 
 	case kindWorkflow:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeDetachedWorkLocked", "branch": "case kindWorkflow"})
 		// A workflow is KICKED: no watch is ever opened for one, and the shim
 		// client deliberately exposes no workflow verbs.
 		w.log.Info("daemon.sessionwatcher.workflow_kicked", "a workflow run is not watched", dlog.Context{
@@ -771,6 +784,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		})
 
 	default:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeDetachedWorkLocked", "branch": "default"})
 		w.log.Error("daemon.sessionwatcher.detached_kind_unknown", "a detached announcement named no kind this daemon could resolve", dlog.Context{
 			"work_id": handle.GetValue(),
 		})
@@ -789,14 +803,19 @@ func (w *watcher) resolveDetachedLocked(work *conversationv1.AgentDetachedWork) 
 	if created := work.GetCreated(); created != nil {
 		switch item := created.GetWorkCreated(); {
 		case item.GetSubagent() != nil:
+			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "case item.GetSubagent() != nil"})
 			return kindSubagent, item.GetSubagent().GetStart().GetCreatedAgentId()
 		case item.GetBash() != nil:
+			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "case item.GetBash() != nil"})
 			return kindBash, nil
 		case item.GetMonitor() != nil:
+			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "case item.GetMonitor() != nil"})
 			return kindMonitor, nil
 		case item.GetWorkflow() != nil:
+			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "case item.GetWorkflow() != nil"})
 			return kindWorkflow, nil
 		default:
+			w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "resolveDetachedLocked", "branch": "default"})
 			return kindUnknown, nil
 		}
 	}
@@ -927,13 +946,16 @@ func (w *watcher) recordActivityLocked(act *conversationv1.AgentActivity) {
 	fact.tool = activityToolName(act)
 	switch {
 	case act.GetSubagent() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "recordActivityLocked", "branch": "case act.GetSubagent() != nil"})
 		fact.kind = kindSubagent
 		if start := act.GetSubagent().GetStart(); start != nil {
 			fact.agent = start.GetCreatedAgentId()
 		}
 	case act.GetBash() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "recordActivityLocked", "branch": "case act.GetBash() != nil"})
 		fact.kind = kindBash
 	case act.GetMonitor() != nil:
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "recordActivityLocked", "branch": "case act.GetMonitor() != nil"})
 		fact.kind = kindMonitor
 	}
 }

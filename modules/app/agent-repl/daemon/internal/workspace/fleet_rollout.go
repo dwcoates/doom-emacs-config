@@ -227,6 +227,9 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 	log.Debug(opFleetRollout, "prelaunched an inert shim beside the running one", dlog.Context{
 		"workspace": string(ws), "uds": uds, "pid": client.PID(),
 	})
+	log.Info(opFleetRollout, "the replacement shim is prelaunched and inert", dlog.Context{
+		"workspace": string(ws), "uds": uds, "pid": client.PID(),
+	})
 	return client, nil
 }
 
@@ -282,9 +285,11 @@ func (f *Fleet) HostSessionFacts(ws ids.WorkspaceID) (HostSessionFacts, bool) {
 // root's socket-path budget — checked once at boot — still bounds it.
 func (f *Fleet) freshSocketPath(ws ids.WorkspaceID) string {
 	f.mu.Lock()
+	before := f.generation[ws]
 	f.generation[ws]++
 	gen := f.generation[ws]
 	f.mu.Unlock()
+	f.logTransition(ws, "shim_generation", before, gen, nil)
 	base := f.deps.SocketPath(ws)
 	return strings.TrimSuffix(base, ".sock") + ".n" + strconv.Itoa(gen) + ".sock"
 }
@@ -306,8 +311,15 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 		carried = previous.hostSessionID
 	}
 	f.sessions[ws] = &live{client: c, hostSessionID: carried}
+	_, gateStood := f.coldGates[ws]
 	delete(f.coldGates, ws)
 	f.mu.Unlock()
+	f.logTransition(ws, "session_live", previous != nil, true,
+		dlog.Context{"shim_pid": c.PID(), "retired": previous != nil})
+	if gateStood {
+		f.logTransition(ws, "cold_gate_standing", true, false,
+			dlog.Context{"reason": "replacement_shim_installed"})
+	}
 
 	if previous != nil && previous.watcher != nil {
 		if err := previous.watcher.Close(); err != nil {
@@ -332,6 +344,10 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	f.deps.Log.Global().Debug(opFleetRollout, "installed a new shim client", dlog.Context{
 		"workspace": string(ws), "pid": c.PID(), "retired": previous != nil,
 	})
+	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Info(opFleetRollout,
+		"installed the replacement shim client", dlog.Context{
+			"pid": c.PID(), "retired": previous != nil,
+		})
 	// The process behind the session changed; the host view carries its pid's
 	// attachment and its generation.
 	f.publishHost(ws)
@@ -396,10 +412,14 @@ func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimcl
 		return fmt.Errorf("workspace: install a shim for %q: start the watcher: %w", ws, err)
 	}
 	f.mu.Lock()
+	attached := false
 	if current, ok := f.sessions[ws]; ok && current.client == c {
+		attached = current.watcher != nil
 		current.watcher = watcher
 	}
 	f.mu.Unlock()
+	f.logTransition(ws, "watcher_attached", attached, true,
+		dlog.Context{"shim_pid": c.PID()})
 	log.Info(opFleetRollout, "opened the adopted session's watches", dlog.Context{
 		"vendor_session_id": session.VendorSessionID, "shim_pid": c.PID(),
 	})
@@ -478,7 +498,13 @@ func (f *Fleet) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.Hibe
 	if !ok {
 		return nil, fmt.Errorf("workspace: hibernate %q: the workspace has no live session", ws)
 	}
-	return client.Hibernate(ctx, &shimv1.HibernateRequest{})
+	response, err := client.Hibernate(ctx, &shimv1.HibernateRequest{})
+	if err != nil {
+		return nil, err
+	}
+	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Info(opFleetRollout,
+		"hibernated the workspace session", dlog.Context{"shim_pid": client.PID()})
+	return response, nil
 }
 
 // KillSession ends a workspace's session: it ASKS THE SHIM to end the session

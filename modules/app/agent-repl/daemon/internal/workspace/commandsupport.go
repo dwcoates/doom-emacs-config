@@ -135,6 +135,7 @@ func (v *verbs) clearPromptsFault(ctx context.Context, log dlog.Logger) {
 	}
 	for _, f := range standing {
 		if f.Workspace != nil {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "f.Workspace != nil"})
 			continue
 		}
 		if err := v.deps.Health.CloseFault(ctx, f.ID); err != nil {
