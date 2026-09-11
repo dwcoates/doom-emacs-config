@@ -57,7 +57,7 @@ func newTestHooks() *testHooks {
 			return nil, errServed
 		},
 		Server: func(server.Deps) (server.Server, error) { return nil, errServed },
-		Serve: func(context.Context, net.Listener, http.Handler) error {
+		Serve: func(_ context.Context, _ net.Listener, _ http.Handler, _ func()) error {
 			th.served <- struct{}{}
 			return errServed
 		},
@@ -216,6 +216,258 @@ func TestTheAdvertisementIsWithdrawnOnExit(t *testing.T) {
 	// Assert.
 	if _, err := os.Stat(filepath.Join(root, "daemon.addr")); !os.IsNotExist(err) {
 		t.Fatalf("daemon.addr survives the exit (stat err = %v)", err)
+	}
+}
+
+// TestServeWithdrawsTheAdvertisementBeforeItStopsAccepting pins the shutdown
+// invariant realtest 1 needed: a daemon that is shutting down is "not there"
+// for clients, so its address comes down at the START of the shutdown sequence
+// — before AwaitQuiet, before srv.Shutdown stops the listener accepting — not
+// in the exit's deferred catch-all. The onShuttingDown callback is where the
+// withdrawal happens, and here it records into the same ordering the gate does,
+// so the assertion is that the withdrawal precedes every grace wait.
+func TestServeWithdrawsTheAdvertisementBeforeItStopsAccepting(t *testing.T) {
+	// Arrange.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	gate := &recordingGate{Handler: http.NotFoundHandler()}
+	ctx, cancel := context.WithCancel(context.Background())
+	onShuttingDown := func() {
+		gate.mu.Lock()
+		gate.calls = append(gate.calls, "withdraw")
+		gate.mu.Unlock()
+	}
+
+	// Act.
+	served := make(chan error, 1)
+	go func() { served <- serve(ctx, listener, gate, onShuttingDown) }()
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("serve() = %v, want an orderly shutdown", err)
+	}
+
+	// Assert.
+	got := gate.recorded()
+	want := []string{"withdraw", "AwaitQuiet", "AwaitWritesQuiet"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("the exit's steps = %v, want %v — the advertisement withdrawn first, before the listener stops accepting", got, want)
+	}
+}
+
+// fakeWithdrawer is an addrWithdrawal.claim seam: it answers a scripted
+// sequence of Withdraw outcomes so a test drives the early/final interplay
+// without a real daemon.addr on disk.
+type fakeWithdrawer struct {
+	outcomes []withdrawOutcome
+	calls    int
+}
+
+type withdrawOutcome struct {
+	withdrawn bool
+	err       error
+}
+
+func (f *fakeWithdrawer) Withdraw() (bool, error) {
+	if f.calls >= len(f.outcomes) {
+		return false, nil
+	}
+	o := f.outcomes[f.calls]
+	f.calls++
+	return o.withdrawn, o.err
+}
+
+func (f *fakeWithdrawer) Address() string { return "127.0.0.1:0" }
+
+// spyLogger records the operation, level and message of each record so a test
+// asserts what a withdrawal wrote.
+type spyLogger struct {
+	records []spyRecord
+}
+
+type spyRecord struct {
+	level, operation, message string
+}
+
+func (s *spyLogger) Debug(operation, message string, _ dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelDebug, operation, message})
+}
+func (s *spyLogger) Info(operation, message string, _ dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelInfo, operation, message})
+}
+func (s *spyLogger) Warn(operation, message string, _ dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelWarn, operation, message})
+}
+func (s *spyLogger) Error(operation, message string, _ dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelError, operation, message})
+}
+func (s *spyLogger) With(dlog.Context) dlog.Logger { return s }
+
+func (s *spyLogger) message(level string) (string, bool) {
+	for _, r := range s.records {
+		if r.level == level {
+			return r.message, true
+		}
+	}
+	return "", false
+}
+
+// TestAddrWithdrawalBeginRecordsTheEarlyWithdrawal pins that the shutdown-begin
+// withdrawal removes the file and records it at INFO with the early wording.
+func TestAddrWithdrawalBeginRecordsTheEarlyWithdrawal(t *testing.T) {
+	// Arrange.
+	claim := &fakeWithdrawer{outcomes: []withdrawOutcome{{withdrawn: true}}}
+	log := &spyLogger{}
+	w := &addrWithdrawal{claim: claim, log: log}
+
+	// Act.
+	w.begin()
+
+	// Assert.
+	if !w.early {
+		t.Fatal("begin did not mark the early withdrawal")
+	}
+	msg, ok := log.message(dlog.LevelInfo)
+	if !ok || !strings.Contains(msg, "at the start of shutdown") {
+		t.Fatalf("begin INFO message = %q (present = %v), want the early-withdrawal wording", msg, ok)
+	}
+}
+
+// TestAddrWithdrawalBeginDoesNotMarkAnUntouchedFile pins that begin does not
+// claim an early withdrawal it did not perform (the file already named someone
+// else or was gone).
+func TestAddrWithdrawalBeginDoesNotMarkAnUntouchedFile(t *testing.T) {
+	// Arrange.
+	claim := &fakeWithdrawer{outcomes: []withdrawOutcome{{withdrawn: false}}}
+	log := &spyLogger{}
+	w := &addrWithdrawal{claim: claim, log: log}
+
+	// Act.
+	w.begin()
+
+	// Assert.
+	if w.early {
+		t.Fatal("begin marked an early withdrawal it never performed")
+	}
+	if _, ok := log.message(dlog.LevelInfo); ok {
+		t.Fatalf("begin recorded a withdrawal it never performed: %v", log.records)
+	}
+}
+
+// TestAddrWithdrawalFinishIsANoOpAfterAnEarlyWithdrawal pins the catch-all's
+// safety: after begin took the file down, finish sees Withdraw return false and
+// records a no-op, NOT the misleading "left alone" that would suggest a
+// successor took over.
+func TestAddrWithdrawalFinishIsANoOpAfterAnEarlyWithdrawal(t *testing.T) {
+	// Arrange: begin removes it, finish's second Withdraw finds nothing.
+	claim := &fakeWithdrawer{outcomes: []withdrawOutcome{{withdrawn: true}, {withdrawn: false}}}
+	log := &spyLogger{}
+	w := &addrWithdrawal{claim: claim, log: log}
+	w.begin()
+
+	// Act.
+	w.finish()
+
+	// Assert.
+	for _, r := range log.records {
+		if strings.Contains(r.message, "left alone") {
+			t.Fatalf("finish recorded a misleading 'left alone' after an early withdrawal: %v", log.records)
+		}
+	}
+	if msg, ok := log.message(dlog.LevelDebug); !ok || !strings.Contains(msg, "already withdrawn") {
+		t.Fatalf("finish DEBUG message = %q (present = %v), want the no-op wording", msg, ok)
+	}
+}
+
+// TestAddrWithdrawalFinishWithdrawsWhenServingWasNeverReached pins the defer
+// catch-all for a boot error before serving: begin never ran, so finish is the
+// one that removes the file and records it withdrawn.
+func TestAddrWithdrawalFinishWithdrawsWhenServingWasNeverReached(t *testing.T) {
+	// Arrange.
+	claim := &fakeWithdrawer{outcomes: []withdrawOutcome{{withdrawn: true}}}
+	log := &spyLogger{}
+	w := &addrWithdrawal{claim: claim, log: log}
+
+	// Act.
+	w.finish()
+
+	// Assert.
+	msg, ok := log.message(dlog.LevelInfo)
+	if !ok || msg != "daemon.addr was withdrawn" {
+		t.Fatalf("finish INFO message = %q (present = %v), want the plain withdrawal record", msg, ok)
+	}
+}
+
+// TestAddrWithdrawalFinishReportsAnUntouchedFileAsLeftAlone pins that, with no
+// early withdrawal, a file finish does not own is reported as left alone.
+func TestAddrWithdrawalFinishReportsAnUntouchedFileAsLeftAlone(t *testing.T) {
+	// Arrange.
+	claim := &fakeWithdrawer{outcomes: []withdrawOutcome{{withdrawn: false}}}
+	log := &spyLogger{}
+	w := &addrWithdrawal{claim: claim, log: log}
+
+	// Act.
+	w.finish()
+
+	// Assert.
+	msg, ok := log.message(dlog.LevelInfo)
+	if !ok || !strings.Contains(msg, "left alone") {
+		t.Fatalf("finish INFO message = %q (present = %v), want the left-alone record", msg, ok)
+	}
+}
+
+// TestAddrWithdrawalSurfacesAWithdrawError pins that a Withdraw failure is
+// surfaced at ERROR rather than swallowed, on both the early and final paths.
+func TestAddrWithdrawalSurfacesAWithdrawError(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(*addrWithdrawal)
+	}{
+		{"begin", func(w *addrWithdrawal) { w.begin() }},
+		{"finish", func(w *addrWithdrawal) { w.finish() }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			claim := &fakeWithdrawer{outcomes: []withdrawOutcome{{err: errors.New("remove refused")}}}
+			log := &spyLogger{}
+			w := &addrWithdrawal{claim: claim, log: log}
+
+			// Act.
+			tc.act(w)
+
+			// Assert.
+			msg, ok := log.message(dlog.LevelError)
+			if !ok || !strings.Contains(msg, "could not be withdrawn") {
+				t.Fatalf("%s ERROR message = %q (present = %v), want the failure surfaced", tc.name, msg, ok)
+			}
+		})
+	}
+}
+
+// TestABootErrorBeforeServingWithdrawsViaTheDefer pins that the deferred
+// catch-all still covers a path that never reached serving: a graph build that
+// fails takes daemon.addr down on the way out, because onShuttingDown is never
+// called on that path.
+func TestABootErrorBeforeServingWithdrawsViaTheDefer(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
+	th := newTestHooks()
+	bootErr := errors.New("graph refused to build")
+	th.hooks.Graph = func(context.Context, process) (*graph, error) { return nil, bootErr }
+
+	// Act.
+	got := run(context.Background(), options{stateDir: root}, th.hooks)
+
+	// Assert.
+	if !errors.Is(got, bootErr) {
+		t.Fatalf("run error = %v, want it to wrap %v", got, bootErr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "daemon.addr")); !os.IsNotExist(err) {
+		t.Fatalf("daemon.addr survives a boot error (stat err = %v)", err)
 	}
 }
 
@@ -417,7 +669,7 @@ func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T)
 
 	// Act
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate) }()
+	go func() { served <- serve(ctx, listener, gate, nil) }()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
