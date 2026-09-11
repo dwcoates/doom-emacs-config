@@ -65,9 +65,11 @@ type Spec struct {
 // Supervisor brings shim processes up and adopts surviving ones.
 type Supervisor interface {
 	// Spawn starts a shim, dials it, and returns once WatchSession is
-	// connected and the first pushed diagnostics arm says healthy. A dead
-	// process ends bring-up at once with its exit decoding and stderr ring,
-	// never a timeout.
+	// connected and the shim has pushed its first diagnostics arm. An
+	// UNHEALTHY arm is an ANSWER and completes the bring-up; its faults reach
+	// the workspace health path through the watcher the caller then attaches.
+	// A dead process ends bring-up at once with its exit decoding and stderr
+	// ring, never a timeout.
 	Spawn(ctx context.Context, spec Spec) (Client, error)
 	// Adopt dials a shim that is already running — a crash boot's surviving
 	// process, or a handover's transferred one — and supervises it without
@@ -98,8 +100,8 @@ type Client interface {
 	// StartSession starts or resumes the session. Session facts travel only
 	// here.
 	StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error)
-	// WatchSession opens the session frame stream. Its first healthy
-	// diagnostics push is the readiness signal. The FRAME is handed on whole:
+	// WatchSession opens the session frame stream. Its first diagnostics push
+	// is the readiness signal, healthy or not. The FRAME is handed on whole:
 	// a frame is either a SessionUpdate or the landing-7 re-announcement of
 	// the session's own SessionStarted, and the consumer tells them apart.
 	WatchSession(ctx context.Context) (Stream[*shimv1.WatchSessionResponse], error)

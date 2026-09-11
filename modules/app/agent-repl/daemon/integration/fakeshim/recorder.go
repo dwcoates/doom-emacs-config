@@ -49,14 +49,24 @@ func (r *Recorder) Count(rpc string) int {
 // Expect pops the oldest unread request for the verb, waiting for one to
 // arrive if none has. The context bounds the wait; its cancellation is
 // returned as an error and never swallowed.
-func (r *Recorder) Expect(ctx context.Context, rpc string) (proto.Message, error) {
+//
+// IT ALSO ANSWERS THE VERB'S TOTAL AT POP TIME, read under the same lock as
+// the pop. A test that needs both the request and how many of that verb have
+// arrived would otherwise take a SECOND round trip for the count -- and a
+// production step that ends the shim right after the request it was waiting
+// for (the merge teardown resubmits the displaced turn and then force-stops
+// the session before removing the worktree) makes that second trip a race
+// against a process on its way out, whose control connection then reads a
+// clean EOF.
+func (r *Recorder) Expect(ctx context.Context, rpc string) (proto.Message, int, error) {
 	for {
 		r.mu.Lock()
 		if n := r.read[rpc]; n < len(r.received[rpc]) {
 			msg := r.received[rpc][n]
 			r.read[rpc] = n + 1
+			total := len(r.received[rpc])
 			r.mu.Unlock()
-			return msg, nil
+			return msg, total, nil
 		}
 		wait := make(chan struct{})
 		r.waiters[rpc] = append(r.waiters[rpc], wait)
@@ -65,7 +75,7 @@ func (r *Recorder) Expect(ctx context.Context, rpc string) (proto.Message, error
 		select {
 		case <-wait:
 		case <-ctx.Done():
-			return nil, fmt.Errorf("fakeshim: waiting for %s: %w", rpc, ctx.Err())
+			return nil, 0, fmt.Errorf("fakeshim: waiting for %s: %w", rpc, ctx.Err())
 		}
 	}
 }

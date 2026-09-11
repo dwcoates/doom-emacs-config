@@ -52,7 +52,9 @@ Daemon — landed
   `sidecar.log`; an unset arm preserves the historical webapp route.
 - forwarded records retain their client timestamp and verbosity class.
 - the run log and daemon-owned workspace sinks rotate on size with retained
-  generations. `shim.log` rotates only with a shim process roll because the
+  generations, and a new daemon instance APPENDS to the target the workspace's
+  canonical link already names instead of opening a generation of its own, so
+  `--workspace` reads every instance rather than the current one alone. `shim.log` rotates only with a shim process roll because the
   writer owns inherited descriptor `3`; a 110% hard ceiling emits one error
   and forces the freeness-aware roll.
 - the bypass lint rejects raw stderr/`fmt.Print`/`log.Print` outside the

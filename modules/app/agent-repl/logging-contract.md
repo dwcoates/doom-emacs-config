@@ -22,9 +22,15 @@ directory; daemon-owned targets live beside `daemon.run.log` under the daemon
 state root's `logs/` directory. The runtime must never follow a workspace-provided
 regular file or symlink as its durable sink. Link replacement is atomic. An
 owned target is reused from the runtime's in-memory workspace map during that
-runtime lifetime. After a runtime restart, the runtime creates a new unique
-target and atomically replaces the canonical link rather than trusting its old
-destination.
+runtime lifetime. After a runtime restart, the runtime APPENDS to the target
+the canonical link already names, so one file spans instances and rotation
+happens only at the byte cap: a bounce loop must not evict history merely by
+restarting, and a reader resolving the canonical path must not see the current
+instance alone. The standing target is joined only when it is a symlink naming
+a regular file directly inside the runtime's own logs directory and that file
+is under the cap; anything else -- a regular file or foreign symlink the
+workspace put there, a swept target, a target at the cap -- is displaced by a
+new unique target and an atomic link replacement, exactly as before.
 
 The daemon opens its workspace targets with append semantics and manages a
 64 MiB cap for `daemon.log`, `shim.log`, `webapp.log`, and `sidecar.log`.
