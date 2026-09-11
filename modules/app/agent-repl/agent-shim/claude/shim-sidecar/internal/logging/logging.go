@@ -39,6 +39,22 @@ import (
 // daemon.addr pid invariant (see logging-contract.md).
 var ErrForwardTargetNotThere = errors.New("sidecar logging: forward target daemon is not there")
 
+// ErrForwardTargetBooting marks a forwarding failure against a daemon ADDRESS
+// that has never once been seen accepting a connection — via Forwarder.Ready
+// or a prior successful Forward — even though the advertisement this attempt
+// dialed is unchanged and its pid is alive. A daemon publishes daemon.addr and
+// its pid before its listener answers, so a connection/dial failure against an
+// address still in that boot window is a STARTUP TRANSIENT specific to that
+// address, not a stuck daemon: a Forwarder wraps it onto a connection/dial
+// failure (see daemonclient.Client.classifyForward); forwardLoop uses
+// errors.Is to treat such a failure as a boot transient (DEBUG, retried, still
+// persisted undelivered) instead of manufacturing a WARN against an address
+// that has simply not finished coming up. Only a forward failure against an
+// address that WAS previously seen accepting remains a genuine WARN candidate
+// — this refines the pid-liveness check of ErrForwardTargetNotThere with
+// PER-ADDRESS boot tolerance (see logging-contract.md).
+var ErrForwardTargetBooting = errors.New("sidecar logging: forward target daemon has never been seen accepting")
+
 // Context is the structured attribution attached to a log record. Every field
 // is optional presence: an empty string (or a nil pointer, for the numeric
 // keys) means the caller does not own that fact, and the key is omitted from
@@ -585,6 +601,16 @@ func (l *Logger) forwardLoop() {
 				// advertiser costs no WARN, even after it was once seen serving.
 				l.reportForwardTransient(now, address, attempts, target, err,
 					"a file-scoped diagnostic could not be forwarded because the daemon that would have received it is no longer there (it exited or was replaced); it was written to the global sink")
+			case errors.Is(err, ErrForwardTargetBooting):
+				// The ADDRESS this record targeted has never once been seen
+				// accepting — via Ready or a prior successful Forward — even
+				// though it is unchanged and its pid is alive: it is still inside
+				// its own boot window. This is a PER-ADDRESS invariant, distinct
+				// from this ladder's own seenServing latch below: a different
+				// daemon address can have been seen serving earlier without that
+				// telling us anything about whether THIS address has come up.
+				l.reportForwardTransient(now, address, attempts, target, err,
+					"a file-scoped diagnostic was not forwarded because the daemon at this address has never been seen accepting connections; it was written to the global sink")
 			case !seenServing:
 				// A daemon that never began serving during the ladder is a
 				// STARTUP TRANSIENT, not an outage: the record forwarded before
