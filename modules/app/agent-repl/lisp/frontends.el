@@ -50,6 +50,7 @@
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
+(declare-function agent-repl--note-panels-shown "agent-repl-panels" (ws))
 (defun agent-repl--ws-backend-name (_ws)
   "Return the backend WS runs under: `claude', always.
 
@@ -361,7 +362,14 @@ capability to invoke.  OPERATION is the diagnostic name (`show' or `hide')."
     result))
 
 (defun agent-repl--frontend-dispatch-show (ws)
-  "Make WS's already-running session visible through its frontend."
+  "Make WS's already-running session visible through its frontend.
+Showing the panels clears any explicit-close preference
+\(`agent-repl--note-panels-shown'): once they are back on screen the
+panels-open default applies again, so a later switch re-shows them.  This
+is the frontend-agnostic show choke every programmatic show reaches
+\(the switch restore, the armed-landing drain, the frame reclaim, the
+window-change layout repair, and `agent-repl-focus-input')."
+  (agent-repl--note-panels-shown ws)
   (agent-repl--frontend-dispatch-view ws 'show #'agent-repl-frontend-show-fn))
 
 (defun agent-repl--frontend-dispatch-hide (ws)

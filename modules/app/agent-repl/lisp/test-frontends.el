@@ -351,3 +351,15 @@ frontend must implement."
        (should (equal got "ws1"))))))
 
 ;;;; ---- Headless boot ---------------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontends-dispatch-show-clears-explicit-close ()
+  "Show dispatch clears the explicit-close preference so panels default
+open again on a later switch."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (agent-repl-register-frontend
+      (agent-repl-test--make-frontend 'probe :show-fn #'ignore))
+     (agent-repl--ws-put "ws1" :frontend 'probe)
+     (agent-repl--ws-put "ws1" :panels-closed-by-user t)
+     (agent-repl--frontend-dispatch-show "ws1")
+     (should-not (agent-repl--ws-get "ws1" :panels-closed-by-user)))))
