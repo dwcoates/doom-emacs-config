@@ -45,8 +45,11 @@
 
 (declare-function agent-repl--frontend-artifact-exists-p "daemon" (path))
 (declare-function agent-repl-daemon--build "daemon" (targets continuation))
+(declare-function agent-repl-daemon--await-departure "daemon" (on-gone))
 (declare-function agent-repl-daemon-ensure "daemon" (&optional on-ready))
+(declare-function agent-repl-daemon-observe-identity "daemon" (conn on-answer on-failure))
 (declare-function agent-repl-frontend-daemon-stop "daemon" (&optional on-done))
+(declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-teardown "daemon-link" ())
 
 (defcustom agent-repl-shim-services-launchctl-program "launchctl"
@@ -397,10 +400,9 @@ and a fresh one is ensured.  ON-SUCCESS runs only after every stage
 completes; ON-FAILURE receives the first diagnostic and no later stage
 starts.
 
-There is no readiness wait on the daemon here and no workspace rebinding:
-the daemon publishes `daemon.addr' when it is serving, and every
-workspace re-registers on link-up because registration is idempotent by
-dir."
+Daemon completion requires a health answer carrying a NEW immutable
+process identity.  A link cycle, address-file cycle, connection object,
+or accepted shutdown request is not completion."
   (agent-repl--assert-main-thread "runtime-restart")
   (unless (and (functionp on-success) (functionp on-failure))
     (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-prepare needs callable continuations"))
@@ -420,45 +422,100 @@ dir."
               "backend restart FAILED: %s — full output in %s"
               detail (agent-repl--logfile-path))
              (funcall on-failure detail)))
-         (complete ()
+         (complete (before after)
            (unless settled
              (setq settled t)
-             (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-complete elapsed=%.3f"
-                               (- (float-time) started))
+             (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
+                               "elisp.services.runtime-complete elapsed=%.3f old-instance=%S old-pid=%S new-instance=%S new-pid=%S new-build-sha=%S"
+                               (- (float-time) started)
+                               (plist-get before :instance-id)
+                               (plist-get before :pid)
+                               (plist-get after :instance-id)
+                               (plist-get after :pid)
+                               (plist-get after :build-sha))
              (agent-repl--backend-phase
               '(:agent-repl-central "host service management spans workspaces")
               "backend restart complete (%.1fs)"
                                        (- (float-time) started))
              (funcall on-success)))
-         (replace-daemon ()
-           ;; The stop is a REQUEST — Emacs never kills a daemon — and the
-           ;; ensure is what brings the replacement up.  A daemon that is
-           ;; not there to stop is not an error: the ensure covers it.
+         (replacement-observed (before after)
+           (cond
+            ((null after)
+             (fail "not restarted: the replacement daemon omitted its process identity"))
+            ((and before
+                  (equal (plist-get before :instance-id)
+                         (plist-get after :instance-id)))
+             (fail (format "not restarted: daemon instance %s still serves after the link cycle (pid %s, build %s)"
+                           (plist-get after :instance-id)
+                           (plist-get after :pid)
+                           (plist-get after :build-sha))))
+            (t
+             (complete before after))))
+         (replace-daemon (before)
+           ;; The stop is a REQUEST — Emacs never kills a daemon.  Every
+           ;; terminal outcome is inspected before the link is torn down.
            (agent-repl-frontend-daemon-stop
-            (lambda (stopped)
-              (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.daemon-stopped accepted=%s"
-                                (if stopped "t" "nil"))
-              (agent-repl-link-teardown)
-              (agent-repl-daemon-ensure
-               (lambda (conn)
-                 (if conn
-                     (complete)
-                   (fail "the replacement daemon never came up"))))))))
-      (condition-case err
-          (progn
-            (agent-repl--shim-services-assert-launchd-loaded)
-            (agent-repl-daemon--build
-             nil
-             (lambda (build-failure)
-               (if build-failure
-                   (fail build-failure)
-                 ;; Same reason as above: the outer `condition-case' has
-                 ;; already returned by the time this continuation runs.
-                 (condition-case err
-                     (agent-repl--shim-services-build-and-bounce
-                      t #'replace-daemon #'fail)
-                   (error (fail (error-message-string err))))))))
-        (error (fail (error-message-string err))))
+            (lambda (outcome)
+              (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
+                                "elisp.services.daemon-stop-outcome arm=%S reason=%S before=%S"
+                                (plist-get outcome :arm)
+                                (plist-get outcome :reason) before)
+              (pcase (plist-get outcome :arm)
+                (:accepted
+                 (agent-repl-link-teardown)
+                 (agent-repl-daemon--await-departure
+                  (lambda (gone)
+                    (if (not gone)
+                        (fail "not restarted: the daemon accepted shutdown but did not depart")
+                      (agent-repl-daemon-ensure
+                       (lambda (conn)
+                         (if (null conn)
+                             (fail "not restarted: the replacement daemon never came up")
+                           (agent-repl-daemon-observe-identity
+                            conn
+                            (lambda (after)
+                              (replacement-observed before after))
+                            (lambda (detail)
+                              (fail (format "not restarted: replacement identity was not observed: %s"
+                                            detail)))))))))))
+                (:not-restarted
+                 (fail (format "not restarted: %s" (plist-get outcome :reason))))
+                (arm
+                 (fail (format "not restarted: unknown daemon stop outcome %S"
+                               arm)))))))
+         (build-and-bounce (before)
+           (condition-case err
+               (progn
+                 (agent-repl--shim-services-assert-launchd-loaded)
+                 (agent-repl-daemon--build
+                  nil
+                  (lambda (build-failure)
+                    (if build-failure
+                        (fail build-failure)
+                      ;; Same reason as above: the outer `condition-case' has
+                      ;; already returned by the time this continuation runs.
+                      (condition-case err
+                          (agent-repl--shim-services-build-and-bounce
+                           t (lambda () (replace-daemon before)) #'fail)
+                        (error (fail (error-message-string err))))))))
+             (error (fail (error-message-string err)))))
+         (before-observed (before)
+           (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
+                             "elisp.services.runtime-current-identity instance=%S pid=%S build-sha=%S legacy=%s"
+                             (plist-get before :instance-id)
+                             (plist-get before :pid)
+                             (plist-get before :build-sha)
+                             (if before "nil" "t"))
+           (build-and-bounce before)))
+      ;; Resolve the daemon link and its identity before mutating any runtime
+      ;; state. A missing link is the exact production defect that used to be
+      ;; ignored and turned into a false completion.
+      (agent-repl-daemon-observe-identity
+       (agent-repl-link-primary)
+       #'before-observed
+       (lambda (detail)
+         (fail (format "not restarted: current daemon identity was not observed: %s"
+                       detail))))
       :pending)))
 
 (defun agent-repl-runtime-restart ()
