@@ -30,8 +30,9 @@
 //     message was empty and this suite could only pin "lost, not cancelled,
 //     not completed" at the feed.
 //   - THE SIDECAR'S OWN RECORD says which arm it CONCLUDED, on its dedicated
-//     `reason` key — the key the sidecar's own integration suite joins a
-//     terminal to its sweep on (`lost-terminal`, seam.go).
+//     `reason` key in the daemon-owned workspace sidecar sink — the key the
+//     sidecar's own integration suite joins a terminal to its sweep on
+//     (`lost-terminal`, seam.go).
 //
 // Both are asserted for every arm, and they remain distinct claims: the
 // sidecar's reason is the conclusion it reached, the feed's `how` is the arm
@@ -54,6 +55,7 @@ import (
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
 )
@@ -175,13 +177,13 @@ func dlAwaitOneSpool(t *testing.T, ctx context.Context, w *World) string {
 // (seam.go) carries a dedicated `reason` key holding the same word the
 // wire's DetachedLost arm carries, so this assertion goes on failing if the
 // arm regresses — a substring match against the sentence would not.
-func dlAwaitLostReason(t *testing.T, ctx context.Context, w *World, spool, reason string) harness.LogRecord {
+func dlAwaitLostReason(t *testing.T, ctx context.Context, w *World, workspaceDir, spool, reason string) harness.LogRecord {
 	t.Helper()
 	tick := time.NewTicker(pollInterval)
 	defer tick.Stop()
 	for {
 		var seen []string
-		for _, r := range w.Sidecar.Log(t) {
+		for _, r := range w.Daemon.WorkspaceLog(workspaceDir, "sidecar") {
 			if !strings.HasPrefix(r.Operation, "lost-terminal") {
 				continue
 			}
@@ -281,14 +283,14 @@ func dlShellLostHow(lost *frontendv1.FeedShellLost) string {
 // The health fault is DECLARED, not tolerated: work that outlives its turn
 // opens one by design, exactly as the detached-bash family's own tests
 // declare it.
-func dlDriveDetachedLive(t *testing.T, w *World) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow]) {
+func dlDriveDetachedLive(t *testing.T, w *World) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow], *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w.ExpectWarnings("daemon.health.open_fault")
 	ws := dbWorkspace(t, w)
 	initial, stream := dbOpenRootFeed(t, w, ws)
 	turn := SubmitPrompt(t, w, ws, "!bash-detach-live")
 	AwaitTurnEnded(t, w, ws, turn)
-	return initial, stream
+	return initial, stream, ws
 }
 
 // ===========================================================================
@@ -308,7 +310,7 @@ func TestDetachedLostWentSilent(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	w := NewWorldWithSidecarStaleness(t, WorldOpts{}, SidecarStaleness{ShellSilence: dlSilenceWindow})
-	initial, stream := dlDriveDetachedLive(t, w)
+	initial, stream, ws := dlDriveDetachedLive(t, w)
 	defer stream.Close()
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), dlLostBound)
@@ -319,7 +321,7 @@ func TestDetachedLostWentSilent(t *testing.T) {
 	spool := dlAwaitOneSpool(t, ctx, w)
 
 	// Assert: the arm, on the sidecar's own `reason` key.
-	dlAwaitLostReason(t, ctx, w, spool, "went_silent")
+	dlAwaitLostReason(t, ctx, w, ws.GetDir(), spool, "went_silent")
 
 	// Assert: the feed draws it LOST, and the spool it managed to write is
 	// still carried — a LOST conclusion never drops what was observed.
@@ -350,7 +352,7 @@ func TestDetachedLostFileVanished(t *testing.T) {
 	// Arrange: only the GRACE window is bought; the silence windows stay at
 	// production length so `went_silent` cannot conclude the run first.
 	w := NewWorldWithSidecarStaleness(t, WorldOpts{}, SidecarStaleness{Grace: dlGraceWindow})
-	initial, stream := dlDriveDetachedLive(t, w)
+	initial, stream, ws := dlDriveDetachedLive(t, w)
 	defer stream.Close()
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), dlLostBound)
@@ -373,7 +375,7 @@ func TestDetachedLostFileVanished(t *testing.T) {
 	}
 
 	// Assert: the arm, then the feed's LOST draw.
-	dlAwaitLostReason(t, ctx, w, spool, "file_vanished")
+	dlAwaitLostReason(t, ctx, w, ws.GetDir(), spool, "file_vanished")
 	shell := dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000", "file_vanished")
 	if got := shell.GetSpool().GetText(); !strings.Contains(got, "partial output with no terminator") {
 		t.Errorf("the LOST shell's spool = %q, want the bytes read before the file vanished — "+
@@ -418,7 +420,7 @@ func TestDetachedLostSweptUp(t *testing.T) {
 	// silence windows at production length is what proves this conclusion is
 	// the boot rule's and not the silence window's.
 	w := NewWorld(t, WorldOpts{})
-	initial, stream := dlDriveDetachedLive(t, w)
+	initial, stream, ws := dlDriveDetachedLive(t, w)
 	defer stream.Close()
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), dlLostBound)
@@ -442,6 +444,6 @@ func TestDetachedLostSweptUp(t *testing.T) {
 	w.Sidecar.Restart(t)
 
 	// Assert: the arm, then the feed's LOST draw.
-	dlAwaitLostReason(t, ctx, w, spool, "swept_up")
+	dlAwaitLostReason(t, ctx, w, ws.GetDir(), spool, "swept_up")
 	dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000", "swept_up")
 }

@@ -40,7 +40,9 @@ func ingestGreenPath(t *testing.T) []logRecord {
 	for _, operation := range []string{"tailer-commit", "tail-pickup"} {
 		operation := operation
 		awaitLog(ctx, t, opts.LogPath, operation+" for the ingested batch", func(r logRecord) bool {
-			return r.Operation == operation
+			return r.Operation == operation &&
+				samePathAny(r.Context["path"], g.Path()) &&
+				r.Context["offset"] == float64(g.Offset())
 		})
 	}
 	return readLog(t, opts.LogPath)

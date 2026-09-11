@@ -391,7 +391,6 @@ func TestIdeDiagnosticsAfterEdit(t *testing.T) {
 	// arrives on the live shim stream. Under load those two authoritative
 	// sources may reach the daemon in either order; applyDiagnostics retains
 	// the attachment until the card arrives, which this test asserts below.
-	w.ExpectWarnings("daemon.feed.diagnostics_without_card")
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "ide-diagnostics")
@@ -437,7 +436,6 @@ func TestIdeDiagnosticsAfterWrite(t *testing.T) {
 	w, ws := newFileToolsWorkspace(t)
 	// As above, transcript diagnostics and the live Write card may arrive in
 	// either order; the resolver retains the early attachment for this card.
-	w.ExpectWarnings("daemon.feed.diagnostics_without_card")
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "ide-diagnostics-write")

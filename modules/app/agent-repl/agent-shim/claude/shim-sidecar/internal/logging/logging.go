@@ -8,11 +8,11 @@
 // `seq`, `from_seq`, `replay_*_seq` — are gone. `claude_session_id` remains as
 // promoted vendor attribution, never as a store address.
 //
-// SELF-DIAGNOSTICS REMAIN IN THE GLOBAL ROTATING SINK until
-// agentrepl.v1.ClientLogRecord can name their runtime. The message has the
-// originating timestamp and verbose class but no runtime discriminator, and
-// the daemon currently labels every forwarded record as webapp. Forwarding a
-// sidecar record through that seam would therefore corrupt its identity.
+// GENUINELY GLOBAL SELF-DIAGNOSTICS remain in the process's rotating sink.
+// File-scoped diagnostics are forwarded to the daemon, which owns each
+// workspace's sidecar.log. A forwarding failure is stated once per daemon
+// address and outage window in the global sink and does not fail the file-plane
+// operation that produced the diagnostic.
 package logging
 
 import (
@@ -161,6 +161,29 @@ type record struct {
 	Context         map[string]any `json:"context"`
 }
 
+// ForwardRecord is one file-scoped diagnostic handed to the daemon boundary.
+// Workspace identity stays explicit so the forwarding implementation cannot
+// accidentally bury the daemon's address in arbitrary context.
+type ForwardRecord struct {
+	Timestamp       string
+	PID             int
+	Level           string
+	Verbose         bool
+	Operation       string
+	Message         string
+	WorkspaceDir    string
+	WorkspaceID     string
+	ClaudeSessionID string
+	Context         map[string]any
+}
+
+// Forwarder is the daemon integration boundary. It answers the exact daemon
+// address used even when the RPC fails, so Logger can rate-limit the global
+// failure record per destination without knowing how daemon.addr is resolved.
+type Forwarder interface {
+	Forward(ForwardRecord) (daemonAddress string, err error)
+}
+
 // Logger writes records at or above one process-wide severity threshold.
 type Logger struct {
 	stderr io.Writer
@@ -183,6 +206,13 @@ type Logger struct {
 	minimumLevel          sharedlogging.Level
 	poisoned              error
 	files                 map[string]Context
+	forwarder             Forwarder
+	lastForwardFailure    string
+	forwardMu             sync.Mutex
+	forwardReady          *sync.Cond
+	forwardQueue          []ForwardRecord
+	forwardClosing        bool
+	forwardDone           chan struct{}
 }
 
 // Bound is the runtime logger passed through sidecar packages.
@@ -232,6 +262,22 @@ func NewDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel sharedlogging.
 	return l
 }
 
+// NewForwardingDurableOnlyAtLevel constructs the production logger: global
+// records go to file, while file-scoped records enter an ordered forwarding
+// queue for the daemon-owned workspace sink. A nil forwarder is an invariant
+// violation, never permission to put a workspace record in the global sink.
+func NewForwardingDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel sharedlogging.Level, forwarder Forwarder) *Logger {
+	if forwarder == nil {
+		panic("sidecar logging: forwarding logger requires a daemon forwarder")
+	}
+	l := NewDurableOnlyAtLevel(terminal, file, minimumLevel)
+	l.forwarder = forwarder
+	l.forwardReady = sync.NewCond(&l.forwardMu)
+	l.forwardDone = make(chan struct{})
+	go l.forwardLoop()
+	return l
+}
+
 // With creates a logger with stable runtime attribution.
 func (l *Logger) With(ctx Context) *Bound {
 	if l == nil {
@@ -246,6 +292,31 @@ func (b *Bound) With(ctx Context) *Bound {
 		panic("sidecar logging: With called on nil Bound logger")
 	}
 	return &Bound{logger: b.logger, context: mergeContext(b.context, ctx)}
+}
+
+// Close drains the forwarding queue and stops its worker. Ordinary log calls
+// never wait for ClientLog; shutdown is the one boundary that waits so a
+// process exit cannot strand diagnostics which were already accepted.
+func (l *Logger) Close() {
+	if l == nil || l.forwarder == nil {
+		return
+	}
+	l.forwardMu.Lock()
+	if !l.forwardClosing {
+		l.forwardClosing = true
+		l.forwardReady.Broadcast()
+	}
+	done := l.forwardDone
+	l.forwardMu.Unlock()
+	<-done
+}
+
+// Close drains the root logger's forwarding queue.
+func (b *Bound) Close() {
+	if b == nil {
+		panic("sidecar logging: Close called on nil Bound logger")
+	}
+	b.logger.Close()
 }
 
 // RegisterFile binds proven workspace/session attribution to one normalized
@@ -367,7 +438,7 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 		verbosity = "verbose"
 	}
 	now := l.now().Local()
-	payload, err := json.Marshal(record{
+	rec := record{
 		Timestamp:       sharedlogging.Timestamp(now),
 		Runtime:         "sidecar",
 		PID:             l.pid(),
@@ -380,7 +451,20 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 		ClaudeSessionID: ctx.ClaudeSessionID,
 		RequestID:       ctx.RequestID,
 		Context:         contextMap(ctx),
-	})
+	}
+	if l.forwarder != nil && ctx.WorkspaceDir != "" && !ctx.SinkEmergency {
+		forwardContext := cloneMap(rec.Context)
+		forwardContext["pid"] = rec.PID
+		forwardContext["claude_session_id"] = rec.ClaudeSessionID
+		l.enqueueForward(ForwardRecord{
+			Timestamp: rec.Timestamp, PID: rec.PID, Level: rec.Level,
+			Verbose: verbose, Operation: rec.Operation, Message: rec.Message,
+			WorkspaceDir: rec.WorkspaceDir, WorkspaceID: rec.WorkspaceID,
+			ClaudeSessionID: rec.ClaudeSessionID, Context: forwardContext,
+		})
+		return
+	}
+	payload, err := json.Marshal(rec)
 	if err != nil {
 		panic(fmt.Sprintf("sidecar logging: encode record: %v", err))
 	}
@@ -403,6 +487,97 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 	if err := writeAll(l.stderr, line); err != nil {
 		panic(fmt.Sprintf("sidecar logging: stderr sink failed: %v", err))
 	}
+}
+
+func (l *Logger) enqueueForward(rec ForwardRecord) {
+	l.forwardMu.Lock()
+	defer l.forwardMu.Unlock()
+	if l.forwardClosing {
+		panic("sidecar logging: file-scoped record written after forwarding closed")
+	}
+	l.forwardQueue = append(l.forwardQueue, rec)
+	l.forwardReady.Signal()
+}
+
+func (l *Logger) forwardLoop() {
+	defer close(l.forwardDone)
+	for {
+		l.forwardMu.Lock()
+		for len(l.forwardQueue) == 0 && !l.forwardClosing {
+			l.forwardReady.Wait()
+		}
+		if len(l.forwardQueue) == 0 {
+			l.forwardMu.Unlock()
+			return
+		}
+		rec := l.forwardQueue[0]
+		l.forwardQueue[0] = ForwardRecord{}
+		l.forwardQueue = l.forwardQueue[1:]
+		l.forwardMu.Unlock()
+
+		address, err := l.forwarder.Forward(rec)
+		if err != nil {
+			l.reportForwardFailure(l.now().Local(), address, record{
+				Operation: rec.Operation, WorkspaceDir: rec.WorkspaceDir,
+				WorkspaceID: rec.WorkspaceID, ClaudeSessionID: rec.ClaudeSessionID,
+			}, err)
+			continue
+		}
+		l.mu.Lock()
+		l.lastForwardFailure = ""
+		l.mu.Unlock()
+	}
+}
+
+// reportForwardFailure writes one global failure per daemon address and outage
+// window. A successful forward resets the limiter. The original file operation
+// continues: diagnostics persistence must never stop transcript ingestion. An
+// empty address means resolution itself failed, so the daemon.addr path
+// supplied by the forwarder remains the rate-limit key.
+func (l *Logger) reportForwardFailure(now time.Time, address string, target record, cause error) {
+	if address == "" {
+		address = "unresolved"
+	}
+	l.mu.Lock()
+	if l.lastForwardFailure == address {
+		l.mu.Unlock()
+		return
+	}
+	l.lastForwardFailure = address
+	l.mu.Unlock()
+
+	payload, err := json.Marshal(record{
+		Timestamp: sharedlogging.Timestamp(now), Runtime: "sidecar", PID: l.pid(),
+		Level: "error", Verbosity: "normal", Operation: "sidecar.logging.forward-failure",
+		Message: "a file-scoped diagnostic could not be forwarded to the daemon",
+		Context: map[string]any{
+			"daemon_address": address, "error": cause.Error(),
+			"target_operation": target.Operation, "target_workspace_dir": target.WorkspaceDir,
+			"target_workspace_id": target.WorkspaceID, "target_claude_session_id": target.ClaudeSessionID,
+		},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("sidecar logging: encode forwarding failure: %v", err))
+	}
+	line := append(payload, '\n')
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.poisoned != nil {
+		panic(fmt.Sprintf("sidecar logging: persistent sink previously failed: %v", l.poisoned))
+	}
+	if err := writeAll(l.file, line); err != nil {
+		l.poisoned = err
+		l.reportSinkFailure(now, target.Operation, err)
+		panic(fmt.Sprintf("sidecar logging: persistent sink failed: %v", err))
+	}
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in)+2)
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 // reportSinkFailure narrates the loss of the canonical sink through the only

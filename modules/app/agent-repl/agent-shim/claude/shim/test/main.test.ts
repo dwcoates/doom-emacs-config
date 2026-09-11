@@ -10,7 +10,7 @@
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
 import { DEFAULT_RETRY_POLICY } from "../src/store/persistence.js";
 import {
@@ -1238,16 +1238,10 @@ describe("main", () => {
  * the seam instead.
  */
 describe("queryFactory forwards the whole spec to the real query", () => {
-  afterEach(() => {
-    vi.doUnmock("../src/sdk/real-query.js");
-    vi.resetModules();
-  });
+  const calls: Array<Record<string, unknown>> = [];
+  let factory: typeof queryFactory;
 
-  async function realQueryCalls(): Promise<{
-    factory: typeof import("../src/main.js").queryFactory;
-    calls: Array<Record<string, unknown>>;
-  }> {
-    const calls: Array<Record<string, unknown>> = [];
+  beforeAll(async () => {
     vi.resetModules();
     vi.doMock("../src/sdk/real-query.js", () => ({
       createRealQuery: (options: Record<string, unknown>) => {
@@ -1257,9 +1251,17 @@ describe("queryFactory forwards the whole spec to the real query", () => {
     }));
     const log = await import("../src/log.js");
     log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "main-query-factory" });
-    const mod = await import("../src/main.js");
-    return { factory: mod.queryFactory, calls };
-  }
+    factory = (await import("../src/main.js")).queryFactory;
+  });
+
+  beforeEach(() => {
+    calls.length = 0;
+  });
+
+  afterAll(() => {
+    vi.doUnmock("../src/sdk/real-query.js");
+    vi.resetModules();
+  });
 
   const env: ShimEnvironment = {
     claudeConfigDir: "/accounts/primary",
@@ -1280,9 +1282,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
   }
 
   it("states the model when the session named one", async () => {
-    // Arrange.
-    const { factory, calls } = await realQueryCalls();
-
+    // Arrange: the describe block's mocked real-query seam.
     // Act.
     await factory(false, env, "/ws")(spec({ model: "claude-opus-5" }));
 
@@ -1291,9 +1291,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
   });
 
   it("omits the model entirely when the session named none", async () => {
-    // Arrange.
-    const { factory, calls } = await realQueryCalls();
-
+    // Arrange: the describe block's mocked real-query seam.
     // Act.
     await factory(false, env, "/ws")(spec());
 
@@ -1302,9 +1300,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
   });
 
   it("forwards the keep-alive rewind target so the rewind is observable at the vendor", async () => {
-    // Arrange.
-    const { factory, calls } = await realQueryCalls();
-
+    // Arrange: the describe block's mocked real-query seam.
     // Act.
     await factory(false, env, "/ws")(
       spec({ binding: { kind: "resume", resumeSessionId: "vendor-old" }, resumeSessionAt: "uuid-9" }),
@@ -1316,9 +1312,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
   });
 
   it("omits the rewind target when the turn asked for no rewind", async () => {
-    // Arrange.
-    const { factory, calls } = await realQueryCalls();
-
+    // Arrange: the describe block's mocked real-query seam.
     // Act.
     await factory(false, env, "/ws")(spec());
 
