@@ -394,7 +394,11 @@ func TestHibernateOnIdleCutoff(t *testing.T) {
 // test assert the daemon's own feed carries no trace of it, and that the
 // wire has no PromptOrigin arm a keep-alive could even be attributed to.
 func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
-	t.Parallel()
+	// This scenario deliberately waits for an idle keep-alive after completing
+	// a full real-process turn. Running it beside seven other process worlds
+	// repeatedly exhausted the baseline GetSidecarCursors deadline before the
+	// assertion's own observation window began. Keep this one world serialized
+	// so the stated cursor bounds measure the product rather than host contention.
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
