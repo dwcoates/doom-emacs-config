@@ -27,6 +27,13 @@ import (
 
 const requestTimeout = 2 * time.Second
 
+// readinessTimeout bounds the loopback connect that decides whether the daemon
+// is live. A booting daemon has bound its listener and published daemon.addr
+// but is not yet accepting, so the connect either fails fast or the kernel
+// queues it; either way a short bound keeps a readiness probe from riding the
+// full request timeout on every retry rung.
+const readinessTimeout = 250 * time.Millisecond
+
 // Client resolves daemon.addr and forwards one file-scoped diagnostic through
 // agentrepl.v1.AgentRepl.ClientLog. The HTTP client is shared so sequential
 // records reuse the loopback connection; the generated Connect client is
@@ -55,6 +62,33 @@ func New(stateDir string) *Client {
 			Timeout:   requestTimeout,
 		},
 	}
+}
+
+// Ready reports whether the daemon has PUBLISHED a live address: daemon.addr
+// exists and names a loopback host:port, and a loopback connect to it succeeds
+// within readinessTimeout. A booting daemon binds its listener and writes
+// daemon.addr at boot steps 5 and 6 but does not reach http.Server.Serve until
+// its reconciliation finishes, so the address can be published while the
+// listener still queues rather than accepts; a plain connect is the cheapest
+// honest signal that it is answering. The probed address is returned even when
+// it is not yet live, so the logger can key its records on the destination it
+// would have used.
+func (c *Client) Ready() (string, bool) {
+	address := c.addrPath
+	raw, err := os.ReadFile(c.addrPath)
+	if err != nil {
+		return address, false
+	}
+	address = strings.TrimSpace(string(raw))
+	if err := validateAddress(address); err != nil {
+		return address, false
+	}
+	conn, err := net.DialTimeout("tcp", address, readinessTimeout)
+	if err != nil {
+		return address, false
+	}
+	_ = conn.Close()
+	return address, true
 }
 
 // Forward resolves the current daemon and sends one record. The returned

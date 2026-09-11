@@ -226,3 +226,81 @@ func rosterResponse(ref *workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRo
 		}}},
 	}}
 }
+
+func TestReadyReportsALivePublishedDaemon(t *testing.T) {
+	// Arrange: serveClientLog publishes daemon.addr and starts a listener.
+	client, _ := serveClientLog(t, &agentreplv1.ClientLogResponse{
+		Result: &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}},
+	})
+
+	// Act.
+	address, ready := client.Ready()
+
+	// Assert.
+	if !ready {
+		t.Fatalf("Ready = false for a published, listening daemon (%q)", address)
+	}
+	if err := validateAddress(address); err != nil {
+		t.Fatalf("Ready address %q is not a resolved loopback address: %v", address, err)
+	}
+}
+
+func TestReadyReportsNotYetServingWhenTheAddressIsUnpublished(t *testing.T) {
+	// Arrange: a state root with no daemon.addr yet.
+	stateDir := t.TempDir()
+
+	// Act.
+	address, ready := New(stateDir).Ready()
+
+	// Assert.
+	if ready {
+		t.Fatalf("Ready = true before daemon.addr was published")
+	}
+	if address != filepath.Join(stateDir, "daemon.addr") {
+		t.Fatalf("probe address = %q, want the daemon.addr path fallback", address)
+	}
+}
+
+func TestReadyReportsNotYetServingWhenTheListenerIsNotAccepting(t *testing.T) {
+	// Arrange: publish an address whose listener has been closed, so the port
+	// is published but nothing accepts — the booting-daemon shape.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a port: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close the reserved listener: %v", err)
+	}
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "daemon.addr"), []byte(address+"\n"), 0o600); err != nil {
+		t.Fatalf("write daemon.addr: %v", err)
+	}
+
+	// Act.
+	probed, ready := New(stateDir).Ready()
+
+	// Assert.
+	if ready {
+		t.Fatalf("Ready = true for a published address with no listener (%q)", probed)
+	}
+	if probed != address {
+		t.Fatalf("probe address = %q, want the published address %q", probed, address)
+	}
+}
+
+func TestReadyRejectsANonLoopbackDaemonAddress(t *testing.T) {
+	// Arrange.
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "daemon.addr"), []byte("192.0.2.10:8123\n"), 0o600); err != nil {
+		t.Fatalf("write daemon.addr: %v", err)
+	}
+
+	// Act.
+	_, ready := New(stateDir).Ready()
+
+	// Assert.
+	if ready {
+		t.Fatalf("Ready = true for a non-loopback daemon address")
+	}
+}
