@@ -46,9 +46,9 @@ func TestTestSurfacesWorkspaceStampsIdentity(t *testing.T) {
 	// Arrange.
 	s := NewTestSurfaces()
 	dir := t.TempDir()
-	want, err := LogWorkspaceID(dir)
+	want, err := syntheticWorkspaceID(dir)
 	if err != nil {
-		t.Fatalf("LogWorkspaceID: %v", err)
+		t.Fatalf("syntheticWorkspaceID: %v", err)
 	}
 
 	// Act.

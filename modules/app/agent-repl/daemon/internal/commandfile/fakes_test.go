@@ -183,7 +183,12 @@ func (s *fakeSurfaces) Workspace(dir string) (dlog.Logger, error) {
 	return s.logger.With(dlog.Context{"dir": dir}), nil
 }
 
-func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error)        { return nil, errFake }
+func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error) { return nil, errFake }
+
+// BindWorkspaceIDs implements dlog.Surfaces. This double answers its own
+// workspace ids, so there is no lookup to install.
+func (s *fakeSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
+
 func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFake }

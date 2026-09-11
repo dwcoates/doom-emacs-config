@@ -35,12 +35,12 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 			fmt.Sprintf("%q is not a git worktree", normalized), false)
 	}
 
-	log, err := v.deps.Log.Workspace(normalized)
-	if err != nil {
-		global.Error(opRegister, "could not resolve the workspace log sink", dlog.Context{"cause": err.Error()})
-		return wsm.Workspace{}, fmt.Errorf("register %q: resolve log sink: %w", normalized, err)
-	}
-
+	// THE WORKSPACE SINK IS RESOLVED ONLY ONCE THE ROW EXISTS. A record's
+	// `workspace_id` is the daemon-minted id, and until RegisterWorkspace
+	// mints it there is no id to attribute these derivations to: they belong
+	// to the announcement, so they go to the run log with the directory on
+	// them, and every record from the mint onwards goes to the workspace's
+	// own sink.
 	if facts.RepoDir == "" {
 		// THE REPOSITORY IS ITS MAIN WORKTREE, not its common dir.
 		// workspace.v1's RepositoryRef.dir is "the repository's normalized
@@ -50,50 +50,57 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 		// the rollout trigger keys on could never match.
 		main, err := v.deps.Git.MainWorktree(ctx, normalized)
 		if err != nil {
-			log.Error(opRegister, "could not resolve the repository's main worktree", dlog.Context{"cause": err.Error()})
+			global.Error(opRegister, "could not resolve the repository's main worktree", dlog.Context{"cause": err.Error()})
 			return wsm.Workspace{}, fmt.Errorf("register %q: repository main worktree: %w", normalized, err)
 		}
 		facts.RepoDir = main
-		log.Debug(opRegister, "derived the repository from git", dlog.Context{"repo_dir": main})
+		global.Debug(opRegister, "derived the repository from git", dlog.Context{"repo_dir": main})
 	}
 	if facts.Branch == "" {
 		branch, err := v.deps.Git.CurrentBranch(ctx, normalized)
 		if err != nil {
-			log.Error(opRegister, "could not resolve the checked-out branch", dlog.Context{"cause": err.Error()})
+			global.Error(opRegister, "could not resolve the checked-out branch", dlog.Context{"cause": err.Error()})
 			return wsm.Workspace{}, fmt.Errorf("register %q: current branch: %w", normalized, err)
 		}
 		facts.Branch = branch
-		log.Debug(opRegister, "derived the branch from git", dlog.Context{"branch": branch})
+		global.Debug(opRegister, "derived the branch from git", dlog.Context{"branch": branch})
 	}
 	if facts.ParentBranch == "" {
 		parent, err := v.deps.Git.DefaultBranch(ctx, facts.RepoDir)
 		if err != nil {
-			log.Error(opRegister, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
+			global.Error(opRegister, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
 			return wsm.Workspace{}, fmt.Errorf("register %q: default branch: %w", normalized, err)
 		}
 		facts.ParentBranch = parent
-		log.Debug(opRegister, "derived the parent branch from git", dlog.Context{"parent_branch": parent})
+		global.Debug(opRegister, "derived the parent branch from git", dlog.Context{"parent_branch": parent})
 	}
 	if facts.DefaultBranch == "" {
 		branch, err := v.deps.Git.DefaultBranch(ctx, facts.RepoDir)
 		if err != nil {
-			log.Error(opRegister, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
+			global.Error(opRegister, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
 			return wsm.Workspace{}, fmt.Errorf("register %q: default branch: %w", normalized, err)
 		}
 		facts.DefaultBranch = branch
-		log.Debug(opRegister, "derived the repository default branch from git", dlog.Context{
+		global.Debug(opRegister, "derived the repository default branch from git", dlog.Context{
 			"default_branch": branch,
 		})
 	}
 	if facts.Name == "" {
 		facts.Name = filepath.Base(normalized)
-		log.Debug(opRegister, "derived the display name from the directory", dlog.Context{"name": facts.Name})
+		global.Debug(opRegister, "derived the display name from the directory", dlog.Context{"name": facts.Name})
 	}
 
 	record, created, err := v.deps.DB.RegisterWorkspace(ctx, normalized, facts)
 	if err != nil {
-		log.Error(opRegister, "could not record the workspace", dlog.Context{"cause": err.Error()})
+		global.Error(opRegister, "could not record the workspace", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("register %q: %w", normalized, err)
+	}
+	log, err := v.deps.Log.Workspace(normalized)
+	if err != nil {
+		global.Error(opRegister, "could not resolve the workspace log sink", dlog.Context{
+			"workspace": string(record.ID), "cause": err.Error(),
+		})
+		return wsm.Workspace{}, fmt.Errorf("register %q: resolve log sink: %w", normalized, err)
 	}
 	if created {
 		log.Info(opRegister, "registered a new workspace", dlog.Context{
