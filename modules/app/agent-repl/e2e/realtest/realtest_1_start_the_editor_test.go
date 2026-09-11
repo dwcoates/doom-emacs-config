@@ -62,12 +62,6 @@ const socketEnv = "AGENT_REPL_REALTEST_EMACS_SOCKET"
 // helper, probe answers) lands.
 const outEnv = "AGENT_REPL_REALTEST_OUT"
 
-// coldStarts is how many times the editor is started.
-//
-// Three, per the plan: one measurement is an anecdote, and the budgets are
-// sized from the healthy MAXIMUM across the set, which needs a set.
-const coldStarts = 3
-
 // OBSERVATION CEILINGS, NOT BUDGETS.
 //
 // These bound how long the test WAITS before reporting that something did not
@@ -77,8 +71,8 @@ const coldStarts = 3
 // timeout, which throws away the evidence the run exists to collect.
 //
 // They have no measured basis yet, and that is stated rather than hidden: the
-// first authorized three-run measurement is what sizes them, alongside the
-// budgets, and until then a ceiling firing is itself a finding to report.
+// first authorized measurement is what sizes them, alongside the budgets, and
+// until then a ceiling firing is itself a finding to report.
 const (
 	// serverCeiling is how long the Emacs server socket may take to answer
 	// after the spawn. It covers a whole Doom boot on a machine that may be
@@ -91,9 +85,9 @@ const (
 	// for ONE workspace's bring-up, and this covers every workspace in the
 	// roster plus the daemon bring-up in front of them.
 	usableCeiling = 240 * time.Second
-	// exitCeiling is how long a quit may take before the run says the editor
-	// did not go away. Between cold starts the test quits the Emacs IT
-	// launched; a quit that hangs is a finding, not something to wait out.
+	// exitCeiling bounds the key self-test's wait for Emacs's own
+	// `(recent-keys)` to report a pressed chord; a stall there is a finding,
+	// not something to wait out.
 	exitCeiling = 60 * time.Second
 	// pollInterval is how often a ceiling's predicate is re-read. Emacs is
 	// answering an emacsclient round trip each time, so this is not free, and
@@ -179,63 +173,56 @@ func TestRealtestStartTheEditor(t *testing.T) {
 				"The log harvest below IS enforced.")
 	}
 
-	var launches []Launch
-	for run := 1; run <= coldStarts; run++ {
-		launch := coldStart(ctx, t, client, run, launches)
-		launches = append(launches, launch)
+	// ONE COLD START (owner ruling, 2026-09-11). One measurement is an
+	// anecdote, but three cold starts existed only to hedge a focus problem
+	// and to compare two launch methods; both are gone (see chooseMethod's
+	// former home in launch.go and docs/REALTEST-JUDGEMENT-CALLS.md, realtest
+	// 1, row 24), so nothing left in this test needs repetition.
+	const run = 1
+	launch := coldStart(ctx, t, client, run)
 
-		phases := waitForUsable(ctx, t, run, env.ModuleLog, moduleLogOffset, launch.SpawnedAt, openWorkspaces)
-		measurements := phases.Measure()
+	phases := waitForUsable(ctx, t, run, env.ModuleLog, moduleLogOffset, launch.SpawnedAt, openWorkspaces)
+	measurements := phases.Measure()
 
-		manifest.Runs = append(manifest.Runs, ManifestRun{
-			Index:        run,
-			Method:       launch.Method,
-			SpawnedAt:    launch.SpawnedAt,
-			DaemonPath:   phases.DaemonPath,
-			FrontBefore:  launch.FrontBefore,
-			FrontAfter:   launch.FrontAfter,
-			Disturbed:    launch.DisturbedOwner,
-			Measurements: measurements,
-		})
+	manifest.Runs = append(manifest.Runs, ManifestRun{
+		Index:        run,
+		Method:       launch.Method,
+		SpawnedAt:    launch.SpawnedAt,
+		DaemonPath:   phases.DaemonPath,
+		FrontBefore:  launch.FrontBefore,
+		FrontAfter:   launch.FrontAfter,
+		Disturbed:    launch.DisturbedOwner,
+		Measurements: measurements,
+	})
 
-		// THE MEASUREMENTS ARE STATED AT THE SITE, which is what lets the
-		// budgets be sized from this run's own output rather than from a file
-		// somebody has to go find.
-		t.Logf("cold start %d via %s: daemon %s", run, launch.Method, orUnknown(phases.DaemonPath))
-		for _, m := range measurements {
-			if m.Note != "" {
-				t.Logf("  phase %-14s %-14s NOT OBSERVED: %s", m.Phase, m.Workspace, m.Note)
-				continue
-			}
-			t.Logf("  phase %-14s %-14s %s from spawn", m.Phase, m.Workspace, m.Elapsed.Round(time.Millisecond))
+	// THE MEASUREMENTS ARE STATED AT THE SITE, which is what lets the
+	// budgets be sized from this run's own output rather than from a file
+	// somebody has to go find.
+	t.Logf("cold start via %s: daemon %s", launch.Method, orUnknown(phases.DaemonPath))
+	for _, m := range measurements {
+		if m.Note != "" {
+			t.Logf("  phase %-14s %-14s NOT OBSERVED: %s", m.Phase, m.Workspace, m.Note)
+			continue
 		}
-
-		assertEveryWorkspaceDrawn(t, run, openWorkspaces, phases)
-		verifyVendorGuard(ctx, t, client, run)
-		manifest.BudgetBreaches = append(manifest.BudgetBreaches, prefixEach(
-			fmt.Sprintf("cold start %d: ", run), CheckBudgets(measurements))...)
-
-		if run < coldStarts {
-			quit(ctx, t, client, run)
-		}
+		t.Logf("  phase %-14s %-14s %s from spawn", m.Phase, m.Workspace, m.Elapsed.Round(time.Millisecond))
 	}
+
+	assertEveryWorkspaceDrawn(t, run, openWorkspaces, phases)
+	verifyVendorGuard(ctx, t, client, run)
+	manifest.BudgetBreaches = append(manifest.BudgetBreaches,
+		prefixEach("cold start: ", CheckBudgets(measurements))...)
 
 	// THE KEY DRIVER, PROVEN. Last, so a driver that cannot work costs the run
 	// nothing it has already measured.
 	proveKeyDriver(ctx, t, client, runDir, &manifest)
 
-	for _, launch := range launches {
-		verdict := "left focus alone"
-		if launch.DisturbedOwner {
-			verdict = fmt.Sprintf("MOVED FOCUS from %q to %q", launch.FrontBefore, launch.FrontAfter)
-		}
-		note := fmt.Sprintf("launch method `%s`: %s", launch.Method, verdict)
-		if launch.Reactivated {
-			note += " (it reactivated the owner's application itself)"
-		}
-		manifest.Notes = append(manifest.Notes, note)
-		t.Logf("%s", note)
+	verdict := "left focus alone"
+	if launch.DisturbedOwner {
+		verdict = fmt.Sprintf("MOVED FOCUS from %q to %q", launch.FrontBefore, launch.FrontAfter)
 	}
+	note := fmt.Sprintf("launch method `%s`: %s", launch.Method, verdict)
+	manifest.Notes = append(manifest.Notes, note)
+	t.Logf("%s", note)
 
 	// THE HARVEST. The window closes here; the sources are re-enumerated first
 	// so rotation siblings and workspace sinks the run itself created are read.
@@ -346,13 +333,10 @@ func waitForUsable(ctx context.Context, t *testing.T, run int, moduleLog string,
 
 // coldStart launches the editor once and waits for it to become usable.
 //
-// Which method is used is chosen from what the earlier runs showed: the first
-// run asks LaunchServices not to bring Emacs forward, the second corrects a
-// steal instead of preventing it, and the third repeats whichever of the two
-// actually left focus alone. That is how the plan's question — "record which
-// launch method actually left focus alone" — gets an answer with evidence on
-// both sides rather than an assumption.
-func coldStart(ctx context.Context, t *testing.T, client *Client, run int, prior []Launch) Launch {
+// There is exactly one launch method, `open -g -a Emacs` (owner ruling,
+// 2026-09-11; see launch.go for why the second method and its rotation across
+// runs were removed).
+func coldStart(ctx context.Context, t *testing.T, client *Client, run int) Launch {
 	t.Helper()
 
 	if client.Alive(ctx) {
@@ -361,16 +345,7 @@ func coldStart(ctx context.Context, t *testing.T, client *Client, run int, prior
 			"AGENT_REPL_REALTEST_TAKEOVER=1", run, client.Socket)
 	}
 
-	var launch Launch
-	var err error
-	switch method := chooseMethod(run, prior); method {
-	case MethodOpenBackground:
-		launch, err = LaunchOpenBackground(ctx)
-	case MethodDirectRestore:
-		launch, err = LaunchDirectRestoring(ctx)
-	default:
-		t.Fatalf("cold start %d: no launch method", run)
-	}
+	launch, err := LaunchOpenBackground(ctx)
 	if err != nil {
 		t.Fatalf("cold start %d: %v", run, err)
 	}
@@ -382,22 +357,6 @@ func coldStart(ctx context.Context, t *testing.T, client *Client, run int, prior
 		t.Fatalf("cold start %d: read which application is frontmost after the launch: %v", run, err)
 	}
 	return launch
-}
-
-func chooseMethod(run int, prior []Launch) LaunchMethod {
-	switch run {
-	case 1:
-		return MethodOpenBackground
-	case 2:
-		return MethodDirectRestore
-	default:
-		for _, launch := range prior {
-			if !launch.DisturbedOwner {
-				return launch.Method
-			}
-		}
-		return MethodOpenBackground
-	}
 }
 
 // assertEveryWorkspaceDrawn is the plan's own assertion: every workspace the
@@ -613,26 +572,6 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	} else {
 		manifest.Notes = append(manifest.Notes,
 			fmt.Sprintf("the key self-test left focus on %q", after))
-	}
-}
-
-// quit stops the Emacs THIS TEST launched, between cold starts.
-//
-// The owner's editor is left running at the end of the run, which is why this
-// only ever runs between iterations and never after the last one.
-func quit(ctx context.Context, t *testing.T, client *Client, run int) {
-	t.Helper()
-	if err := client.Kill(ctx); err != nil {
-		// The server cannot answer the call that killed it, so this is not
-		// the verdict; whether Emacs went away is decided by the poll below.
-		t.Logf("cold start %d: (kill-emacs) reported %v; whether Emacs went away is decided by the socket", run, err)
-	}
-	waitUntil(ctx, t, fmt.Sprintf("cold start %d: the Emacs this run launched to exit", run), exitCeiling,
-		func() bool { return !client.Alive(ctx) })
-	if client.Alive(ctx) {
-		t.Fatalf("cold start %d: Emacs is still answering %s after (kill-emacs) and %s. "+
-			"The run stops rather than launching a second Emacs onto the same server socket",
-			run, client.Socket, exitCeiling)
 	}
 }
 
