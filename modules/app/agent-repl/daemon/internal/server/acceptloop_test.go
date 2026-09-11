@@ -100,8 +100,7 @@ func TestARetriedAcceptFailureIsReportedAtError(t *testing.T) {
 // leaving a process that listens and answers nothing.
 func TestAClosedListenerEndsTheAcceptLoop(t *testing.T) {
 	// Arrange.
-	closed := net.ErrClosed
-	inner := &scriptedListener{answers: []error{closed}}
+	inner := &scriptedListener{answers: []error{net.ErrClosed}}
 
 	// Act.
 	_, err := RetryAccept(inner, dlog.NewTestLogger()).Accept()
@@ -115,12 +114,31 @@ func TestAClosedListenerEndsTheAcceptLoop(t *testing.T) {
 	}
 }
 
+// TestTheDaemonsOwnShutdownIsNotAnAcceptFault pins that the orderly exit stays
+// quiet. `http.Server.Shutdown` closes this listener on the way out, so an
+// ERROR here would put a record against every clean shutdown.
+func TestTheDaemonsOwnShutdownIsNotAnAcceptFault(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	inner := &scriptedListener{answers: []error{net.ErrClosed}}
+
+	// Act.
+	_, _ = RetryAccept(inner, log).Accept()
+
+	// Assert.
+	for _, record := range log.Records() {
+		if record.Level == dlog.LevelError {
+			t.Fatalf("records = %+v, want no error record for the daemon closing its own listener", log.Records())
+		}
+	}
+}
+
 // TestALostListenerIsReportedAtError pins the record for the end of the loop,
 // which is the one thing pid 31984's run log could not have told anyone.
 func TestALostListenerIsReportedAtError(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	inner := &scriptedListener{answers: []error{net.ErrClosed}}
+	inner := &scriptedListener{answers: []error{acceptError(syscall.EFAULT)}}
 
 	// Act.
 	_, _ = RetryAccept(inner, log).Accept()

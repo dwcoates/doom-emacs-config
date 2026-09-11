@@ -61,6 +61,18 @@ func (l *retryAccept) Accept() (net.Conn, error) {
 			l.backoff = 0
 			return conn, nil
 		}
+		// THE DAEMON'S OWN EXIT CLOSES THIS LISTENER. `http.Server.Shutdown`
+		// closes it before the process leaves, so net.ErrClosed here is the
+		// orderly end of the loop and not a fault: reported at ERROR it would
+		// put a record against every clean shutdown in the suite and in
+		// production. It is still RETURNED, because Serve must end.
+		if errors.Is(err, net.ErrClosed) {
+			l.log.Debug("daemon.server.accept", "the listener was closed; the accept loop is ending", dlog.Context{
+				"addr":    addrText(l.Listener),
+				"attempt": attempt,
+			})
+			return nil, err
+		}
 		if !transientAcceptError(err) {
 			l.log.Error("daemon.server.accept", "the listener stopped accepting connections", dlog.Context{
 				"addr":    addrText(l.Listener),
