@@ -99,3 +99,37 @@ func TestAgentAddressedNotificationCarriesItsText(t *testing.T) {
 		t.Fatalf("agent_addressed notification text = %q, want the pushed message verbatim", got)
 	}
 }
+
+// TestOpeningAWorkspaceLogsNoHostIdentityError guards the realtest-1 regression:
+// right after Emacs subscribes to WatchHostWorkspace, the shim may not yet have
+// described the session, so a briefly missing host identity is a STARTUP
+// TRANSIENT and must never be recorded as the compose_host_workspace ERROR that
+// names a mint defect. Once the host view carries an identity, the boot is past
+// that window, so neither the workspace daemon log nor the run log may hold that
+// ERROR.
+func TestOpeningAWorkspaceLogsNoHostIdentityError(t *testing.T) {
+	t.Parallel()
+	// Arrange: an opened workspace whose host stream is held from open.
+	f := newOpened(t, harness.Opts{})
+
+	// Act: wait until the session is fully described — the host view carries a
+	// minted identity — so the boot's identity window has certainly closed.
+	harness.AwaitView(t, f.d.Ctx(), f.host, "the host session identity",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+			return r.GetHost().GetExisting().GetId().GetValue() != ""
+		})
+
+	// Assert: no host-identity ERROR was recorded on either sink.
+	const wantOp = "daemon.server.compose_host_workspace"
+	const wantMsg = "a session record carries no host identity; the host view was withheld"
+	assertNoHostIdentityError := func(where string, records []harness.LogRecord) {
+		for _, r := range records {
+			if r.Level == "ERROR" && r.Operation == wantOp && r.Message == wantMsg {
+				t.Fatalf("the %s recorded a host-identity ERROR during a healthy boot: %+v", where, r)
+			}
+		}
+	}
+	assertNoHostIdentityError("workspace daemon log",
+		f.d.WorkspaceLog(f.repo.Dir, "daemon"))
+	assertNoHostIdentityError("run log", f.d.RunLog())
+}
