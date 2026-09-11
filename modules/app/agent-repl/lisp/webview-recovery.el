@@ -116,7 +116,7 @@ mounted is not queued again, and one that becomes ineligible while the
 queue drains is skipped at its tick."
   (let ((queued (agent-repl--webview-precreate-schedule
                  (agent-repl--webview-precreate-missing))))
-    (agent-repl--info nil "elisp.webview-recovery.precreate-all: queued=%d" queued)
+    (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces") "elisp.webview-recovery.precreate-all: queued=%d" queued)
     queued))
 
 (defun agent-repl--webview-precreate-on-link-up (&optional _conn)
@@ -125,7 +125,7 @@ Registered on `agent-repl-link-up-functions': before the link is up
 there is no daemon address to build a URL from, so a workspace's page
 cannot be mounted, and this edge is the first moment every open
 workspace is buildable."
-  (agent-repl--log nil "elisp.webview-recovery.link-up: pre-creating")
+  (agent-repl--log '(:agent-repl-central "webview recovery spans workspaces") "elisp.webview-recovery.link-up: pre-creating")
   (agent-repl-webview-precreate-all))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl--webview-precreate-on-link-up)

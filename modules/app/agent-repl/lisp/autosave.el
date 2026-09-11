@@ -76,25 +76,28 @@ workspace summary; save failures are always recorded before they propagate."
 Runs silently every 5 minutes to prevent data loss."
   (if (not (agent-repl--ws-system-available-p))
       (agent-repl--log-verbose
-       nil "autosave-workspace-buffers: outcome=skipped workspace-system-available=nil")
+       '(:agent-repl-central "the autosave sweep spans workspaces")
+       "autosave-workspace-buffers: outcome=skipped workspace-system-available=nil")
     (let* ((persps (agent-repl--ws-all-persps))
            (persp-count (length persps))
            (saved 0))
       (agent-repl--log-verbose
-       nil "autosave-workspace-buffers: outcome=scanning workspace-system-available=t perspective-count=%d"
+       '(:agent-repl-central "the autosave sweep spans workspaces")
+       "autosave-workspace-buffers: outcome=scanning workspace-system-available=t perspective-count=%d"
        persp-count)
       (dolist (persp persps)
         (cond
          ;; nil is persp-mode's "no perspective" container — expected, skip silently.
          ((null persp)
           (agent-repl--log-verbose
-           nil "autosave-workspace-buffers: outcome=skipped-nil-perspective entry=%S" persp))
+           '(:agent-repl-central "the autosave sweep spans workspaces")
+           "autosave-workspace-buffers: outcome=skipped-nil-perspective entry=%S" persp))
          ((not (symbolp persp))
           (let* ((ws (agent-repl--ws-persp-name persp))
                  (perspective-identity (agent-repl--ws-persp-identity persp)))
             (unless (and (stringp ws) (not (string-empty-p ws)))
               (agent-repl--log
-               nil
+               '(:agent-repl-central "the autosave sweep spans workspaces")
                "autosave-workspace-buffers: rejected perspective-identity=%s workspace-name=%S reason=invalid-workspace-name"
                perspective-identity ws)
               (error "agent-repl--autosave-workspace-buffers: perspective has no workspace name"))
@@ -113,11 +116,12 @@ Runs silently every 5 minutes to prevent data loss."
                "autosave-workspace-buffers: outcome=workspace-complete workspace-name=%s perspective-identity=%s buffer-count=%d modified-count=%d saved-count=%d"
                ws perspective-identity buffer-count modified-count workspace-saved))))
          (t
-          (agent-repl--log nil "WARN: autosave encountered non-perspective entry: %S" persp))))
+          (agent-repl--log '(:agent-repl-central "the autosave sweep spans workspaces") "WARN: autosave encountered non-perspective entry: %S" persp))))
       (if (> saved 0)
-          (agent-repl--log nil "autosave: saved %d buffer(s) outcome=saved perspective-count=%d" saved persp-count)
+          (agent-repl--log '(:agent-repl-central "the autosave sweep spans workspaces") "autosave: saved %d buffer(s) outcome=saved perspective-count=%d" saved persp-count)
         (agent-repl--log-verbose
-         nil "autosave-workspace-buffers: outcome=no-buffers-saved perspective-count=%d" persp-count)))))
+         '(:agent-repl-central "the autosave sweep spans workspaces")
+         "autosave-workspace-buffers: outcome=no-buffers-saved perspective-count=%d" persp-count)))))
 
 (defcustom agent-repl-autosave-initial-delay 300
   "Seconds before the first autosave sweep fires after load."
@@ -140,7 +144,8 @@ sweep scheduled instead of stacking a second.  Returns the timer."
                                 agent-repl-autosave-interval
                                 #'agent-repl--autosave-workspace-buffers))))
     (agent-repl--log
-     nil "autosave: timer-scheduled initial-delay=%S interval=%S timer=%S"
+     '(:agent-repl-central "the autosave sweep spans workspaces")
+     "autosave: timer-scheduled initial-delay=%S interval=%S timer=%S"
      agent-repl-autosave-initial-delay agent-repl-autosave-interval timer)
     timer))
 

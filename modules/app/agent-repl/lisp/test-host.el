@@ -1661,7 +1661,7 @@ Reloading first would navigate the page at the daemon that just died."
         (agent-repl-host-on-link-up conn))
       ;; Assert
       (should (null agent-repl-test-host--calls))
-      (should (eq logged-workspace agent-repl--global-log-scope)))))
+      (should (agent-repl--central-log-scope-reason logged-workspace)))))
 
 (ert-deftest agent-repl-test-host-link-up-reselects-the-dir-the-user-stood-in ()
   "Emacs owns the user's selection across a daemon restart.

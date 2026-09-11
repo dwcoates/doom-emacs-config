@@ -3447,7 +3447,11 @@ owns a `:project-dir', so a record attributed to one is unroutable and
     ;; Arrange
     (let ((unroutable nil))
       (cl-letf* ((collect (lambda (ws &rest _)
-                            (unless (or (null ws) (agent-repl--ws-log-routable-p ws))
+                            (unless (or (null ws)
+                                        (eq ws agent-repl--global-log-scope)
+                                        (agent-repl--central-log-scope-reason ws)
+                                        (agent-repl--context-log-scope-reason ws)
+                                        (agent-repl--ws-log-routable-p ws))
                               (push ws unroutable))))
                  ((symbol-function '+workspace-current-name) (lambda () "main"))
                  ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
