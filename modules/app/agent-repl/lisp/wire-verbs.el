@@ -117,7 +117,7 @@ rather than silently dropped."
   "Decode an EMPTY protobuf MESSAGE from JSON, returning nil.
 Any field at all is unknown, so this is the whole validation."
   (agent-repl-wire-verbs--check-keys message json nil)
-  (agent-repl--log nil "elisp.wire.verbs-decode-empty message=%s" message)
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-decode-empty message=%s" message)
   nil)
 
 (defun agent-repl-wire-verbs--decode-oneof (message field json arms)
@@ -138,7 +138,7 @@ both are contract breaches."
       (let* ((hit (car found))
              (arm (car hit))
              (cell (cdr hit)))
-        (agent-repl--log nil "elisp.wire.verbs-decode-oneof message=%s field=%s arm=%s"
+        (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-decode-oneof message=%s field=%s arm=%s"
                           message field (nth 1 arm))
         (list :arm (nth 1 arm)
               :value (funcall (nth 2 arm) (cdr cell))))))))
@@ -224,7 +224,7 @@ ENCODER).  An unset oneof and an unrecognized arm are contract breaches."
          (arm (assq keyword arms)))
     (unless arm
       (agent-repl-wire-verbs--fail message field "unknown oneof arm"))
-    (agent-repl--log nil "elisp.wire.verbs-encode-oneof message=%s field=%s arm=%s"
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-oneof message=%s field=%s arm=%s"
                       message field keyword)
     (cons (nth 1 arm) (funcall (nth 2 arm) (plist-get value :value)))))
 
@@ -415,7 +415,7 @@ unprioritized workspace, a top-level workspace, no ungated consent."
                   (agent-repl-wire-encode-create-workspace-request-allow-ungated
                    (plist-get request :allow-ungated)))
             out))
-    (agent-repl--log nil "elisp.wire.verbs-encode-create-workspace-request form=%s"
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-create-workspace-request form=%s"
                       (plist-get (plist-get request :form) :arm))
     (nreverse out)))
 
@@ -582,7 +582,7 @@ arm this codec does not know is refused as an unknown field."
 
 (defun agent-repl-wire-encode-open-workspace-request (request)
   "Encode OpenWorkspaceRequest from plist REQUEST (:workspace REF)."
-  (agent-repl--log nil "elisp.wire.verbs-encode-open-workspace-request")
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-open-workspace-request")
   (list (cons 'workspace
               (agent-repl-wire-encode-open-workspace-request-workspace
                (agent-repl-wire-verbs--require "OpenWorkspaceRequest" "workspace"
@@ -725,7 +725,7 @@ arm this codec does not know is refused as an unknown field."
 
 (defun agent-repl-wire-encode-close-workspace-request (request)
   "Encode CloseWorkspaceRequest from plist REQUEST (:workspace REF)."
-  (agent-repl--log nil "elisp.wire.verbs-encode-close-workspace-request")
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-close-workspace-request")
   (list (cons 'workspace
               (agent-repl-wire-encode-close-workspace-request-workspace
                (agent-repl-wire-verbs--require "CloseWorkspaceRequest" "workspace"
@@ -838,7 +838,7 @@ arm this codec does not know is refused as an unknown field."
 
 (defun agent-repl-wire-encode-kill-workspace-request (request)
   "Encode KillWorkspaceRequest from plist REQUEST (:workspace REF)."
-  (agent-repl--log nil "elisp.wire.verbs-encode-kill-workspace-request")
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-kill-workspace-request")
   (list (cons 'workspace
               (agent-repl-wire-encode-kill-workspace-request-workspace
                (agent-repl-wire-verbs--require "KillWorkspaceRequest" "workspace"
@@ -929,7 +929,7 @@ arm this codec does not know is refused as an unknown field."
 
 (defun agent-repl-wire-encode-nuke-workspace-request (request)
   "Encode NukeWorkspaceRequest from plist REQUEST (:workspace REF)."
-  (agent-repl--log nil "elisp.wire.verbs-encode-nuke-workspace-request")
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-nuke-workspace-request")
   (list (cons 'workspace
               (agent-repl-wire-encode-nuke-workspace-request-workspace
                (agent-repl-wire-verbs--require "NukeWorkspaceRequest" "workspace"
@@ -1033,7 +1033,7 @@ arm this codec does not know is refused as an unknown field."
 
 (defun agent-repl-wire-encode-merge-workspace-request (request)
   "Encode MergeWorkspaceRequest from plist REQUEST (:workspace REF)."
-  (agent-repl--log nil "elisp.wire.verbs-encode-merge-workspace-request")
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-merge-workspace-request")
   (list (cons 'workspace
               (agent-repl-wire-encode-merge-workspace-request-workspace
                (agent-repl-wire-verbs--require "MergeWorkspaceRequest" "workspace"
@@ -1168,7 +1168,7 @@ BOOL).
 `force' is spelled EXPLICITLY on the wire even when false: a forced
 restart interrupts live work, so the request states the mode rather than
 leaning on an omitted default."
-  (agent-repl--log nil "elisp.wire.verbs-encode-restart-workspace-request force=%S"
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-restart-workspace-request force=%S"
                     (and (plist-get request :force) t))
   (list (cons 'workspace
               (agent-repl-wire-encode-restart-workspace-request-workspace
@@ -1283,7 +1283,7 @@ the field entirely."
                           (agent-repl-wire-verbs--require
                            "SetWorkspacePriorityRequest" "workspace"
                            (plist-get request :workspace)))))))
-    (agent-repl--log nil "elisp.wire.verbs-encode-set-workspace-priority-request cleared=%S"
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-set-workspace-priority-request cleared=%S"
                       (null (plist-get request :priority)))
     (if (plist-get request :priority)
         (append out (list (cons 'priority
@@ -1397,7 +1397,7 @@ never UNSPECIFIED because a stored turn must trace back to the exact send
 site.  `feed' is never set — Emacs composes into the workspace's root feed
 only, so the absent field IS that fact."
   (let ((message "SubmitPromptRequest"))
-    (agent-repl--log nil "elisp.wire.verbs-encode-submit-prompt-request origin=%s"
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s"
                       (plist-get request :origin))
     (list (cons 'workspace
                 (agent-repl-wire-encode-submit-prompt-request-workspace
@@ -1942,7 +1942,7 @@ arm this codec does not know is refused as an unknown field."
 
 (defun agent-repl-wire-encode-daemon-health-request (&optional _request)
   "Encode DaemonHealthRequest.  Nothing to ask beyond \"you?\"."
-  (agent-repl--log nil "elisp.wire.verbs-encode-daemon-health-request")
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-daemon-health-request")
   nil)
 
 (defun agent-repl-wire-decode-daemon-fault-adoption-window-expired-workspace (json)
@@ -2106,7 +2106,7 @@ ANSWERED at all."
 
 (defun agent-repl-wire-encode-session-health-request (request)
   "Encode SessionHealthRequest from plist REQUEST (:workspace REF)."
-  (agent-repl--log nil "elisp.wire.verbs-encode-session-health-request")
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-session-health-request")
   (list (cons 'workspace
               (agent-repl-wire-encode-session-health-request-workspace
                (agent-repl-wire-verbs--require "SessionHealthRequest" "workspace"

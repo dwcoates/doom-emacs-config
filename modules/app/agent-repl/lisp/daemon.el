@@ -383,7 +383,7 @@ the short-lived \"just built\" note."
                agent-repl-daemon--build-duration)
           (format "agent-repl stack built in %.1fs"
                   agent-repl-daemon--build-duration))))
-  (agent-repl--log nil "elisp.daemon.segment segment=%S"
+  (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.segment segment=%S"
                    agent-repl-daemon-mode-line-segment)
   (force-mode-line-update t)
   ;; THE TAB-BAR CAVEAT (status.el): the tab-bar caches its render by string
@@ -400,7 +400,7 @@ the short-lived \"just built\" note."
   (setq agent-repl-daemon--build-status-timer nil
         agent-repl-daemon--build-state nil
         agent-repl-daemon--build-duration nil)
-  (agent-repl--log nil "elisp.daemon.build-status-cleared")
+  (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-status-cleared")
   (agent-repl-daemon--refresh-segment))
 
 (defun agent-repl-daemon--set-build-status (state duration)
@@ -425,10 +425,10 @@ timer wipe the later one's status."
                      global-mode-string
                    (list global-mode-string))))
     (if (memq 'agent-repl-daemon-mode-line-segment current)
-        (agent-repl--log nil "elisp.daemon.segment-already-installed")
+        (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.segment-already-installed")
       (setq global-mode-string
             (append current (list 'agent-repl-daemon-mode-line-segment)))
-      (agent-repl--log nil "elisp.daemon.segment-installed"))))
+      (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.segment-installed"))))
 
 ;;;; ---- The build ----
 
@@ -521,7 +521,7 @@ reason about must never be silently skipped."
      (let ((spec (assoc name agent-repl-daemon--build-target-specs)))
        (if (null spec)
            (progn
-             (agent-repl--warn nil "elisp.daemon.build-target-unknown target=%S" name)
+             (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-target-unknown target=%S" name)
              t)
          (agent-repl-daemon--target-stale-p spec))))
    (or targets agent-repl-daemon--default-build-targets)))
@@ -543,12 +543,14 @@ reason about must never be silently skipped."
           agent-repl-daemon--build-started nil
           agent-repl-daemon--build-labels nil
           agent-repl-daemon--build-target-names nil)
-    (agent-repl--info nil "elisp.daemon.build script=%S targets=%S exit=%S output=%s"
+    (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build script=%S targets=%S exit=%S output=%s"
                       agent-repl-daemon-build-script (or targets 'default) exit-code
                       (if (string-empty-p output) "<empty>" output))
     (if detail
         (agent-repl-daemon--set-build-status nil nil)
-      (agent-repl--backend-phase nil "%s built (%.1fs)" (cdr labels) duration)
+      (agent-repl--backend-phase
+       '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+       "%s built (%.1fs)" (cdr labels) duration)
       (agent-repl-daemon--set-build-status 'built duration))
     (dolist (continuation continuations)
       (funcall continuation detail))))
@@ -572,23 +574,25 @@ mode-line segment is raised, and the interactive ensure is the retry."
     (cond
      ((not (agent-repl--frontend-artifact-exists-p agent-repl-daemon-build-script))
       (let ((detail (format "build script not found: %s" agent-repl-daemon-build-script)))
-        (agent-repl--error nil "elisp.daemon.build-script-missing script=%S"
+        (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-script-missing script=%S"
                            agent-repl-daemon-build-script)
         (funcall continuation detail)))
      (agent-repl-daemon--build-in-flight
-      (agent-repl--info nil "elisp.daemon.build-coalesced targets=%S"
+      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-coalesced targets=%S"
                         (or targets 'default))
       (push continuation agent-repl-daemon--build-continuations))
      ((null (agent-repl-daemon--stale-targets targets))
       ;; Nothing moved, so nothing is spawned: the script's own check would
       ;; reach the same verdict, after paying a subprocess to do it.
-      (agent-repl--info nil "elisp.daemon.build-skipped-fresh targets=%S"
+      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-skipped-fresh targets=%S"
                         (or targets 'default))
       (funcall continuation nil))
      (t
       (with-current-buffer (get-buffer-create agent-repl-daemon-build-buffer)
         (erase-buffer))
-      (agent-repl--backend-phase nil "rebuilding %s if stale..." running-label)
+      (agent-repl--backend-phase
+       '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+       "rebuilding %s if stale..." running-label)
       (setq agent-repl-daemon--build-in-flight t
             agent-repl-daemon--build-continuations (list continuation)
             agent-repl-daemon--build-started (float-time)
@@ -606,7 +610,7 @@ mode-line segment is raised, and the interactive ensure is the retry."
                         (setq agent-repl-daemon--build-in-flight nil
                               agent-repl-daemon--build-continuations nil)
                         (agent-repl-daemon--set-build-status nil nil)
-                        (agent-repl--error nil "elisp.daemon.build-spawn-failed error=%S" err)
+                        (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-spawn-failed error=%S" err)
                         (signal (car err) (cdr err))))))
         ;; Only when the build is still running: a stub (or a process that
         ;; exited before this returned) may already have settled it.
@@ -616,7 +620,7 @@ mode-line segment is raised, and the interactive ensure is the retry."
 (defun agent-repl-daemon--report-build-failure (detail)
   "Surface build failure DETAIL: the buffer, a WARNING, an echo, the segment."
   (setq agent-repl-daemon-build-failure detail)
-  (agent-repl--warn nil "elisp.daemon.build-failed detail=%s" detail)
+  (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-failed detail=%s" detail)
   (display-buffer agent-repl-daemon-build-buffer)
   (message "agent-repl: %s" detail)
   (agent-repl-daemon--refresh-segment))
@@ -628,21 +632,21 @@ daemon that exits before it publishes its address — used to show up only as
 a status-2 log line followed by a thirty-second boot timeout, with every
 verb afterwards failing on a nil connection."
   (setq agent-repl-daemon-launch-failure detail)
-  (agent-repl--error nil "elisp.daemon.launch-failed detail=%s" detail)
+  (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.launch-failed detail=%s" detail)
   (message "agent-repl: %s" detail)
   (agent-repl-daemon--refresh-segment))
 
 (defun agent-repl-daemon--clear-launch-failure ()
   "Clear a recorded launch failure and take its mode-line segment down."
   (when agent-repl-daemon-launch-failure
-    (agent-repl--info nil "elisp.daemon.launch-failure-cleared")
+    (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.launch-failure-cleared")
     (setq agent-repl-daemon-launch-failure nil)
     (agent-repl-daemon--refresh-segment)))
 
 (defun agent-repl-daemon--clear-build-failure ()
   "Clear a recorded build failure and take its mode-line segment down."
   (when agent-repl-daemon-build-failure
-    (agent-repl--info nil "elisp.daemon.build-failure-cleared")
+    (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-failure-cleared")
     (setq agent-repl-daemon-build-failure nil)
     (agent-repl-daemon--refresh-segment)))
 
@@ -670,11 +674,11 @@ probe connection is closed on both paths: it exists to ask one question."
            (:error
             ;; A daemon that REFUSES the health question still answered it:
             ;; something is serving on that address, so it is adopted.
-            (agent-repl--warn nil "elisp.daemon.health-error address=%S error=%S"
+            (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.health-error address=%S error=%S"
                               address (plist-get response :value))
             (finish on-answer nil))
            (arm
-            (agent-repl--error nil "elisp.daemon.health-unknown-arm address=%S arm=%S"
+            (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.health-unknown-arm address=%S arm=%S"
                                address arm)
             (finish on-answer nil))))
        :on-failure
@@ -703,22 +707,22 @@ cold-start outcome and not a fault, but which daemon a session attached
 to is the first thing anyone reading the log needs, so it is STATED
 rather than inferred from the absence of a start line."
   (if (agent-repl-daemon--spawned-here-p)
-      (agent-repl--info nil "elisp.daemon.own-adopted address=%S" address)
-    (agent-repl--info nil "elisp.daemon.foreign-adopted address=%S" address)))
+      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.own-adopted address=%S" address)
+    (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.foreign-adopted address=%S" address)))
 
 (defun agent-repl-daemon--report-verdict (address verdict)
   "Log the adopted daemon at ADDRESS and surface VERDICT's faults, if any."
   (agent-repl-daemon--report-provenance address)
   (pcase (plist-get verdict :arm)
     (:healthy
-     (agent-repl--info nil "elisp.daemon.adopted address=%S health=healthy" address))
+     (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.adopted address=%S health=healthy" address))
     (:unhealthy
      (let ((faults (plist-get (plist-get verdict :value) :faults)))
-       (agent-repl--warn nil "elisp.daemon.adopted-unhealthy address=%S faults=%d"
+       (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.adopted-unhealthy address=%S faults=%d"
                          address (length faults))
        (agent-repl-daemon--render-health address faults)))
     (_
-     (agent-repl--info nil "elisp.daemon.adopted address=%S health=unstated" address))))
+     (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.adopted address=%S health=unstated" address))))
 
 ;;;; ---- The boot wait ----
 
@@ -757,19 +761,19 @@ dependence on the scheduler and no sleep anywhere."
   (let ((address (condition-case err
                      (agent-repl-connect-read-daemon-addr)
                    (error
-                    (agent-repl--warn nil "elisp.daemon.boot-addr-unreadable error=%S" err)
+                    (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.boot-addr-unreadable error=%S" err)
                     nil)))
         (on-ready agent-repl-daemon--boot-continuation)
         (deadline (or agent-repl-daemon--boot-deadline 0)))
     (cond
      (address
-      (agent-repl--info nil "elisp.daemon.booted address=%S" address)
+      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.booted address=%S" address)
       (agent-repl-daemon--cancel-boot-wait)
       (when on-ready (funcall on-ready address)))
      ((agent-repl-daemon--exited-p agent-repl-daemon--boot-process)
       (let ((status (process-exit-status agent-repl-daemon--boot-process))
             (tail (agent-repl--frontend-run-log-tail)))
-        (agent-repl--error nil "elisp.daemon.boot-exited status=%S run-log=%s"
+        (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.boot-exited status=%S run-log=%s"
                            status tail)
         (agent-repl-daemon--cancel-boot-wait)
         (agent-repl-daemon--report-launch-failure
@@ -777,13 +781,13 @@ dependence on the scheduler and no sleep anywhere."
                  status tail)))
       (when on-ready (funcall on-ready nil)))
      ((>= (float-time) deadline)
-      (agent-repl--error nil "elisp.daemon.boot-timeout seconds=%.1f file=%S"
+      (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.boot-timeout seconds=%.1f file=%S"
                          agent-repl-daemon-boot-timeout-seconds
                          (agent-repl-connect-daemon-addr-file))
       (agent-repl-daemon--cancel-boot-wait)
       (when on-ready (funcall on-ready nil)))
      (t
-      (agent-repl--log nil "elisp.daemon.boot-waiting remaining=%.3f"
+      (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.boot-waiting remaining=%.3f"
                        (- deadline (float-time)))
       (setq agent-repl-daemon--boot-timer
             (run-with-timer agent-repl-daemon-boot-poll-interval-seconds nil
@@ -818,23 +822,23 @@ dependence on the scheduler and no sleep anywhere."
   (let ((address (condition-case err
                      (agent-repl-connect-read-daemon-addr)
                    (error
-                    (agent-repl--warn nil "elisp.daemon.departure-addr-unreadable error=%S" err)
+                    (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departure-addr-unreadable error=%S" err)
                     nil)))
         (on-gone agent-repl-daemon--departure-continuation)
         (deadline (or agent-repl-daemon--departure-deadline 0)))
     (cond
      ((null address)
-      (agent-repl--info nil "elisp.daemon.departed")
+      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departed")
       (agent-repl-daemon--cancel-departure-wait)
       (when on-gone (funcall on-gone t)))
      ((>= (float-time) deadline)
-      (agent-repl--warn nil "elisp.daemon.departure-timeout seconds=%.1f address=%S file=%S"
+      (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departure-timeout seconds=%.1f address=%S file=%S"
                         agent-repl-daemon-boot-timeout-seconds address
                         (agent-repl-connect-daemon-addr-file))
       (agent-repl-daemon--cancel-departure-wait)
       (when on-gone (funcall on-gone nil)))
      (t
-      (agent-repl--log nil "elisp.daemon.departure-waiting address=%S remaining=%.3f"
+      (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departure-waiting address=%S remaining=%.3f"
                        address (- deadline (float-time)))
       (setq agent-repl-daemon--departure-timer
             (run-with-timer agent-repl-daemon-boot-poll-interval-seconds nil
@@ -848,7 +852,7 @@ Everything after boot is the daemon's own blue-green rollout, so a daemon
 that exits is a fact to record — daemon-link.el's reconnect is what
 notices and recovers."
   (unless (process-live-p proc)
-    (agent-repl--warn nil "elisp.daemon.exited status=%S event=%s"
+    (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.exited status=%S event=%s"
                       (process-exit-status proc) (string-trim (or event "")))
     (when (eq proc agent-repl--frontend-daemon-process)
       (setq agent-repl--frontend-daemon-process nil))))
@@ -921,7 +925,7 @@ is stated on the spawn rather than assumed."
         (missing (agent-repl-daemon--missing-config-flags)))
     (cond
      ((not (agent-repl--frontend-artifact-exists-p binary))
-      (agent-repl--error nil "elisp.daemon.binary-missing binary=%S" binary)
+      (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.binary-missing binary=%S" binary)
       nil)
      ;; REFUSED HERE, LOUDLY.  Spawning without an account root buys a
      ;; status-2 exit, a thirty-second boot timeout, and every verb after it
@@ -934,12 +938,14 @@ is stated on the spawn rather than assumed."
       nil)
      (t
       (agent-repl-daemon--clear-launch-failure)
-      (agent-repl--backend-phase nil "starting the daemon...")
+      (agent-repl--backend-phase
+       '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+       "starting the daemon...")
       (let* ((argv (agent-repl-daemon--argv))
              (proc (agent-repl--frontend-spawn-daemon
                     argv (agent-repl-daemon--environment))))
         (setq agent-repl--frontend-daemon-process proc)
-        (agent-repl--info nil "elisp.daemon.started argv=%S state-dir=%S"
+        (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.started argv=%S state-dir=%S"
                           argv (agent-repl--global-state-dir))
         proc)))))
 
@@ -948,7 +954,7 @@ is stated on the spawn rather than assumed."
 (defun agent-repl-daemon--settle (on-ready outcome)
   "End the ensure with OUTCOME and hand it to ON-READY."
   (setq agent-repl-daemon--ensure-in-flight nil)
-  (agent-repl--info nil "elisp.daemon.ensure-settled ready=%s"
+  (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.ensure-settled ready=%s"
                     (if outcome "t" "nil"))
   (when on-ready (funcall on-ready outcome))
   outcome)
@@ -978,7 +984,7 @@ everything after it lives in the continuation."
              ;; `foreign-adopted' would say the session attached to someone
              ;; else's daemon every single time it started its own.
              (agent-repl-daemon--report-provenance address)
-              (agent-repl--info nil "elisp.daemon.linking address=%S" address)
+              (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.linking address=%S" address)
               (agent-repl-daemon--settle on-ready (agent-repl-link-connect))))
           proc)))))))
 
@@ -989,11 +995,11 @@ WHOLE decision, signals included."
   (let ((address (condition-case err
                      (agent-repl-connect-read-daemon-addr)
                    (error
-                    (agent-repl--warn nil "elisp.daemon.addr-unreadable error=%S" err)
+                    (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.addr-unreadable error=%S" err)
                     nil))))
     (if (null address)
         (progn
-          (agent-repl--info nil "elisp.daemon.addr-absent")
+          (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.addr-absent")
           (agent-repl-daemon--build-and-start on-ready))
       (agent-repl-daemon--probe
        address
@@ -1001,7 +1007,7 @@ WHOLE decision, signals included."
          (agent-repl-daemon--report-verdict address verdict)
          (agent-repl-daemon--settle on-ready (agent-repl-link-connect)))
        (lambda (detail)
-         (agent-repl--warn nil "elisp.daemon.stale-addr address=%S detail=%S"
+         (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stale-addr address=%S detail=%S"
                            address detail)
          (agent-repl-daemon--build-and-start on-ready))))))
 
@@ -1016,7 +1022,7 @@ is after that first redisplay."
   (setq agent-repl-daemon--startup-timer
         (run-with-idle-timer agent-repl-daemon-startup-idle-seconds nil
                              #'agent-repl-daemon-ensure))
-  (agent-repl--info nil "elisp.daemon.ensure-scheduled idle=%s"
+  (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.ensure-scheduled idle=%s"
                     agent-repl-daemon-startup-idle-seconds)
   agent-repl-daemon--startup-timer)
 
@@ -1035,11 +1041,11 @@ twice at once: a concurrent ensure is exactly how a second daemon gets
 spawned beside a live one."
   (cond
    ((agent-repl-link-up-p)
-    (agent-repl--log nil "elisp.daemon.ensure-noop reason=link-up")
+    (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.ensure-noop reason=link-up")
     (when on-ready (funcall on-ready (agent-repl-link-primary)))
     (agent-repl-link-primary))
    (agent-repl-daemon--ensure-in-flight
-    (agent-repl--info nil "elisp.daemon.ensure-already-in-flight")
+    (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.ensure-already-in-flight")
     nil)
    (t
     (setq agent-repl-daemon--ensure-in-flight t)
@@ -1052,7 +1058,7 @@ spawned beside a live one."
         (agent-repl-daemon--begin on-ready)
       (error
        (setq agent-repl-daemon--ensure-in-flight nil)
-       (agent-repl--error nil "elisp.daemon.ensure-failed error=%S" err)
+       (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.ensure-failed error=%S" err)
        (signal (car err) (cdr err)))))))
 
 ;;;; ---- Interactive commands ----
@@ -1060,7 +1066,7 @@ spawned beside a live one."
 (defun agent-repl-frontend-daemon-ensure ()
   "Ensure a daemon is serving; also the retry after a build failure."
   (interactive)
-  (agent-repl--info nil "elisp.daemon.ensure-command")
+  (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.ensure-command")
   (agent-repl-daemon-ensure
    (lambda (conn)
      (message "agent-repl: %s"
@@ -1080,11 +1086,11 @@ leave it out."
   (let ((conn (agent-repl-link-primary)))
     (if (null conn)
         (progn
-          (agent-repl--warn nil "elisp.daemon.stop-skipped reason=no-link")
+          (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-skipped reason=no-link")
           (message "agent-repl: no daemon link to stop")
           (when on-done (funcall on-done nil))
           nil)
-      (agent-repl--info nil "elisp.daemon.stop")
+      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop")
       (agent-repl-rpc-update-shutdown-schedule
        conn (list :action
                   (list :arm :now
@@ -1094,20 +1100,20 @@ leave it out."
        (lambda (response)
          (pcase (plist-get response :arm)
            (:success
-            (agent-repl--info nil "elisp.daemon.stop-accepted")
+            (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-accepted")
             (message "agent-repl: daemon shutting down")
             (when on-done (funcall on-done t)))
            (:error
-            (agent-repl--error nil "elisp.daemon.stop-refused error=%S"
+            (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-refused error=%S"
                                (plist-get response :value))
             (message "agent-repl: daemon refused the shutdown")
             (when on-done (funcall on-done nil)))
            (arm
-            (agent-repl--error nil "elisp.daemon.stop-unknown-arm arm=%S" arm)
+            (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-unknown-arm arm=%S" arm)
             (when on-done (funcall on-done nil)))))
        :on-failure
        (lambda (detail)
-         (agent-repl--error nil "elisp.daemon.stop-failed detail=%S" detail)
+         (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-failed detail=%S" detail)
          (message "agent-repl: could not reach the daemon to stop it")
          (when on-done (funcall on-done nil))))
       t)))
@@ -1131,10 +1137,10 @@ then the ensure.
 With no link standing there is nothing to stop, and the restart is just
 the ensure."
   (interactive)
-  (agent-repl--info nil "elisp.daemon.restart")
+  (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart")
   (if (null (agent-repl-link-primary))
       (progn
-        (agent-repl--info nil "elisp.daemon.restart-nothing-to-stop reason=no-link")
+        (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-nothing-to-stop reason=no-link")
         (agent-repl-daemon-ensure))
     (agent-repl-frontend-daemon-stop
      (lambda (accepted)
@@ -1143,10 +1149,10 @@ the ensure."
            ;; Ensuring here would adopt it and report a restart that did
            ;; not happen, so the refusal stands and the link is left alone.
            (progn
-             (agent-repl--error nil "elisp.daemon.restart-abandoned reason=stop-not-accepted accepted=%S"
+             (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-abandoned reason=stop-not-accepted accepted=%S"
                                 accepted)
              (message "agent-repl: the daemon did not accept the stop; not restarting"))
-         (agent-repl--info nil "elisp.daemon.restart-stop-accepted")
+         (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-stop-accepted")
          (agent-repl-link-teardown)
          (agent-repl-daemon--await-departure
           (lambda (gone)
@@ -1154,8 +1160,8 @@ the ensure."
               ;; The address outlived the wait.  Ensure anyway -- the link
               ;; is already down, and leaving the user with no daemon at
               ;; all is strictly worse than an ensure that may re-adopt.
-              (agent-repl--warn nil "elisp.daemon.restart-ensures-despite-timeout gone=%S" gone))
-            (agent-repl--info nil "elisp.daemon.restart-ensure gone=%S" gone)
+              (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-ensures-despite-timeout gone=%S" gone))
+            (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-ensure gone=%S" gone)
             (agent-repl-daemon-ensure))))))))
 
 (add-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure)

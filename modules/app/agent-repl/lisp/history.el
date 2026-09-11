@@ -81,8 +81,9 @@ Catches errors and displays a user-visible warning via
   `(condition-case err
        (progn ,@body)
      (error
-      (agent-repl--warn agent-repl--global-log-scope "%s error: %S" ,label err)
-      (agent-repl--log agent-repl--global-log-scope
+      (agent-repl--warn '(:agent-repl-central "state loading precedes workspace restoration")
+                        "%s error: %S" ,label err)
+      (agent-repl--log '(:agent-repl-central "state loading precedes workspace restoration")
                        (concat ,label " error: %S") err)
       nil)))
 
@@ -90,31 +91,31 @@ Catches errors and displays a user-visible warning via
 
 (defun agent-repl--read-sexp-file (file)
   "Read and return the first sexp from FILE."
-  (agent-repl--log nil "read-sexp-file: file=%s" file)
+  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file: file=%s" file)
   (with-temp-buffer
     (insert-file-contents file)
     (let ((data (read (current-buffer))))
-      (agent-repl--log nil "read-sexp-file: complete file=%s value-type=%s" file (type-of data))
+      (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file: complete file=%s value-type=%s" file (type-of data))
       data)))
 
 (defun agent-repl--write-sexp-file (file data)
   "Write DATA as a sexp to FILE.
 Creates FILE's parent directory if missing so the relocated `.claude/emacs/'
 data dir is auto-provisioned on first save."
-  (agent-repl--log nil "write-sexp-file: file=%s" file)
+  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: file=%s" file)
   (let ((dir (file-name-directory file)))
     (when (and dir (not (file-directory-p dir)))
       (make-directory dir t)
-      (agent-repl--log nil "write-sexp-file: created parent-dir=%s" dir)))
+      (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: created parent-dir=%s" dir)))
   (with-temp-file file
     (prin1 data (current-buffer)))
-  (agent-repl--log nil "write-sexp-file: complete file=%s value-type=%s" file (type-of data)))
+  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: complete file=%s value-type=%s" file (type-of data)))
 
 (defun agent-repl--read-sexp-file-if-exists (file)
   "Read and return the first sexp from FILE, or nil if FILE does not exist."
   (if (file-exists-p file)
       (agent-repl--read-sexp-file file)
-    (agent-repl--log nil "read-sexp-file-if-exists: file not found file=%s" file)
+    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file-if-exists: file not found file=%s" file)
     nil))
 
 ;;;; Instantiation serialization
@@ -144,7 +145,7 @@ instantiation is still the per-environment slot; it simply carries nothing
 durable.  See `test-history.el\='s state-file invariant test."
   (if inst
       nil
-    (agent-repl--log nil "instantiation-to-plist: inst is nil, returning nil")
+    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "instantiation-to-plist: inst is nil, returning nil")
     nil))
 
 ;;;; State migration
@@ -178,20 +179,20 @@ key (and its `:frontend-explicit' marker) lets the workspace re-resolve
 through `agent-repl-default-frontend'."
   (if (null saved)
       (progn
-        (agent-repl--log nil "migrate-saved-state: saved=nil outcome=unchanged")
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "migrate-saved-state: saved=nil outcome=unchanged")
         saved)
     (let ((out (copy-sequence saved))
           (sandbox-p (eq (plist-get saved :active-env) :sandbox))
           (vterm-p (eq (plist-get saved :frontend) 'vterm)))
       (when (eq (plist-get out :active-env) :sandbox)
-        (agent-repl--log nil "migrate-saved-state: :active-env :sandbox -> :bare-metal")
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "migrate-saved-state: :active-env :sandbox -> :bare-metal")
         (setq out (plist-put out :bare-metal (plist-get out :sandbox)))
         (setq out (plist-put out :active-env :bare-metal)))
       (when (eq (plist-get out :frontend) 'vterm)
-        (agent-repl--log nil "migrate-saved-state: dropping retired :frontend vterm")
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "migrate-saved-state: dropping retired :frontend vterm")
         (setq out (plist-put out :frontend nil))
         (setq out (plist-put out :frontend-explicit nil)))
-      (agent-repl--log nil "migrate-saved-state: complete sandbox-migrated=%s frontend-migrated=%s" sandbox-p vterm-p)
+      (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "migrate-saved-state: complete sandbox-migrated=%s frontend-migrated=%s" sandbox-p vterm-p)
       out)))
 
 ;;;; Persistence file paths
@@ -203,9 +204,9 @@ Used by writers to compose the destination path; readers use the
 locations."
   (if root
       (let ((dir (expand-file-name agent-repl-emacs-data-subdir root)))
-        (agent-repl--log nil "data-dir: root=%s dir=%s" root dir)
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "data-dir: root=%s dir=%s" root dir)
         dir)
-    (agent-repl--log nil "data-dir: root=nil outcome=nil")
+    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "data-dir: root=nil outcome=nil")
     nil))
 
 (defun agent-repl--history-file (root)
@@ -216,9 +217,9 @@ never the legacy file at the project root.  Use
   (if root
       (let ((file (expand-file-name agent-repl-history-filename
                                     (agent-repl--data-dir root))))
-        (agent-repl--log nil "history-file: root=%s file=%s" root file)
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file: root=%s file=%s" root file)
         file)
-    (agent-repl--log nil "history-file: root=nil outcome=nil")
+    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file: root=nil outcome=nil")
     nil))
 
 (defun agent-repl--state-file (root)
@@ -228,9 +229,9 @@ reads (which falls back to the legacy project-root path)."
   (if root
       (let ((file (expand-file-name agent-repl-state-filename
                                     (agent-repl--data-dir root))))
-        (agent-repl--log nil "state-file: root=%s file=%s" root file)
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file: root=%s file=%s" root file)
         file)
-    (agent-repl--log nil "state-file: root=nil outcome=nil")
+    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file: root=nil outcome=nil")
     nil))
 
 (defun agent-repl--history-file-for-read (root)
@@ -243,15 +244,15 @@ working through the relocation transition)."
             (legacy (expand-file-name agent-repl--legacy-history-filename root)))
         (cond
          ((file-exists-p new)
-          (agent-repl--log nil "history-file-for-read: root=%s source=new file=%s" root new)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root=%s source=new file=%s" root new)
           new)
          ((file-exists-p legacy)
-          (agent-repl--log nil "history-file-for-read: root=%s source=legacy file=%s" root legacy)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root=%s source=legacy file=%s" root legacy)
           legacy)
          (t
-          (agent-repl--log nil "history-file-for-read: root=%s source=new-missing file=%s" root new)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root=%s source=new-missing file=%s" root new)
           new)))
-    (agent-repl--log nil "history-file-for-read: root=nil outcome=nil")
+    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root=nil outcome=nil")
     nil))
 
 (defun agent-repl--state-file-for-read (root)
@@ -262,15 +263,15 @@ Same fallback semantics as `agent-repl--history-file-for-read'."
             (legacy (expand-file-name agent-repl--legacy-state-filename root)))
         (cond
          ((file-exists-p new)
-          (agent-repl--log nil "state-file-for-read: root=%s source=new file=%s" root new)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root=%s source=new file=%s" root new)
           new)
          ((file-exists-p legacy)
-          (agent-repl--log nil "state-file-for-read: root=%s source=legacy file=%s" root legacy)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root=%s source=legacy file=%s" root legacy)
           legacy)
          (t
-          (agent-repl--log nil "state-file-for-read: root=%s source=new-missing file=%s" root new)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root=%s source=new-missing file=%s" root new)
           new)))
-    (agent-repl--log nil "state-file-for-read: root=nil outcome=nil")
+    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root=nil outcome=nil")
     nil))
 
 ;;;; History persistence

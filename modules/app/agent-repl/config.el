@@ -176,7 +176,8 @@ Computes the SHA on first use (and caches it for the rest of this load),
 returning the SHA string (or the sentinel \"unknown\" when undetermined)."
   (interactive)
   (let ((version (or (agent-repl--version-string) "unknown")))
-    (agent-repl--log nil "version command: cached-sha=%S display=%S"
+    (agent-repl--log '(:agent-repl-central "the loaded module version is process-wide")
+                     "version command: cached-sha=%S display=%S"
                      agent-repl--version version)
     (message "agent-repl version: %s" version)
     version))
@@ -344,7 +345,8 @@ never by its name."
          (match (and file
                      (string-prefix-p (expand-file-name (agent-repl--notes-dir))
                                       (expand-file-name file)))))
-    (agent-repl--log nil "elisp.notes.popup-predicate: buffer=%S file=%S match=%s"
+    (agent-repl--log '(:agent-repl-central "popup classification is process-wide")
+                     "elisp.notes.popup-predicate: buffer=%S file=%S match=%s"
                      buffer-name file (if match t nil))
     match))
 
@@ -365,7 +367,8 @@ never by its name."
         (agent-repl--boot-warn "  %s.el: %S" (car pair) (cdr pair)))
       (error "[agent-repl] FATAL: %d module(s) failed to load — see messages above"
              (length agent-repl--load-errors)))
-  (agent-repl--info nil "Loaded Agent-Repl package."))
+  (agent-repl--info '(:agent-repl-central "module loading is process-wide")
+                    "Loaded Agent-Repl package."))
 
 ;; NO SNAPSHOT RESTORE.  The durable Emacs workspace-roster snapshot is
 ;; gone: THE DAEMON is the source of which workspaces exist, and on connect

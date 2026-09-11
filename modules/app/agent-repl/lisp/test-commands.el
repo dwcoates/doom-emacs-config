@@ -652,6 +652,22 @@ schedules its drain and finds nothing set."
         ;; Assert
         (should armed-at-switch)))))
 
+(ert-deftest agent-repl-test-commands-switch-to-project-logs-the-target-workspace ()
+  "The explicit project target wins over the currently selected workspace."
+  ;; Arrange
+  (let (scopes)
+    (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) "target"))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "buffer-owner"))
+              ((symbol-function 'agent-repl--log)
+               (lambda (ws _fmt &rest _args) (push ws scopes)))
+              ((symbol-function 'agent-repl--switch-project-arm-panels) #'ignore)
+              ((symbol-function 'agent-repl--ws-switch-project) #'ignore)
+              ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-switch-to-project "/tmp/target/")
+      ;; Assert
+      (should (equal scopes '("target"))))))
+
 (ert-deftest agent-repl-test-commands-switch-to-project-arms-nothing-off-a-workspace ()
   "A plain project directory has no panel to show, so nothing is armed."
   ;; Arrange

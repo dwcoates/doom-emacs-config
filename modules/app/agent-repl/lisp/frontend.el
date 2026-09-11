@@ -336,7 +336,7 @@ unowned workspace webview unrepresentable rather than merely unlikely."
     (condition-case err
         (run-hooks 'agent-repl-frontend-webview-adopt-hook)
       (error
-       (agent-repl--warn nil "frontend webview adopt-hook failed buffer=%s err=%S"
+       (agent-repl--warn owner "frontend webview adopt-hook failed buffer=%s err=%S"
                         name err))))
   buf)
 

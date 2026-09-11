@@ -1044,7 +1044,7 @@ silently start round-tripping back onto disk."
                        logged-msg (apply #'format fmt args)))))
       (agent-repl--with-error-logging "my-label"
         (error "kaboom"))
-      (should (eq logged-workspace agent-repl--global-log-scope))
+      (should (agent-repl--central-log-scope-reason logged-workspace))
       (should (stringp logged-msg))
       (should (string-match-p "my-label" logged-msg)))))
 

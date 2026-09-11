@@ -644,7 +644,7 @@ even if the user has switched perspectives by the time it resolves."
     ;; vendor call or it is nothing.
     (agent-repl--log ws "prompt-summary: kickoff skipped reason=vendor-calls-forbidden"))
    ((not ws)
-    (agent-repl--log nil "prompt-summary: kickoff skipped reason=no-workspace raw-type=%S" (type-of raw)))
+    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: kickoff skipped reason=no-workspace raw-type=%S" (type-of raw)))
    ((not (stringp raw))
     (agent-repl--log ws "prompt-summary: kickoff skipped reason=non-string-raw raw-type=%S" (type-of raw)))
    ((agent-repl--prompt-summary-skip-p raw)
@@ -700,13 +700,13 @@ captured before this file existed).  Also exposed interactively for
 manual recovery."
   (interactive)
   (let ((workspaces (agent-repl--live-ws-names)))
-    (agent-repl--log nil "prompt-summary: attach-all start workspace-count=%d" (length workspaces))
+    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: attach-all start workspace-count=%d" (length workspaces))
     (dolist (ws workspaces)
       (let ((buf (agent-repl--ws-get ws :vterm-buffer)))
         (if (and buf (buffer-live-p buf))
             (agent-repl--prompt-summary-attach-to-mode-line buf)
           (agent-repl--log ws "prompt-summary: attach-all skipped reason=no-live-vterm-buffer buffer=%S" buf))))
-    (agent-repl--log nil "prompt-summary: attach-all complete workspace-count=%d" (length workspaces))))
+    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: attach-all complete workspace-count=%d" (length workspaces))))
 
 ;; The prompt-summary segment is intentionally NOT wired into the vterm
 ;; mode-line (see `agent-repl--workspace-mode-line'): it was dropped

@@ -237,26 +237,51 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     (dolist (rung rungs)
       (should (memq rung owners)))))
 
-(ert-deftest agent-repl-test-nil-workspace-log-sites-have-a-central-reason ()
-  "Every literal nil workspace site is classified when no runtime scope exists."
+(defun agent-repl-test--reasoned-log-scope (form tag)
+  "Return FORM's reason when FORM is a quoted `(TAG REASON)' scope marker."
+  (when (and (consp form)
+             (eq (car form) 'quote)
+             (consp (cadr form))
+             (eq (car (cadr form)) tag)
+             (consp (cdr (cadr form)))
+             (null (cddr (cadr form)))
+             (stringp (cadr (cadr form)))
+             (not (string-empty-p (cadr (cadr form)))))
+    (cadr (cadr form))))
+
+(ert-deftest agent-repl-test-log-sites-have-explicit-attribution ()
+  "Every log site names a workspace expression or a reasoned scope marker."
   ;; Arrange
   (let ((print-length nil)
         (print-level nil)
         (rungs '(agent-repl--log agent-repl--log-verbose agent-repl--info
                  agent-repl--warn agent-repl--warn-once agent-repl--error
-                 agent-repl--fatal))
-        missing)
+                 agent-repl--fatal agent-repl--backend-phase))
+        bare-nil
+        malformed-markers
+        central-sites)
     ;; Act
     (dolist (call (agent-repl-test--production-source-calls rungs))
-      (let ((form (nth 2 call)))
-        (when (null (nth 1 form))
-          (let* ((fmt (nth (if (eq (car form) 'agent-repl--warn-once) 3 2)
-                           form))
-                 (prefix (agent-repl-test--source-format-prefix fmt)))
-            (unless (and prefix (agent-repl--central-log-reason prefix))
-              (push (list (car call) (cadr call) fmt) missing))))))
+      (let* ((form (nth 2 call))
+             (scope (nth 1 form))
+             (quoted (and (consp scope) (eq (car scope) 'quote)
+                          (cadr scope)))
+             (tag (and (consp quoted) (car quoted))))
+        (when (null scope)
+          (push (list (car call) (cadr call) form) bare-nil))
+        (when (memq tag '(:agent-repl-central :agent-repl-context))
+          (let ((reason (agent-repl-test--reasoned-log-scope scope tag)))
+            (if reason
+                (when (eq tag :agent-repl-central)
+                  (push (list (car call) (cadr call) reason) central-sites))
+              (push (list (car call) (cadr call) scope) malformed-markers))))))
     ;; Assert
-    (should (null (nreverse missing)))))
+    (should (null (nreverse bare-nil)))
+    (should (null (nreverse malformed-markers)))
+    ;; Keep the complete reasoned inventory in the assertion value so any
+    ;; malformed central marker reports every reviewed central site beside it.
+    (should (cl-every (lambda (site) (stringp (nth 2 site)))
+                      (nreverse central-sites)))))
 
 (defconst agent-repl-test--user-facing-message-sites
   '(("clipboard-image.el" agent-repl-attach-clipboard-image
@@ -3070,8 +3095,8 @@ ladder made a debug line abort `doom-init-ui-hook'."
 
 ;;;; ---- Tests: unroutable workspaces fail loudly ----
 
-(ert-deftest agent-repl-test-log-resolves-a-nil-site-from-the-buffer-owner ()
-  "A nil logger argument inherits its owning composer or panel workspace."
+(ert-deftest agent-repl-test-context-log-scope-resolves-the-buffer-owner ()
+  "A context-scoped site inherits its owning composer or panel workspace."
   ;; Arrange
   (let ((agent-repl--log-context-workspace nil)
         (agent-repl-log-to-file t))
@@ -3080,11 +3105,12 @@ ladder made a debug line abort `doom-init-ui-hook'."
       (cl-letf (((symbol-function 'agent-repl--ws-log-routable-p)
                  (lambda (ws) (equal ws "buffer-ws"))))
         ;; Act / Assert
-        (should (equal (agent-repl--resolve-log-workspace nil "workspace event")
-                       '(:workspace "buffer-ws")))))))
+        (should (equal (agent-repl--capture-log-scope
+                        '(:agent-repl-context "transport can be process-wide"))
+                       "buffer-ws"))))))
 
-(ert-deftest agent-repl-test-log-resolves-a-nil-site-from-the-current-workspace ()
-  "A nil logger argument outside an owned buffer inherits the active workspace."
+(ert-deftest agent-repl-test-context-log-scope-resolves-the-current-workspace ()
+  "A context-scoped site outside an owned buffer inherits the active workspace."
   ;; Arrange
   (let ((agent-repl--log-context-workspace nil)
         (agent-repl-log-to-file t)
@@ -3094,8 +3120,39 @@ ladder made a debug line abort `doom-init-ui-hook'."
               ((symbol-function 'agent-repl--ws-log-routable-p)
                (lambda (ws) (equal ws "current-ws"))))
       ;; Act / Assert
-      (should (equal (agent-repl--resolve-log-workspace nil "workspace event")
-                     '(:workspace "current-ws"))))))
+      (should (equal (agent-repl--capture-log-scope
+                      '(:agent-repl-context "transport can be process-wide"))
+                     "current-ws")))))
+
+(ert-deftest agent-repl-test-explicit-log-workspace-wins-over-the-buffer-owner ()
+  "An explicit workspace is never replaced by the current buffer's owner."
+  ;; Arrange
+  (let ((agent-repl--log-context-workspace nil)
+        (agent-repl-log-to-file t))
+    (with-temp-buffer
+      (setq-local agent-repl--owning-workspace "buffer-ws")
+      (cl-letf (((symbol-function 'agent-repl--ws-log-routable-p)
+                 (lambda (ws) (member ws '("explicit-ws" "buffer-ws")))))
+        ;; Act / Assert
+        (should (equal (agent-repl--capture-log-scope "explicit-ws")
+                       "explicit-ws"))))))
+
+(ert-deftest agent-repl-test-explicit-central-log-scope-uses-the-global-sink ()
+  "A reasoned central marker routes globally even from a workspace buffer."
+  ;; Arrange
+  (let ((agent-repl-log-to-file t)
+        (sink-workspace :unset))
+    (with-temp-buffer
+      (setq-local agent-repl--owning-workspace "buffer-ws")
+      (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
+                 (lambda (_record ws) (setq sink-workspace ws)))
+                ((symbol-function 'message) #'ignore))
+        ;; Act
+        (agent-repl--info
+         '(:agent-repl-central "daemon lifecycle spans workspaces")
+         "central event")
+        ;; Assert
+        (should (null sink-workspace))))))
 
 (ert-deftest agent-repl-test-deleted-worktree-aborts-its-caller ()
   "A workspace whose sink vanished is a routing invariant violation."
@@ -3120,6 +3177,22 @@ ladder made a debug line abort `doom-init-ui-hook'."
           (insert-file-contents path)
           (should (string-match-p "log-routing-error" (buffer-string)))
           (should-not (string-match-p "owned secret payload" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-unroutable-workspace-error-names-the-operation ()
+  "The user-visible invariant error identifies the logger site that failed."
+  ;; Arrange.
+  (let ((agent-repl--log-context-workspace nil)
+        (agent-repl-log-to-file t))
+    (cl-letf (((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) nil))
+              ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+              ((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+              ((symbol-function 'display-warning) #'ignore))
+      ;; Act.
+      (let ((err (should-error
+                  (agent-repl--log nil "elisp.test.unattributed value=%s" "x"))))
+        ;; Assert.
+        (should (string-match-p "operation=agent-repl.elisp-test-unattributed-value-s"
+                                (error-message-string err)))))))
 
 (ert-deftest agent-repl-test-unroutable-workspace-error-keeps-the-request-id ()
   "A routing failure remains correlated to the request edge that exposed it."

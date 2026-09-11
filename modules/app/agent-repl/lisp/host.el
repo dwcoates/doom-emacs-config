@@ -333,35 +333,40 @@ early state and not a failure."
 
 ;;;; ---- Register ----
 
-(defun agent-repl-host-register (conn dir on-done)
+(defun agent-repl-host-register (conn dir on-done &optional workspace)
   "Register DIR with the daemon on CONN; call ON-DONE with the minted ref.
 IDEMPOTENT BY DIR — re-registering after a reconnect or a daemon restart
 is the normal path, never an error.  A daemon-authored error arm and a
 transport failure are different facts and are logged as such; both answer
-ON-DONE with nil so the caller never waits on a callback that will not
-come."
-  (agent-repl--info nil "elisp.host.register dir=%S" dir)
-  (agent-repl-rpc-register-workspace
-   conn (list :dir dir)
-   :on-response
-   (lambda (response)
-     (pcase (plist-get response :arm)
-       (:success
-        (let ((ref (plist-get (plist-get response :value) :workspace)))
-          (agent-repl--info nil "elisp.host.registered dir=%S id=%S" dir
-                            (plist-get ref :id))
-          (funcall on-done ref)))
-       (:error
-        (agent-repl--error nil "elisp.host.register-refused dir=%S error=%S"
-                           dir (plist-get response :value))
-        (funcall on-done nil))
-       (arm
-        (agent-repl--error nil "elisp.host.register-unknown-arm dir=%S arm=%S" dir arm)
-        (funcall on-done nil))))
-   :on-failure
-   (lambda (detail)
-     (agent-repl--error nil "elisp.host.register-failed dir=%S detail=%S" dir detail)
-     (funcall on-done nil))))
+ON-DONE with nil so the caller never waits on a callback that will not come.
+WORKSPACE names an existing workspace being re-registered.  Its absence means
+DIR is being registered before any workspace identity exists."
+  (let ((log-scope (if workspace
+                       workspace
+                     '(:agent-repl-central
+                       "initial registration precedes workspace ownership"))))
+    (agent-repl--info log-scope "elisp.host.register dir=%S" dir)
+    (agent-repl-rpc-register-workspace
+     conn (list :dir dir)
+     :on-response
+     (lambda (response)
+       (pcase (plist-get response :arm)
+         (:success
+          (let ((ref (plist-get (plist-get response :value) :workspace)))
+            (agent-repl--info log-scope "elisp.host.registered dir=%S id=%S" dir
+                              (plist-get ref :id))
+            (funcall on-done ref)))
+         (:error
+          (agent-repl--error log-scope "elisp.host.register-refused dir=%S error=%S"
+                             dir (plist-get response :value))
+          (funcall on-done nil))
+         (arm
+          (agent-repl--error log-scope "elisp.host.register-unknown-arm dir=%S arm=%S" dir arm)
+          (funcall on-done nil))))
+     :on-failure
+     (lambda (detail)
+       (agent-repl--error log-scope "elisp.host.register-failed dir=%S detail=%S" dir detail)
+       (funcall on-done nil)))))
 
 (defconst agent-repl-host--handover-arms '(:transferring-away :not-yet-adopted)
   "Refusal arms that are HANDOVER NEWS rather than user-facing failures.
@@ -469,9 +474,9 @@ and the roster push carrying that stamp took the frame off the workspace
 the user was standing in.  It is the same flag the other two
 activation-reactive hooks consult for the same reason (see its
 docstring in `core.el\=')."
-  (if agent-repl--eager-open-in-progress
-      (agent-repl--log nil "elisp.host.select-skipped reason=background-activation")
-    (let ((ws (agent-repl--ws-current-name)))
+  (let ((ws (agent-repl--ws-current-name)))
+    (if agent-repl--eager-open-in-progress
+        (agent-repl--log ws "elisp.host.select-skipped reason=background-activation")
       (when (and ws (agent-repl-host--entry ws))
         (agent-repl-host-select ws)))))
 
@@ -1050,13 +1055,16 @@ next sidebar click."
   (cond
    ((null dir)
     (setq agent-repl-host-reselect-pending nil)
-    (agent-repl--log nil "elisp.host.link-up-reselect-skipped reason=no-selection"))
+    (agent-repl--log '(:agent-repl-central "the link has no workspace selection")
+                     "elisp.host.link-up-reselect-skipped reason=no-selection"))
    ((null (agent-repl-host--ws-for-dir dir))
     ;; The workspace the user stood in did not come back.  The selection
     ;; stays wherever it is — a live workspace — and the loss is reported
     ;; rather than papered over with an arbitrary substitute.
     (setq agent-repl-host-reselect-pending nil)
-    (agent-repl--warn nil "elisp.host.link-up-reselect-lost dir=%S kept=%S"
+    (agent-repl--warn '(:agent-repl-central
+                        "the lost selection has no registered workspace sink")
+                      "elisp.host.link-up-reselect-lost dir=%S kept=%S"
                       dir (agent-repl--ws-current-name)))
    (t
     (let ((ws (agent-repl-host--ws-for-dir dir)))
@@ -1105,7 +1113,8 @@ nothing."
                    (when (zerop outstanding)
                      (agent-repl-host--reassert-selection wanted)))))
     (setq agent-repl-host-reselect-pending wanted)
-    (agent-repl--info nil "elisp.host.link-up workspaces=%d selection=%S"
+    (agent-repl--info '(:agent-repl-central "link recovery spans every workspace")
+                      "elisp.host.link-up workspaces=%d selection=%S"
                       (length names) wanted)
     (dolist (ws names)
       (let ((dir (agent-repl--ws-get ws :project-dir)))
@@ -1113,7 +1122,8 @@ nothing."
             ;; A name with no registered project directory owns no durable
             ;; workspace sink.  This refusal belongs to process-wide link
             ;; repair; preserve the candidate name in the record body.
-            (agent-repl--warn agent-repl--global-log-scope
+            (agent-repl--warn '(:agent-repl-central
+                                "a link-repair candidate without a directory owns no sink")
                               "elisp.host.link-up-skipped ws=%s reason=no-dir" ws)
           (agent-repl-host-register
            conn dir
@@ -1124,7 +1134,8 @@ nothing."
                (agent-repl-frontend-reload-webview ws)
                (agent-repl--info ws "elisp.host.link-up-webview-repointed ws=%s address=%S"
                                  ws (agent-repl-connect-connection-address conn)))
-             (funcall settle))))))
+             (funcall settle)))
+           ws)))
     ;; Nothing to wait for: no workspace had a dir to re-register, so the
     ;; selection is settled here rather than in a callback that never runs.
     (when (null eligible)
@@ -1143,7 +1154,8 @@ covers by itself."
          (agent-repl-host--put ws :stream nil)
          (agent-repl-host--put ws :conn nil)))
      agent-repl-host--by-name)
-    (agent-repl--warn nil "elisp.host.link-down workspaces=%d" affected)))
+    (agent-repl--warn '(:agent-repl-central "link loss spans every workspace")
+                      "elisp.host.link-down workspaces=%d" affected)))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-host-on-link-up)
 (add-hook 'agent-repl-link-down-functions #'agent-repl-host-on-link-down)

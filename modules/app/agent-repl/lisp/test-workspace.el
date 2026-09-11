@@ -601,7 +601,7 @@ to avoid surfacing killed workspaces."
                    (setq captured
                          (list ws (apply #'format fmt args))))))
         (agent-repl--ws-registered-names))
-      (should-not (car captured))
+      (should (agent-repl--central-log-scope-reason (car captured)))
       (should (string-match-p "count=1" (cadr captured)))
       (should (string-match-p "live" (cadr captured))))))
 
@@ -701,7 +701,7 @@ dead shadow never counts as the owner."
                  (lambda (ws &rest _args) (setq logged-workspace ws))))
         (should-error (agent-repl--ws-require-known "missing" "ctx")
                       :type 'user-error))
-      (should (eq logged-workspace agent-repl--global-log-scope)))))
+      (should (agent-repl--central-log-scope-reason logged-workspace)))))
 
 (ert-deftest agent-repl-test-ws-require-known-includes-context-in-message ()
   "The error message mentions the CONTEXT argument so callers identify themselves."
@@ -796,7 +796,7 @@ dead shadow never counts as the owner."
         (should-not (agent-repl--ws-revive "missing")))
     ;; Assert.
       (should-not (agent-repl--ws-known-p "missing"))
-      (should (eq logged-workspace agent-repl--global-log-scope)))))
+      (should (agent-repl--central-log-scope-reason logged-workspace)))))
 
 (ert-deftest agent-repl-test-ws-revive-restores-ref-id-reverse-lookup ()
   "After a revive the name answers `--ws-by-ref-id' again."
@@ -1495,8 +1495,9 @@ gated push would then drop the very repaint this exists for."
                (lambda (ws fmt &rest args)
                  (setq record (list ws (apply #'format fmt args))))))
       (should-error (agent-repl--ws-persp-identity nil) :type 'error))
-    (should (equal record
-                   '(nil "ws-persp-identity: rejected reason=nil-perspective")))))
+    (should (agent-repl--central-log-scope-reason (car record)))
+    (should (equal (cadr record)
+                   "ws-persp-identity: rejected reason=nil-perspective"))))
 
 ;;;; ---- Tests: --ws-switch-project-display ----
 

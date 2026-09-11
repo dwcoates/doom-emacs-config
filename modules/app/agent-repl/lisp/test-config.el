@@ -131,6 +131,23 @@ SHA is nil."
       (should (equal (agent-repl-version) "unknown"))
       (should (equal messaged "agent-repl version: unknown")))))
 
+(ert-deftest agent-repl-config-test-version-command/uses-central-log-scope ()
+  "The process-wide version command never borrows an ambient workspace."
+  ;; Arrange
+  (let ((agent-repl--version "feedface1234")
+        (agent-repl--version-computed t)
+        logged-scope)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (scope &rest _args) (setq logged-scope scope)))
+              ((symbol-function 'message) #'ignore))
+      ;; Act
+      (agent-repl-version)
+      ;; Assert
+      (should
+       (equal logged-scope
+              '(:agent-repl-central
+                "the loaded module version is process-wide"))))))
+
 ;;;; ---- Tests: bootstrap-phase emission ----
 ;;
 ;; config.el runs before core.el defines the log-severity ladder, and is also

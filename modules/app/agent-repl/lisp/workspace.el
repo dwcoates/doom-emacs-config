@@ -284,14 +284,14 @@ restored.  Returns the number of rewritten workspaces.  Invalid path
 arguments signal `user-error' before any workspace is mutated."
   (unless (and (stringp old-source-dir)
                (not (string-empty-p old-source-dir)))
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "workspace registry operations can span workspaces")
                      "ws-rewrite-source-back-refs: REJECT old-source-dir=%S new-source-dir=%S reason=invalid-old-dir"
                      old-source-dir new-source-dir)
     (user-error "agent-repl: ws-rewrite-source-back-refs: invalid old source directory %S"
                 old-source-dir))
   (unless (and (stringp new-source-dir)
                (not (string-empty-p new-source-dir)))
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "workspace registry operations can span workspaces")
                      "ws-rewrite-source-back-refs: REJECT old-source-dir=%S new-source-dir=%S reason=invalid-new-dir"
                      old-source-dir new-source-dir)
     (user-error "agent-repl: ws-rewrite-source-back-refs: invalid new source directory %S"
@@ -300,7 +300,7 @@ arguments signal `user-error' before any workspace is mutated."
         (canonical-new (agent-repl--path-canonical new-source-dir))
         (rewritten 0))
     (when (string= canonical-old canonical-new)
-      (agent-repl--log nil
+      (agent-repl--log '(:agent-repl-central "workspace registry operations can span workspaces")
                        "ws-rewrite-source-back-refs: REJECT old-source-dir=%s new-source-dir=%s reason=identical-canonical-dirs"
                        canonical-old canonical-new)
       (user-error "agent-repl: ws-rewrite-source-back-refs: source directories are identical: %s"
@@ -331,7 +331,7 @@ arguments signal `user-error' before any workspace is mutated."
             ws source-dir canonical-new
             (if (plist-get plist :killed-at) "t" "nil"))))))
      agent-repl--workspaces)
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "workspace registry operations can span workspaces")
                      "ws-rewrite-source-back-refs: DONE old-source-dir=%s new-source-dir=%s rewritten=%d"
                      canonical-old canonical-new rewritten)
     rewritten))
@@ -483,7 +483,8 @@ workspace-owned API for callers that need the complete registration
 set rather than the live-only view from `agent-repl--live-ws-names'."
   (let ((names (hash-table-keys agent-repl--workspaces)))
     (agent-repl--log-verbose
-     nil "ws-registered-names: count=%d names=%S"
+     '(:agent-repl-central "workspace registry operations can span workspaces")
+     "ws-registered-names: count=%d names=%S"
      (length names) names)
     names))
 
@@ -629,7 +630,7 @@ e.g. `\"ws-render-status\"' or `\"ws-open-p\"'.  Used by wrappers that
 contractually refuse to operate on an unknown ws (per the AGENTS.md
 no-silent-fallback rule).  Returns nil on success."
   (unless (agent-repl--ws-known-p ws)
-    (agent-repl--log agent-repl--global-log-scope
+    (agent-repl--log '(:agent-repl-central "workspace registration has no durable sink yet")
                      "ws-require-known: REJECT ws=%S context=%s reason=unregistered"
                      ws context)
     (user-error "agent-repl: %s: workspace %S is not registered" context ws)))
@@ -660,7 +661,7 @@ answer nil, so a caller may call this unconditionally before it opens."
     ;; registry-level observation about refusing to create state, so preserve
     ;; the candidate name in the record body and route it explicitly to the
     ;; process-wide sink.
-    (agent-repl--log agent-repl--global-log-scope
+    (agent-repl--log '(:agent-repl-central "workspace registration has no durable sink yet")
                      "ws-revive: SKIP ws=%s reason=unknown" ws)
     nil)
    ((null (agent-repl--ws-get ws :killed-at))
@@ -861,11 +862,13 @@ rendered in their registration order so a pre-roster boot still draws."
     (if (null order)
         (progn
           (agent-repl--log-verbose
-           nil "ws-tabline-names: no roster order yet count=%d" (length known))
+           '(:agent-repl-central "tab rendering spans every workspace")
+           "ws-tabline-names: no roster order yet count=%d" (length known))
           known)
       (let ((names (cl-remove-if-not (lambda (name) (member name known)) order)))
         (agent-repl--log-verbose
-         nil "ws-tabline-names: roster-order=%d rendered=%d"
+         '(:agent-repl-central "tab rendering spans every workspace")
+         "ws-tabline-names: roster-order=%d rendered=%d"
          (length order) (length names))
         names))))
 
@@ -883,7 +886,11 @@ so answering with one would resurrect a closed workspace."
                           (equal (plist-get (plist-get plist :ref) :id) id))
                  (setq found name)))
              agent-repl--workspaces)
-    (agent-repl--log-verbose nil "ws-by-ref-id: id=%s ws=%S" id found)
+    (agent-repl--log-verbose
+     (if found
+         found
+       '(:agent-repl-central "an unmatched roster reference has no workspace"))
+     "ws-by-ref-id: id=%s ws=%S" id found)
     found))
 
 ;;;; ---- Render state: the roster row's status arm ---------------------
@@ -1348,7 +1355,11 @@ already succeeded must not be turned into a failure by the unwind."
     (condition-case err
         (agent-repl--ws-switch orig-persp)
       (error
-       (agent-repl--warn nil "restore-focus: switch back to %s failed err=%S"
+       (agent-repl--warn
+        (if (agent-repl--ws-log-routable-p orig-persp)
+            orig-persp
+          '(:agent-repl-central "a foreign perspective has no workspace sink"))
+        "restore-focus: switch back to %s failed err=%S"
                          orig-persp err))))
   (when (and (window-live-p orig-window)
              (not (eq orig-window (selected-window))))
@@ -1699,7 +1710,8 @@ contents.  It is diagnostic correlation only and is not persisted as product
 state.  The owning high-level operation logs this returned identity as part of
 its aggregate record, so this boundary does not emit a duplicate record."
   (unless persp
-    (agent-repl--log nil "ws-persp-identity: rejected reason=nil-perspective")
+    (agent-repl--log '(:agent-repl-central "the rejected perspective is absent")
+                     "ws-persp-identity: rejected reason=nil-perspective")
     (error "agent-repl--ws-persp-identity: perspective must be non-nil"))
   (format "persp@%x" (sxhash-eq persp)))
 
@@ -1993,9 +2005,11 @@ magit status when it has none."
       (agent-repl--log ws "ws-switch-project-display: ws=%s dir=%s branch=workspace-panel-owns-display"
                        ws dir))
      ((doom-real-buffer-list)
-      (agent-repl--log nil "ws-switch-project-display: dir=%s branch=has-real-buffers" dir))
+      (agent-repl--log '(:agent-repl-central "a plain project is not an agent workspace")
+                       "ws-switch-project-display: dir=%s branch=has-real-buffers" dir))
      (t
-      (agent-repl--log nil "ws-switch-project-display: dir=%s branch=magit-status" dir)
+      (agent-repl--log '(:agent-repl-central "a plain project is not an agent workspace")
+                       "ws-switch-project-display: dir=%s branch=magit-status" dir)
       (agent-repl--magit-status-same-window dir)))))
 
 (defun agent-repl--ws-install-persp-policy ()
