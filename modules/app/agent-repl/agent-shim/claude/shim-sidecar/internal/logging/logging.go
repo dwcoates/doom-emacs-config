@@ -107,9 +107,11 @@ type Context struct {
 	// reader joining the sidecar's record against the store's own refusal
 	// matches on the site and reads the verdict off the kind.
 	RefusalSite string
-	// Reason is a LOST conclusion's own vocabulary (file_vanished /
+	// Reason is a conclusion's own vocabulary: a LOST arm (file_vanished /
 	// went_silent / swept_up) — the same word the wire's DetachedLost arm
-	// carries, so a terminal and the sweep that concluded it join on it.
+	// carries, so a terminal and the sweep that concluded it join on it — or a
+	// held transcript's hold reason, which is what says whether a repeated
+	// hold record is the SAME condition or a new one.
 	Reason string
 	// Field is the offending field an invalid_request refusal names, so the
 	// producer defect can be found without reading prose.
