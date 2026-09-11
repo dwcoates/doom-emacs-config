@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestLogWorkspaceIDIsTheLockFileDerivation(t *testing.T) {
+func TestWorkspaceDirHashIsTheLockFileDerivation(t *testing.T) {
 	tests := []struct {
 		name string
 		dir  string
@@ -20,56 +20,56 @@ func TestLogWorkspaceIDIsTheLockFileDerivation(t *testing.T) {
 	}
 	// The lock file name the shim uses: md5hex(filepath.Clean(absDir))[:8].
 	sum := md5.Sum([]byte("/Users/someone/workspace/repo"))
-	want := hex.EncodeToString(sum[:])[:LogWorkspaceIDLength]
+	want := hex.EncodeToString(sum[:])[:WorkspaceDirHashLength]
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange, Act.
-			got, err := LogWorkspaceID(tc.dir)
+			got, err := WorkspaceDirHash(tc.dir)
 
 			// Assert.
 			if err != nil {
-				t.Fatalf("LogWorkspaceID(%q) error = %v", tc.dir, err)
+				t.Fatalf("WorkspaceDirHash(%q) error = %v", tc.dir, err)
 			}
 			if got != want {
-				t.Fatalf("LogWorkspaceID(%q) = %q, want %q — a record must grep against the lock file name", tc.dir, got, want)
+				t.Fatalf("WorkspaceDirHash(%q) = %q, want %q — a record must grep against the lock file name", tc.dir, got, want)
 			}
 		})
 	}
 }
 
-func TestLogWorkspaceIDAbsolutizesARelativeDir(t *testing.T) {
+func TestWorkspaceDirHashAbsolutizesARelativeDir(t *testing.T) {
 	// Arrange.
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	absID, err := LogWorkspaceID(filepath.Join(cwd, "sub"))
+	absHash, err := WorkspaceDirHash(filepath.Join(cwd, "sub"))
 	if err != nil {
-		t.Fatalf("LogWorkspaceID(abs) error = %v", err)
+		t.Fatalf("WorkspaceDirHash(abs) error = %v", err)
 	}
 
 	// Act.
-	relID, err := LogWorkspaceID("sub")
+	relHash, err := WorkspaceDirHash("sub")
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("LogWorkspaceID(rel) error = %v", err)
+		t.Fatalf("WorkspaceDirHash(rel) error = %v", err)
 	}
-	if relID != absID {
-		t.Fatalf("relative id %q != absolute id %q", relID, absID)
+	if relHash != absHash {
+		t.Fatalf("relative hash %q != absolute hash %q", relHash, absHash)
 	}
 }
 
-func TestLogWorkspaceIDIsEightCharacters(t *testing.T) {
+func TestWorkspaceDirHashIsEightCharacters(t *testing.T) {
 	// Arrange, Act.
-	got, err := LogWorkspaceID("/tmp/whatever")
+	got, err := WorkspaceDirHash("/tmp/whatever")
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("LogWorkspaceID error = %v", err)
+		t.Fatalf("WorkspaceDirHash error = %v", err)
 	}
-	if len(got) != LogWorkspaceIDLength {
-		t.Fatalf("len(%q) = %d, want %d", got, len(got), LogWorkspaceIDLength)
+	if len(got) != WorkspaceDirHashLength {
+		t.Fatalf("len(%q) = %d, want %d", got, len(got), WorkspaceDirHashLength)
 	}
 }

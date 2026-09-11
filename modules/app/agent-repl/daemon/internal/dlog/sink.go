@@ -50,6 +50,12 @@ type sink struct {
 	link string
 	// target is the daemon-owned file the link names.
 	target string
+	// mintedTarget says this runtime CREATED the target, so its name carries
+	// the daemon-minted workspace id. False means the target was already
+	// named by the canonical link and is appended to as it stands -- which is
+	// how a pre-existing directory-hash-named target keeps its history
+	// instead of being orphaned by the rename to the minted scheme.
+	mintedTarget bool
 
 	mu            sync.Mutex
 	file          *logging.RotatingFile
@@ -99,12 +105,14 @@ func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capB
 		}
 		target = standing
 	}
+	mintedTarget := false
 	if target == "" {
 		minted, err := createTarget(logsDir, workspaceID, name)
 		if err != nil {
 			return nil, err
 		}
 		target = minted
+		mintedTarget = true
 	}
 	file, err := logging.OpenRotating(target, capBytes, backups)
 	if err != nil {
@@ -121,6 +129,7 @@ func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capB
 		workspaceID:  workspaceID,
 		link:         filepath.Join(linkDir, name+".log"),
 		target:       target,
+		mintedTarget: mintedTarget,
 		file:         file,
 		cap:          capBytes,
 		size:         info.Size(),
@@ -177,6 +186,12 @@ func standingTarget(logsDir, linkDir, name string, capBytes int64) (string, erro
 // logs directory, per ARCHITECTURE.md's "State root layout". It is reached
 // only when the workspace has no daemon-owned target to append to, and the
 // result is remembered in memory for the rest of this runtime.
+//
+// THE NAME CARRIES THE DAEMON-MINTED ids.WorkspaceID, the same 16 hex
+// characters every runtime's records carry. A target minted by an older
+// daemon under the 8-character directory hash is NOT renamed: the canonical
+// link still names it, standingTarget joins it, and only a genuinely new
+// target gets the minted name.
 //
 // IT IS NOT THE OS TEMP DIR. A durable log a person is asked to read must not
 // live where the operating system may sweep it, must not be scattered across a

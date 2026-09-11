@@ -48,6 +48,13 @@ type Surfaces interface {
 	// every workspace and agent session may use it: failing to resolve a known
 	// workspace is an invariant violation, never a reason to write globally.
 	Global() Logger
+	// BindWorkspaceIDs installs the lookup from a workspace directory to that
+	// workspace's daemon-minted ids.WorkspaceID. Every workspace record's
+	// workspace_id and every minted sink name comes from it, so it is bound
+	// once the state client is open and before any workspace-owned record.
+	// Until it is bound, Workspace, ShimSink and ClientLog all refuse: a
+	// workspace record is never attributed to a path-derived stand-in.
+	BindWorkspaceIDs(lookup WorkspaceIDLookup)
 	// Workspace resolves the logger whose durable sink is
 	// <dir>/.claude/emacs/daemon.log (via the canonical symlink). It fails
 	// rather than falling back to the global sink.
