@@ -13,23 +13,102 @@ import (
 )
 
 func TestNewRefusesMissingCollaborators(t *testing.T) {
+	complete := func() Deps {
+		return Deps{
+			DB: &stubDB{}, Live: alwaysLive, Log: newStubSurfaces(),
+			Instance: "daemon-test", PID: 4242,
+			BuildSHA: func() (string, error) { return "test-build", nil },
+		}
+	}
 	tests := []struct {
 		name string
-		deps Deps
+		omit func(*Deps)
 	}{
-		{name: "no state client", deps: Deps{Live: alwaysLive, Log: newStubSurfaces()}},
-		{name: "no liveness probe", deps: Deps{DB: &stubDB{}, Log: newStubSurfaces()}},
-		{name: "no log surfaces", deps: Deps{DB: &stubDB{}, Live: alwaysLive}},
+		{name: "no state client", omit: func(d *Deps) { d.DB = nil }},
+		{name: "no liveness probe", omit: func(d *Deps) { d.Live = nil }},
+		{name: "no log surfaces", omit: func(d *Deps) { d.Log = nil }},
+		{name: "no instance id", omit: func(d *Deps) { d.Instance = "" }},
+		{name: "no positive pid", omit: func(d *Deps) { d.PID = 0 }},
+		{name: "no build sha reader", omit: func(d *Deps) { d.BuildSHA = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange in the table. Act.
-			_, err := New(tt.deps)
+			// Arrange.
+			deps := complete()
+			tt.omit(&deps)
+			// Act.
+			_, err := New(deps)
 			// Assert.
 			if err == nil {
 				t.Fatalf("New(%s) = nil error, want a refusal", tt.name)
 			}
 		})
+	}
+}
+
+func TestDaemonHealthCarriesTheServingProcessIdentity(t *testing.T) {
+	// Arrange.
+	r := newReporter(t, &stubDB{}, alwaysLive, newStubSurfaces())
+
+	// Act.
+	got, err := r.Daemon(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Daemon: %v", err)
+	}
+	identity := got.GetSuccess().GetIdentity()
+	if identity.GetInstanceId() != "daemon-test" || identity.GetPid() != 4242 || identity.GetBuildSha() != "test-build" {
+		t.Fatalf("Daemon() identity = %v, want daemon-test pid 4242 at test-build", identity)
+	}
+}
+
+func TestDaemonHealthRefusesAnUnreadableBuildIdentity(t *testing.T) {
+	// Arrange.
+	deps := Deps{
+		DB: &stubDB{}, Live: alwaysLive, Log: newStubSurfaces(),
+		Instance: "daemon-test", PID: 4242,
+		BuildSHA: func() (string, error) { return "", errors.New("stamp denied") },
+	}
+
+	// Act.
+	_, err := New(deps)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "stamp denied") {
+		t.Fatalf("New() error = %v, want the build stamp failure", err)
+	}
+}
+
+func TestDaemonHealthSnapshotsTheBuildIdentityAtProcessBoot(t *testing.T) {
+	// Arrange.
+	reads := 0
+	r, err := New(Deps{
+		DB: &stubDB{}, Live: alwaysLive, Log: newStubSurfaces(),
+		Instance: "daemon-test", PID: 4242,
+		BuildSHA: func() (string, error) {
+			reads++
+			return "boot-build", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Act.
+	first, firstErr := r.Daemon(context.Background())
+	second, secondErr := r.Daemon(context.Background())
+
+	// Assert.
+	if firstErr != nil || secondErr != nil {
+		t.Fatalf("Daemon errors = first %v, second %v; want successes", firstErr, secondErr)
+	}
+	if reads != 1 {
+		t.Fatalf("build identity reads = %d, want one boot-time snapshot", reads)
+	}
+	if first.GetSuccess().GetIdentity().GetBuildSha() != "boot-build" ||
+		second.GetSuccess().GetIdentity().GetBuildSha() != "boot-build" {
+		t.Fatalf("health identities = first %v, second %v; want immutable boot-build", first, second)
 	}
 }
 

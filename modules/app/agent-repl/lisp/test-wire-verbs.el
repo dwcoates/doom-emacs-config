@@ -911,7 +911,20 @@ message."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-daemon-health-response
                     (agent-repl-test-wire-verbs--parse "{\"success\":{\"healthy\":{}}}"))
-                   '(:arm :success :value (:arm :healthy :value nil))))))
+                   '(:arm :success :value (:arm :healthy :value nil :identity nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-health-process-identity ()
+  "A health answer identifies the exact serving process and deployed build."
+  (agent-repl-test-wire-verbs--with-common
+    (should
+     (equal
+      (agent-repl-wire-decode-daemon-health-response
+       (agent-repl-test-wire-verbs--parse
+        "{\"success\":{\"healthy\":{},\"identity\":{\"instanceId\":\"daemon-2\",\"pid\":\"4242\",\"buildSha\":\"abc123\"}}}"))
+      '(:arm :success
+        :value (:arm :healthy :value nil
+                :identity (:instance-id "daemon-2" :pid 4242
+                           :build-sha "abc123")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-unhealthy-faults ()
   "UNHEALTHY IS AN ANSWER: the faults arrive inside success, each with its
@@ -929,14 +942,16 @@ detail."
                                        :kind (:arm :wsm-read-only :value nil))
                                       (:detail "queue stuck"
                                        :kind (:arm :log-sink-poisoned
-                                              :value (:sink "emacs")))))))))))
+                                              :value (:sink "emacs")))))
+                             :identity nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-unhealthy-no-faults ()
   "An omitted repeated field is the empty list, protojson's `no elements'."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-daemon-health-response
                     (agent-repl-test-wire-verbs--parse "{\"success\":{\"unhealthy\":{}}}"))
-                   '(:arm :success :value (:arm :unhealthy :value (:faults nil)))))))
+                   '(:arm :success :value (:arm :unhealthy :value (:faults nil)
+                                                :identity nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-detail-default ()
   "An omitted fault detail is the proto3 default, never a missing-field breach."
