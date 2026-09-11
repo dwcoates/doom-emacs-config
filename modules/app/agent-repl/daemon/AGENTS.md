@@ -310,6 +310,27 @@ inherited descriptor, and forwarded webapp and sidecar records go to
 a daemon-owned target under `<state>/logs/`. Failing to resolve a workspace is
 an invariant violation, never a global write.
 
+THE WORKSPACE ID ON A RECORD AND IN A SINK NAME IS THE DAEMON-MINTED
+`ids.WorkspaceID` (16 hex characters, `wsm.IDLength`) -- the same id the shim,
+the webapp and the store state, so a reader grouping by `workspace_id` sees
+ONE group per workspace. `run.go` binds the lookup
+(`Surfaces.BindWorkspaceIDs`, `db.WorkspaceByDir`) the moment the state client
+is open and before any workspace-owned record; a workspace the roster cannot
+name is REFUSED, never attributed to anything derived from the path. A newly
+minted target is `logs/agent-repl-<minted id>-<sink>-*.log`, and an INFO
+(`daemon.dlog.sink_opened`) states the scheme on every sink open. Registration
+therefore resolves its workspace sink only AFTER `RegisterWorkspace` mints the
+row; the git derivations before it go to the run log with the announced
+directory on them.
+
+`dlog.WorkspaceDirHash` (md5hex(clean abs dir)[:8]) is the SHIM-HELD KERNEL
+LOCK FILE's derivation and stays recorded, as the ordinary context key
+`workspace_dir_hash`, so an operator can grep a record against a lock file
+name. It is never a `workspace_id`, and the lock file naming is untouched.
+MIGRATION: a target an older daemon minted under that hash is APPENDED TO
+where the canonical link still names it (the standing-target rule); nothing is
+renamed and no history is orphaned. Only a new target gets the minted name.
+
 `daemon.log`, `webapp.log`, and `sidecar.log` rotate synchronously at 64 MiB
 through `agentrepl/logging.OpenRotating`, retain `logging.DefaultBackups`
 generations, and atomically refresh their canonical symlink after each roll.
