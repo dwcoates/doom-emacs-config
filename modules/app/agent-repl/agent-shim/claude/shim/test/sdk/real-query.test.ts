@@ -244,7 +244,7 @@ describe("createRealQuery", () => {
       },
     }));
     const log = await import("../../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "real-query-suite" });
+    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ff", agentReplSessionId: "real-query-suite" });
     const mod = await import("../../src/sdk/real-query.js");
     return { createRealQuery: mod.createRealQuery, calls, sites, query };
   }

@@ -60,6 +60,7 @@ src/
     ids.ts             the four identifier spaces, minted
   store/
     keys.ts            upsert_key + write_id (THE one place)
+    retry.ts           the READ half's retry schedule (the writer's own policy)
     client.ts          the store.v1 client over the store UDS
   fake/
     index.ts           createFakeQuery(): the scenario engine behind --fake
@@ -409,8 +410,23 @@ at build time and is not a vendor import site.
   once, durably recorded.
 - Every record carries the shim `pid`, the workspace dir and its id, and every
   known agent-repl and Claude session identifier. Before a session exists the
-  `agent_repl_session_id` is the process's own `shim-<workspace-key>-<pid>`,
-  which correlates a log line with its lock file.
+  `agent_repl_session_id` is the process's own `shim-<workspace id>-<pid>`,
+  which joins the daemon's own records for the same workspace.
+- **`workspace_id` IS THE DAEMON'S 16-HEX WORKSPACE ID, and nothing else.**
+  `bin/logs.sh --workspace` and the realtest harvest group records by it, so a
+  shim that answered with an id of its own devising filed its records under a
+  workspace nothing else in the fleet ever wrote to. No spawn argument or
+  environment variable carries it; what the daemon does hand over is the listen
+  socket, which it names `<state>/sock/<workspace id>.sock` (plus the rollout's
+  `.n<generation>`), so `workspaceIdFromListenSocket` reads it back off the
+  basename. A socket that does not spell one is a STARTUP REFUSAL, exactly like
+  an unrecognized flag: it means this build and the daemon disagree about the
+  socket layout, and a record filed under an unknown workspace is worse than a
+  shim that says why it will not start.
+- The shim's own md5 prefix of the workspace directory travels beside it as the
+  `shim_workspace_hash` CONTEXT key. It is what the workspace lock FILE is
+  named after, so it is the only thing joining a record to that file on disk —
+  it is simply not the fleet's workspace identity.
 - `AGENT_REPL_LOG_LEVEL` is the process-startup threshold for both durable
   persistence and stderr mirroring. It accepts exactly `debug`, `info`, `warn`,
   or `error` and defaults to `info`. An invalid value aborts logger setup.

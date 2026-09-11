@@ -305,7 +305,7 @@ describe("the claim protocol over a synthetic holder", () => {
     vi.resetModules();
     vi.doMock("node:child_process", () => ({ spawn: spawnImpl }));
     const log = await import("../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "locks-suite" });
+    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000bb", agentReplSessionId: "locks-suite" });
     return import("../src/locks.js");
   }
 
