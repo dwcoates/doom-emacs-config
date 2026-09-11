@@ -75,6 +75,16 @@ func run(args []string) error {
 
 	log := newLogSink(argv.LogFD)
 	defer log.close()
+	// THE WORKSPACE ID COMES OFF THE LISTEN SOCKET, as it does in the real
+	// shim: the spawn contract carries no workspace id, and the daemon names
+	// the socket `<state>/sock/<workspace id>[.n<gen>].sock`. A basename that
+	// does not spell one is a refusal, never a record filed under an id the
+	// fleet never minted.
+	workspaceID, err := workspaceIDFromListenSocket(argv.Listen)
+	if err != nil {
+		return err
+	}
+	log.bind(workspaceID, absCwd)
 
 	// NO LOCK IS TAKEN AT STARTUP. Both kernel locks are taken inside
 	// StartSession, before the SDK is touched, and released together on a kill
