@@ -49,7 +49,7 @@ composer or the webview) so it is skipped by `next-buffer',
 (setq switch-to-prev-buffer-skip
       #'agent-repl--prev-buffer-skip-agent-panel)
 
-(agent-repl--log nil
+(agent-repl--log '(:agent-repl-central "host-wide buffer selection policy is process-wide")
                   "prevent-select: installed switch-to-prev-buffer-skip predicate=%S"
                   switch-to-prev-buffer-skip)
 

@@ -53,12 +53,14 @@ import { shellHTML } from "./shell-html.js";
  * coverage-instrumented full graph reached 2170ms in the unified gate and
  * exhausted a three-second bound under later host contention.
  *
- * Six seconds also leaves the inner two-second failure-card deadline enough
- * room to print its own diagnostic first. This is a per-site bound,
+ * A coverage run on a contended host exhausted six seconds while the other
+ * two identical imports completed, so twelve seconds keeps a 2x scheduling
+ * margin and leaves the inner two-second failure-card deadline enough room to
+ * print its own diagnostic first. This is a per-site bound,
  * deliberately not a raised global: nothing else in the unit suite imports
  * its subject at run time, and the global stays sized for what it covers.
  */
-const BOOT_IMPORT_TIMEOUT_MS = 6000;
+const BOOT_IMPORT_TIMEOUT_MS = 12_000;
 
 /** The page address a workspace-addressed page is loaded with. */
 const PAGE_ADDRESS = "/?workspace=w-boot-logger&dir=/tmp/w-boot-logger";

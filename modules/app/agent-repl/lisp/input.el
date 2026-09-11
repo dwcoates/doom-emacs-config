@@ -334,7 +334,7 @@ The file is NOT read here: an `ImageBlock' carries a REFERENCE, and the
 daemon and the shim run on this same host, so the path is the whole
 payload."
   (unless (derived-mode-p 'agent-repl-input-mode)
-    (agent-repl--fatal agent-repl--global-log-scope
+    (agent-repl--fatal '(:agent-repl-central "the attachment request has no composer workspace")
                        "elisp.input.attach-outside-composer buffer=%s path=%s"
                        (buffer-name) path))
   (let ((ws (agent-repl--buffer-owner (current-buffer))))
@@ -906,7 +906,7 @@ Returns the submission's idempotency key, or nil when nothing was sent."
     (agent-repl--fatal ws "elisp.input.invalid-origin origin=%S" origin))
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (unless ws
-      (agent-repl--fatal nil "elisp.input.no-workspace origin=%S prompt-supplied=%s"
+      (agent-repl--fatal '(:agent-repl-central "the record reports that no workspace exists") "elisp.input.no-workspace origin=%S prompt-supplied=%s"
                          origin (not (null prompt))))
     (agent-repl--log ws "elisp.input.send ws=%s origin=%S force-metaprompt=%s from-buffer=%s"
                      ws origin force-metaprompt (null prompt))

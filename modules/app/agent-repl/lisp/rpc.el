@@ -38,6 +38,7 @@
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
+(declare-function agent-repl--capture-log-scope "core" (scope))
 
 (declare-function agent-repl-connect-unary "connect"
                   (conn method json-string &rest keys))
@@ -105,8 +106,11 @@ ON-FAILURE receives a transport failure plist.  A response that arrives
 but will not DECODE is a contract breach, not a transport failure: it is
 logged at ERROR and reported through ON-FAILURE so the caller is never
 left waiting on a callback that will not come."
-  (let ((json (agent-repl-rpc--serialize encoder request)))
-    (agent-repl--log nil "elisp.rpc.send method=%S" method)
+  (let ((json (agent-repl-rpc--serialize encoder request))
+        (log-scope
+         (agent-repl--capture-log-scope
+          '(:agent-repl-context "an unscoped RPC exchange is process-wide"))))
+    (agent-repl--log log-scope "elisp.rpc.send method=%S" method)
     (agent-repl-connect-unary
      conn method json
      :timeout timeout
@@ -114,11 +118,11 @@ left waiting on a callback that will not come."
      (lambda (alist)
        (condition-case err
            (let ((decoded (funcall decoder alist)))
-             (agent-repl--log nil "elisp.rpc.answer method=%S arm=%S"
+             (agent-repl--log log-scope "elisp.rpc.answer method=%S arm=%S"
                               method (plist-get decoded :arm))
              (when on-response (funcall on-response decoded)))
          (error
-          (agent-repl--error nil "elisp.rpc.response-invalid method=%S error=%S body=%S"
+          (agent-repl--error log-scope "elisp.rpc.response-invalid method=%S error=%S body=%S"
                              method err alist)
           (when on-failure
             (funcall on-failure
@@ -126,7 +130,7 @@ left waiting on a callback that will not come."
                            :message (format "%s: undecodable response (%S)" method err)))))))
      :on-failure
      (lambda (detail)
-       (agent-repl--warn nil "elisp.rpc.transport-failure method=%S detail=%S" method detail)
+       (agent-repl--warn log-scope "elisp.rpc.transport-failure method=%S detail=%S" method detail)
        (when on-failure (funcall on-failure detail))))))
 
 (defun agent-repl-rpc--unary-sync (conn method encoder decoder request &optional timeout)
@@ -134,10 +138,13 @@ left waiting on a callback that will not come."
 Signals `agent-repl-connect-error' on a transport failure and whatever the
 codec signals on an undecodable response — a synchronous caller wants the
 failure in its own stack, not in a callback."
-  (let ((json (agent-repl-rpc--serialize encoder request)))
-    (agent-repl--log nil "elisp.rpc.send-sync method=%S" method)
+  (let ((json (agent-repl-rpc--serialize encoder request))
+        (log-scope
+         (agent-repl--capture-log-scope
+          '(:agent-repl-context "an unscoped RPC exchange is process-wide"))))
+    (agent-repl--log log-scope "elisp.rpc.send-sync method=%S" method)
     (let ((decoded (funcall decoder (agent-repl-connect-unary-sync conn method json timeout))))
-      (agent-repl--log nil "elisp.rpc.answer-sync method=%S arm=%S"
+      (agent-repl--log log-scope "elisp.rpc.answer-sync method=%S arm=%S"
                        method (plist-get decoded :arm))
       decoded)))
 
@@ -152,22 +159,25 @@ boundary, which likewise keeps the stream open.
 ON-OPEN, when given, is handed through UNTOUCHED: it is the transport's
 acceptance instant (the HTTP 200 header block), which carries no message
 and so needs no codec."
-  (let ((json (agent-repl-rpc--serialize encoder request)))
-    (agent-repl--info nil "elisp.rpc.stream-open method=%S" method)
+  (let ((json (agent-repl-rpc--serialize encoder request))
+        (log-scope
+         (agent-repl--capture-log-scope
+          '(:agent-repl-context "an unscoped RPC exchange is process-wide"))))
+    (agent-repl--info log-scope "elisp.rpc.stream-open method=%S" method)
     (agent-repl-connect-stream
      conn method json
      (lambda (alist)
        (condition-case err
            (funcall on-push (funcall decoder alist))
          (error
-          (agent-repl--error nil "elisp.rpc.push-invalid method=%S error=%S body=%S"
+          (agent-repl--error log-scope "elisp.rpc.push-invalid method=%S error=%S body=%S"
                              method err alist))))
      (lambda (outcome)
-       (agent-repl--info nil "elisp.rpc.stream-close method=%S outcome=%S" method (car outcome))
+       (agent-repl--info log-scope "elisp.rpc.stream-close method=%S outcome=%S" method (car outcome))
        (when on-close (funcall on-close outcome)))
      (when on-open
        (lambda ()
-         (agent-repl--info nil "elisp.rpc.stream-accepted method=%S" method)
+         (agent-repl--info log-scope "elisp.rpc.stream-accepted method=%S" method)
          (funcall on-open))))))
 
 ;;;; ---- Unary verbs ----

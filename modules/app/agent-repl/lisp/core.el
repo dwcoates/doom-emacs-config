@@ -109,7 +109,7 @@ than absorbed."
     ;; Guard: owner files can arm before `agent-repl--log' exists on an
     ;; unusual load order; the registration itself must not depend on it.
     (when (fboundp 'agent-repl--log)
-      (agent-repl--log nil "register-timer: key=%s replaced=%s timer=%S keyed-count=%d total-count=%d"
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "register-timer: key=%s replaced=%s timer=%S keyed-count=%d total-count=%d"
                        key (if replaced "t" "nil") timer
                        (length agent-repl--keyed-timers) (length agent-repl--timers)))
     timer))
@@ -126,7 +126,7 @@ Returns non-nil when a timer was actually cancelled."
     (when cell
       (setq agent-repl--keyed-timers (delq cell agent-repl--keyed-timers)))
     (when (fboundp 'agent-repl--log)
-      (agent-repl--log nil "cancel-timer-key: key=%s cancelled=%s keyed-count=%d"
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "cancel-timer-key: key=%s cancelled=%s keyed-count=%d"
                        key (if cancelled "t" "nil") (length agent-repl--keyed-timers)))
     cancelled))
 
@@ -148,7 +148,7 @@ no unregistered chain to leave armed across a reload."
     ;; Guard: this function is called at load time (line below), before
     ;; agent-repl--log is defined.  Only log when logging is available.
     (when (fboundp 'agent-repl--log)
-      (agent-repl--log nil "cancel-all-timers: cancelled=%d keyed-cleared=%d"
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "cancel-all-timers: cancelled=%d keyed-cleared=%d"
                        count keyed-count))))
 
 (agent-repl--cancel-all-timers)
@@ -361,7 +361,7 @@ swallowed, and does not abort the remaining migrations."
               ;; `message', which is already the channel `agent-repl--warn'
               ;; would have used.
               (if (fboundp 'agent-repl--log)
-                  (agent-repl--log nil "migrate-legacy-state: moved %s -> %s" old new)
+                  (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "migrate-legacy-state: moved %s -> %s" old new)
                 (let ((inhibit-message t))
                   (message "[agent-repl] migrated state %s -> %s" old new))))
           (error
@@ -585,12 +585,12 @@ set to obtain a prefix."
         (legacy (getenv "CLAUDE_WORKSPACE_PREFIX")))
     (if (and new (not (string-empty-p new)))
         (progn
-          (agent-repl--log nil
+          (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
                             "workspace-prefix: source=AGENT_WORKSPACE_PREFIX value=%S"
                             new)
           new)
       (let ((result (or legacy "")))
-        (agent-repl--log nil
+        (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
                           "workspace-prefix: source=CLAUDE_WORKSPACE_PREFIX value=%S"
                           result)
         result))))
@@ -964,6 +964,57 @@ must keep shouting."
 (defconst agent-repl--global-log-scope :agent-repl-global-log-scope
   "Explicit workspace argument for a record that is genuinely central.")
 
+(defconst agent-repl--central-log-scope-tag :agent-repl-central
+  "Tag introducing an explicitly reasoned central log scope.")
+
+(defconst agent-repl--context-log-scope-tag :agent-repl-context
+  "Tag introducing a reasoned context-derived log scope.")
+
+(defun agent-repl--reasoned-log-scope-reason (scope tag)
+  "Return SCOPE's nonempty reason when SCOPE is a well-formed TAG marker.
+A reasoned marker is the quoted two-element list `(TAG REASON)'.  The reason
+lives at the call site so source review and the static logging audit can tell
+an intentional central record from omitted workspace attribution."
+  (when (and (consp scope)
+             (eq (car scope) tag)
+             (consp (cdr scope))
+             (null (cddr scope))
+             (stringp (cadr scope))
+             (not (string-empty-p (cadr scope))))
+    (cadr scope)))
+
+(defun agent-repl--central-log-scope-reason (scope)
+  "Return SCOPE's reason when SCOPE explicitly requires the central sink."
+  (agent-repl--reasoned-log-scope-reason
+   scope agent-repl--central-log-scope-tag))
+
+(defun agent-repl--context-log-scope-reason (scope)
+  "Return SCOPE's reason when SCOPE derives workspace context when available.
+The marker's reason explains why the same site is genuinely central when no
+request edge, owning buffer, or current workspace supplies an identity."
+  (agent-repl--reasoned-log-scope-reason
+   scope agent-repl--context-log-scope-tag))
+
+(defun agent-repl--capture-log-scope (scope)
+  "Resolve SCOPE now and return a durable scope for an asynchronous callback.
+The returned value is either the concrete workspace name or a reasoned central
+marker.  Callers capture before registering callbacks so later process filters,
+sentinels, and timers cannot inherit whichever buffer happens to be current
+when Emacs eventually dispatches them.
+
+This helper deliberately emits no record: it is part of the logging boundary,
+and logging its own resolution would recurse through the same boundary."
+  (let ((routing (agent-repl--resolve-log-workspace
+                  scope "elisp.core.capture-log-scope")))
+    (cond
+     ((plist-get routing :workspace) (plist-get routing :workspace))
+     ((plist-get routing :central)
+      (list agent-repl--central-log-scope-tag (plist-get routing :central)))
+     (t
+      (error "agent-repl cannot capture log scope: offender=%S reason=%s"
+             (plist-get routing :offender)
+             (plist-get routing :reason))))))
+
 (defvar agent-repl--log-context-workspace nil
   "Dynamically bound workspace for records emitted below an asynchronous edge.")
 
@@ -1161,20 +1212,29 @@ an invariant violation and signals; it is never rewritten to the central sink."
 The return value is `(:workspace NAME)', `(:central REASON)', or a plist with
 `:routing-error', `:offender', and `:reason'.  Explicit scope wins, followed by
 the dynamically bound request edge, the current buffer's owner, the current
-workspace, and finally the reasoned central registry."
-  (let ((candidate
+workspace, and finally an explicit reasoned context marker or the legacy
+reasoned central registry."
+  (let* ((explicit-central-reason
+          (agent-repl--central-log-scope-reason ws))
+         (context-central-reason
+          (agent-repl--context-log-scope-reason ws))
+         (candidate
          (cond
+          (explicit-central-reason agent-repl--global-log-scope)
           ((eq ws agent-repl--global-log-scope) agent-repl--global-log-scope)
-          (ws ws)
+          ((and ws (not context-central-reason)) ws)
           (agent-repl--log-context-workspace agent-repl--log-context-workspace)
           ((agent-repl--buffer-owner (current-buffer)))
           ((and (fboundp 'agent-repl--ws-current-log-name)
                 (agent-repl--ws-current-log-name)))
+          (context-central-reason agent-repl--global-log-scope)
           ((agent-repl--central-log-reason fmt) agent-repl--global-log-scope)
           (t nil))))
     (cond
      ((eq candidate agent-repl--global-log-scope)
-      (list :central (or (agent-repl--central-log-reason fmt)
+      (list :central (or explicit-central-reason
+                         context-central-reason
+                         (agent-repl--central-log-reason fmt)
                          "explicit central request context")))
      ((null candidate)
       (list :routing-error t :offender nil
@@ -1571,8 +1631,10 @@ the untagged operation template used by warning and error wrappers."
           (when agent-repl-log-to-file
             (agent-repl--do-log-to-file record nil))
           (agent-repl--note-unroutable-log-workspace offender)
-          (error "agent-repl log routing invariant violated: workspace=%S reason=%s"
-                 offender reason))
+          (error
+           "agent-repl log routing invariant violated: workspace=%S reason=%s operation=%s"
+           offender reason
+           (agent-repl--log-operation (or operation-fmt fmt))))
       (let* ((record (agent-repl--log-record sink-ws level verbosity fmt args
                                              pseudo-ws operation-fmt))
              (text (agent-repl--build-log-text sink-ws fmt args))
@@ -1805,17 +1867,18 @@ off will not shrink one — that is `agent-repl-set-log-file-level'."
                  ('t "ON")
                  ('verbose "ON (verbose)")
                  (_ (agent-repl--fatal
-                     nil "elisp.core.toggle-debug: agent-repl-debug has unexpected value=%S"
+                     '(:agent-repl-central "process-wide logging and utility state")
+                     "elisp.core.toggle-debug: agent-repl-debug has unexpected value=%S"
                      agent-repl-debug)))))
     ;; Emitted through `message' unconditionally: this is synchronous feedback
     ;; from a command the user just ran, and it must be visible in exactly the
     ;; case where the ladder has just been turned OFF.
     (message "[agent-repl] debug logging: %s" label)
     (if agent-repl-debug
-        (agent-repl--info nil "elisp.core.toggle-debug: visibility=%s" label)
+        (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-debug: visibility=%s" label)
       ;; The turn-OFF record cannot ride `--info' honestly once visibility is
       ;; gone from *Messages*, but the durable sink still wants the boundary.
-      (agent-repl--log nil "elisp.core.toggle-debug: visibility=%s" label))))
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-debug: visibility=%s" label))))
 
 (defun agent-repl-set-log-file-level (level)
   "Set `agent-repl-log-file-level' to LEVEL for the rest of this session.
@@ -1831,14 +1894,15 @@ and back up before a reproduction is captured."
            nil t nil nil (symbol-name agent-repl-log-file-level)))))
   (unless (memq level '(debug info warn error))
     (agent-repl--error
-     nil "elisp.core.set-log-file-level: rejected level=%S reason=not-a-log-level" level)
+     '(:agent-repl-central "process-wide logging and utility state")
+     "elisp.core.set-log-file-level: rejected level=%S reason=not-a-log-level" level)
     (error "agent-repl: %S is not a log level; expected one of debug info warn error"
            level))
   (setq agent-repl-log-file-level level)
   ;; Announced through the durable sink as well as the echo area: the record
   ;; saying the threshold moved is itself the boundary a later reader needs to
   ;; explain why the surrounding volume changed.
-  (agent-repl--info nil "elisp.core.set-log-file-level: durable log level now %s" level)
+  (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.set-log-file-level: durable log level now %s" level)
   (message "[agent-repl] durable log level: %s" level)
   level)
 
@@ -1853,7 +1917,7 @@ Affects the FILE only.  The per-workspace log buffers follow
   (setq agent-repl-log-file-level
         (if (eq agent-repl-log-file-level 'debug) 'info 'debug))
   (let ((on (eq agent-repl-log-file-level 'debug)))
-    (agent-repl--info nil "elisp.core.toggle-verbose-to-disk: verbose-to-file=%s"
+    (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-verbose-to-disk: verbose-to-file=%s"
                       (if on "ON" "OFF"))
     (message "[agent-repl] verbose logging to disk: %s%s"
              (if on "ON" "OFF")
@@ -1903,7 +1967,7 @@ propagates exactly as it did before."
        (let ((,result (progn ,@body)))
          (when quit-flag
            (agent-repl--log
-            nil
+            '(:agent-repl-central "process-wide logging and utility state")
             "deferred-quit: C-g arrived inside %s — deferred to the command loop (quit-flag left armed)"
             ,context))
          ,result))))
@@ -2221,7 +2285,7 @@ dead PROC.  Returns non-nil when a deletion was performed or scheduled."
   (when (process-live-p proc)
     (if (eq (current-thread) main-thread)
         (progn (delete-process proc) t)
-      (agent-repl--log nil
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
                        "kill-process-safely: deferring delete-process %s to main thread"
                        (ignore-errors (process-name proc)))
       (agent-repl--defer-to-main-thread
@@ -2376,7 +2440,7 @@ explode."
                        :connection-type 'pipe
                        :noquery t))))
           (agent-repl--log-verbose
-           nil
+           '(:agent-repl-central "process-wide logging and utility state")
            "capture-process-output: spawned program=%s args=%S suppress-stderr=%s timeout=%s"
            program args suppress-stderr timeout)
           (set-process-query-on-exit-flag proc nil)
@@ -2400,7 +2464,7 @@ explode."
               ;; of it.  Log so post-mortems can see WHICH command stalled
               ;; (the per-call cherry-pick-base stalls were invisible
               ;; until this line existed).
-              (agent-repl--log nil
+              (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
                                 "capture-process-output: TIMEOUT after %ss %s %S"
                                 timeout program args)
               "")
@@ -2410,7 +2474,7 @@ explode."
                                (buffer-substring-no-properties
                                 (point-min) (point-max)))))
                   (agent-repl--log-verbose
-                   nil
+                   '(:agent-repl-central "process-wide logging and utility state")
                    "capture-process-output: completed program=%s args=%S status=%S output-length=%d"
                    program args status (length output))
                   output))))))
@@ -2479,7 +2543,7 @@ gh (see AGENTS.md \"No External Processes or External State in Tests\")."
                       (format "agent-repl-%s" label)
                       buf
                       "gh" args)))
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
                       "async-gh: spawned label=%s dir=%s args=%S"
                       label default-directory args)
     (set-process-query-on-exit-flag proc nil)
@@ -2496,7 +2560,7 @@ silently waiting forever.  This helper owns the completion branch separately
 from the external spawn boundary, so its pure Elisp behavior is directly
 testable with process fixtures."
   (if (process-live-p process)
-      (agent-repl--log-verbose nil
+      (agent-repl--log-verbose '(:agent-repl-central "process-wide logging and utility state")
                                 "async-gh: nonterminal-sentinel label=%s event=%S"
                                 label event)
     (let* ((buffer (process-buffer process))
@@ -2513,7 +2577,7 @@ testable with process fixtures."
         ;; `async-gh' can only run after the full module load, whose order
         ;; defines `agent-repl--kill-buffer-safely' before a caller can spawn.
         (agent-repl--kill-buffer-safely buffer))
-      (agent-repl--log nil
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
                         "async-gh: completed label=%s status=%s ok=%s event=%S output-length=%d"
                         label status ok event (length safe-output))
       (funcall callback ok safe-output))))
@@ -2639,7 +2703,7 @@ Lazily computes and caches the value on first invocation."
     (unless agent-repl-git-branch
       (setq agent-repl-git-branch
             (agent-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")))
-    (agent-repl--log nil "print-git-branch: cache-hit=%s branch=%S"
+    (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "print-git-branch: cache-hit=%s branch=%S"
                       cache-hit agent-repl-git-branch))
   (message "agent-repl loaded on branch: %s" agent-repl-git-branch))
 
@@ -3055,28 +3119,33 @@ log line."
          ((not (fboundp arm-fn))
           (push key unavailable)
           (agent-repl--warn
-           nil "assert-heartbeat-armed: key=%s outcome=unavailable arm-fn=%s reason=owner-not-loaded"
+           '(:agent-repl-central "process-wide logging and utility state")
+           "assert-heartbeat-armed: key=%s outcome=unavailable arm-fn=%s reason=owner-not-loaded"
            key arm-fn))
          (t
           (agent-repl--info
-           nil "assert-heartbeat-armed: key=%s outcome=stranded arm-fn=%s action=re-arming"
+           '(:agent-repl-central "process-wide logging and utility state")
+           "assert-heartbeat-armed: key=%s outcome=stranded arm-fn=%s action=re-arming"
            key arm-fn)
           (funcall arm-fn)
           (if (agent-repl--timer-armed-p key)
               (progn
                 (push key rearmed)
                 (agent-repl--info
-                 nil "assert-heartbeat-armed: key=%s outcome=rearmed arm-fn=%s" key arm-fn))
+                 '(:agent-repl-central "process-wide logging and utility state")
+                 "assert-heartbeat-armed: key=%s outcome=rearmed arm-fn=%s" key arm-fn))
             (push key failed)
             (agent-repl--warn
-             nil "assert-heartbeat-armed: key=%s outcome=rearm-failed arm-fn=%s"
+             '(:agent-repl-central "process-wide logging and utility state")
+             "assert-heartbeat-armed: key=%s outcome=rearm-failed arm-fn=%s"
              key arm-fn))))))
     (let ((result (list :armed (nreverse armed)
                         :rearmed (nreverse rearmed)
                         :failed (nreverse failed)
                         :unavailable (nreverse unavailable))))
       (agent-repl--log-verbose
-       nil "assert-heartbeat-armed: armed=%d rearmed=%d failed=%d unavailable=%d"
+       '(:agent-repl-central "process-wide logging and utility state")
+       "assert-heartbeat-armed: armed=%d rearmed=%d failed=%d unavailable=%d"
        (length (plist-get result :armed))
        (length (plist-get result :rearmed))
        (length (plist-get result :failed))
@@ -3120,7 +3189,8 @@ Returns `:checked' with the assertion result consed on, or `:deferred'."
           (run-with-idle-timer agent-repl-heartbeat-assert-defer-delay nil
                                #'agent-repl--assert-heartbeat-armed))
     (agent-repl--log
-     nil "assert-heartbeat-armed: outcome=deferred reason=owners-not-loaded delay=%s timer=%S"
+     '(:agent-repl-central "process-wide logging and utility state")
+     "assert-heartbeat-armed: outcome=deferred reason=owners-not-loaded delay=%s timer=%S"
      agent-repl-heartbeat-assert-defer-delay
      agent-repl--heartbeat-assert-deferral-timer)
     :deferred))

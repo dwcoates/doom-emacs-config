@@ -148,7 +148,9 @@ window is selected so the user can start typing immediately."
   "Return non-nil if the buffer stored at KEY in current workspace is visible."
   (let* ((buf (agent-repl--ws-get (agent-repl--ws-current-name) key))
          (result (and buf (buffer-live-p buf) (get-buffer-window buf))))
-    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
+    (agent-repl--log-verbose
+     '(:agent-repl-context "panel visibility can be checked outside a workspace")
+     "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
     result))
 
 (defun agent-repl--input-visible-p ()
@@ -163,7 +165,9 @@ window is selected so the user can start typing immediately."
   "Return t if both the input panel and the agent view are visible."
   (let ((result (and (agent-repl--input-visible-p)
                      (agent-repl--view-visible-p))))
-    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "panels-visible-p: result=%s" (if result "visible" "hidden"))
+    (agent-repl--log-verbose
+     '(:agent-repl-context "panel visibility can be checked outside a workspace")
+     "panels-visible-p: result=%s" (if result "visible" "hidden"))
     result))
 
 ;;;; Panel display and hide
@@ -183,7 +187,9 @@ caller is doing a per-frame teardown."
 
 (defun agent-repl--close-buffer-windows (&rest bufs)
   "Close windows displaying any of BUFS."
-  (agent-repl--log (agent-repl--ws-current-log-name) "close-buffer-windows %s" (mapcar #'agent-repl--safe-buffer-name bufs))
+  (agent-repl--log
+   '(:agent-repl-context "panel cleanup can run outside a workspace")
+   "close-buffer-windows %s" (mapcar #'agent-repl--safe-buffer-name bufs))
   (dolist (buf bufs)
     (when (and buf (buffer-live-p buf))
       (agent-repl--close-buffer-window buf))))
@@ -635,7 +641,8 @@ latest ws, dropping bookkeeping on the intermediate ones).
 
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
-  (agent-repl--log (agent-repl--ws-current-log-name) "after-persp-activated: entry cache=%S"
+  (agent-repl--log '(:agent-repl-context "perspective activation can name no agent workspace")
+                   "after-persp-activated: entry cache=%S"
                     (or (agent-repl--ws-names-cache) "(unbound)"))
   ;; Suppressed during `agent-repl--eager-open-panels': its transient
   ;; switch-in/build/switch-back would otherwise schedule a deferred
@@ -644,7 +651,7 @@ events (kill, switch, add) are traceable."
   ;; the background workspace's panels (the eviction bug `--gui-boot' documents).
   (cond
    (agent-repl--eager-open-in-progress
-    (agent-repl--log (agent-repl--ws-current-log-name)
+    (agent-repl--log '(:agent-repl-context "perspective activation can name no agent workspace")
                       "after-persp-activated: suppressed (eager-open in progress)"))
    ((agent-repl--foreign-perspective-p (agent-repl--ws-current-name))
     ;; A perspective persp-mode activated that agent-repl never registered —
@@ -652,7 +659,7 @@ events (kill, switch, add) are traceable."
     ;; list.  Scheduling `--on-workspace-switch' for it would feed its name
     ;; into the logging ladder with no sink it will ever own; see
     ;; `agent-repl--foreign-perspective-p'.
-    (agent-repl--log-verbose nil "after-persp-activated: skipped foreign perspective ws=%s"
+    (agent-repl--log-verbose '(:agent-repl-central "a foreign perspective has no agent workspace") "after-persp-activated: skipped foreign perspective ws=%s"
                               (agent-repl--ws-current-name)))
    (t
     (let ((ws (agent-repl--ws-current-name)))
@@ -878,7 +885,7 @@ visible — the input panel's live partner is the webview."
                         (or (not is-input)
                             (and (not loading)
                                  (not webview-window))))))
-      (agent-repl--log-verbose (agent-repl--ws-current-log-name)
+      (agent-repl--log-verbose '(:agent-repl-context "panel restoration can run outside a workspace")
                                 "orphaned-panel-p: name=%s id=%s input=%s partner=%s one-window=%s partner-visible=%s loading=%s webview-visible=%s result=%s"
                                 name id is-input partner one-window
                                 (and partner-window t) (and loading t)
@@ -924,7 +931,7 @@ the sweeper."
   (let* ((orphaned (agent-repl--orphaned-panel-p name))
          (own (and orphaned (agent-repl--own-panel-p name)))
          (result (and orphaned (not own))))
-    (agent-repl--log-verbose (agent-repl--ws-current-log-name)
+    (agent-repl--log-verbose '(:agent-repl-context "panel restoration can run outside a workspace")
                               "sweepable-panel-p: name=%s orphaned=%s own=%s result=%s"
                               name (and orphaned t) (and own t) (and result t))
     result))
@@ -1232,14 +1239,16 @@ push-to-back.  Bound to `SPC o c'."
   "Send SIGKILL to PROC if it is still alive."
   (if (process-live-p proc)
       (progn
-        (agent-repl--log (agent-repl--ws-current-log-name) "sigkill-if-alive: branch=signal proc=%s" proc)
+        (agent-repl--log '(:agent-repl-context "process cleanup can run after workspace teardown")
+                         "sigkill-if-alive: branch=signal proc=%s" proc)
         (signal-process proc 'SIGKILL))
-    (agent-repl--log-verbose (agent-repl--ws-current-log-name)
+    (agent-repl--log-verbose '(:agent-repl-context "process cleanup can run after workspace teardown")
                               "sigkill-if-alive: branch=already-dead proc=%s" proc)))
 
 (defun agent-repl--schedule-sigkill (proc)
   "Schedule a SIGKILL for PROC after 0.5s if it's still alive."
-  (agent-repl--log (agent-repl--ws-current-log-name) "schedule-sigkill: scheduling for proc=%s" proc)
+  (agent-repl--log '(:agent-repl-context "process cleanup can run after workspace teardown")
+                   "schedule-sigkill: scheduling for proc=%s" proc)
   (run-at-time agent-repl-sigkill-delay nil #'agent-repl--sigkill-if-alive proc))
 
 (defun agent-repl--kill-workspace-buffers (ws)
