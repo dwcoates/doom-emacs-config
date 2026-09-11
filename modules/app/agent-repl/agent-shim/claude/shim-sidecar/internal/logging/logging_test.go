@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -362,6 +363,45 @@ func TestABootingDaemonIsRetriedUntilItAnswers(t *testing.T) {
 	}
 	if strings.Contains(global.String(), "forward-failure") {
 		t.Fatalf("a retry that succeeded was still reported as a failure: %q", global.String())
+	}
+}
+
+// A DAEMON SEEN SERVING AND THEN REPLACED IS NOT A STUCK DAEMON. The forwarder
+// wraps a connection failure with ErrForwardTargetNotThere when the target
+// this attempt dialed is provably gone (dead pid, or daemon.addr changed);
+// forwardLoop must not manufacture a WARN for that even though the daemon was
+// seen serving earlier in the ladder — that WARN belongs only to a daemon that
+// is genuinely stuck, not one that was replaced mid-flight.
+func TestATargetGoneAfterSeenServingIsTransientNotAWarn(t *testing.T) {
+	// Arrange: the daemon answers Ready every time (seenServing latches true),
+	// but every Forward attempt fails because the target it dialed is gone.
+	forwarder := &recordingForwarder{
+		address: "127.0.0.1:8123",
+		err:     fmt.Errorf("ClientLog at 127.0.0.1:8123: dial tcp: connection refused: %w", ErrForwardTargetNotThere),
+	}
+	l, _, global := forwardingSinks(t, true, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert: no WARN was manufactured, but the transient is narrated at DEBUG
+	// and the record itself is still kept in the global sink.
+	if strings.Contains(global.String(), "forward-failure") {
+		t.Fatalf("a target-not-there failure was reported as a WARN outage: %q", global.String())
+	}
+	operations := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		operations[decode(t, line).Operation]++
+	}
+	want := map[string]int{"sidecar.logging.forward-deferred": 1, "poll": 1}
+	for operation, count := range want {
+		if operations[operation] != count {
+			t.Fatalf("global operations = %v, want %v", operations, want)
+		}
 	}
 }
 
