@@ -521,3 +521,86 @@ func TestReconcileAnswersACompletedBoot(t *testing.T) {
 		t.Fatalf("report.HoldsRestored = %d, want %d", report.HoldsRestored, want.HoldsRestored)
 	}
 }
+
+// runLogRecord answers the first run-log record for an operation at a level,
+// so a test can assert on the CONTEXT a record carries and not only that it
+// exists.
+func runLogRecord(t *testing.T, root, operation, level string) map[string]any {
+	t.Helper()
+
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("ReadFile daemon.run.log: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("parse daemon.run.log record %q: %v", line, err)
+		}
+		if record["operation"] == operation && record["level"] == level {
+			return record
+		}
+	}
+	return nil
+}
+
+// TestAStaleAdvertisementIsRecordedBeforeItIsReplaced pins the realtest-1
+// finding: a predecessor that went without withdrawing left Emacs an address
+// to dial and time out on, and the boot that overwrites it says so.
+func TestAStaleAdvertisementIsRecordedBeforeItIsReplaced(t *testing.T) {
+	// Arrange: an address nothing is listening on. Port 0 can never be
+	// connected to, so the probe is certain rather than merely likely.
+	root := shortRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "daemon.addr"), []byte("127.0.0.1:0\n"), 0o644); err != nil {
+		t.Fatalf("write the stale daemon.addr: %v", err)
+	}
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	record := runLogRecord(t, root, "daemon.cmd.claim", dlog.LevelWarn)
+	if record == nil {
+		t.Fatal("no WARN daemon.cmd.claim record, want the stale advertisement reported")
+	}
+	context, _ := record["context"].(map[string]any)
+	if got := context["stale_address"]; got != "127.0.0.1:0" {
+		t.Fatalf("stale_address = %v, want the address the predecessor left", got)
+	}
+}
+
+// TestAnAnsweringAdvertisementIsNotCalledStale is the other arm: this
+// daemon's OWN address, published and then withdrawn, must never be reported
+// as a predecessor's leavings on a later boot of the same state root.
+func TestAnAnsweringAdvertisementIsNotCalledStale(t *testing.T) {
+	// Arrange: a first boot that published and withdrew.
+	root := shortRoot(t)
+	_ = runIn(t, root)
+	if _, err := os.Stat(filepath.Join(root, "daemon.addr")); !os.IsNotExist(err) {
+		t.Fatalf("the first boot left daemon.addr behind (stat err = %v)", err)
+	}
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	if record := runLogRecord(t, root, "daemon.cmd.claim", dlog.LevelWarn); record != nil {
+		t.Fatalf("a WARN daemon.cmd.claim record %v was written for a state root with no advertisement", record)
+	}
+}
+
+// TestTheWithdrawalIsRecordedAtInfo pins the evidence the realtest reader
+// needed and did not have: which exit took the advertisement down.
+func TestTheWithdrawalIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	record := runLogRecord(t, root, "daemon.cmd.exit", dlog.LevelInfo)
+	if record == nil {
+		t.Fatal("no INFO daemon.cmd.exit record, want the withdrawal recorded")
+	}
+}
