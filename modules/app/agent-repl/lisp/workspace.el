@@ -48,7 +48,7 @@
 ;;
 ;;   - `--ws-del' does NOT `remhash'.  It tombstones (stamps
 ;;     `:killed-at', clears every key in `--ws-runtime-keys').  The
-;;     identity keys (`:project-dir', `:created-at', `:ws-id',
+;;     identity keys (`:project-dir', `:created-at', `:ws-dir-hash',
 ;;     `:source-ws-dir', `:priority', the `:merge-completed*' family)
 ;;     survive so reverse-lookups, picker sort, and merged-state
 ;;     rendering keep working past kill.
@@ -211,7 +211,7 @@ hash is mutated, so a rejected rename leaves both names untouched.
 
 The complete OLD-WS plist is preserved under NEW-WS except that
 `:project-dir' is replaced with the canonical new path and cached
-`:ws-id' is cleared for lazy recomputation from that path.  OLD-WS is
+`:ws-dir-hash' is cleared for lazy recomputation from that path.  OLD-WS is
 then removed.  Returns NEW-WS after the move; invariant violations
 signal `user-error'."
   (unless (and (stringp old-ws) (not (string-empty-p old-ws)))
@@ -258,7 +258,7 @@ signal `user-error'."
          (new-plist (plist-put
                      (plist-put (copy-sequence old-plist)
                                 :project-dir canonical-dir)
-                     :ws-id nil)))
+                     :ws-dir-hash nil)))
     (agent-repl--log old-ws
                      "ws-rename-state: MOVE old-ws=%s new-ws=%s old-project-dir=%S new-project-dir=%s key-count=%d"
                      old-ws new-ws (plist-get old-plist :project-dir)
@@ -411,7 +411,7 @@ REFUSED — see the body."
   (let* ((existing (gethash ws agent-repl--workspaces))
          (stub-create (and (null existing) (not (eq key :project-dir))))
          (old-value (plist-get existing key)))
-    (when (and (memq key '(:project-dir :ws-id))
+    (when (and (memq key '(:project-dir :ws-dir-hash))
                old-value
                (not (equal old-value val)))
       (agent-repl--ws-forget-emacs-log-target
@@ -444,10 +444,10 @@ REFUSED — see the body."
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives
 the tombstone — notably `:project-dir', `:created-at', `:last-killed-at',
-`:last-viewed-at', `:priority', `:worktree-p', `:source-ws-dir', `:ws-id',
+`:last-viewed-at', `:priority', `:worktree-p', `:source-ws-dir', `:ws-dir-hash',
 and the `:merge-completed*' family.  Preserving `:project-dir' across tombstone
 is what lets `agent-repl--ws-dir' callers (magit-status, async git,
-ws-id hashing) keep working on a persp that outlives its agent-repl
+ws-dir-hash hashing) keep working on a persp that outlives its agent-repl
 session — the failure mode that previously surfaced as
 `no :project-dir for workspace X' errors after a kill.")
 
@@ -540,7 +540,7 @@ Stamps `:killed-at' with the current time, clears every key in
 `agent-repl--ws-runtime-keys' (frontend buffer / proc refs, timers,
 session-bound state), and preserves identity/historical keys
 (`:project-dir', `:created-at', `:last-killed-at', `:priority',
-`:worktree-p', `:source-ws-dir', `:ws-id', merge metadata).  The entry
+`:worktree-p', `:source-ws-dir', `:ws-dir-hash', merge metadata).  The entry
 remains in `agent-repl--workspaces' so `agent-repl--ws-dir' and
 reverse-lookups still resolve, but `agent-repl--ws-live-p' returns
 nil and every filtered iterator (picker, periodic updater)

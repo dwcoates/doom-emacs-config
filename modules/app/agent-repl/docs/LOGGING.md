@@ -27,9 +27,10 @@ audit found, which are the work.
    takes the workspace from its scope so a site cannot forget it. That
    `workspace_id` is the DAEMON-MINTED 16-hex `ids.WorkspaceID` in every
    runtime, and every log sink target a runtime mints is named after it; a
-   runtime that cannot resolve it refuses the record rather than substitute a
-   path-derived id, and the workspace directory hash the kernel lock file is
-   named after travels separately as `context.workspace_dir_hash`.
+   runtime that cannot resolve it omits the field rather than substitute a
+   path-derived id (Emacs before its first roster push), and the workspace
+   directory hash the kernel lock file is named after travels separately as
+   `context.workspace_dir_hash`.
 3. Coverage: `error` never swallowed and always carrying the error text;
    `warn` only for a defect or a named decision; `info` for every lifecycle
    edge; `debug` for request boundaries, state transitions and decisions.
