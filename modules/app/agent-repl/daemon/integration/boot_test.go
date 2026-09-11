@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
@@ -994,4 +995,74 @@ func TestARestartKeepsThePreviousInstancesWorkspaceRecordsReadable(t *testing.T)
 	if !sawSecond {
 		t.Fatalf("%s carries no record from pid %d", harness.WorkspaceLogPath(f.repo.Dir, "daemon"), nd.PID())
 	}
+}
+
+// TestBootClosesAWorkspaceWhoseDirectoryIsGone pins the owner's ruling. The
+// live example was workspace 6e32a50ef5fc47ef, whose worktree under a swept
+// temporary directory had been removed while its registry row stayed open, so
+// Emacs read a live roster row and opened a tab on a path that is not there.
+func TestBootClosesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
+	t.Parallel()
+	// Arrange: a registered workspace on a WORKTREE -- a workspace at the
+	// repository root is one whose removal takes the repository with it -- then
+	// the daemon is stopped and the directory removed under it.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	dir := worktreeOf(t, repo, "swept")
+	ws := harness.Register(t, d, dir)
+	d.Stop()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act: the next boot reconciles the row.
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
+	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+
+	// Assert: the boot recorded the close with the workspace, the directory
+	// and the stat error.
+	nd.AwaitLogRecord(nd.RunLogPath(), "the missing-directory close record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.boot.close_missing_dir" &&
+			strings.ToLower(r.Level) == "warn" &&
+			r.WorkspaceID == ws.GetId() &&
+			r.WorkspaceDir == ws.GetDir() &&
+			r.Context["error"] != nil
+	})
+
+	// Assert: and the roster Emacs receives carries the row as closed, so no
+	// tab is opened for it.
+	roster := nd.WatchRoster()
+	got := awaitRoster(t, nd, roster, "the missing-directory row receded", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, ws.GetId())
+		return row != nil && row.GetClosed().GetClosed()
+	})
+	if row := rosterRow(got, ws.GetId()); row == nil || !row.GetClosed().GetClosed() {
+		t.Fatalf("the row for %s = %v, want it carried as closed", ws.GetId(), row)
+	}
+}
+
+// TestBootCountsTheMissingDirectoryCloseInItsReport is the report half: the
+// boot's own completion record answers for what it closed, so a reader does
+// not have to count WARN records to know.
+func TestBootCountsTheMissingDirectoryCloseInItsReport(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	dir := worktreeOf(t, repo, "counted")
+	harness.Register(t, d, dir)
+	d.Stop()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
+	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+
+	// Assert.
+	nd.AwaitLogRecord(nd.RunLogPath(), "the boot completion record's count", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.boot" && strings.Contains(r.Message, "reconciliation completed") &&
+			r.Context["missing_dir_closed"] == float64(1)
+	})
 }

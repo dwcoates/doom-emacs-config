@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"sync"
 	"time"
 
@@ -66,6 +68,12 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 	// is still driving. Each workspace's state is reconciled as it is
 	// TRANSFERRED, which is the rendezvous the join arms below.
 	if !s.Joining() {
+		// THE MISSING DIRECTORIES ARE CLOSED FIRST, because every step below
+		// asks something of a workspace that is still open, and a workspace
+		// whose worktree is gone can answer none of it.
+		if err := s.closeMissingDirs(ctx, log, workspaces, &report); err != nil {
+			return Report{}, err
+		}
 		clientless, err := s.adopt(ctx, log, workspaces, &report)
 		if err != nil {
 			return Report{}, err
@@ -88,14 +96,72 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 	}
 
 	log.Debug("daemon.boot.run", "the boot reconciliation is complete", dlog.Context{
-		"adopted":          len(report.Adopted),
-		"undetermined":     len(report.Undetermined),
-		"orphans_closed":   len(report.Orphaned),
-		"holds_restored":   report.HoldsRestored,
-		"merges_recovered": len(report.MergesRecovered),
-		"dispositions":     len(report.Dispositions),
+		"adopted":            len(report.Adopted),
+		"undetermined":       len(report.Undetermined),
+		"orphans_closed":     len(report.Orphaned),
+		"missing_dir_closed": len(report.MissingDirClosed),
+		"holds_restored":     report.HoldsRestored,
+		"merges_recovered":   len(report.MergesRecovered),
+		"dispositions":       len(report.Dispositions),
 	})
 	return report, nil
+}
+
+// closeMissingDirs closes every open workspace whose directory is GONE.
+//
+// A workspace is a worktree plus the editor state over it, so a registry row
+// whose directory no longer exists names nothing a user can work in: Emacs
+// read the roster, opened a tab for it, and every per-workspace verb on that
+// tab then failed on a path that is not there. Closing the row is what takes
+// it out of the roster's live half (internal/resolve/sidebar draws a closed
+// row receded and `inactive`), and it is the same durable flag an explicit
+// CloseWorkspace sets.
+//
+// IT DOES NOT GO THROUGH THE CLOSE VERB'S QUIET GATE. That gate exists so a
+// USER's close cannot discard undelivered intent; a directory that does not
+// exist can neither receive intent nor be worked in, and refusing the close
+// would leave exactly the unopenable tab this step is here to prevent. It is
+// also not a re-close: a merged or nuked workspace keeps its registry row with
+// its directory removed and is ALREADY closed, so this step passes over it.
+//
+// A STAT THAT DOES NOT SAY "NOT EXIST" IS NEVER READ AS GONE, for the same
+// reason an unreadable lock is never read as free: "could not tell" is not the
+// answer this step needs, and closing a workspace on it would tear down the
+// editor state of a workspace that is merely unreachable this instant.
+func (s *sequence) closeMissingDirs(ctx context.Context, log dlog.Logger, workspaces []wsm.Workspace, report *Report) error {
+	for i := range workspaces {
+		ws := &workspaces[i]
+		if ws.Closed {
+			continue
+		}
+		_, statErr := os.Stat(ws.Dir)
+		if statErr == nil {
+			continue
+		}
+		// THE IDENTIFIERS GO IN THEIR OWN KEYS, which dlog promotes to
+		// top-level record fields (internal/dlog/record.go reservedKeys), so a
+		// reader joins on them rather than digging in context.
+		context := dlog.Context{
+			dlog.KeyWorkspaceID:  string(ws.ID),
+			dlog.KeyWorkspaceDir: ws.Dir,
+			"error":              statErr.Error(),
+		}
+		if !errors.Is(statErr, fs.ErrNotExist) {
+			log.Warn("daemon.boot.close_missing_dir", "the workspace directory could not be stat-ed; never read as gone", context)
+			continue
+		}
+		if err := s.deps.DB.SetClosed(ctx, ws.ID, true); err != nil {
+			context["error"] = err.Error()
+			log.Error("daemon.boot.close_missing_dir", "a workspace whose directory is gone could not be closed", context)
+			return fmt.Errorf("boot: close the missing-directory workspace %s: %w", ws.ID, err)
+		}
+		// The LOCAL row is closed with the durable one, so every step below
+		// this reads the workspace as the closed row it now is.
+		ws.Closed = true
+		log.Warn("daemon.boot.close_missing_dir", "the workspace directory is gone; the workspace is closed", context)
+		report.MissingDirClosed = append(report.MissingDirClosed, ws.ID)
+	}
+	return nil
 }
 
 // survivor is one workspace whose lock reads HELD: a shim this boot must dial

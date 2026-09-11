@@ -64,6 +64,11 @@ const DefaultAdoptBound = 10 * time.Second
 type Report struct {
 	// Adopted are the workspaces whose surviving shims were reconnected.
 	Adopted []ids.WorkspaceID
+	// MissingDirClosed are the workspaces this boot CLOSED because their
+	// directory no longer exists. They are counted separately from Orphaned
+	// because closing a row is a registry decision about the workspace, while
+	// an orphan close is about one workspace's unterminated turns.
+	MissingDirClosed []ids.WorkspaceID
 	// Orphaned are the turns closed because they had no terminal.
 	Orphaned []ids.TurnID
 	// HoldsRestored is how many held prompts came back.
