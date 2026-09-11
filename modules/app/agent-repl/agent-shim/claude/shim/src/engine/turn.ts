@@ -142,6 +142,14 @@ export interface SessionContext {
    * like a session in perfect health serving one odd refusal.
    */
   reportStoreUnreachable(detail: string): void;
+  /**
+   * A store read this shim SERVED, which is the recovery for the fault above.
+   *
+   * Declared beside the refusal on purpose: a fault channel with no recovery
+   * channel makes a transient outage permanent, and the pair is what keeps the
+   * session's health a statement about now rather than about ever.
+   */
+  reportStoreReadable(): void;
 }
 
 /**
@@ -927,9 +935,11 @@ export class TurnEngine {
         // Validated at the wire; read back through ids.ts so an empty pointer
         // cannot reach the store as a legal-looking cursor.
         storeItemPointerValue(after);
-        return readHistoryPage(
+        const older = readHistoryPage(
           await this.session.persistence.readAgentPage(target, request.pageSize, after),
         );
+        this.session.reportStoreReadable();
+        return older;
       }
       // THE SAME PRODUCER VERDICT `WatchAgent` GIVES. An agent this shim
       // announced whose first row has not landed has an EMPTY past, not an
@@ -942,11 +952,13 @@ export class TurnEngine {
       // because the value of that open is the tail — but here the ask is the
       // only thing that tells an empty book apart from a store that is down or
       // failing reads, and this endpoint owes a typed refusal for both.
-      return readHistoryPage(
+      const page = readHistoryPage(
         await this.session.persistence.readFirstPage(target, request.pageSize, undefined, () =>
           this.session.knowsAgent(target),
         ),
       );
+      this.session.reportStoreReadable();
+      return page;
     } catch (err) {
       if (err instanceof PersistenceError) {
         const kind =
