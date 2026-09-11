@@ -49,6 +49,10 @@
 #                       identity is stale, and it pushes `reload_webapp` to the
 #                       clients that must reload. This script only reports what
 #                       moved.
+#  5b. daemon gate      readiness-report.sh --require-ready daemon, after the
+#                       Emacs coordinator observes a new process identity. A
+#                       stale running binary fails the deployment with its pid
+#                       and the deployed/source revision stamps.
 #   6. elisp reload     with `--elisp <git-range>`: hot-load every non-test
 #                       .el under modules/app/agent-repl changed in the range
 #                       into the running Emacs (test-*.el is batch-only and is
@@ -204,6 +208,21 @@ verify_webapp_revision() {
         exit 3
     fi
     log "webapp: revision gate passed"
+}
+
+# A terminal Emacs answer proves the restart coordinator observed a new daemon
+# identity. This independent gate proves that new process is serving the
+# artifact this deploy just wrote, using the same revision and process checks
+# the readiness report presents to operators.
+verify_daemon_revision() {
+    local report
+    if ! report="$("$READINESS_REPORT" --require-ready daemon)"; then
+        echo "[deploy-all] daemon post-bounce revision gate failed; structured readiness report names the running pid, deployed_sha, and source_sha:" >&2
+        printf '%s\n' "$report" >&2
+        echo "[deploy-all] deploy incomplete: the daemon is not serving the deployed build" >&2
+        exit 3
+    fi
+    log "daemon: post-bounce revision gate passed"
 }
 
 # ---- 1. protobufs ----------------------------------------------------------
@@ -512,11 +531,22 @@ else
     else
         log "daemon: restarting and awaiting completion via emacsclient..."
     fi
-    RESTART_OUT="$("$EMACSCLIENT" --eval "$RESTART_FORM" 2>&1)" || {
-        echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
+    if ! RESTART_OUT="$("$EMACSCLIENT" --eval "$RESTART_FORM" 2>&1)"; then
+        case "$RESTART_OUT" in
+            *not\ restarted:*)
+                echo "[deploy-all] daemon not restarted: $RESTART_OUT" >&2
+                ;;
+            *)
+                echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
+                ;;
+        esac
         exit 3
-    }
+    fi
     case "$RESTART_OUT" in
+        *not\ restarted:*)
+            echo "[deploy-all] daemon not restarted: $RESTART_OUT" >&2
+            exit 3
+            ;;
         *refusing*)
             # emacsclient exits 0 even when the elisp signals; the refusal text
             # is the only tell. A refused bounce means the deploy is NOT
@@ -532,6 +562,7 @@ else
             exit 3
             ;;
     esac
+    verify_daemon_revision
     log "daemon: restart completed"
 
 fi
