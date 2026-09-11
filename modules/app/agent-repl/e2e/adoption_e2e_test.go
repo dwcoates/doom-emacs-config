@@ -409,11 +409,11 @@ func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.Reposit
 // drainTriggerRollout).
 func adTriggerSelfMergeRollout(t *testing.T, w *World, selfRepo *harness.Repo, path string) {
 	t.Helper()
-	// THE TRIGGER WORKSPACE'S SHIM IS STOOD DOWN BY THE HANDOVER, and its
-	// link severing is the evidence of that stop rather than a fault. The
-	// merge removes the trigger's worktree at its terminal, so the handover
-	// cannot transfer it — the successor could not resolve a log sink for a
-	// directory that is gone — and a workspace this daemon serves and does
+	// THE TRIGGER WORKSPACE'S SHIM IS STOOD DOWN BY THE MERGE before its
+	// worktree is removed, and its link severing is the evidence of that stop
+	// rather than a fault. The trigger is gone before the handover begins, so
+	// the handover cannot transfer it: the successor could not resolve a log
+	// sink for a directory that is gone. A workspace this daemon serves and does
 	// not hand over is stood down before the exit, because nothing after this
 	// daemon would know its process existed
 	// (daemon/internal/rollout/handover.go, standDownTheUntransferred).
