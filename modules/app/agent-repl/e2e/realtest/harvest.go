@@ -657,3 +657,124 @@ func sortFindings(findings []Finding) {
 		return a.Line < b.Line
 	})
 }
+
+// A REPEATED FINDING IS ONE FINDING, READ MANY TIMES. Realtest 1's first run
+// produced 5926 findings, of which about six thousand lines of the manifest
+// were the same two classes: every shim record in one workspace flagged for the
+// same attribution conflict, and the sidecar's `discover-meta` repeated 4988
+// times. A document nobody can read is not evidence the owner can rule on, and
+// the reason each of those is a finding is identical in every copy.
+//
+// So the manifest carries one line per CLASS with the count and one sample,
+// and every record is kept verbatim in HARVEST-FULL.jsonl beside it. The count
+// is what keeps this from being a filter: nothing is dropped, and the total per
+// class is in the document the owner reads.
+
+// FindingClass is one repeated finding, with how many times it occurred.
+//
+// The key is (source, operation, level, kind) — the runtime that wrote it, the
+// call site it came from, how bad it said it was, and what sort of evidence it
+// is. Two records that agree on all four are the same defect seen twice; the
+// message's own arguments differ between them and are exactly what the sample
+// and the full file are for.
+type FindingClass struct {
+	Source    string
+	Operation string
+	Level     string
+	Kind      FindingKind
+	Workspace string
+	// Count is how many findings fell in this class. One means the class is
+	// a single finding and is reported in full.
+	Count int
+	// Sample is the first finding of the class, verbatim.
+	Sample Finding
+}
+
+// CollapseFindings groups findings into classes, in first-appearance order.
+func CollapseFindings(findings []Finding) []FindingClass {
+	var out []FindingClass
+	at := make(map[string]int)
+	for _, finding := range findings {
+		key := strings.Join([]string{
+			finding.Source,
+			operationOrUnnamed(finding.Operation),
+			finding.Level,
+			finding.Kind.String(),
+			finding.Workspace,
+		}, "\x00")
+		if index, ok := at[key]; ok {
+			out[index].Count++
+			continue
+		}
+		at[key] = len(out)
+		out = append(out, FindingClass{
+			Source:    finding.Source,
+			Operation: operationOrUnnamed(finding.Operation),
+			Level:     finding.Level,
+			Kind:      finding.Kind,
+			Workspace: finding.Workspace,
+			Count:     1,
+			Sample:    finding,
+		})
+	}
+	return out
+}
+
+// fullHarvestName is the sibling file every finding is written to, verbatim.
+const fullHarvestName = "HARVEST-FULL.jsonl"
+
+// WriteFullHarvest writes every finding to dir/HARVEST-FULL.jsonl, one JSON
+// object per line, in harvest order.
+//
+// It is written even when the manifest reports every finding in full, so a
+// reader never has to work out whether the file exists for this run.
+func WriteFullHarvest(dir string, findings []Finding) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create the run directory %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, fullHarvestName)
+	var body strings.Builder
+	for _, finding := range findings {
+		line, err := json.Marshal(struct {
+			Kind      string `json:"kind"`
+			Source    string `json:"source"`
+			Path      string `json:"path"`
+			Line      int    `json:"line"`
+			Timestamp string `json:"timestamp"`
+			Level     string `json:"level"`
+			Operation string `json:"operation"`
+			Message   string `json:"message"`
+			Workspace string `json:"workspace"`
+			Note      string `json:"note"`
+			Raw       string `json:"raw"`
+		}{
+			Kind:      finding.Kind.String(),
+			Source:    finding.Source,
+			Path:      finding.Path,
+			Line:      finding.Line,
+			Timestamp: findingTimestamp(finding),
+			Level:     finding.Level,
+			Operation: finding.Operation,
+			Message:   finding.Message,
+			Workspace: finding.Workspace,
+			Note:      finding.Note,
+			Raw:       finding.Raw,
+		})
+		if err != nil {
+			return "", fmt.Errorf("render a finding from %s as JSON: %w", finding.Path, err)
+		}
+		body.Write(line)
+		body.WriteString("\n")
+	}
+	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
+}
+
+func findingTimestamp(finding Finding) string {
+	if finding.Timestamp.IsZero() {
+		return ""
+	}
+	return finding.Timestamp.Format(time.RFC3339Nano)
+}
