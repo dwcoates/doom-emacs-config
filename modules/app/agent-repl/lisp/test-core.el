@@ -3735,8 +3735,8 @@ survives into the rest of the batch run."
 (ert-deftest agent-repl-test-heartbeat-assertion-defers-on-a-cold-load ()
   "A cold load (owners not yet defined) defers instead of erroring or stranding."
   ;; Arrange — this is exactly core.el's own load-time state in a fresh
-  ;; batch process: core.el is evaluated before status.el, autosave.el,
-  ;; workspace-status-export.el, and readiness.el define the arm functions.
+  ;; batch process: core.el is evaluated before status.el and autosave.el
+  ;; define the arm functions.
   (agent-repl-test--with-timer-registry
     (let ((agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fn-that-does-not-exist)))
@@ -3767,6 +3767,25 @@ survives into the rest of the batch run."
           (should (equal '(:test-heartbeat) (plist-get (cdr outcome) :rearmed)))
           (should (null agent-repl--heartbeat-assert-deferral-timer)))))))
 
+(ert-deftest agent-repl-test-every-required-timer-key-names-a-loadable-owner ()
+  "A required key whose owner file does not exist can never be satisfied.
+`:readiness-poll' and `:workspace-status-export' outlived readiness.el
+and workspace-status-export.el, so every cold start warned
+`outcome=unavailable reason=owner-not-loaded' twice, a second after the
+module loaded, about jobs nothing owns any more."
+  ;; Arrange: the arm functions the production sources actually define.
+  (let ((defined nil))
+    (dolist (file (agent-repl-test--production-lisp-files))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (re-search-forward "^(defun \\([^ \t\n()]+\\)" nil t)
+          (push (intern (match-string 1)) defined))))
+    ;; Act / Assert: every required key's owner is one of them.  Read off
+    ;; the SOURCES, never `fboundp', because the suite's own process has
+    ;; loaded files a cold start would not have reached yet.
+    (dolist (entry agent-repl--required-timer-keys)
+      (should (memq (cdr entry) defined)))))
 
 (ert-deftest agent-repl-test-core-input-buffer-name-carries-the-title ()
   "The title rides after the identity segment, inside the name form."
