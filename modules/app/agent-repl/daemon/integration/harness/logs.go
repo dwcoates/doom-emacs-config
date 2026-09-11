@@ -391,13 +391,18 @@ func (d *Daemon) AwaitWorkspaceLogRecord(workspaceDir, what string, pred func(Lo
 }
 
 // AwaitWorkspaceLogOperationCount waits until a workspace's own log sink holds
-// at least `n` records under `operation`.
+// at least `n` records under `operation` FROM THIS DAEMON.
 //
 // It is how a test synchronizes on a daemon-side step it cannot observe on the
 // wire. The fake shim records an rpc when the request ARRIVES, so a test that
 // acts the moment it sees one is racing the daemon's handling of that rpc's
 // ANSWER — pushing a turn's terminal frame before the daemon has opened the
 // turn, for one, which loses the terminal and hangs whatever was waiting on it.
+//
+// The pid scope is the same rule RunLog applies, and for the same reason: a
+// workspace sink now spans daemon instances (internal/dlog/sink.go appends to
+// the standing target), so an unscoped count answers "somebody did this once"
+// where every caller means "THIS daemon did".
 func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string, n int) {
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
@@ -406,12 +411,7 @@ func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string,
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		seen := 0
-		for _, r := range readLog(d.t, path) {
-			if r.Operation == operation {
-				seen++
-			}
-		}
+		seen := d.WorkspaceLogOperationCount(workspaceDir, operation)
 		if seen >= n {
 			return
 		}
@@ -424,12 +424,15 @@ func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string,
 }
 
 // WorkspaceLogOperationCount answers how many records a workspace's log sink
-// already holds under an operation, for a test that needs a baseline.
+// already holds under an operation FROM THIS DAEMON, for a test that needs a
+// baseline. The workspace sink spans instances, so the pid scope is what makes
+// "nothing spawned" an assertion about the daemon under test rather than about
+// everything that ever ran against this workspace.
 func (d *Daemon) WorkspaceLogOperationCount(workspaceDir, operation string) int {
 	d.t.Helper()
 	seen := 0
 	for _, r := range readLog(d.t, WorkspaceLogPath(workspaceDir, "daemon")) {
-		if r.Operation == operation {
+		if r.Operation == operation && r.PID == d.PID() {
 			seen++
 		}
 	}
@@ -439,12 +442,12 @@ func (d *Daemon) WorkspaceLogOperationCount(workspaceDir, operation string) int 
 // WorkspaceLogTargets names every daemon-runtime target file behind one
 // workspace sink, oldest first.
 //
-// The canonical <workspace>/.claude/emacs/<sink>.log symlink names only the
-// CURRENT runtime's target: internal/dlog/sink.go mints a fresh target per
-// runtime ("A restart never trusts the previous run's destination") and
-// atomically re-points the link at it. A test that spans a crash and a cold
-// boot must therefore read every target the runtimes minted for that sink,
-// never the link alone, which answers only the successor's own records.
+// A new daemon instance now APPENDS to the target the canonical link already
+// names (internal/dlog/sink.go), so the link ordinarily spans every instance
+// and this answers one file. It still answers several when the cap rolled a
+// generation or an instance found nothing safe to append to, which is exactly
+// when a test that spans a crash and a cold boot would otherwise read only
+// part of the narrative.
 func WorkspaceLogTargets(t *testing.T, workspaceDir, sink string) []string {
 	t.Helper()
 	link := WorkspaceLogPath(workspaceDir, sink)

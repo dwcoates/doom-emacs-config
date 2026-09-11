@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"agentrepl/logging"
 )
@@ -60,14 +61,25 @@ type sink struct {
 	poison        error
 }
 
-// openSink creates this runtime's unique target for one workspace sink, opens
-// it with append semantics, and atomically replaces the canonical symlink so
-// it names that target.
+// openSink resolves this runtime's target for one workspace sink, opens it
+// with append semantics, and atomically replaces the canonical symlink so it
+// names that target.
+//
 // A target already minted for this workspace sink in THIS runtime is REUSED
 // (target != ""): a sink evicted on close and re-opened by the next
 // workspace-bound record must go on appending to the same file, or the
 // workspace's whole log narrative would be replaced by whatever came after the
 // eviction.
+//
+// AND A PREVIOUS RUNTIME'S TARGET IS REUSED TOO, for the same reason one
+// instant later. A NEW daemon instance used to mint a fresh generation and
+// retarget the link at it, so `<ws>/.claude/emacs/daemon.log` named only the
+// CURRENT instance: realtest 1 read a workspace whose link had been retargeted
+// four minutes earlier and the previous daemon's whole boot -- the adoption
+// records the reader was looking for -- was on an inode nothing named any
+// more. Long-lived sinks append on open and rotate only at the byte cap
+// (logging-contract.md), so a bounce loop cannot evict history merely by
+// restarting, and that rule now holds for the workspace sinks as well.
 func openSink(logsDir, workspaceDir, workspaceID, name, target string) (*sink, error) {
 	return openSinkSized(logsDir, workspaceDir, workspaceID, name, target, CapBytes, logging.DefaultBackups)
 }
@@ -79,6 +91,13 @@ func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capB
 	linkDir := filepath.Join(workspaceDir, linkDirRel)
 	if err := os.MkdirAll(linkDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create log directory %q: %w", linkDir, err)
+	}
+	if target == "" {
+		standing, err := standingTarget(logsDir, linkDir, name, capBytes)
+		if err != nil {
+			return nil, err
+		}
+		target = standing
 	}
 	if target == "" {
 		minted, err := createTarget(logsDir, workspaceID, name)
@@ -113,10 +132,51 @@ func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capB
 	return s, nil
 }
 
+// standingTarget answers the daemon-owned target the workspace's canonical
+// link already names, so a new instance APPENDS to the file the last one wrote
+// instead of starting a generation nothing before it is in. It answers the
+// empty string when there is nothing safe to append to, which is the caller's
+// signal to mint.
+//
+// THE SAME THREE THINGS THAT MAKE A TARGET OURS ARE CHECKED HERE. The
+// canonical path must be a SYMLINK -- a regular file or a foreign symlink the
+// workspace put there is displaced, never written to -- it must name a regular
+// file DIRECTLY INSIDE the daemon's own logs directory, and that file must be
+// under the cap, because a target already at the cap is a generation to roll
+// rather than one to join.
+//
+// An absent link and a path that is not a symlink are ordinary answers; any
+// other failure to read it is returned, because "could not tell whose file
+// that is" must never be answered by writing into it.
+func standingTarget(logsDir, linkDir, name string, capBytes int64) (string, error) {
+	link := filepath.Join(linkDir, name+".log")
+	dest, err := os.Readlink(link)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.EINVAL) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read canonical link %q for a standing target: %w", link, err)
+	}
+	if !filepath.IsAbs(dest) || filepath.Dir(dest) != filepath.Clean(logsDir) {
+		return "", nil
+	}
+	info, err := os.Lstat(dest)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("stat the standing log target %q: %w", dest, err)
+	}
+	if !info.Mode().IsRegular() || info.Size() >= capBytes {
+		return "", nil
+	}
+	return dest, nil
+}
+
 // createTarget makes a fresh, uniquely named target under the STATE ROOT's
-// logs directory, per ARCHITECTURE.md's "State root layout". A restart never
-// trusts the previous run's destination, so this is called once per sink per
-// runtime lifetime and the result is remembered in memory.
+// logs directory, per ARCHITECTURE.md's "State root layout". It is reached
+// only when the workspace has no daemon-owned target to append to, and the
+// result is remembered in memory for the rest of this runtime.
 //
 // IT IS NOT THE OS TEMP DIR. A durable log a person is asked to read must not
 // live where the operating system may sweep it, must not be scattered across a
