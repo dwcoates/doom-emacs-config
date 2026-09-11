@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 )
 
 func attachmentLineOf(uuid, body string) string {
@@ -327,5 +328,110 @@ func TestAContextBudgetWarningWithNoTextIsStoredRatherThanDrawnEmpty(t *testing.
 	}
 	if got := entries[0].GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind(); got != "attachment/context_budget_warning" {
 		t.Fatalf("kind = %q, want the record stored whole", got)
+	}
+}
+
+// convertAttachmentInBook converts one attachment line as though it were read
+// from a transcript whose book is `agent`, at a fixed file position — the two
+// inputs the injected-context write identity and key both derive from. It lets a
+// test place the SAME vendor record under two different books, which is exactly
+// what a skill inherited into a subagent's sidechain does.
+func convertAttachmentInBook(t *testing.T, c *Converter, line, agent string, offset int64) *storev1.StoreEntry {
+	t.Helper()
+	at := Attribution{
+		VendorSessionID: "session-uuid",
+		MainAgentID:     "session-uuid",
+		AgentID:         agent,
+		Path:            "/p/projects/proj/" + agent + ".jsonl",
+		FileID:          "dev:" + agent,
+		Offset:          offset,
+	}
+	entries := c.Line(decode(t, line), at, nil)
+	if len(entries) != 1 {
+		t.Fatalf("want exactly one entry, got %d", len(entries))
+	}
+	return entries[0]
+}
+
+// TestInjectedSkillsKeyIsScopedToItsBook is the realtest-1 defect (ledger row
+// 46): the vendor copies one invoked_skills record — uuid and all — into every
+// sidechain that inherits the skill, so the same uuid recurred under two books.
+// Keyed by the uuid alone the identical key named two books, and a re-ingest of
+// the second file asked the store to MOVE the row (upsert_changes_identity),
+// losing the write. The key must be scoped to its book so the two are two rows.
+func TestInjectedSkillsKeyIsScopedToItsBook(t *testing.T) {
+	// Arrange: one invoked_skills record, one uuid, inherited into two subagent
+	// books.
+	body := `{"type":"invoked_skills","skills":[{"name":"workspace","path":"userSettings:workspace","content":"# body"}]}`
+	line := attachmentLineOf("1403ebb6", body)
+
+	// Act: the same record read from two different sidechain transcripts.
+	inA := convertAttachmentInBook(t, newTestConverter(t), line, "toolu_A", 0)
+	inB := convertAttachmentInBook(t, newTestConverter(t), line, "toolu_B", 0)
+
+	// Assert: two distinct keys, each deterministically naming its own book, so
+	// nothing ever tries to move a row from one book to another.
+	if inA.GetUpsertKey() == inB.GetUpsertKey() {
+		t.Fatalf("the same skill under two books shares the key %q; the store would refuse the second as an identity move", inA.GetUpsertKey())
+	}
+	if got := inA.GetUpsertKey(); got != ActivityKey(ContextInjectedUnitID("skills", "toolu_A", "1403ebb6")) {
+		t.Fatalf("book A key = %q, want it scoped to book A", got)
+	}
+	if got := pageLine(inA).GetPageAgentId().GetValue(); got != "toolu_A" {
+		t.Fatalf("book A page agent = %q, want toolu_A", got)
+	}
+	if got := pageLine(inB).GetPageAgentId().GetValue(); got != "toolu_B" {
+		t.Fatalf("book B page agent = %q, want toolu_B", got)
+	}
+}
+
+// TestInjectedSkillsKeyIsStableAcrossReconversion proves the invariant a
+// re-ingest rests on: converting the SAME transcript line again mints the
+// identical upsert key, book, AND write id, so the store absorbs it by write id
+// rather than ever seeing an identity move.
+func TestInjectedSkillsKeyIsStableAcrossReconversion(t *testing.T) {
+	// Arrange
+	body := `{"type":"invoked_skills","skills":[{"name":"workspace","content":"# body"}]}`
+	line := attachmentLineOf("1403ebb6", body)
+
+	// Act: two independent converters read the same file line at the same book
+	// and offset, as a fresh sidecar re-reading the transcript does.
+	first := convertAttachmentInBook(t, newTestConverter(t), line, "toolu_A", 4096)
+	again := convertAttachmentInBook(t, newTestConverter(t), line, "toolu_A", 4096)
+
+	// Assert
+	if first.GetUpsertKey() != again.GetUpsertKey() {
+		t.Fatalf("re-conversion key %q != %q; a re-ingest would not settle in place", again.GetUpsertKey(), first.GetUpsertKey())
+	}
+	if pageLine(first).GetPageAgentId().GetValue() != pageLine(again).GetPageAgentId().GetValue() {
+		t.Fatalf("re-conversion moved the book %q -> %q", pageLine(first).GetPageAgentId().GetValue(), pageLine(again).GetPageAgentId().GetValue())
+	}
+	if first.GetWriteId() != again.GetWriteId() {
+		t.Fatalf("re-conversion write id %q != %q; the store would not absorb the duplicate", again.GetWriteId(), first.GetWriteId())
+	}
+}
+
+// TestInjectedMemoryKeyIsScopedToItsBook is the same defect for the memory
+// injection, which the vendor inherits into sidechains exactly as it does a
+// skill, so the fix is applied consistently to both.
+func TestInjectedMemoryKeyIsScopedToItsBook(t *testing.T) {
+	// Arrange
+	body := `{"type":"nested_memory","path":"/p/CLAUDE.md",` +
+		`"content":{"path":"/p/CLAUDE.md","type":"Project","content":"@./AGENTS.md\n"}}`
+	line := attachmentLineOf("mem-1", body)
+
+	// Act
+	inA := convertAttachmentInBook(t, newTestConverter(t), line, "toolu_A", 0)
+	inB := convertAttachmentInBook(t, newTestConverter(t), line, "toolu_B", 0)
+
+	// Assert
+	if inA.GetUpsertKey() == inB.GetUpsertKey() {
+		t.Fatalf("the same memory file under two books shares the key %q", inA.GetUpsertKey())
+	}
+	if got := inA.GetUpsertKey(); got != ActivityKey(ContextInjectedUnitID("memory", "toolu_A", "mem-1")) {
+		t.Fatalf("book A key = %q, want it scoped to book A", got)
+	}
+	if got := pageLine(inA).GetPageAgentId().GetValue(); got != "toolu_A" {
+		t.Fatalf("book A page agent = %q, want toolu_A", got)
 	}
 }
