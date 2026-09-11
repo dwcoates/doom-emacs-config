@@ -66,7 +66,10 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	if err != nil {
 		return address, fmt.Errorf("read daemon address %q: %w", c.addrPath, err)
 	}
-	address = strings.TrimSpace(string(raw))
+	// daemon.addr's first line is the bare address; an optional "pid=<n>" line
+	// may follow it (see daemonaddr.ReadAdvertisement). The forwarder needs
+	// only the address, so it takes the first line and ignores the rest.
+	address = addressLine(string(raw))
 	if err := validateAddress(address); err != nil {
 		return address, fmt.Errorf("daemon address %q from %s: %w", address, c.addrPath, err)
 	}
@@ -276,6 +279,13 @@ func wireContext(in map[string]any) map[string]any {
 		}
 	}
 	return out
+}
+
+// addressLine is the bare "host:port" a daemon.addr payload advertises: its
+// first line, trimmed. A legacy bare-address file is exactly its first line.
+func addressLine(raw string) string {
+	first, _, _ := strings.Cut(raw, "\n")
+	return strings.TrimSpace(first)
 }
 
 func validateAddress(address string) error {
