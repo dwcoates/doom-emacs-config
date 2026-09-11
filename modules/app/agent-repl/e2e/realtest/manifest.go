@@ -205,17 +205,27 @@ func (m Manifest) render() string {
 }
 
 // phaseLabel renders a measurement's phase name for the manifest table.
-// PhasePanelPainted (and, downstream of it, PhaseTotal) get an explicit
-// qualifier: both are now measured in the SHOW phase, not the hidden one
-// (owner ruling 2026-09-11, phases.go says why), and a reader skimming the
-// table for "why is panel-painted's elapsed time so much larger than
-// tab-drawn's" should not have to go find that out from the source.
+//
+// PhasePanelPainted and PhaseTotal each get an explicit qualifier, because
+// each is easy to misread as "from spawn" the way every other row is (owner
+// ruling 2026-09-11; phases.go says why they are not):
+//
+//   - PhasePanelPainted's elapsed is the panel's own INTRINSIC paint cost,
+//     the delta from PhaseFocusEdge (the harness bringing Emacs forward) to
+//     the load, never from spawn — a spawn-based number would fold the
+//     harness's own arbitrary wait before it shows Emacs into a figure that
+//     is supposed to be about the product, which is never reported as
+//     latency.
+//   - PhaseTotal is startup-usable, spawn to the latest of tab-drawn,
+//     link-up, roster-subscribed, first-roster and webview-armed. There is
+//     deliberately no "total (spawn to shown-and-painted)" row: that number
+//     would be the same harness overhead, folded in the other direction.
 func phaseLabel(phase PhaseName) string {
 	switch phase {
 	case PhasePanelPainted:
-		return "panel-painted (on first show)"
+		return "panel paint cost (focus edge to load)"
 	case PhaseTotal:
-		return "total (spawn to shown-and-painted)"
+		return "startup-usable (spawn to usable)"
 	default:
 		return string(phase)
 	}

@@ -65,13 +65,29 @@ var budgets = []Budget{
 	// gate (owner ruling 2026-09-11; phases.go says why). It is still
 	// measured from spawn like every other row here.
 	{Phase: PhaseWebviewArmed, Limit: unmeasured},
-	// PhasePanelPainted and PhaseTotal are now measured in the SHOW phase —
-	// after the key self-test brings Emacs forward, not during hidden
-	// startup — so a future healthy-maximum measurement for either of these
-	// two rows is sized from "spawn to shown-and-painted", not "spawn to
-	// hidden-usable". Still measured from spawn, per this file's rule; only
-	// WHEN the marker fires moved.
+	// PhaseFocusEdge is spawn to the harness bringing Emacs forward for the
+	// key self-test — a real observed edge, but ALSO where the harness's own
+	// deliberate hidden-window wait ends. A budget on this row bounds how
+	// long the show-phase wait itself took, which is worth watching for
+	// harness health, but it is never a proxy for product latency: nothing
+	// downstream (PhaseTotal, PhasePanelPainted) is computed by adding to it.
+	{Phase: PhaseFocusEdge, Limit: unmeasured},
+	// PhasePanelPainted is now measured from PhaseFocusEdge, not spawn (owner
+	// ruling 2026-09-11): it is the panel's INTRINSIC paint cost, so a future
+	// healthy-maximum measurement for this row is sized from "focus edge to
+	// load" (observed around 0.4s), never from "spawn to load" — the latter
+	// bakes in however long the harness felt like waiting before it showed
+	// Emacs, which is harness overhead the owner never experiences and must
+	// never be reported as latency.
 	{Phase: PhasePanelPainted, Limit: unmeasured},
+	// PhaseTotal is startup-usable: spawn to the latest of tab-drawn,
+	// link-up, roster-subscribed, first-roster and webview-armed (phases.go's
+	// usableEdges). It EXCLUDES PhasePanelPainted on purpose, so a future
+	// healthy-maximum measurement for this row is sized from "spawn to
+	// usable" (observed around 2.8s) — the number the owner actually waits
+	// on — never from "spawn to shown-and-painted", which would fold the
+	// harness's own arbitrary wait before it reveals Emacs into a bound that
+	// is supposed to be about the product.
 	{Phase: PhaseTotal, Limit: unmeasured},
 }
 
