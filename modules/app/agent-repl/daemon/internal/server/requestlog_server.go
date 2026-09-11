@@ -24,6 +24,8 @@ func (s *requestLoggingServer) SubmitPrompt(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.submit_prompt", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.submit_prompt", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -39,6 +41,8 @@ func (s *requestLoggingServer) RequestCommandSupport(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.request_command_support", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.request_command_support", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -54,6 +58,8 @@ func (s *requestLoggingServer) OpenFeed(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.open_feed", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.open_feed", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -70,6 +76,8 @@ func (s *requestLoggingServer) WatchFeed(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_feed", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_feed", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -85,6 +93,8 @@ func (s *requestLoggingServer) GetFeedPage(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.get_feed_page", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.get_feed_page", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -100,6 +110,8 @@ func (s *requestLoggingServer) Interrupt(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.interrupt", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.interrupt", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -115,6 +127,8 @@ func (s *requestLoggingServer) AnswerPermission(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.answer_permission", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.answer_permission", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -130,6 +144,8 @@ func (s *requestLoggingServer) AnswerQuestion(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.answer_question", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.answer_question", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -145,6 +161,8 @@ func (s *requestLoggingServer) AnswerColdGate(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.answer_cold_gate", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.answer_cold_gate", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -161,6 +179,8 @@ func (s *requestLoggingServer) WatchWorkspaceRoster(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_workspace_roster", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_workspace_roster", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -176,6 +196,8 @@ func (s *requestLoggingServer) CreateWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.create_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.create_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -191,6 +213,8 @@ func (s *requestLoggingServer) OpenWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.open_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.open_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -206,6 +230,8 @@ func (s *requestLoggingServer) CloseWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.close_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.close_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -221,6 +247,8 @@ func (s *requestLoggingServer) KillWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.kill_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.kill_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -236,6 +264,8 @@ func (s *requestLoggingServer) NukeWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.nuke_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.nuke_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -251,6 +281,8 @@ func (s *requestLoggingServer) MergeWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.merge_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.merge_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -266,6 +298,8 @@ func (s *requestLoggingServer) RestartWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.restart_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.restart_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -281,6 +315,8 @@ func (s *requestLoggingServer) SetWorkspacePriority(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.set_workspace_priority", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.set_workspace_priority", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -296,6 +332,8 @@ func (s *requestLoggingServer) CreateTask(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.create_task", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.create_task", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -311,6 +349,8 @@ func (s *requestLoggingServer) UpdateTask(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.update_task", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.update_task", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -326,6 +366,8 @@ func (s *requestLoggingServer) AssignWorkspaceTask(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.assign_workspace_task", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.assign_workspace_task", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -342,6 +384,8 @@ func (s *requestLoggingServer) WatchTopbar(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_topbar", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_topbar", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -357,6 +401,8 @@ func (s *requestLoggingServer) SetModel(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.set_model", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.set_model", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -372,6 +418,8 @@ func (s *requestLoggingServer) SetPermissionMode(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.set_permission_mode", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.set_permission_mode", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -388,6 +436,8 @@ func (s *requestLoggingServer) WatchFooter(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_footer", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_footer", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -404,6 +454,8 @@ func (s *requestLoggingServer) WatchDaemonHolds(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_daemon_holds", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_daemon_holds", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -419,6 +471,8 @@ func (s *requestLoggingServer) UpdateHeldPrompt(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.update_held_prompt", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.update_held_prompt", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -434,6 +488,8 @@ func (s *requestLoggingServer) AnswerHeldOffer(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.answer_held_offer", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.answer_held_offer", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -449,6 +505,8 @@ func (s *requestLoggingServer) UpdateShutdownSchedule(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.update_shutdown_schedule", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.update_shutdown_schedule", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -464,6 +522,8 @@ func (s *requestLoggingServer) UpdateMergeQueue(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.update_merge_queue", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.update_merge_queue", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -479,6 +539,8 @@ func (s *requestLoggingServer) DaemonHealth(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.daemon_health", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.daemon_health", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -494,6 +556,8 @@ func (s *requestLoggingServer) SessionHealth(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.session_health", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.session_health", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -509,6 +573,8 @@ func (s *requestLoggingServer) ClientLog(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.client_log", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.client_log", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -524,6 +590,8 @@ func (s *requestLoggingServer) RegisterWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.register_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.register_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -539,6 +607,8 @@ func (s *requestLoggingServer) SelectWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.select_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.select_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -555,6 +625,8 @@ func (s *requestLoggingServer) WatchHostWorkspace(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_host_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_host_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -571,6 +643,8 @@ func (s *requestLoggingServer) WatchDaemon(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_daemon", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_daemon", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -586,6 +660,8 @@ func (s *requestLoggingServer) AdoptHostWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.adopt_host_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.adopt_host_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -602,6 +678,8 @@ func (s *requestLoggingServer) WatchWebWorkspace(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_web_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_web_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -617,6 +695,8 @@ func (s *requestLoggingServer) OpenLogin(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.open_login", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.open_login", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -633,6 +713,8 @@ func (s *requestLoggingServer) WatchLoginTerminal(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_login_terminal", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_login_terminal", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -648,6 +730,8 @@ func (s *requestLoggingServer) SendLoginInput(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.send_login_input", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.send_login_input", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -663,6 +747,8 @@ func (s *requestLoggingServer) CloseLogin(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.close_login", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.close_login", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -678,6 +764,8 @@ func (s *requestLoggingServer) OpenExternal(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.open_external", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.open_external", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -693,6 +781,8 @@ func (s *requestLoggingServer) OpenInEditor(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.open_in_editor", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.open_in_editor", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -708,6 +798,8 @@ func (s *requestLoggingServer) AdoptWebWorkspace(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.adopt_web_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.adopt_web_workspace", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -724,6 +816,8 @@ func (s *requestLoggingServer) WatchPage(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.watch_page", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.watch_page", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -739,6 +833,8 @@ func (s *requestLoggingServer) SubscribePage(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.subscribe_page", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.subscribe_page", "completed the rpc handler", boundary.completionContext(err))
 	}()
@@ -754,6 +850,8 @@ func (s *requestLoggingServer) UnsubscribePage(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	boundary.log.Debug("daemon.server.unsubscribe_page", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
 	defer func() {
 		boundary.log.Debug("daemon.server.unsubscribe_page", "completed the rpc handler", boundary.completionContext(err))
 	}()
