@@ -731,3 +731,66 @@ func TestAdoptionDialsTheShimsRolledGeneration(t *testing.T) {
 		t.Fatalf("Adopt paths = %v, want [%q]: the survivor listens on its rolled generation", got, rolled)
 	}
 }
+
+// TestSilentSurvivorsPayTheAdoptionBoundOnce pins the concurrency of the dial
+// pass. Every instant this step spends is an instant the daemon's already-bound
+// listener queues connections nobody accepts, so N survivors that never answer
+// must cost ONE bound rather than N: the realtest-1 boot paid its full 10s
+// before it served at all.
+func TestSilentSurvivorsPayTheAdoptionBoundOnce(t *testing.T) {
+	// Arrange: four survivors whose locks read held and whose dials hang.
+	const bound = 100 * time.Millisecond
+	const survivors = 4
+	h := newHarness(t, func(deps *Deps, _ *harness) { deps.AdoptBound = bound })
+	h.supervisor.hang = true
+	for i := 0; i < survivors; i++ {
+		h.register(t, t.TempDir(), sessionlock.StateHeld)
+	}
+
+	// Act.
+	started := time.Now()
+	report, err := h.seq.Run(context.Background())
+	elapsed := time.Since(started)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.Undetermined) != survivors {
+		t.Fatalf("report.Undetermined = %v, want all %d survivors undetermined", report.Undetermined, survivors)
+	}
+	// Two bounds is the generous ceiling that still fails a SERIAL pass, which
+	// would take four.
+	if ceiling := 2 * bound; elapsed >= ceiling {
+		t.Fatalf("the boot spent %v adopting %d silent survivors, want under %v: the bound is paid once for all of them",
+			elapsed, survivors, ceiling)
+	}
+}
+
+// TestSurvivorsAreReportedInWorkspaceOrder pins what the concurrent dial pass
+// must not cost: the report is built on the boot's own goroutine in the order
+// the registry lists the workspaces, never in the order the dials answered.
+func TestSurvivorsAreReportedInWorkspaceOrder(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var want []ids.WorkspaceID
+	for i := 0; i < 5; i++ {
+		want = append(want, h.register(t, t.TempDir(), sessionlock.StateHeld).ID)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.Adopted) != len(want) {
+		t.Fatalf("report.Adopted = %v, want %v", report.Adopted, want)
+	}
+	for i := range want {
+		if report.Adopted[i] != want[i] {
+			t.Fatalf("report.Adopted = %v, want the registry's order %v", report.Adopted, want)
+		}
+	}
+}

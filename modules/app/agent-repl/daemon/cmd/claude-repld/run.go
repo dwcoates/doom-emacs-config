@@ -375,8 +375,8 @@ func run(ctx context.Context, opts options, h hooks) error {
 // covers the one that produced that wedge — so this covers a step whose bound
 // somebody forgot, and its expiry is a dumped stack rather than a guess.
 //
-// Sized above the worst LEGITIMATE boot: a handful of workspaces adopted
-// serially at boot.DefaultAdoptBound (10s) apiece, plus the manifest, the
+// Sized above the worst LEGITIMATE boot: every surviving workspace adopted
+// CONCURRENTLY under one boot.DefaultAdoptBound (10s), plus the manifest, the
 // holds, the orphan closes and the merge recovery, all of which are local
 // sqlite work measured in milliseconds. 90s is that with room over it, and it
 // is never paid on a healthy boot.
