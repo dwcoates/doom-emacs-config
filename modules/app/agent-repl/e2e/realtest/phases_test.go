@@ -96,17 +96,17 @@ func TestPhasesReadTheDaemonAdoptionPath(t *testing.T) {
 	if phases.DaemonPath != "adopted" {
 		t.Errorf("the daemon path reads %q, want \"adopted\"", phases.DaemonPath)
 	}
-	got, ok := measurementFor(phases.Measure(), PhaseDaemonAnswered, GlobalWorkspace)
+	got, ok := measurementFor(phases.Measure(), PhaseDaemonSpawned, GlobalWorkspace)
 	if !ok || got.Elapsed != 3400*time.Millisecond {
-		t.Errorf("%s measured %+v, want 3.4s", PhaseDaemonAnswered, got)
+		t.Errorf("%s measured %+v, want 3.4s", PhaseDaemonSpawned, got)
 	}
 }
 
-func TestPhasesReadTheDaemonBootPath(t *testing.T) {
+func TestPhasesReadTheDaemonSpawnPath(t *testing.T) {
 	// Arrange: a spawned daemon is different work from an adopted one, and
 	// comparing their times would be comparing different things.
 	path, spawned := phaseFixture(t,
-		elisp("2026-09-10T12:00:09.000000-04:00", "info", `elisp.daemon.booted address="127.0.0.1:1234"`, ""))
+		elisp("2026-09-10T12:00:09.000000-04:00", "info", `elisp.daemon.started argv=("claude-repld") state-dir="/s"`, ""))
 
 	// Act.
 	phases, err := ReadPhases(path, 0, spawned)
@@ -115,8 +115,111 @@ func TestPhasesReadTheDaemonBootPath(t *testing.T) {
 	}
 
 	// Assert.
-	if phases.DaemonPath != "booted" {
-		t.Errorf("the daemon path reads %q, want \"booted\"", phases.DaemonPath)
+	if phases.DaemonPath != "spawned" {
+		t.Errorf("the daemon path reads %q, want \"spawned\"", phases.DaemonPath)
+	}
+	got, ok := measurementFor(phases.Measure(), PhaseDaemonSpawned, GlobalWorkspace)
+	if !ok || got.Elapsed != 9*time.Second {
+		t.Errorf("%s measured %+v, want 9s", PhaseDaemonSpawned, got)
+	}
+}
+
+func TestPhasesDoNotCreditAnUnhealthyAdoptionToTheDaemonSpawnedPhase(t *testing.T) {
+	// Arrange: `elisp.daemon.adopted-unhealthy` is the OPPOSITE of the phase a
+	// word-boundary match would credit it to.
+	path, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:03.000000-04:00", "warn", `elisp.daemon.adopted-unhealthy address="a"`, ""))
+
+	// Act.
+	phases, err := ReadPhases(path, 0, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	if _, ok := measurementFor(phases.Measure(), PhaseDaemonSpawned, GlobalWorkspace); ok {
+		t.Errorf("an unhealthy adoption was measured as %s", PhaseDaemonSpawned)
+	}
+}
+
+func TestPhasesEndDaemonAnsweredAtTheLaterOfLinkUpAndTheRosterSubscription(t *testing.T) {
+	// Arrange: a link with no roster has nothing to draw, so the phase ends at
+	// the subscription when that is the later of the two.
+	path, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:10.000000-04:00", "info", `elisp.link.reconnected address="a"`, ""),
+		elisp("2026-09-10T12:00:13.500000-04:00", "info", `elisp.roster.subscribed method="push" address="a"`, ""))
+
+	// Act.
+	phases, err := ReadPhases(path, 0, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	got, ok := measurementFor(phases.Measure(), PhaseDaemonAnswered, GlobalWorkspace)
+	if !ok || got.Elapsed != 13500*time.Millisecond {
+		t.Errorf("%s measured %+v, want 13.5s", PhaseDaemonAnswered, got)
+	}
+}
+
+func TestPhasesDoNotEndDaemonAnsweredOnABootClaim(t *testing.T) {
+	// Arrange: realtest 1 run 1 wrote `elisp.daemon.booted` three milliseconds
+	// after the spawn against a stale address file, while the link came up ten
+	// seconds later. A phase that ends here measures the claim.
+	path, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:00.003000-04:00", "info", `elisp.daemon.booted address="127.0.0.1:1234"`, ""))
+
+	// Act.
+	phases, err := ReadPhases(path, 0, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	got, ok := measurementFor(phases.Measure(), PhaseDaemonAnswered, GlobalWorkspace)
+	if !ok {
+		t.Fatalf("no %s measurement at all", PhaseDaemonAnswered)
+	}
+	if got.Note == "" {
+		t.Errorf("%s reported %s off a boot claim alone", PhaseDaemonAnswered, got.Elapsed)
+	}
+}
+
+func TestPhasesSayWhichHalfOfDaemonAnsweredIsMissing(t *testing.T) {
+	// Arrange: a link and no roster subscription.
+	path, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:10.000000-04:00", "info", `elisp.link.up address="a"`, ""))
+
+	// Act.
+	phases, err := ReadPhases(path, 0, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	got, _ := measurementFor(phases.Measure(), PhaseDaemonAnswered, GlobalWorkspace)
+	if !contains(got.Note, "roster subscription was never accepted") {
+		t.Errorf("the note reads %q, and does not say which half is missing", got.Note)
+	}
+}
+
+func TestPhasesMeasureLinkUpFromAHostLinkUpRecord(t *testing.T) {
+	// Arrange: `elisp.host.link-up-skipped` must not be credited as a link
+	// coming up, and `elisp.host.link-up` must be.
+	path, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:04.000000-04:00", "warn", `elisp.host.link-up-skipped ws=none`, ""),
+		elisp("2026-09-10T12:00:11.000000-04:00", "info", `elisp.host.link-up workspaces=3 selection="a"`, ""))
+
+	// Act.
+	phases, err := ReadPhases(path, 0, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	got, ok := measurementFor(phases.Measure(), PhaseLinkUp, GlobalWorkspace)
+	if !ok || got.Elapsed != 11*time.Second {
+		t.Errorf("%s measured %+v, want 11s from the link-up record", PhaseLinkUp, got)
 	}
 }
 
