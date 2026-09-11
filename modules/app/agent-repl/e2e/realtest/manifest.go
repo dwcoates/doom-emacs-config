@@ -130,7 +130,7 @@ func (m Manifest) render() string {
 				elapsed = measurement.Elapsed.Round(time.Millisecond).String()
 			}
 			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-				measurement.Phase, measurement.Workspace, elapsed, budget)
+				phaseLabel(measurement.Phase), measurement.Workspace, elapsed, budget)
 		}
 		b.WriteString("\n")
 	}
@@ -202,6 +202,23 @@ func (m Manifest) render() string {
 	}
 
 	return b.String()
+}
+
+// phaseLabel renders a measurement's phase name for the manifest table.
+// PhasePanelPainted (and, downstream of it, PhaseTotal) get an explicit
+// qualifier: both are now measured in the SHOW phase, not the hidden one
+// (owner ruling 2026-09-11, phases.go says why), and a reader skimming the
+// table for "why is panel-painted's elapsed time so much larger than
+// tab-drawn's" should not have to go find that out from the source.
+func phaseLabel(phase PhaseName) string {
+	switch phase {
+	case PhasePanelPainted:
+		return "panel-painted (on first show)"
+	case PhaseTotal:
+		return "total (spawn to shown-and-painted)"
+	default:
+		return string(phase)
+	}
 }
 
 func orUnknown(value string) string {
