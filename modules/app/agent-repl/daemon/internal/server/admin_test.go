@@ -340,14 +340,20 @@ func TestClientLogRecordsTheSuccessfulRequestBoundaryAtDebug(t *testing.T) {
 	}
 
 	// Assert.
-	debug := log.at("DEBUG")
-	if len(debug) != 1 {
-		t.Fatalf("DEBUG records = %v, want exactly one", debug)
+	var persisted *logRecord
+	for i := range log.records {
+		if log.records[i].Message == "persisted a forwarded client record" {
+			persisted = &log.records[i]
+			break
+		}
 	}
-	if debug[0].Operation != "daemon.server.client_log" {
-		t.Fatalf("operation = %q, want daemon.server.client_log", debug[0].Operation)
+	if persisted == nil {
+		t.Fatalf("records = %v, want the forwarded-record success", log.records)
 	}
-	if debug[0].Context["operation"] != "webapp.render" {
-		t.Fatalf("context = %v, want the forwarded operation", debug[0].Context)
+	if persisted.Level != "DEBUG" || persisted.Operation != "daemon.server.client_log" {
+		t.Fatalf("record = %+v, want the client-log debug operation", persisted)
+	}
+	if persisted.Context["operation"] != "webapp.render" {
+		t.Fatalf("context = %v, want the forwarded operation", persisted.Context)
 	}
 }
