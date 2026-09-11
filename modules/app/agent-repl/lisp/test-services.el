@@ -53,8 +53,20 @@
 (defvar agent-repl-test-services--daemon-stops 0
   "How many daemon stops were requested.")
 
-(defvar agent-repl-test-services--daemon-stop-accepted t
+(defvar agent-repl-test-services--daemon-stop-outcome '(:arm :accepted)
   "What the stubbed daemon stop reports to its continuation.")
+
+(defvar agent-repl-test-services--daemon-departed t
+  "What the stubbed daemon departure wait reports.")
+
+(defvar agent-repl-test-services--daemon-current-identity nil
+  "Identity observed before the stop.")
+
+(defvar agent-repl-test-services--daemon-current-conn 'current-connection
+  "The connection returned by the stubbed primary-link lookup.")
+
+(defvar agent-repl-test-services--daemon-replacement-identity nil
+  "Identity observed from the ensured replacement.")
 
 (defvar agent-repl-test-services--daemon-ensures 0
   "How many daemon ensures were requested.")
@@ -95,7 +107,13 @@
          (agent-repl-test-services--builds nil)
          (agent-repl-test-services--timers nil)
          (agent-repl-test-services--daemon-stops 0)
-         (agent-repl-test-services--daemon-stop-accepted t)
+         (agent-repl-test-services--daemon-stop-outcome '(:arm :accepted))
+         (agent-repl-test-services--daemon-departed t)
+         (agent-repl-test-services--daemon-current-identity
+          '(:instance-id "daemon-old" :pid 4101 :build-sha "old-build"))
+         (agent-repl-test-services--daemon-current-conn 'current-connection)
+         (agent-repl-test-services--daemon-replacement-identity
+          '(:instance-id "daemon-new" :pid 4102 :build-sha "new-build"))
          (agent-repl-test-services--daemon-ensures 0)
          (agent-repl-test-services--daemon-conn 'the-connection)
          (agent-repl-test-services--teardowns 0)
@@ -125,12 +143,25 @@
                   (setq agent-repl-test-services--daemon-stops
                         (1+ agent-repl-test-services--daemon-stops))
                   (when on-done
-                    (funcall on-done agent-repl-test-services--daemon-stop-accepted))))
+                    (funcall on-done agent-repl-test-services--daemon-stop-outcome))))
+               ((symbol-function 'agent-repl-daemon--await-departure)
+                (lambda (on-gone)
+                  (funcall on-gone agent-repl-test-services--daemon-departed)))
                ((symbol-function 'agent-repl-daemon-ensure)
                 (lambda (&optional on-ready)
                   (setq agent-repl-test-services--daemon-ensures
                         (1+ agent-repl-test-services--daemon-ensures))
                   (when on-ready (funcall on-ready agent-repl-test-services--daemon-conn))))
+               ((symbol-function 'agent-repl-daemon-observe-identity)
+                (lambda (conn on-answer on-failure)
+                  (if (null conn)
+                      (funcall on-failure "no daemon link is available")
+                    (funcall on-answer
+                             (if (eq conn 'current-connection)
+                                 agent-repl-test-services--daemon-current-identity
+                               agent-repl-test-services--daemon-replacement-identity)))))
+               ((symbol-function 'agent-repl-link-primary)
+                (lambda () agent-repl-test-services--daemon-current-conn))
                ((symbol-function 'agent-repl-link-teardown)
                 (lambda ()
                   (setq agent-repl-test-services--teardowns
@@ -431,7 +462,7 @@
     (should (= agent-repl-test-services--daemon-ensures 1))))
 
 (ert-deftest agent-repl-test-services-runtime-restart-completes ()
-  "Success runs only after every stage has completed."
+  "A newly identified daemon process is terminal restart completion."
   (agent-repl-test-services--with-harness
     ;; Arrange
     (let ((done nil))
@@ -439,6 +470,54 @@
       (agent-repl--runtime-prepare (lambda () (setq done t)) #'ignore)
       ;; Assert
       (should done))))
+
+(ert-deftest agent-repl-test-services-runtime-restart-rejects-the-same-instance-after-a-link-cycle ()
+  "A down/up link cycle to one daemon process is not a completed restart."
+  (agent-repl-test-services--with-harness
+    ;; Arrange.
+    (let ((done nil)
+          (failure nil))
+      (setq agent-repl-test-services--daemon-replacement-identity
+            agent-repl-test-services--daemon-current-identity)
+      ;; Act.
+      (agent-repl--runtime-prepare (lambda () (setq done t))
+                                   (lambda (detail) (setq failure detail)))
+      ;; Assert.
+      (should-not done)
+      (should (string-match-p "not restarted: daemon instance daemon-old still serves"
+                              failure)))))
+
+(ert-deftest agent-repl-test-services-runtime-restart-surfaces-a-deferred-daemon-reason ()
+  "A daemon-side deferral is a reasoned non-restart, never completion."
+  (agent-repl-test-services--with-harness
+    ;; Arrange.
+    (let ((failure nil))
+      (setq agent-repl-test-services--daemon-stop-outcome
+            '(:arm :not-restarted
+              :reason "shutdown deferred until workspace alpha is free"))
+      ;; Act.
+      (agent-repl--runtime-prepare #'ignore
+                                   (lambda (detail) (setq failure detail)))
+      ;; Assert.
+      (should (equal failure
+                     "not restarted: shutdown deferred until workspace alpha is free"))
+      (should (= agent-repl-test-services--teardowns 0))
+      (should (= agent-repl-test-services--daemon-ensures 0)))))
+
+(ert-deftest agent-repl-test-services-runtime-restart-without-a-link-mutates-nothing ()
+  "A missing daemon link fails before any build or service mutation begins."
+  (agent-repl-test-services--with-harness
+    ;; Arrange.
+    (let ((failure nil))
+      (setq agent-repl-test-services--daemon-current-conn nil)
+      ;; Act.
+      (agent-repl--runtime-prepare #'ignore
+                                   (lambda (detail) (setq failure detail)))
+      ;; Assert.
+      (should (equal failure
+                     "not restarted: current daemon identity was not observed: no daemon link is available"))
+      (should (null agent-repl-test-services--builds))
+      (should (= agent-repl-test-services--daemon-stops 0)))))
 
 (ert-deftest agent-repl-test-services-runtime-restart-fails-without-a-replacement ()
   "A replacement that never comes up is a failed restart, not a quiet one."
