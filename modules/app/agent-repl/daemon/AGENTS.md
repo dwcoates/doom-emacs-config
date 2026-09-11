@@ -155,7 +155,15 @@ environment. Every flag is optional.
 6. `daemon.addr`, written atomically by an incumbent; a `--joining` successor
    DEFERS it and instead writes `joining.addr` where the incumbent that spawned
    it is waiting, and `daemon.addr` is written only once every workspace is
-   adopted (the rollout's `WriteDaemonAddr` hook);
+   adopted (the rollout's `WriteDaemonAddr` hook). Its payload is the bare
+   `host:port` on the first line and `pid=<n>` — this daemon's process id — on
+   the second (`daemonaddr.ParseAdvertisement` / `ReadAdvertisement`); a reader
+   that needs only the address takes the first line, which is exactly what a
+   legacy daemon wrote, and a file with no `pid=<n>` line reads as pid-unknown.
+   The pid lets Emacs retire an advertisement whose advertiser is dead without
+   a dial — a predecessor that died without withdrawing is ABSENT, not a
+   transport fault. See `logging-contract.md` "Daemon address advertisement";
+   `joining.addr` stays a bare address;
 7. the state client — `wsm.Open`, or `wsm.OpenReadOnly` for a joining daemon,
    which owns no workspace and must not be a second writer. That handle is
    PROMOTED IN PLACE (`wsm.DB.Promote`) at the successor's first adoption:
