@@ -65,8 +65,12 @@ type hooks struct {
 	Graph func(ctx context.Context, p process) (*graph, error)
 	// Server builds the Connect surface.
 	Server func(server.Deps) (server.Server, error)
-	// Serve runs the http server until ctx ends.
-	Serve func(ctx context.Context, l net.Listener, h http.Handler) error
+	// Serve runs the http server until ctx ends. onShuttingDown is invoked
+	// once, at the very start of the shutdown sequence, while the listener is
+	// still accepting — it is where the advertisement is withdrawn so a client
+	// forwarding during shutdown finds no address rather than a present address
+	// backed by a listener that has stopped accepting.
+	Serve func(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown func()) error
 	// BootStall bounds the whole boot reconciliation; zero means
 	// bootStallBound. It is a seam because the behavior under test is a
 	// reconciliation that never finishes, and a test must not wait out a
@@ -228,32 +232,21 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// and times out: realtest 1 caught Emacs probing 127.0.0.1:58161 minutes
 	// after the daemon that bound it had gone.
 	//
-	// This defer is the ONE withdrawal site, and it covers every path this
-	// process can observe: a cancelled context, SIGINT or SIGTERM (main's
-	// signal.NotifyContext cancels ctx, which ends the serve), `Serve`
-	// returning on its own, and every boot error that returns from here.
-	// SIGKILL is not observable by anything, which is what the boot's own
-	// staleness check above exists for.
-	defer func() {
-		withdrawn, err := claim.Withdraw()
-		if err != nil {
-			log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
-				"error": err.Error(),
-			})
-			return
-		}
-		if withdrawn {
-			log.Info("daemon.cmd.exit", "daemon.addr was withdrawn", dlog.Context{
-				"address": claim.Address(),
-			})
-			return
-		}
-		// The file names somebody else -- a successor that took over and
-		// published its own address -- or nothing at all.
-		log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", dlog.Context{
-			"address": claim.Address(),
-		})
-	}()
+	// withdrawal.finish is the CATCH-ALL withdrawal site, and it covers every
+	// path this process can observe: a cancelled context, SIGINT or SIGTERM
+	// (main's signal.NotifyContext cancels ctx, which ends the serve), `Serve`
+	// returning on its own, and every boot error that returns before serving
+	// was ever reached. SIGKILL is not observable by anything, which is what
+	// the boot's own staleness check above exists for.
+	//
+	// A run that reached serving withdraws EARLIER, via withdrawal.begin at the
+	// start of the shutdown sequence (passed to h.Serve below), so a forward
+	// during shutdown finds no address. Withdraw is idempotent and
+	// address/pid-guarded, so finish is a safe no-op on that path; addrWithdrawal
+	// records that the early call already took the file down so the no-op is not
+	// mistaken for a successor having taken over.
+	withdrawal := &addrWithdrawal{claim: claim, log: log}
+	defer withdrawal.finish()
 
 	db, err := openState(ctx, layout, log, joining)
 	if err != nil {
@@ -397,7 +390,12 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// healthy one, because daemon.addr still names a bound port — so an accept
 	// error is reported at ERROR, a transient one is retried with backoff, and
 	// anything else ends the serve and the process with it.
-	if err := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log)); err != nil {
+	// withdrawal.begin takes daemon.addr down at the START of the shutdown
+	// sequence, before the listener stops accepting, so a client forwarding
+	// during shutdown finds no address rather than a present address backed by
+	// a listener that no longer accepts. The deferred finish above is the
+	// safety net for boot errors and paths that never reached serving.
+	if err := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), withdrawal.begin); err != nil {
 		log.Error("daemon.cmd.serve", "the daemon stopped serving its listener", dlog.Context{
 			"address": claim.Address(),
 			"error":   err.Error(),
@@ -496,7 +494,7 @@ func workspaceIDLookup(ctx context.Context, db wsm.DB) dlog.WorkspaceIDLookup {
 
 // serve runs the http server on the claimed listener until ctx ends, then shuts
 // it down gracefully.
-func serve(ctx context.Context, l net.Listener, h http.Handler) error {
+func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown func()) error {
 	// THE GRACE HAS TO BE OURS, so the handler must carry the gate that counts
 	// the calls being answered. `Server.Shutdown` cannot do it: every client
 	// dials h2c, `h2c.NewHandler` serves such a connection by HIJACKING it,
@@ -521,6 +519,19 @@ func serve(ctx context.Context, l net.Listener, h http.Handler) error {
 		}
 		return err
 	case <-ctx.Done():
+		// THE ADVERTISEMENT COMES DOWN BEFORE THE LISTENER STOPS ACCEPTING.
+		// A daemon that is shutting down is "not there" for clients, so its
+		// address is withdrawn the instant shutdown begins — while srv.Serve
+		// is still accepting — rather than after Shutdown has stopped the
+		// listener. Withdrawing here closes the shutdown transient that
+		// realtest 1 caught: a present daemon.addr backed by a listener that
+		// no longer accepts, which the sidecar forwarded into and logged as a
+		// real connection-refused WARN. With the address gone first, a forward
+		// during shutdown finds no address and is the vanished-address
+		// transient the sidecar already treats as gone.
+		if onShuttingDown != nil {
+			onShuttingDown()
+		}
 		// THE CALLS BEING ANSWERED GO FIRST, and this is the wait that
 		// actually happens. `UpdateShutdownSchedule{now}` ends the serving
 		// lifetime from inside its own handler, so the exit races its own
@@ -568,6 +579,79 @@ func serve(ctx context.Context, l net.Listener, h http.Handler) error {
 // shutdownGrace is how long in-flight requests have to finish before the
 // standing streams are closed underneath them.
 const shutdownGrace = 2 * time.Second
+
+// withdrawer is the slice of daemonaddr.Claim that addrWithdrawal needs: the
+// idempotent, address/pid-guarded removal and the address it names.
+type withdrawer interface {
+	Withdraw() (bool, error)
+	Address() string
+}
+
+// addrWithdrawal takes daemon.addr down and keeps the exit's records honest.
+//
+// A daemon that is shutting down is "not there" for clients, so begin removes
+// the advertisement at the START of shutdown — before the listener stops
+// accepting — closing the shutdown transient realtest 1 caught: a present
+// daemon.addr backed by a listener that no longer accepts, which the sidecar
+// forwarded into and logged as a real connection-refused WARN.
+//
+// finish is the deferred catch-all covering boot errors and paths that never
+// reached serving. Withdraw is idempotent, so finish is a safe no-op after
+// begin; the early flag keeps that no-op from being recorded as a successor
+// takeover. A "withdrew" record fires only when a call actually removed the
+// file, and a Withdraw error is always surfaced at ERROR.
+type addrWithdrawal struct {
+	claim withdrawer
+	log   dlog.Logger
+	early bool
+}
+
+// begin withdraws the advertisement at the start of the shutdown sequence.
+func (w *addrWithdrawal) begin() {
+	withdrawn, err := w.claim.Withdraw()
+	if err != nil {
+		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
+			"error": err.Error(),
+		})
+		return
+	}
+	if withdrawn {
+		w.early = true
+		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn at the start of shutdown, before the listener stopped accepting", dlog.Context{
+			"address": w.claim.Address(),
+		})
+	}
+}
+
+// finish is the deferred catch-all withdrawal, run on every exit.
+func (w *addrWithdrawal) finish() {
+	withdrawn, err := w.claim.Withdraw()
+	if err != nil {
+		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
+			"error": err.Error(),
+		})
+		return
+	}
+	if withdrawn {
+		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn", dlog.Context{
+			"address": w.claim.Address(),
+		})
+		return
+	}
+	if w.early {
+		// begin already took the file down at the start of shutdown; this
+		// catch-all had nothing left to do.
+		w.log.Debug("daemon.cmd.exit", "daemon.addr was already withdrawn at the start of shutdown", dlog.Context{
+			"address": w.claim.Address(),
+		})
+		return
+	}
+	// The file names somebody else -- a successor that took over and published
+	// its own address -- or nothing at all.
+	w.log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", dlog.Context{
+		"address": w.claim.Address(),
+	})
+}
 
 // writesQuietBound is how long the exit gives the connections to stop writing
 // after every counted call has been answered.
