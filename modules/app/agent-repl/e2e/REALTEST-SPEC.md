@@ -55,6 +55,7 @@ worse than not running:
 | a deployed system is not at this checkout's revision | a realtest against a stale daemon measures a build nobody has, and its findings send the owner after defects that were fixed days ago. `bin/readiness-report.sh` is the judge — the same `.source-tree` stamp comparison `bin/build-frontend.sh` rebuilds on, so a system this declines on is exactly a system a plain build will rebuild |
 | an Emacs is running and `AGENT_REPL_REALTEST_TAKEOVER=1` is not set | a cold start has to quit the standing editor, and that is the owner's editor with the owner's unsaved work in it. The script does not make that decision |
 | a daemon is running without the vendor guard in its environment | Emacs ADOPTS an answering daemon and never kills one, so the new Emacs would inherit it and it would spawn shims with the real SDK reachable. The refusal names the pid to stop |
+| a shim listening under the state directory's `sock/`, or a `shim-lock`, is running without the guard | the daemon ADOPTS a shim that is already listening rather than spawning a fresh one, so the guard on the daemon never reaches it. Realtest 1's first run proved the hole: a shim spawned the day before by an unguarded daemon kept submitting a keepalive prompt to the real vendor every four minutes for the whole run. Every such process is enumerated (`pgrep -f` for the shim's `dist/main.js` and for `shim-lock`, then `ps -Eww` per pid) and the refusal names each pid and its socket |
 
 The backups come BEFORE the takeover refusal. An operator who is told to set the
 flag then re-runs against state that already has a copy.
@@ -181,8 +182,10 @@ outside, because it precedes the process that would otherwise report it.
 |---|---|
 | `doom-boot` | the first module record of the run — the earliest evidence the process reached lisp at all |
 | `module-loaded` | `elisp.daemon.ensure-command` |
-| `daemon-answered` | `elisp.daemon.adopted` or `elisp.daemon.booted`, reported as which |
-| `link-up` | `elisp.link.up` |
+| `daemon-spawned` | `elisp.daemon.started` (this launch spawned it) or `elisp.daemon.adopted` (one was already answering), reported as which |
+| `daemon-answered` | the LATER of `link-up` and `roster-subscribed`: the daemon is answering this frontend |
+| `link-up` | `elisp.link.up`, `elisp.link.reconnected` or `elisp.host.link-up` |
+| `roster-subscribed` | `elisp.roster.subscribed` — written from the daemon's ACCEPTANCE, not from the request |
 | `first-roster` | `elisp.roster.reconcile:` |
 | `tab-drawn` | `elisp.roster.tab-open:`, per workspace |
 | `panel-painted` | `elisp.frontend.watch-load: load-changed`, per workspace — the only signal in the whole startup that comes from the PAGE, and a fact the widget emits rather than an answer to a question, which is what makes it trustworthy for a page too broken to answer one |
@@ -197,9 +200,37 @@ Two rules that are easy to get wrong:
   asked, it had happened", which carries no timestamp. Emacs is polled only to
   decide WHEN TO STOP WAITING; every number reported comes from a record.
 
-`daemon-answered` reports whether the daemon was adopted or booted because those
+`daemon-spawned` reports whether the daemon was spawned or adopted because those
 are different work, and comparing their times would be comparing different
 things.
+
+`daemon-answered` is COMPUTED, not read off a marker, and it deliberately does
+not end at `elisp.daemon.booted`. Realtest 1's first run wrote that record three
+milliseconds after the spawn, against an address file a dead daemon had left
+behind, while the link the frontend actually talks over came up ten seconds
+later: a phase ending at the boot claim measures the claim. A link with no
+roster has nothing to draw and a subscription with no link cannot be delivered,
+so the phase ends at whichever of the two is later, and when either is missing
+it reports WHICH — the two send a reader to different places.
+
+The marker boundaries are spelled `(\s|$)` rather than `\b`, because `-` is not
+a word character: `link-up\b` also matches `link-up-skipped` and `adopted\b`
+also matches `adopted-unhealthy`, each the opposite of the phase it would be
+credited to.
+
+## The harvest is collapsed, never filtered
+
+Realtest 1's first run produced 5926 findings, and about six thousand lines of
+its manifest were two classes repeated: every shim record in one workspace
+flagged for the same attribution conflict, and the sidecar's `discover-meta`
+4988 times. A document nobody can read is not evidence the owner can rule on.
+
+So the manifest reports one line per CLASS — keyed by (source runtime,
+operation, level, kind) within a workspace — carrying the class's COUNT and one
+sample record verbatim, and every record is written to `HARVEST-FULL.jsonl` in
+the run directory beside it. The count is what keeps this from being a filter:
+no record is dropped and no total is hidden, and a class of one reads exactly as
+a single finding does.
 
 ## Budgets, and why they ship unmeasured
 

@@ -70,6 +70,12 @@ func (m Manifest) Write(dir string) (string, error) {
 	if err := os.WriteFile(path, []byte(m.render()), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
+	// The full harvest travels WITH the manifest, always: the manifest reports
+	// a repeated class once with its count, and the file beside it is where
+	// every one of those records is kept verbatim.
+	if _, err := WriteFullHarvest(dir, m.Findings); err != nil {
+		return "", err
+	}
 	return path, nil
 }
 
@@ -107,9 +113,13 @@ func (m Manifest) render() string {
 		fmt.Fprintf(&b, "- launch method: `%s`\n", run.Method)
 		fmt.Fprintf(&b, "- spawned at: `%s`\n", run.SpawnedAt.Format(time.RFC3339Nano))
 		fmt.Fprintf(&b, "- daemon: %s\n", orUnknown(run.DaemonPath))
-		fmt.Fprintf(&b, "- frontmost application before: %s; after: %s%s\n",
+		// The launch method is repeated ON the focus line rather than left to
+		// the line above it: whether focus moved is a fact ABOUT a method, and
+		// a reader comparing the three cold starts is comparing methods.
+		fmt.Fprintf(&b, "- frontmost application before: %s; after: %s%s (launch method `%s`)\n",
 			orUnknown(run.FrontBefore), orUnknown(run.FrontAfter),
-			map[bool]string{true: " — **FOCUS MOVED**", false: " — focus unchanged"}[run.Disturbed])
+			map[bool]string{true: " — **FOCUS MOVED**", false: " — focus unchanged"}[run.Disturbed],
+			run.Method)
 		b.WriteString("\n| phase | workspace | from spawn | budget |\n|---|---|---|---|\n")
 		for _, measurement := range run.Measurements {
 			budget := "not measured yet"
@@ -140,6 +150,9 @@ func (m Manifest) render() string {
 	if len(m.Findings) == 0 {
 		b.WriteString("No warning, error, malformed record, stray stderr line, attribution\nconflict or rotation inside the run window.\n\n")
 	} else {
+		fmt.Fprintf(&b, "A finding class repeated inside one workspace is reported ONCE, with its\n")
+		fmt.Fprintf(&b, "count and one sample record. Every record is kept verbatim in `%s`\n", fullHarvestName)
+		b.WriteString("beside this file; nothing is dropped and no count is hidden.\n\n")
 		byWorkspace := make(map[string][]Finding)
 		for _, finding := range m.Findings {
 			byWorkspace[finding.Workspace] = append(byWorkspace[finding.Workspace], finding)
@@ -151,22 +164,8 @@ func (m Manifest) render() string {
 		sort.Strings(keys)
 		for _, key := range keys {
 			fmt.Fprintf(&b, "### %s\n\n", key)
-			for _, finding := range byWorkspace[key] {
-				at := "(no timestamp)"
-				if !finding.Timestamp.IsZero() {
-					at = finding.Timestamp.Format(time.RFC3339Nano)
-				}
-				fmt.Fprintf(&b, "- **%s** in `%s` (`%s`", finding.Kind, finding.Source, finding.Path)
-				if finding.Line > 0 {
-					fmt.Fprintf(&b, " line %d", finding.Line)
-				}
-				fmt.Fprintf(&b, ") at %s\n", at)
-				if finding.Note != "" {
-					fmt.Fprintf(&b, "  - %s\n", finding.Note)
-				}
-				if finding.Raw != "" {
-					fmt.Fprintf(&b, "  - verbatim:\n\n    ```\n    %s\n    ```\n", finding.Raw)
-				}
+			for _, class := range CollapseFindings(byWorkspace[key]) {
+				renderClass(&b, class)
 			}
 			b.WriteString("\n")
 		}
@@ -211,4 +210,31 @@ func orUnknown(value string) string {
 		return "(not established)"
 	}
 	return value
+}
+
+// renderClass writes one finding class: the count, the sample verbatim, and
+// nothing paraphrased. A class of one reads exactly as a single finding did
+// before the collapsing existed, because it is one.
+func renderClass(b *strings.Builder, class FindingClass) {
+	finding := class.Sample
+	at := "(no timestamp)"
+	if !finding.Timestamp.IsZero() {
+		at = finding.Timestamp.Format(time.RFC3339Nano)
+	}
+	fmt.Fprintf(b, "- **%s** in `%s` (`%s`", finding.Kind, finding.Source, finding.Path)
+	if finding.Line > 0 {
+		fmt.Fprintf(b, " line %d", finding.Line)
+	}
+	fmt.Fprintf(b, ") at %s\n", at)
+	if class.Count > 1 {
+		fmt.Fprintf(b, "  - **%d records** of operation `%s` at level `%s`, identical in why they are a finding. "+
+			"One sample follows; all %d are in `%s`.\n",
+			class.Count, class.Operation, orUnknown(class.Level), class.Count, fullHarvestName)
+	}
+	if finding.Note != "" {
+		fmt.Fprintf(b, "  - %s\n", finding.Note)
+	}
+	if finding.Raw != "" {
+		fmt.Fprintf(b, "  - verbatim:\n\n    ```\n    %s\n    ```\n", finding.Raw)
+	}
 }
