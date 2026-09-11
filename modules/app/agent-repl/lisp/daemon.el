@@ -684,6 +684,67 @@ probe connection is closed on both paths: it exists to ask one question."
        :on-failure
        (lambda (detail) (finish on-silence detail))))))
 
+(defun agent-repl-daemon-observe-identity (conn on-answer on-failure)
+  "Ask CONN which daemon process serves it.
+ON-ANSWER receives `agentrepl.v1.DaemonIdentity' as a plist, or nil when
+the answering daemon predates that response field.  ON-FAILURE receives a
+diagnostic when the question could not be answered.  The compatibility nil
+is an explicit wire-version fact; callers deciding restart completion must
+require the replacement to state a valid identity."
+  (unless (and (functionp on-answer) (functionp on-failure))
+    (agent-repl--fatal '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                       "elisp.daemon.observe-identity needs callable continuations"))
+  (if (null conn)
+      (let ((detail "no daemon link is available"))
+        (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                           "elisp.daemon.identity-unavailable reason=no-link")
+        (funcall on-failure detail))
+    (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                     "elisp.daemon.identity-request conn=%S" conn)
+    (agent-repl-rpc-daemon-health
+     conn nil
+     :timeout agent-repl-daemon-health-timeout-seconds
+     :on-response
+     (lambda (response)
+       (pcase (plist-get response :arm)
+         (:success
+          (let* ((verdict (plist-get response :value))
+                 (identity (plist-get verdict :identity)))
+            (if (and identity
+                     (or (not (stringp (plist-get identity :instance-id)))
+                         (string-empty-p (plist-get identity :instance-id))
+                         (not (integerp (plist-get identity :pid)))
+                         (<= (plist-get identity :pid) 0)))
+                (let ((detail (format "daemon returned an invalid process identity: %S"
+                                      identity)))
+                  (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                                     "elisp.daemon.identity-invalid identity=%S" identity)
+                  (funcall on-failure detail))
+              (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                                "elisp.daemon.identity-observed instance=%S pid=%S build-sha=%S legacy=%s"
+                                (plist-get identity :instance-id)
+                                (plist-get identity :pid)
+                                (plist-get identity :build-sha)
+                                (if identity "nil" "t"))
+              (funcall on-answer identity))))
+         (:error
+          (let ((detail (format "daemon refused the identity health query: %S"
+                                (plist-get response :value))))
+            (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                               "elisp.daemon.identity-refused error=%S"
+                               (plist-get response :value))
+            (funcall on-failure detail)))
+         (arm
+          (let ((detail (format "daemon returned unknown health arm %S" arm)))
+            (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                               "elisp.daemon.identity-unknown-arm arm=%S" arm)
+            (funcall on-failure detail)))))
+     :on-failure
+     (lambda (detail)
+       (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                          "elisp.daemon.identity-failed detail=%S" detail)
+       (funcall on-failure (format "daemon identity query failed: %S" detail))))))
+
 (defun agent-repl-daemon--render-health (address faults)
   "Write the adopted daemon at ADDRESS and its FAULTS into the health buffer."
   (with-current-buffer (get-buffer-create "*agent-repl-health*")
@@ -1079,16 +1140,18 @@ this editor — the daemon stops accepting work, flushes its in-flight
 writes and exits itself, which is the only shutdown that strands
 nothing.
 
-ON-DONE, when given, is called with non-nil once the daemon ACCEPTED the
-shutdown and nil on any refusal or transport failure; interactive callers
-leave it out."
+ON-DONE, when given, receives `(:arm :accepted)' once the daemon accepts
+the shutdown, or `(:arm :not-restarted :reason STRING)' on a refusal,
+missing link, or transport failure; interactive callers leave it out."
   (interactive)
   (let ((conn (agent-repl-link-primary)))
     (if (null conn)
         (progn
           (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-skipped reason=no-link")
           (message "agent-repl: no daemon link to stop")
-          (when on-done (funcall on-done nil))
+          (when on-done
+            (funcall on-done '(:arm :not-restarted
+                               :reason "no daemon link is available")))
           nil)
       (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop")
       (agent-repl-rpc-update-shutdown-schedule
@@ -1102,20 +1165,29 @@ leave it out."
            (:success
             (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-accepted")
             (message "agent-repl: daemon shutting down")
-            (when on-done (funcall on-done t)))
+            (when on-done (funcall on-done '(:arm :accepted))))
            (:error
-            (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-refused error=%S"
-                               (plist-get response :value))
-            (message "agent-repl: daemon refused the shutdown")
-            (when on-done (funcall on-done nil)))
+            (let ((detail (format "daemon refused the immediate shutdown: %S"
+                                  (plist-get response :value))))
+              (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-refused error=%S"
+                                 (plist-get response :value))
+              (when on-done
+                (funcall on-done (list :arm :not-restarted :reason detail))))
+            (message "agent-repl: daemon refused the shutdown"))
            (arm
             (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-unknown-arm arm=%S" arm)
-            (when on-done (funcall on-done nil)))))
+            (when on-done
+              (funcall on-done
+                       (list :arm :not-restarted
+                             :reason (format "daemon returned unknown shutdown arm %S" arm)))))))
        :on-failure
        (lambda (detail)
          (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-failed detail=%S" detail)
          (message "agent-repl: could not reach the daemon to stop it")
-         (when on-done (funcall on-done nil))))
+         (when on-done
+           (funcall on-done
+                    (list :arm :not-restarted
+                          :reason (format "daemon stop request failed: %S" detail))))))
       t)))
 
 (defun agent-repl-frontend-daemon-restart ()
@@ -1143,26 +1215,25 @@ the ensure."
         (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-nothing-to-stop reason=no-link")
         (agent-repl-daemon-ensure))
     (agent-repl-frontend-daemon-stop
-     (lambda (accepted)
-       (if (not accepted)
+     (lambda (outcome)
+       (if (not (eq (plist-get outcome :arm) :accepted))
            ;; The daemon refused or never answered; it is still serving.
            ;; Ensuring here would adopt it and report a restart that did
            ;; not happen, so the refusal stands and the link is left alone.
            (progn
-             (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-abandoned reason=stop-not-accepted accepted=%S"
-                                accepted)
-             (message "agent-repl: the daemon did not accept the stop; not restarting"))
+             (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-abandoned reason=stop-not-accepted outcome=%S"
+                                outcome)
+             (message "agent-repl: not restarted: %s" (plist-get outcome :reason)))
          (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-stop-accepted")
          (agent-repl-link-teardown)
          (agent-repl-daemon--await-departure
           (lambda (gone)
-            (unless gone
-              ;; The address outlived the wait.  Ensure anyway -- the link
-              ;; is already down, and leaving the user with no daemon at
-              ;; all is strictly worse than an ensure that may re-adopt.
-              (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-ensures-despite-timeout gone=%S" gone))
-            (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-ensure gone=%S" gone)
-            (agent-repl-daemon-ensure))))))))
+            (if gone
+                (progn
+                  (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-ensure gone=t")
+                  (agent-repl-daemon-ensure))
+              (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.restart-abandoned reason=departure-timeout gone=%S" gone)
+              (message "agent-repl: not restarted: the accepted daemon stop never completed")))))))))
 
 (add-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure)
 (agent-repl-daemon-install-segment)

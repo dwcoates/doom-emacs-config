@@ -341,8 +341,11 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "agent-repl: could not reach the daemon to stop it"
      "reports failure of the interactive stop")
     ("daemon.el" agent-repl-frontend-daemon-restart
-     "agent-repl: the daemon did not accept the stop; not restarting"
-     "reports why the interactive restart aborted")
+     "agent-repl: not restarted: %s"
+     "reports the daemon-provided reason why interactive restart aborted")
+    ("daemon.el" agent-repl-frontend-daemon-restart
+     "agent-repl: not restarted: the accepted daemon stop never completed"
+     "reports that interactive restart timed out before daemon departure")
     ("emoji.el" agent-repl-install-commit-emoji-hook
      "Backed up existing hook to %s"
      "reports the backup made by the interactive installer")
