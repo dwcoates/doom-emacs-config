@@ -8,10 +8,20 @@
  * one and the daemon's whole bring-up blocks on it.
  */
 import { create } from "@bufbuild/protobuf";
+import { writeSync } from "node:fs";
 import { nextPush } from "../next-push.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { conversationv1 } from "../../src/proto.js";
 import { SessionPushes, SUBSCRIBER_QUEUE_LIMIT } from "../../src/engine/pushes.js";
+
+const mockedWriteSync = vi.mocked(writeSync);
+
+function logRecordsSince(before: number): Array<Record<string, unknown>> {
+  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
+  return calls.map(([, bytes, offset, length]) =>
+    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+  );
+}
 
 function modelChanged(name: string): conversationv1.SessionUpdate {
   return create(conversationv1.SessionUpdateSchema, {
@@ -218,12 +228,79 @@ describe("faults", () => {
     expect((await read.next())?.update.case).toBe("diagnostics");
   });
 
-  it("accumulate since start", () => {
+  it("accumulate distinct components since start", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.fault(
+      create(conversationv1.SessionFaultSchema, {
+        component: "converter",
+        detail: "refused",
+        kind: {
+          case: "converterDefect",
+          value: create(conversationv1.SessionFaultConverterDefectSchema, {}),
+        },
+      }),
+    );
+    pushes.fault(fault("the store went away"));
+
+    expect(pushes.faultCount).toBe(2);
+  });
+
+  it("a repeat of the same component and kind REPLACES the standing fault rather than stacking", () => {
     const pushes = new SessionPushes(() => 1);
     pushes.fault(fault("one"));
     pushes.fault(fault("two"));
 
+    expect(pushes.faultCount).toBe(1);
+    const diagnostics = pushes.diagnostics().update;
+    const faults =
+      diagnostics.case === "diagnostics" && diagnostics.value.health.case === "unhealthy"
+        ? diagnostics.value.health.value.faults
+        : [];
+    expect(faults.map((entry) => entry.detail)).toEqual(["two"]);
+  });
+
+  it("a different kind on the same component is a SECOND fault", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.fault(fault("the store went away"));
+    pushes.fault(
+      create(conversationv1.SessionFaultSchema, {
+        component: "test",
+        detail: "the converter refused",
+        kind: {
+          case: "converterDefect",
+          value: create(conversationv1.SessionFaultConverterDefectSchema, {}),
+        },
+      }),
+    );
+
     expect(pushes.faultCount).toBe(2);
+  });
+
+  it("logs the first occurrence of a fault at error", () => {
+    const pushes = new SessionPushes(() => 1);
+    const before = mockedWriteSync.mock.calls.length;
+
+    pushes.fault(fault("the store went away"));
+
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.message === "recorded a session fault")
+        .map((record) => record.level),
+    ).toEqual(["error"]);
+  });
+
+  it("logs a repeat at debug, carrying the repeat count", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.fault(fault("one"));
+    const before = mockedWriteSync.mock.calls.length;
+
+    pushes.fault(fault("two"));
+
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.message === "recorded a session fault")
+        .map((record) => ({ level: record.level, repeats: (record.context as Record<string, unknown>).repeats })),
+    ).toEqual([{ level: "debug", repeats: 2 }]);
   });
 });
 
