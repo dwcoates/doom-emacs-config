@@ -479,4 +479,47 @@ what matters is that a real focus change reaches the resume."
   (should (memq #'agent-repl--webview-precreate-on-link-up
                 agent-repl-link-up-functions)))
 
+;;;; ---- The roster-update edge ----
+
+(ert-deftest agent-repl-test-wr-roster-update-queues-newly-registered ()
+  "A cold start's workspaces arrive on the roster push, not at link-up."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta")
+      ;; Act
+      (agent-repl--webview-precreate-on-roster-update 'roster)
+      ;; Assert
+      (should (equal agent-repl--webview-precreate-queue '("alpha" "beta"))))))
+
+(ert-deftest agent-repl-test-wr-roster-update-second-identical-push-queues-nothing ()
+  "A repeated push owes no new work: the first already queued them."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta")
+      (agent-repl--webview-precreate-on-roster-update 'roster)
+      ;; Act
+      (let ((before (copy-sequence agent-repl--webview-precreate-queue)))
+        (should (= 0 (agent-repl-webview-precreate-all)))
+        ;; Assert
+        (should (equal agent-repl--webview-precreate-queue before))))))
+
+(ert-deftest agent-repl-test-wr-roster-update-skips-an-already-mounted-workspace ()
+  "A workspace whose page is mounted is refused, so the push never queues it."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    ;; alpha is eligible; beta is not (its page is already mounted).
+    (agent-repl-test-wr--eligible '("alpha")
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("alpha" "beta"))))
+        ;; Act
+        (agent-repl--webview-precreate-on-roster-update 'roster)
+        ;; Assert
+        (should (equal agent-repl--webview-precreate-queue '("alpha")))))))
+
+(ert-deftest agent-repl-test-wr-roster-update-is-registered-on-the-roster-hook ()
+  "The pre-creation also rides every accepted roster push."
+  ;; Act / Assert
+  (should (memq #'agent-repl--webview-precreate-on-roster-update
+                agent-repl-roster-update-functions)))
+
 ;;; test-webview-recovery.el ends here
