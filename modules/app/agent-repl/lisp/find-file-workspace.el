@@ -134,10 +134,10 @@ outside the user's home directory."
               (root (agent-repl--path-canonical raw)))
     (if (agent-repl--ffw-under-home-p root)
         (progn
-          (agent-repl--info nil "find-file-workspace: root resolved file=%s root=%s"
+          (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: root resolved file=%s root=%s"
                             file root)
           root)
-      (agent-repl--log nil "find-file-workspace: root outside home file=%s root=%s"
+      (agent-repl--log '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: root outside home file=%s root=%s"
                        file root)
       nil)))
 
@@ -268,7 +268,7 @@ routes normally again without any timer, retry budget, or sleep.
 (defun agent-repl--ffw-refused-clear (root)
   "Forget ROOT's recorded refusal, so it may route again."
   (when (gethash root agent-repl--ffw-refused)
-    (agent-repl--info nil "find-file-workspace: refusal cleared root=%s" root)
+    (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: refusal cleared root=%s" root)
     (remhash root agent-repl--ffw-refused)))
 
 (defvar agent-repl--ffw-pending (make-hash-table :test 'equal)
@@ -281,14 +281,14 @@ nothing here outlives the arrival it is waiting for.")
 
 (defun agent-repl--ffw-pending-register (root buffer)
   "Record BUFFER as the one-shot placement waiting on ROOT's tab."
-  (agent-repl--info nil "find-file-workspace: pending registered root=%s buffer=%s"
+  (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: pending registered root=%s buffer=%s"
                     root (buffer-name buffer))
   (puthash root buffer agent-repl--ffw-pending))
 
 (defun agent-repl--ffw-pending-drop (root reason)
   "Forget ROOT's pending placement, recording REASON."
   (when (gethash root agent-repl--ffw-pending)
-    (agent-repl--info nil "find-file-workspace: pending dropped root=%s reason=%s"
+    (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: pending dropped root=%s reason=%s"
                       root reason)
     (remhash root agent-repl--ffw-pending)))
 
@@ -333,7 +333,7 @@ this, visiting a file under it routes again from scratch."
   (interactive)
   (clrhash agent-repl--ffw-pending)
   (clrhash agent-repl--ffw-refused)
-  (agent-repl--info nil "find-file-workspace: reset pending and refusals")
+  (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: reset pending and refusals")
   (message "agent-repl: find-file routing reset"))
 
 (defun agent-repl--ffw-acquire (root buffer thunk)
@@ -345,11 +345,11 @@ that ROOT's tab arrival will fire.  A REFUSAL — the verb signalling —
 drops the pending entry, is logged and messaged, and answers nil so the
 caller falls back to ordinary display."
   (agent-repl--ffw-pending-register root buffer)
-  (agent-repl--info nil "find-file-workspace: verb sent root=%s" root)
+  (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: verb sent root=%s" root)
   (condition-case err
       (progn
         (funcall thunk)
-        (agent-repl--info nil "find-file-workspace: verb answered root=%s" root)
+        (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: verb answered root=%s" root)
         (or (when-let* ((ws (agent-repl--ws-name-for-dir root)))
               (when (agent-repl--ffw-switch-and-place ws buffer)
                 (agent-repl--ffw-pending-drop root "placed-immediately")
@@ -358,7 +358,7 @@ caller falls back to ordinary display."
     (error
      (agent-repl--ffw-pending-drop root "verb-refused")
      (agent-repl--ffw-refused-record root)
-     (agent-repl--warn nil "find-file-workspace: verb refused root=%s error=%S"
+     (agent-repl--warn '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: verb refused root=%s error=%S"
                        root err)
      (message "agent-repl: could not open the workspace for %s; opening the file here"
               root)
@@ -385,7 +385,7 @@ the thing this routing exists to stop."
                           root ws (buffer-name buffer))
         (agent-repl--ffw-switch-and-place ws buffer))
        ((agent-repl--ffw-refused-p root)
-        (agent-repl--info nil "find-file-workspace: verb chosen root=%s ws=%s verb=none reason=refused-earlier buffer=%s"
+        (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: verb chosen root=%s ws=%s verb=none reason=refused-earlier buffer=%s"
                           root ws (buffer-name buffer))
         nil)
        (ws
@@ -395,7 +395,7 @@ the thing this routing exists to stop."
          root buffer
          (lambda () (funcall agent-repl-find-file-workspace-open-function ws))))
        (t
-        (agent-repl--info nil "find-file-workspace: verb chosen root=%s ws=nil verb=create buffer=%s"
+        (agent-repl--info '(:agent-repl-central "file routing precedes workspace selection") "find-file-workspace: verb chosen root=%s ws=nil verb=create buffer=%s"
                           root (buffer-name buffer))
         (agent-repl--ffw-acquire
          root buffer

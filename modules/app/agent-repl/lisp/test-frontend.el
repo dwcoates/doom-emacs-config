@@ -1637,6 +1637,24 @@ one place where a decoration failing may not cost the user a page."
                          "ws-1")))
       (kill-buffer buf))))
 
+(ert-deftest agent-repl-test-frontend-adopt-hook-failure-uses-the-explicit-owner ()
+  "A failed webview decoration is attributed to the adopted workspace."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt-log-owner*"))
+        (agent-repl-frontend-webview-adopt-hook
+         (list (lambda () (error "decoration failed"))))
+        logged-workspace)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--warn)
+                   (lambda (ws _fmt &rest _args)
+                     (setq logged-workspace ws))))
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer
+           buf "*agent-repl-test-adopted-log-owner*" "owner-ws")
+          ;; Assert
+          (should (equal logged-workspace "owner-ws")))
+      (kill-buffer buf))))
+
 (ert-deftest agent-repl-test-frontend-adopt-webview-buffer-clears-the-header-line ()
   "Adoption clears `xwidget-webkit-mode's header line: a webview is a
 panel, not a browser."

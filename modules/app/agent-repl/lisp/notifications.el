@@ -408,17 +408,18 @@ exits.  It is kept only for a host lacking both alerter and osascript.
 Signals an error if no supported notification tool is found."
   (cond
    ((executable-find agent-repl-alerter-executable)
-    (agent-repl--log nil "select-notification-backend: backend=alerter")
+    (agent-repl--log '(:agent-repl-central "notification backend selection is host-wide") "select-notification-backend: backend=alerter")
     #'agent-repl--notify-backend-alerter)
    ((executable-find agent-repl-osascript-executable)
-    (agent-repl--log nil "select-notification-backend: backend=osascript")
+    (agent-repl--log '(:agent-repl-central "notification backend selection is host-wide") "select-notification-backend: backend=osascript")
     #'agent-repl--notify-backend-osascript)
    ((executable-find agent-repl-terminal-notifier-executable)
-    (agent-repl--log nil "select-notification-backend: backend=terminal-notifier")
+    (agent-repl--log '(:agent-repl-central "notification backend selection is host-wide") "select-notification-backend: backend=terminal-notifier")
     #'agent-repl--notify-backend-terminal-notifier)
    (t
     (agent-repl--fatal
-     nil "select-notification-backend FAILED alerter=%s osascript=%s terminal-notifier=%s"
+     '(:agent-repl-central "notification backend selection is host-wide")
+     "select-notification-backend FAILED alerter=%s osascript=%s terminal-notifier=%s"
      agent-repl-alerter-executable agent-repl-osascript-executable
      agent-repl-terminal-notifier-executable))))
 

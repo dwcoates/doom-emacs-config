@@ -305,7 +305,7 @@ deferral was asked for."
 (defun agent-repl--prompt-queue-on-link-up (&optional _conn)
   "Release every OUTAGE-held prompt, in order, on the link-up edge."
   (let ((workspaces (hash-table-keys agent-repl--prompt-queue)))
-    (agent-repl--info nil "elisp.prompt-queue.link-up workspaces=%d" (length workspaces))
+    (agent-repl--info '(:agent-repl-central "link recovery scans every workspace") "elisp.prompt-queue.link-up workspaces=%d" (length workspaces))
     (dolist (ws workspaces)
       (agent-repl-prompt-queue-drain ws :outage))))
 

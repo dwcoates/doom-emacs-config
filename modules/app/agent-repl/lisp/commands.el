@@ -314,15 +314,15 @@ CHANGE-SPEC describes which changes; PROMPT is the analysis instruction."
       (cond
        (override
         (when (fboundp 'agent-repl--log)
-          (agent-repl--log nil "elisp.commands.change-spec branch=override scope=%s" scope))
+          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=override scope=%s" scope))
         override)
        ((eq default-spec :use-branch-diff-spec)
         (when (fboundp 'agent-repl--log)
-          (agent-repl--log nil "elisp.commands.change-spec branch=branch-spec scope=%s" scope))
+          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=branch-spec scope=%s" scope))
         'agent-repl-branch-diff-spec)
        (t
         (when (fboundp 'agent-repl--log)
-          (agent-repl--log nil "elisp.commands.change-spec branch=default scope=%s" scope))
+          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=default scope=%s" scope))
         default-spec))))
 
   (defun agent-repl--diff-command-form (scope-entry family doc-verb prompt-var scope-overrides)
@@ -589,17 +589,17 @@ moves the user nowhere: there is no workspace to come up on."
   (let ((canonical (file-name-as-directory (expand-file-name dir))))
     (unless (file-directory-p canonical)
       (user-error "agent-repl: %s is not a directory" canonical))
-    (agent-repl--info nil "elisp.commands.add-project dir=%s" canonical)
+    (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project dir=%s" canonical)
     (agent-repl--ws-register-project canonical)
     (agent-repl-host-register
      (agent-repl-link-primary) canonical
      (lambda (ref)
        (if ref
            (progn
-             (agent-repl--info nil "elisp.commands.add-project-registered dir=%s id=%s"
+             (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-registered dir=%s id=%s"
                                canonical (plist-get ref :id))
              (agent-repl-verbs-select-minted ref))
-         (agent-repl--warn nil "elisp.commands.add-project-not-registered dir=%s"
+         (agent-repl--warn '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-not-registered dir=%s"
                            canonical))))))
 
 ;;;; ---- Workspace navigation ---------------------------------------------
@@ -653,28 +653,31 @@ blocking I/O fires, and so they run in order rather than racing across
 two timers."
   (interactive)
   (if project
-      (progn
-        (agent-repl--log (agent-repl--ws-current-log-name)
+      (let* ((target (agent-repl--ws-name-for-dir project))
+             ;; A non-workspace project switch is editor-local and may begin
+             ;; before any workspace exists; a known target is always explicit.
+             (scope (if target target
+                      '(:agent-repl-context "plain project switch has no workspace target"))))
+        (agent-repl--log scope
                          "elisp.commands.switch-to-project path=%s" project)
         (agent-repl--switch-project-arm-panels project)
         (agent-repl--ws-switch-project project)
         (run-at-time
          0 nil
          (lambda ()
-           (let ((recent-file (agent-repl--most-recent-project-file project))
-                 (current (ignore-errors (agent-repl--ws-current-name))))
+           (let ((recent-file (agent-repl--most-recent-project-file project)))
              (if (and recent-file (file-exists-p recent-file))
                  (progn
-                   (agent-repl--log current "elisp.commands.switch-open-recent file=%s"
+                   (agent-repl--log scope "elisp.commands.switch-open-recent file=%s"
                                     recent-file)
                    (find-file recent-file))
-               (agent-repl--log current
+               (agent-repl--log scope
                                 "elisp.commands.switch-no-recent project=%s" project))))))
     (let ((names (agent-repl--live-ws-names)))
       (unless names
         (user-error "agent-repl: no live workspaces"))
       (let ((choice (completing-read "Switch to workspace: " names nil t)))
-        (agent-repl--log (agent-repl--ws-current-log-name)
+        (agent-repl--log choice
                          "elisp.commands.switch-chosen ws=%s" choice)
         (agent-repl--ws-switch choice)))))
 

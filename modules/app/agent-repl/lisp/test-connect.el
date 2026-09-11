@@ -53,7 +53,7 @@ points testable without waiting on anything.")
                      (string-match-p regexp (cdr entry))))
               agent-repl-test-connect--logs))
 
-(defun agent-repl-test-connect--dial-stub (name host port request filter sentinel)
+(defun agent-repl-test-connect--dial-stub (name host port request filter sentinel log-scope)
   "Stand in for `agent-repl-connect--open-socket' without dialing anything.
 Creates a pipe process (a real process object bound to no connection),
 records the exchange, and — when `agent-repl-test-connect--script' is set
@@ -69,6 +69,7 @@ records the exchange, and — when `agent-repl-test-connect--script' is set
                                      :filter #'ignore
                                      :sentinel #'ignore))
          (record (list :name name :host host :port port :request request
+                       :log-scope log-scope
                        :filter filter :sentinel sentinel :process process)))
     (push record agent-repl-test-connect--spawned)
     (when agent-repl-test-connect--script
@@ -843,6 +844,20 @@ Decoding past it would invent a body out of the framing bytes."
       (let ((record (agent-repl-test-connect--last-spawn)))
         (should (equal (plist-get record :host) "127.0.0.1"))
         (should (equal (plist-get record :port) 41234))))))
+
+(ert-deftest agent-repl-test-connect-unary-captures-the-request-log-workspace ()
+  "A unary exchange carries its caller workspace into the socket callbacks."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (cl-letf (((symbol-function 'agent-repl--capture-log-scope)
+               (lambda (_scope) "request-ws")))
+      (let ((conn (agent-repl-test-connect--conn)))
+        ;; Act
+        (agent-repl-connect-unary conn "DaemonHealth" "{}")
+        ;; Assert
+        (should (equal (plist-get (agent-repl-test-connect--last-spawn)
+                                  :log-scope)
+                       "request-ws"))))))
 
 (ert-deftest agent-repl-test-connect-unary-leaves-no-socket-behind ()
   "The exchange\'s socket does not outlive the call that opened it."

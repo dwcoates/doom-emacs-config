@@ -51,6 +51,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--git-string "agent-repl-core" (&rest args))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
@@ -148,8 +149,16 @@ settle directly."
   (let ((ok (zerop (process-exit-status proc)))
         (output (with-current-buffer (process-buffer proc)
                   (string-trim (buffer-string))))
-        (callback (process-get proc 'agent-repl-callback)))
-    (agent-repl--log nil "elisp.worktree.async-git-settle proc=%s status=%s exit=%s"
+        (callback (process-get proc 'agent-repl-callback))
+        (log-ws (process-get proc 'agent-repl-log-workspace)))
+    (unless log-ws
+      (agent-repl--error
+       '(:agent-repl-central "a malformed async git process has no captured workspace")
+       "elisp.worktree.async-git-missing-log-scope proc=%s"
+       (process-name proc))
+      (error "agent-repl async git process %S has no log workspace"
+             (process-name proc)))
+    (agent-repl--log log-ws "elisp.worktree.async-git-settle proc=%s status=%s exit=%s"
                      (process-name proc) (process-status proc) (process-exit-status proc))
     (agent-repl--kill-buffer-safely (process-buffer proc))
     (funcall callback ok output)))
@@ -172,16 +181,22 @@ LABEL names the process and temp buffer.  CALLBACK is called with
 \(SUCCESS-P OUTPUT) when the process exits.  This IS the
 external-boundary wrapper -- tests mock it via `cl-letf' (see
 `agent-repl--external-boundary-functions' in core.el)."
-  (agent-repl--log nil "elisp.worktree.async-git label=%s git-root=%s args=%S"
-                   label git-root args)
-  (let* ((buf (generate-new-buffer (format " *agent-repl-%s*" label)))
-         (proc (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
-                      (format "agent-repl-%s" label)
-                      buf
-                      "git" "-C" git-root
-                      args)))
-    (process-put proc 'agent-repl-callback callback)
-    (set-process-sentinel proc #'agent-repl--async-git-sentinel)))
+  (let* ((workspace (agent-repl--ws-name-for-dir git-root))
+         (log-ws (if workspace
+                     workspace
+                   '(:agent-repl-central
+                     "a git directory outside the roster has no workspace")))
+         (buf (generate-new-buffer (format " *agent-repl-%s*" label))))
+    (agent-repl--log log-ws "elisp.worktree.async-git label=%s git-root=%s args=%S"
+                     label git-root args)
+    (let ((proc (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
+                       (format "agent-repl-%s" label)
+                       buf
+                       "git" "-C" git-root
+                       args)))
+      (process-put proc 'agent-repl-callback callback)
+      (process-put proc 'agent-repl-log-workspace log-ws)
+      (set-process-sentinel proc #'agent-repl--async-git-sentinel))))
 
 ;;;; ---- Branch readers ----------------------------------------------------
 ;;
@@ -229,7 +244,8 @@ Tombstoned entries are skipped so a killed workspace's preserved
 `:project-dir' cannot shadow a live workspace at the same path."
   (if (not dir)
       (progn
-        (agent-repl--log nil "elisp.worktree.ws-name-for-dir dir=nil result=nil")
+        (agent-repl--log '(:agent-repl-central "the lookup input names no workspace")
+                         "elisp.worktree.ws-name-for-dir dir=nil result=nil")
         nil)
     (let* ((canon (agent-repl--path-canonical dir))
            (live-names (agent-repl--live-ws-names))
@@ -345,7 +361,8 @@ not happen would be the more misleading answer."
                (setq error-string (error-message-string err)))))
           (setq printed (with-current-buffer printed-buf (buffer-string))))
       (kill-buffer printed-buf))
-    (agent-repl--log nil "elisp.worktree.eval printed-len=%d errored=%s"
+    (agent-repl--log '(:agent-repl-central "runtime evaluation is process-wide")
+                     "elisp.worktree.eval printed-len=%d errored=%s"
                      (length printed) (and error-string t))
     (list :printed printed
           :value-string value-string

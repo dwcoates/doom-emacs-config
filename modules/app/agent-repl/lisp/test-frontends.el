@@ -58,6 +58,19 @@ global."
   ;; Assert
   (should (agent-repl-frontend-get 'gui)))
 
+(ert-deftest agent-repl-test-frontends-process-wide-get-uses-central-scope ()
+  "A frontend registry lookup without a workspace is explicitly central."
+  ;; Arrange
+  (let (scope)
+    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+               (lambda (ws _fmt &rest _args) (setq scope ws))))
+      ;; Act
+      (agent-repl-frontend-get 'gui)
+      ;; Assert
+      (should (equal scope
+                     '(:agent-repl-central
+                       "frontend registry lookup has no workspace subject"))))))
+
 (ert-deftest agent-repl-test-frontends-vterm-not-registered ()
   "vterm is no longer a registered frontend — the gui is the only one.
 The vterm frontend was deleted from production; a name lookup for it
@@ -338,4 +351,3 @@ frontend must implement."
        (should (equal got "ws1"))))))
 
 ;;;; ---- Headless boot ---------------------------------------------------------------
-

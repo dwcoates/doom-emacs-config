@@ -146,15 +146,15 @@ daemon's.")
             ("print" (list "print" service))
             ("kickstart" (list "kickstart" "-k" service))
             (_
-             (agent-repl--error nil
+             (agent-repl--error '(:agent-repl-central "host service management spans workspaces")
                                 "elisp.services.launchctl-invalid-verb verb=%S label=%s"
                                 verb label)
-             (agent-repl--fatal nil
+             (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces")
                                 "invalid launchctl verb %S for service %s"
                                 verb label))))
          (exit-code (agent-repl--launchctl-call args))
          (output (agent-repl--shim-services-output)))
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "host service management spans workspaces")
                      "elisp.services.launchctl verb=%s label=%s service=%s exit=%S output=%s"
                      verb label service exit-code
                      (if (string-empty-p output) "<empty>" output))
@@ -162,10 +162,11 @@ daemon's.")
       ;; `call-process' merged launchctl's stderr into the capture buffer, so
       ;; the refusal text is already in the durable record above.
       (agent-repl--backend-phase
-       nil "launchctl %s FAILED for %s (exit %s): %s — full output in %s"
+       '(:agent-repl-central "host service management spans workspaces")
+       "launchctl %s FAILED for %s (exit %s): %s — full output in %s"
        verb label exit-code (agent-repl--backend-output-tail output)
        (agent-repl--logfile-path))
-      (agent-repl--fatal nil
+      (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces")
                          "launchd service %s failed `%s' (exit %s): %s"
                          label verb exit-code
                          (if (string-empty-p output) "<no output>" output)))
@@ -175,7 +176,7 @@ daemon's.")
   "Fail before mutation unless launchd owns both required service jobs."
   (agent-repl--shim-services-launchctl "print" agent-repl--shim-store-label)
   (agent-repl--shim-services-launchctl "print" agent-repl--shim-sidecar-label)
-  (agent-repl--log nil
+  (agent-repl--log '(:agent-repl-central "host service management spans workspaces")
                    "elisp.services.preflight store=%s sidecar=%s"
                    agent-repl--shim-store-label agent-repl--shim-sidecar-label)
   t)
@@ -210,7 +211,7 @@ with, so bounce."
                  ((null recorded) t)
                  (t (not (equal recorded
                                 (agent-repl--shim-service-file-sha256 binary)))))))
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "host service management spans workspaces")
                      "elisp.services.stamp binary=%s stamp=%s recorded=%s stale=%s"
                      binary stamp (or recorded "<absent>") (if stale "t" "nil"))
     stale))
@@ -219,7 +220,7 @@ with, so bounce."
   "Record that launchd has started the installed BINARY."
   (let* ((digest (agent-repl--shim-service-file-sha256 binary))
          (stamp (agent-repl--shim-service-deployed-stamp binary)))
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "host service management spans workspaces")
                      "elisp.services.stamp-recorded binary=%s stamp=%s sha256=%s"
                      binary stamp digest)
     (agent-repl--shim-service-write-stamp stamp digest)))
@@ -230,11 +231,11 @@ with, so bounce."
   "Poll for the kickstarted store socket without blocking Emacs.
 A TIMER poll, never a sleep."
   (unless (and (functionp on-success) (functionp on-failure))
-    (agent-repl--fatal nil "elisp.services.store-readiness needs callable continuations"))
+    (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.store-readiness needs callable continuations"))
   (let* ((started-at (float-time))
          (deadline (+ started-at agent-repl-shim-store-ready-timeout))
          (latch (agent-repl--make-latch)))
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "host service management spans workspaces")
                      "elisp.services.store-readiness socket=%s timeout=%.1f initial-ready=%s"
                      agent-repl--shim-store-socket
                      agent-repl-shim-store-ready-timeout
@@ -243,11 +244,11 @@ A TIMER poll, never a sleep."
         ((finish (ok detail)
            (when (agent-repl--latch-claim latch)
              (if ok
-                 (agent-repl--info nil
+                 (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
                                    "elisp.services.store-ready socket=%s elapsed=%.3f"
                                    agent-repl--shim-store-socket
                                    (- (float-time) started-at))
-               (agent-repl--error nil
+               (agent-repl--error '(:agent-repl-central "host service management spans workspaces")
                                   "elisp.services.store-not-ready socket=%s elapsed=%.3f detail=%S"
                                   agent-repl--shim-store-socket
                                   (- (float-time) started-at) detail))
@@ -255,7 +256,7 @@ A TIMER poll, never a sleep."
          (poll ()
            (let ((ready (agent-repl--shim-store-socket-present-p))
                  (now (float-time)))
-             (agent-repl--log-verbose nil
+             (agent-repl--log-verbose '(:agent-repl-central "host service management spans workspaces")
                                       "elisp.services.store-readiness-poll ready=%s remaining=%.3f"
                                       (if ready "t" "nil") (max 0.0 (- deadline now)))
              (cond
@@ -280,15 +281,15 @@ touched, and both stamps are written only after their kickstart
 succeeded.  PREFLIGHT-COMPLETE means the coordinator already validated
 both jobs before building any runtime artifact."
   (unless (and (functionp on-success) (functionp on-failure))
-    (agent-repl--fatal nil "elisp.services.bounce needs callable continuations"))
-  (agent-repl--info nil
+    (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.bounce needs callable continuations"))
+  (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
                     "elisp.services.bounce-begin preflight-complete=%s store=%s sidecar=%s"
                     (if preflight-complete "t" "nil")
                     agent-repl--shim-store-binary
                     agent-repl--shim-sidecar-binary)
   (if preflight-complete
-      (agent-repl--log nil "elisp.services.bounce-preflight-inherited")
-    (agent-repl--log nil "elisp.services.bounce-preflight-own")
+      (agent-repl--log '(:agent-repl-central "host service management spans workspaces") "elisp.services.bounce-preflight-inherited")
+    (agent-repl--log '(:agent-repl-central "host service management spans workspaces") "elisp.services.bounce-preflight-own")
     (agent-repl--shim-services-assert-launchd-loaded))
   ;; The build is ASYNCHRONOUS, so everything downstream of it lives in
   ;; `agent-repl--shim-services-after-build', which the continuation calls.
@@ -297,7 +298,7 @@ both jobs before building any runtime artifact."
    (lambda (build-failure)
      (if build-failure
          (progn
-           (agent-repl--error nil "elisp.services.build-failed detail=%s" build-failure)
+           (agent-repl--error '(:agent-repl-central "host service management spans workspaces") "elisp.services.build-failed detail=%s" build-failure)
            (funcall on-failure build-failure))
        ;; A signal raised inside a sentinel-driven continuation has no
        ;; caller left to catch it, so it is converted to the failure
@@ -315,11 +316,11 @@ the build in front of it is asynchronous; the sequencing is unchanged."
                         agent-repl--shim-store-binary))
         (sidecar-present (agent-repl--frontend-artifact-exists-p
                           agent-repl--shim-sidecar-binary)))
-    (agent-repl--log nil
+    (agent-repl--log '(:agent-repl-central "host service management spans workspaces")
                      "elisp.services.artifacts store-present=%s sidecar-present=%s"
                      (if store-present "t" "nil") (if sidecar-present "t" "nil"))
     (unless (and store-present sidecar-present)
-      (agent-repl--fatal nil
+      (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces")
                          "shim service build completed without both binaries: store=%s present=%s sidecar=%s present=%s"
                          agent-repl--shim-store-binary (if store-present "t" "nil")
                          agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))))
@@ -340,37 +341,44 @@ the build in front of it is asynchronous; the sequencing is unchanged."
                  (if (or store-bounced sidecar-stale)
                      (progn
                        (agent-repl--backend-phase
-                        nil "store up; bouncing the sidecar service…")
+                        '(:agent-repl-central "host service management spans workspaces")
+                        "store up; bouncing the sidecar service…")
                        (agent-repl--shim-services-launchctl
                         "kickstart" agent-repl--shim-sidecar-label)
                        (agent-repl--shim-service-record-deployed
                         agent-repl--shim-sidecar-binary))
-                   (agent-repl--log nil
+                   (agent-repl--log '(:agent-repl-central "host service management spans workspaces")
                                     "elisp.services.sidecar-kickstart-skipped label=%s"
                                     agent-repl--shim-sidecar-label))
-                 (agent-repl--info nil "elisp.services.bounce-complete store=%s sidecar=%s"
+                 (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.bounce-complete store=%s sidecar=%s"
                                    agent-repl--shim-store-label
                                    agent-repl--shim-sidecar-label)
-                 (agent-repl--backend-phase nil "store and sidecar services up")
+                 (agent-repl--backend-phase
+                  '(:agent-repl-central "host service management spans workspaces")
+                  "store and sidecar services up")
                  (funcall on-success))
              (error
               (let ((detail (error-message-string err)))
-                (agent-repl--error nil "elisp.services.sidecar-bounce-failed detail=%s" detail)
+                (agent-repl--error '(:agent-repl-central "host service management spans workspaces") "elisp.services.sidecar-bounce-failed detail=%s" detail)
                 (agent-repl--backend-phase
-                 nil "sidecar service bounce FAILED: %s — full output in %s"
+                 '(:agent-repl-central "host service management spans workspaces")
+                 "sidecar service bounce FAILED: %s — full output in %s"
                  detail (agent-repl--logfile-path))
                 (funcall on-failure detail)))))
          (store-failed (detail)
-           (agent-repl--error nil "elisp.services.store-bounce-failed detail=%s" detail)
+           (agent-repl--error '(:agent-repl-central "host service management spans workspaces") "elisp.services.store-bounce-failed detail=%s" detail)
            (agent-repl--backend-phase
-            nil "store service never came up: %s — full output in %s"
+            '(:agent-repl-central "host service management spans workspaces")
+            "store service never came up: %s — full output in %s"
             detail (agent-repl--logfile-path))
            (funcall on-failure detail)))
       (if store-stale
           (progn
-            (agent-repl--backend-phase nil "bouncing the store service…")
+            (agent-repl--backend-phase
+             '(:agent-repl-central "host service management spans workspaces")
+             "bouncing the store service…")
             (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-store-label))
-        (agent-repl--log nil "elisp.services.store-kickstart-skipped label=%s"
+        (agent-repl--log '(:agent-repl-central "host service management spans workspaces") "elisp.services.store-kickstart-skipped label=%s"
                          agent-repl--shim-store-label))
       ;; Readiness is awaited on BOTH paths.  A skipped kickstart still has to
       ;; prove the store is serving before the sidecar is touched.
@@ -395,27 +403,32 @@ workspace re-registers on link-up because registration is idempotent by
 dir."
   (agent-repl--assert-main-thread "runtime-restart")
   (unless (and (functionp on-success) (functionp on-failure))
-    (agent-repl--fatal nil "elisp.services.runtime-prepare needs callable continuations"))
-  (agent-repl--backend-phase nil "backend restart beginning…")
+    (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-prepare needs callable continuations"))
+  (agent-repl--backend-phase
+   '(:agent-repl-central "host service management spans workspaces")
+   "backend restart beginning…")
   (let ((started (float-time))
         (settled nil))
     (cl-labels
         ((fail (detail)
            (unless settled
              (setq settled t)
-             (agent-repl--error nil "elisp.services.runtime-failed elapsed=%.3f detail=%s"
+             (agent-repl--error '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-failed elapsed=%.3f detail=%s"
                                 (- (float-time) started) detail)
              (agent-repl--backend-phase
-              nil "backend restart FAILED: %s — full output in %s"
+              '(:agent-repl-central "host service management spans workspaces")
+              "backend restart FAILED: %s — full output in %s"
               detail (agent-repl--logfile-path))
              (funcall on-failure detail)))
          (complete ()
            (unless settled
              (setq settled t)
-             (agent-repl--info nil "elisp.services.runtime-complete elapsed=%.3f"
+             (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-complete elapsed=%.3f"
                                (- (float-time) started))
-             (agent-repl--backend-phase nil "backend restart complete (%.1fs)"
-                                        (- (float-time) started))
+             (agent-repl--backend-phase
+              '(:agent-repl-central "host service management spans workspaces")
+              "backend restart complete (%.1fs)"
+                                       (- (float-time) started))
              (funcall on-success)))
          (replace-daemon ()
            ;; The stop is a REQUEST — Emacs never kills a daemon — and the
@@ -423,7 +436,7 @@ dir."
            ;; not there to stop is not an error: the ensure covers it.
            (agent-repl-frontend-daemon-stop
             (lambda (stopped)
-              (agent-repl--info nil "elisp.services.daemon-stopped accepted=%s"
+              (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.daemon-stopped accepted=%s"
                                 (if stopped "t" "nil"))
               (agent-repl-link-teardown)
               (agent-repl-daemon-ensure
@@ -453,14 +466,14 @@ dir."
 Build script, then the store and sidecar services, then the daemon: stop
 it (a request, never a kill) and ensure a fresh one."
   (interactive)
-  (agent-repl--info nil "elisp.services.runtime-restart-command interactive=%s"
+  (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-restart-command interactive=%s"
                     (if (called-interactively-p 'interactive) "t" "nil"))
   (agent-repl--runtime-prepare
    ;; `agent-repl--runtime-prepare' already echoes the completion phase line
    ;; with its elapsed time; a second message would only overwrite it.
    #'ignore
    (lambda (detail)
-     (agent-repl--warn nil "elisp.services.runtime-restart-failed detail=%s" detail))))
+     (agent-repl--warn '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-restart-failed detail=%s" detail))))
 
 (defun agent-repl-runtime-restart-await (&optional timeout)
   "Restart the runtime and return only after terminal completion.
@@ -472,12 +485,12 @@ timeout is logged and SIGNALLED, so a caller cannot mistake the initial
 dispatch for a completed deployment."
   (let ((limit (or timeout agent-repl-runtime-restart-await-timeout)))
     (unless (and (numberp limit) (> limit 0))
-      (agent-repl--fatal nil "elisp.services.runtime-await-invalid-timeout timeout=%S" limit))
+      (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-invalid-timeout timeout=%S" limit))
     (let ((started (float-time))
           (deadline (+ (float-time) limit))
           (state :pending)
           (failure nil))
-      (agent-repl--info nil "elisp.services.runtime-await-begin timeout=%.3f" limit)
+      (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-begin timeout=%.3f" limit)
       (agent-repl--runtime-prepare
        (lambda () (setq state :complete))
        (lambda (detail) (setq failure detail state :failed)))
@@ -485,14 +498,14 @@ dispatch for a completed deployment."
         (agent-repl--runtime-pump-events 0.05))
       (pcase state
         (:complete
-         (agent-repl--info nil "elisp.services.runtime-await-complete elapsed=%.3f"
+         (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-complete elapsed=%.3f"
                            (- (float-time) started))
          "runtime-restart-complete")
         (:failed
-         (agent-repl--fatal nil "elisp.services.runtime-await-failed elapsed=%.3f detail=%s"
+         (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-failed elapsed=%.3f detail=%s"
                             (- (float-time) started) failure))
         (_
-         (agent-repl--fatal nil "elisp.services.runtime-await-timeout timeout=%.3f elapsed=%.3f"
+         (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-timeout timeout=%.3f elapsed=%.3f"
                             limit (- (float-time) started)))))))
 
 (provide 'services)

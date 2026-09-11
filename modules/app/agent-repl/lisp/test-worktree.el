@@ -222,7 +222,11 @@
                     ((symbol-function 'process-name) (lambda (_p) "test"))
                     ((symbol-function 'process-buffer) (lambda (_p) buf))
                     ((symbol-function 'process-get)
-                     (lambda (_p _k) (lambda (ok out) (setq seen (list ok out)))))
+                     (lambda (_p key)
+                       (pcase key
+                         ('agent-repl-callback
+                          (lambda (ok out) (setq seen (list ok out))))
+                         ('agent-repl-log-workspace "git-ws"))))
                     ((symbol-function 'agent-repl--kill-buffer-safely) (lambda (_b) nil)))
             (agent-repl--async-git-settle 'fake-proc)
             (should (equal seen '(t "fetched")))))
@@ -240,10 +244,32 @@
                     ((symbol-function 'process-name) (lambda (_p) "test"))
                     ((symbol-function 'process-buffer) (lambda (_p) buf))
                     ((symbol-function 'process-get)
-                     (lambda (_p _k) (lambda (ok out) (setq seen (list ok out)))))
+                     (lambda (_p key)
+                       (pcase key
+                         ('agent-repl-callback
+                          (lambda (ok out) (setq seen (list ok out))))
+                         ('agent-repl-log-workspace "git-ws"))))
                     ((symbol-function 'agent-repl--kill-buffer-safely) (lambda (_b) nil)))
             (agent-repl--async-git-settle 'fake-proc)
             (should (equal seen '(nil "fatal: no remote")))))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-worktree-async-git-settle-rejects-a-missing-log-scope ()
+  "A malformed async process records and signals its missing workspace scope."
+  ;; Arrange.
+  (let ((logged-workspace nil)
+        (buf (generate-new-buffer " *agent-repl-test-git*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-exit-status) (lambda (_p) 0))
+                  ((symbol-function 'process-name) (lambda (_p) "test"))
+                  ((symbol-function 'process-buffer) (lambda (_p) buf))
+                  ((symbol-function 'process-get) (lambda (_p _key) nil))
+                  ((symbol-function 'agent-repl--error)
+                   (lambda (ws &rest _args) (setq logged-workspace ws))))
+          ;; Act / Assert.
+          (should-error (agent-repl--async-git-settle 'fake-proc)
+                        :type 'error)
+          (should (agent-repl--central-log-scope-reason logged-workspace)))
       (kill-buffer buf))))
 
 ;;;; ---- Initial buffers ----

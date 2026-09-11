@@ -144,17 +144,17 @@ Signals when FRONTEND is not an `agent-repl-frontend' struct or a
 required slot is missing — a partially-defined frontend is a bug, not
 a configuration to cope with."
   (unless (agent-repl-frontend-p frontend)
-    (agent-repl--log nil "frontend-register: rejected non-frontend value=%S" frontend)
+    (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: rejected non-frontend value=%S" frontend)
     (error "agent-repl-register-frontend: not a frontend struct: %S" frontend))
   (dolist (slot '(name open-fn boot-fn kill-fn running-p-fn
                   supported-backends supported-envs))
     (unless (funcall (intern (format "agent-repl-frontend-%s" slot)) frontend)
-      (agent-repl--log nil "frontend-register: rejected frontend=%S missing-slot=%s"
+      (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: rejected frontend=%S missing-slot=%s"
                        (agent-repl-frontend-name frontend) slot)
       (error "agent-repl-register-frontend: frontend %S is missing slot %s"
              (agent-repl-frontend-name frontend) slot)))
   (puthash (agent-repl-frontend-name frontend) frontend agent-repl--frontends)
-  (agent-repl--log nil "frontend-register: frontend=%s backends=%S envs=%S"
+  (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: frontend=%s backends=%S envs=%S"
                    (agent-repl-frontend-name frontend)
                    (agent-repl-frontend-supported-backends frontend)
                    (agent-repl-frontend-supported-envs frontend)))
@@ -163,12 +163,14 @@ a configuration to cope with."
   "Return the registered frontend named NAME (a symbol).
 Signals when no such frontend is registered — callers must never
 silently fall back to a different presentation."
-  (let ((frontend (gethash name agent-repl--frontends)))
+  (let ((frontend (gethash name agent-repl--frontends))
+        ;; A registry inspection with no workspace is deliberately process-wide.
+        (scope (if ws ws '(:agent-repl-central "frontend registry lookup has no workspace subject"))))
     (if frontend
         (progn
-          (agent-repl--log-verbose ws "frontend-get: frontend=%s found=t" name)
+          (agent-repl--log-verbose scope "frontend-get: frontend=%s found=t" name)
           frontend)
-      (agent-repl--log ws "frontend-get: frontend=%s found=nil -> error" name)
+      (agent-repl--log scope "frontend-get: frontend=%s found=nil -> error" name)
       (error "agent-repl-frontend-get: no frontend registered under `%s'" name))))
 
 (defun agent-repl--frontend-names ()
