@@ -27,13 +27,19 @@ import (
 //
 // THE ORDER OF ATTEMPTS IS FIXED and there is no third:
 //
-//  1. CGEventPostToPid through the Swift helper, addressed to the Emacs pid,
-//     with no activation.
-//  2. osascript / System Events `key code`, addressed to the Emacs process.
+//  1. The Swift helper: it activates the target Emacs for the instant of the
+//     keypress, posts CGEventPostToPid addressed to the Emacs pid, and restores
+//     the previously frontmost application. A no-activation post reached nothing
+//     in run 3 because a hidden background app has no key window for the event
+//     to land on; keydriver.swift carries the full reasoning. The momentary
+//     focus is the ONE place a realtest brings Emacs forward, and it is bounded
+//     to the keypress and reversed immediately.
+//  2. osascript / System Events `key code`, addressed to the Emacs process,
+//     which delivers to whatever is frontmost and so also requires focus.
 //
-// If NEITHER works without focus — or accessibility permission is missing —
-// the run records exactly what failed and why and stops. It does NOT fall back
-// to elisp: the owner rules on the alternative (docs/REALTEST-PLAN.md).
+// If NEITHER works — or accessibility permission is missing — the run records
+// exactly what failed and why and stops. It does NOT fall back to elisp: the
+// owner rules on the alternative (docs/REALTEST-PLAN.md).
 
 // Chord is one keystroke, spelled the way Emacs spells it and carrying the
 // macOS virtual keycode that produces it.
@@ -140,7 +146,7 @@ func (d *KeyDriver) Build(ctx context.Context) error {
 				"No elisp fallback is taken: the owner rules on the alternative",
 			strings.TrimSpace(string(checkOut)), checkErr)
 	}
-	d.Method = "CGEventPostToPid via keydriver.swift (no activation)"
+	d.Method = "CGEventPostToPid via keydriver.swift (activates Emacs for the keypress, restores prior focus)"
 	return nil
 }
 

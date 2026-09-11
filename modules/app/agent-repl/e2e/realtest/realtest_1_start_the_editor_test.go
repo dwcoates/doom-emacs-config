@@ -505,6 +505,13 @@ func pgrepOne(ctx context.Context, pattern string) (int, error) {
 // It reads `(recent-keys)` rather than observing a workspace switch: the switch
 // would also have happened if something had CALLED the command, and the whole
 // point of a real key event is that Emacs's keymap is what resolved it.
+//
+// The key driver deliberately brings Emacs frontmost for the instant of each
+// keypress and restores the prior frontmost app afterwards (keydriver.swift
+// says why a no-activation post reaches no key window). So the focus check
+// below is a NET check: it fails only if focus was left on something other than
+// where it started, which is a failure to restore, not the momentary activation
+// itself. This is the one phase that touches focus at all; startup never does.
 func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir string, manifest *Manifest) {
 	t.Helper()
 
@@ -515,8 +522,8 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	driver := &KeyDriver{Pid: pid, Scratch: runDir}
 	if err := driver.Build(ctx); err != nil {
 		// SURFACED, NOT WORKED AROUND. The plan rules that if key delivery to
-		// an unfocused Emacs is impossible, the owner decides the alternative;
-		// there is no elisp fallback here on purpose.
+		// Emacs is impossible, the owner decides the alternative; there is no
+		// elisp fallback here on purpose.
 		note := fmt.Sprintf("KEY DRIVER UNAVAILABLE: %v", err)
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
@@ -569,12 +576,13 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 		t.Fatalf("read which application is frontmost after the key self-test: %v", err)
 	}
 	if before != after {
-		note := fmt.Sprintf("the key self-test MOVED FOCUS from %q to %q, which a realtest must not do", before, after)
+		note := fmt.Sprintf("the key self-test left focus on %q, not on %q where it started: the driver "+
+			"activates Emacs for each keypress and must restore the prior frontmost app, and here it did not", after, before)
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
 	} else {
 		manifest.Notes = append(manifest.Notes,
-			fmt.Sprintf("the key self-test left focus on %q", after))
+			fmt.Sprintf("the key self-test restored focus to %q after momentarily activating Emacs for each keypress", after))
 	}
 }
 
