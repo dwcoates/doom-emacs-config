@@ -121,6 +121,18 @@ The Connect URL of a method is this prefix plus the bare method name.")
 The daemon writes the literal `127.0.0.1:<port>'; a bracketed IPv6
 literal is accepted so a future loopback spelling is not a parse crash.")
 
+(defconst agent-repl-connect--pid-line-regexp
+  "\\`pid=\\([0-9]+\\)\\'"
+  "Regexp of the `daemon.addr' line that names the advertiser's pid.
+The daemon writes the address on the first line and `pid=<n>' on the
+second; a legacy file carries only the address and names no pid.")
+
+(defun agent-repl-connect--first-line (raw)
+  "Return the trimmed first line of RAW `daemon.addr' content.
+The address lives on the first line; a `pid=<n>' line may follow it, and
+a legacy file is exactly its first line."
+  (string-trim (car (split-string raw "\n"))))
+
 (defun agent-repl-connect-daemon-addr-file ()
   "Return the absolute path of the daemon's address file.
 Lives at `daemon.addr' under agent-repl's canonical state dir
@@ -141,7 +153,7 @@ at ERROR and signals `agent-repl-connect-error'."
       (let ((raw (with-temp-buffer
                    (insert-file-contents file)
                    (buffer-string))))
-        (let ((address (string-trim raw)))
+        (let ((address (agent-repl-connect--first-line raw)))
           (if (string-match-p agent-repl-connect--address-regexp address)
               (progn
                 (agent-repl--log '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.daemon-addr-read file=%S address=%S"
@@ -153,6 +165,24 @@ at ERROR and signals `agent-repl-connect-error'."
                     (list (agent-repl-connect--failure
                            :malformed-addr
                            (format "malformed daemon.addr content: %S" raw))))))))))
+
+(defun agent-repl-connect-read-daemon-addr-pid ()
+  "Return the pid the daemon advertised in `daemon.addr', or nil for none.
+The daemon writes `pid=<n>' on the second line; a LEGACY file that
+carries only a bare address advertises no pid and answers nil.  A nil
+answer is `pid-unknown', which a reader must treat as such rather than
+guess an advertiser -- see `agent-repl-daemon--begin'."
+  (let ((file (agent-repl-connect-daemon-addr-file)))
+    (when (file-readable-p file)
+      (let ((raw (with-temp-buffer
+                   (insert-file-contents file)
+                   (buffer-string))))
+        (catch 'pid
+          (dolist (line (split-string raw "\n"))
+            (let ((trimmed (string-trim line)))
+              (when (string-match agent-repl-connect--pid-line-regexp trimmed)
+                (throw 'pid (string-to-number (match-string 1 trimmed))))))
+          nil)))))
 
 ;;;; ---- Failure detail ----
 

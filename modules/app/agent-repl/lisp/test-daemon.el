@@ -69,6 +69,11 @@
 (defvar agent-repl-test-daemon--link-connect-calls 0
   "How many times the stubbed `agent-repl-link-connect' ran.")
 
+(defvar agent-repl-test-daemon--health-calls 0
+  "How many times the stubbed `DaemonHealth' probe ran.
+A dead-advertiser cold start dials nothing, so this stays zero -- the
+proxy for `no dial' the transport records would otherwise prove.")
+
 (defvar agent-repl-test-daemon--link-conn nil
   "What the stubbed `agent-repl-link-connect' answers.")
 
@@ -91,6 +96,14 @@ under the temp root rather than the session's state dir.")
 
 (defvar agent-repl-test-daemon--addr-file-contents nil
   "What the throwaway `daemon.addr' holds, or nil when the file is absent.")
+
+(defvar agent-repl-test-daemon--addr-pid nil
+  "The pid the stubbed `daemon.addr' pid reader answers, or nil for legacy.")
+
+(defvar agent-repl-test-daemon--alive-pids nil
+  "Pids the stubbed `process-attributes' reports as live.
+The cold-start triage checks the advertiser's liveness before any dial, so
+a scenario names which pids are alive rather than depending on the host.")
 
 (defun agent-repl-test-daemon--write-addr-file (address)
   "Write ADDRESS into the scenario's throwaway `daemon.addr'."
@@ -130,6 +143,7 @@ under the temp root rather than the session's state dir.")
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-daemon--shutdown-requests nil)
          (agent-repl-test-daemon--link-connect-calls 0)
+         (agent-repl-test-daemon--health-calls 0)
          (agent-repl-test-daemon--link-conn 'the-connection)
          (agent-repl-test-daemon--link-up nil)
          (agent-repl-test-daemon--timers nil)
@@ -169,9 +183,17 @@ under the temp root rather than the session's state dir.")
          (agent-repl-test-daemon--addr-file
           (make-temp-file "agent-repl-test-daemon-addr-"))
          (agent-repl-test-daemon--addr-file-contents nil)
+         (agent-repl-test-daemon--addr-pid nil)
+         (agent-repl-test-daemon--alive-pids nil)
          (agent-repl-daemon--ensure-in-flight nil))
      (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
                 (lambda () agent-repl-test-daemon--address))
+               ((symbol-function 'agent-repl-connect-read-daemon-addr-pid)
+                (lambda () agent-repl-test-daemon--addr-pid))
+               ((symbol-function 'process-attributes)
+                (lambda (pid)
+                  (when (memq pid agent-repl-test-daemon--alive-pids)
+                    (list (cons 'state "R")))))
                ((symbol-function 'agent-repl-connect-daemon-addr-file)
                 (lambda () agent-repl-test-daemon--addr-file))
                ((symbol-function 'agent-repl--frontend-run-build-script)
@@ -204,6 +226,8 @@ under the temp root rather than the session's state dir.")
                     (and (member path agent-repl-test-daemon--existing-paths) t))))
                ((symbol-function 'agent-repl-rpc-daemon-health)
                 (lambda (_conn _request &rest keys)
+                  (setq agent-repl-test-daemon--health-calls
+                        (1+ agent-repl-test-daemon--health-calls))
                   (agent-repl-test-daemon--answer agent-repl-test-daemon--health-answer
                                                   (plist-get keys :on-response)
                                                   (plist-get keys :on-failure))))
@@ -911,6 +935,144 @@ the spawn, called the daemon booted, and linked to a refused port."
     (agent-repl-daemon--boot-tick)
     ;; Assert
     (should (= agent-repl-test-daemon--link-connect-calls 1))))
+
+;;;; ---- An advertisement whose advertiser is dead ----
+
+(ert-deftest agent-repl-test-daemon-dead-advertiser-addr-is-retired-at-info ()
+  "A pid that names no live process retires the address at INFO."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: an advertisement whose pid is not among the live pids.
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids nil)
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.addr-retired-dead-advertiser"))))
+
+(ert-deftest agent-repl-test-daemon-dead-advertiser-is-not-dialled ()
+  "A dead advertiser's address is absent, so the probe never runs."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids nil)
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert: no dial means the health probe was never asked.
+    (should (= agent-repl-test-daemon--health-calls 0))))
+
+(ert-deftest agent-repl-test-daemon-dead-advertiser-records-no-transport-warn ()
+  "A dead advertiser earns none of the stale-addr transport records."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: a transport-failing health answer would fire the stale-addr
+    ;; warn IF the probe were taken, so its absence proves the probe was not.
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids nil
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should-not (agent-repl-test-daemon--logged-p :warn "elisp.daemon.stale-addr"))))
+
+(ert-deftest agent-repl-test-daemon-dead-advertiser-file-is-retired ()
+  "The dead advertiser's `daemon.addr' is removed before the build."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids nil)
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+
+(ert-deftest agent-repl-test-daemon-dead-advertiser-spawns-a-fresh-daemon ()
+  "A dead advertiser leads straight to a build and a start."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids nil)
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should agent-repl-test-daemon--spawns)))
+
+(ert-deftest agent-repl-test-daemon-alive-advertiser-that-is-unreachable-still-warns ()
+  "A LIVE pid whose daemon refuses the connection is a real transport fault."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: the advertiser is alive, but its daemon answers nothing.
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids '(4242)
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p :warn "elisp.daemon.stale-addr"))))
+
+(ert-deftest agent-repl-test-daemon-alive-advertiser-that-answers-is-adopted ()
+  "A LIVE pid whose daemon answers is dialled and adopted, never respawned."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids '(4242))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert: it dialled, and it did not spawn.
+    (should (= agent-repl-test-daemon--health-calls 1))
+    (should (null agent-repl-test-daemon--spawns))))
+
+(ert-deftest agent-repl-test-daemon-pid-less-legacy-advertisement-is-dialled ()
+  "A LEGACY file names no pid, so the cold start falls through to the dial."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: no advertised pid, and a daemon that refuses the connection.
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid nil
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert: the legacy path dials and then records the stale address.
+    (should (= agent-repl-test-daemon--health-calls 1))
+    (should (agent-repl-test-daemon--logged-p :warn "elisp.daemon.stale-addr"))))
+
+(ert-deftest agent-repl-test-daemon-advertiser-alive-p-reports-a-live-process ()
+  "`process-attributes' answering for a pid means the advertiser is alive."
+  (agent-repl-test-daemon--with-harness
+    (cl-letf (((symbol-function 'process-attributes)
+               (lambda (_pid) (list (cons 'state "R")))))
+      ;; Arrange, Act, Assert.
+      (should (agent-repl-daemon--advertiser-alive-p 4242)))))
+
+(ert-deftest agent-repl-test-daemon-advertiser-alive-p-reports-a-dead-process ()
+  "`process-attributes' answering nil means the advertiser is gone."
+  (agent-repl-test-daemon--with-harness
+    (cl-letf (((symbol-function 'process-attributes) (lambda (_pid) nil)))
+      ;; Arrange, Act, Assert.
+      (should-not (agent-repl-daemon--advertiser-alive-p 4242)))))
+
+(ert-deftest agent-repl-test-daemon-advertiser-alive-p-rejects-a-nonpositive-pid ()
+  "A non-positive pid is no advertiser at all, never probed for liveness."
+  (agent-repl-test-daemon--with-harness
+    (cl-letf (((symbol-function 'process-attributes)
+               (lambda (_pid) (error "process-attributes must not be reached"))))
+      ;; Arrange, Act, Assert.
+      (should-not (agent-repl-daemon--advertiser-alive-p 0)))))
 
 (ert-deftest agent-repl-test-daemon-own-daemons-exit-removes-its-address-file ()
   "A daemon THIS Emacs spawned leaves no address behind when it dies."

@@ -501,6 +501,38 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       (should (agent-repl-test-connect--logs-matching
                'error "elisp\\.connect\\.daemon-addr-malformed")))))
 
+(ert-deftest agent-repl-test-connect-read-daemon-addr-takes-the-first-line-past-a-pid-line ()
+  "The address is the first line; a `pid=<n>' line after it is not the address."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (agent-repl-test-connect--with-addr-file "127.0.0.1:41234\npid=4242\n"
+      ;; Act / Assert
+      (should (equal (agent-repl-connect-read-daemon-addr) "127.0.0.1:41234")))))
+
+(ert-deftest agent-repl-test-connect-read-daemon-addr-pid-parses-the-pid-line ()
+  "A `pid=<n>' second line yields the advertised pid as an integer."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (agent-repl-test-connect--with-addr-file "127.0.0.1:41234\npid=4242\n"
+      ;; Act / Assert
+      (should (equal (agent-repl-connect-read-daemon-addr-pid) 4242)))))
+
+(ert-deftest agent-repl-test-connect-read-daemon-addr-pid-answers-nil-for-a-legacy-file ()
+  "A legacy bare-address file names no pid and reads as pid-unknown."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (agent-repl-test-connect--with-addr-file "127.0.0.1:41234\n"
+      ;; Act / Assert
+      (should (null (agent-repl-connect-read-daemon-addr-pid))))))
+
+(ert-deftest agent-repl-test-connect-read-daemon-addr-pid-answers-nil-when-absent ()
+  "An absent address file advertises no pid, never an error."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (agent-repl-test-connect--with-addr-file nil
+      ;; Act / Assert
+      (should (null (agent-repl-connect-read-daemon-addr-pid))))))
+
 ;;;; ---- Tests: address splitting ----
 
 (ert-deftest agent-repl-test-connect-split-address-separates-host-and-port ()
