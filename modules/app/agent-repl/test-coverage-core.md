@@ -118,10 +118,10 @@
 - Only `default-directory` available (no git, no project root)
 - Verify verbose logging is called with correct source label
 
-## Function: `agent-repl--workspace-id`
+## Function: `agent-repl--workspace-dir-hash`
 ### Existing tests:
-- `agent-repl-test-workspace-id-from-project-root`: uses project root fallback
-- `agent-repl-test-workspace-id-default-directory`: uses default-directory fallback
+- `agent-repl-test-workspace-dir-hash-from-project-root`: uses project root fallback
+- `agent-repl-test-workspace-dir-hash-default-directory`: uses default-directory fallback
 ### Missing edge cases:
 - `resolve-root` returns nil (should return nil since `when root` guards the body)
 - Verify the hash is exactly 8 characters
