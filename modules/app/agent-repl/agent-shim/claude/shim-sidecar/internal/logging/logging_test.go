@@ -80,7 +80,22 @@ func forwardingSinks(t *testing.T, verbose bool, forwarder Forwarder) (*Logger, 
 	l := NewForwardingDurableOnlyAtLevel(terminal, global, level, forwarder)
 	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 123456000, time.UTC) }
 	l.pid = func() int { return 4242 }
+	// THE LADDER IS EXERCISED, NOT WAITED ON. Its inter-attempt delay is the
+	// one thing in it measured in real seconds, so the suite replaces the wait
+	// itself rather than shortening it — no test here ever sleeps, and none
+	// races a timer.
+	l.forwardWait = func(time.Duration) bool { return true }
 	return l, terminal, global
+}
+
+// failures builds a retry ladder's worth of the same error, so a subject can
+// say "this record's every attempt failed" without restating the count.
+func failures(n int, err error) []error {
+	out := make([]error, n)
+	for i := range out {
+		out[i] = err
+	}
+	return out
 }
 
 func decode(t *testing.T, raw string) record {
@@ -264,28 +279,29 @@ func TestForwardFailureIsRecordedOnceAndLoggingContinues(t *testing.T) {
 	l.With(Context{Operation: "rescan"}).Log("rescan complete")
 	l.Close()
 
-	// Assert.
-	if records := forwarder.Records(); len(records) != 2 {
-		t.Fatalf("forward attempts = %d, want both file records attempted", len(records))
+	// Assert: both records climbed the whole ladder, and the outage is stated
+	// ONCE — with the two undelivered records themselves kept in the global
+	// sink rather than dropped.
+	if records := forwarder.Records(); len(records) != 2*defaultForwardAttempts {
+		t.Fatalf("forward attempts = %d, want both file records retried %d times", len(records), defaultForwardAttempts)
 	}
-	lines := strings.Split(strings.TrimSpace(global.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("global records = %d, want one forwarding failure plus the later lifecycle record: %q", len(lines), global.String())
+	operations := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		operations[decode(t, line).Operation]++
 	}
-	operations := map[string]bool{}
-	for _, line := range lines {
-		operations[decode(t, line).Operation] = true
-	}
-	if !operations["sidecar.logging.forward-failure"] || !operations["rescan"] {
-		t.Fatalf("global operations = %v, want forwarding failure and later lifecycle record", operations)
+	want := map[string]int{"sidecar.logging.forward-failure": 1, "rescan": 1, "poll": 1, "commit": 1}
+	for operation, count := range want {
+		if operations[operation] != count {
+			t.Fatalf("global operations = %v, want %v", operations, want)
+		}
 	}
 }
 
 func TestForwardFailureIsRecordedAgainAfterRecovery(t *testing.T) {
-	// Arrange.
-	forwarder := &recordingForwarder{address: "127.0.0.1:8123", errors: []error{
-		errors.New("connection refused"), nil, errors.New("connection reset"),
-	}}
+	// Arrange: one outage, a recovery, then a second outage.
+	script := append(failures(defaultForwardAttempts, errors.New("connection refused")), nil)
+	script = append(script, failures(defaultForwardAttempts, errors.New("connection reset"))...)
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", errors: script}
 	l, _, global := forwardingSinks(t, false, forwarder)
 	file := Context{Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef", ClaudeSessionID: "session-1"}
 
@@ -296,9 +312,103 @@ func TestForwardFailureIsRecordedAgainAfterRecovery(t *testing.T) {
 	l.Close()
 
 	// Assert.
-	lines := strings.Split(strings.TrimSpace(global.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("forwarding failure records = %d, want one per outage window: %q", len(lines), global.String())
+	failureRecords := 0
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		if decode(t, line).Operation == "sidecar.logging.forward-failure" {
+			failureRecords++
+		}
+	}
+	if failureRecords != 2 {
+		t.Fatalf("forwarding failure records = %d, want one per outage window: %q", failureRecords, global.String())
+	}
+}
+
+// A DAEMON THAT IS BOOTING IS NOT A DAEMON THAT IS GONE. Its boot
+// reconciliation answers no rpc, so the first attempt deadlines and a later one
+// lands; one attempt lost the diagnostic to a window that fixes itself.
+func TestABootingDaemonIsRetriedUntilItAnswers(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:53952", errors: []error{
+		errors.New("WatchWorkspaceRoster at 127.0.0.1:53952: deadline_exceeded"),
+		errors.New("WatchWorkspaceRoster at 127.0.0.1:53952: deadline_exceeded"),
+		nil,
+	}}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert: it was delivered, so nothing was recorded as a failure.
+	if got := len(forwarder.Records()); got != 3 {
+		t.Fatalf("forward attempts = %d, want the two deadlines plus the delivery", got)
+	}
+	if strings.Contains(global.String(), "forward-failure") {
+		t.Fatalf("a retry that succeeded was still reported as a failure: %q", global.String())
+	}
+}
+
+// The count is what separates "the daemon was slow to boot" from "the daemon is
+// not there", so the one failure record carries it.
+func TestTheForwardFailureRecordCarriesItsAttemptCount(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", err: errors.New("connection refused")}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert.
+	var failure record
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		if got := decode(t, line); got.Operation == "sidecar.logging.forward-failure" {
+			failure = got
+		}
+	}
+	if failure.Level != "warn" {
+		t.Fatalf("forward-failure level = %q, want warn", failure.Level)
+	}
+	if got := failure.Context["attempt"]; got != float64(defaultForwardAttempts) {
+		t.Fatalf("attempt = %v, want the whole ladder (%d)", got, defaultForwardAttempts)
+	}
+}
+
+// AN UNDELIVERABLE DIAGNOSTIC IS NOT A DISCARDED ONE: the workspace sink is
+// unreachable, so the record lands in the global durable sink instead.
+func TestAnUndeliverableRecordIsKeptInTheGlobalSink(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", err: errors.New("connection refused")}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert.
+	var kept record
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		if got := decode(t, line); got.Operation == "poll" {
+			kept = got
+		}
+	}
+	if kept.Message != "polling" {
+		t.Fatalf("the undelivered file-scoped record is not in the global sink: %q", global.String())
+	}
+	if kept.Context["forward_undelivered"] != true {
+		t.Fatalf("the kept record does not say it was never delivered: %v", kept.Context)
+	}
+	if kept.WorkspaceDir != "/work/repo" {
+		t.Fatalf("the kept record lost its workspace attribution: %+v", kept)
 	}
 }
 

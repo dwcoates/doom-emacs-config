@@ -295,8 +295,40 @@ because neither spelling may make a spool invisible.
   mandate forbids.
 - A TRANSCRIPT WITHOUT ITS META IS HELD, NEVER DROPPED: `agent-<id>.meta.json`
   is the ONLY source of the agent's type, spawn depth, model and worktree, so
-  the transcript is discovered, warned about ONCE, re-checked every rescan, and
-  not tailed until the meta appears.
+  the transcript is discovered, stated ONCE, re-checked every rescan, and not
+  tailed until the meta appears.
+- THE VENDOR WRITES ONE FILE NAME FOR TWO DOCUMENTS, and the second is not a
+  defect:
+  - the SUBAGENT shape (`subagents/agent-<id>.meta.json`) always states
+    `toolUseId` beside `agentType`, `description` and `spawnDepth` (and,
+    variously, `parentAgentId`, `model`, `isFork`, `cwd`, `stoppedByUser`,
+    `worktreePath`/`worktreeBranch`/`spawnedWithWorktree`/`inheritedWorktreePath`,
+    `worktreeCleanlyRemoved`). `toolUseId` IS the identity.
+  - the WORKFLOW shape (`subagents/workflows/wf_<id>/agent-<id>.meta.json`)
+    states `agentType` (`workflow-subagent`), `spawnDepth` and `model`, plus
+    `worktreePath`/`spawnedWithWorktree` when the agent got a worktree. IT
+    CARRIES NO `toolUseId` AND NO `description`, because NO TOOL CALL SPAWNED
+    IT. Such an agent is attributed to its WORKFLOW RUN and PARENT SESSION,
+    both of which the path already carries, and its transcript is ingestible —
+    as workflow residue, which is all workflow converts to this wave. Holding
+    it for an id the vendor never writes held every workflow agent forever.
+  - a meta naming NEITHER a `toolUseId` nor an `agentType` names nothing at
+    all, and so does a workflow-shaped meta found OUTSIDE a `wf_<id>`
+    directory: both are held, at ERROR, because they will not fix themselves.
+- A HOLD IS A CONDITION, NOT AN EVENT. Every rescan re-evaluates every
+  transcript, so a per-pass warning is a record per file per pass forever —
+  one stuck agent wrote 4988 identical `discover-meta` records in 13 minutes.
+  The per-transcript hold state (`internal/discover`, keyed by path, carrying
+  the REASON, the instant it began and a repeat count) makes each record say
+  something new: the FIRST hold is stated at its own level (`warn` for an
+  absent meta, `error` for one that is present and unusable), a hold whose
+  REASON CHANGED is stated again at `warn` (it is a different fact about the
+  same file), a repeat of the same reason is VERBOSE and carries
+  `repeat_count`, and a RELEASE is an `info` lifecycle edge. Every one of them
+  carries the hold `reason` in its own context key. The STANDING set is
+  restated as one periodic `discover-holds` info record ("N transcript(s) held
+  ...; oldest since T"), bounded by `DefaultHoldSummaryInterval`; nothing held
+  states nothing.
 - WORKFLOW IS KICKED this wave: journals and workflow per-agent transcripts are
   discovered and cursor-tailed, but they convert to DECLARED residue only —
   `workflow_journal/<type>` for the journal, `workflow/agent_transcript` for a
@@ -588,8 +620,22 @@ foreground harnesses may use `logging.NewAtLevel`.
   `<state-dir>/daemon.addr` for every record so handover changes the destination
   without a sidecar restart.
 - GENUINELY GLOBAL SERVICE RECORDS stay in the global rotating sink only. A
-  forwarding failure writes one global error per daemon address and outage
+  forwarding failure writes one global record per daemon address and outage
   window and never fails the file-plane operation that produced the diagnostic.
+- A DAEMON THAT IS BOOTING IS NOT A DAEMON THAT IS GONE. Its ~10s boot
+  reconciliation is listening and answering nothing, so the first ClientLog of
+  a sidecar that came up beside it deadlines. Forwarding therefore climbs a
+  RETRY LADDER — six attempts over a doubling 250ms..5s backoff, spanning
+  ~12.75s — and the ladder is ABANDONED at Close, because a process that is
+  exiting does not wait out an outage. The one failure record is `warn` and
+  carries `attempt`: the count is what separates "slow to boot" from "not
+  there", which a bare failure could never say.
+- AN UNDELIVERABLE DIAGNOSTIC IS NOT A DISCARDED ONE. When the ladder is
+  exhausted the file-scoped record itself is written to the GLOBAL durable
+  sink, marked `forward_undelivered` with the daemon address, attempt count and
+  cause, keeping its workspace attribution. Dropping it, which is what this
+  loop used to do, silently swallowed every file-plane diagnostic for the whole
+  of a daemon outage.
 - Lifecycle records persist in
   `~/.cache/agent-repl/log/shim-claude-sidecar.log` (`--log`).
 - THE DURABLE LOG IS THE ONLY COPY, AND IT IS BOUNDED. `--log` is opened
