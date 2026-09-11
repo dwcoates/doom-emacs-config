@@ -278,8 +278,37 @@ func TestPhasesReadATabsWorkspaceFromTheMessageWhenTheFieldIsAbsent(t *testing.T
 }
 
 func TestPhasesMeasureAPanelPaintedPerWorkspace(t *testing.T) {
-	// Arrange: the webview's own load-finished event, which is the only
-	// signal in the startup that comes from the page.
+	// Arrange: the harness's own hidden-to-shown wait (spawn to focus-edge) is
+	// deliberately huge here, so the test fails if PhasePanelPainted's elapsed
+	// leaks any of it. The panel's real load happens a short interval AFTER
+	// the focus edge.
+	src, snap, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:06.000000-04:00", "info", "elisp.roster.tab-open: ws=one id=aaaa dir=/tmp/one", `"workspace_id":"aaaa"`),
+		elisp("2026-09-10T12:00:40.000000-04:00", "info", "elisp.webview-recovery.precreate-drained-on-focus queued=1 reason=focus-edge", ""),
+		elisp("2026-09-10T12:00:40.400000-04:00", "debug", "elisp.frontend.watch-load: load-changed ws=one", `"workspace_id":"aaaa"`))
+
+	// Act.
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert: the panel's elapsed is the INTRINSIC cost, focus-edge to load
+	// (400ms), never spawn to load (34.4s) — the owner ruling this file is
+	// named for is precisely that the ~34s hidden-window wait above must
+	// never be reported as latency.
+	got, ok := measurementFor(phases.Measure(), PhasePanelPainted, "aaaa")
+	if !ok || got.Elapsed != 400*time.Millisecond {
+		t.Errorf("workspace aaaa's panel measured %+v, want 400ms (focus-edge to load), not spawn to load", got)
+	}
+	if painted := phases.PaintedWorkspaces(); len(painted) != 1 || painted[0] != "aaaa" {
+		t.Errorf("the painted workspaces are %v, want [aaaa]", painted)
+	}
+}
+
+func TestPhasesReportPanelPaintedAsNotObservedWithNoFocusEdge(t *testing.T) {
+	// Arrange: a load-changed record with no focus-edge marker in the run —
+	// the panel's intrinsic cost has nothing to be measured from.
 	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:11.000000-04:00", "debug", "elisp.frontend.watch-load: load-changed ws=one", `"workspace_id":"aaaa"`))
 
@@ -289,13 +318,33 @@ func TestPhasesMeasureAPanelPaintedPerWorkspace(t *testing.T) {
 		t.Fatalf("read the phases: %v", err)
 	}
 
-	// Assert.
+	// Assert: no elapsed is reported at all, spawn-based or otherwise.
 	got, ok := measurementFor(phases.Measure(), PhasePanelPainted, "aaaa")
-	if !ok || got.Elapsed != 11*time.Second {
-		t.Errorf("workspace aaaa's panel measured %+v, want 11s", got)
+	if !ok {
+		t.Fatalf("expected a panel-painted measurement (as a not-observed note), got none")
 	}
-	if painted := phases.PaintedWorkspaces(); len(painted) != 1 || painted[0] != "aaaa" {
-		t.Errorf("the painted workspaces are %v, want [aaaa]", painted)
+	if got.Elapsed != 0 || got.Note == "" {
+		t.Errorf("workspace aaaa's panel measured %+v, want Elapsed 0 and a not-observed note", got)
+	}
+}
+
+func TestPhasesMeasureTheFocusEdgeFromSpawn(t *testing.T) {
+	// Arrange: the harness bringing Emacs forward for the key self-test is a
+	// real observed edge in its own right, and it is measured from spawn like
+	// every phase except PhasePanelPainted.
+	src, snap, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:34.000000-04:00", "info", "elisp.webview-recovery.precreate-drained-on-focus queued=1 reason=focus-edge", ""))
+
+	// Act.
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	got, ok := measurementFor(phases.Measure(), PhaseFocusEdge, GlobalWorkspace)
+	if !ok || got.Elapsed != 34*time.Second {
+		t.Errorf("%s measured %+v, want 34s from spawn", PhaseFocusEdge, got)
 	}
 }
 
@@ -464,23 +513,43 @@ func TestPhasesReadFromTheSnapshotOffset(t *testing.T) {
 	}
 }
 
-func TestPhasesMeasureTheTotalToTheLastMarker(t *testing.T) {
-	// Arrange: usable is when the last thing the startup produces has
-	// happened, which here is the second workspace's panel.
+func TestPhasesMeasureTheTotalToTheLastUsableEdge(t *testing.T) {
+	// Arrange: startup-usable (PhaseTotal) is the latest of the hidden-window
+	// edges, which here is link-up at 8s — tab-drawn at 6s is earlier. The
+	// panel-painted record is much later still (a large, deliberately
+	// harness-shaped gap, standing in for the hidden-to-shown wait), and it
+	// must NOT be able to inflate PhaseTotal: the owner ruling this test
+	// guards is precisely that no reported figure equals spawn-to-load.
 	src, snap, spawned := phaseFixture(t,
 		elisp("2026-09-10T12:00:06.000000-04:00", "info", "elisp.roster.tab-open: ws=one id=aaaa dir=/tmp/one", ""),
-		elisp("2026-09-10T12:00:13.250000-04:00", "debug", "elisp.frontend.watch-load: load-changed ws=one", `"workspace_id":"aaaa"`))
+		elisp("2026-09-10T12:00:08.000000-04:00", "info", `elisp.link.up address="a"`, ""),
+		elisp("2026-09-10T12:00:40.000000-04:00", "info", "elisp.webview-recovery.precreate-drained-on-focus queued=1 reason=focus-edge", ""),
+		elisp("2026-09-10T12:00:40.400000-04:00", "debug", "elisp.frontend.watch-load: load-changed ws=one", `"workspace_id":"aaaa"`))
 
 	// Act.
 	phases, err := ReadPhases([]Source{src}, snap, spawned)
 	if err != nil {
 		t.Fatalf("read the phases: %v", err)
 	}
+	measurements := phases.Measure()
 
-	// Assert.
-	got, ok := measurementFor(phases.Measure(), PhaseTotal, GlobalWorkspace)
-	if !ok || got.Elapsed != 13250*time.Millisecond {
-		t.Errorf("%s measured %+v, want 13.25s", PhaseTotal, got)
+	// Assert: PhaseTotal is 8s (spawn to link-up, the later of the two
+	// usable edges present), not 40.4s (spawn to the panel painting).
+	got, ok := measurementFor(measurements, PhaseTotal, GlobalWorkspace)
+	if !ok || got.Elapsed != 8*time.Second {
+		t.Errorf("%s measured %+v, want 8s (spawn to the latest usable edge), not spawn to the panel paint", PhaseTotal, got)
+	}
+	for _, m := range measurements {
+		if m.Note == "" && m.Elapsed == 40400*time.Millisecond {
+			t.Errorf("phase %s (workspace %s) reported %s, the inflated spawn-to-load delta; "+
+				"no reported figure may equal spawn to load", m.Phase, m.Workspace, m.Elapsed)
+		}
+	}
+
+	// And panel-painted itself is the intrinsic 400ms, not part of the total.
+	painted, ok := measurementFor(measurements, PhasePanelPainted, "aaaa")
+	if !ok || painted.Elapsed != 400*time.Millisecond {
+		t.Errorf("workspace aaaa's panel measured %+v, want 400ms", painted)
 	}
 }
 
