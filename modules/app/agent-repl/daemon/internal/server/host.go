@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
@@ -157,6 +158,7 @@ func (s *server) composeHostWorkspace(
 	facts, live := s.deps.SessionFacts.HostSessionFacts(ws)
 	switch {
 	case live:
+		s.clearAwaitedHostIdentity(ws)
 		existing, ok := s.hostExisting(ctx, log, ws, session, hasSession, facts)
 		if !ok {
 			return nil, false
@@ -165,8 +167,10 @@ func (s *server) composeHostWorkspace(
 	case !hasSession:
 		// Registered, and no session was ever created for it. This is the one
 		// session arm that needs no live facts at all.
+		s.clearAwaitedHostIdentity(ws)
 		view.Session = &agentreplv1.HostWorkspace_None{None: &agentreplv1.HostSessionNone{}}
 	case session.HostSessionID != "":
+		s.clearAwaitedHostIdentity(ws)
 		// A SESSION THIS DAEMON DOES NOT OPERATE is an ordinary state, not a
 		// gap: it was killed, it was handed to a successor, or it has not
 		// been opened since this daemon booted. The record carries the
@@ -192,16 +196,62 @@ func (s *server) composeHostWorkspace(
 		// A session record with NO IDENTITY AT ALL. The identity is minted
 		// where the session is created, and HostSessionExisting.id is not
 		// optional: an empty id would be a sentinel, and a client correlating
-		// on it would correlate wrongly. The view is WITHHELD and the gap is
-		// recorded rather than papered over.
-		log.Error(op, "a session record carries no host identity; the host view was withheld",
-			dlog.Context{
-				"invariant_violation": "a session record exists with no host session id",
-				"remediation":         "mint the host session identity where the session is created",
-			})
-		return nil, false
+		// on it would correlate wrongly. The view is WITHHELD either way.
+		//
+		// A RESOURCE REQUESTED BEFORE ITS PRODUCER HAS PUBLISHED IS A STARTUP
+		// TRANSIENT. Right after Emacs subscribes to WatchHostWorkspace, the
+		// shim may not yet have described the session, so the identity is
+		// legitimately absent for a moment. The FIRST withholding per workspace
+		// is DEBUG, and the missing identity only escalates to the ERROR that
+		// names a mint defect once it has persisted past
+		// hostIdentityDescribeBound.
+		if elapsed, transient := s.awaitHostIdentity(ws); transient {
+			log.Debug(op, "awaiting host identity; the session is not yet described, so the host view was withheld",
+				dlog.Context{
+					"reason":         "host session id not yet minted",
+					"withheld_for":   elapsed.String(),
+					"escalate_after": hostIdentityDescribeBound.String(),
+				})
+			return nil, false
+		} else {
+			log.Error(op, "a session record carries no host identity; the host view was withheld",
+				dlog.Context{
+					"invariant_violation": "a session record exists with no host session id",
+					"remediation":         "mint the host session identity where the session is created",
+					"withheld_for":        elapsed.String(),
+				})
+			return nil, false
+		}
 	}
 	return view, true
+}
+
+// awaitHostIdentity records the first time a workspace's host identity was
+// found missing and reports how long it has been missing since, and whether
+// that is still within the startup-transient window. The first observation is
+// always transient: the shim has just been asked for a session it may not have
+// described yet.
+func (s *server) awaitHostIdentity(ws ids.WorkspaceID) (time.Duration, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	first, ok := s.hostIdentityAwaited[ws]
+	if !ok {
+		s.hostIdentityAwaited[ws] = now
+		return 0, true
+	}
+	elapsed := now.Sub(first)
+	return elapsed, elapsed <= hostIdentityDescribeBound
+}
+
+// clearAwaitedHostIdentity forgets any pending missing-identity window for a
+// workspace, because its host view was composed with an identity: the next
+// withholding, if any, starts a fresh transient window rather than inheriting a
+// stale one.
+func (s *server) clearAwaitedHostIdentity(ws ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.hostIdentityAwaited, ws)
 }
 
 // hostExisting composes the `existing` arm: the session's identity, common to

@@ -773,3 +773,134 @@ func TestComposeHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled(t *testing.
 		})
 	}
 }
+
+// ---- the missing-host-identity startup transient --------------------------
+
+// awaitingIdentityDebug answers the compose_host_workspace DEBUG record that
+// narrates a withheld view awaiting host identity, or nil when none was logged.
+func awaitingIdentityDebug(log *recordingLogger) *logRecord {
+	for i, rec := range log.records {
+		if rec.Level == "DEBUG" && rec.Context["reason"] == "host session id not yet minted" {
+			return &log.records[i]
+		}
+	}
+	return nil
+}
+
+// A session record with no host identity, right after WatchHostWorkspace
+// subscribes, is a STARTUP TRANSIENT: the shim has not described the session
+// yet, so the FIRST withholding is DEBUG rather than ERROR.
+func TestAMissingHostIdentityIsATransientOnTheFirstWithholding(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
+	surface := h.Server.(*server)
+	log := &recordingLogger{}
+
+	// Act.
+	_, ok := surface.composeHostWorkspace(context.Background(), log, testWorkspaceID)
+
+	// Assert.
+	if ok {
+		t.Fatal("a session with no host identity composed a view, want it withheld")
+	}
+	if errs := log.at("ERROR"); len(errs) != 0 {
+		t.Fatalf("the first withholding was recorded at ERROR: %v", errs)
+	}
+	if awaitingIdentityDebug(log) == nil {
+		t.Fatalf("the first withholding did not narrate the transient at DEBUG: %v", log.records)
+	}
+}
+
+// The same missing identity escalates to ERROR once it has PERSISTED past the
+// describe bound: a session that is still identity-less that long after
+// subscription is the genuine mint defect the ERROR names.
+func TestAPersistentMissingHostIdentityEscalatesToError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
+	surface := h.Server.(*server)
+	current := time.Unix(1_700_000_000, 0)
+	surface.now = func() time.Time { return current }
+
+	// Act: a first withholding opens the transient window, then time passes
+	// beyond the bound before a second withholding.
+	surface.composeHostWorkspace(context.Background(), &recordingLogger{}, testWorkspaceID)
+	current = current.Add(hostIdentityDescribeBound + time.Second)
+	log := &recordingLogger{}
+	_, ok := surface.composeHostWorkspace(context.Background(), log, testWorkspaceID)
+
+	// Assert.
+	if ok {
+		t.Fatal("a persistently identity-less session composed a view, want it withheld")
+	}
+	errs := log.at("ERROR")
+	if len(errs) != 1 || errs[0].Context["invariant_violation"] != "a session record exists with no host session id" {
+		t.Fatalf("a persistent missing identity did not escalate to the mint-defect ERROR: %v", log.records)
+	}
+	if awaitingIdentityDebug(log) != nil {
+		t.Fatalf("an escalated withholding also narrated a transient DEBUG: %v", log.records)
+	}
+}
+
+// A missing identity that stays within the bound is STILL a transient on later
+// withholdings, not only the first: escalation is about persistence, not count.
+func TestAMissingHostIdentityWithinTheBoundStaysATransient(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
+	surface := h.Server.(*server)
+	current := time.Unix(1_700_000_000, 0)
+	surface.now = func() time.Time { return current }
+
+	// Act.
+	surface.composeHostWorkspace(context.Background(), &recordingLogger{}, testWorkspaceID)
+	current = current.Add(hostIdentityDescribeBound / 2)
+	log := &recordingLogger{}
+	_, ok := surface.composeHostWorkspace(context.Background(), log, testWorkspaceID)
+
+	// Assert.
+	if ok {
+		t.Fatal("a still-identity-less session composed a view, want it withheld")
+	}
+	if errs := log.at("ERROR"); len(errs) != 0 {
+		t.Fatalf("a withholding still inside the bound escalated to ERROR: %v", errs)
+	}
+	if awaitingIdentityDebug(log) == nil {
+		t.Fatalf("a withholding inside the bound did not narrate the transient: %v", log.records)
+	}
+}
+
+// A host view that composes WITH an identity clears the transient window, so a
+// later missing identity opens a fresh one rather than inheriting a stale bound.
+func TestComposingAHostIdentityClearsTheTransientWindow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
+	surface := h.Server.(*server)
+	current := time.Unix(1_700_000_000, 0)
+	surface.now = func() time.Time { return current }
+
+	// Act: withhold once (opening the window), then compose a view with a live
+	// identity long after the bound would have elapsed, then withhold again.
+	surface.composeHostWorkspace(context.Background(), &recordingLogger{}, testWorkspaceID)
+	current = current.Add(hostIdentityDescribeBound + time.Second)
+	h.Facts.facts[testWorkspaceID] = liveFacts()
+	if _, ok := surface.composeHostWorkspace(context.Background(), &recordingLogger{}, testWorkspaceID); !ok {
+		t.Fatal("a live session did not compose a view")
+	}
+	delete(h.Facts.facts, testWorkspaceID)
+	log := &recordingLogger{}
+	_, ok := surface.composeHostWorkspace(context.Background(), log, testWorkspaceID)
+
+	// Assert: the fresh window makes this withholding a transient again.
+	if ok {
+		t.Fatal("a session with no host identity composed a view, want it withheld")
+	}
+	if errs := log.at("ERROR"); len(errs) != 0 {
+		t.Fatalf("a withholding after a clear escalated as if the old window survived: %v", errs)
+	}
+	if awaitingIdentityDebug(log) == nil {
+		t.Fatalf("a withholding after a clear did not narrate a fresh transient: %v", log.records)
+	}
+}
