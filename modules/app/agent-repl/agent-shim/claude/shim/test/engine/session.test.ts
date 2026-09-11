@@ -4757,6 +4757,19 @@ function logContextFor(from: number, needle: string): Record<string, unknown> | 
   return undefined;
 }
 
+/** The LEVEL of the first record since `from` whose message carries `needle`. */
+function logLevelFor(from: number, needle: string): string | undefined {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
+  for (const [, bytes, offset, length] of calls.slice(from)) {
+    const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
+      message: string;
+      level: string;
+    };
+    if (record.message.includes(needle)) return record.level;
+  }
+  return undefined;
+}
+
 /** Every fault detail the session's diagnostics carried while `act` ran. */
 async function faultDetailsWhile(h: Harness, act: () => Promise<void>): Promise<string[]> {
   const seen = await pushedUpdates(
@@ -6083,7 +6096,7 @@ describe("the durable log sink being poisoned", () => {
     const freshFs = await import("node:fs");
     const freshLog = await import("../../src/log.js");
     const { createEngine: freshCreateEngine } = await import("../../src/engine/session.js");
-    freshLog.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "poison-suite" });
+    freshLog.configureLog({ fd: 3, cwd: "/ws", workspaceId: "000000000000ab01", agentReplSessionId: "poison-suite" });
     vi.mocked(freshFs.writeSync).mockImplementationOnce(() => {
       throw new Error("fd 3 is gone");
     });
@@ -6092,5 +6105,451 @@ describe("the durable log sink being poisoned", () => {
     const h = harness({ engineFactory: freshCreateEngine });
 
     expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A TRANSIENT FAULT LIFTS WHEN THE SAME OPERATION SUCCEEDS.
+ *
+ * WHAT THIS GUARDS, and why it exists: a single `SQLITE_BUSY` on one store read
+ * made the owner's shim unhealthy for twenty-two hours. Every new WatchSession
+ * was answered with that one fault still standing, so the daemon refused to
+ * adopt the shim on every boot, forever. A transient condition that raises a
+ * permanent verdict is the defect — so every fault-raising operation here has
+ * its own component, and every transient one clears its component when it next
+ * succeeds.
+ */
+describe("a component that recovers", () => {
+  /** The faults standing right now, by component. */
+  function standingFaults(h: Harness): { component: string; detail: string }[] {
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("diagnostics is the only arm here");
+    const health = update.value.health;
+    if (health.case !== "unhealthy") return [];
+    return health.value.faults.map((fault) => ({
+      component: fault.component,
+      detail: fault.detail,
+    }));
+  }
+
+  /** The components with a fault standing right now. */
+  function faultyComponents(h: Harness): string[] {
+    return standingFaults(h).map((fault) => fault.component);
+  }
+
+  /** Drive one prompt to its `result`, which is what re-probes the pulled facts. */
+  async function closeATurn(h: Harness, turn: string): Promise<void> {
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: turn }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+  }
+
+  it("clears the record plane's fault when its degraded window closes", async () => {
+    // Arrange: the store stopped answering the writer, then answered again.
+    const h = harness();
+    await started(h);
+    h.persistence.raiseDegradedWindow("the store stopped answering");
+    h.persistence.raiseFault("the store stopped answering");
+    expect(faultyComponents(h)).toContain("store-writer");
+
+    // Act.
+    h.persistence.closeDegradedWindow("the store stopped answering", 3);
+
+    // Assert.
+    expect(faultyComponents(h)).toEqual([]);
+  });
+
+  // ONE OUTAGE IS ONE WINDOW. The writer announces its window twice, and
+  // relaying both as fresh windows left a consumer reading two holes where
+  // there was one.
+  it("closes the window it already holds instead of recording a second one", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    h.persistence.raiseDegradedWindow("the store stopped answering");
+
+    // Act.
+    h.persistence.closeDegradedWindow("the store stopped answering", 3);
+
+    // Assert.
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("diagnostics is the only arm here");
+    const windows = update.value.degradedWindows.filter(
+      (window) => window.component === "store-writer",
+    );
+    expect(windows.map((window) => window.extent.case)).toEqual(["closed"]);
+  });
+
+  // A CLOSED WINDOW WITH NOTHING TO CLOSE IS STILL A FACT. If the open
+  // announcement never reached this session -- a watch that attached after it,
+  // or a plane that only ever announced the closing -- the hole still happened
+  // and a consumer is still entitled to it.
+  it("records a closing window that matches nothing standing", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+
+    // Act.
+    h.persistence.closeDegradedWindow("a hole this session never saw open", 2);
+
+    // Assert.
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("diagnostics is the only arm here");
+    expect(
+      update.value.degradedWindows.map((window) => [window.reason, window.extent.case]),
+    ).toEqual([["a hole this session never saw open", "closed"]]);
+  });
+
+  it("clears the context-usage probe's fault when the next sample answers", async () => {
+    // Arrange: the vendor refuses the first probe only.
+    let probes = 0;
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.getContextUsage = async (): Promise<ContextUsageLike> => {
+          probes += 1;
+          if (probes === 1) throw new Error("the vendor is busy");
+          return query.contextUsage;
+        };
+      },
+    });
+    await started(h);
+    expect(faultyComponents(h)).toContain("vendor-context-usage");
+
+    // Act.
+    await closeATurn(h, "turn-1");
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).not.toContain("vendor-context-usage");
+    });
+  });
+
+  it("clears the mcp probe's fault when the next probe answers", async () => {
+    // Arrange.
+    let probes = 0;
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.mcpServerStatus = async (): Promise<McpServerStatusLike[]> => {
+          probes += 1;
+          if (probes === 1) throw new Error("the vendor is busy");
+          return query.mcp;
+        };
+      },
+    });
+    await started(h);
+    expect(faultyComponents(h)).toContain("vendor-mcp-status");
+
+    // Act.
+    await closeATurn(h, "turn-1");
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).not.toContain("vendor-mcp-status");
+    });
+  });
+
+  it("clears the model catalog's fault when the next read answers", async () => {
+    // Arrange.
+    let reads = 0;
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = async (): Promise<ModelInfoLike[]> => {
+          reads += 1;
+          if (reads === 1) throw new Error("the vendor is busy");
+          return query.models;
+        };
+      },
+    });
+    await started(h);
+    expect(faultyComponents(h)).toContain("vendor-model-catalog");
+
+    // Act.
+    await closeATurn(h, "turn-1");
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).not.toContain("vendor-model-catalog");
+    });
+  });
+
+  // THE OWNER'S OWN FAULT, EXACTLY. The re-announcement's read of the open
+  // obligations met a locked database once and the verdict never lifted.
+  it("clears the open-obligations fault when a later read answers", async () => {
+    // Arrange: StartSession's own reconciliation met a locked database.
+    const h = harness();
+    h.persistence.liveWorkError = new PersistenceError(
+      "store_unavailable",
+      "storage failure: begin read transaction: database is locked (5) (SQLITE_BUSY)",
+    );
+    await started(h);
+    expect(faultyComponents(h)).toContain("store-live-work");
+
+    // Act: the store answers, and a new WatchSession re-announces from it.
+    h.persistence.liveWorkError = undefined;
+    const stream = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}));
+    const watch = stream[Symbol.asyncIterator]();
+    await watch.next();
+    await watch.next();
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).not.toContain("store-live-work");
+    });
+    await watch.return?.();
+  });
+
+  it("clears the keep-alive's fault when the next beat submits", async () => {
+    // Arrange: the first beat cannot record its prompt.
+    const h = harness();
+    await started(h);
+    h.persistence.writeThrows = new Error("the row could not be enveloped");
+    h.scheduler.fire(0);
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).toContain("shim-engine-keepalive");
+    });
+
+    // Act.
+    h.persistence.writeThrows = undefined;
+    h.scheduler.fire(0);
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).not.toContain("shim-engine-keepalive");
+    });
+  });
+
+  it("clears the history reader's fault when the next read is served", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    h.persistence.readError = new PersistenceError("store_unavailable", "the store is down");
+    await h.engine.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 5,
+        position: {
+          case: "after",
+          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+        },
+      }),
+    );
+    expect(faultyComponents(h)).toContain("shim-store-reader");
+
+    // Act.
+    h.persistence.readError = undefined;
+    await h.engine.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 5,
+        position: {
+          case: "after",
+          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+        },
+      }),
+    );
+
+    // Assert.
+    expect(faultyComponents(h)).not.toContain("shim-store-reader");
+  });
+
+  // THE ONE FAULT MEANT TO STAND. Nothing in this process restarts a query it
+  // lost, and the per-operation components are what keep a probe that still
+  // answers from clearing it.
+  it("keeps the lost query's fault standing while another component recovers", async () => {
+    // Arrange: the context probe refuses once, and then the query dies.
+    let probes = 0;
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.getContextUsage = async (): Promise<ContextUsageLike> => {
+          probes += 1;
+          if (probes === 1) throw new Error("the vendor is busy");
+          return query.contextUsage;
+        };
+      },
+    });
+    await started(h);
+    h.queries[0]?.query.fail(new Error("the vendor process is gone"));
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).toContain("vendor-query");
+    });
+
+    // Act: the context probe is resolved directly, the way a later sample does.
+    h.engine.pushes.resolveComponent("vendor-context-usage", 0);
+
+    // Assert.
+    expect(faultyComponents(h)).toEqual(["vendor-query"]);
+  });
+});
+
+/**
+ * LIVE WORK THIS SESSION HAS NO START FOR, and which of two states it is in.
+ *
+ * WHAT THIS GUARDS: `GetLiveWork` is the store's GLOBAL open-obligation set by
+ * contract — an empty request, answering "every started thing the record holds
+ * no terminal for", across every conversation the store holds. So a handle with
+ * no start in THIS session's book is usually another conversation's obligation
+ * and not a defect at all, and reporting every one of them as a record-plane
+ * loss made a healthy shim look broken on every new watch. The vendor is the
+ * authority that separates the two.
+ */
+describe("re-announcing live work the record cannot describe", () => {
+  /** A session whose store holds one live handle with no start in this book. */
+  async function sessionWithForeignHandle(holdsIt: boolean): Promise<Harness> {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.backgroundTasks = (): Promise<boolean> => Promise.resolve(holdsIt);
+      },
+    });
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_foreign" })],
+    });
+    return h;
+  }
+
+  /** Open one WatchSession far enough to take its re-announcement. */
+  async function reannounce(h: Harness): Promise<void> {
+    const stream = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}));
+    const watch = stream[Symbol.asyncIterator]();
+    await watch.next();
+    await watch.next();
+    await watch.return?.();
+  }
+
+  it("says the work belongs to another conversation when the vendor does not hold it", async () => {
+    // Arrange.
+    const h = await sessionWithForeignHandle(false);
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(logContextFor(before, "belongs to another conversation")?.work_id).toBe(
+      "toolu_foreign",
+    );
+  });
+
+  // NOT A DEFECT, SO NOT A WARNING. The shared set carrying other
+  // conversations' obligations is its ordinary state.
+  it("states another conversation's obligation below warning level", async () => {
+    // Arrange.
+    const h = await sessionWithForeignHandle(false);
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(logLevelFor(before, "belongs to another conversation")).toBe("debug");
+  });
+
+  it("reports a defect when the vendor DOES still hold the undescribable work", async () => {
+    // Arrange.
+    const h = await sessionWithForeignHandle(true);
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(logLevelFor(before, "work the vendor still has")).toBe("warn");
+  });
+
+  // A VENDOR THAT CANNOT ANSWER IS NOT A VENDOR THAT SAID "NOT MINE": the
+  // handle might be this conversation's, so it is reported as the defect it
+  // might be rather than dismissed.
+  it("treats an unanswerable probe as this conversation's work", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.backgroundTasks = (): Promise<boolean> =>
+          Promise.reject(new Error("the vendor is not answering"));
+      },
+    });
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_unknown" })],
+    });
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(
+      logContextFor(before, "could not be asked whether it holds this undescribable live work")
+        ?.work_id,
+    ).toBe("toolu_unknown");
+  });
+
+  // NO VENDOR LEFT TO ASK IS NOT AN ANSWER EITHER. A shim whose query died
+  // still serves WatchSession, and the handle might well be this
+  // conversation's, so it is reported as the defect it might be.
+  it("treats a handle as this conversation's when there is no query left to ask", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_orphan" })],
+    });
+    h.queries[0]?.query.fail(new Error("the vendor process is gone"));
+    await vi.waitFor(() => {
+      expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
+    });
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(logContextFor(before, "work the vendor still has")?.work_id).toBe("toolu_orphan");
+  });
+
+  // THE SDK IS A FOREIGN BOUNDARY, so a rejection that is not an `Error` is
+  // exactly what the cause's `String(...)` arm exists for.
+  it("records a non-Error probe rejection with the words it used", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.backgroundTasks = (): Promise<boolean> =>
+          Promise.reject("the vendor is not answering");
+      },
+    });
+    await started(h);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_bare" })],
+    });
+    const before = logCursor();
+
+    // Act.
+    await reannounce(h);
+
+    // Assert.
+    expect(
+      logContextFor(before, "could not be asked whether it holds this undescribable live work")
+        ?.cause,
+    ).toBe("the vendor is not answering");
+  });
+
+  it("announces nothing for a handle it cannot describe", async () => {
+    // Arrange.
+    const h = await sessionWithForeignHandle(false);
+
+    // Act.
+    const stream = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}));
+    const watch = stream[Symbol.asyncIterator]();
+    await watch.next();
+    const second = await watch.next();
+    await watch.return?.();
+
+    // Assert.
+    const response = second.value as shimv1.WatchSessionResponse | undefined;
+    const frame = response?.frame;
+    expect(frame?.case === "sessionStarted" ? frame.value.liveWork : undefined).toEqual([]);
   });
 });

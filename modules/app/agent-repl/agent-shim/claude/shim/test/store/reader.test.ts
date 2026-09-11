@@ -762,9 +762,15 @@ function stubClient(overrides: Partial<StoreClient>): StoreClient {
   };
 }
 
-/** A reader over a hand-built store client. */
+/**
+ * A reader over a hand-built store client.
+ *
+ * The backoff is taken instantly: the retry SCHEDULE is what
+ * `test/store/retry.test.ts` asserts, and a suite that waited the real one out
+ * would spend seconds per refusal.
+ */
 function readerOver(overrides: Partial<StoreClient>) {
-  return createReader({ client: stubClient(overrides) });
+  return createReader({ client: stubClient(overrides), sleep: () => Promise.resolve() });
 }
 
 /** One read unit's frame, exactly as the shared fixture writes it. */
@@ -2000,6 +2006,39 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     await expect(reader.readFirstPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
+  });
+
+  // A BUSY DATABASE IS NOT AN UNREACHABLE ONE. This read backs the history a
+  // consumer opens with and the membership a joining WatchSession is
+  // re-announced, and one `SQLITE_BUSY` used to lose both outright.
+  it("serves the page once a momentarily busy database lets go", async () => {
+    // Arrange: the store is busy for its first answer only.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        if (opens > 1) return opened(floorPage([]), undefined);
+        return create(storev1.OpenAgentSessionResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(storev1.OpenAgentSessionFailureSchema, {
+              detail: "storage failure: begin read transaction: database is locked (5) (SQLITE_BUSY)",
+              kind: {
+                case: "storageFailure",
+                value: create(storev1.OpenAgentSessionStorageFailureSchema, {}),
+              },
+            }),
+          },
+        });
+      },
+    });
+
+    // Act.
+    const page = await reader.readFirstPage(BOOK, 10);
+
+    // Assert.
+    expect(opens).toBe(2);
+    expect(page.entries).toEqual([]);
   });
 
   it("refuses store_unavailable when the READ ITSELF FAILS", async () => {

@@ -32,6 +32,7 @@ import {
   parseArgs,
   processIdentity,
   requireServingArgs,
+  workspaceIdFromListenSocket,
   resolveEnvironment,
   shutdownSignalHandlers,
   versionLine,
@@ -53,7 +54,7 @@ function spawnEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 
 function servingArgs(overrides: Partial<CliArgs> = {}): CliArgs {
   return {
-    listen: "/tmp/shim.sock",
+    listen: "/tmp/0100059cb65649bc.sock",
     storeSocket: "/tmp/store.sock",
     logFd: 3,
     fake: false,
@@ -67,7 +68,7 @@ describe("parseArgs", () => {
     // Arrange, Act.
     const args = parseArgs([
       "--listen",
-      "/tmp/shim.sock",
+      "/tmp/0100059cb65649bc.sock",
       "--store-socket",
       "/tmp/store.sock",
       "--log-fd",
@@ -77,7 +78,7 @@ describe("parseArgs", () => {
 
     // Assert.
     expect(args).toEqual({
-      listen: "/tmp/shim.sock",
+      listen: "/tmp/0100059cb65649bc.sock",
       storeSocket: "/tmp/store.sock",
       logFd: 3,
       fake: true,
@@ -87,7 +88,7 @@ describe("parseArgs", () => {
 
   it("defaults --fake off", () => {
     // Arrange, Act.
-    const args = parseArgs(["--listen", "/tmp/shim.sock", "--log-fd", "3"]);
+    const args = parseArgs(["--listen", "/tmp/0100059cb65649bc.sock", "--log-fd", "3"]);
 
     // Assert.
     expect(args.fake).toBe(false);
@@ -160,7 +161,7 @@ describe("requireServingArgs", () => {
 
   it("refuses a shim with no durable log sink", () => {
     // Arrange.
-    const args = parseArgs(["--listen", "/tmp/shim.sock"]);
+    const args = parseArgs(["--listen", "/tmp/0100059cb65649bc.sock"]);
 
     // Act, Assert.
     expect(() => requireServingArgs(args)).toThrow(/--log-fd 3 is required/);
@@ -358,21 +359,64 @@ describe("versionLine", () => {
 });
 
 describe("processIdentity", () => {
-  it("correlates with the workspace lock file and every log record", () => {
+  // IT JOINS THE DAEMON'S RECORDS, which is the whole point of a correlation
+  // id: keyed by the shim's own md5 prefix it joined nothing outside this
+  // process, and `bin/logs.sh --workspace` grouped it under a workspace the
+  // fleet had never heard of.
+  it("is keyed by the daemon's own workspace id", () => {
     // Arrange, Act.
-    const identity = processIdentity("/ws/feature");
+    const identity = processIdentity("0100059cb65649bc");
 
     // Assert.
-    expect(identity).toMatch(/^shim-[0-9a-f]{8}-\d+$/);
+    expect(identity).toMatch(/^shim-0100059cb65649bc-\d+$/);
   });
 
   it("gives two workspaces two identities", () => {
     // Arrange, Act.
-    const first = processIdentity("/ws/one");
-    const second = processIdentity("/ws/two");
+    const first = processIdentity("0100059cb65649bc");
+    const second = processIdentity("0100059cb65649bd");
 
     // Assert.
     expect(first).not.toBe(second);
+  });
+});
+
+describe("workspaceIdFromListenSocket", () => {
+  it("reads the id off a first-generation socket", () => {
+    // Arrange, Act, Assert.
+    expect(
+      workspaceIdFromListenSocket("/Users/x/.claude-emacs/sock/0100059cb65649bc.sock"),
+    ).toBe("0100059cb65649bc");
+  });
+
+  // A REPLACEMENT SHIM SERVES THE SAME WORKSPACE. The rollout appends its
+  // generation to the socket name, and a generation is not a new workspace.
+  it("reads the same id off a rolled generation's socket", () => {
+    // Arrange, Act, Assert.
+    expect(
+      workspaceIdFromListenSocket("/Users/x/.claude-emacs/sock/0100059cb65649bc.n7.sock"),
+    ).toBe("0100059cb65649bc");
+  });
+
+  it("refuses a socket whose name is not a workspace id", () => {
+    // Arrange, Act, Assert.
+    expect(() => workspaceIdFromListenSocket("/tmp/shim-for-a-human.sock")).toThrow(
+      /not named after a workspace id/,
+    );
+  });
+
+  it("refuses an id of the wrong width", () => {
+    // Arrange, Act, Assert.
+    expect(() => workspaceIdFromListenSocket("/tmp/0100059cb656.sock")).toThrow(
+      /not named after a workspace id/,
+    );
+  });
+
+  it("refuses an id that is not hexadecimal", () => {
+    // Arrange, Act, Assert.
+    expect(() => workspaceIdFromListenSocket("/tmp/0100059cb65649bZ.sock")).toThrow(
+      /not named after a workspace id/,
+    );
   });
 });
 
@@ -757,21 +801,21 @@ describe("logCorrelation", () => {
   });
 
   it("uses the daemon's exported id when it exported one", () => {
-    expect(logCorrelation(env("daemon-id-1"), "/ws")).toEqual({
+    expect(logCorrelation(env("daemon-id-1"), "0100059cb65649bc")).toEqual({
       agentReplSessionId: "daemon-id-1",
       source: "daemon_env",
     });
   });
 
-  it("self-names from the cwd when the daemon exported none", () => {
-    const correlation = logCorrelation(env(), "/ws");
+  it("self-names from the daemon's workspace id when the daemon exported none", () => {
+    const correlation = logCorrelation(env(), "0100059cb65649bc");
 
     expect(correlation.source).toBe("self_named");
-    expect(correlation.agentReplSessionId).toBe(processIdentity("/ws"));
+    expect(correlation.agentReplSessionId).toBe(processIdentity("0100059cb65649bc"));
   });
 
   it("self-names when the daemon exported an empty string", () => {
-    expect(logCorrelation(env(""), "/ws").source).toBe("self_named");
+    expect(logCorrelation(env(""), "0100059cb65649bc").source).toBe("self_named");
   });
 });
 
@@ -935,7 +979,7 @@ describe("main", () => {
     vi.doMock("../src/service/server.js", () => ({
       serve: async () => {
         await serveGate;
-        return { socketPath: "/tmp/shim.sock", quiet, close };
+        return { socketPath: "/tmp/0100059cb65649bc.sock", quiet, close };
       },
     }));
     vi.doMock("../src/service/routes.js", () => ({ shimRoutes: () => (): void => {} }));
@@ -993,7 +1037,7 @@ describe("main", () => {
   }
 
   /** The serving arguments, as the daemon spells them on the command line. */
-  const SERVING = ["--listen", "/tmp/shim.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3"];
+  const SERVING = ["--listen", "/tmp/0100059cb65649bc.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3"];
 
   it("answers --version and returns without binding anything", async () => {
     // Arrange.
@@ -1018,7 +1062,7 @@ describe("main", () => {
 
     // Assert.
     expect(record.fields).toMatchObject({
-      listen_socket: "/tmp/shim.sock",
+      listen_socket: "/tmp/0100059cb65649bc.sock",
       store_socket: "/tmp/store.sock",
       claude_config_dir: "/accounts/primary",
       shim_build_sha: "abc1234",
@@ -1055,7 +1099,7 @@ describe("main", () => {
     expect(h.lifecycle.map((r) => r.fields["outcome"])).toEqual(["startup_arguments_validated"]);
     h.letServeReturn();
     const serving = await h.reached("serving");
-    expect(serving.fields).toMatchObject({ listen_socket: "/tmp/shim.sock" });
+    expect(serving.fields).toMatchObject({ listen_socket: "/tmp/0100059cb65649bc.sock" });
   });
 
   it("installs the signal handlers BEFORE announcing readiness", async () => {
@@ -1250,7 +1294,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
       },
     }));
     const log = await import("../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "main-query-factory" });
+    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ee", agentReplSessionId: "main-query-factory" });
     factory = (await import("../src/main.js")).queryFactory;
   });
 

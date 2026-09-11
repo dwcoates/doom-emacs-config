@@ -53,7 +53,7 @@ import os from "node:os";
 import path from "node:path";
 import { configureLog } from "./log.js";
 import { MAIN_LIFECYCLE_LOGGER, reportFatal } from "./fatal.js";
-import { lockBinaryPath, lockDir, workspaceLockKey, LOCK_DIR_ENV } from "./locks.js";
+import { lockBinaryPath, lockDir, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
 import { type Engine } from "./engine/engine.js";
 import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
@@ -580,18 +580,56 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
 // ---------------------------------------------------------------------------
 
 /**
+ * THE DAEMON'S WORKSPACE ID, read off the socket it told this shim to serve.
+ *
+ * WHY THE SOCKET IS THE SOURCE. `workspace_id` on a log record is the fleet's
+ * grouping key -- `bin/logs.sh --workspace` and the realtest harvest both
+ * attribute by it -- so it has to be the DAEMON's minted 16-hex identity and
+ * nothing the shim invents. No spawn argument or environment variable carries
+ * it: the spawn contract is `--listen`, `--store-socket`, `--log-fd` and
+ * `--fake`, and the only contracted env is the account, the owned mark, the
+ * build sha, the state root, the store socket and the lock locations. What the
+ * daemon DOES hand over is the socket path, and it names that socket after the
+ * workspace: `<state>/sock/<workspace id>.sock`, with the rollout generation
+ * appended as `.n<gen>` (`daemon/internal/stateroot` mints the first shape,
+ * `daemon/internal/workspace/fleet_rollout.go` the second). So the id is read
+ * back out of the basename, and `daemon/internal/wsm.IDLength` is why sixteen
+ * hex characters is the shape rather than a guess.
+ *
+ * A REFUSAL, NOT A GUESS. A basename that does not spell one means this build
+ * and the daemon disagree about the socket layout, exactly like an unrecognized
+ * flag -- and a record filed under a workspace the fleet never heard of is
+ * worse than a shim that refuses to start and says why.
+ */
+export function workspaceIdFromListenSocket(listen: string): string {
+  const base = path.basename(listen);
+  const stem = base.endsWith(".sock") ? base.slice(0, -".sock".length) : base;
+  // The rollout's generation suffix, stripped before the id is read: a
+  // replacement shim serves `<id>.n2.sock` for the SAME workspace.
+  const candidate = stem.replace(/\.n\d+$/, "");
+  if (!/^[0-9a-f]{16}$/.test(candidate)) {
+    throw new Error(
+      `shim: the --listen socket ${listen} is not named after a workspace id; ` +
+        "expected <16 hex characters>[.n<generation>].sock, which is how the daemon names it",
+    );
+  }
+  return candidate;
+}
+
+/**
  * The shim's own identity in its log records, before a session exists.
  *
  * `agent_repl_session_id` normally names the daemon's session, but no spawn
  * argument carries one any more (session facts travel only in `StartSession`,
  * which is an rpc that has not arrived yet). So the process names itself, in a
- * form that CORRELATES: the workspace key is the same md5 prefix the workspace
- * lock file and every log record use, so a log line, a lock file and a process
- * can be matched without a session id. The vendor's own id is attached later,
- * through `setClaudeSessionId`, once the SDK reveals it.
+ * form that CORRELATES: it is keyed by THE DAEMON'S OWN workspace id, the same
+ * one every record's `workspace_id` carries, so a self-named record joins the
+ * daemon's records for the same workspace. It used to be keyed by the shim's
+ * md5 prefix, which joined nothing outside this process. The vendor's own id is
+ * attached later, through `setClaudeSessionId`, once the SDK reveals it.
  */
-export function processIdentity(cwd: string): string {
-  return `shim-${workspaceLockKey(cwd)}-${process.pid}`;
+export function processIdentity(workspaceId: string): string {
+  return `shim-${workspaceId}-${process.pid}`;
 }
 
 /** Where the log's correlation id came from, so the record says which it used. */
@@ -609,10 +647,13 @@ export interface LogCorrelation {
  * and a record with no correlation id at all is the one outcome neither side
  * can recover from.
  */
-export function logCorrelation(environment: ShimEnvironment, cwd: string): LogCorrelation {
+export function logCorrelation(
+  environment: ShimEnvironment,
+  workspaceId: string,
+): LogCorrelation {
   const exported = environment.agentReplSessionId;
   return exported === undefined || exported === ""
-    ? { agentReplSessionId: processIdentity(cwd), source: "self_named" }
+    ? { agentReplSessionId: processIdentity(workspaceId), source: "self_named" }
     : { agentReplSessionId: exported, source: "daemon_env" };
 }
 
@@ -675,8 +716,17 @@ export async function main(): Promise<void> {
   const environment = resolveEnvironment(process.env, args);
   const cwd = process.cwd();
 
-  const correlation = logCorrelation(environment, cwd);
-  configureLog({ fd: args.logFd, cwd, agentReplSessionId: correlation.agentReplSessionId });
+  // BEFORE THE LOG IS CONFIGURED, because the log cannot state a workspace it
+  // has not been told: a refusal here is reported through the pre-logger fatal
+  // path, the same as any other spawn-contract disagreement.
+  const workspaceId = workspaceIdFromListenSocket(args.listen);
+  const correlation = logCorrelation(environment, workspaceId);
+  configureLog({
+    fd: args.logFd,
+    cwd,
+    workspaceId,
+    agentReplSessionId: correlation.agentReplSessionId,
+  });
 
   const identity = runtimeIdentity();
   MAIN_LIFECYCLE_LOGGER.info(

@@ -21,6 +21,18 @@ export interface ShimLogConfiguration {
   fd: number;
   /** Authoritative, already-canonical workspace path supplied by the daemon. */
   cwd: string;
+  /**
+   * THE DAEMON'S OWN 16-hex workspace id, and the only thing `workspace_id`
+   * ever carries.
+   *
+   * It is the daemon's minted identity for the workspace, not a function of
+   * the path: `bin/logs.sh --workspace` and the realtest harvest group records
+   * by it, so a shim that answered with an id of its own devising was filed
+   * under a workspace nothing else in the fleet had ever heard of. The shim
+   * does not mint it and cannot derive it from the workspace directory -- it
+   * reads it off the listen socket the daemon named.
+   */
+  workspaceId: string;
   agentReplSessionId: string;
 }
 
@@ -28,6 +40,14 @@ interface RuntimeContext {
   fd: number;
   workspace_dir: string;
   workspace_id: string;
+  /**
+   * The shim's own md5-prefix key for this workspace directory.
+   *
+   * KEPT, AS A SEPARATE FIELD. It is what the workspace LOCK FILE is named
+   * after, so it is the only thing that joins a log record to a lock file on
+   * disk; it is simply not the fleet's workspace identity and never was.
+   */
+  shim_workspace_hash: string;
   agent_repl_session_id: string;
   minimum_level: LogLevel;
   claude_session_id?: string;
@@ -77,6 +97,8 @@ let runtimeContext: RuntimeContext | undefined;
 const RESERVED_FIELDS = new Set([
   "level", "operation", "workspace_dir", "workspace_id",
   "agent_repl_session_id", "claude_session_id", "request_id",
+  // The logger states this one itself; a caller's copy could disagree with it.
+  "shim_workspace_hash",
 ]);
 const LOG_LEVEL_ENV = "AGENT_REPL_LOG_LEVEL";
 const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
@@ -113,13 +135,20 @@ export function configureLog(config: ShimLogConfiguration): void {
   if (typeof config.agentReplSessionId !== "string" || config.agentReplSessionId.length === 0) {
     throw new Error("shim agent-repl session id is required");
   }
+  // A REFUSAL, NOT A DEFAULT. Every workspace record owes a `workspace_id`,
+  // and one the fleet cannot recognize is worse than none: it files the record
+  // under a workspace nothing else ever writes to.
+  if (typeof config.workspaceId !== "string" || config.workspaceId.length === 0) {
+    throw new Error("shim workspace id is required");
+  }
   if (runtimeContext !== undefined) throw new Error("shim logger has already been configured");
   const minimumLevel = configuredLogLevel();
   // Do not realpath this value: the daemon supplied the canonical cwd and owns symlink resolution.
   runtimeContext = {
     fd: config.fd,
     workspace_dir: config.cwd,
-    workspace_id: createHash("md5").update(config.cwd).digest("hex").slice(0, 8),
+    workspace_id: config.workspaceId,
+    shim_workspace_hash: createHash("md5").update(config.cwd).digest("hex").slice(0, 8),
     agent_repl_session_id: config.agentReplSessionId,
     minimum_level: minimumLevel,
     write: (fd, bytes, offset, length) => writeSync(fd, bytes, offset, length),
@@ -231,7 +260,10 @@ function buildRecord(
   const runtime = requireContext();
   requireMethodLevel(fields);
   const operation = requireString(fields, "operation");
-  const context: Record<string, unknown> = {};
+  // NOTHING IS LOST BY THE MOVE. `workspace_id` now carries the fleet's own
+  // identity, so the shim's md5 prefix -- the only thing that joins a record to
+  // the workspace lock FILE on disk -- travels beside it as its own key.
+  const context: Record<string, unknown> = { shim_workspace_hash: runtime.shim_workspace_hash };
   for (const [key, value] of Object.entries(fields)) {
     if (!RESERVED_FIELDS.has(key) && value !== undefined) context[key] = jsonSafe(value);
   }
