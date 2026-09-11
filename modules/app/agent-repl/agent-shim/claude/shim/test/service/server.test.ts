@@ -21,6 +21,7 @@ import {
   isStreamingContentType,
   isStreamingPath,
   probeSocket,
+  recordStreamReset,
   serve,
   sniffProtocol,
   type ShimServer,
@@ -1104,9 +1105,135 @@ describe("an h2c stream this server resets", () => {
     // Assert
     await vi.waitFor(() => {
       const reset = mirroredRecords(written).find(
-        (record) => record.level === "error" && record.context.rst_code !== undefined,
+        (record) => record.context.rst_code !== undefined,
       );
       expect(reset?.context.path).toBe("/shim.v1.Shim/Hibernate");
     });
+  });
+
+  // THE PEER'S OWN CANCEL IS NOT THIS SERVER'S DEFECT. Every daemon that gave
+  // up an adoption dropped its standing WatchSession, and every one of those
+  // departures was reported as an unexplained transport error -- which is
+  // exactly the noise that hides a reset something really did break.
+  it("records a peer cancel as a cancel rather than as an error", async () => {
+    // Arrange: a standing stream the client then cancels.
+    const sock = socketPath();
+    const { engine, entered } = heldHibernateEngine();
+    const server = await serve(sock, shimRoutes(engine));
+    started.push(server);
+    const pending = client(sock, "2")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}), { signal: AbortSignal.timeout(1) })
+      .catch(() => undefined);
+    await entered;
+
+    // Act
+    await pending;
+
+    // Assert
+    await vi.waitFor(() => {
+      const reset = mirroredRecords(written).find(
+        (record) => record.context.rst_code !== undefined,
+      );
+      expect(reset?.level).toBe("warn");
+      expect(reset?.context.reason).toBe(
+        "the peer cancelled the stream; it stopped consuming what this server was serving",
+      );
+    });
+  });
+});
+
+/**
+ * A standing stream the peer walks away from.
+ *
+ * THE CANCEL MUST REACH THE PRODUCER. `WatchSession` is a generator the engine
+ * holds a subscriber for; if a peer cancel ended the h2 stream without the
+ * generator being returned, every daemon that gave up an adoption would leave
+ * a subscriber attached to a shim that outlives it.
+ */
+describe("a peer that cancels a standing WatchSession", () => {
+  it("returns the engine's stream so its cleanup runs", async () => {
+    // Arrange: a WatchSession suspended at a yield the peer never collects.
+    const sock = socketPath();
+    let announceReturn = (): void => {};
+    const returned = new Promise<void>((resolve) => {
+      announceReturn = resolve;
+    });
+    const engine = new NotImplementedEngine();
+    engine.watchSession = async function* (): AsyncIterable<shimv1.WatchSessionResponse> {
+      try {
+        yield create(shimv1.WatchSessionResponseSchema, {});
+        yield create(shimv1.WatchSessionResponseSchema, {});
+      } finally {
+        announceReturn();
+      }
+    };
+    const server = await serve(sock, shimRoutes(engine));
+    started.push(server);
+    const controller = new AbortController();
+
+    // Act: take the one frame the peer wanted, then walk away.
+    const stream = client(sock, "2").watchSession(create(shimv1.WatchSessionRequestSchema, {}), {
+      signal: controller.signal,
+    });
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next();
+    controller.abort();
+
+    // Assert.
+    await expect(returned).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * The classification itself, for the codes no peer in a suite will send.
+ *
+ * A reset that is NOT the peer's cancel still has to be an error, and nothing
+ * a client can be made to do over a real socket produces one.
+ */
+describe("classifying how an h2c stream ended", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("says nothing about a stream that ended with no error", () => {
+    // Arrange, Act.
+    recordStreamReset(0, 3, "/shim.v1.Shim/WatchSession");
+
+    // Assert.
+    expect(mirroredRecords(written)).toEqual([]);
+  });
+
+  it("says nothing about a stream that ended with no reset code at all", () => {
+    // Arrange, Act.
+    recordStreamReset(undefined, 3, "/shim.v1.Shim/WatchSession");
+
+    // Assert.
+    expect(mirroredRecords(written)).toEqual([]);
+  });
+
+  it("reports a cancel at warn, naming the peer as the reason", () => {
+    // Arrange, Act.
+    recordStreamReset(8, 3, "/shim.v1.Shim/WatchSession");
+
+    // Assert.
+    const record = mirroredRecords(written)[0];
+    expect(record?.level).toBe("warn");
+    expect(record?.context.rst_code).toBe(8);
+  });
+
+  it("reports a reset this server cannot account for at error", () => {
+    // Arrange: INTERNAL_ERROR, which no consumer sends on its way out.
+    // Act.
+    recordStreamReset(2, 3, "/shim.v1.Shim/WatchSession");
+
+    // Assert.
+    const record = mirroredRecords(written)[0];
+    expect(record?.level).toBe("error");
+    expect(record?.context.rst_code).toBe(2);
   });
 });
