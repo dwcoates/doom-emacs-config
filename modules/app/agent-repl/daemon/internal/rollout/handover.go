@@ -144,11 +144,10 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 	return nil
 }
 
-// releaseServing clears this daemon's serving claim unless the successor has
-// already claimed it. Headless workspaces can be adopted as soon as the intent
-// manifest lands, before the outgoing transfer goroutine reaches this step;
-// another owner is therefore the same completed-adoption fact timeAdoption
-// observes, never a release this daemon should attempt on a bystander's claim.
+// releaseServing clears this daemon's serving claim. The successor waits for
+// this release before beginning adoption, so the normal path owns and clears
+// the row here. The already-released and already-moved arms preserve a durable
+// completed edge if an incumbent resumes after losing an operation's answer.
 func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
 	owner, err := c.deps.DB.Serving(ctx, ws)
 	if err != nil {

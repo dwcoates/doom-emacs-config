@@ -15,9 +15,10 @@ import (
 // It reads the intent manifest (the only thing the outgoing daemon left it —
 // there is NO daemon-to-daemon channel), reconciles every session's disposition
 // against the kernel locks, arms the rendezvous from the participants the
-// manifest recorded, and adopts every HEADLESS workspace at once: zero expected
-// participants means there is nothing to wait for, and Emacs may not even be
-// running.
+// manifest recorded, and starts adopting every HEADLESS workspace without a
+// participant call. Every adoption still waits for the incumbent's serving
+// release: that durable edge says the workspace passed freeness, its intake is
+// quiesced and its shim is detached.
 func (c *controller) Join(ctx context.Context) error {
 	// JOINING MODE IS THE FACT, not the manifest. A successor owns NOTHING
 	// until it adopts, and the manifest may not exist yet when it boots: the
@@ -93,7 +94,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	armed := c.armSessions(m.Sessions)
+	armed := c.armSessions(m.Daemon, m.Sessions)
 	// THE HEADLESS SET IS TAKEN FROM THE LEDGER, NOT FROM THIS READ. Arming is
 	// additive, so a workspace armed by an EARLIER read — a participant's own
 	// adopt call re-reads the manifest before this poll gets to it — adds
@@ -218,7 +219,7 @@ func (c *controller) reclaimHeadless(ws ids.WorkspaceID) bool {
 // than once by design (a successor boots before the incumbent writes it, and
 // both the awaiting poll and a participant's own call re-read it), so every
 // read must be additive.
-func (c *controller) armSessions(sessions []ManifestSession) int {
+func (c *controller) armSessions(outgoing ids.InstanceID, sessions []ManifestSession) int {
 	added := 0
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -233,7 +234,11 @@ func (c *controller) armSessions(sessions []ManifestSession) int {
 			continue
 		}
 		expected := Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb}
-		c.rendezvous[session.Workspace] = &entry{expected: expected, done: make(chan struct{})}
+		c.rendezvous[session.Workspace] = &entry{
+			outgoing: outgoing,
+			expected: expected,
+			done:     make(chan struct{}),
+		}
 		c.joining[session.Workspace] = true
 		added++
 	}
@@ -273,7 +278,7 @@ func (c *controller) armFromManifest() error {
 	if err != nil || !found {
 		return err
 	}
-	added := c.armSessions(m.Sessions)
+	added := c.armSessions(m.Daemon, m.Sessions)
 	if added > 0 {
 		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
 			dlog.Context{"workspaces": added})
@@ -421,11 +426,21 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 // no surviving shim to adopt.
 func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source string) error {
 	fields := dlog.Context{"workspace": string(ws), "source": source}
+	outgoing, err := c.outgoingDaemon(ws)
+	if err != nil {
+		c.log.Error(opAdopt, "could not resolve the incumbent serving owner", withCause(fields, err))
+		return err
+	}
+	fields["outgoing_daemon"] = string(outgoing)
+	if err := c.awaitServingRelease(ctx, ws, outgoing, fields); err != nil {
+		return err
+	}
 
 	// THE HANDLE BECOMES A WRITING ONE HERE. A successor opens read-only
 	// because the incumbent is still the sole writer; adopting a workspace is
-	// the moment it starts writing that workspace's rows, and the incumbent
-	// stopped writing them at its transfer notice.
+	// the moment it starts writing that workspace's rows. The serving release
+	// above is the durable proof that the incumbent already passed freeness,
+	// quiesced the intake and stopped writing this workspace.
 	if err := c.deps.DB.Promote(ctx); err != nil {
 		c.log.Error(opAdopt, "the state handle could not be promoted to writing", withCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: promote the state handle: %w", ws, err)
@@ -504,6 +519,68 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.advertise(ctx, fields)
 	}
 	return nil
+}
+
+// outgoingDaemon returns the incumbent recorded on a workspace's armed
+// rendezvous. Adoption without that identity cannot distinguish the intended
+// predecessor from an unrelated serving owner, so it is an invariant error.
+func (c *controller) outgoingDaemon(ws ids.WorkspaceID) (ids.InstanceID, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.rendezvous[ws]
+	if !ok {
+		return "", fmt.Errorf("rollout: adopt %q: no rendezvous is armed", ws)
+	}
+	if e.outgoing == "" {
+		return "", fmt.Errorf("rollout: adopt %q: the intent manifest names no outgoing daemon", ws)
+	}
+	return e.outgoing, nil
+}
+
+// awaitServingRelease holds adoption behind the incumbent's durable freeness
+// edge. The successor may be asked to adopt as soon as the shutdown
+// announcement arrives, while the incumbent is still waiting for the turn to
+// finish. Claiming before the serving row clears lets the successor race the
+// incumbent's release and can strand every transfer notice behind that error.
+func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID, outgoing ids.InstanceID, fields dlog.Context) error {
+	waiting := false
+	for {
+		owner, err := c.deps.DB.Serving(ctx, ws)
+		if err != nil {
+			c.log.Error(opAdopt, "could not read serving ownership while waiting for the incumbent", withCause(fields, err))
+			return fmt.Errorf("rollout: adopt %q: read serving ownership: %w", ws, err)
+		}
+		if owner == nil {
+			c.log.Debug(opAdopt, "the incumbent released serving ownership; adoption may begin",
+				merge(fields, dlog.Context{"serving_daemon": ""}))
+			return nil
+		}
+		if *owner == c.deps.Instance {
+			c.log.Debug(opAdopt, "this daemon already owns the workspace; adoption may resume",
+				merge(fields, dlog.Context{"serving_daemon": string(*owner)}))
+			return nil
+		}
+		if *owner != outgoing {
+			err := fmt.Errorf("rollout: adopt %q: workspace is served by unexpected daemon %q, want incumbent %q", ws, *owner, outgoing)
+			c.log.Error(opAdopt, "an unexpected daemon owns the workspace at the adoption boundary", withCause(merge(fields, dlog.Context{"serving_daemon": string(*owner)}), err))
+			return err
+		}
+		if !waiting {
+			c.log.Info(opAdopt, "waiting for the incumbent to release serving ownership at freeness",
+				merge(fields, dlog.Context{
+					"serving_daemon": string(*owner),
+					"poll_interval":  manifestPoll.String(),
+				}))
+			waiting = true
+		}
+		select {
+		case <-ctx.Done():
+			err := context.Cause(ctx)
+			c.log.Error(opAdopt, "the adoption lifetime ended before the incumbent released serving ownership", withCause(fields, err))
+			return fmt.Errorf("rollout: adopt %q: wait for incumbent serving release: %w", ws, err)
+		case <-c.deps.Clock.After(manifestPoll):
+		}
+	}
 }
 
 // advertise writes daemon.addr once every workspace is owned, retrying while
