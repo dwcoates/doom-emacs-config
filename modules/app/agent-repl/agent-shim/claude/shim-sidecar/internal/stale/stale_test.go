@@ -431,3 +431,155 @@ func TestAVanishedRunIsStillJudgedByItsGraceWindowWhenItPredatesBoot(t *testing.
 		t.Fatalf("sweep concluded %+v, want file_vanished", lost)
 	}
 }
+
+// startMs is the sidecar's process-start boundary for the catch-up subjects: a
+// run whose last activity predates it is backlog, one after it is steady state.
+// It sits after nowMs so the plain fixtures above (which observe at nowMs) count
+// as backlog when a test opts into the boundary, and a steady-state run is one
+// stamped past it.
+const startMs = nowMs + int64(1000)
+
+// trackerFromStart builds a tracker whose startup catch-up boundary is set, so
+// the sweep can tell backlog from a steady-state conclusion.
+func trackerFromStart(t *testing.T, opt Options, processStartMs int64) (*Tracker, *[]string) {
+	t.Helper()
+	tr, logs := tracker(t, opt)
+	tr.SetProcessStart(processStartMs)
+	return tr, logs
+}
+
+func TestStartupCatchUpSummarizesABacklogOfSilentRunsAsOneRecord(t *testing.T) {
+	// Arrange: three runs that were already silent before the sidecar started.
+	tr, logs := trackerFromStart(t, Options{}, startMs)
+	for _, path := range []string{"/private/tmp/b1.output", "/private/tmp/b2.output", "/private/tmp/b3.output"} {
+		tr.Observe(Work{Path: path, TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: nowMs - 10_000}, nowMs)
+	}
+
+	// Act: the first sweep catches up on the whole backlog at once.
+	tr.Sweep(bootMs, startMs+shellMs)
+
+	// Assert: one summary at warn naming the class and the count, never three
+	// per-item warnings.
+	records := parseLogLines(t, *logs)
+	rec := requireOnceIn(t, records, "catchup-summary", "warn")
+	if got := ctxString(t, rec, "reason"); got != string(ReasonWentSilent) {
+		t.Fatalf("summary reason = %q, want %q", got, ReasonWentSilent)
+	}
+	if got := ctxInt(t, rec, "repeat_count"); got != 3 {
+		t.Fatalf("summary repeat_count = %d, want 3", got)
+	}
+	if got := len(opsAt(records, "lost-policy", "warn")); got != 0 {
+		t.Fatalf("catch-up stated %d per-item warnings, want none (the summary carries the total)", got)
+	}
+}
+
+func TestStartupCatchUpStatesEachBacklogRunAtDebug(t *testing.T) {
+	// Arrange: two backlog runs.
+	tr, logs := trackerFromStart(t, Options{}, startMs)
+	tr.Observe(Work{Path: "/private/tmp/b1.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: nowMs - 10_000}, nowMs)
+	tr.Observe(Work{Path: "/private/tmp/b2.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: nowMs - 10_000}, nowMs)
+
+	// Act.
+	tr.Sweep(bootMs, startMs+shellMs)
+
+	// Assert: nothing is silenced — each backlog conclusion is still stated, at
+	// debug, so the per-file detail is retrievable behind the summary.
+	if got := len(opsAt(parseLogLines(t, *logs), "lost-policy", "debug")); got != 2 {
+		t.Fatalf("catch-up stated %d per-item debug records, want one per backlog run (2)", got)
+	}
+}
+
+func TestASteadyStateRunAfterCatchUpWarnsPerItem(t *testing.T) {
+	// Arrange: a run that grew AFTER the sidecar started, then went silent.
+	tr, logs := trackerFromStart(t, Options{}, startMs)
+	tr.Observe(Work{Path: "/private/tmp/b1.output", TaskID: "b1", Kind: tail.KindShellSpool, RunActivityID: "call-1", LastActivityMs: startMs + 1}, startMs+1)
+
+	// Act.
+	tr.Sweep(bootMs, startMs+1+shellMs)
+
+	// Assert: a newly-arising conclusion is stated per item, never folded into a
+	// catch-up summary.
+	records := parseLogLines(t, *logs)
+	requireOnceIn(t, records, "lost-policy", "warn")
+	if got := len(opsAt(records, "catchup-summary", "")); got != 0 {
+		t.Fatalf("a steady-state run produced %d catch-up summaries, want none", got)
+	}
+}
+
+func TestAnEmptyBacklogEmitsNoCatchUpSummary(t *testing.T) {
+	// Arrange: the boundary is set but nothing is being tracked.
+	tr, logs := trackerFromStart(t, Options{}, startMs)
+
+	// Act.
+	tr.Sweep(bootMs, startMs+shellMs)
+
+	// Assert.
+	if got := len(opsAt(parseLogLines(t, *logs), "catchup-summary", "")); got != 0 {
+		t.Fatalf("an empty backlog emitted %d catch-up summaries, want none", got)
+	}
+}
+
+func TestStartupCatchUpSummarizesEachClassSeparately(t *testing.T) {
+	// Arrange: one backlog run that went silent and one that predates the reboot.
+	tr, logs := trackerFromStart(t, Options{}, startMs)
+	tr.Observe(Work{Path: "/private/tmp/b1.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: nowMs - 10_000}, nowMs)
+	tr.Observe(Work{Path: "/private/tmp/b2.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: bootMs - 1}, nowMs)
+
+	// Act.
+	tr.Sweep(bootMs, startMs+shellMs)
+
+	// Assert: the arm IS the class, so each gets its own one-line summary.
+	records := parseLogLines(t, *logs)
+	summaries := map[string]int{}
+	for _, r := range opsAt(records, "catchup-summary", "warn") {
+		summaries[ctxString(t, r, "reason")] = ctxInt(t, r, "repeat_count")
+	}
+	want := map[string]int{string(ReasonWentSilent): 1, string(ReasonSweptUp): 1}
+	for reason, count := range want {
+		if summaries[reason] != count {
+			t.Fatalf("summary for %q counted %d, want %d; summaries=%v", reason, summaries[reason], count, summaries)
+		}
+	}
+	if len(summaries) != len(want) {
+		t.Fatalf("catch-up emitted %d class summaries, want %d: %v", len(summaries), len(want), summaries)
+	}
+}
+
+func TestABootSweepBacklogIsSummarizedNotStatedPerRun(t *testing.T) {
+	// Arrange: two runs whose files predate the machine boot.
+	tr, logs := trackerFromStart(t, Options{}, startMs)
+	tr.Observe(Work{Path: "/private/tmp/b1.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: bootMs - 1}, nowMs)
+	tr.Observe(Work{Path: "/private/tmp/b2.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: bootMs - 1}, nowMs)
+
+	// Act: the boot sweep is itself a catch-up pass.
+	tr.BootSweep(bootMs, startMs)
+
+	// Assert.
+	records := parseLogLines(t, *logs)
+	rec := requireOnceIn(t, records, "catchup-summary", "warn")
+	if got := ctxString(t, rec, "reason"); got != string(ReasonSweptUp) {
+		t.Fatalf("boot-sweep summary reason = %q, want %q", got, ReasonSweptUp)
+	}
+	if got := ctxInt(t, rec, "repeat_count"); got != 2 {
+		t.Fatalf("boot-sweep summary counted %d, want 2", got)
+	}
+	if got := len(opsAt(records, "lost-policy", "warn")); got != 0 {
+		t.Fatalf("the boot-sweep backlog stated %d per-item warnings, want none", got)
+	}
+}
+
+func TestProcessStartBoundaryIsSetOnlyOnce(t *testing.T) {
+	// Arrange: a store bounce re-enters the first cycle and would move the
+	// boundary forward, reclassifying runs a prior cycle already summarized.
+	tr, _ := tracker(t, Options{})
+
+	// Act.
+	tr.SetProcessStart(startMs)
+	tr.SetProcessStart(startMs + 1_000_000)
+
+	// Assert: a run stamped just before the FIRST boundary is still backlog.
+	tr.Observe(Work{Path: "/private/tmp/b1.output", TaskID: "b", Kind: tail.KindShellSpool, LastActivityMs: startMs - 1}, nowMs)
+	if tr.processStartMs != startMs {
+		t.Fatalf("process start = %d, want it pinned to the first value %d", tr.processStartMs, startMs)
+	}
+}
