@@ -824,3 +824,31 @@ can import the real SDK. The harnesses set it for you — `TestMain` in
 `daemon/e2e` and `daemon/internal/sessioncontroller`, and the shim's vitest
 setup — and children inherit it, so a new test needs no opt-in. Production must
 never set it.
+
+## Realtest orchestration (owner rulings, 2026-09-11)
+
+- Realtests run against the real Emacs.app on the host: real keystrokes, no
+  sandbox, no focus grab, no pictures.
+  - A realtest is remediated only when the harvest of ALL logs in the run
+    window is clean.
+- `docs/REALTEST-PLAN.md` sections 1 and 2 (startup, workspaces; tests 1
+  through 8) are run and remediated by the lead autonomously.
+  - Sections 3 onward are owner-rules-first: run, surface, owner rules,
+    remediate, owner confirms.
+- The lead asks the owner nothing unless truly blocked.
+  - Every judgement call is recorded in `docs/REALTEST-JUDGEMENT-CALLS.md`.
+- Model policy for dispatched fixes:
+  - Sonnet: docs, ledgers, shell and harness edits, tests from a settled
+    table, log-shape fixes, read-only investigations, single-site fixes
+    with a stated cause.
+  - Opus-medium: multi-file production logic.
+  - The lead never edits files itself.
+- Logging coverage only grows.
+  - Fixes never demote or delete a warn/error site.
+- Proto files are never edited by agents.
+  - Contract questions are surfaced to the lead.
+  - The proto's framing wins.
+- Workspace id contract: the daemon's 16-hex id is the id on every record
+  and sink across all runtimes.
+  - A workspace whose directory no longer exists is closed automatically
+    by the daemon.
