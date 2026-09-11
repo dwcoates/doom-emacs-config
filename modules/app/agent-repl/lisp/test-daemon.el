@@ -84,6 +84,19 @@
 (defvar agent-repl-test-daemon--displayed nil
   "Buffers handed to `display-buffer', newest first.")
 
+(defvar agent-repl-test-daemon--addr-file nil
+  "The throwaway path the stubbed `daemon.addr' resolver answers.
+The removal paths touch a REAL file, so every scenario gets its own
+under the temp root rather than the session's state dir.")
+
+(defvar agent-repl-test-daemon--addr-file-contents nil
+  "What the throwaway `daemon.addr' holds, or nil when the file is absent.")
+
+(defun agent-repl-test-daemon--write-addr-file (address)
+  "Write ADDRESS into the scenario's throwaway `daemon.addr'."
+  (setq agent-repl-test-daemon--addr-file-contents address)
+  (with-temp-file agent-repl-test-daemon--addr-file (insert address "\n")))
+
 (defun agent-repl-test-daemon--logged-p (level substring)
   "Return non-nil when a LEVEL entry containing SUBSTRING was recorded."
   (seq-some (lambda (entry)
@@ -138,9 +151,16 @@
          (agent-repl-daemon--boot-timer nil)
          (agent-repl-daemon--boot-deadline nil)
          (agent-repl-daemon--boot-continuation nil)
+         (agent-repl-daemon--boot-rejected-address nil)
+         (agent-repl-daemon--own-address nil)
+         (agent-repl-test-daemon--addr-file
+          (make-temp-file "agent-repl-test-daemon-addr-"))
+         (agent-repl-test-daemon--addr-file-contents nil)
          (agent-repl-daemon--ensure-in-flight nil))
      (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
                 (lambda () agent-repl-test-daemon--address))
+               ((symbol-function 'agent-repl-connect-daemon-addr-file)
+                (lambda () agent-repl-test-daemon--addr-file))
                ((symbol-function 'agent-repl--frontend-run-build-script)
                 (lambda (args on-exit)
                   (push args agent-repl-test-daemon--build-runs)
@@ -212,7 +232,11 @@
                ((symbol-function 'agent-repl--error)
                 (lambda (_ws fmt &rest args)
                   (push (cons :error (apply #'format fmt args)) agent-repl-test-daemon--logs))))
-       ,@body)))
+       (unwind-protect
+           (progn ,@body)
+         (when (and agent-repl-test-daemon--addr-file
+                    (file-exists-p agent-repl-test-daemon--addr-file))
+           (delete-file agent-repl-test-daemon--addr-file))))))
 
 ;;;; ---- daemon.addr absent: build, start, wait ----
 
@@ -806,6 +830,123 @@ stubbed too, which is the only external thing about this branch."
     (agent-repl-daemon-ensure)
     ;; Assert
     (should agent-repl-test-daemon--spawns)))
+
+(ert-deftest agent-repl-test-daemon-stale-address-file-is-removed-before-the-build ()
+  "The corpse's `daemon.addr' goes before a fresh daemon is built."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+
+(ert-deftest agent-repl-test-daemon-stale-address-removal-is-recorded ()
+  "Removing another process's leftover file is stated, never silent."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.stale-addr-removed"))))
+
+(ert-deftest agent-repl-test-daemon-boot-wait-refuses-the-address-it-judged-stale ()
+  "A `daemon.addr' still holding the dead address is not the new daemon booting.
+A cold start read the dead 127.0.0.1:58161 back three milliseconds after
+the spawn, called the daemon booted, and linked to a refused port."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: the probe refuses, and the file survives the removal.
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert: the ensure did not settle on the dead address.
+    (should (= agent-repl-test-daemon--link-connect-calls 0))))
+
+(ert-deftest agent-repl-test-daemon-boot-wait-records-the-refused-address ()
+  "The refusal is stated so a log reader sees WHY boot kept waiting."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.boot-addr-rejected"))))
+
+(ert-deftest agent-repl-test-daemon-boot-wait-accepts-the-new-daemons-address ()
+  "A DIFFERENT address is the daemon we started, and it is accepted at once."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    (agent-repl-daemon-ensure)
+    (setq agent-repl-test-daemon--address "127.0.0.1:9002")
+    ;; Act
+    (agent-repl-daemon--boot-tick)
+    ;; Assert
+    (should (= agent-repl-test-daemon--link-connect-calls 1))))
+
+(ert-deftest agent-repl-test-daemon-own-daemons-exit-removes-its-address-file ()
+  "A daemon THIS Emacs spawned leaves no address behind when it dies."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (agent-repl-daemon-ensure)
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001")
+    (agent-repl-daemon--boot-tick)
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl--frontend-daemon-process 'the-daemon-process)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 1)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "killed\n"))
+    ;; Assert
+    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+
+(ert-deftest agent-repl-test-daemon-own-daemons-exit-keeps-a-successors-address ()
+  "A file that has moved on belongs to another daemon and is left alone."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (agent-repl-daemon-ensure)
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001")
+    (agent-repl-daemon--boot-tick)
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9002")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9002"
+          agent-repl--frontend-daemon-process 'the-daemon-process)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should (file-exists-p agent-repl-test-daemon--addr-file))))
+
+(ert-deftest agent-repl-test-daemon-a-foreign-daemons-exit-removes-no-address-file ()
+  "Emacs retires only the address of the daemon it started itself."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: no own address was ever published.
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl--frontend-daemon-process 'the-daemon-process)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 1)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "killed\n"))
+    ;; Assert
+    (should (file-exists-p agent-repl-test-daemon--addr-file))))
 
 ;;;; ---- Idempotence ----
 
