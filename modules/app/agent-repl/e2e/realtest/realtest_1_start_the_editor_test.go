@@ -27,15 +27,34 @@ import (
 //
 //	Doom boot done, the module loaded, the daemon ensure commanded and answered
 //	— adopted or spawned, reported as which — the link up, the first roster
-//	push, then per workspace its tab drawn and its panel painted, and the total.
+//	push, then per workspace its tab drawn and the pre-creation queue armed
+//	for it. THAT is hidden startup, and that is all of it — see below.
 //
-// It asserts that EVERY workspace the state database holds is drawn, and lists
-// them with times.
+// TWO PHASES, NOT ONE (owner ruling, 2026-09-11). The realtest launches
+// Emacs with `open -gj` to preserve the owner's focus, and on this machine
+// that leaves the frame visible-but-unfocused rather than truly hidden. The
+// settled webview invariant parks a workspace's pre-creation in exactly that
+// state rather than steal focus, so no panel paints until the first focus
+// edge — no matter how long hidden startup runs. So:
 //
-// It has no acts: it only observes a startup. The key driver is nonetheless
-// proven at the END of the run, by pressing `s-}` and `M-2` once each and
-// reading Emacs's own `(recent-keys)` back — because a driver first exercised by
-// the realtest that needs it is a driver that fails on the day it matters.
+//   - HIDDEN: every open workspace's tab drawn, and the pre-creation queue
+//     armed for the whole open set (elisp.webview-recovery.precreate-all /
+//     precreate-parked queued=N reaching that count). No panel is required to
+//     have painted here; requiring one asserted a bug that was never there.
+//   - SHOW: the key self-test (below) is what first brings Emacs forward,
+//     which is the focus edge the parked queue was waiting on. Once shown,
+//     every open workspace's panel is asserted to paint within a generous
+//     ceiling — proving panels DO paint, just on show, not on hidden launch.
+//
+// It asserts that EVERY workspace the state database holds is drawn (hidden
+// phase) and painted (show phase), and lists them with times.
+//
+// It has no acts of its own before the show phase: it only observes a
+// startup. The key driver is nonetheless proven at the END of the run, by
+// pressing `s-}` and `M-2` once each and reading Emacs's own `(recent-keys)`
+// back — because a driver first exercised by the realtest that needs it is a
+// driver that fails on the day it matters. Proving it is also what produces
+// the show phase's focus edge, so the show-phase assertions run right after.
 //
 // THE REMEDIATION BAR IS THE LOG HARVEST, not the timings: every WARN and ERROR
 // written inside the run window across every log, with no allowlist, into the
@@ -80,11 +99,27 @@ const (
 	// machine by definition.
 	serverCeiling = 90 * time.Second
 	// usableCeiling is how long the module log may take to show every open
-	// workspace's tab drawn and panel painted. open-progress.el records live
-	// incidents between 6.8s on a quiet machine and 16.9s on a congested one
-	// for ONE workspace's bring-up, and this covers every workspace in the
-	// roster plus the daemon bring-up in front of them.
+	// workspace's tab drawn and the pre-creation queue armed for it (see
+	// PhaseWebviewArmed). open-progress.el records live incidents between
+	// 6.8s on a quiet machine and 16.9s on a congested one for ONE
+	// workspace's bring-up, and this covers every workspace in the roster
+	// plus the daemon bring-up in front of them.
+	//
+	// IT NO LONGER WAITS FOR A PAINTED PANEL. Panel-painted moved to the
+	// show phase (showCeiling, below) on the owner's 2026-09-11 ruling:
+	// `open -gj` leaves Emacs visible-but-unfocused, and the settled webview
+	// invariant parks pre-creation in that state rather than steal focus, so
+	// no panel paints until the first focus edge regardless of how long this
+	// window runs.
 	usableCeiling = 240 * time.Second
+	// showCeiling is how long, AFTER Emacs is brought forward for the key
+	// self-test, the module log may take to report every open workspace's
+	// panel painted. This is the first focus edge the parked pre-creation
+	// queue was waiting on, so it is only measured from here, never from
+	// spawn — a hidden window of any length was never going to drain it.
+	// It has no measured basis yet, same as usableCeiling: generous on
+	// purpose, per the OBSERVATION CEILINGS note above.
+	showCeiling = 120 * time.Second
 	// exitCeiling bounds the key self-test's wait for Emacs's own
 	// `(recent-keys)` to report a pressed chord; a stall there is a finding,
 	// not something to wait out.
@@ -196,7 +231,8 @@ func TestRealtestStartTheEditor(t *testing.T) {
 
 	// THE MEASUREMENTS ARE STATED AT THE SITE, which is what lets the
 	// budgets be sized from this run's own output rather than from a file
-	// somebody has to go find.
+	// somebody has to go find. This table is the HIDDEN phase: panel-painted
+	// is not in it yet, and that is expected (see waitForUsable).
 	t.Logf("cold start via %s: daemon %s", launch.Method, orUnknown(phases.DaemonPath))
 	for _, m := range measurements {
 		if m.Note != "" {
@@ -208,12 +244,34 @@ func TestRealtestStartTheEditor(t *testing.T) {
 
 	assertEveryWorkspaceDrawn(t, run, openWorkspaces, phases)
 	verifyVendorGuard(ctx, t, client, run)
-	manifest.BudgetBreaches = append(manifest.BudgetBreaches,
-		prefixEach("cold start: ", CheckBudgets(measurements))...)
 
-	// THE KEY DRIVER, PROVEN. Last, so a driver that cannot work costs the run
-	// nothing it has already measured.
+	// THE KEY DRIVER, PROVEN. It also delivers the first focus edge: Emacs is
+	// visible-but-unfocused up to here, and proveKeyDriver is what activates
+	// it for the key self-test.
 	proveKeyDriver(ctx, t, client, runDir, &manifest)
+
+	// THE SHOW PHASE. The parked pre-creation queue drains on the focus edge
+	// proveKeyDriver just produced, so a painted panel is assertable only
+	// from here. Re-reading folds in everything waitForUsable already saw
+	// (nothing there un-happens) plus whatever the show made happen, so the
+	// measurements and budget check below replace the hidden-phase ones
+	// rather than duplicate them.
+	shown := waitForShown(ctx, t, run, sources, snapshot, launch.SpawnedAt, openWorkspaces)
+	shownMeasurements := shown.Measure()
+	manifest.Runs[len(manifest.Runs)-1].Measurements = shownMeasurements
+
+	t.Logf("cold start %d: after Emacs was shown for the key self-test:", run)
+	for _, m := range shownMeasurements {
+		if m.Note != "" {
+			t.Logf("  phase %-14s %-14s NOT OBSERVED: %s", m.Phase, m.Workspace, m.Note)
+			continue
+		}
+		t.Logf("  phase %-14s %-14s %s from spawn", m.Phase, m.Workspace, m.Elapsed.Round(time.Millisecond))
+	}
+
+	assertEveryWorkspacePainted(t, run, openWorkspaces, shown)
+	manifest.BudgetBreaches = append(manifest.BudgetBreaches,
+		prefixEach("cold start: ", CheckBudgets(shownMeasurements))...)
 
 	verdict := "left focus alone"
 	if launch.DisturbedOwner {
@@ -288,8 +346,19 @@ func TestRealtestStartTheEditor(t *testing.T) {
 	}
 }
 
-// waitForUsable polls the Emacs log sinks until the startup has produced
-// everything realtest 1 measures, or the observation ceiling expires.
+// waitForUsable polls the Emacs log sinks until the HIDDEN startup has
+// produced everything realtest 1 measures while Emacs is not yet shown, or
+// the observation ceiling expires.
+//
+// STARTUP-USABLE, HIDDEN, MEANS: every open workspace's tab drawn, and the
+// pre-creation queue armed for the whole open set — NOT a painted panel.
+// `open -gj` leaves Emacs visible-but-unfocused on this machine, and the
+// settled webview invariant parks pre-creation there rather than steal
+// focus, so no panel paints until the first focus edge (owner ruling
+// 2026-09-11). Waiting on one here would wait the whole ceiling out on a
+// startup that had already done everything hidden startup can do; the
+// painted assertion moved to waitForShown, after the key self-test brings
+// Emacs forward.
 //
 // It polls the LOG, not Emacs. Two reasons, and the second is the important
 // one: asking Emacs whether it has drawn a tab costs an emacsclient round trip
@@ -299,8 +368,8 @@ func TestRealtestStartTheEditor(t *testing.T) {
 // decide WHEN TO STOP WAITING; every number reported comes from the log.
 //
 // It reads across the enumerated sources rather than one path because the
-// per-workspace tab-open and panel-painted markers live in each workspace's own
-// `emacs.log` sink, not in the global module log (ReadPhases says why).
+// per-workspace tab-open marker lives in each workspace's own `emacs.log`
+// sink, not in the global module log (ReadPhases says why).
 //
 // It returns whatever it has when the ceiling expires rather than failing:
 // a startup that did not finish is exactly the run whose partial phase table
@@ -310,7 +379,7 @@ func waitForUsable(ctx context.Context, t *testing.T, run int, sources []Source,
 	t.Helper()
 	var phases Phases
 	waitUntil(ctx, t,
-		fmt.Sprintf("cold start %d: every workspace's tab drawn and panel painted", run),
+		fmt.Sprintf("cold start %d: every workspace's tab drawn and the pre-creation queue armed for it", run),
 		usableCeiling,
 		func() bool {
 			read, err := ReadPhases(sources, snap, spawnedAt)
@@ -323,9 +392,46 @@ func waitForUsable(ctx context.Context, t *testing.T, run int, sources []Source,
 			}
 			phases = read
 			drawn := setOf(read.DrawnWorkspaces())
+			if read.MaxArmed() < len(expected) {
+				return false
+			}
+			for _, ws := range expected {
+				if !matchedIn(drawn, ws.ID) {
+					return false
+				}
+			}
+			return true
+		})
+	return phases
+}
+
+// waitForShown polls the Emacs log sinks, AFTER Emacs has been brought
+// forward for the key self-test, until every open workspace's panel has
+// painted, or showCeiling expires.
+//
+// This is the phase the hidden window (waitForUsable) deliberately does not
+// wait for: the parked pre-creation queue drains only on the first focus
+// edge, and proveKeyDriver's activation of Emacs for the key-proof IS that
+// edge. So this is called after proveKeyDriver, never before, and it reads
+// the SAME sources and the SAME spawnedAt as waitForUsable — the elapsed
+// times PhasePanelPainted and PhaseTotal report are still "since the process
+// was spawned", which is what the user experienced, not "since Emacs was
+// shown".
+func waitForShown(ctx context.Context, t *testing.T, run int, sources []Source, snap Snapshot, spawnedAt time.Time, expected []Workspace) Phases {
+	t.Helper()
+	var phases Phases
+	waitUntil(ctx, t,
+		fmt.Sprintf("cold start %d: every workspace's panel painted, now that Emacs is shown", run),
+		showCeiling,
+		func() bool {
+			read, err := ReadPhases(sources, snap, spawnedAt)
+			if err != nil {
+				t.Fatalf("cold start %d: read the show-phase startup phases: %v", run, err)
+			}
+			phases = read
 			painted := setOf(read.PaintedWorkspaces())
 			for _, ws := range expected {
-				if !matchedIn(drawn, ws.ID) || !matchedIn(painted, ws.ID) {
+				if !matchedInPainted(painted, ws) {
 					return false
 				}
 			}
@@ -362,26 +468,26 @@ func coldStart(ctx context.Context, t *testing.T, client *Client, run int) Launc
 	return launch
 }
 
-// assertEveryWorkspaceDrawn is the plan's own assertion: every workspace the
-// state database holds is drawn, and they are listed with times.
+// assertEveryWorkspaceDrawn is the plan's HIDDEN-startup assertion: every
+// workspace the state database holds got a drawn tab and was armed for
+// pre-creation, and they are listed with times. Painted panels are NOT
+// asserted here — see assertEveryWorkspacePainted — because the parked
+// pre-creation queue does not drain until Emacs is shown (owner ruling
+// 2026-09-11): a hidden-phase assertion that still required a painted panel
+// would be asserting a bug that isn't one.
 //
-// Drawn and painted are asserted SEPARATELY because they fail for different
-// reasons — a tab is Emacs's own roster reconcile, a painted panel is the
-// webview reporting its load finished — and one message naming both would name
-// neither.
+// Tab-drawn and armed are still logged as separate conditions where they
+// fail, because they fail for different reasons — a tab is Emacs's own
+// roster reconcile, "armed" is the pre-creation queue's own count — and one
+// message naming both would name neither.
 func assertEveryWorkspaceDrawn(t *testing.T, run int, expected []Workspace, phases Phases) {
 	t.Helper()
 	drawn := setOf(phases.DrawnWorkspaces())
-	painted := setOf(phases.PaintedWorkspaces())
 
 	for _, ws := range expected {
 		if !matchedIn(drawn, ws.ID) {
 			t.Errorf("cold start %d: workspace %s (%s) is in the state database but no tab was drawn for it "+
 				"(no `elisp.roster.tab-open` record naming it inside the run)", run, ws.ID, ws.Name)
-		}
-		if !matchedIn(painted, ws.ID) {
-			t.Errorf("cold start %d: workspace %s (%s) had no panel painted "+
-				"(no `elisp.frontend.watch-load: load-changed` record naming it inside the run)", run, ws.ID, ws.Name)
 		}
 	}
 
@@ -389,6 +495,28 @@ func assertEveryWorkspaceDrawn(t *testing.T, run int, expected []Workspace, phas
 		if !matchedInWorkspaces(expected, id) {
 			t.Errorf("cold start %d: a tab was drawn for workspace %s, which the state database does not hold",
 				run, id)
+		}
+	}
+
+	if armed := phases.MaxArmed(); armed < len(expected) {
+		t.Errorf("cold start %d: the pre-creation queue armed at most %d workspace(s) for %d open "+
+			"workspace(s) (no `elisp.webview-recovery.precreate-all: queued=N` or `precreate-parked "+
+			"queued=N` reached that count inside the run) — the panel that never paints on first show "+
+			"is downstream of this, not of focus", run, armed, len(expected))
+	}
+}
+
+// assertEveryWorkspacePainted is the plan's SHOW-phase assertion: once Emacs
+// is focused, every open workspace's panel paints. Called after proveKeyDriver
+// has brought Emacs forward, against phases read by waitForShown.
+func assertEveryWorkspacePainted(t *testing.T, run int, expected []Workspace, phases Phases) {
+	t.Helper()
+	painted := setOf(phases.PaintedWorkspaces())
+	for _, ws := range expected {
+		if !matchedInPainted(painted, ws) {
+			t.Errorf("cold start %d: workspace %s (%s) had no panel painted after Emacs was shown "+
+				"(no `elisp.frontend.watch-load: load-changed` or `elisp.webview-recovery.precreate-created "+
+				"ws=%s reason=focused` record naming it inside the run)", run, ws.ID, ws.Name, ws.Name)
 		}
 	}
 }
@@ -405,6 +533,19 @@ func matchedIn(set map[string]bool, id string) bool {
 		}
 	}
 	return false
+}
+
+// matchedInPainted is matchedIn, but tried against BOTH a workspace's id and
+// its registered name. Every other per-workspace marker this file reads is
+// attributed by id (rec.WorkspaceID, resolved from the workspace regardless
+// of which string a log call's subject happened to be), but
+// `precreate-created` is written on the central sink with no `workspace_id`
+// at all — its own `ws=` names the workspace by the NAME its hash is keyed
+// by (phases.go's wsEqualsRe says why), not by the daemon id the state
+// database's `ws.ID` holds. Trying the name as well as the id is what lets
+// that one marker still count as a match.
+func matchedInPainted(painted map[string]bool, ws Workspace) bool {
+	return matchedIn(painted, ws.ID) || matchedIn(painted, ws.Name)
 }
 
 func matchedInWorkspaces(workspaces []Workspace, id string) bool {
