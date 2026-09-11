@@ -294,14 +294,37 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 	for _, repo := range repositories {
 		defaults[repo.ID] = repo.DefaultBranch
 	}
-	for _, ws := range workspaces {
+	for i := range workspaces {
+		ws := &workspaces[i]
 		// A WORKSPACE WHOSE WORKTREE IS GONE binds nothing: a merged or nuked
 		// workspace keeps its registry row (the roster draws it under
 		// recently_merged) while its directory has been removed, and its log
 		// sink lives inside that directory. It is an ordinary state, not a
 		// reason to refuse the whole roster -- and refusing it failed the BOOT
 		// of every daemon that inherited one, a handover's successor included.
+		//
+		// AND AN OPEN ONE IS CLOSED HERE. The boot reconciliation closes these
+		// rows (internal/boot/sequence.go closeMissingDirs), but a JOINING
+		// SUCCESSOR RECONCILES NOTHING -- it takes ownership workspace by
+		// workspace and never runs that step -- so this walk, which is the one
+		// that publishes the opening roster, is what keeps a successor from
+		// handing Emacs a live row for a directory that is not there. An
+		// already-closed row is left alone, which is every merged and nuked
+		// one.
 		if _, err := os.Stat(ws.Dir); errors.Is(err, fs.ErrNotExist) {
+			if !ws.Closed {
+				if err := v.deps.DB.SetClosed(ctx, ws.ID, true); err != nil {
+					global.Error(opRegister, "a workspace whose directory is gone could not be closed", dlog.Context{
+						"workspace": string(ws.ID), "dir": ws.Dir, "cause": err.Error(),
+					})
+					return fmt.Errorf("publish the opening roster: close the missing-directory workspace %q: %w", ws.ID, err)
+				}
+				ws.Closed = true
+				global.Warn(opRegister, "the workspace directory is gone; the workspace is closed", dlog.Context{
+					dlog.KeyWorkspaceID: string(ws.ID), dlog.KeyWorkspaceDir: ws.Dir,
+					"error": err.Error(),
+				})
+			}
 			global.Debug(opRegister, "the workspace's directory is gone; its views are not bound", dlog.Context{
 				"workspace": string(ws.ID), "dir": ws.Dir,
 			})
@@ -310,7 +333,7 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		if err := v.bindResolvers(global, ws.ID, ws.Dir); err != nil {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
-		if err := v.publishNaming(ctx, global, ws, defaults[ws.Repo]); err != nil {
+		if err := v.publishNaming(ctx, global, *ws, defaults[ws.Repo]); err != nil {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
 	}

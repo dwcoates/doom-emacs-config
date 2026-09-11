@@ -536,7 +536,7 @@ func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.W
 
 	if !s.profile.DelayDiagnostics || !s.claimFirstSessionStream() {
 		if err := stream.Send(&shimv1.WatchSessionResponse{
-			Frame: &shimv1.WatchSessionResponse_Update{Update: HealthyDiagnostics()},
+			Frame: &shimv1.WatchSessionResponse_Update{Update: s.openingDiagnostics()},
 		}); err != nil {
 			return err
 		}
@@ -1096,4 +1096,14 @@ func (s *server) rememberPushedBash(frame *conversationv1.AgentFrame) {
 	if detached := work.GetDetached(); detached != nil {
 		s.aliasBashStart(handle, detached.GetDetachedFromId().GetValue())
 	}
+}
+
+// openingDiagnostics is the health verdict every session stream opens with.
+// A profile that states an OpeningFault makes it unhealthy on every stream,
+// which is what the shim standing on a fault it never clears does.
+func (s *server) openingDiagnostics() *conversationv1.SessionUpdate {
+	if s.profile.OpeningFault != "" {
+		return UnhealthyDiagnostics(s.profile.OpeningFault)
+	}
+	return HealthyDiagnostics()
 }

@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"sync"
 	"time"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
 )
@@ -64,6 +68,12 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 	// is still driving. Each workspace's state is reconciled as it is
 	// TRANSFERRED, which is the rendezvous the join arms below.
 	if !s.Joining() {
+		// THE MISSING DIRECTORIES ARE CLOSED FIRST, because every step below
+		// asks something of a workspace that is still open, and a workspace
+		// whose worktree is gone can answer none of it.
+		if err := s.closeMissingDirs(ctx, log, workspaces, &report); err != nil {
+			return Report{}, err
+		}
 		clientless, err := s.adopt(ctx, log, workspaces, &report)
 		if err != nil {
 			return Report{}, err
@@ -86,14 +96,83 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 	}
 
 	log.Debug("daemon.boot.run", "the boot reconciliation is complete", dlog.Context{
-		"adopted":          len(report.Adopted),
-		"undetermined":     len(report.Undetermined),
-		"orphans_closed":   len(report.Orphaned),
-		"holds_restored":   report.HoldsRestored,
-		"merges_recovered": len(report.MergesRecovered),
-		"dispositions":     len(report.Dispositions),
+		"adopted":            len(report.Adopted),
+		"undetermined":       len(report.Undetermined),
+		"orphans_closed":     len(report.Orphaned),
+		"missing_dir_closed": len(report.MissingDirClosed),
+		"holds_restored":     report.HoldsRestored,
+		"merges_recovered":   len(report.MergesRecovered),
+		"dispositions":       len(report.Dispositions),
 	})
 	return report, nil
+}
+
+// closeMissingDirs closes every open workspace whose directory is GONE.
+//
+// A workspace is a worktree plus the editor state over it, so a registry row
+// whose directory no longer exists names nothing a user can work in: Emacs
+// read the roster, opened a tab for it, and every per-workspace verb on that
+// tab then failed on a path that is not there. Closing the row is what takes
+// it out of the roster's live half (internal/resolve/sidebar draws a closed
+// row receded and `inactive`), and it is the same durable flag an explicit
+// CloseWorkspace sets.
+//
+// IT DOES NOT GO THROUGH THE CLOSE VERB'S QUIET GATE. That gate exists so a
+// USER's close cannot discard undelivered intent; a directory that does not
+// exist can neither receive intent nor be worked in, and refusing the close
+// would leave exactly the unopenable tab this step is here to prevent. It is
+// also not a re-close: a merged or nuked workspace keeps its registry row with
+// its directory removed and is ALREADY closed, so this step passes over it.
+//
+// A STAT THAT DOES NOT SAY "NOT EXIST" IS NEVER READ AS GONE, for the same
+// reason an unreadable lock is never read as free: "could not tell" is not the
+// answer this step needs, and closing a workspace on it would tear down the
+// editor state of a workspace that is merely unreachable this instant.
+func (s *sequence) closeMissingDirs(ctx context.Context, log dlog.Logger, workspaces []wsm.Workspace, report *Report) error {
+	for i := range workspaces {
+		ws := &workspaces[i]
+		if ws.Closed {
+			continue
+		}
+		_, statErr := os.Stat(ws.Dir)
+		if statErr == nil {
+			continue
+		}
+		// THE IDENTIFIERS GO IN THEIR OWN KEYS, which dlog promotes to
+		// top-level record fields (internal/dlog/record.go reservedKeys), so a
+		// reader joins on them rather than digging in context.
+		context := dlog.Context{
+			dlog.KeyWorkspaceID:  string(ws.ID),
+			dlog.KeyWorkspaceDir: ws.Dir,
+			"error":              statErr.Error(),
+		}
+		if !errors.Is(statErr, fs.ErrNotExist) {
+			log.Warn("daemon.boot.close_missing_dir", "the workspace directory could not be stat-ed; never read as gone", context)
+			continue
+		}
+		if err := s.deps.DB.SetClosed(ctx, ws.ID, true); err != nil {
+			context["error"] = err.Error()
+			log.Error("daemon.boot.close_missing_dir", "a workspace whose directory is gone could not be closed", context)
+			return fmt.Errorf("boot: close the missing-directory workspace %s: %w", ws.ID, err)
+		}
+		// The LOCAL row is closed with the durable one, so every step below
+		// this reads the workspace as the closed row it now is.
+		ws.Closed = true
+		log.Warn("daemon.boot.close_missing_dir", "the workspace directory is gone; the workspace is closed", context)
+		report.MissingDirClosed = append(report.MissingDirClosed, ws.ID)
+	}
+	return nil
+}
+
+// survivor is one workspace whose lock reads HELD: a shim this boot must dial
+// before it can say what the workspace is. The dial's outcome is filled in by
+// the concurrent pass and read by the sequential one that follows it.
+type survivor struct {
+	ws         wsm.Workspace
+	socketPath string
+	client     shimclient.Client
+	err        error
+	overran    bool
 }
 
 // adopt probes every open workspace's shim-held kernel lock and ADOPTS the
@@ -101,8 +180,18 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 // process on the other side of that lock is the only thing that may touch the
 // conversation's transcript. It answers the workspaces whose lock read FREE,
 // which are the client-less ones whose turns are orphans.
+//
+// THE PROBING IS SEQUENTIAL AND THE DIALLING IS NOT. Each survivor's dial is
+// bounded by adoptBound, and a boot that paid those bounds one after another
+// paid N of them: the whole point of the bound is that the daemon reaches its
+// accept loop, and N silent survivors put it N bounds away from serving. The
+// dials therefore run CONCURRENTLY and the bound is paid ONCE for all of them.
+// Everything that touches the report or the state root stays on this
+// goroutine and in workspace order, so the boot's outcome does not depend on
+// which dial answered first.
 func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.Workspace, report *Report) ([]wsm.Workspace, error) {
 	var clientless []wsm.Workspace
+	var survivors []*survivor
 	for _, ws := range workspaces {
 		if ws.Closed {
 			log.Debug("daemon.boot.adopt", "a closed workspace has no shim to adopt", dlog.Context{
@@ -151,52 +240,7 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 		}
 		switch {
 		case state == sessionlock.StateHeld:
-			// THE ADOPTION IS BOUNDED, AND ITS OVERRUN IS NOT A BOOT FAILURE.
-			// `shimclient.bringUp` redials a shim whose lock reads held
-			// FOREVER — correctly, because a held lock is a living process —
-			// so a survivor whose socket path is gone (a rolled generation,
-			// an unlinked path) is a condition that never resolves. This step
-			// runs BEFORE the daemon serves, so waiting it out is a listener
-			// nobody accepts on: pid 31984 sat there for ten hours with its
-			// accept queue full while Emacs and curl timed out on connect.
-			//
-			// An overrun is therefore reported at ERROR and the workspace is
-			// UNDETERMINED: the lock says the conversation is owned, so its
-			// turns are NOT orphan-closed and no second shim is spawned onto
-			// it, exactly as for a probe that could not tell. The boot goes
-			// on and the daemon serves.
-			adoptCtx, cancelAdopt := context.WithTimeout(ctx, s.adoptBound)
-			client, adoptErr := s.deps.Supervisor.Adopt(adoptCtx, ws.ID, ws.Dir, socketPath)
-			overran := adoptErr != nil && errors.Is(adoptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
-			cancelAdopt()
-			if overran {
-				log.Error("daemon.boot.adopt", "a surviving shim did not answer within the adoption bound; the workspace is left undetermined and the daemon serves", dlog.Context{
-					"workspace_id": string(ws.ID),
-					"socket_path":  socketPath,
-					"bound_ms":     s.adoptBound.Milliseconds(),
-					"error":        adoptErr.Error(),
-				})
-				report.Undetermined = append(report.Undetermined, ws.ID)
-				continue
-			}
-			if adoptErr != nil {
-				log.Error("daemon.boot.adopt", "a surviving shim could not be adopted", dlog.Context{
-					"workspace_id": string(ws.ID),
-					"error":        adoptErr.Error(),
-				})
-				return nil, fmt.Errorf("boot: adopt the surviving shim of %s: %w", ws.ID, adoptErr)
-			}
-			if installErr := s.deps.Adopted(ctx, ws.ID, client); installErr != nil {
-				log.Error("daemon.boot.adopt", "an adopted shim could not be installed", dlog.Context{
-					"workspace_id": string(ws.ID),
-					"error":        installErr.Error(),
-				})
-				return nil, fmt.Errorf("boot: install the adopted shim of %s: %w", ws.ID, installErr)
-			}
-			log.Debug("daemon.boot.adopt", "a surviving shim was adopted", dlog.Context{
-				"workspace_id": string(ws.ID),
-			})
-			report.Adopted = append(report.Adopted, ws.ID)
+			survivors = append(survivors, &survivor{ws: ws, socketPath: socketPath})
 		case state == sessionlock.StateFree:
 			// NOTHING HOLDS AND NOTHING LISTENS, so a socket FILE left here is
 			// a dead shim's leavings — an AF_UNIX path is not reclaimed on
@@ -226,7 +270,72 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			report.Undetermined = append(report.Undetermined, ws.ID)
 		}
 	}
+
+	s.dialSurvivors(ctx, survivors)
+
+	for _, sv := range survivors {
+		// THE ADOPTION IS BOUNDED, AND ITS OVERRUN IS NOT A BOOT FAILURE.
+		// `shimclient.bringUp` redials a shim whose lock reads held
+		// FOREVER — correctly, because a held lock is a living process — so a
+		// survivor whose socket path is gone (a rolled generation, an
+		// unlinked path) is a condition that never resolves. This step runs
+		// BEFORE the daemon serves, so waiting it out is a listener nobody
+		// accepts on: pid 31984 sat there for ten hours with its accept queue
+		// full while Emacs and curl timed out on connect.
+		//
+		// An overrun is therefore reported at ERROR and the workspace is
+		// UNDETERMINED: the lock says the conversation is owned, so its turns
+		// are NOT orphan-closed and no second shim is spawned onto it,
+		// exactly as for a probe that could not tell. The boot goes on and
+		// the daemon serves.
+		if sv.overran {
+			log.Error("daemon.boot.adopt", "a surviving shim did not answer within the adoption bound; the workspace is left undetermined and the daemon serves", dlog.Context{
+				"workspace_id": string(sv.ws.ID),
+				"socket_path":  sv.socketPath,
+				"bound_ms":     s.adoptBound.Milliseconds(),
+				"error":        sv.err.Error(),
+			})
+			report.Undetermined = append(report.Undetermined, sv.ws.ID)
+			continue
+		}
+		if sv.err != nil {
+			log.Error("daemon.boot.adopt", "a surviving shim could not be adopted", dlog.Context{
+				"workspace_id": string(sv.ws.ID),
+				"error":        sv.err.Error(),
+			})
+			return nil, fmt.Errorf("boot: adopt the surviving shim of %s: %w", sv.ws.ID, sv.err)
+		}
+		if installErr := s.deps.Adopted(ctx, sv.ws.ID, sv.client); installErr != nil {
+			log.Error("daemon.boot.adopt", "an adopted shim could not be installed", dlog.Context{
+				"workspace_id": string(sv.ws.ID),
+				"error":        installErr.Error(),
+			})
+			return nil, fmt.Errorf("boot: install the adopted shim of %s: %w", sv.ws.ID, installErr)
+		}
+		log.Debug("daemon.boot.adopt", "a surviving shim was adopted", dlog.Context{
+			"workspace_id": string(sv.ws.ID),
+		})
+		report.Adopted = append(report.Adopted, sv.ws.ID)
+	}
 	return clientless, nil
+}
+
+// dialSurvivors dials every survivor AT ONCE, each under its own adoption
+// bound, and fills each one's outcome in. Nothing here touches the report or
+// the state root: the caller reads the outcomes back in workspace order.
+func (s *sequence) dialSurvivors(ctx context.Context, survivors []*survivor) {
+	var wg sync.WaitGroup
+	for _, sv := range survivors {
+		wg.Add(1)
+		go func(sv *survivor) {
+			defer wg.Done()
+			adoptCtx, cancelAdopt := context.WithTimeout(ctx, s.adoptBound)
+			defer cancelAdopt()
+			sv.client, sv.err = s.deps.Supervisor.Adopt(adoptCtx, sv.ws.ID, sv.ws.Dir, sv.socketPath)
+			sv.overran = sv.err != nil && errors.Is(adoptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		}(sv)
+	}
+	wg.Wait()
 }
 
 // reconcileManifest reads the outgoing daemon's stand-down intent against the
