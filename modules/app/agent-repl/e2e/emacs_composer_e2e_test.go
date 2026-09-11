@@ -84,12 +84,19 @@ func addProjectWorkspace(t *testing.T, e *Emacs, dir string) string {
 	t.Helper()
 	before := decodeStrings(e.Eval(workspaceNamesForm))
 	e.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
-	raw := e.AwaitEvalFor(emacsBootBound,
+	raw := e.AwaitEvalFor(emacsVerbBound,
 		"the workspace to appear in Emacs's registry",
 		workspaceNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(before)+1 })
 	for _, name := range decodeStrings(raw) {
 		if !contains(before, name) {
+			// Registry publication precedes the landing that selects the new
+			// workspace. Callers open its panel immediately, so wait for the
+			// command's complete user-visible outcome instead of racing that edge.
+			e.AwaitEvalFor(emacsVerbBound,
+				"the newly registered workspace to become current",
+				`(agent-repl--ws-current-name)`,
+				func(raw json.RawMessage) bool { return decodeString(raw) == name })
 			return name
 		}
 	}

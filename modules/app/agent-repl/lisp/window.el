@@ -569,7 +569,7 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
   (let ((ws (agent-repl--ws-current-name)))
     (cond
      ((not ws)
-      (agent-repl--log-verbose nil
+      (agent-repl--log-verbose '(:agent-repl-central "the record reports that no workspace exists")
                                "window--ensure-layout: noop reason=no-current-workspace")
       nil)
      (agent-repl--eager-open-in-progress

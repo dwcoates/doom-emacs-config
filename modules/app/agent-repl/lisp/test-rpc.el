@@ -166,6 +166,27 @@ missing here or there is a broken seam.")
 
 ;;;; ---- Tests: method naming and codec pairing ----
 
+(ert-deftest agent-repl-test-rpc-unary-callback-keeps-the-captured-log-workspace ()
+  "A delayed unary answer logs against the scope captured at request send."
+  ;; Arrange
+  (let (transport-response logged-workspaces)
+    (cl-letf (((symbol-function 'agent-repl--capture-log-scope)
+               (lambda (_scope) "request-ws"))
+              ((symbol-function 'agent-repl--log)
+               (lambda (ws _fmt &rest _args) (push ws logged-workspaces)))
+              ((symbol-function 'agent-repl-connect-unary)
+               (lambda (_conn _method _json &rest keys)
+                 (setq transport-response (plist-get keys :on-response))))
+              ((symbol-function 'agent-repl-wire-encode-register-workspace-request)
+               (lambda (_request) '((dir . "/workspace"))))
+              ((symbol-function 'agent-repl-wire-decode-register-workspace-response)
+               (lambda (_response) '(:arm :success :value nil))))
+      ;; Act
+      (agent-repl-rpc-register-workspace 'conn '(:dir "/workspace"))
+      (funcall transport-response '((success . nil)))
+      ;; Assert
+      (should (equal logged-workspaces '("request-ws" "request-ws"))))))
+
 (ert-deftest agent-repl-test-rpc-each-verb-sends-its-own-method-name ()
   "Each unary function targets the rpc it is named for, and no other."
   ;; Arrange

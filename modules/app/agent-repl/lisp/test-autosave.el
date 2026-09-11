@@ -220,7 +220,7 @@
                  (setq record (list ws (apply #'format fmt args))))))
       (should-error (agent-repl--autosave-workspace-buffers) :type 'error))
     (should (= save-count 0))
-    (should (equal (car record) nil))
+      (should (agent-repl--central-log-scope-reason (car record)))
     (should (string-match-p "perspective-identity=persp@missing" (cadr record)))
     (should (string-match-p "reason=invalid-workspace-name" (cadr record)))))
 
