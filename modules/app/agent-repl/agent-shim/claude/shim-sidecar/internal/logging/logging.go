@@ -215,7 +215,31 @@ type Logger struct {
 	forwardQueue          []ForwardRecord
 	forwardClosing        bool
 	forwardDone           chan struct{}
+	// forwardStop is closed by Close. It is what lets a retry ladder ABANDON
+	// its wait at shutdown: a booting daemon is worth a dozen seconds of
+	// backoff while the process runs, and nothing at all while it exits.
+	forwardStop chan struct{}
+	// The retry ladder. A DAEMON THAT IS BOOTING IS NOT A DAEMON THAT IS GONE:
+	// its 10s boot reconciliation answers no rpc, so the first ClientLog of a
+	// sidecar that came up beside it is refused for reasons that fix
+	// themselves. One attempt dropped the diagnostic on the floor.
+	forwardAttempts   int
+	forwardBackoffMin time.Duration
+	forwardBackoffMax time.Duration
+	// forwardWait is the inter-attempt delay, injected in tests. It answers
+	// false when the wait was abandoned because the logger is closing.
+	forwardWait func(time.Duration) bool
 }
+
+// The forwarding retry ladder's defaults. Six attempts over a doubling
+// 250ms..5s backoff span ~12.75s, which outlasts the daemon's boot
+// reconciliation window without turning a genuinely dead daemon into a stalled
+// queue.
+const (
+	defaultForwardAttempts   = 6
+	defaultForwardBackoffMin = 250 * time.Millisecond
+	defaultForwardBackoffMax = 5 * time.Second
+)
 
 // Bound is the runtime logger passed through sidecar packages.
 type Bound struct {
@@ -276,6 +300,10 @@ func NewForwardingDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel shar
 	l.forwarder = forwarder
 	l.forwardReady = sync.NewCond(&l.forwardMu)
 	l.forwardDone = make(chan struct{})
+	l.forwardStop = make(chan struct{})
+	l.forwardAttempts = defaultForwardAttempts
+	l.forwardBackoffMin = defaultForwardBackoffMin
+	l.forwardBackoffMax = defaultForwardBackoffMax
 	go l.forwardLoop()
 	return l
 }
@@ -306,6 +334,7 @@ func (l *Logger) Close() {
 	l.forwardMu.Lock()
 	if !l.forwardClosing {
 		l.forwardClosing = true
+		close(l.forwardStop)
 		l.forwardReady.Broadcast()
 	}
 	done := l.forwardDone
@@ -517,12 +546,19 @@ func (l *Logger) forwardLoop() {
 		l.forwardQueue = l.forwardQueue[1:]
 		l.forwardMu.Unlock()
 
-		address, err := l.forwarder.Forward(rec)
+		address, attempts, err := l.forwardWithRetry(rec)
 		if err != nil {
-			l.reportForwardFailure(l.now().Local(), address, record{
+			now := l.now().Local()
+			l.reportForwardFailure(now, address, attempts, record{
 				Operation: rec.Operation, WorkspaceDir: rec.WorkspaceDir,
 				WorkspaceID: rec.WorkspaceID, ClaudeSessionID: rec.ClaudeSessionID,
 			}, err)
+			// THE DIAGNOSTIC ITSELF IS NOT LOST. The workspace sink is the
+			// daemon's and is unreachable, so the record lands in the global
+			// durable sink instead, marked as undelivered. Dropping it was the
+			// old behavior and it silently swallowed file-plane diagnostics for
+			// the whole of a daemon outage.
+			l.writeUndelivered(now, address, attempts, rec, err)
 			continue
 		}
 		l.mu.Lock()
@@ -531,12 +567,85 @@ func (l *Logger) forwardLoop() {
 	}
 }
 
+// forwardWithRetry climbs the retry ladder, answering the daemon address, how
+// many attempts were made, and the LAST error when every one of them failed.
+//
+// The ladder exists for the booting daemon: during its boot reconciliation it
+// is listening but answering nothing, so the first attempt fails with a
+// deadline and the second or third succeeds.
+func (l *Logger) forwardWithRetry(rec ForwardRecord) (string, int, error) {
+	backoff := l.forwardBackoffMin
+	var address string
+	var err error
+	for attempt := 1; attempt <= l.forwardAttempts; attempt++ {
+		address, err = l.forwarder.Forward(rec)
+		if err == nil {
+			return address, attempt, nil
+		}
+		if attempt == l.forwardAttempts {
+			return address, attempt, err
+		}
+		if !l.waitBeforeRetry(backoff) {
+			// Shutdown abandoned the ladder. The record is still accounted for
+			// by the caller, which writes it to the durable sink.
+			return address, attempt, err
+		}
+		if backoff *= 2; backoff > l.forwardBackoffMax {
+			backoff = l.forwardBackoffMax
+		}
+	}
+	return address, l.forwardAttempts, err
+}
+
+// waitBeforeRetry sleeps between attempts, answering false when the wait was
+// abandoned because the logger is closing.
+func (l *Logger) waitBeforeRetry(d time.Duration) bool {
+	if l.forwardWait != nil {
+		return l.forwardWait(d)
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-l.forwardStop:
+		return false
+	}
+}
+
+// writeUndelivered puts a file-scoped record the daemon never accepted into the
+// global durable sink, so an outage costs the record its DESTINATION and not
+// its existence.
+func (l *Logger) writeUndelivered(now time.Time, address string, attempts int, rec ForwardRecord, cause error) {
+	if address == "" {
+		address = "unresolved"
+	}
+	context := cloneMap(rec.Context)
+	context["forward_undelivered"] = true
+	context["daemon_address"] = address
+	context["attempt"] = attempts
+	context["error"] = cause.Error()
+	verbosity := "normal"
+	if rec.Verbose {
+		verbosity = "verbose"
+	}
+	l.writeGlobal(record{
+		Timestamp: rec.Timestamp, Runtime: "sidecar", PID: rec.PID,
+		Level: rec.Level, Verbosity: verbosity, Operation: rec.Operation,
+		Message: rec.Message, WorkspaceDir: rec.WorkspaceDir, WorkspaceID: rec.WorkspaceID,
+		ClaudeSessionID: rec.ClaudeSessionID, Context: context,
+	}, now, rec.Operation)
+}
+
 // reportForwardFailure writes one global failure per daemon address and outage
-// window. A successful forward resets the limiter. The original file operation
-// continues: diagnostics persistence must never stop transcript ingestion. An
-// empty address means resolution itself failed, so the daemon.addr path
-// supplied by the forwarder remains the rate-limit key.
-func (l *Logger) reportForwardFailure(now time.Time, address string, target record, cause error) {
+// window, at WARN and carrying the ATTEMPT COUNT — the number says whether the
+// destination was merely slow to boot or is genuinely not there, which one
+// failure record with no count could never distinguish. A successful forward
+// resets the limiter. The original file operation continues: diagnostics
+// persistence must never stop transcript ingestion. An empty address means
+// resolution itself failed, so the daemon.addr path supplied by the forwarder
+// remains the rate-limit key.
+func (l *Logger) reportForwardFailure(now time.Time, address string, attempts int, target record, cause error) {
 	if address == "" {
 		address = "unresolved"
 	}
@@ -548,18 +657,24 @@ func (l *Logger) reportForwardFailure(now time.Time, address string, target reco
 	l.lastForwardFailure = address
 	l.mu.Unlock()
 
-	payload, err := json.Marshal(record{
+	l.writeGlobal(record{
 		Timestamp: sharedlogging.Timestamp(now), Runtime: "sidecar", PID: l.pid(),
-		Level: "error", Verbosity: "normal", Operation: "sidecar.logging.forward-failure",
-		Message: "a file-scoped diagnostic could not be forwarded to the daemon",
+		Level: "warn", Verbosity: "normal", Operation: "sidecar.logging.forward-failure",
+		Message: "a file-scoped diagnostic could not be forwarded to the daemon; it was retried and then written to the global sink",
 		Context: map[string]any{
-			"daemon_address": address, "error": cause.Error(),
+			"daemon_address": address, "error": cause.Error(), "attempt": attempts,
 			"target_operation": target.Operation, "target_workspace_dir": target.WorkspaceDir,
 			"target_workspace_id": target.WorkspaceID, "target_claude_session_id": target.ClaudeSessionID,
 		},
-	})
+	}, now, target.Operation)
+}
+
+// writeGlobal encodes one record into the global durable sink, poisoning the
+// logger the same way the ordinary write path does when that sink fails.
+func (l *Logger) writeGlobal(rec record, now time.Time, targetOperation string) {
+	payload, err := json.Marshal(rec)
 	if err != nil {
-		panic(fmt.Sprintf("sidecar logging: encode forwarding failure: %v", err))
+		panic(fmt.Sprintf("sidecar logging: encode global record: %v", err))
 	}
 	line := append(payload, '\n')
 	l.mu.Lock()
@@ -569,7 +684,7 @@ func (l *Logger) reportForwardFailure(now time.Time, address string, target reco
 	}
 	if err := writeAll(l.file, line); err != nil {
 		l.poisoned = err
-		l.reportSinkFailure(now, target.Operation, err)
+		l.reportSinkFailure(now, targetOperation, err)
 		panic(fmt.Sprintf("sidecar logging: persistent sink failed: %v", err))
 	}
 }

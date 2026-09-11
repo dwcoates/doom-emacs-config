@@ -620,8 +620,22 @@ foreground harnesses may use `logging.NewAtLevel`.
   `<state-dir>/daemon.addr` for every record so handover changes the destination
   without a sidecar restart.
 - GENUINELY GLOBAL SERVICE RECORDS stay in the global rotating sink only. A
-  forwarding failure writes one global error per daemon address and outage
+  forwarding failure writes one global record per daemon address and outage
   window and never fails the file-plane operation that produced the diagnostic.
+- A DAEMON THAT IS BOOTING IS NOT A DAEMON THAT IS GONE. Its ~10s boot
+  reconciliation is listening and answering nothing, so the first ClientLog of
+  a sidecar that came up beside it deadlines. Forwarding therefore climbs a
+  RETRY LADDER — six attempts over a doubling 250ms..5s backoff, spanning
+  ~12.75s — and the ladder is ABANDONED at Close, because a process that is
+  exiting does not wait out an outage. The one failure record is `warn` and
+  carries `attempt`: the count is what separates "slow to boot" from "not
+  there", which a bare failure could never say.
+- AN UNDELIVERABLE DIAGNOSTIC IS NOT A DISCARDED ONE. When the ladder is
+  exhausted the file-scoped record itself is written to the GLOBAL durable
+  sink, marked `forward_undelivered` with the daemon address, attempt count and
+  cause, keeping its workspace attribution. Dropping it, which is what this
+  loop used to do, silently swallowed every file-plane diagnostic for the whole
+  of a daemon outage.
 - Lifecycle records persist in
   `~/.cache/agent-repl/log/shim-claude-sidecar.log` (`--log`).
 - THE DURABLE LOG IS THE ONLY COPY, AND IT IS BOUNDED. `--log` is opened
