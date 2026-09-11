@@ -72,6 +72,18 @@ e2e and Emacs-layer suites stay.
 Startup and shape
 1. Start Emacs cold. Time to usable; which workspaces open and when; what the
    modeline and tab bar show while waiting.
+
+   TWO PHASES (owner ruling, 2026-09-11): `open -gj` leaves the frame
+   visible-but-unfocused on this machine, not truly hidden, and the settled
+   webview invariant PARKS a workspace's pre-creation in exactly that state
+   rather than steal focus — so a panel does not paint until the first focus
+   edge, no matter how long the hidden window runs. HIDDEN startup is
+   therefore judged by a drawn tab and the pre-creation queue armed for it,
+   not by a painted panel; a SHOW phase, run right after the realtest's own
+   key self-test brings Emacs forward, then asserts every panel paints
+   within a generous ceiling. This proves panels DO paint, just on first
+   show (see e2e/REALTEST-SPEC.md, "The phases: hidden, then shown", and
+   docs/REALTEST-JUDGEMENT-CALLS.md, row 40).
 2. Quit and restart Emacs with the daemon still up. Same measurements; the
    daemon is adopted, not rebuilt.
 3. Start Emacs with the daemon down. It is built and spawned; time and

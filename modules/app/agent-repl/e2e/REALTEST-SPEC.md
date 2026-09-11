@@ -191,24 +191,40 @@ hangs the run holding the owner's editor open on a modal question nobody will
 answer. It does not save; the human-in-Emacs refusal upstream is what protects
 unsaved work.
 
-## The phases
+## The phases: hidden, then shown
 
 Every phase from spawn to usable is bounded by a record the module already
 writes, with its own microsecond timestamp. Only the spawn is timed from
 outside, because it precedes the process that would otherwise report it.
 
-| phase | ends at |
-|---|---|
-| `doom-boot` | the first module record of the run — the earliest evidence the process reached lisp at all |
-| `module-loaded` | `elisp.daemon.ensure-command` |
-| `daemon-spawned` | `elisp.daemon.started` (this launch spawned it) or `elisp.daemon.adopted` (one was already answering), reported as which |
-| `daemon-answered` | the LATER of `link-up` and `roster-subscribed`: the daemon is answering this frontend |
-| `link-up` | `elisp.link.up`, `elisp.link.reconnected` or `elisp.host.link-up` |
-| `roster-subscribed` | `elisp.roster.subscribed` — written from the daemon's ACCEPTANCE, not from the request |
-| `first-roster` | `elisp.roster.reconcile:` |
-| `tab-drawn` | `elisp.roster.tab-open:`, per workspace |
-| `panel-painted` | `elisp.frontend.watch-load: load-changed`, per workspace — the only signal in the whole startup that comes from the PAGE, and a fact the widget emits rather than an answer to a question, which is what makes it trustworthy for a page too broken to answer one |
-| `total` | the last marker of the run |
+**TWO WINDOWS, NOT ONE (owner ruling, 2026-09-11).** `open -gj` leaves the
+frame visible-but-unfocused on this machine rather than truly hidden
+(`visible-frame-list` is non-empty), and the settled webview invariant PARKS
+a workspace's pre-creation in exactly that state to avoid stealing focus. So
+no panel paints while Emacs sits unfocused, no matter how long that window
+runs — this is accepted, not a focus bug (docs/REALTEST-JUDGEMENT-CALLS.md,
+row 40). Realtest 1 therefore reads the startup in two windows:
+
+- **Hidden** — every phase up through `tab-drawn`, plus `webview-armed`.
+  Nothing here requires a painted panel.
+- **Show** — `panel-painted` and `total`, read only AFTER the key self-test
+  (below) brings Emacs forward for the first time. That activation is the
+  focus edge the parked queue was waiting on, and once it fires, panels are
+  asserted to paint within their own ceiling.
+
+| phase | window | ends at |
+|---|---|---|
+| `doom-boot` | hidden | the first module record of the run — the earliest evidence the process reached lisp at all |
+| `module-loaded` | hidden | `elisp.daemon.ensure-command` |
+| `daemon-spawned` | hidden | `elisp.daemon.started` (this launch spawned it) or `elisp.daemon.adopted` (one was already answering), reported as which |
+| `daemon-answered` | hidden | the LATER of `link-up` and `roster-subscribed`: the daemon is answering this frontend |
+| `link-up` | hidden | `elisp.link.up`, `elisp.link.reconnected` or `elisp.host.link-up` |
+| `roster-subscribed` | hidden | `elisp.roster.subscribed` — written from the daemon's ACCEPTANCE, not from the request |
+| `first-roster` | hidden | `elisp.roster.reconcile:` |
+| `tab-drawn` | hidden | `elisp.roster.tab-open:`, per workspace |
+| `webview-armed` | hidden | the LARGEST `queued=N` seen on `elisp.webview-recovery.precreate-all:` or `precreate-parked`, reaching the number of open workspaces. Both markers are written on the module's central sink with no per-workspace attribution — the queue reports a COUNT, not names — so this is judged run-wide rather than per workspace the way `tab-drawn` is |
+| `panel-painted` | **show** | `elisp.frontend.watch-load: load-changed`, per workspace — the page's own account of its load finishing — OR `elisp.webview-recovery.precreate-created ws=NAME reason=focused`, the parked drain resuming on the focus edge and mounting directly. The second marker carries no `workspace_id` either (same central sink as `webview-armed`), so it is matched by the workspace's registered NAME rather than its daemon id |
+| `total` | **show** | the last marker of the run — now "spawn to shown-and-painted", not "spawn to hidden-usable" |
 
 Two rules that are easy to get wrong:
 
@@ -274,11 +290,13 @@ Once measured, each entry carries the observed healthy maximum it is a multiple
 of, the way the bounds table in `AGENTS.md` records the run behind every value
 it holds.
 
-The three OBSERVATION CEILINGS in the test (the server answering, the startup
-finishing, a quit completing) are not budgets. They bound how long the run waits
-before reporting that something did not happen, and they are generous on
-purpose: a ceiling that fires turns a measurable slow startup into an
-unmeasurable timeout, which throws away the evidence the run exists to collect.
+The four OBSERVATION CEILINGS in the test (the server answering, the hidden
+startup finishing, the show phase's panels painting, and the key self-test's
+`(recent-keys)` reporting a chord) are not budgets. They bound how long the
+run waits before reporting that something did not happen, and they are
+generous on purpose: a ceiling that fires turns a measurable slow startup
+into an unmeasurable timeout, which throws away the evidence the run exists
+to collect.
 
 ## The log harvest — the remediation bar
 
