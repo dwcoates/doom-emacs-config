@@ -35,8 +35,10 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 	// open episode, and opens one keyed on itself when there is none.
 	episode := s.planUnits[unitID]
 	if episode == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "episode == nil"})
 		episode = s.plans[agentID]
 		if episode == nil || episode.closed {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "episode == nil || episode.closed"})
 			episode = &planState{opener: unitID, feed: at}
 			s.plans[agentID] = episode
 		}
@@ -57,26 +59,34 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 	bubble := &frontendv1.FeedPlan{}
 	switch frame := plan.GetState().(type) {
 	case *conversationv1.AgentPlanMode_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanMode_Start"})
 		switch frame.Start.GetAct().(type) {
 		case *conversationv1.AgentPlanModeStart_Enter:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanModeStart_Enter"})
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		case *conversationv1.AgentPlanModeStart_Exit:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanModeStart_Exit"})
 			// AN EXIT WITH NO ENTER IS LEGAL: a session started in the plan
 			// permission mode never calls EnterPlanMode at all.
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		default:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "default"})
 			return nil, errNotARow
 		}
 	case *conversationv1.AgentPlanMode_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanMode_Success"})
 		switch outcome := frame.Success.GetAct().(type) {
 		case *conversationv1.AgentPlanModeSuccess_Entered:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanModeSuccess_Entered"})
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		case *conversationv1.AgentPlanModeSuccess_Exited:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanModeSuccess_Exited"})
 			planned := &frontendv1.FeedPlanPlanned{
 				Prose: &frontendv1.FeedPlanProse{Markdown: outcome.Exited.GetPlan().GetMarkdown()},
 			}
 			// The edit affordance draws only when the vendor NAMED the file.
 			if outcome.Exited.FilePath != nil && outcome.Exited.GetFilePath() != "" {
+				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "outcome.Exited.FilePath != nil && outcome.Exited.GetFilePath() != \"\""})
 				planned.Edit = &frontendv1.FeedPlanEditTarget{Path: outcome.Exited.GetFilePath()}
 			}
 			bubble.State = &frontendv1.FeedPlan_Planned{Planned: planned}
@@ -85,9 +95,11 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 			// recognized as one instead of opening a second episode.
 			episode.closed = true
 		default:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "default"})
 			return nil, errNotARow
 		}
 	case *conversationv1.AgentPlanMode_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanMode_Failure"})
 		bubble.State = &frontendv1.FeedPlan_Failed{Failed: &frontendv1.FeedPlanFailed{
 			Text: planFailureText(frame.Failure.GetError()),
 		}}
@@ -118,6 +130,7 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 func (r *resolver) breakPlanEpisodes(s *wsState, reason string) {
 	for agentID, episode := range s.plans {
 		if episode.closed {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "episode.closed"})
 			// An episode that already reached its final state is not open, and
 			// breaking it would put "the turn ended while plan mode was still
 			// open" over a plan the agent DID present. It is only still in this
@@ -161,6 +174,7 @@ func (r *resolver) drawFindings(s *wsState, at placement, act *conversationv1.Ag
 	unitID := act.GetActivityId().GetValue()
 	success, ok := report.GetState().(*conversationv1.AgentReportFindings_Success)
 	if !ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 		// A report that has not landed draws nothing: the bubble's substance
 		// is the findings, and there is no in-flight treatment for it.
 		return nil, errNotARow
@@ -262,8 +276,10 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 	bubble := &frontendv1.FeedArtifact{}
 	switch frame := artifact.GetResult().(type) {
 	case *conversationv1.AgentArtifact_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawArtifact", "branch": "case *conversationv1.AgentArtifact_Start"})
 		publish, ok := frame.Start.GetAct().(*conversationv1.AgentArtifactStart_Publish)
 		if !ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 			return nil, errNotARow
 		}
 		u.startedAtMs = frame.Start.GetStartedAtMs()
@@ -272,12 +288,15 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 		bubble.Heading = &frontendv1.FeedArtifactHeading{Text: u.input}
 		bubble.State = &frontendv1.FeedArtifact_Publishing{Publishing: &frontendv1.FeedArtifactPublishing{}}
 	case *conversationv1.AgentArtifact_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawArtifact", "branch": "case *conversationv1.AgentArtifact_Success"})
 		published, ok := frame.Success.GetOutcome().(*conversationv1.AgentArtifactSuccess_Published)
 		if !ok {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 			return nil, errNotARow
 		}
 		heading := u.input
 		if title := published.Published.GetTitle(); title != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "title := published.Published.GetTitle(); title != \"\""})
 			// The outcome's title WINS over the one the call announced, and the
 			// favicon still comes from the call: the publish is the only frame
 			// that carries one, so recomposing from the outcome alone dropped
@@ -290,7 +309,9 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 			Url: &frontendv1.FeedArtifactUrl{Url: published.Published.GetUrl()},
 		}}
 	case *conversationv1.AgentArtifact_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawArtifact", "branch": "case *conversationv1.AgentArtifact_Failure"})
 		if u.input == "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.input == \"\""})
 			// The failure of a call that never announced a publish is not a
 			// publish's failure; there is nothing to draw.
 			return nil, errNotARow
@@ -300,6 +321,7 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 			Text: artifactFailureText(frame.Failure.GetFailure()),
 		}}
 	default:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawArtifact", "branch": "default"})
 		return nil, errNotARow
 	}
 
@@ -346,30 +368,38 @@ func (r *resolver) drawHook(s *wsState, at placement, act *conversationv1.AgentA
 	card := &frontendv1.FeedHook{}
 	switch frame := hook.GetResult().(type) {
 	case *conversationv1.AgentHook_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawHook", "branch": "case *conversationv1.AgentHook_Start"})
 		u.input = hookHeadline(frame.Start.GetHookName(), frame.Start.GetEvent(), false)
 		if gated := frame.Start.GetGatedCall(); gated.GetValue() != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "gated := frame.Start.GetGatedCall(); gated.GetValue() != \"\""})
 			s.gatedCalls["hook:"+unitID] = gated.GetValue()
 		}
 		return nil, errNotARow
 	case *conversationv1.AgentHook_BlockingError:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawHook", "branch": "case *conversationv1.AgentHook_BlockingError"})
 		card.Headline = &frontendv1.FeedHookHeadline{Text: hookBlockedHeadline(u.input)}
 		card.Outcome = &frontendv1.FeedHook_Blocked{Blocked: &frontendv1.FeedHookBlocked{
 			Reason: frame.BlockingError.GetBlockingText(),
 		}}
 	case *conversationv1.AgentHook_NonBlockingError:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawHook", "branch": "case *conversationv1.AgentHook_NonBlockingError"})
 		card.Headline = &frontendv1.FeedHookHeadline{Text: hookFailedHeadline(u.input)}
 		failed := &frontendv1.FeedHookFailed{ExitCode: frame.NonBlockingError.GetExitCode()}
 		if text := hookOutputText(frame.NonBlockingError.GetOutput()); text != "" {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "text := hookOutputText(frame.NonBlockingError.GetOutput()); text != \"\""})
 			failed.Output = &frontendv1.FeedHookOutput{Text: text}
 		}
 		card.Outcome = &frontendv1.FeedHook_Failed{Failed: failed}
 	default:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawHook", "branch": "default"})
 		// Succeeded and cancelled draw nothing.
 		return nil, errNotARow
 	}
 
 	if gated, ok := s.gatedCalls["hook:"+unitID]; ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "gated, ok := s.gatedCalls[\"hook:\"+unitID]; ok"})
 		if u := s.units[gated]; u != nil && u.row != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u := s.units[gated]; u != nil && u.row != nil"})
 			card.GatedCall = &frontendv1.FeedHookGatedCall{Row: u.row.GetId()}
 		}
 	}

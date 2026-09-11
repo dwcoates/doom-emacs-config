@@ -144,7 +144,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 func (r *resolver) render(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterView {
 	return &frontendv1.FooterView{
 		Strip: &frontendv1.FooterStrip{
-			Status:   r.status(s),
+			Status:   r.status(s, r.logOf(ws, s)),
 			Clock:    r.clockCell(s),
 			Tokens:   s.tok.cell(),
 			LiveWork: r.chips(s),
@@ -337,6 +337,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 	switch u := update.GetUpdate().(type) {
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died", func(s *wsState) {
+			r.logSessionArm(ws, s, "query_died")
 			now := r.opts.clock.Now()
 			s.queryDied = &standing{text: deadQueryLine, at: now}
 			s.blocked = &blockedState{kind: blockedQueryDied, at: now}
@@ -347,28 +348,46 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		// THE FIGURES' SOURCE. The sampled account usage carries both
 		// windows' utilization and reset, complete from the first sample;
 		// the rate-limit event carries the verdict.
-		return "account_usage", func(s *wsState) { r.observeAccountUsage(s, u.AccountUsage) }
+		return "account_usage", func(s *wsState) {
+			r.logSessionArm(ws, s, "account_usage")
+			r.observeAccountUsage(s, u.AccountUsage)
+		}
 	case *conversationv1.SessionUpdate_RateLimitStatus:
-		return "rate_limit_status", func(s *wsState) { r.observeRateLimitStatus(ws, s, u.RateLimitStatus) }
+		return "rate_limit_status", func(s *wsState) {
+			r.logSessionArm(ws, s, "rate_limit_status")
+			r.observeRateLimitStatus(ws, s, u.RateLimitStatus)
+		}
 	case *conversationv1.SessionUpdate_Compacting:
-		return "compacting", func(s *wsState) { s.compacting = true }
+		return "compacting", func(s *wsState) {
+			r.logSessionArm(ws, s, "compacting")
+			s.compacting = true
+		}
 	case *conversationv1.SessionUpdate_Diagnostics:
-		return "diagnostics", func(s *wsState) { s.degraded = anyWindowOpen(u.Diagnostics) }
+		return "diagnostics", func(s *wsState) {
+			r.logSessionArm(ws, s, "diagnostics")
+			s.degraded = anyWindowOpen(u.Diagnostics)
+		}
 	case *conversationv1.SessionUpdate_ModelChanged:
-		return "model_changed", func(*wsState) {}
+		return "model_changed", func(s *wsState) { r.logSessionArm(ws, s, "model_changed") }
 	case *conversationv1.SessionUpdate_PermissionModeChanged:
-		return "permission_mode_changed", func(*wsState) {}
+		return "permission_mode_changed", func(s *wsState) { r.logSessionArm(ws, s, "permission_mode_changed") }
 	case *conversationv1.SessionUpdate_IdentityRotated:
-		return "identity_rotated", func(*wsState) {}
+		return "identity_rotated", func(s *wsState) { r.logSessionArm(ws, s, "identity_rotated") }
 	case *conversationv1.SessionUpdate_FastMode:
-		return "fast_mode", func(*wsState) {}
+		return "fast_mode", func(s *wsState) { r.logSessionArm(ws, s, "fast_mode") }
 	case *conversationv1.SessionUpdate_McpServer:
-		return "mcp_server", func(*wsState) {}
+		return "mcp_server", func(s *wsState) { r.logSessionArm(ws, s, "mcp_server") }
 	case *conversationv1.SessionUpdate_ContextUsage:
-		return "context_usage", func(*wsState) {}
+		return "context_usage", func(s *wsState) { r.logSessionArm(ws, s, "context_usage") }
 	default:
-		return "unset", func(*wsState) {}
+		return "unset", func(s *wsState) { r.logSessionArm(ws, s, "unset") }
 	}
+}
+
+// logSessionArm records the update arm selected for this workspace frame.
+func (r *resolver) logSessionArm(ws ids.WorkspaceID, s *wsState, arm string) {
+	r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer session-update arm",
+		dlog.Context{"arm": arm})
 }
 
 // anyWindowOpen reports whether the diagnostics carry an open degraded window,
@@ -522,7 +541,11 @@ func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			})
 	default:
 		r.mutate(ws, "daemon.footer.on_question", "the footer closed a question batch",
-			dlog.Context{"question_id": id}, func(s *wsState) { s.dropQuestion(id) })
+			dlog.Context{"question_id": id}, func(s *wsState) {
+				r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected the question-close transition",
+					dlog.Context{"question_id": id})
+				s.dropQuestion(id)
+			})
 	}
 }
 
@@ -562,7 +585,11 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 			})
 	default:
 		r.mutate(ws, "daemon.footer.on_permission", "the footer closed a consent ask",
-			dlog.Context{"permission_id": id}, func(s *wsState) { s.dropPermission(id) })
+			dlog.Context{"permission_id": id}, func(s *wsState) {
+				r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected the permission-close transition",
+					dlog.Context{"permission_id": id})
+				s.dropPermission(id)
+			})
 	}
 }
 
