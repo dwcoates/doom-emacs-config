@@ -123,6 +123,37 @@ func (s *store) OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error) {
 	return out, nil
 }
 
+// HasTurns reports whether a workspace has EVER recorded a turn.
+//
+// IT IS DELIBERATELY KEYED ON THE WORKSPACE, because that is how the turns
+// table is keyed: no turn row names the vendor conversation it belonged to. So
+// the answer is "this workspace has been engaged", not "this conversation
+// has", and a workspace that rotated conversations answers TRUE for a freshly
+// minted id that never took a turn. That direction is the safe one — its
+// caller reads a true as "cannot prove this conversation was never engaged"
+// and stays loud — and a caller must never read a true as proof of engagement
+// of one particular conversation.
+func (s *store) HasTurns(ctx context.Context, id WorkspaceID) (bool, error) {
+	var has bool
+	err := s.read(ctx, "daemon.wsm.has_turns", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
+		var one int
+		err := s.db().QueryRowContext(ctx, `SELECT 1 FROM turns WHERE workspace_id = ? LIMIT 1`, id).Scan(&one)
+		if errors.Is(err, sql.ErrNoRows) {
+			has = false
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		has = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return has, nil
+}
+
 // querier is what openTurns needs: the handle or a transaction, so the orphan
 // close reads the same rows through the same decoder inside its transaction.
 type querier interface {

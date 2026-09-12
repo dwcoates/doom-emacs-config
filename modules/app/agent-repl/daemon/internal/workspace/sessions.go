@@ -340,14 +340,25 @@ type source struct {
 //   - no session record, or an empty vendor id: FRESH;
 //   - a DELETED session: refused outright rather than resurrected;
 //   - a vendor id whose transcript is found: RESUME;
-//   - a vendor id whose transcript is MISSING: FRESH, with a fault opened once
-//     naming the abandoned conversation. A pre-minted id that never took a
-//     turn writes no transcript, so this is the ORDINARY state of a session
-//     bounced before its first turn — and resuming it names a conversation the
-//     shim rightly refuses as `unknown_session`, which left the workspace with
-//     no client at all. The fault is loud because a genuinely VANISHED
-//     transcript reaches the same branch; what it must not do is cost the
-//     workspace its live session.
+//   - a vendor id whose transcript is MISSING: FRESH, at a loudness that
+//     depends on whether anything was lost (below).
+//
+// TWO POPULATIONS REACH THE MISSING-TRANSCRIPT BRANCH, and they are told apart
+// by whether the workspace has ever recorded a turn (Fleet.neverEngaged).
+// A pre-minted id that NEVER TOOK A TURN writes no transcript, so nothing was
+// ever there to lose: this is the ORDINARY state of a session bounced before
+// its first turn — a stale-build relaunch mints an id at spawn and stands the
+// shim down milliseconds later — and it is recorded at INFO with no fault,
+// because there is no abandoned conversation to report. A conversation that
+// DID take turns and whose transcript then VANISHED off disk is the other
+// population: coming up fresh silently abandons real history, so it stays
+// exactly as loud as it has always been, a WARN plus the
+// once-per-conversation `conversation_abandoned` fault, which is the only
+// record the user gets.
+//
+// Either way the session comes up FRESH rather than resuming: a resume names
+// a conversation the shim rightly refuses as `unknown_session`, which left the
+// workspace with no client at all.
 func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string, session wsm.Session, exists bool) (source, error) {
 	if !exists {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!exists"})
@@ -362,6 +373,12 @@ func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.Work
 		return source{Fresh: true}, nil
 	}
 	if _, err := f.deps.Accounts.FindTranscript(ctx, dir, session.VendorSessionID); err != nil {
+		if f.neverEngaged(ctx, log, ws) {
+			log.Info(opBringUp, "the recorded conversation never took a turn and wrote no transcript; the session comes up FRESH", dlog.Context{
+				"vendor_session_id": session.VendorSessionID, "cause": err.Error(),
+			})
+			return source{Fresh: true}, nil
+		}
 		log.Warn(opBringUp, "the recorded conversation has no transcript on disk; the session comes up FRESH", dlog.Context{
 			"vendor_session_id": session.VendorSessionID, "cause": err.Error(),
 		})
@@ -372,6 +389,30 @@ func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.Work
 		"vendor_session_id": session.VendorSessionID,
 	})
 	return source{VendorSessionID: session.VendorSessionID}, nil
+}
+
+// neverEngaged is the PROOF that a missing transcript lost nothing: the
+// workspace has never recorded a turn, so no conversation of its has ever
+// spoken and no vendor ever had reason to write a transcript file.
+//
+// IT ANSWERS TRUE ONLY ON PROOF. The turns table is keyed by workspace, not by
+// vendor conversation (wsm.Turn, internal/wsm/types.go), so a workspace that
+// ROTATED conversations reads as engaged even for a freshly minted id that
+// never took a turn. That is deliberate: the question the caller is really
+// asking is "may I be quiet about this", and everything short of proof —
+// turns present, or a read that failed — answers false and leaves the caller
+// loud. A read failure is recorded at ERROR in its own right, because a state
+// client that cannot answer an existence query is a fault of its own; it is
+// never allowed to quiet the abandonment.
+func (f *Fleet) neverEngaged(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) bool {
+	engaged, err := f.deps.DB.HasTurns(ctx, ws)
+	if err != nil {
+		log.Error(opBringUp, "could not tell whether the workspace ever took a turn; the abandoned conversation stays loud", dlog.Context{
+			"cause": err.Error(),
+		})
+		return false
+	}
+	return !engaged
 }
 
 // noteConversationAbandoned records the abandoned conversation ONCE, keyed on
@@ -1294,13 +1335,43 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 }
 
 // remember records a workspace's live session.
+//
+// A DISPLACED WATCHER IS CLOSED HERE, not left to the caller. The map entry is
+// the only handle a watcher has: overwriting it with a new session dropped the
+// old one on the floor with its streams still standing, and those streams then
+// ended on their own -- against a fleet nothing had told, which recorded the
+// end as a severing. Closing it in the one place a session is displaced is what
+// makes that unrepresentable rather than a rule each caller must remember.
+//
+// The close runs OFF the lock: it cancels the watcher's context, drains its
+// streams and joins its in-flight sink dispatch, none of which may hold the
+// fleet's lock.
 func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
 	f.mu.Lock()
-	_, stood := f.sessions[ws]
+	previous, stood := f.sessions[ws]
 	f.sessions[ws] = session
 	f.mu.Unlock()
+	if stood && previous != nil && previous.watcher != nil && previous.watcher != session.watcher {
+		f.closeDisplaced(ws, previous.watcher, "the workspace's session was replaced")
+	}
 	f.logTransition(ws, "session_live", stood, true,
 		dlog.Context{"shim_pid": session.client.PID(), "watcher_attached": session.watcher != nil})
+}
+
+// closeDisplaced closes a watcher no handle points at any more. A close is a
+// DELIBERATE teardown -- it bumps the fleet's generation before it cancels, so
+// every stream end it causes reads as the tear-down it is -- and a failure to
+// close is surfaced rather than swallowed: the streams and the sink dispatch it
+// owns outlive it.
+func (f *Fleet) closeDisplaced(ws ids.WorkspaceID, watcher sessionwatcher.Watcher, reason string) {
+	log := f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	if err := watcher.Close(); err != nil {
+		log.Error(opBringUp, "could not close the watcher a new session displaced", dlog.Context{
+			"reason": reason, "cause": err.Error(),
+		})
+		return
+	}
+	log.Debug(opBringUp, "closed the watcher a new session displaced", dlog.Context{"reason": reason})
 }
 
 // logTransition records one workspace fleet state edge with enough context to

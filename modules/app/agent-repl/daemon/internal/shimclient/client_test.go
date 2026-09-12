@@ -818,3 +818,106 @@ func TestFaultKindsOfNoFaultsIsEmpty(t *testing.T) {
 		t.Fatalf("FaultKinds(nil) = %q, want the empty string", got)
 	}
 }
+
+// TestStandingDownIsFalseUntilAKillSessionIsAsked pins the latch's resting
+// state: nothing has been asked of a fresh client, so nothing it does may be
+// read as this daemon's own teardown.
+func TestStandingDownIsFalseUntilAKillSessionIsAsked(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+
+	// Act.
+	got := c.StandingDown()
+
+	// Assert.
+	if got {
+		t.Fatal("a client nobody has asked to stand down reports StandingDown() = true")
+	}
+}
+
+// TestPublishExitRecordsAnAskedForCleanExitAsOrderly covers the exit route with
+// NO attribution: the shim ends its own process when it answers KillSession, so
+// every graceful stand-down in this daemon reaches the exit with nothing having
+// called Kill. Recorded as a death, an orderly relaunch bounce cost the
+// realtest sweep an ERROR for a teardown the daemon itself ordered.
+func TestPublishExitRecordsAnAskedForCleanExitAsOrderly(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c.standDown.Store(true)
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: 0})
+
+	// Assert.
+	if hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("a clean exit inside an asked-for stand-down was recorded as a death")
+	}
+	if !hasRecordAt(log, "info", "daemon.shimclient.exit") {
+		t.Fatal("the orderly stand-down exit was not recorded at all")
+	}
+}
+
+// TestPublishExitRecordsAnUnaskedCleanExitAsADeath is the other half of the
+// distinction: a shim that exits with nobody having asked it to is gone for a
+// reason this daemon does not know, whatever its exit code.
+func TestPublishExitRecordsAnUnaskedCleanExitAsADeath(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: 0})
+
+	// Assert.
+	if !hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("an exit nobody asked for was not recorded as a death")
+	}
+}
+
+// TestPublishExitRecordsAnAskedForNonzeroExitAsADeath pins that the ASK alone
+// never quiets an exit: a stood-down shim that leaves nonzero failed on its way
+// out, and the failure is the whole of what the log is for.
+func TestPublishExitRecordsAnAskedForNonzeroExitAsADeath(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c.standDown.Store(true)
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: 3})
+
+	// Assert.
+	if !hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("a nonzero exit inside a stand-down was not recorded as a death")
+	}
+}
+
+// TestPublishExitRecordsAnAskedForSignalledExitAsADeath is the same rule for
+// the other way an exit is not clean: a shim asked to stand down gracefully and
+// then SIGKILLed did not do what it was asked.
+func TestPublishExitRecordsAnAskedForSignalledExitAsADeath(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c.standDown.Store(true)
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: 0, Signal: "killed"})
+
+	// Assert.
+	if !hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("a signalled exit inside a stand-down was not recorded as a death")
+	}
+}
+
+// hasRecordAt answers whether the test logger holds a record at one level for
+// one operation.
+func hasRecordAt(log *dlog.TestLogger, level, operation string) bool {
+	for _, r := range log.Records() {
+		if r.Level == level && r.Operation == operation {
+			return true
+		}
+	}
+	return false
+}
