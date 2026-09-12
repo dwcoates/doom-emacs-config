@@ -49,14 +49,12 @@ import (
 // no-real-git rule governing the unit and integration suites.
 //
 // AND IT CLEANS UP AFTER ITSELF, through `t.Cleanup` so a failure halfway
-// still tears down what it had made: the workspace is closed and the scratch
-// repository is deleted. What the product has no verb to remove is stated
-// rather than hidden — registering mints a workspace record and a repository
-// record, and no RPC forgets either (nuke, the one verb that does, destroys
-// the worktree first and git refuses to remove a main working tree). So the
-// run leaves exactly one closed workspace row and its repository row, both
-// naming a deleted path under the run directory, and says so in its own
-// output for the owner to rule on (wsActCleanupRegistered).
+// still tears down what it had made: the workspace is closed, then FORGOTTEN
+// — through the command-file ingress, the only door onto the `Forget` verb
+// today (daemon/internal/workspace/forget.go is not yet on the rpc surface) —
+// and the scratch repository is deleted. A forget the daemon refuses is
+// reported loudly rather than hidden, and does not fail this run: cleanup
+// runs after the verdict (wsActCleanupRegistered).
 //
 // A DELIBERATE, STATED DEVIATION FROM "REAL KEYS" for the acts (authorized by
 // the lead, 2026-09-12; the substrate's "The acts" commentary carries the full
