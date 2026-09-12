@@ -90,6 +90,15 @@ type Lost struct {
 	// ObservedAtMs is when the conclusion was reached, NOT when the run ended:
 	// we do not know when it ended, which is the whole point of the word.
 	ObservedAtMs int64
+	// Catchup says this conclusion is STARTUP BACKLOG rather than a
+	// newly-arising condition: the run's last growth predates this sidecar's
+	// own start, so it was already stale before we were watching and was
+	// concluded once, long ago, by whoever was. `state` summarizes these
+	// per class at INFO instead of stating each one, and it rides out to the
+	// caller so the TERMINAL's own record can follow the same classification
+	// — without it the flood this policy exists to stop simply reappeared one
+	// layer down, as one `bash-lost` WARN per backlog run.
+	Catchup bool
 }
 
 type entry struct {
@@ -325,8 +334,10 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []Lost {
 func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	catchup := map[Reason]*catchupCount{}
-	for _, lost := range out {
+	for i := range out {
+		lost := &out[i]
 		if t.processStartMs != 0 && lost.LastActivityMs < t.processStartMs {
+			lost.Catchup = true
 			c := catchup[lost.Reason]
 			if c == nil {
 				c = &catchupCount{oldestMs: lost.LastActivityMs}
