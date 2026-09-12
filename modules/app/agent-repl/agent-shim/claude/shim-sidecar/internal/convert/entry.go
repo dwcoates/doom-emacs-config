@@ -52,6 +52,20 @@ type Attribution struct {
 	// must.
 	AgentID string
 
+	// AgentType is the subagent TYPE this file's agent IS ("general-purpose", a
+	// plugin name, "fork", ...), read from the companion meta file; EMPTY for a
+	// session transcript, which has none.
+	//
+	// IT DECIDES WHETHER AN ASSISTANT RECORD WAS PRODUCED HERE OR MERELY QUOTED.
+	// A fork transcript copies the parent's conversation ahead of its own work,
+	// and the vendor keeps each copied record's true producer in
+	// `attributionAgent` while stamping the fork's OWN records with the fork's
+	// type. A record whose `attributionAgent` names a DIFFERENT type is inherited
+	// context, already booked under its producer, and re-booking it under this
+	// agent would ask the store to move a row between books (assistant.go). It is
+	// a TYPE, never an identity, so it is never a book and never reaches the wire.
+	AgentType string
+
 	// Backgrounded reports that this file's agent was spawned into the
 	// background, which makes the agent its OWN top_level rather than the
 	// session's main agent.

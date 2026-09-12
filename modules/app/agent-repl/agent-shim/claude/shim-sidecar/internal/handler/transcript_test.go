@@ -244,6 +244,40 @@ func TestASubagentsBookIsTheIdentityTheReaderSupplied(t *testing.T) {
 	}
 }
 
+func TestASubagentsAgentTypeReachesTheAttribution(t *testing.T) {
+	// Arrange. The agent's OWN type, read from its meta, is what lets the
+	// converter tell an assistant record this agent PRODUCED from one it merely
+	// QUOTES from a parent (a fork's inherited context).
+	ctx := &Context{
+		Path:      "/p/projects/proj/sess-uuid/subagents/agent-abc123.jsonl",
+		Kind:      tail.KindAgentTranscript,
+		AgentID:   "toolu_spawn_abc",
+		AgentType: "fork",
+	}
+
+	// Act.
+	at := attribute(ctx, 0)
+
+	// Assert.
+	if at.AgentType != "fork" {
+		t.Fatalf("AgentType = %q, want the reader's value 'fork'", at.AgentType)
+	}
+}
+
+func TestASessionTranscriptHasNoAgentType(t *testing.T) {
+	// Arrange. A session transcript has no meta and so no agent type; the quoted
+	// check must therefore never fire for it.
+	ctx := &Context{Path: "/p/projects/proj/sess-uuid.jsonl", Kind: tail.KindSessionTranscript}
+
+	// Act.
+	at := attribute(ctx, 0)
+
+	// Assert.
+	if at.AgentType != "" {
+		t.Fatalf("AgentType = %q, want empty for a session transcript", at.AgentType)
+	}
+}
+
 func TestASubagentsBookIsNeverItsFileName(t *testing.T) {
 	// Arrange. `agent-<id>` is a LOCATOR. Falling back to it would give one
 	// agent two books — one per plane — that no consumer could reconcile, so an
