@@ -111,3 +111,113 @@ func TestChordDismissCeilingIsFarBelowTheChordCeiling(t *testing.T) {
 			"the 30s stalls", wsActChordDismissCeiling, wsActChordCeiling)
 	}
 }
+
+// ---- The C-g press is judged by the marks Emacs is obliged to leave --------
+
+func TestQuitEvidenceCountsAGrownRecentKeysAsArrival(t *testing.T) {
+	// Arrange
+	evidence := wsActQuitEvidence{KeysBefore: "SPC j m p", KeysAfter: "SPC j m p C-g"}
+
+	// Act / Assert
+	if !evidence.Arrived() {
+		t.Errorf("a (recent-keys) that grew is Emacs saying it read the quit character, so the press arrived; "+
+			"the evidence %+v was read as not having arrived", evidence)
+	}
+}
+
+func TestQuitEvidenceCountsAnArmedQuitFlagAsArrival(t *testing.T) {
+	// Arrange
+	evidence := wsActQuitEvidence{KeysBefore: "SPC j m p", KeysAfter: "SPC j m p", QuitFlagArmed: true}
+
+	// Act / Assert
+	if !evidence.Arrived() {
+		t.Errorf("an armed quit-flag is a quit Emacs took in and has not yet honoured, so the press arrived; "+
+			"the evidence %+v was read as not having arrived", evidence)
+	}
+}
+
+func TestQuitEvidenceCallsNeitherMarkANonArrival(t *testing.T) {
+	// Arrange
+	evidence := wsActQuitEvidence{KeysBefore: "SPC j m p", KeysAfter: "SPC j m p"}
+
+	// Act / Assert
+	if evidence.Arrived() {
+		t.Errorf("an arriving quit character must leave (recent-keys) grown or quit-flag armed, so neither "+
+			"mark is the key never entering Emacs's input; the evidence %+v was read as having arrived", evidence)
+	}
+}
+
+func TestQuitEvidenceTreatsAFailedProbeAsArrival(t *testing.T) {
+	// Arrange
+	//
+	// The conservative direction: an editor that would not answer has said
+	// nothing, and a reading nobody got must never let a real product defect
+	// be filed against the harness.
+	evidence := wsActQuitEvidence{ProbeFailure: "quit-flag after the press: connection refused"}
+
+	// Act / Assert
+	if !evidence.Arrived() {
+		t.Errorf("a probe that would not answer is not an absent mark; the evidence %+v was read as not "+
+			"having arrived", evidence)
+	}
+}
+
+func TestQuitFlagFormReadsTheFlagAsAWord(t *testing.T) {
+	// Arrange / Act
+	form := wsActQuitFlagForm()
+
+	// Assert
+	if !strings.Contains(form, "quit-flag") || !strings.Contains(form, `"armed"`) {
+		t.Errorf("the quit-flag probe must read `quit-flag` and answer in a word an empty reply cannot pass "+
+			"for; it is:\n%s", form)
+	}
+}
+
+func TestDismissNoteBlamesTheHarnessWhenTheChordNeverArrived(t *testing.T) {
+	// Arrange / Act
+	note := wsActDismissNote(wsActDismissChordNeverArrived, "Repository: ", 1)
+
+	// Assert
+	if !strings.Contains(note, "NOT A PRODUCT FINDING") || !strings.Contains(note, "key driver") {
+		t.Errorf("a `C-g` Emacs never saw is a defect in this harness's key driver and must say so rather "+
+			"than accuse the editor; it said %q", note)
+	}
+}
+
+func TestDismissNoteKeepsTheProductFindingWhenTheChordArrived(t *testing.T) {
+	// Arrange / Act
+	note := wsActDismissNote(wsActDismissByEval, "Repository: ", 1)
+
+	// Assert
+	if !strings.Contains(note, "PRODUCT FINDING") || !strings.Contains(note, "REACHED Emacs") {
+		t.Errorf("a `C-g` that reached Emacs and left the prompt up is a product defect and must still be "+
+			"reported as one; it said %q", note)
+	}
+}
+
+func TestQuitEvidenceNoteRendersBothReadings(t *testing.T) {
+	// Arrange
+	evidence := wsActQuitEvidence{KeysBefore: "SPC j m p", KeysAfter: "SPC j m p", QuitFlagArmed: true}
+
+	// Act
+	note := wsActQuitEvidenceNote(evidence)
+
+	// Assert
+	if !strings.Contains(note, "quit-flag was armed") {
+		t.Errorf("the evidence sentence must carry what the editor said about the flag so the verdict can be "+
+			"checked rather than taken; it said %q", note)
+	}
+}
+
+func TestQuitEvidenceNoteNamesAProbeFailure(t *testing.T) {
+	// Arrange
+	evidence := wsActQuitEvidence{ProbeFailure: "quit-flag after the press: connection refused"}
+
+	// Act
+	note := wsActQuitEvidenceNote(evidence)
+
+	// Assert
+	if !strings.Contains(note, "connection refused") {
+		t.Errorf("a probe that would not answer must appear in the finding, not be smoothed over; it said %q", note)
+	}
+}
