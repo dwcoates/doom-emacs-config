@@ -30,6 +30,38 @@ func TestWriteBatchRefusesAnUpsertThatMovesTheRowToAnotherBook(t *testing.T) {
 	}
 }
 
+// TestABookMoveEntryRollsBackEveryLegitimateSiblingInItsBatch is the
+// data-loss boundary the sidecar's quoted-context fix rests on (ledger row 51):
+// a WriteBatch is atomic, so ONE refused entry rolls back the WHOLE transaction
+// and every LEGITIMATE new entry beside it is lost too. This is why a producer
+// must never PUT a book-moving entry in a batch — "log the refusal softer" would
+// still discard the batch's good rows — and why the fix removes the bad entry at
+// the producer instead.
+func TestABookMoveEntryRollsBackEveryLegitimateSiblingInItsBatch(t *testing.T) {
+	// Arrange: an existing row under agent-1, so a later move to agent-2 is a
+	// genuine identity change.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Act: one batch carries a brand-new, perfectly legitimate line AND the
+	// offending book-move entry.
+	_, err := d.WriteBatch(ctx(), "producer", batch(
+		pageEntry("w2", "u2", "agent-1", frameItem(activityFrame("agent-1", "act-2", prose()))),
+		pageEntry("w3", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose())))))
+
+	// Assert: the batch was refused, and the legitimate sibling committed
+	// NOTHING — the whole transaction rolled back.
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid", err)
+	}
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = 'u2'`); got != 0 {
+		t.Fatalf("the legitimate sibling produced %d rows, want 0 — a refused batch commits nothing", got)
+	}
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger WHERE write_id IN ('w2','w3')`); got != 0 {
+		t.Fatalf("ledger rows for the refused batch = %d, want 0", got)
+	}
+}
+
 func TestAnIdentityChangingUpsertCommitsNothing(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
