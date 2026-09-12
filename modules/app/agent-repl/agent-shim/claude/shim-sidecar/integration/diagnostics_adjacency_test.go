@@ -91,6 +91,12 @@ func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing
 	slug := cwdSlug(cwd)
 	session := "7b7b7b7b-7b7b-47b7-87b7-7b7b7b7b7b7b"
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// The orphaned-diagnostics record is BENIGN on a re-scan and emitted at
+	// debug (see diagnosticsAttachment): a report whose causing change scrolled
+	// past this reader's cursor is stored whole as residue, which is correct,
+	// so it must not flood the strict all-logs harvest at warn. Debug logging is
+	// enabled here so the trace still reaches the log to be asserted.
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 	report := retargetSession(t,
 		decodeRecord(t, corpusLine(t, "attachments/diagnostics.jsonl", 0)), session, cwd)
 
@@ -111,8 +117,8 @@ func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing
 			t.Errorf("orphaned findings were pinned onto unit %q", a.GetActivityId().GetValue())
 		}
 	}
-	awaitLog(ctx, t, opts.LogPath, "the orphaned-diagnostics warning", func(r logRecord) bool {
-		return r.Level == "warn" && r.Operation == "diagnostics"
+	awaitLog(ctx, t, opts.LogPath, "the orphaned-diagnostics debug trace", func(r logRecord) bool {
+		return r.Level == "debug" && r.Verbosity == "verbose" && r.Operation == "diagnostics"
 	})
 }
 

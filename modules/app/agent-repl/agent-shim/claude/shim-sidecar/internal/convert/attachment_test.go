@@ -257,6 +257,34 @@ func TestDiagnosticSeverityTable(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsWithNoObservedChangeAreRecordedAtDebug pins the reclassified
+// orphan diagnostics record. With no remembered change unit the report follows
+// no write or edit in this reader's window — a cursor-resumed reader legitimately
+// sees the report after its causing change scrolled past the cursor. The findings
+// are stored whole as residue, which is correct, so the trace is debug rather
+// than a warn that floods a cold re-scan. An in-window change always sets
+// lastChangeUnit, so a report whose change IS in-window never reaches this branch.
+func TestDiagnosticsWithNoObservedChangeAreRecordedAtDebug(t *testing.T) {
+	// Arrange: a diagnostics report with no preceding write or edit.
+	c, sink := loggedConverter(t)
+	body := `{"type":"diagnostics","isNew":true,"files":[{"uri":"/p/x.ts",` +
+		`"diagnostics":[{"message":"boom","severity":"Error",` +
+		`"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":3}},` +
+		`"source":"typescript","code":"2304"}]}]}`
+
+	// Act.
+	entries := convertLines(t, c, attachmentLineOf("diag-1", body))
+
+	// Assert: the residue is kept whole...
+	if len(entries) != 1 || vendorKindOf(entries[0]) != "attachment/diagnostics" {
+		t.Fatalf("entries = %v, want exactly one attachment/diagnostics residue", allKeys(entries))
+	}
+	// ...and only the severity drops.
+	if got := levelForMessage(t, sink, "follow no write or edit this reader observed"); got != "debug" {
+		t.Fatalf("the orphaned diagnostics record was recorded at %q, want debug (benign on a re-scan)", got)
+	}
+}
+
 func TestTheContextBudgetWarningLandsAsAPageLineOfTheAgentsBook(t *testing.T) {
 	// Arrange. A FILE-PLANE FACT WITH NO STREAM PRODUCER: it exists only as an
 	// attachment line in the agent's transcript, so the sidecar is its only
