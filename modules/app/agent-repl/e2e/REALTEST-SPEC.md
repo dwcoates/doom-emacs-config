@@ -228,6 +228,9 @@ row 40). Realtest 1 therefore reads the startup in two windows:
   IS `focus-edge` — the focus edge the parked queue was waiting on — and once
   it fires, panels are asserted to paint within their own ceiling.
 
+Realtests 2 and 3 read the SAME two windows through the same helpers, over a
+different precondition — see "The startup realtests" below.
+
 | phase | window | ends at |
 |---|---|---|
 | `doom-boot` | hidden | the first module record of the run — the earliest evidence the process reached lisp at all |
@@ -252,6 +255,40 @@ Two rules that are easy to get wrong:
 - **The log is what is read, never a poll.** A poll answers "by the time I
   asked, it had happened", which carries no timestamp. Emacs is polled only to
   decide WHEN TO STOP WAITING; every number reported comes from a record.
+
+## The startup realtests
+
+`docs/REALTEST-PLAN.md`, "Startup and shape", items 1 to 3 are one measurement
+taken three times under three preconditions. Items 2 and 3 call item 1's own
+helpers — `coldStart`, `waitForUsable`, `waitForShown`,
+`assertEveryWorkspaceDrawn`, `assertEveryWorkspacePainted`,
+`verifyVendorGuard`, `proveKeyDriver` — so the phase tables are directly
+comparable and the harvest bar is identical. `startup_shared_test.go` holds
+what item 1 has no use for: the takeover quit as an ACT, the resident-daemon
+lookup, the startup-feedback reader, and the run tail.
+
+| # | test | precondition | what it adds |
+|---|---|---|---|
+| 1 | `TestRealtestStartTheEditor` | no Emacs answering; `bin/realtest.sh` quits a standing one under `AGENT_REPL_REALTEST_TAKEOVER=1` | the baseline: every phase, tab, panel, key self-test and harvest |
+| 2 | `TestRealtestRestartWithTheDaemonUp` | exactly one daemon already serving | the QUIT is the test's own act, and the daemon must be ADOPTED: `elisp.daemon.adopted` present, `elisp.daemon.started` absent, the lifecycle settling on `adopted` and never `ready`, `Phases.DaemonPath` reading "adopted", and the daemon's pid unchanged across the restart |
+| 3 | `TestRealtestStartWithTheDaemonDown` | NO daemon running; the test refuses and names the pid rather than stopping the owner's, so it runs ALONE | the daemon must be SPAWNED, and the user-visible feedback during the wait is asserted: the mode-line lifecycle `starting` → `linking` → `ready`, and the minibuffer echoes "starting the daemon…", "linking to the daemon…", "daemon ready", "loading workspaces (n/m)…" |
+
+Two things about the feedback assertions, both easy to get wrong:
+
+- **The feedback is read AFTER the show phase.** The lifecycle records land
+  early, but "loading workspaces (n/m)…" is driven by the painted count, and no
+  panel paints until Emacs is brought forward.
+- **The echoes are matched on the U+2026 ellipsis, never on ".".**
+  `lisp/daemon.el` also writes a plain info record whose message is "starting
+  the daemon..." with three ASCII dots, kept for the log while the minibuffer
+  line is issued once by the lifecycle transition. A pattern matching both would
+  report the user-visible echo as present on a run that only wrote the log line.
+
+The build the plan's item 3 mentions is REPORTED, not asserted: the readiness
+refusal guarantees the tree is fresh, so the staleness check writes
+`elisp.daemon.build-skipped-fresh` rather than building, and asserting a build
+would be asserting that the preflight failed. Which of the two happened goes in
+the manifest, because a run that did build measured a different startup.
 
 ## Latency is always an intrinsic log-edge delta, never harness overhead (owner ruling, 2026-09-11)
 
@@ -445,8 +482,11 @@ e2e/realtest/
   keydriver.swift              CGEventPostToPid, with the trust check
   state.go                     what the state database holds, read-only
   manifest.go                  MANIFEST.md
+  startup_shared_test.go         what realtests 2 and 3 share
   realtest_1_start_the_editor_test.go
   realtest_4_switch_between_workspaces_test.go
+  realtest_2_restart_with_the_daemon_up_test.go
+  realtest_3_start_with_the_daemon_down_test.go
 ```
 
 The unit tests run under the same build tag and need none of the above: they

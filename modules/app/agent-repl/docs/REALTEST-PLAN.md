@@ -141,10 +141,27 @@ Scale
 |---|---|---|
 | 0 | done (cc93abb9d) | retire the old playtest layer |
 | 1 | DONE — twice-green 2026-09-12, clean harvest | remediated; see judgement ledger rows 1-57 |
+| 2 | authored, not yet run | `TestRealtestRestartWithTheDaemonUp` |
+| 3 | authored, not yet run | `TestRealtestStartWithTheDaemonDown` |
 | 4 | authored, not yet run (`TestRealtestSwitchBetweenWorkspaces`) | needs a bar drawing at least THREE tabs: with two, `s-{` and `s-}` reach the same tab and a reversed direction cannot be told from a correct one |
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
+
+### Running realtests 2 and 3
+
+Both are `bin/realtest.sh -run <name>`, one at a time, and each has a
+precondition the script's own preflight does not establish:
+
+- **2 — restart with the daemon up** needs a daemon already serving. Realtest 1
+  leaves one behind, and so does starting Emacs by hand. The test quits the
+  standing editor itself, which needs `AGENT_REPL_REALTEST_TAKEOVER=1` exactly
+  as the script's second refusal does.
+- **3 — start with the daemon down** needs NO daemon running. The test refuses
+  and names the pid rather than stopping the owner's daemon: stop it
+  deliberately first (`SPC o C-d` from the editor, or kill the pid), then run
+  realtest 3 ALONE. It is not the third test of a sweep, because realtests 1
+  and 2 each leave a daemon behind them.
 
 ### Realtest 1, run 1 — 2026-09-11 12:13, FAILED
 
