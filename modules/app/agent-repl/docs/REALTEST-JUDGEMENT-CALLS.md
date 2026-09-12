@@ -137,3 +137,45 @@ readers to skip the harvest.
 snapshot subsystem, which would contradict the daemon-owns-the-roster ruling.
 If that ruling changes, restore the block from `832ad299f`'s parent and the
 guard comes back with it.
+
+## Budget multiples dropped from a uniform 3x to a per-row multiple (2026-09-12, lead)
+
+**Call.** `e2e/realtest/budgets.go`'s table was filled in earlier the same day
+at a uniform 3x the slowest healthy observation across 23 accumulated runs.
+With 43 runs now on disk, the observed healthy maximum had not moved for most
+rows (the same 2026-09-11 154945 run is still the ceiling), so re-applying 3x
+would have reproduced the identical loose numbers. Retightening instead came
+from lowering the multiple, chosen per row from that row's own sample size and
+spread rather than kept uniform:
+
+- 2x for the well-sampled (n=26-51), consistently-shaped boot-chain rows —
+  doom-boot, daemon-spawned, daemon-answered, link-up, roster-subscribed,
+  tab-drawn, total — whose max/mean ratio clusters tightly around 1.43-1.47.
+- 1.75x for webview-armed (n=22), whose max/mean ratio (1.20) is visibly
+  tighter than its boot-chain siblings.
+- 2.5x for the two newly-measured, small-sample rows — module-loaded and
+  first-roster (n=5 each) — where the low n justifies more headroom despite
+  an even tighter observed spread, and for panel-painted (n=24), whose
+  millisecond-scale values (22ms-409ms) carry proportionally more scheduling
+  jitter than the second-scale rows.
+- 2.5x, kept above the boot-chain's 2x, for focus-edge: it is an explicit
+  harness-wait hang-detector, not a product-latency bound, and its spread
+  (4.119s-6.168s) did not tighten with the 3 new observations the way every
+  product row's did.
+
+**Why it is a judgement call.** AGENTS.md's standing rule says "roughly 3x the
+slowest healthy case," not exactly 3x, and this file's own task explicitly
+declined to mandate uniformity. The specific multiples (2x / 1.75x / 2.5x)
+are the lead's read of where each row's sample size and spread stop
+justifying the old headroom — a defensible read, not the only one a stricter
+or looser reviewer could reach.
+
+**How to revise.** Each row's Basis string in `budgets.go` names the healthy
+max, the run, the observation count and the multiple applied, so any of these
+can be dialed independently. Widen a specific row's multiple only alongside
+recording why in that row's Basis and re-measuring: a bound that creeps back
+up without a new observation behind it is exactly the unexamined slack
+AGENTS.md's standing rule exists to prevent. If a later regression is caught
+too eagerly (a flake, not a real slowdown) on a specific phase, that phase's
+multiple is the first thing to revisit — not a blanket return to 3x, which
+would silently re-loosen every row this pass tightened.
