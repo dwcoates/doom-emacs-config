@@ -55,9 +55,10 @@ import (
 // own repository under the run directory (`git init`, one commit) and acts
 // only against that; the owner's repositories are never touched. Everything it
 // creates it removes, through `t.Cleanup` so a failure halfway still tears
-// down what it had made — and the one residue the product has no verb to
-// remove is reported in the run's own output rather than left to be found
-// (wsActCleanupRegistered says exactly what it is).
+// down what it had made — the registered scratch directory is closed, then
+// FORGOTTEN through the command-file ingress, and a forget the daemon refuses
+// is reported in the run's own output rather than left to be found
+// (wsActCleanupRegistered says exactly what happened).
 //
 // THE REGISTER IS BOOTSTRAP HERE, NOT THE SUBJECT. `SPC TAB n` picks its
 // repository from the roster's sections, and a repository is in the roster

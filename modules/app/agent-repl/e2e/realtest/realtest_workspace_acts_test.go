@@ -1041,22 +1041,204 @@ func wsActCleanupCreated(ctx context.Context, t *testing.T, client *Client, dbPa
 	}
 }
 
-// wsActCleanupRegistered closes a workspace this run registered, and states
-// plainly what it cannot remove.
+// wsActForgetCeiling bounds how long a forget issued through the command-file
+// ingress may take to remove a workspace's registry row. The ingress polls its
+// directory every commandfile.DefaultInterval (250ms, daemon/internal/commandfile
+// /api.go); this is generous well past that, the way wsActChordCeiling is
+// generous past what a chord's own prompt normally takes.
+const wsActForgetCeiling = 30 * time.Second
+
+// wsActCommandFileGlobPrefix and wsActCommandFileGlobSuffix must bracket every
+// name this layer writes into the ingress directory, so the daemon's own
+// glob (`workspace_commands_*.json`, daemon/internal/stateroot/stateroot.go
+// CommandFileGlob) claims it.
+const (
+	wsActCommandFileGlobPrefix = "workspace_commands_realtest-forget-"
+	wsActCommandFileGlobSuffix = ".json"
+)
+
+// wsActForgetCommandFile writes a one-entry command file asking the daemon to
+// forget `id`, and answers the path it wrote.
 //
-// WHAT THE PRODUCT CANNOT UNDO IS SAID, NOT HIDDEN. Registering a directory
-// mints a workspace record AND a repository record, and the daemon exposes no
-// verb that forgets either: `close` marks the row closed, `kill` does the same
-// by force, and `nuke` — the one verb that forgets a record — destroys the
-// worktree first, which for a registered main checkout is the repository
-// itself and which git refuses (`git worktree remove` will not remove a main
-// working tree), leaving the record behind anyway.
+// THE COMMAND-FILE INGRESS IS THE ONLY DOOR. `Forget` (daemon/internal
+// /workspace/forget.go) is on the Verbs interface and mapped in
+// daemon/internal/commandfile/ingress.go's `apply`, but no rpc arm exists yet
+// for it — that needs a proto addition nobody has made. The command file is a
+// real production ingress (the same one `agent-repl workspace-dispatch`
+// scripts write through), not a side channel invented for this test, which is
+// why driving it is faithful to "forget the way an owner shell script would".
+func wsActForgetCommandFile(stateDir, id string) (string, error) {
+	dir := filepath.Join(stateDir, "output")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create the command-file ingress directory %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%s%d%s", wsActCommandFileGlobPrefix, time.Now().UnixNano(), wsActCommandFileGlobSuffix))
+	body := fmt.Sprintf(`[{"type":"forget","workspace":%s}]`, jsonString(id))
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return "", fmt.Errorf("write the command file %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// jsonString renders s as a JSON string literal, so a workspace id can never
+// be interpolated into the command file unescaped.
+func jsonString(s string) string {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		// json.Marshal of a string cannot fail; this exists only so a caller
+		// never has to check an error that can't occur, per the JSON stdlib's
+		// own contract for string values.
+		return `""`
+	}
+	return string(encoded)
+}
+
+// wsActForgetReasonRe matches the daemon's own account of a refused verb,
+// `intended arm: <Rpc>Error.<Arm>: <reason>` (daemon/internal/workspace
+// /refusal.go's Refusal.Error), and the ingress's wrapping of it,
+// `a command-file entry was refused`. Either is useful evidence; this reads
+// whichever the daemon actually wrote.
+var wsActForgetReasonRe = regexp.MustCompile(`ForgetWorkspace|command-file entry was refused`)
+
+// wsActForgetReason best-effort reads the daemon's own global log for the
+// latest record, since `since`, that names both the forget arm and the
+// workspace id — so a refusal is reported in the daemon's own words rather
+// than left as a bare "it did not happen".
 //
-// So the closest the product gets to "as it was found" is a CLOSED row naming
-// a directory this cleanup then deletes. That residue is reported here, in the
-// run's own output, so the owner rules on it rather than discovering it: one
-// closed workspace row and one repository row per run, both naming a path
-// under the run directory that no longer exists.
+// BEST-EFFORT, NOT A SECOND VERDICT: nothing here fails the test. A daemon log
+// that has rotated out from under a slow forget, or a record this regexp does
+// not match, answers the empty string, and the caller states plainly that no
+// explanation was found rather than fabricating one.
+func wsActForgetReason(stateDir string, since time.Time, id string) string {
+	path := filepath.Join(stateDir, "logs", "daemon.run.log")
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	var latest string
+	var latestAt time.Time
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
+	for scanner.Scan() {
+		text := scanner.Text()
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		var rec record
+		if err := json.Unmarshal([]byte(text), &rec); err != nil {
+			continue
+		}
+		at, parseErr := time.Parse(time.RFC3339Nano, rec.Timestamp)
+		if parseErr != nil || at.Before(since) {
+			continue
+		}
+		if !wsActForgetReasonRe.MatchString(rec.Message) {
+			continue
+		}
+		if !strings.Contains(rec.Message, id) && rec.WorkspaceID != id {
+			continue
+		}
+		if latest == "" || at.After(latestAt) {
+			latest, latestAt = rec.Message, at
+		}
+	}
+	return latest
+}
+
+// wsActWaitForForgetGone polls the registry, on wsActForgetCeiling rather than
+// wsActActCeiling, until id is gone, and answers whether it left within that
+// wait. It is its own function rather than a wsActWaitForDB call because that
+// helper's ceiling is the much longer wsActActCeiling, sized for a create or a
+// nuke to reach the daemon and the log; a forget round-trips through a 250ms
+// poll (commandfile.DefaultInterval) and a ceiling thirty times that already
+// generously covers a slow sweep.
+func wsActWaitForForgetGone(ctx context.Context, t *testing.T, dbPath, name, id string) bool {
+	t.Helper()
+	var gone bool
+	waitUntil(ctx, t, fmt.Sprintf("cleanup: the registry to forget %s", name), wsActForgetCeiling, func() bool {
+		all, _, _, err := wsActWorkspacesNow(ctx, dbPath)
+		if err != nil {
+			return false
+		}
+		_, still := wsActWorkspaceByID(all, id)
+		gone = !still
+		return gone
+	})
+	return gone
+}
+
+// wsActForgetDeps abstracts the collaborators the forget step needs, so the
+// decision logic below — issue for the right id, wait, report a refusal
+// loudly without failing the test — is testable without a live daemon, a real
+// state database, or a real Emacs.
+type wsActForgetDeps struct {
+	// IssueForget writes the command-file entry for id and answers the path
+	// written. An error here is a harness failure (the ingress directory
+	// could not even be written to), distinct from the daemon later refusing
+	// the request it did receive.
+	IssueForget func(id string) (string, error)
+	// WaitGone polls the registry until id is no longer in it, up to
+	// wsActForgetCeiling, and answers whether it is gone.
+	WaitGone func(id string) bool
+	// Reason best-effort explains why a forget did not take. May be nil.
+	Reason func(id string) string
+}
+
+// wsActForget drives one forget through deps and reports the outcome on t.
+//
+// IT NEVER FAILS THE TEST. Cleanup runs after the test's own verdict, and a
+// forget the daemon refuses or a request the harness could not even issue is a
+// residue to report, not a defect this cleanup pass gets to fail the run over
+// — the run has already been judged. Losing that residue silently would be
+// worse than reporting it, so every path here ends in a t.Logf that says
+// plainly what is left and, where it can be learned, why.
+func wsActForget(t *testing.T, deps wsActForgetDeps, ws Workspace, name string) {
+	t.Helper()
+
+	path, err := deps.IssueForget(ws.ID)
+	if err != nil {
+		t.Logf("REGISTRY RESIDUE, for the owner to rule on: forgetting %s (%s) at %s could not even be "+
+			"requested through the command-file ingress: %v. The row and the repository record minted with it "+
+			"are LEFT IN THE REGISTRY.", ws.ID, name, ws.Dir, err)
+		return
+	}
+
+	if deps.WaitGone(ws.ID) {
+		t.Logf("cleanup: forgot the workspace this run registered, %s (%s); the registry holds no trace of it "+
+			"or of the repository record minted with it", ws.ID, name)
+		return
+	}
+
+	reason := ""
+	if deps.Reason != nil {
+		reason = deps.Reason(ws.ID)
+	}
+	if reason == "" {
+		reason = "no explanation for the refusal was found in the daemon's own log within the wait"
+	}
+	t.Logf("REGISTRY RESIDUE, for the owner to rule on: this run leaves ONE closed workspace row (%s, %s) "+
+		"and the repository row minted with it, both naming %s. A forget was requested through the command file "+
+		"%s but the daemon did not remove the record: %s.", ws.ID, name, ws.Dir, path, reason)
+}
+
+// wsActCleanupRegistered closes a workspace this run registered, then
+// FORGETS it through the command-file ingress, so the run leaves the registry
+// exactly as it found it whenever the daemon accepts the forget.
+//
+// CLOSE, THEN FORGET, IN THAT ORDER: `Forget` refuses an open workspace
+// (daemon/internal/workspace/forget.go), so the close this cleanup already
+// performed — and its own wait for the row to read back closed — must land
+// before the forget is even requested.
+//
+// FORGET ONLY WHAT THIS RUN REGISTERED. The id this cleanup forgets is the one
+// the register act minted and this test has been asserting against the whole
+// time; before issuing the forget, the row is re-read by that same id and its
+// directory is checked against the directory this run owns. A mismatch here
+// would mean the identity this test has been asserting on all along was never
+// what it appeared to be, which is worth failing loudly over rather than
+// forgetting a row on someone else's say-so.
 func wsActCleanupRegistered(ctx context.Context, t *testing.T, client *Client, dbPath string, ws Workspace, name string) {
 	t.Helper()
 	all, _, closed, err := wsActWorkspacesNow(ctx, dbPath)
@@ -1073,21 +1255,182 @@ func wsActCleanupRegistered(ctx context.Context, t *testing.T, client *Client, d
 		if err := wsActCloseWorkspace(ctx, client, name); err != nil {
 			t.Errorf("cleanup: close the registered workspace %s (%s): %v. Its tab is LEFT STANDING",
 				ws.ID, name, err)
-		} else {
-			wsActWaitForDB(ctx, t, fmt.Sprintf("cleanup: the registry to mark %s closed", name), dbPath,
-				func(all []Workspace) bool {
-					_, _, closedNow, readErr := wsActWorkspacesNow(ctx, dbPath)
-					if readErr != nil {
-						return false
-					}
-					_, isClosed := wsActWorkspaceByID(closedNow, ws.ID)
-					return isClosed
-				})
+			return
 		}
+		wsActWaitForDB(ctx, t, fmt.Sprintf("cleanup: the registry to mark %s closed", name), dbPath,
+			func(all []Workspace) bool {
+				_, _, closedNow, readErr := wsActWorkspacesNow(ctx, dbPath)
+				if readErr != nil {
+					return false
+				}
+				_, isClosed := wsActWorkspaceByID(closedNow, ws.ID)
+				return isClosed
+			})
 	}
-	t.Logf("REGISTRY RESIDUE, for the owner to rule on: this run leaves ONE closed workspace row (%s, %s) "+
-		"and the repository row minted with it, both naming %s, which this cleanup deletes. The daemon has no "+
-		"verb that forgets either: nuke is the only verb that forgets a record and it refuses a main working "+
-		"tree, so no realtest that registers a directory can leave the registry byte-for-byte as it found it.",
-		ws.ID, name, ws.Dir)
+
+	// Re-read by id and verify ownership before forgetting anything.
+	allNow, _, closedNow, err := wsActWorkspacesNow(ctx, dbPath)
+	if err != nil {
+		t.Errorf("cleanup: re-read the state database before forgetting %s (%s): %v. The row is LEFT "+
+			"IN THE REGISTRY.", ws.ID, name, err)
+		return
+	}
+	current, stillThere := wsActWorkspaceByID(allNow, ws.ID)
+	if !stillThere {
+		t.Logf("cleanup: %s (%s) left the registry on its own before this cleanup could forget it", ws.ID, name)
+		return
+	}
+	if !wsActSameDir(current.Dir, ws.Dir) {
+		t.Errorf("cleanup: refusing to forget %s (%s): the registry now names %s for this id, not the "+
+			"directory this run registered (%s). Forgetting it would risk deleting a record this run never "+
+			"created; the row is LEFT IN THE REGISTRY for the owner to inspect.",
+			ws.ID, name, current.Dir, ws.Dir)
+		return
+	}
+	if _, isClosed := wsActWorkspaceByID(closedNow, ws.ID); !isClosed {
+		t.Errorf("cleanup: refusing to forget %s (%s): the registry still shows it open, and forget refuses "+
+			"an open workspace. The row is LEFT IN THE REGISTRY.", ws.ID, name)
+		return
+	}
+
+	stateDir := filepath.Dir(dbPath)
+	requestedAt := time.Now()
+	deps := wsActForgetDeps{
+		IssueForget: func(id string) (string, error) { return wsActForgetCommandFile(stateDir, id) },
+		WaitGone: func(id string) bool {
+			return wsActWaitForForgetGone(ctx, t, dbPath, name, id)
+		},
+		Reason: func(id string) string { return wsActForgetReason(stateDir, requestedAt, id) },
+	}
+	wsActForget(t, deps, ws, name)
+}
+
+// ---- Unit tests for the forget helpers ---------------------------------
+//
+// These start no editor and no daemon: wsActForget takes its collaborators as
+// wsActForgetDeps, which is what lets its decision logic — issue for the right
+// id, wait, report a refusal without failing the calling test — be exercised
+// directly. TestWsActCleanupRegisteredForgetsNothingWhenAlreadyGone goes one
+// layer up, through the real database-reading fixture state_test.go already
+// built (crashedWALFixture, snapshotsUnder), because that early-return
+// happens before wsActCleanupRegistered ever touches its `client` argument.
+
+// TestWsActForgetCommandFileNamesTheRequestedID is the edge case "the forget
+// is issued for the right id": the command file wsActForgetCommandFile writes
+// must decode as exactly one entry, of type "forget", naming the id it was
+// asked to forget — never a different one and never more than one.
+func TestWsActForgetCommandFileNamesTheRequestedID(t *testing.T) {
+	// Arrange.
+	stateDir := t.TempDir()
+
+	// Act.
+	path, err := wsActForgetCommandFile(stateDir, "ws-123")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("write the forget command file: %v", err)
+	}
+	if !strings.HasPrefix(filepath.Base(path), "workspace_commands_") || filepath.Ext(path) != ".json" {
+		t.Fatalf("the command file %s does not match the daemon's own glob workspace_commands_*.json "+
+			"(daemon/internal/stateroot/stateroot.go CommandFileGlob)", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the command file back: %v", err)
+	}
+	var entries []struct {
+		Type      string `json:"type"`
+		Workspace string `json:"workspace"`
+	}
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("the command file %s did not decode as JSON: %v", path, err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly one entry, got %d: %+v", len(entries), entries)
+	}
+	if entries[0].Type != "forget" || entries[0].Workspace != "ws-123" {
+		t.Fatalf("expected a forget entry naming ws-123, got %+v", entries[0])
+	}
+}
+
+// TestWsActForgetRefusalIsReportedNotFailed is the edge case "a refused forget
+// is reported and does not fail the test": wsActForget must state the residue
+// loudly (t.Logf) rather than fail the calling test (t.Errorf/t.Fatalf), since
+// the cleanup it runs from executes after the realtest's own verdict.
+func TestWsActForgetRefusalIsReportedNotFailed(t *testing.T) {
+	// Arrange.
+	ws := Workspace{ID: "ws-refused", Dir: "/repos/refused"}
+	deps := wsActForgetDeps{
+		IssueForget: func(id string) (string, error) {
+			return "/tmp/workspace_commands_refused.json", nil
+		},
+		WaitGone: func(id string) bool { return false },
+		Reason:   func(id string) string { return "workspace has forks naming it as parent" },
+	}
+
+	// Act.
+	ok := t.Run("forget", func(t *testing.T) {
+		wsActForget(t, deps, ws, "refused-name")
+	})
+
+	// Assert.
+	if !ok {
+		t.Fatalf("a refused forget must be reported without failing the calling test, but the subtest failed")
+	}
+}
+
+// TestWsActForgetIssueFailureIsReportedNotFailed is the same non-failure
+// contract for the other way a forget can come up short: the harness could
+// not even write the command file (the ingress directory is unwritable, say).
+// That is a harness failure rather than a daemon refusal, and it still must
+// not fail the calling test for the same reason: cleanup runs after the
+// verdict.
+func TestWsActForgetIssueFailureIsReportedNotFailed(t *testing.T) {
+	// Arrange.
+	ws := Workspace{ID: "ws-unwritable", Dir: "/repos/unwritable"}
+	deps := wsActForgetDeps{
+		IssueForget: func(id string) (string, error) {
+			return "", fmt.Errorf("create the command-file ingress directory: permission denied")
+		},
+		WaitGone: func(id string) bool {
+			t.Fatalf("WaitGone must not be consulted when the forget could not even be issued")
+			return false
+		},
+	}
+
+	// Act.
+	ok := t.Run("forget", func(t *testing.T) {
+		wsActForget(t, deps, ws, "unwritable-name")
+	})
+
+	// Assert.
+	if !ok {
+		t.Fatalf("an issue failure must be reported without failing the calling test, but the subtest failed")
+	}
+}
+
+// TestWsActCleanupRegisteredForgetsNothingWhenAlreadyGone is the edge case "a
+// run that registered nothing forgets nothing": a workspace id this run never
+// put in the registry (or that some other actor already removed) must never
+// reach a forget at all. `client` is passed as nil because this early-return
+// path is reached before wsActCleanupRegistered ever uses it.
+func TestWsActCleanupRegisteredForgetsNothingWhenAlreadyGone(t *testing.T) {
+	// Arrange.
+	snapshotsUnder(t)
+	dbPath := crashedWALFixture(t)
+	stateDir := filepath.Dir(dbPath)
+	ws := Workspace{ID: "never-registered-by-this-run", Dir: filepath.Join(stateDir, "scratch")}
+
+	// Act.
+	wsActCleanupRegistered(context.Background(), t, nil, dbPath, ws, "ghost")
+
+	// Assert: no command file was ever written to the ingress directory.
+	outputDir := filepath.Join(stateDir, "output")
+	entries, err := os.ReadDir(outputDir)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("list the ingress directory %s: %v", outputDir, err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no command file for a workspace this run never registered, found %v", entries)
+	}
 }
