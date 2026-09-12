@@ -48,7 +48,35 @@ type migration struct {
 // file and a created one cannot drift into two different shapes.
 var migrations = []migration{
 	{To: 4, Name: "ported_prompts", DDL: portedPromptsDDL},
+	{To: 5, Name: "host_session_identity_backfill", DDL: hostSessionIdentityBackfillDDL},
 }
+
+// hostSessionIdentityBackfillDDL heals the DURABLE RESIDUE of a build that
+// filed a session row before minting its host identity: the creation path
+// recorded the spawn facts the fleet reads at bring-up, and left
+// host_session_id empty until a session actually came up. A workspace whose
+// bring-up never succeeded kept that row forever, and the host view is
+// WITHHELD for a row with no identity — so every compose for that workspace
+// recorded the missing-identity ERROR again, for the life of the file.
+//
+// Minting the identity where the session is created stops new rows from
+// arriving in that state; it does nothing for the ones already filed. This
+// step is the one-shot catch-up over that backlog: it is summarized ONCE by
+// the migration record the open path writes, and anything that arises AFTER
+// it is a genuine defect that keeps the compose ERROR.
+//
+// The id is minted in SQL as sixteen lowercase hex characters, which is
+// exactly the shape NewHostSessionID mints (eight random bytes, hex-encoded).
+// randomblob is evaluated per row, so no two rows are healed to the same id.
+//
+// Unlike the layout-4 step this one introduces NO SHAPE, so there is no
+// fresh-file DDL for it to reuse: a file created by this build has no session
+// rows at all, and every row it later writes goes through PutSession, which
+// refuses one with no identity.
+const hostSessionIdentityBackfillDDL = `
+UPDATE sessions SET host_session_id = lower(hex(randomblob(8)))
+WHERE host_session_id IS NULL OR host_session_id = '';
+`
 
 // planMigrations answers the steps that carry a file stamped with from up to
 // this build's LayoutVersion, and whether such a chain exists at all. A gap in

@@ -555,6 +555,25 @@ func TestCreateRecordsTheModelAndModeAsSpawnFacts(t *testing.T) {
 	}
 }
 
+// THE SPAWN-FACTS ROW IS A SESSION RECORD the host view is composed from the
+// instant it exists, so it names its identity from the instant it exists.
+func TestCreateMintsTheHostSessionIdentityWithTheSpawnFacts(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t)
+
+	// Act.
+	created, err := f.verbs.Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.sessions[created.ID].HostSessionID; got == "" {
+		t.Fatalf("the created workspace's session record carries no host session id")
+	}
+}
+
 func TestSaidTextComposesOneTextBlock(t *testing.T) {
 	// Arrange. Act.
 	said := SaidText("hello")

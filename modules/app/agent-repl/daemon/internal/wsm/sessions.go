@@ -51,8 +51,19 @@ const terminalDeleted = "deleted"
 // PutSession records a workspace's session binding and spawn identity. A
 // workspace whose session was DELETED refuses a new binding: resurrection is
 // unrepresentable, not merely discouraged.
+//
+// A ROW WITH NO HOST SESSION IDENTITY IS REFUSED AT THE WRITE. Every session
+// row is composed into the host view, and the view is WITHHELD when the row
+// names no identity — so a row written without one is not a transient gap but
+// a permanent one, re-failing every compose for as long as the row stands.
+// This is the single chokepoint every writer passes through, so refusing here
+// is what makes the missing identity unrepresentable rather than merely
+// unlikely.
 func (s *store) PutSession(ctx context.Context, sess Session) error {
 	const op = "daemon.wsm.put_session"
+	if sess.HostSessionID == "" {
+		return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionIdentityMissing)
+	}
 	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var kind sql.NullString
