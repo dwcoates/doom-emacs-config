@@ -193,8 +193,17 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	// mode are recorded HERE, before any session exists, because
 	// StartSession(fresh) carries them and nothing else knows what the user
 	// asked for.
+	//
+	// THE HOST IDENTITY IS MINTED WITH THE ROW, not later at bring-up. This is
+	// where the session record is CREATED, and the host view is composed from
+	// the record the instant it exists — so a row filed without an identity
+	// withholds the view and, if the bring-up below never succeeds, keeps
+	// withholding it for the life of the workspace. Bring-up rotates the
+	// identity when it starts a fresh conversation, exactly as it does for any
+	// other record; what it must never have to do is invent the first one.
 	session := wsm.Session{
 		Workspace:      record.ID,
+		HostSessionID:  wsm.NewHostSessionID(),
 		ConfigDir:      v.deps.Accounts.ConfigDirFor(record.Dir),
 		Model:          spec.Model,
 		PermissionMode: spec.PermissionMode,
