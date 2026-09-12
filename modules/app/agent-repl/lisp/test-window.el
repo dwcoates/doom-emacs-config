@@ -784,3 +784,167 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
             (should-not (agent-repl-window--delete-buffer-windows buf)))
         (kill-buffer buf)
         (kill-buffer fallback)))))
+
+;;;; ---- The composer's fixed height ----
+;;
+;; The defect these cover: the composer used to be split out at a
+;; fraction of whatever window the mount happened to be splitting, so
+;; its height moved with the frame's state at that instant — different
+;; per workspace, and different for one workspace across a remount.
+
+(defmacro agent-repl-window-test--with-fresh-height-cache (&rest body)
+  "Run BODY with the frame's cached composer height cleared and restored."
+  (declare (indent 0))
+  `(let ((saved (frame-parameter nil agent-repl-window--input-height-parameter)))
+     (unwind-protect
+         (progn
+           (set-frame-parameter nil agent-repl-window--input-height-parameter nil)
+           ,@body)
+       (set-frame-parameter nil agent-repl-window--input-height-parameter saved))))
+
+(defmacro agent-repl-window-test--capturing-debug (&rest body)
+  "Run BODY capturing the debug rung into `agent-repl-window-test--debug'."
+  (declare (indent 0))
+  `(let ((agent-repl-window-test--debug nil))
+     (cl-letf (((symbol-function 'agent-repl--log)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-window-test--debug))))
+       ,@body)))
+
+(defvar agent-repl-window-test--debug nil
+  "Debug records the stubbed rung received during a capture.")
+
+(ert-deftest agent-repl-window-test-input-height-is-the-declared-fraction-of-the-main-area ()
+  "The composer height is the declared fraction of the frame's main area."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      ;; Act
+      (let ((lines (agent-repl-window--input-height)))
+        ;; Assert
+        (should (= lines
+                   (round (* agent-repl-input-height-fraction
+                             (window-total-height (frame-root-window))))))))))
+
+(ert-deftest agent-repl-window-test-input-height-ignores-the-window-being-split ()
+  "A smaller host window does not shrink the composer's height.
+The old mount measured the window it was splitting, which is why a
+workspace mounted while the frame carried something else came out short."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      ;; Arrange — the full-frame answer, then a frame split in half.
+      (let ((full (agent-repl-window--input-height)))
+        (set-frame-parameter nil agent-repl-window--input-height-parameter nil)
+        (split-window)
+        ;; Act
+        (let ((halved (agent-repl-window--input-height)))
+          ;; Assert
+          (should (= halved full)))))))
+
+(ert-deftest agent-repl-window-test-input-height-reuses-the-frame-cache ()
+  "A second ask returns the cached line count, not a fresh derivation."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      ;; Arrange
+      (let ((first (agent-repl-window--input-height)))
+        ;; Act — a changed fraction must not move an already-derived frame.
+        (let* ((agent-repl-input-height-fraction
+                (* 2 agent-repl-input-height-fraction))
+               (second (agent-repl-window--input-height)))
+          ;; Assert
+          (should (= second first)))))))
+
+(ert-deftest agent-repl-window-test-input-height-rederives-on-a-frame-geometry-change ()
+  "A frame whose text height changed re-derives instead of reusing the cache."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      ;; Arrange — a cache recorded against a geometry this frame no longer has.
+      (set-frame-parameter nil agent-repl-window--input-height-parameter
+                           (cons (+ 1000 (frame-height)) 99))
+      ;; Act
+      (let ((lines (agent-repl-window--input-height)))
+        ;; Assert
+        (should (= lines
+                   (round (* agent-repl-input-height-fraction
+                             (window-total-height (frame-root-window))))))))))
+
+(ert-deftest agent-repl-window-test-input-height-floors-at-the-minimum ()
+  "A fraction too small to leave a usable composer is floored, not honored."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      ;; Arrange / Act
+      (let* ((agent-repl-input-height-fraction 0.001)
+             (lines (agent-repl-window--input-height)))
+        ;; Assert
+        (should (= lines agent-repl-window--input-height-minimum))))))
+
+(ert-deftest agent-repl-window-test-input-height-records-the-derivation ()
+  "The derivation is on the record: an unexplained height is a logging defect."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      ;; Act
+      (agent-repl-window-test--capturing-debug
+        (agent-repl-window--input-height)
+        ;; Assert
+        (should (cl-find-if
+                 (lambda (m)
+                   (string-prefix-p "window--input-height: source=computed" m))
+                 agent-repl-window-test--debug))))))
+
+(ert-deftest agent-repl-window-test-input-height-records-a-cache-hit ()
+  "A reused height says so, so a run can tell derivation from reuse."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      ;; Arrange
+      (agent-repl-window--input-height)
+      ;; Act
+      (agent-repl-window-test--capturing-debug
+        (agent-repl-window--input-height)
+        ;; Assert
+        (should (cl-find-if
+                 (lambda (m)
+                   (string-prefix-p "window--input-height: source=frame-cache" m))
+                 agent-repl-window-test--debug))))))
+
+(ert-deftest agent-repl-window-test-apply-height-resizes-to-the-target ()
+  "A window granted fewer lines than asked for is resized to the target."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange
+    (let ((win (split-window nil -4 'below)))
+      ;; Act
+      (agent-repl-window--apply-height win 6 nil)
+      ;; Assert
+      (should (= (window-total-height win) 6)))))
+
+(ert-deftest agent-repl-window-test-apply-height-returns-the-real-height ()
+  "The return value is the height the window HAS, never the one requested."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange — a target the frame cannot possibly grant.
+    (let ((win (split-window nil -4 'below)))
+      ;; Act
+      (let ((actual (agent-repl-window--apply-height win 10000 nil)))
+        ;; Assert
+        (should (= actual (window-total-height win)))
+        (should (< actual 10000))))))
+
+(ert-deftest agent-repl-window-test-apply-height-records-a-refused-resize ()
+  "A resize the frame refuses is recorded with the error it refused with."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange
+    (let ((win (split-window nil -4 'below)))
+      ;; Act
+      (agent-repl-window-test--capturing-debug
+        (agent-repl-window--apply-height win 10000 nil)
+        ;; Assert
+        (should (cl-find-if
+                 (lambda (m)
+                   (string-prefix-p "window--apply-height: outcome=refused" m))
+                 agent-repl-window-test--debug))))))
+
+(ert-deftest agent-repl-window-test-apply-height-errors-on-a-dead-window ()
+  "A dead window is a caller bug and surfaces as one, not as a silent no-op."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange
+    (let ((win (split-window nil -4 'below)))
+      (delete-window win)
+      ;; Act / Assert
+      (should-error (agent-repl-window--apply-height win 6 nil)))))

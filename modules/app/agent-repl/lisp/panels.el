@@ -123,7 +123,14 @@ ladder unscreened from their own call sites."
        (not (agent-repl--preregistration-log-workspace-p ws))))
 
 (defcustom agent-repl-input-height-fraction 0.23
-  "Fraction of the agent view window's height allocated to the input panel."
+  "Fraction of the frame's main area allocated to the input panel.
+
+Read ONCE PER FRAME GEOMETRY by `agent-repl-window--input-height', which
+turns it into a fixed line count every mount of every workspace on that
+frame then reuses.  It is not re-applied to whatever window the mount
+happens to split, which is what used to make one workspace's composer
+taller than another's and one workspace's composer change height across
+a remount."
   :type 'number
   :group 'agent-repl)
 
