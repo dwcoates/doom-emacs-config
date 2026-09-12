@@ -211,6 +211,11 @@ func (c *client) Reaped() (ExitInfo, bool) {
 	return *c.exitInfo, true
 }
 
+// StandingDown answers the stand-down latch. It is the shim's own record that
+// THIS DAEMON asked it to end its session, and it is read by every consumer
+// that must tell a teardown it ordered from one that happened to it.
+func (c *client) StandingDown() bool { return c.standDown.Load() }
+
 // Connectivity yields every link state change: dialing, connected, redialing,
 // dead.
 func (c *client) Connectivity() <-chan LinkState { return c.link.states() }
@@ -710,7 +715,23 @@ func (c *client) publishExit(info ExitInfo) {
 		ctx["actor"] = info.Attribution.Actor
 		ctx["reason"] = info.Attribution.Reason
 		c.log.Info("daemon.shimclient.exit", "supervised shim stopped as asked", ctx)
+	} else if c.standDown.Load() && info.Code == 0 && info.Signal == "" {
+		// THE SHIM ENDS ITS OWN PROCESS ON KillSession. Every graceful
+		// stand-down in this daemon asks before it signals, so the ordinary
+		// case is that the shim is already gone by the time anything would
+		// have killed it -- there is no `Kill` and therefore no attribution,
+		// and the exit arrives here unexplained. Recorded as a death, an
+		// orderly relaunch bounce cost every realtest run an ERROR for a
+		// teardown the daemon itself ordered and the shim performed exactly
+		// as asked.
+		//
+		// THE THREE CONDITIONS ARE ALL REQUIRED. A shim that was never asked
+		// to stand down, one that exits nonzero, and one that was signalled
+		// all reach the loud branch below unchanged: those are deaths however
+		// the teardown was ordered, and the whole point is telling them apart.
+		c.log.Info("daemon.shimclient.exit", "the shim exited cleanly after the stand-down it was asked for", ctx)
 	} else {
+		ctx["stand_down_asked"] = c.standDown.Load()
 		c.log.Error("daemon.shimclient.exit", "shim died", ctx)
 	}
 

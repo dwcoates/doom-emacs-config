@@ -146,6 +146,24 @@ type fakeClient struct {
 	sessionCount int
 	// reaped is the decoded exit Reaped answers, nil when nothing was reaped.
 	reaped *shimclient.ExitInfo
+	// standingDown is the shim's stand-down latch, which the real client sets
+	// the moment a KillSession is asked of it.
+	standingDown bool
+}
+
+// standDown latches the fake as having been asked to end its session, which is
+// what every route to a deliberate teardown does to the real client.
+func (c *fakeClient) standDown() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.standingDown = true
+}
+
+// StandingDown answers the stand-down latch.
+func (c *fakeClient) StandingDown() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.standingDown
 }
 
 // setReaped arranges the decoded exit a dead link's fault carries.
