@@ -141,6 +141,7 @@ Scale
 |---|---|---|
 | 0 | done (cc93abb9d) | retire the old playtest layer |
 | 1 | DONE — twice-green 2026-09-12, clean harvest | remediated; see judgement ledger rows 1-57 |
+| 4 | authored, not yet run (`TestRealtestSwitchBetweenWorkspaces`) | needs a bar drawing at least THREE tabs: with two, `s-{` and `s-}` reach the same tab and a reversed direction cannot be told from a correct one |
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
