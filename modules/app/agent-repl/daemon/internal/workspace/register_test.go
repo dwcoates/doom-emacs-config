@@ -533,3 +533,111 @@ func TestPublishRegistryLeavesAPresentDirectoryOpen(t *testing.T) {
 		t.Fatalf("workspace %v was closed though its directory is there", record.ID)
 	}
 }
+
+// TestRegisterReopensAClosedWorkspace pins the fix for a register that
+// produced a workspace with NO TAB.
+//
+// Registration is idempotent by dir, and the row it answers with is the row
+// that is already there. When a previous CLOSE had marked that row closed,
+// handing it back untouched left the roster carrying `closed = true`, which is
+// the editor's whole tab-membership rule: no tab was drawn, the minted ref's
+// landing waited on a tab that never came, and the workspace could not be
+// resolved by name to close it again.
+func TestRegisterReopensAClosedWorkspace(t *testing.T) {
+	// Arrange: a directory whose registry row is already closed.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	closed := first
+	closed.Closed = true
+	f.db.with(closed)
+
+	// Act.
+	again, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("second Register: %v", err)
+	}
+
+	// Assert.
+	if again.Closed {
+		t.Fatalf("Register answered workspace %v still closed; announcing a directory must re-open it", again.ID)
+	}
+}
+
+// TestRegisterClearsTheClosedFlagOnTheRecord is the durable half: the answer
+// being open is worth nothing if the row it came from stays closed, because
+// the roster is published from the row.
+func TestRegisterClearsTheClosedFlagOnTheRecord(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	closed := first
+	closed.Closed = true
+	f.db.with(closed)
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("second Register: %v", err)
+	}
+
+	// Assert.
+	if f.db.closedFlags[first.ID] {
+		t.Fatalf("workspace %v is still recorded closed after being announced again", first.ID)
+	}
+}
+
+// TestRegisterWritesNoClosedFlagForAWorkspaceThatIsAlreadyOpen is the negative
+// arm: the re-open is a repair of one state, not a write every announcement
+// makes. The link-up walk re-announces every held workspace on every
+// reconnect.
+func TestRegisterWritesNoClosedFlagForAWorkspaceThatIsAlreadyOpen(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("second Register: %v", err)
+	}
+
+	// Assert.
+	if _, written := f.db.closedFlags[first.ID]; written {
+		t.Fatalf("announcing the open workspace %v wrote its closed flag; nothing needed repairing", first.ID)
+	}
+}
+
+// TestRegisterSurfacesAFailedReopen keeps the failure path loud: a re-open
+// that did not land would answer an open workspace over a row that is still
+// closed, and the tab would never come.
+func TestRegisterSurfacesAFailedReopen(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	closed := first
+	closed.Closed = true
+	f.db.with(closed)
+	f.db.setClosedErr = errors.New("the registry is read-only")
+
+	// Act.
+	_, err = f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Register answered success though the re-open failed")
+	}
+}

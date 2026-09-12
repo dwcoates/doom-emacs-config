@@ -1477,3 +1477,51 @@ persp-mode perspective such as \"main\" appears in the registry."
 (provide 'test-verbs)
 
 ;;; test-verbs.el ends here
+
+(ert-deftest agent-repl-verbs-a-landing-still-waiting-for-its-tab-is-recorded ()
+  "A landing that did not fire says what it is still waiting for.
+Nothing here polls or times out, so for as long as the tab did not come
+the log went silent between `pending-landing-registered' and nothing at
+all -- which is what three minutes of waiting on a register whose row
+came back CLOSED left behind."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "waiting" "/tmp/w"))
+        (cl-letf (((symbol-function 'agent-repl--log)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+          ;; Act.
+          (agent-repl-verbs--pending-landing-fire)))
+      ;; Assert.
+      (should (seq-some (lambda (text)
+                          (string-search "elisp.verbs.pending-landing-waiting id=waiting" text))
+                        logs)))))
+
+(ert-deftest agent-repl-verbs-a-landing-that-fires-records-no-wait ()
+  "The wait record names a landing that is STILL pending, never one that landed."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "arrives" "/tmp/w")))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                ((symbol-function 'agent-repl-switch-to-project) #'ignore))
+        ;; Act.
+        (agent-repl-test-verbs--tab-arrives "arrives" "arrived-ws"))
+      ;; Assert.
+      (should-not (seq-some (lambda (text)
+                              (string-search "elisp.verbs.pending-landing-waiting" text))
+                            logs)))))
+
+(ert-deftest agent-repl-verbs-a-waiting-landing-is-not-cleared-by-the-record ()
+  "Recording the wait must not consume the landing: the tab is still coming."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "kept" "/tmp/w"))
+      ;; Act.
+      (agent-repl-verbs--pending-landing-fire))
+    ;; Assert.
+    (should (equal (plist-get agent-repl-verbs--pending-landing :id) "kept"))))

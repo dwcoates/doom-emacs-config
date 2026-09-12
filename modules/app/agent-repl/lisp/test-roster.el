@@ -1485,3 +1485,42 @@ count never moves; the tabs opening is the only bring-up there is."
       (should (seq-some (lambda (text)
                           (string-search "elisp.roster.bringup-handler-failed" text))
                         logs)))))
+
+(ert-deftest agent-repl-test-roster-records-the-closed-row-it-gives-no-tab ()
+  "The roster says which row it declined a tab for, and why.
+`agent-repl-roster-desired-tabs' is the whole answer to \"why is there no
+tab for that workspace\", and it used to give it silently: a register
+whose row came back CLOSED drew no tab and left nothing in any log
+saying the roster had been asked for one and declined."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-desired-tabs
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row
+                                         "shut" "scratch-repo" :ready :closed t)))))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-search "elisp.roster.no-tab: id=shut name=scratch-repo reason=closed"
+                                         text))
+                        logs)))))
+
+(ert-deftest agent-repl-test-roster-records-nothing-for-a-row-it-does-draw ()
+  "The record names the rows REFUSED a tab; an open row is not one of them."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-desired-tabs
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "open" "one" :ready)))))))
+      ;; Assert
+      (should-not (seq-some (lambda (text) (string-search "elisp.roster.no-tab:" text))
+                            logs)))))

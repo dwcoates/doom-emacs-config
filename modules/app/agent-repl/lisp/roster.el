@@ -291,11 +291,26 @@ with the repo label rather than resolved by dropping a tab."
 (defun agent-repl-roster-desired-tabs (roster)
   "Return the tabs ROSTER asks for, in order: plists `(:id :name :ref)'.
 Only rows with `closed = false' get a tab; the daemon sets `closed' on
-merged, closed and killed rows, so this is the whole membership rule."
-  (let* ((entries (cl-remove-if (lambda (entry)
+merged, closed and killed rows, so this is the whole membership rule.
+
+THE ROWS IT REFUSES A TAB ARE RECORDED.  This predicate is the whole
+answer to \"why is there no tab for that workspace\", and it used to give
+it silently: a register whose row came back CLOSED produced no tab, and
+nothing anywhere said the roster had been asked for one and declined.
+Once per push over every closed row, which is why it is DEBUG."
+  (let* ((all (agent-repl-roster-walk roster))
+         (entries (cl-remove-if (lambda (entry)
                                   (agent-repl-roster-row-closed-p (plist-get entry :row)))
-                                (agent-repl-roster-walk roster)))
+                                all))
          (collisions (agent-repl-roster--colliding-names entries)))
+    (dolist (entry all)
+      (let ((row (plist-get entry :row)))
+        (when (agent-repl-roster-row-closed-p row)
+          (agent-repl--log '(:agent-repl-central
+                             "a closed row the roster gives no tab owns no workspace sink")
+                           "elisp.roster.no-tab: id=%s name=%s reason=closed"
+                           (agent-repl-roster-row-id row)
+                           (agent-repl-roster-row-name row)))))
     (mapcar (lambda (entry)
               (let ((row (plist-get entry :row)))
                 (list :id (agent-repl-roster-row-id row)

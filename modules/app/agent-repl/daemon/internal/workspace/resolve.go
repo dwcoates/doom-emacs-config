@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -60,7 +63,8 @@ func (v *verbs) Resolve(ctx context.Context, ref *workspacev1.WorkspaceRef) (wsm
 // sidebarRegistry composes the roster's durable half. It lives beside Resolve
 // because both are pure translations of WSM facts into another package's
 // vocabulary.
-func sidebarRegistry(workspaces []wsm.Workspace, repositories []wsm.Repository, tasks []wsm.Task, sessions []wsm.Session, current *ids.WorkspaceID) sidebar.Registry {
+func sidebarRegistry(log dlog.Logger, workspaces []wsm.Workspace, repositories []wsm.Repository, tasks []wsm.Task, sessions []wsm.Session, current *ids.WorkspaceID) sidebar.Registry {
+	repositories, workspaces, sessions = withoutGoneRepositories(log, repositories, workspaces, sessions)
 	return sidebar.Registry{
 		Workspaces:   workspaces,
 		Repositories: repositories,
@@ -68,6 +72,65 @@ func sidebarRegistry(workspaces []wsm.Workspace, repositories []wsm.Repository, 
 		Sessions:     sessions,
 		Current:      current,
 	}
+}
+
+// withoutGoneRepositories drops every repository whose main worktree is no
+// longer on disk, together with the workspaces and session records that name
+// it.
+//
+// A REPOSITORY THAT IS NOT THERE IS NOT A PLACE TO WORK. The roster's
+// repository sections are also the CREATE TARGETS -- `SPC TAB n' reads its
+// repository straight out of them (lisp/verbs.el's
+// `agent-repl-verbs--read-repository') -- and nothing ever forgets a
+// repository row, so a repository whose tree has been deleted stayed in the
+// picker for the life of the registry. Two repositories with the same base
+// name then draw the SAME label, one of them dead, and choosing the label
+// cannot say which: a create that picked the dead one failed at `git`, with
+// the workspace never appearing at all. Its workspaces go with it, for the
+// same reason and to keep the resolver's "a workspace names no registered
+// repository" invariant intact.
+//
+// A STAT THAT DOES NOT SAY "NOT EXIST" IS NEVER READ AS GONE -- the discipline
+// Open and the boot reconciliation already apply. "Could not tell" is not an
+// answer, and dropping a repository on it would hide a whole tree behind a
+// transient filesystem error.
+func withoutGoneRepositories(log dlog.Logger, repositories []wsm.Repository, workspaces []wsm.Workspace, sessions []wsm.Session) ([]wsm.Repository, []wsm.Workspace, []wsm.Session) {
+	gone := map[ids.RepoID]bool{}
+	kept := make([]wsm.Repository, 0, len(repositories))
+	for _, repo := range repositories {
+		if _, err := os.Stat(MainWorktreeDir(repo.Dir)); errors.Is(err, fs.ErrNotExist) {
+			gone[repo.ID] = true
+			log.Debug(opRoster, "the repository's directory is gone; it is not published in the roster", dlog.Context{
+				"repository": string(repo.ID), "dir": repo.Dir,
+			})
+			continue
+		}
+		kept = append(kept, repo)
+	}
+	if len(gone) == 0 {
+		return repositories, workspaces, sessions
+	}
+	dropped := map[ids.WorkspaceID]bool{}
+	keptWorkspaces := make([]wsm.Workspace, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if gone[ws.Repo] {
+			dropped[ws.ID] = true
+			log.Debug(opRoster, "the workspace's repository is gone; it is not published in the roster", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws.ID), dlog.KeyWorkspaceDir: ws.Dir,
+				"repository": string(ws.Repo),
+			})
+			continue
+		}
+		keptWorkspaces = append(keptWorkspaces, ws)
+	}
+	keptSessions := make([]wsm.Session, 0, len(sessions))
+	for _, session := range sessions {
+		if dropped[session.Workspace] {
+			continue
+		}
+		keptSessions = append(keptSessions, session)
+	}
+	return kept, keptWorkspaces, keptSessions
 }
 
 // sessionRecords reads one durable session record per registered workspace.

@@ -111,6 +111,36 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 			"workspace": string(record.ID),
 		})
 	}
+	// A REGISTERED WORKSPACE IS AN OPEN WORKSPACE. Registration is idempotent
+	// by dir, and the row it answers with is the row that is already there --
+	// including a row a previous CLOSE marked closed. Handing that row back
+	// untouched is how announcing a directory produced a workspace with NO
+	// TAB: `closed = true` is the roster's whole tab-membership rule
+	// (lisp/roster.el's `agent-repl-roster-desired-tabs'), so the editor drew
+	// nothing, the minted ref's landing waited on a tab that was never coming,
+	// and the workspace could not even be resolved by name to close it again.
+	//
+	// So the announcement RE-OPENS it. Emacs announces a directory because it
+	// means to hold that workspace -- `SPC TAB C-n' onboarding one, and the
+	// link-up walk re-announcing the ones it already holds tabs for, which are
+	// open by construction -- and the standing rule is that a workspace's
+	// panels default to open whenever it comes into the editor's hands.
+	//
+	// It is the FLAG that is cleared here and nothing else: OpenWorkspace's
+	// session bring-up stays OpenWorkspace's, because registration has never
+	// spawned anything and the mount is what spawns.
+	if !created && record.Closed {
+		if err := v.deps.DB.SetClosed(ctx, record.ID, false); err != nil {
+			log.Error(opRegister, "could not re-open the announced workspace", dlog.Context{
+				"workspace": string(record.ID), "cause": err.Error(),
+			})
+			return wsm.Workspace{}, fmt.Errorf("register %q: re-open the closed workspace: %w", normalized, err)
+		}
+		record.Closed = false
+		log.Info(opRegister, "the announcement re-opened a closed workspace", dlog.Context{
+			"workspace": string(record.ID), "dir": record.Dir,
+		})
+	}
 	// THE RESOLVERS ARE BOUND HERE. The footer, the topbar and the hold tray
 	// each write their records to the workspace's own log sink and resolve
 	// nothing themselves, so a frame for a workspace they were never told the
@@ -349,7 +379,7 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		log.Error(opRegister, "could not read the session records for the opening roster", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("publish the opening roster: %w", err)
 	}
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(workspaces, repositories, tasks, sessions, current))
+	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current))
 	log.Debug(opRegister, "published the opening roster", dlog.Context{
 		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
 		"sessions": len(sessions),
