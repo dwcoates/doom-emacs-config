@@ -142,7 +142,8 @@ env = the daemon's OWN environment passed through (never an allowlist) with
 `CLAUDE_CONFIG_DIR=<account root>`, `AGENT_REPL_OWNED=1`,
 `AGENT_REPL_STATE_DIR`, `SHIM_BUILD_SHA`, `AGENT_REPL_SESSION_ID=<HostSessionId.value>`
 (log correlation only) set/overridden, and in tests
-`AGENT_REPL_FORBID_VENDOR_CALLS=1`; cwd is the workspace dir; fd 3 is the
+`AGENT_REPL_FORBID_VENDOR_CALLS=1` (which also forces `--fake` onto the argv);
+cwd is the workspace dir; fd 3 is the
 already-open shim log sink (never a pipe to the daemon's stderr). Process
 group discipline; stderr captured in a ring buffer as failure evidence.
 Readiness = WatchSession connected and the first pushed `diagnostics` arm
@@ -466,7 +467,13 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
   scripted fake script. No `git init`, no temp repositories in any test.
 - No real vendor calls anywhere: every test sets
   `AGENT_REPL_FORBID_VENDOR_CALLS=1`; the classifier and any exec site
-  check `envc.VendorGuard`.
+  check `envc.VendorGuard`. THE SHIM SPAWN IS THE ONE SITE THAT DOES NOT
+  REFUSE: the shim is the daemon's own process and runs the whole real shim
+  over a scripted SDK under `--fake`, so the guard forces fake mode on the
+  spawn (`shimclient.fakeMode`) rather than refusing it. Refusing made a
+  workspace impossible to create under the guard, and forcing the fake is
+  strictly stronger: the child cannot reach the vendor whatever the caller
+  asked for, and the shim's own guard still throws at `createRealQuery`.
 - Workflow is kicked: workflow rpcs and arms are answered/ignored with a
   typed not-implemented refusal (transport-layer, intended arm
   `<Rpc>Error.not_implemented`); no watch is ever opened for a workflow.
