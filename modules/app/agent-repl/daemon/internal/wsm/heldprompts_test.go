@@ -655,7 +655,7 @@ func TestForgetDeletesAWorkspacesHolds(t *testing.T) {
 	standingHold(t, s, ws.ID)
 
 	// Act
-	if err := s.Forget(context.Background(), ws.ID); err != nil {
+	if _, err := s.Forget(context.Background(), ws.ID); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}
 

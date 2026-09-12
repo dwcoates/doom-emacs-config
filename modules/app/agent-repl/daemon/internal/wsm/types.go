@@ -87,6 +87,22 @@ type Repository struct {
 	DefaultBranch string
 }
 
+// ForgetReport is what a Forget removed BESIDES the workspace's own rows.
+//
+// It exists because the repository record's removal is CONDITIONAL — the last
+// workspace registered under a repository takes the repository with it, and any
+// other workspace keeps it — and a caller that wants to say what it forgot
+// cannot re-read a row that is already gone.
+type ForgetReport struct {
+	// Repository is the repository whose record went with the workspace,
+	// empty when another workspace still references it.
+	Repository RepoID
+	// RepositoryDir is that repository's directory, empty for the same
+	// reason. It is carried so the caller can NAME the path that stopped
+	// being registered without a second lookup.
+	RepositoryDir string
+}
+
 // RegisterFacts are the facts Emacs supplies when it announces a workspace.
 // Registration is idempotent by normalized dir; the daemon mints the ids.
 type RegisterFacts struct {
