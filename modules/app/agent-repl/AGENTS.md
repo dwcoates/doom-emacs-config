@@ -380,6 +380,92 @@ operation, and message, with a count. Genuine central records are labelled
 zero. For exploratory reading use `--all`, `--level`, comma-separated
 `--runtime`, `--follow`, and `--json`; `bin/logs.sh --help` is authoritative.
 
+### Querying compactly — read this before dumping raw records
+
+Every record is already structured JSONL, and `--json` dumps it verbatim, but
+`--json`/no-flag output is expensive for a limited context budget: a session
+that reads a window by eyeballing raw records burns tens of thousands of
+tokens on records that answer nothing. `bin/logs.sh` answers the four
+questions that come up over and over as COMPACT, first-class modes instead.
+**Prefer `--tally` first to see what happened; then drill in with
+`--sample`/`--fields`/`--timeline`; reach for `--json` only when a whole
+record's every field is genuinely needed.** All four compose with the
+existing selectors (`--workspace`/`--central`/`--all`, `--since`/`--until`,
+`--level`, comma-separated `--runtime`) exactly like `--json` and the default
+format do; `--sample` composes with `--tally`, and `--follow` works with
+`--timeline`/`--fields` but not with `--tally`/`--sample` (an aggregate table
+has nothing incremental to append to).
+
+1. "What warn/error operations occurred in this window, and how many of
+   each?" — `--tally`, one `count level runtime operation` line per group,
+   sorted by count descending:
+   ```sh
+   modules/app/agent-repl/bin/logs.sh --all --level warn --since 30m --tally
+   ```
+2. "Show me ONE representative record per operation." — add `--sample N`
+   (default a small N such as 1); with `--tally` it follows the count table,
+   used alone it prints just the sample lines:
+   ```sh
+   modules/app/agent-repl/bin/logs.sh --all --level warn --since 30m --tally --sample 1
+   ```
+3. "What is the timeline of the interesting records for one
+   process/workspace?" — `--timeline`, one `time level operation message`
+   line per record in time order, message truncated to `--width` (default
+   120):
+   ```sh
+   modules/app/agent-repl/bin/logs.sh --workspace <id|dir|name> --runtime shim --timeline
+   ```
+4. "Give me the full message and context for exactly one operation." —
+   narrow with `--runtime`/`--level` (and shell `grep` on the operation name
+   if needed), then `--fields` to print exactly the named top-level or
+   `context` fields, nothing else:
+   ```sh
+   modules/app/agent-repl/bin/logs.sh --workspace <id|dir|name> --runtime shim \
+     --fields operation,message,cause
+   ```
+
+A service's `.err.log` (raw stderr — `shim-store.err.log`,
+`shim-claude-sidecar.err.log`) and a captured Emacs `*Messages*` snapshot
+passed with `--messages FILE` are text, not JSONL: the contract permits the
+former only when the canonical structured sink could not record a process's
+own failure, and the latter has never carried structured fields at all.
+Everything above is still queryable ONE way — `--tally`, `--sample`,
+`--timeline`, `--fields`, the default format, and `--json` all include these
+two sources whenever the selection covers them, by synthesizing the fields
+they lack rather than dropping the line:
+- `operation` is a stable synthetic tag: `stderr` for every `.err.log` line,
+  `messages` for every scraped `*Messages*` line.
+- `runtime` names the emitting service (`store` or `sidecar`) for `.err.log`,
+  or `emacs` for a `--messages` snapshot.
+- `level` is inferred: an `.err.log` line is `warn` by default and `error`
+  when it plainly names one; a `*Messages*` line is included at all only when
+  it matches one of the severity shapes `e2e/realtest/messages.go` looks for
+  (the module's own `WARNING:`/`ERROR:` rungs, `display-warning`, an escaped
+  lisp signal, the debugger opening, a load failure), each classified `warn`
+  or `error` the same way — every other buffer line is prose and is skipped.
+- `message` is the raw line, and `context` is empty; there is no workspace
+  attribution for either source in this reader, so both read as `central`.
+  `--messages` has no effect unless `--runtime` selects (or omits) `emacs`,
+  the same composition rule every other synthetic and structured source
+  follows.
+`--harvest` keeps its established scope and does not gain these two sources.
+
+`bin/logs.sh --help` documents every compact flag; the fixtures in
+`bin/test-logs.sh` are worked examples of each mode, including a stderr and a
+Messages fixture line.
+
+The realtest harvest manifest's sibling `HARVEST-FULL.jsonl` (one JSON object
+per finding, in the run directory — see `docs/LOGGING.md` and
+`e2e/REALTEST-SPEC.md` "The harvest is collapsed, never filtered") is read the
+same compact way instead of being dumped whole, since it is exactly this kind
+of large flat JSONL:
+
+```sh
+jq -s 'group_by([.level, .source, .operation])
+  | map({count: length, level: .[0].level, source: .[0].source, operation: .[0].operation})
+  | sort_by(-.count)' HARVEST-FULL.jsonl
+```
+
 ## Purple means the vendor, blue means the local environment, teal means nothing is wrong
 
 Every surface that carries color here — the Emacs tab-bar, the sidebar dots,
