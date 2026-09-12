@@ -161,9 +161,32 @@ Scale
 | 4 | authored, not yet run (`TestRealtestSwitchBetweenWorkspaces`) | needs a bar drawing at least THREE tabs: with two, `s-{` and `s-}` reach the same tab and a reversed direction cannot be told from a correct one |
 | 5 | authored, not yet run | `TestRealtestCreateWorkDeleteAWorkspace`; acts against a dedicated scratch repo under the run directory |
 | 6 | authored, not yet run | `TestRealtestRegisterAndReopen`; same scratch-repo rule |
+| 7 | authored, not yet run | `TestRealtestForkAWorkspace`; same scratch-repo rule. Needs `AGENT_REPL_FAKE_SHIMS=1` on the launch, see below |
+| 8 | authored, not yet run | `TestRealtestPriorityCloseReopenKill`; same scratch-repo rule |
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
+
+### Running realtest 7
+
+It is the first realtest that needs a prompt to be ANSWERED. The daemon refuses
+a fork whose parent has no conversation, so realtest 7 gives its parent one
+before it forks, and a submitted prompt reaches the shim's `createRealQuery`,
+which is where `AGENT_REPL_FORBID_VENDOR_CALLS=1` makes the guard throw. The
+Emacs process therefore needs `AGENT_REPL_FAKE_SHIMS=1` beside the guard, so
+every shim spawn carries `--fake` and answers from the offline scripted SDK.
+
+`open` hands Emacs to launchd, which does not inherit the caller's environment,
+so the hook has to be stated with `--env` on the launch: `openBackgroundArgs` in
+`e2e/realtest/launch.go`. That file is shared by every realtest, so the test
+does NOT change it. It checks the Emacs process for the hook and fails naming
+this remedy. The lead rules on whether the launcher states it always or only for
+the realtests that need an answered prompt.
+
+Realtest 8 does not require the hook: nothing in it submits a prompt. Its reopen
+does bring a session up, so if a bring-up turns out to reach the vendor on this
+machine the refusal appears in that run's harvest, and the remedy is the same
+one.
 
 ### Running realtests 2 and 3
 
