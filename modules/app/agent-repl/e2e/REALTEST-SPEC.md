@@ -246,7 +246,20 @@ its own output, with the ids, for the owner to rule on.
 keys, and where the plan names a binding the chord IS pressed as real key
 events — then the command's own first prompt is read back out of the minibuffer
 as the proof it arrived (`SPC TAB n` is the only thing that asks "Repository: "
-first), and a real `C-g` aborts it. The parameterized act that follows enters
+first), and a real `C-g` aborts it. **The abort has two channels since
+2026-09-12**, and the second one is always reported. The real `C-g` goes first,
+with a 3s bound; if the prompt still stands, an emacsclient eval schedules
+`abort-minibuffers` on a zero-delay timer instead — scheduled rather than
+called inline, so the throw unwinds the minibuffer's recursive edit rather than
+`server-process-filter` — for up to three attempts of 2s each. Taking the
+second channel is written into the manifest as a DEVIATION AND A FINDING and
+fails the test; it is not a fallback that quietly rescues a run. A prompt
+neither channel can clear stops the run immediately, because every assertion
+after it would be about an editor no owner would be in. The single-channel
+version waited the 30s chord ceiling out per failed dismissal and then carried
+on, which is how one run came back reporting that every act after the first had
+run against a standing minibuffer (docs/REALTEST-JUDGEMENT-CALLS.md, row 58).
+The parameterized act that follows enters
 the SAME user-facing command through `call-interactively` with only its
 minibuffer reads answered, because those reads are a `require-match`
 `completing-read` and a directory-name prompt, and typing into either with
@@ -261,6 +274,16 @@ unreachable through the enumeration even though they still exist at the target.
 Realtest 5 captures those targets while the workspace still stands and appends
 them to the harvest as ordinary sources, so the remediation bar is not quietly
 claiming a clean harvest over a log it never opened.
+
+**Realtest 4 brings its own third workspace.** It needs three open workspaces,
+because with two tabs `s-}` and `s-{` land on the same tab and a reversed
+direction cannot be told from a correct one. It used to refuse when the registry
+held fewer; it now registers `rt4-bootstrap-N` scratch repositories under its
+run directory through the same substrate realtests 5 through 8 use, waits for
+each registry row and drawn tab, and closes and deletes them on the way out
+including on failure. A bootstrap that mints no workspace names the vendor guard
+and `AGENT_REPL_FAKE_SHIMS=1` as the first suspect in its failure message
+(docs/REALTEST-JUDGEMENT-CALLS.md, row 60).
 
 **One `-run` invocation per act realtest.** Each performs a cold start, and a
 cold start refuses to run against an Emacs that is already answering, so two of
@@ -313,6 +336,17 @@ row 40). Realtest 1 therefore reads the startup in two windows:
 
 - **Hidden** — every phase up through `tab-drawn`, plus `webview-armed`.
   Nothing here requires a painted panel.
+**The show phase is ONE shared helper**, `showEmacsAndWaitForPaint`, called by
+every realtest that asserts a paint. It brings Emacs forward, waits for the
+panels, RE-ISSUES the focus edge up to three times while it waits, checks focus
+was restored to where it started, and reports how many edges the paint needed.
+The re-issuing is not padding: `agent-repl--webview-precreate-drain` pops one
+workspace per tick and re-checks its hold before each, so the remaining queue
+re-parks the instant Emacs is visible-but-unfocused again, and the driver hands
+focus back about 0.3s after each keypress by design. One edge is the healthy
+shape; more than one is written into the manifest as a PRODUCT FINDING rather
+than smoothed over (docs/REALTEST-JUDGEMENT-CALLS.md, row 59).
+
 - **Show** — `focus-edge` and `panel-painted`, read only AFTER the key
   self-test (below) brings Emacs forward for the first time. That activation
   IS `focus-edge` — the focus edge the parked queue was waiting on — and once
