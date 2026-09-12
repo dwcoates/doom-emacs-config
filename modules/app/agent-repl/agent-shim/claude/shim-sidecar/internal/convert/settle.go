@@ -55,6 +55,19 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	}
 	delete(c.openCalls, callID)
 
+	if call.inherited {
+		// The call was one this transcript only QUOTED from a parent (a fork's
+		// copied context; see assistant.go quotedAssistant). Its producer already
+		// settled the unit under the producing agent, so settling it again here
+		// would re-book that row under THIS agent, which the store refuses as a
+		// book move. Kept as residue instead — book NULL, keyed by the record's
+		// own uuid — so the copy is durable, moves no one's row, and re-ingests
+		// idempotently across every fork that quotes it.
+		c.log.With(at.ctxFor("quoted-tool-result")).With(logging.Context{ActivityID: callID}).
+			LogVerbose("tool result for a quoted (inherited) call name=%q kept as residue, not re-settled under this agent", call.name)
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "tool_result/quoted_context", record)}
+	}
+
 	// The ONE carve-out in the exempt set: the TaskStop CALL is dropped, but its
 	// RESULT is consumed as the owning task's CANCELLED terminal before the drop
 	// — deliberately-stopped work must resolve cancelled, never LOST.
