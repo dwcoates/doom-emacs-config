@@ -391,6 +391,13 @@ throws and the shim exits nonzero — never a silent no-op, never a fake fallbac
 `test/setup.ts` sets it for the whole vitest suite, so a test needing offline
 behavior must pass `--fake`. Production must never set it.
 
+THE DAEMON GUARANTEES THE `--fake` HALF. A daemon that is itself under the
+guard spawns every shim with `--fake` rather than refusing the spawn
+(`daemon/internal/shimclient/supervisor.go`, `fakeMode`), so a guarded run
+creates, forks and prompts workspaces entirely against the mocked vendor. The
+guard is still stated on the child, so the throw at `createRealQuery` remains
+the backstop if the shim ever reaches for the SDK in fake mode.
+
 `test/vendor-guard.test.ts` enforces the chokepoint STRUCTURALLY: it walks
 `src/` and fails if any file other than the guard contains a dynamic import of
 the SDK. `src/sdk/types.ts` imports SDK types with `import type`, which is erased

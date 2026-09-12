@@ -127,12 +127,12 @@ import (
 //     PRECONDITION rather than the act under test: what realtest 7 asserts is
 //     what the FORK did with a conversation that already existed.
 //
-// PRECONDITION FOR THE LEAD, and this test checks it rather than working around
-// it: the Emacs process must carry AGENT_REPL_FAKE_SHIMS=1 as well as the
-// vendor guard. Seeding the parent means submitting a prompt, and a submitted
-// prompt reaches the shim's `createRealQuery`, where the vendor guard throws.
-// rt78_shared.go's rt78FakeShimsEnv carries the whole reasoning, including why
-// this test does not edit the shared launcher to add it.
+// THE VENDOR GUARD ALONE IS ENOUGH TO SEED THE PARENT. Seeding means submitting
+// a prompt, which used to demand AGENT_REPL_FAKE_SHIMS=1 on the launch beside
+// the guard, because a guarded daemon refused the shim spawn and a real-vendor
+// shim throws at `createRealQuery`. A guarded daemon now spawns every shim with
+// `--fake` instead, so the one variable the launcher states covers it;
+// rt78_shared.go carries the whole account.
 //
 // ALSO A PRECONDITION FOR THE LEAD: run this realtest in its own
 // `bin/realtest.sh -run` invocation. It performs a cold start, and a cold start
@@ -233,7 +233,6 @@ func TestRealtestForkAWorkspace(t *testing.T) {
 	logMeasurements(t, "hidden startup", phases.Measure())
 	assertEveryWorkspaceDrawn(t, run, openBefore, phases)
 	verifyVendorGuard(ctx, t, client, run)
-	rt78RequireFakeShims(ctx, t, client)
 
 	driver := wsActKeyDriver(ctx, t, client, runDir, &manifest)
 	shown := showEmacsAndWaitForPaint(ctx, t, run, client, driver, sources, snapshot,
