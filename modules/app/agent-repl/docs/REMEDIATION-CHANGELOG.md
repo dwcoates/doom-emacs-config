@@ -42,6 +42,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - daemon/rollout: a relaunch whose resume failed records `resume_failed' itself, not a private second spelling that reached no arm.
 - daemon/server+promptqueue+prompthandler+health: resolving a named workspace's log sink is total at the last four sites, so a prompt is never lost, and a host view never withheld, over where its narration is written.
 - elisp/notifications+session: the desktop-focus check names its scope -- the workspace that asked, or the central sink -- so it no longer earns `log-routing-error' at ERROR.
+- daemon/sidebar: roster order is priority then name then id, with the selection instant dropped as an ordering key, so the drawn bar no longer moves under the user and cycling right then left returns where it started.
 
 ## Standing measurements to protect
 
