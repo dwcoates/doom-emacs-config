@@ -212,6 +212,15 @@ type DeliveryReceipt struct {
 	After  InputMark
 	// Elapsed is how long the confirmation took, focus held throughout.
 	Elapsed time.Duration
+	// Focus is what the EDITOR said about its own desktop focus while the
+	// helper held the target key.
+	//
+	// It answers a question the key marks cannot: a pid-addressed CGEvent
+	// reaches the process whether or not the activation that preceded it was
+	// granted, so a confirmed key proves delivery and says nothing at all
+	// about whether a focus edge happened. focus.go carries the reasoning and
+	// the sweep that made it necessary.
+	Focus FocusReading
 }
 
 // Confirmed says the press needs no report: the key arrived on the first post.
