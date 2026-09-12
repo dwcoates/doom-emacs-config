@@ -1017,6 +1017,16 @@ never set it.
   sandbox, no focus grab, no pictures.
   - A realtest is remediated only when the harvest of ALL logs in the run
     window is clean.
+- A sweep is `bin/realtest.sh <numbers or names>`, and the script sequences it:
+  one `go test` per realtest, with the world each one's precondition demands
+  established between them (`e2e/REALTEST-SPEC.md`, "The entry point").
+  - `AGENT_REPL_REALTEST_TAKEOVER=1` covers every editor quit in the run;
+    stopping the daemon for realtest 3 needs `AGENT_REPL_REALTEST_STOP_DAEMON=1`
+    on top of it, and without that consent realtest 3 is skipped.
+  - Exit 78 means some realtests never ran; 0 means everything asked for ran
+    and passed. Never read a skip as a pass.
+  - A new realtest needs a row in the script's world table, and
+    `bin/test-realtest.sh` fails until it has one.
 - `docs/REALTEST-PLAN.md` sections 1 and 2 (startup, workspaces; tests 1
   through 8) are run and remediated by the lead autonomously.
   - Sections 3 onward are owner-rules-first: run, surface, owner rules,

@@ -30,6 +30,7 @@ LIB_UNDER_TEST="$THIS_DIR/lib-realtest-backup.sh"
 . "$LIB_UNDER_TEST"
 
 readonly EXIT_DECLINED=77
+readonly EXIT_INCOMPLETE=78
 
 PASS=0
 FAIL=0
@@ -361,20 +362,42 @@ scratch_bin() {
 cat "${STUB_READINESS_JSON:?the case must state a readiness document}"
 STUB
 
+    # THE SLOT STUB IS THE RUN LOG. It appends the test name of every `go test`
+    # invocation the script makes, which is how a sequencing case sees WHICH
+    # realtests ran and in what order rather than only that one did.
+    #
+    # It also creates the alive flag, because every realtest leaves an editor
+    # running and the next cold-start realtest in a sweep has to face one.
     cat > "$dir/suite-slot.sh" <<'STUB'
 #!/usr/bin/env bash
-printf 'reached\n' > "${STUB_SLOT_MARKER:?the case must state a marker path}"
+name=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -run) name="$2"; shift ;;
+    esac
+    shift
+done
+printf '%s\n' "$name" >> "${STUB_SLOT_MARKER:?the case must state a marker path}"
+[ -n "${STUB_ALIVE_FLAG:-}" ] && : > "$STUB_ALIVE_FLAG"
+if [ -n "${STUB_SLOT_FAIL:-}" ] && printf '%s' "$name" | grep -q -- "$STUB_SLOT_FAIL"; then
+    exit 1
+fi
 exit 0
 STUB
 
+    # THE EDITOR IS A FILE. It is answering exactly while STUB_ALIVE_FLAG
+    # exists, so a quit really does end it and a later realtest really does
+    # bring one back (the slot stub recreates the flag) — which is the whole of
+    # what a sequencing case needs to see.
     cat > "$dir/emacsclient" <<'STUB'
 #!/usr/bin/env bash
-# Answers only what the case says it should. With STUB_EMACS_ALIVE unset every
-# probe fails, which is how "no Emacs is running" is spelled.
-[ "${STUB_EMACS_ALIVE:-}" = "1" ] || exit 1
+[ -f "${STUB_ALIVE_FLAG:?the case must state an alive flag path}" ] || exit 1
 for arg in "$@"; do
     case "$arg" in
-        '(kill-emacs)') printf 'killed\n' > "${STUB_KILL_MARKER:?}"; rm -f "${STUB_ALIVE_FLAG:?}" ;;
+        '(kill-emacs)')
+            printf 'killed\n' >> "${STUB_KILL_MARKER:?}"
+            rm -f "$STUB_ALIVE_FLAG"
+            ;;
     esac
 done
 printf 'nil\n'
@@ -437,7 +460,30 @@ esac
 exec /bin/cp "$@"
 STUB
 
-    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp"
+    # THE KILL IS THE TEST'S TOO. `kill` is a shell builtin, so a PATH stub
+    # would never be reached; realtest.sh calls AGENT_REPL_REALTEST_KILL for
+    # the same reason it calls AGENT_REPL_REALTEST_EMACSCLIENT. This one logs
+    # the signalled pids and removes them from the process table, which is what
+    # a daemon exiting looks like from pgrep's side.
+    cat > "$dir/kill" <<'STUB'
+#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -*) ;;
+        *)
+            printf '%s\n' "$1" >> "${STUB_KILL_LOG:?the case must state a kill log}"
+            if [ -f "${STUB_PROCS:-}" ] && [ "${STUB_KILL_IGNORED:-}" != "1" ]; then
+                grep -v "^$1 " "$STUB_PROCS" > "$STUB_PROCS.next" || true
+                mv "$STUB_PROCS.next" "$STUB_PROCS"
+            fi
+            ;;
+    esac
+    shift
+done
+exit 0
+STUB
+
+    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp" "$dir/kill"
     printf '%s' "$dir"
 }
 
@@ -455,9 +501,13 @@ stale_json() {
 JSON
 }
 
-# run_script DIR — run the copied script with the stub environment, capturing
-# output and status. Every path the script would otherwise reach on the real
-# machine is redirected into the scratch tree.
+# run_script DIR [ENV=VALUE ...] — run the copied script with the stub
+# environment, capturing output and status. Every path the script would
+# otherwise reach on the real machine is redirected into the scratch tree.
+#
+# SCRIPT_ARGS is what the script itself is called with (the realtest selectors
+# and any go-test flags); the arguments to run_script are environment
+# assignments prefixed to it.
 run_script() {
     local dir="$1"
     shift
@@ -468,20 +518,35 @@ run_script() {
     STUB_READINESS_JSON="$SCRATCH/readiness.json" \
     STUB_SLOT_MARKER="$SCRATCH/slot-reached" \
     STUB_KILL_MARKER="$SCRATCH/killed" \
+    STUB_KILL_LOG="${STUB_KILL_LOG:-$SCRATCH/kill-log}" \
+    STUB_ALIVE_FLAG="${STUB_ALIVE_FLAG:-$SCRATCH/alive}" \
     AGENT_REPL_REALTEST_EMACSCLIENT="$dir/emacsclient" \
+    AGENT_REPL_REALTEST_KILL="$dir/kill" \
     AGENT_REPL_REALTEST_OUT="$SCRATCH/out" \
-    "$@" bash "$dir/realtest.sh" 2>&1
+    "$@" bash "$dir/realtest.sh" ${SCRIPT_ARGS[@]+"${SCRIPT_ARGS[@]}"} 2>&1
     local status=$?
     set -e
     return "$status"
 }
 
 prepare_home() {
-    rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed"
+    SCRIPT_ARGS=()
+    rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed" \
+        "${SCRATCH:?}/alive" "${SCRATCH:?}/kill-log"
     : > "$SCRATCH/procs"
     mkdir -p "$SCRATCH/home/.claude-emacs" "$SCRATCH/home/.cache/agent-repl/store"
     printf 'workspaces' > "$SCRATCH/home/.claude-emacs/wsm.db"
     printf 'events' > "$SCRATCH/home/.cache/agent-repl/store/events.db"
+}
+
+# standing_emacs — an editor is answering the socket when the script starts.
+standing_emacs() { : > "$SCRATCH/alive"; }
+
+# guarded_daemon_line PID DIR — a daemon of this checkout, carrying the vendor
+# guard, in the stub process table.
+guarded_daemon_line() {
+    printf '%s %s/daemon/bin/claude-repld --state-dir /tmp AGENT_REPL_FORBID_VENDOR_CALLS=1\n' \
+        "$1" "$(cd "$2/.." && pwd)"
 }
 
 test_declines_when_a_system_is_not_deployed() {
@@ -518,7 +583,8 @@ test_declines_when_emacs_is_running_without_a_takeover() {
     prepare_home
     ready_json > "$SCRATCH/readiness.json"
 
-    out="$(STUB_EMACS_ALIVE=1 STUB_ALIVE_FLAG="$SCRATCH/alive" run_script "$dir")" || status=$?
+    standing_emacs
+    out="$(run_script "$dir")" || status=$?
     if [ "$status" -ne "$EXIT_DECLINED" ]; then
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
@@ -545,7 +611,8 @@ test_backs_up_before_refusing_the_takeover() {
     prepare_home
     ready_json > "$SCRATCH/readiness.json"
 
-    STUB_EMACS_ALIVE=1 STUB_ALIVE_FLAG="$SCRATCH/alive" run_script "$dir" >/dev/null || status=$?
+    standing_emacs
+    run_script "$dir" >/dev/null || status=$?
     if [ "$status" -ne "$EXIT_DECLINED" ]; then
         fail "$name" "exit was $status, want $EXIT_DECLINED"
         return
@@ -570,6 +637,10 @@ test_runs_when_nothing_stands_in_the_way() {
     prepare_home
     ready_json > "$SCRATCH/readiness.json"
 
+    # ONE REALTEST, because this case is about the preflight and not about a
+    # sweep's sequencing: with a single cold-start realtest and no editor
+    # standing, no consent is in play at all.
+    SCRIPT_ARGS=(1)
     out="$(run_script "$dir")" || status=$?
     if [ "$status" -ne 0 ]; then
         fail "$name" "exit was $status, want 0; output: $out"
@@ -619,6 +690,7 @@ test_records_the_deployed_revisions() {
     dir="$(scratch_bin stamps)"
     prepare_home
     ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
 
     run_script "$dir" >/dev/null || status=$?
     if [ "$status" -ne 0 ]; then
@@ -671,6 +743,7 @@ test_runs_when_every_listening_shim_carries_the_guard() {
     ready_json > "$SCRATCH/readiness.json"
     printf '94292 node /opt/agent-shim/claude/shim/dist/main.js --listen %s/.claude-emacs/sock/aaaa.n1.sock AGENT_REPL_FORBID_VENDOR_CALLS=1\n' \
         "$SCRATCH/home" > "$SCRATCH/procs"
+    SCRIPT_ARGS=(1)
 
     out="$(run_script "$dir")" || status=$?
     if [ "$status" -ne 0 ]; then
@@ -694,6 +767,7 @@ test_ignores_a_shim_listening_under_another_state_directory() {
     # declining on it would send the operator after the wrong thing.
     printf '77001 node /opt/agent-shim/claude/shim/dist/main.js --listen /var/other-state/sock/bbbb.n1.sock PATH=/usr/bin\n' \
         > "$SCRATCH/procs"
+    SCRIPT_ARGS=(1)
 
     out="$(run_script "$dir")" || status=$?
     if [ "$status" -ne 0 ]; then
@@ -752,6 +826,399 @@ test_declines_when_the_daemon_lacks_the_guard() {
     pass "$name"
 }
 
+# ---- the sweep: one world per realtest ------------------------------------
+
+test_unknown_selector_declines_before_anything() {
+    local name="an unknown realtest selector DECLINES, and before the state is touched"
+    local dir out status=0
+    dir="$(scratch_bin bad-selector)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(9)
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'TestRealtestStartTheEditor'; then
+        fail "$name" "the refusal does not list the realtests that do exist: $out"
+        return
+    fi
+    # A typo must cost nothing: no readiness report, no clone of an 11GB
+    # database, no processes looked at.
+    if ls "$SCRATCH/home/.claude-emacs/wsm.db.realtest-bak-"* >/dev/null 2>&1; then
+        fail "$name" "the state was backed up for a run that could never start"
+        return
+    fi
+    pass "$name"
+}
+
+test_run_pattern_matching_nothing_declines() {
+    local name="a -run pattern that matches no realtest DECLINES"
+    local dir out status=0
+    dir="$(scratch_bin bad-run)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(-run TestRealtestThereIsNoSuchThing)
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'matches no realtest'; then
+        fail "$name" "the refusal does not say the pattern matched nothing: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_run_pattern_selects_one_realtest() {
+    local name="-run <name> runs exactly that realtest"
+    local dir out status=0
+    dir="$(scratch_bin run-one)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(-run TestRealtestPriorityCloseReopenKill)
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ "$(cat "$SCRATCH/slot-reached")" != '^TestRealtestPriorityCloseReopenKill$' ]; then
+        fail "$name" "the invocations were: $(cat "$SCRATCH/slot-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_sweep_runs_one_invocation_per_realtest_in_order() {
+    local name="a sweep runs one go test invocation per realtest, in the order asked for"
+    local dir out status=0
+    dir="$(scratch_bin sweep-order)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(5 1 7)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    local want='^TestRealtestCreateWorkDeleteAWorkspace$
+^TestRealtestStartTheEditor$
+^TestRealtestForkAWorkspace$'
+    if [ "$(cat "$SCRATCH/slot-reached")" != "$want" ]; then
+        fail "$name" "the invocations were: $(cat "$SCRATCH/slot-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_sweep_quits_the_editor_between_cold_starts() {
+    local name="a sweep quits the editor each realtest leaves behind, so the next cold start gets its world"
+    local dir out status=0
+    dir="$(scratch_bin sweep-quits)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    # Three cold-start realtests and no editor standing: the first needs no
+    # quit, and each of the other two faces the editor its predecessor left.
+    SCRIPT_ARGS=(1 5 6)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    local quits=0
+    [ -f "$SCRATCH/killed" ] && quits="$(grep -c killed "$SCRATCH/killed")"
+    if [ "$quits" -ne 2 ]; then
+        fail "$name" "the editor was quit $quits time(s), want 2"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_sweep_backs_up_once() {
+    local name="a sweep backs up the owner's state ONCE, not once per realtest"
+    local dir status=0
+    dir="$(scratch_bin sweep-backup)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1 5 6 7)
+
+    AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir" >/dev/null || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0"
+        return
+    fi
+    local copies=0 f
+    for f in "$SCRATCH/home/.claude-emacs/wsm.db.realtest-bak-"*; do
+        [ -e "$f" ] && copies=$((copies + 1))
+    done
+    if [ "$copies" -ne 1 ]; then
+        fail "$name" "$copies workspace-state backups were taken; the backup captures the state BEFORE the run and must be taken once"
+        return
+    fi
+    pass "$name"
+}
+
+test_declines_a_sweep_that_would_quit_a_standing_editor() {
+    local name="a sweep DECLINES before anything runs when it would quit a standing editor without consent"
+    local dir out status=0
+    dir="$(scratch_bin sweep-no-consent)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    standing_emacs
+    SCRIPT_ARGS=(1 5)
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'quits Emacs 2 time(s)'; then
+        fail "$name" "the refusal does not say how many quits the consent would authorize: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "a realtest ran despite the refusal"
+        return
+    fi
+    if [ -f "$SCRATCH/killed" ]; then
+        fail "$name" "the owner's editor was quit without authorization"
+        return
+    fi
+    pass "$name"
+}
+
+test_realtest_3_is_skipped_without_the_daemon_consent() {
+    local name="realtest 3 is SKIPPED with a reason when a daemon is running and no stop consent was given"
+    local dir out status=0
+    dir="$(scratch_bin rt3-no-consent)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    SCRIPT_ARGS=(1 3)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_INCOMPLETE" ]; then
+        fail "$name" "exit was $status, want $EXIT_INCOMPLETE; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
+        fail "$name" "the skip does not say what consent would let it run: $out"
+        return
+    fi
+    if grep -q 'TestRealtestStartWithTheDaemonDown' "$SCRATCH/slot-reached"; then
+        fail "$name" "realtest 3 was run into its own refusal instead of being skipped"
+        return
+    fi
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+        fail "$name" "the realtest that COULD run did not: $(cat "$SCRATCH/slot-reached")"
+        return
+    fi
+    if [ -f "$SCRATCH/kill-log" ] && [ -s "$SCRATCH/kill-log" ]; then
+        fail "$name" "the daemon was signalled without the consent: $(cat "$SCRATCH/kill-log")"
+        return
+    fi
+    pass "$name"
+}
+
+test_realtest_3_stops_the_daemon_under_its_own_consent() {
+    local name="realtest 3 runs, and the daemon is stopped with SIGTERM, under AGENT_REPL_REALTEST_STOP_DAEMON=1"
+    local dir out status=0
+    dir="$(scratch_bin rt3-consent)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    SCRIPT_ARGS=(3)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ "$(cat "$SCRATCH/kill-log")" != "55501" ]; then
+        fail "$name" "the daemon pid signalled was: $(cat "$SCRATCH/kill-log")"
+        return
+    fi
+    if ! grep -q 'TestRealtestStartWithTheDaemonDown' "$SCRATCH/slot-reached"; then
+        fail "$name" "realtest 3 did not run once its world was established"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_daemon_that_ignores_sigterm_is_not_escalated() {
+    local name="a daemon that survives SIGTERM makes realtest 3 a SKIP, never a SIGKILL"
+    local dir out status=0
+    dir="$(scratch_bin rt3-stubborn)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    SCRIPT_ARGS=(3)
+
+    # STUB_KILL_IGNORED: the signal is delivered and the process stays.
+    out="$(STUB_KILL_IGNORED=1 AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 \
+        AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED (nothing ran); output: $out"
+        return
+    fi
+    if grep -q -- '-KILL\|-9' "$SCRATCH/kill-log"; then
+        fail "$name" "the owner's daemon was escalated to SIGKILL: $(cat "$SCRATCH/kill-log")"
+        return
+    fi
+    if [ -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "realtest 3 ran with a daemon still up"
+        return
+    fi
+    pass "$name"
+}
+
+test_realtest_2_is_skipped_when_no_daemon_is_serving() {
+    local name="realtest 2 is SKIPPED with a reason when no daemon is serving for it to adopt"
+    local dir out status=0
+    dir="$(scratch_bin rt2-no-daemon)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(2)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED (nothing ran); output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'measures an ADOPTION'; then
+        fail "$name" "the skip does not say why realtest 2 could not run: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "realtest 2 ran into its own precondition instead of being skipped"
+        return
+    fi
+    pass "$name"
+}
+
+test_realtest_2_keeps_the_standing_editor() {
+    local name="the runner does NOT quit the editor for realtest 2, whose restart is what it measures"
+    local dir out status=0
+    dir="$(scratch_bin rt2-keeps-editor)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    standing_emacs
+    SCRIPT_ARGS=(2)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/killed" ]; then
+        fail "$name" "the runner quit the editor, which turns realtest 2's restart into a plain cold start"
+        return
+    fi
+    pass "$name"
+}
+
+test_realtest_4_keeps_the_standing_editor() {
+    local name="the runner does NOT quit the editor for realtest 4, which adopts whatever is standing"
+    local dir out status=0
+    dir="$(scratch_bin rt4-keeps-editor)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    standing_emacs
+    SCRIPT_ARGS=(4)
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/killed" ]; then
+        fail "$name" "the editor was quit for a realtest that adopts it"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_failing_realtest_does_not_stop_the_sweep() {
+    local name="a failing realtest does not stop the sweep, and the run's status is the failure"
+    local dir out status=0
+    dir="$(scratch_bin sweep-failure)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1 5 6)
+
+    out="$(STUB_SLOT_FAIL=TestRealtestCreateWorkDeleteAWorkspace AGENT_REPL_REALTEST_TAKEOVER=1 \
+        run_script "$dir")" || status=$?
+    if [ "$status" -eq 0 ] || [ "$status" -eq "$EXIT_DECLINED" ] || [ "$status" -eq "$EXIT_INCOMPLETE" ]; then
+        fail "$name" "exit was $status, want a realtest failure; output: $out"
+        return
+    fi
+    if ! grep -q 'TestRealtestRegisterAndReopen' "$SCRATCH/slot-reached"; then
+        fail "$name" "the realtest after the failure never ran, so one run does not gather every finding"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_realtest_asked_for_twice_runs_once() {
+    local name="a realtest asked for twice runs once"
+    local dir out status=0
+    dir="$(scratch_bin sweep-duplicate)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1 1)
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ "$(grep -c . "$SCRATCH/slot-reached")" -ne 1 ]; then
+        fail "$name" "the invocations were: $(cat "$SCRATCH/slot-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_world_table_covers_every_realtest() {
+    local name="the world table holds a row for every realtest in e2e/realtest"
+    local missing="" fn
+    while IFS= read -r fn; do
+        [ -n "$fn" ] || continue
+        if ! grep -q "|${fn}|" "$SCRIPT_UNDER_TEST"; then
+            missing="$missing $fn"
+        fi
+    done < <(grep -rho '^func TestRealtest[A-Za-z0-9_]*' "$THIS_DIR/../e2e/realtest" | awk '{print $2}' | sort -u)
+    if [ -n "$missing" ]; then
+        fail "$name" "these realtests have no row, so the runner does not know what world they need:$missing"
+        return
+    fi
+    pass "$name"
+}
+
+test_every_world_table_row_names_a_real_test() {
+    local name="every row in the world table names a realtest that exists"
+    local stale="" fn
+    while IFS= read -r fn; do
+        [ -n "$fn" ] || continue
+        if ! grep -rq "^func ${fn}(" "$THIS_DIR/../e2e/realtest"; then
+            stale="$stale $fn"
+        fi
+    done < <(grep -o '|TestRealtest[A-Za-z0-9_]*|' "$SCRIPT_UNDER_TEST" | tr -d '|' | sort -u)
+    if [ -n "$stale" ]; then
+        fail "$name" "these rows name no test, so a selector would resolve to nothing:$stale"
+        return
+    fi
+    pass "$name"
+}
+
 # ---- run ------------------------------------------------------------------
 
 test_backup_copies_the_database
@@ -777,6 +1244,23 @@ test_declines_when_a_listening_shim_lacks_the_guard
 test_runs_when_every_listening_shim_carries_the_guard
 test_ignores_a_shim_listening_under_another_state_directory
 test_declines_when_a_shim_lock_lacks_the_guard
+test_unknown_selector_declines_before_anything
+test_run_pattern_matching_nothing_declines
+test_run_pattern_selects_one_realtest
+test_a_sweep_runs_one_invocation_per_realtest_in_order
+test_a_sweep_quits_the_editor_between_cold_starts
+test_a_sweep_backs_up_once
+test_declines_a_sweep_that_would_quit_a_standing_editor
+test_realtest_3_is_skipped_without_the_daemon_consent
+test_realtest_3_stops_the_daemon_under_its_own_consent
+test_a_daemon_that_ignores_sigterm_is_not_escalated
+test_realtest_2_is_skipped_when_no_daemon_is_serving
+test_realtest_2_keeps_the_standing_editor
+test_realtest_4_keeps_the_standing_editor
+test_a_failing_realtest_does_not_stop_the_sweep
+test_a_realtest_asked_for_twice_runs_once
+test_the_world_table_covers_every_realtest
+test_every_world_table_row_names_a_real_test
 
 echo
 echo "$PASS passed, $FAIL failed"

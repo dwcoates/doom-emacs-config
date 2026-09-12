@@ -38,28 +38,47 @@ skipped.
 ```
 bin/realtest.sh                                  every realtest
 bin/realtest.sh -run TestRealtestStartTheEditor   one, by name
+bin/realtest.sh 2 3 4                             a sweep, by number, in that order
 
-exit 0   the realtests ran
-exit 77  DECLINED, and the message says why
+exit 0   every realtest asked for ran and passed
+exit 77  DECLINED, and the message says why; NOTHING ran
+exit 78  INCOMPLETE: what ran passed, at least one realtest was SKIPPED
 other    a realtest failed
 ```
 
 `77` is the autotools "skipped" convention, used rather than `0` so a run can
-never report a green realtest that did not execute.
+never report a green realtest that did not execute. `78` is the same rule one
+layer in: a sweep that could not give one of its tests the world that test
+demands must not report the sweep as green.
 
-Two rules follow from the script running EVERY realtest in one `go test`, and
-they apply to every realtest after the first:
+**A sweep is SEQUENCED: one `go test` invocation per realtest.** The realtests
+do not share a world — 1 and 5 through 8 each perform their own cold start and
+refuse against an answering Emacs, 2 needs a daemon already serving, 3 needs
+none — so the script holds a world table (`NUMBER|TEST|EMACS|DAEMON`) and
+establishes each test's world before running it. It quits the editor the
+previous realtest left for a cold-start test, leaves it standing for realtests
+2 and 4, and stops the daemon for realtest 3 only under
+`AGENT_REPL_REALTEST_STOP_DAEMON=1`. A world it cannot establish makes that
+realtest a SKIP with its reason printed, never a pass and never a run into a
+guaranteed failure; a failing realtest does not stop the ones after it.
+`bin/test-realtest.sh` asserts that every `TestRealtest*` in `e2e/realtest/`
+has a row, so a new realtest cannot be added without the runner being told what
+world it needs.
+
+Two rules follow, and they apply to every realtest after the first:
 
 - **Its own subdirectory of `AGENT_REPL_REALTEST_OUT`.** The script exports one
-  of those for the whole invocation, so two realtests writing `MANIFEST.md` to
-  the same path would leave only the second one's. Realtest 4 writes
-  `realtest-4/` beneath it; realtest 1 predates the rule and writes the run
-  directory itself, which is safe only because it is the first to run.
-- **It ADOPTS a standing editor rather than failing on one.** Each realtest
-  leaves the owner's editor running, so by the second realtest an Emacs is
-  always answering. Quitting it would be a takeover, and that decision belongs
-  to `bin/realtest.sh` and to nothing downstream of it. A realtest that adopts
-  says so in its manifest and asserts from LIVE STATE whatever it would
+  of those for the whole run — every invocation in a sweep shares it — so two
+  realtests writing `MANIFEST.md` to the same path would leave only the second
+  one's. Realtest 4 writes `realtest-4/` beneath it; realtest 1 predates the
+  rule and writes the run directory itself, which is safe only because it is
+  the first to run.
+- **It ADOPTS a standing editor rather than failing on one, when adopting is
+  what it measures.** Realtests 2 and 4 face whatever is answering, and the
+  runner leaves it alone for them: realtest 2's quit is its own act, and
+  realtest 4's adoption is the point. Quitting is a takeover, and that decision
+  belongs to `bin/realtest.sh` and to nothing downstream of it. A realtest that
+  adopts says so in its manifest and asserts from LIVE STATE whatever it would
   otherwise have read out of a startup it did not perform, because an adopted
   editor's startup records are older than the run's own harvest window.
 
@@ -69,7 +88,7 @@ worse than not running:
 | refusal | why |
 |---|---|
 | a deployed system is not at this checkout's revision | a realtest against a stale daemon measures a build nobody has, and its findings send the owner after defects that were fixed days ago. `bin/readiness-report.sh` is the judge — the same `.source-tree` stamp comparison `bin/build-frontend.sh` rebuilds on, so a system this declines on is exactly a system a plain build will rebuild |
-| an Emacs is running and `AGENT_REPL_REALTEST_TAKEOVER=1` is not set | a cold start has to quit the standing editor, and that is the owner's editor with the owner's unsaved work in it. The script does not make that decision |
+| the plan would quit an editor the run did not start, and `AGENT_REPL_REALTEST_TAKEOVER=1` is not set | a cold start has to quit the standing editor, and that is the owner's editor with the owner's unsaved work in it. The script does not make that decision. The refusal states how many quits the plan holds, and that one answer covers all of them: an editor the run itself started is the run's own artifact, not the owner's session |
 | a daemon is running without the vendor guard in its environment | Emacs ADOPTS an answering daemon and never kills one, so the new Emacs would inherit it and it would spawn shims with the real SDK reachable. The refusal names the pid to stop |
 | a shim listening under the state directory's `sock/`, or a `shim-lock`, is running without the guard | the daemon ADOPTS a shim that is already listening rather than spawning a fresh one, so the guard on the daemon never reaches it. Realtest 1's first run proved the hole: a shim spawned the day before by an unguarded daemon kept submitting a keepalive prompt to the real vendor every four minutes for the whole run. Every such process is enumerated (`pgrep -f` for the shim's `dist/main.js` and for `shim-lock`, then `ps -Eww` per pid) and the refusal names each pid and its socket |
 
@@ -80,7 +99,8 @@ Environment:
 
 | variable | effect |
 |---|---|
-| `AGENT_REPL_REALTEST_TAKEOVER=1` | authorizes quitting the running Emacs |
+| `AGENT_REPL_REALTEST_TAKEOVER=1` | authorizes quitting the running Emacs, for every quit in the run |
+| `AGENT_REPL_REALTEST_STOP_DAEMON=1` | authorizes stopping the daemon (SIGTERM only) so realtest 3 can run; without it realtest 3 is skipped |
 | `AGENT_REPL_REALTEST_MEASURE=1` | the phase budgets are reported and NOT enforced (see "Budgets") |
 | `AGENT_REPL_REALTEST_OUT` | where the run directory lands |
 | `AGENT_REPL_REALTEST_EMACS_SOCKET` | the Emacs server socket, when it is not `$TMPDIR/emacs<uid>/server` |
@@ -393,9 +413,9 @@ lookup, the startup-feedback reader, and the run tail.
 
 | # | test | precondition | what it adds |
 |---|---|---|---|
-| 1 | `TestRealtestStartTheEditor` | no Emacs answering; `bin/realtest.sh` quits a standing one under `AGENT_REPL_REALTEST_TAKEOVER=1` | the baseline: every phase, tab, panel, key self-test and harvest |
+| 1 | `TestRealtestStartTheEditor` | no Emacs answering; `bin/realtest.sh` quits a standing one under `AGENT_REPL_REALTEST_TAKEOVER=1`, before this and before every other cold-start realtest in a sweep | the baseline: every phase, tab, panel, key self-test and harvest |
 | 2 | `TestRealtestRestartWithTheDaemonUp` | exactly one daemon already serving | the QUIT is the test's own act, and the daemon must be ADOPTED: `elisp.daemon.adopted` present, `elisp.daemon.started` absent, the lifecycle settling on `adopted` and never `ready`, `Phases.DaemonPath` reading "adopted", and the daemon's pid unchanged across the restart |
-| 3 | `TestRealtestStartWithTheDaemonDown` | NO daemon running; the test refuses and names the pid rather than stopping the owner's, so it runs ALONE | the daemon must be SPAWNED, and the user-visible feedback during the wait is asserted: the mode-line lifecycle `starting` → `linking` → `ready`, and the minibuffer echoes "starting the daemon…", "linking to the daemon…", "daemon ready", "loading workspaces (n/m)…" |
+| 3 | `TestRealtestStartWithTheDaemonDown` | NO daemon running; the test refuses and names the pid rather than stopping the owner's. The runner stops it under `AGENT_REPL_REALTEST_STOP_DAEMON=1`, and skips realtest 3 without that consent | the daemon must be SPAWNED, and the user-visible feedback during the wait is asserted: the mode-line lifecycle `starting` → `linking` → `ready`, and the minibuffer echoes "starting the daemon…", "linking to the daemon…", "daemon ready", "loading workspaces (n/m)…" |
 
 Two things about the feedback assertions, both easy to get wrong:
 
