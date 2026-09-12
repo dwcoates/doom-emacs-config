@@ -44,6 +44,7 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--with-deferred-quit "core")
+(declare-function agent-repl--deferred-quit-arm-delivery "agent-repl-core" (context))
 
 (require 'cl-lib)
 (require 'subr-x)

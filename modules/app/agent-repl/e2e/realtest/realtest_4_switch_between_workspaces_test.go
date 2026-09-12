@@ -416,6 +416,16 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 		t.Fatalf("read which application is frontmost before the first chord: %v", err)
 	}
 
+	// WHAT THE EDITOR WAS ALREADY STANDING AT, CLEARED BEFORE ANYTHING IS
+	// PRESSED. This realtest ADOPTS a standing Emacs rather than starting one,
+	// so it inherits whatever the owner or a previous run left half-typed —
+	// and a bare `d` is an evil operator that does not expire and eats the
+	// next key as its motion. That is precisely how this realtest's first act
+	// once made a completely correct switch while `last-command` came back
+	// `evil-delete`. inputstate.go carries the whole account; the clear is a
+	// real `<escape>`, and what it cleared is reported.
+	wsActClearPendingInput(ctx, t, client, driver, "the warm-up chord", &manifest)
+
 	// THE WARM-UP CHORD, which is not one of the four measured acts.
 	//
 	// It exists for the focus edge, not for the switch. Emacs is
@@ -425,9 +435,14 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 	// of that queue draining. So one harmless `s-}` is pressed first, purely
 	// to produce the edge, and the wait after it is for the composer to
 	// exist rather than for a clock.
+	warmUpKeysBefore, err := RecentKeys(ctx, client)
+	if err != nil {
+		t.Fatalf("read Emacs's recent keys before the warm-up %s: %v", SwitchRight.Emacs, err)
+	}
 	if err := driver.Press(ctx, SwitchRight); err != nil {
 		t.Fatalf("press the warm-up %s to bring Emacs forward for the first time: %v", SwitchRight.Emacs, err)
 	}
+	rt4ProveWarmUpLanded(ctx, t, client, warmUpKeysBefore, &manifest)
 	manifest.Notes = append(manifest.Notes,
 		fmt.Sprintf("warm-up chord %s pressed to produce the first focus edge, so the parked webview "+
 			"pre-creation queue drains and the input composer exists before the measured acts", SwitchRight.Emacs))
@@ -755,6 +770,51 @@ func rt4WaitForComposer(ctx context.Context, t *testing.T, client *Client) {
 	t.Logf("the input composer for %q is %s", state.Current, state.InputBuffer)
 }
 
+// rt4ProveWarmUpLanded checks Emacs's own record that the warm-up key arrived.
+//
+// A WARM-UP NOBODY CHECKS IS A KEY THAT CAN VANISH IN SILENCE. The wait after
+// it is for the input composer, and the composer is downstream of the webview
+// pre-creation queue draining off the FOCUS EDGE — which the activation the
+// key driver performs produces whether or not the key event itself was ever
+// dispatched. So the composer appearing proves the activation, never the key.
+//
+// That silence mattered. A warm-up eaten by a pending evil operator, or
+// dropped outright, leaves the first measured act pressing into a state the
+// run has never verified — and the first measured act is the one that came
+// back with `last-command` naming `evil-delete`. `recent-keys` is Emacs's own
+// account of its INPUT and is the only thing that separates the two.
+//
+// It is a finding rather than a stop: the acts below make their own
+// assertions and are still worth performing, and a run that halted here would
+// say nothing about whether switching works at all.
+func rt4ProveWarmUpLanded(ctx context.Context, t *testing.T, client *Client, keysBefore string, manifest *Manifest) {
+	t.Helper()
+
+	var fresh string
+	waitUntil(ctx, t, fmt.Sprintf("emacs's own (recent-keys) to record the warm-up %s", SwitchRight.Emacs),
+		rt4SwitchCeiling,
+		func() bool {
+			keysAfter, err := RecentKeys(ctx, client)
+			if err != nil {
+				return false
+			}
+			fresh = rt4FreshKeys(keysBefore, keysAfter)
+			return strings.Contains(fresh, SwitchRight.Emacs)
+		})
+
+	if !strings.Contains(fresh, SwitchRight.Emacs) {
+		note := fmt.Sprintf("THE WARM-UP KEY DID NOT REACH THE KEYMAP: Emacs's own (recent-keys) gained %q "+
+			"after the warm-up %s was posted, and it does not contain the chord. The focus edge the warm-up "+
+			"exists for may still have happened — activating Emacs produces it on its own — but the key event "+
+			"did not, so the acts below start from a keyboard state this run has not verified",
+			fresh, SwitchRight.Emacs)
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
+		return
+	}
+	t.Logf("the warm-up %s reached Emacs's keymap: (recent-keys) gained %q", SwitchRight.Emacs, fresh)
+}
+
 // rt4RunAct presses one chord and makes all five assertions for it.
 func rt4RunAct(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver, sources []Source, snap Snapshot, since time.Time, act rt4Act, manifest *Manifest) {
 	t.Helper()
@@ -773,6 +833,16 @@ func rt4RunAct(ctx context.Context, t *testing.T, client *Client, driver *KeyDri
 	}
 	t.Logf("%s: standing in %q; the drawn order %v says this lands on %q",
 		act.Chord.Emacs, before.Current, before.Drawn, target)
+
+	// NOTHING PENDING BEFORE A MEASURED CHORD. An evil operator or a standing
+	// prefix consumes the very next key as part of a sequence this run never
+	// sent: the chord's own command still runs — `evil-read-motion` accepts
+	// whatever the key is bound to and `call-interactively`s it — so the
+	// switch looks perfect while `last-command` names the operator. Assertion
+	// (3) below is exactly the one that catches it, and it must be measuring
+	// this chord rather than somebody else's leftovers.
+	wsActClearPendingInput(ctx, t, client, driver,
+		fmt.Sprintf("pressing %s", act.Chord.Emacs), manifest)
 
 	if err := driver.Press(ctx, act.Chord); err != nil {
 		t.Errorf("press %s (%s): %v", act.Chord.Emacs, act.Chord.Why, err)
