@@ -141,6 +141,7 @@ Scale
 |---|---|---|
 | 0 | done (cc93abb9d) | retire the old playtest layer |
 | 1 | DONE — twice-green 2026-09-12, clean harvest | remediated; see judgement ledger rows 1-57 |
+| 5 | authored, not yet run | `TestRealtestCreateWorkDeleteAWorkspace`; acts against a dedicated scratch repo under the run directory |
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
