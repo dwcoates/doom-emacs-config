@@ -397,16 +397,22 @@ in the composer ready for command keys rather than mid-insert.
 
 WS reaches here straight off the persp activation path, so it may be a
 persp-mode placeholder that owns no log sink; the records go through
-`agent-repl--ws-log-name' and carry the name in their text instead."
+`agent-repl--ws-log-name' and carry the name in their text instead.
+
+EVERY BRANCH RECORDS AT `info'.  This record is the only thing that says the
+SWITCH is what moved the cursor into the composer -- the cursor's position
+alone cannot, because a composer that was already selected looks identical.
+On the debug rung it fell below the default durable threshold and never
+reached a sink, so the landing was invisible afterwards."
   (let ((log-ws (agent-repl--ws-log-name ws)))
     (if agent-repl-autoselect-input-on-workspace-switch
         (if-let ((win (agent-repl-window--panel-window :input ws)))
             (progn
-              (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
+              (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
               (select-window win)
               (agent-repl--input-enter-command-state))
-          (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))
-      (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=disabled" ws))))
+          (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))
+      (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=disabled" ws))))
 
 (defun agent-repl--stale-panel-windows ()
   "Return a list of windows showing agent panel buffers from a different workspace.
@@ -634,7 +640,7 @@ not be routed at all.
          ;; Screened through `--ws-log-name' like every other record on this
          ;; path: persp-mode hands it its own placeholders too, and those own
          ;; no durable sink to route a workspace-attributed record to.
-         (agent-repl--log log-ws "elisp.panels.switch: complete ws=%s" ws))))))
+         (agent-repl--info log-ws "elisp.panels.switch: complete ws=%s" ws))))))
 
 ;; Save window state for current workspace before switching away,
 ;; so the panel-visibility paint can inspect the saved config.
