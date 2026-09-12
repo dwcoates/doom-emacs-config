@@ -112,6 +112,21 @@ type Disposition struct {
 	Kind DispositionKind
 }
 
+// AdoptedSession is one SESSION a boot adopted from a surviving shim: a
+// workspace whose kernel lock read HELD, which by the shim's lock contract
+// means a session was started on that process and is still running.
+//
+// IT CARRIES THE PID BECAUSE THE ACCOUNTING NAMES IT. Reconciling a bounce
+// with no manifest used to record `shim_pid: 0` for every survivor — the zero
+// value of an empty manifest entry, not a reading of anything — which read as
+// "no process" for the one case where a process demonstrably answered a dial.
+type AdoptedSession struct {
+	// Workspace is the adopted session's workspace.
+	Workspace ids.WorkspaceID
+	// ShimPID is the surviving shim's process id, as the adoption dialed it.
+	ShimPID int
+}
+
 // FaultBounceDisposition is the fault kind an ORDINARY reconciled session is
 // recorded under — one the bounce preserved or rolled, opened and closed in the
 // same breath so the per-session accounting survives without polluting the open
@@ -213,7 +228,7 @@ func ReadManifest(path string) (Manifest, bool, error) {
 // PRESERVED and ROLLED are recorded as ALREADY-RESOLVED faults, so the record
 // exists per session without polluting the open-fault set; DIED and UNKNOWN
 // stay OPEN, because each is a workspace whose session state needs a human.
-func (c *controller) Reconcile(ctx context.Context, adopted []ids.WorkspaceID) ([]Disposition, error) {
+func (c *controller) Reconcile(ctx context.Context, adopted []AdoptedSession) ([]Disposition, error) {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opReconcile, "could not read the intent manifest",
@@ -259,13 +274,26 @@ func (c *controller) Reconcile(ctx context.Context, adopted []ids.WorkspaceID) (
 	return out, nil
 }
 
-// reconcileWithoutManifest accounts for a boot that found NO manifest. With no
-// surviving session that is an ordinary boot and there is nothing to account
-// for. With sessions this boot ADOPTED it is a crash or a force-kill: the
-// outgoing daemon never stood down, so nothing states what its bounce meant for
-// them, and BOUNCE ACCOUNTABILITY surfaces that per workspace rather than
-// passing over it. Each adopted session gets an OPEN bounce_unknown fault.
-func (c *controller) reconcileWithoutManifest(ctx context.Context, adopted []ids.WorkspaceID) []Disposition {
+// reconcileWithoutManifest accounts for a boot that found NO manifest.
+//
+// AN ABSENT MANIFEST IS LEGITIMATE ON MOST BOOTS. Only Handover writes one, so
+// every boot that is not the successor of a self-merge rollout — a cold start,
+// a launchd restart, an operator's kill — finds none by design. With no
+// surviving SESSION that is an ordinary boot and there is nothing to account
+// for, and an inert surviving shim is not a surviving session: it never took
+// the workspace lock because it never started one, so there is no process
+// whose survival could be judged. The boot passes only the lock-held
+// survivors, which is what makes the ordinary case ordinary.
+//
+// With sessions this boot ADOPTED it is a crash or a force-kill: the outgoing
+// daemon never stood down, so nothing states what its bounce meant for them,
+// and BOUNCE ACCOUNTABILITY surfaces that per workspace rather than passing
+// over it. Each adopted session gets an OPEN bounce_unknown fault.
+//
+// THE LOCK STATE IS NOT INVENTED HERE. It reads HELD because the caller's
+// contract is that every entry is a lock-held survivor; nothing in this
+// function guesses a state it did not read.
+func (c *controller) reconcileWithoutManifest(ctx context.Context, adopted []AdoptedSession) []Disposition {
 	if len(adopted) == 0 {
 		c.log.Debug(opReconcile, "no intent manifest is present and no session survived; this is an ordinary boot",
 			dlog.Context{"path": c.deps.IntentManifest})
@@ -274,15 +302,18 @@ func (c *controller) reconcileWithoutManifest(ctx context.Context, adopted []ids
 	c.log.Warn(opReconcile, "sessions survived a bounce that wrote no intent manifest; each one is unaccounted for",
 		dlog.Context{"path": c.deps.IntentManifest, "adopted": len(adopted)})
 	out := make([]Disposition, 0, len(adopted))
-	for _, ws := range adopted {
+	for _, session := range adopted {
 		d := Disposition{
-			Workspace: ws,
+			Workspace: session.Workspace,
 			Intent:    IntentUnattested,
 			Lock:      sessionlock.StateHeld,
 			Kind:      DispositionUnknown,
 		}
 		out = append(out, d)
-		c.recordDisposition(ctx, ManifestSession{Workspace: ws}, d)
+		c.recordDisposition(ctx, ManifestSession{
+			Workspace: session.Workspace,
+			ShimPID:   session.ShimPID,
+		}, d)
 	}
 	return out
 }
