@@ -32,6 +32,10 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - realtest: key delivery fails loudly instead of silently dropping, one shared show phase, realtest 4 bootstraps its third workspace (H, M, K)
 - daemon/roster: the daemon outlives Emacs, and "loading workspaces" echoes on a hidden startup (C, D)
 - wsm: the forget verb, registration's undo, reachable through the command-file ingress (B)
+- daemon/server+health: a fault the `kind' oneof spells no arm for is withheld from the wire instead of published unset, so one abandoned-conversation fault no longer costs the editor the whole WatchHostWorkspace push.
+- daemon/rollout: a relaunch whose resume failed records `resume_failed' itself, not a private second spelling that reached no arm.
+- daemon/server+promptqueue+prompthandler+health: resolving a named workspace's log sink is total at the last four sites, so a prompt is never lost, and a host view never withheld, over where its narration is written.
+- elisp/notifications+session: the desktop-focus check names its scope -- the workspace that asked, or the central sink -- so it no longer earns `log-routing-error' at ERROR.
 
 ## Standing measurements to protect
 
