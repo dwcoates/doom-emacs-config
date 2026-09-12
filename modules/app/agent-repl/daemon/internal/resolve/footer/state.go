@@ -320,6 +320,22 @@ type cronRow struct {
 	order int
 }
 
+// startFailedState is one standing bring-up failure: why it failed, what it
+// cost, and when it began standing.
+type startFailedState struct {
+	// detail is the composed cause, drawn verbatim.
+	detail string
+	// dropped counts the held prompts this failure dropped, zero when it
+	// dropped none.
+	dropped uint32
+	// at is when the failure began standing.
+	at time.Time
+	// announced reports that the info record for this failure's line has
+	// already been written, so the line is recorded ONCE rather than on every
+	// republication of a view that keeps drawing it.
+	announced bool
+}
+
 // wsState is one workspace's whole footer accumulation. It is in-memory only:
 // a resolver aggregates, it never stores.
 type wsState struct {
@@ -387,6 +403,10 @@ type wsState struct {
 	merge MergeFacts
 	// closing is the standing close refusal, nil when no close is blocked.
 	closing *CloseBlocked
+	// startFailed is the standing bring-up failure, nil when none stands. It
+	// is installed by the site that opens the `shim_start_failed` fault and
+	// cleared by the next successful link edge.
+	startFailed *startFailedState
 	// blocked is the standing block, nil when nothing blocks the session.
 	blocked *blockedState
 
