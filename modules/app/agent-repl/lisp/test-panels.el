@@ -3798,6 +3798,116 @@ press."
         (should (= close-calls 0))
         (should opened)))))
 
+;;;; ---- Tests: the autoselect landing is DURABLE in the log ----
+
+;; `maybe-autoselect-input' recorded on the debug rung, below the default
+;; durable threshold (`info'), so the record that says "the SWITCH is what put
+;; the cursor in the composer" never reached disk.  The cursor state alone
+;; cannot say that: a composer that was already selected looks identical.
+
+(defmacro agent-repl-test-panels--capturing-rungs (&rest body)
+  "Run BODY capturing the `info' and `debug' logging rungs separately."
+  (declare (indent 0))
+  `(let ((agent-repl-test-panels--info nil)
+         (agent-repl-test-panels--debug nil))
+     (cl-letf (((symbol-function 'agent-repl--info)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-panels--info)))
+               ((symbol-function 'agent-repl--log)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-panels--debug))))
+       ,@body)))
+
+(defvar agent-repl-test-panels--info nil
+  "Messages the stubbed `info' rung received during a capture.")
+
+(defvar agent-repl-test-panels--debug nil
+  "Messages the stubbed debug rung received during a capture.")
+
+(ert-deftest agent-repl-test-panels-autoselect-records-the-select-branch ()
+  "Selecting the input window records `maybe-autoselect-input: ws=... branch=select'."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((input-buf (get-buffer-create "*autoselect-log-input*"))
+          (new-win nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win input-buf)
+            (select-window (car (window-list)))
+            ;; Act
+            (agent-repl-test-panels--capturing-rungs
+              (let ((agent-repl-autoselect-input-on-workspace-switch t))
+                (agent-repl--maybe-autoselect-input "test-ws"))
+              ;; Assert
+              (should (cl-find-if
+                       (lambda (m)
+                         (string-prefix-p
+                          "maybe-autoselect-input: ws=test-ws branch=select" m))
+                       agent-repl-test-panels--info))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest agent-repl-test-panels-autoselect-select-branch-is-not-debug ()
+  "The landing record must not sit below the default durable threshold."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((input-buf (get-buffer-create "*autoselect-log-rung*"))
+          (new-win nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+            (setq new-win (split-window))
+            (set-window-buffer new-win input-buf)
+            (select-window (car (window-list)))
+            ;; Act
+            (agent-repl-test-panels--capturing-rungs
+              (let ((agent-repl-autoselect-input-on-workspace-switch t))
+                (agent-repl--maybe-autoselect-input "test-ws"))
+              ;; Assert
+              (should-not (cl-find-if
+                           (lambda (m)
+                             (string-prefix-p "maybe-autoselect-input: " m))
+                           agent-repl-test-panels--debug))))
+        (when (and new-win (window-live-p new-win))
+          (ignore-errors (delete-window new-win)))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest agent-repl-test-panels-autoselect-records-closed-panels ()
+  "A switch to a workspace whose panels are CLOSED records `no-input-window'.
+Closed panels are an ordinary outcome, not a failure: the switch happens,
+the cursor stays where it is, and the record says why."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((input-buf (get-buffer-create "*autoselect-log-closed*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+            (switch-to-buffer (get-buffer-create "*autoselect-log-other*"))
+            ;; Act
+            (agent-repl-test-panels--capturing-rungs
+              (let ((agent-repl-autoselect-input-on-workspace-switch t))
+                (agent-repl--maybe-autoselect-input "test-ws"))
+              ;; Assert
+              (should (member "maybe-autoselect-input: ws=test-ws branch=no-input-window"
+                              agent-repl-test-panels--info))))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))
+        (when (get-buffer "*autoselect-log-other*")
+          (kill-buffer "*autoselect-log-other*"))))))
+
+(ert-deftest agent-repl-test-panels-autoselect-records-the-disabled-branch ()
+  "With the defcustom off the record still says so, durably."
+  (agent-repl-test--with-clean-state
+    ;; Arrange / Act
+    (agent-repl-test-panels--capturing-rungs
+      (let ((agent-repl-autoselect-input-on-workspace-switch nil))
+        (agent-repl--maybe-autoselect-input "test-ws"))
+      ;; Assert
+      (should (member "maybe-autoselect-input: ws=test-ws branch=disabled"
+                      agent-repl-test-panels--info)))))
+
 ;;;; ---- Tests: input command-state on switch ----
 
 (ert-deftest agent-repl-test-panels-autoselect-enters-command-state ()
