@@ -403,3 +403,35 @@ func TestSubmitSurfacesAnUnresolvableWorkspace(t *testing.T) {
 		t.Fatal("failing to resolve the workspace is an invariant violation, never a global write")
 	}
 }
+
+// unroutableSurfaces is dlog.Surfaces whose per-workspace sink never opens, so
+// a test can drive the one condition production hits when a workspace's
+// directory is a scratch path or a deleted worktree.
+type unroutableSurfaces struct {
+	*dlog.TestSurfaces
+}
+
+func (unroutableSurfaces) Workspace(string) (dlog.Logger, error) {
+	return nil, errors.New("the workspace owns no durable log sink")
+}
+
+func (s unroutableSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
+	return s.TestSurfaces.Global().With(dlog.Context{dlog.KeyUnroutableWorkspace: dir})
+}
+
+// TestSubmitSurvivesAWorkspaceThatOwnsNoLogSink pins that A PROMPT IS NEVER
+// LOST OVER ITS OWN LOGGING. Resolving a named workspace's sink is a TOTAL
+// function, so the submission goes through and its records go centrally.
+func TestSubmitSurvivesAWorkspaceThatOwnsNoLogSink(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.h.deps.Log = unroutableSurfaces{dlog.NewTestSurfaces()}
+
+	// Act.
+	_, err := h.submit("hello")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Submit() = %v, want the prompt delivered despite the unroutable sink", err)
+	}
+}
