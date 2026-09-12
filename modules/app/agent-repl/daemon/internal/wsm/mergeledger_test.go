@@ -251,7 +251,7 @@ func TestForgetDeletesAWorkspacesLedger(t *testing.T) {
 	}
 
 	// Act
-	if err := s.Forget(context.Background(), ws.ID); err != nil {
+	if _, err := s.Forget(context.Background(), ws.ID); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}
 
