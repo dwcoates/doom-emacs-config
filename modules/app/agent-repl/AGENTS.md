@@ -354,6 +354,26 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## Every landed remediation gets a changelog line
+
+`docs/REMEDIATION-CHANGELOG.md` carries one brief line per landed remediation,
+newest first. Append to it in the same commit or merge that lands the change.
+Owner instruction, 2026-09-12, standing for every realtest section.
+
+Its purpose is REGRESSION WATCH across a long remediation effort. A performance
+win or an invariant established while fixing one realtest must not be quietly
+undone while fixing a later one, and this file is the only artifact that spans
+the whole effort. Before landing anything, scan it for a line the change would
+reverse, and say so if it would.
+
+It is read back into context at every compaction, so it must stay cheap to
+carry. One sentence per entry, in the shape of a classic changelog. No rationale
+and no narrative: the commit message holds the reasoning and
+`docs/REALTEST-JUDGEMENT-CALLS.md` holds the decisions.
+
+It also carries a short "standing measurements to protect" section. Update those
+numbers when a measurement genuinely improves; never when it regresses.
+
 ## No look-and-feel changes during bug remediation
 
 Standing owner instruction, 2026-09-12. Remediation fixes defects. It does not
