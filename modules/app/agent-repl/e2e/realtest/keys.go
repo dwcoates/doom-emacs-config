@@ -3,9 +3,12 @@
 package realtest
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,6 +62,31 @@ type Chord struct {
 	Modifiers []string
 	// Why says what the chord does, so a reader knows why it is safe to send.
 	Why string
+	// Repeatable says a SECOND delivery of this chord is harmless.
+	//
+	// It gates the retry of a key the editor's own account says was dropped
+	// (delivery.go). A retry is not free: a post that was dropped at dispatch
+	// may still be sitting in the target's queue, so re-posting a key that
+	// ADVANCES state — a workspace switch, a leader sequence, a letter that
+	// completes a command — risks the act happening twice, and a run that
+	// reports one act when two happened is lying in a worse direction than one
+	// that reports a key as undelivered. Only keys that return the editor to a
+	// resting state, where a second press is a no-op, are repeatable.
+	//
+	// The zero value is the safe one: a chord says nothing, and it is posted
+	// exactly once.
+	Repeatable bool
+	// RepeatWhy says why this chord is, or is not, repeatable, so a reader of
+	// a finding can check the judgement rather than take it.
+	RepeatWhy string
+}
+
+// repeatWhy is RepeatWhy with the answer every chord that says nothing gives.
+func (c Chord) repeatWhy() string {
+	if c.RepeatWhy != "" {
+		return c.RepeatWhy
+	}
+	return "it advances the editor's state, so a second delivery would not be a no-op"
 }
 
 // The chords the self-test presses. Both are harmless: they change which
@@ -93,6 +121,18 @@ type KeyDriver struct {
 	Pid int
 	// Scratch is where the compiled helper lands.
 	Scratch string
+	// Client is the read-only channel to the same Emacs, and it is what turns
+	// a post into a DELIVERY. With it, every press holds the target key until
+	// Emacs's own account of its input shows the key arriving, and a key that
+	// never arrives is reported as a harness failure instead of being waited
+	// out downstream (delivery.go). Without it a press is posted blind, which
+	// is the old behaviour and is kept only for a caller that has no channel
+	// to the editor.
+	Client *Client
+	// Notes collects what the presses had to say about themselves — a retry, an
+	// unconfirmable reading — for a caller to drain into its manifest. An
+	// undelivered key is not here: that is the press's error.
+	Notes []string
 	// helper is the compiled keydriver path, once built.
 	helper string
 	// Method names which of the two mechanisms is in use, for the report.
@@ -150,20 +190,211 @@ func (d *KeyDriver) Build(ctx context.Context) error {
 	return nil
 }
 
-// Press posts one chord to the Emacs process.
+// Press posts one chord to the Emacs process and, when a Client is attached,
+// does not answer until Emacs's own account says the key arrived.
 func (d *KeyDriver) Press(ctx context.Context, chord Chord) error {
+	_, err := d.PressWithReceipt(ctx, chord)
+	return err
+}
+
+// DrainNotes takes what the presses have said about themselves and empties the
+// list, so a caller can put them in its manifest without reporting any of them
+// twice.
+func (d *KeyDriver) DrainNotes() []string {
+	notes := d.Notes
+	d.Notes = nil
+	return notes
+}
+
+// PressWithReceipt posts one chord and answers what is known about it.
+//
+// WITH A CLIENT IT CANNOT SILENTLY DROP. The helper holds the target key while
+// this side reads `(recent-keys)` and `quit-flag`, so the window in which
+// AppKit will route the queued event stays open for as long as the reading
+// takes, and the press answers an error the moment Emacs's own marks say the
+// key never entered its input. A repeatable chord is posted again first
+// (delivery.go says which chords those are and why the rest are not).
+//
+// WITHOUT ONE IT IS THE OLD BLIND POST, kept for a caller with no channel to
+// the editor, and the receipt says so rather than claiming a delivery nobody
+// checked.
+func (d *KeyDriver) PressWithReceipt(ctx context.Context, chord Chord) (DeliveryReceipt, error) {
 	if d.helper == "" {
-		return fmt.Errorf("the key helper has not been built; call Build first")
+		return DeliveryReceipt{Chord: chord}, fmt.Errorf("the key helper has not been built; call Build first")
 	}
+
+	if d.Client == nil {
+		out, err := d.post(ctx, chord, nil)
+		receipt := DeliveryReceipt{
+			Chord:    chord,
+			Verdict:  DeliveryUndetermined,
+			Reason:   "the key driver has no read channel to this Emacs, so nothing was read back",
+			Attempts: 1,
+			Helper:   out,
+		}
+		if err != nil {
+			return receipt, err
+		}
+		return receipt, nil
+	}
+
+	attempts := 1
+	if chord.Repeatable {
+		attempts = keyDeliveryAttempts
+	}
+
+	receipt := DeliveryReceipt{Chord: chord}
+	for attempt := 1; attempt <= attempts; attempt++ {
+		before := ReadInputMark(ctx, d.Client)
+		started := time.Now()
+
+		var after InputMark
+		verdict, reason := DeliveryUndetermined, "the helper never reported the key as posted"
+		out, err := d.post(ctx, chord, func() {
+			verdict, reason, after = d.confirm(ctx, before)
+		})
+
+		receipt = DeliveryReceipt{
+			Chord:    chord,
+			Verdict:  verdict,
+			Reason:   reason,
+			Attempts: attempt,
+			Helper:   out,
+			Before:   before,
+			After:    after,
+			Elapsed:  time.Since(started),
+		}
+		if err != nil {
+			return receipt, err
+		}
+		if verdict != DeliveryAbsent {
+			break
+		}
+	}
+
+	if receipt.Verdict == DeliveryAbsent {
+		return receipt, receipt.deliveryError()
+	}
+	if !receipt.Confirmed() {
+		d.Notes = append(d.Notes, receipt.Note())
+	}
+	return receipt, nil
+}
+
+// confirm reads the editor until it accounts for the key, or until the ceiling.
+//
+// It runs while the helper is HOLDING the target key, which is the whole point:
+// the queued event is routed to whatever is the key window when Emacs next
+// looks, so the reading and the key-ness of the window have to overlap.
+//
+// It returns as soon as there is nothing left to learn — the key arrived, or
+// the reading is one that more time cannot resolve — so the ordinary press
+// gives the owner's focus back in milliseconds. A probe that would not answer
+// is retried until the ceiling, because that one IS transient.
+func (d *KeyDriver) confirm(ctx context.Context, before InputMark) (DeliveryVerdict, string, InputMark) {
+	deadline := time.Now().Add(keyDeliveryConfirmCeiling)
+	for {
+		after := ReadInputMark(ctx, d.Client)
+		verdict, reason := judgeDelivery(before, after)
+		if verdict == DeliveryArrived {
+			return verdict, reason, after
+		}
+		if verdict == DeliveryUndetermined && before.ProbeFailure == "" && after.ProbeFailure == "" {
+			// The ring cannot distinguish this press, and it will not start
+			// being able to. Holding focus out to the ceiling for a reading
+			// that cannot change would cost the owner's desktop for nothing.
+			return verdict, reason, after
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return verdict, reason, after
+		}
+		select {
+		case <-ctx.Done():
+			return verdict, reason, after
+		case <-time.After(keyDeliveryPollInterval):
+		}
+	}
+}
+
+// keyDriverArgs spells one press for the helper.
+//
+// Its own function so the spelling is testable without a window server: a
+// `--hold` that went missing would put the harness back on the fixed-span
+// handback that dropped keys, and nothing else would notice.
+func keyDriverArgs(pid int, chord Chord, hold bool) []string {
+	args := make([]string, 0, 4)
+	if hold {
+		args = append(args, fmt.Sprintf("--hold=%g", keyDeliveryHoldCeiling.Seconds()))
+	}
+	return append(args, fmt.Sprint(pid), fmt.Sprint(chord.Keycode), strings.Join(chord.Modifiers, ","))
+}
+
+// post runs the helper once.
+//
+// `held` is what makes the two modes one path: when it is non-nil the helper is
+// asked to hold the target key, and `held` is called once the event has been
+// posted and before focus is handed back. When it is nil the helper posts and
+// restores focus on its own fixed span, which is the blind mode.
+//
+// EVERYTHING THE HELPER SAID TRAVELS BACK, including on the paths that fail
+// early: its refusals are the evidence a key-delivery finding is made of.
+func (d *KeyDriver) post(ctx context.Context, chord Chord, held func()) (string, error) {
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(callCtx, d.helper,
-		fmt.Sprint(d.Pid), fmt.Sprint(chord.Keycode), strings.Join(chord.Modifiers, ",")).CombinedOutput()
+
+	command := exec.CommandContext(callCtx, d.helper, keyDriverArgs(d.Pid, chord, held != nil)...)
+	var errors bytes.Buffer
+	command.Stderr = &errors
+
+	stdin, err := command.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("post %s (keycode %d, %s) to pid %d: %w; the helper said: %s",
-			chord.Emacs, chord.Keycode, strings.Join(chord.Modifiers, "+"), d.Pid, err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("open the key helper's stdin for %s: %w", chord.Emacs, err)
 	}
-	return nil
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("open the key helper's stdout for %s: %w", chord.Emacs, err)
+	}
+	if err := command.Start(); err != nil {
+		return "", fmt.Errorf("start the key helper for %s: %w", chord.Emacs, err)
+	}
+
+	lines := make(chan string, 8)
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+
+	said := make([]string, 0, 4)
+	posted := false
+	for line := range lines {
+		said = append(said, line)
+		if line == keyDeliveryPostedLine {
+			posted = true
+			break
+		}
+	}
+	if posted && held != nil {
+		held()
+		// The release is best-effort by design: the helper's own ceiling ends
+		// the hold anyway, so a write that cannot land delays the focus
+		// handback rather than losing it.
+		_, _ = io.WriteString(stdin, "release\n")
+	}
+	_ = stdin.Close()
+	for line := range lines {
+		said = append(said, line)
+	}
+
+	waitErr := command.Wait()
+	report := strings.TrimSpace(strings.Join(append(said, strings.TrimSpace(errors.String())), " | "))
+	if waitErr != nil {
+		return report, fmt.Errorf("post %s (keycode %d, %s) to pid %d: %w; the helper said: %s",
+			chord.Emacs, chord.Keycode, strings.Join(chord.Modifiers, "+"), d.Pid, waitErr, report)
+	}
+	return report, nil
 }
 
 // PressViaSystemEvents is the second mechanism, and it is NOT equivalent.
