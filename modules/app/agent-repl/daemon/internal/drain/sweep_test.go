@@ -885,3 +885,84 @@ func TestAHibernationWithNoSessionScopedViewsWiredIsTolerated(t *testing.T) {
 		t.Fatalf("hibernated = %v, want the idle session hibernated with no view surface wired", hibernated)
 	}
 }
+
+// unsinkableWorkspace makes the workspace's directory unable to host a durable
+// log sink, the way a scratch or deleted worktree is: the minted-id lookup the
+// sink resolution needs cannot name it.
+func unsinkableWorkspace(h *harness, dir string) {
+	h.log.BindWorkspaceIDs(func(candidate string) (string, error) {
+		if candidate == dir {
+			return "", errors.New("the workspace directory is gone")
+		}
+		return "wsxxxxxxxxxxxxxx", nil
+	})
+}
+
+func TestSweepHibernatesAWorkspaceWhoseDirectoryCannotHostASink(t *testing.T) {
+	// Arrange: the sweep must not stop at a workspace whose worktree is gone.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	unsinkableWorkspace(h, record.Dir)
+
+	// Act.
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("hibernated = %v, want [%s]", hibernated, ws)
+	}
+}
+
+func TestSweepRecordsNoErrorForAWorkspaceThatCannotHostASink(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	unsinkableWorkspace(h, record.Dir)
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert: an unavailable directory is an ordinary outcome, never a fault.
+	for _, rec := range records(h.log, opSweep) {
+		if rec.Level == "error" {
+			t.Fatalf("the sweep recorded an error for an unsinkable workspace: %+v", rec)
+		}
+	}
+}
+
+func TestSweepNamesTheWorkspaceOnItsCentrallyRoutedRecords(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	unsinkableWorkspace(h, record.Dir)
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert: the records still say which workspace they are about.
+	for _, rec := range records(h.log, opSweep) {
+		if rec.Context[dlog.KeyUnroutableWorkspace] == record.Dir {
+			return
+		}
+	}
+	t.Fatalf("no sweep record named the unroutable workspace %q", record.Dir)
+}

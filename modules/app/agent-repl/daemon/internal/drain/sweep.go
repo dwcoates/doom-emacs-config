@@ -33,14 +33,12 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID), "cutoff": c.deps.IdleCutoff.String()}
 		// EVERY RECORD BELOW IS WORKSPACE-BOUND and goes to that workspace's
-		// own sink; a record about one workspace's session written globally is
-		// the invariant violation the logging contract names.
-		log, err := c.workspaceLog(ws)
-		if err != nil {
-			c.log.Error(opSweep, "could not resolve a workspace's log sink; deferring its sweep",
-				withCause(fields, err))
-			continue
-		}
+		// own sink whenever the workspace can host one. A workspace whose
+		// directory is a scratch path or has been deleted still gets swept:
+		// resolution falls back to the central sink with the workspace named
+		// on the record. Deferring the sweep on it instead cost an ERROR per
+		// pass per workspace and left the session unhibernated forever.
+		log := c.workspaceLog(ws)
 		session, found, err := c.deps.DB.Session(ctx, ws.ID)
 		if err != nil {
 			log.Error(opSweep, "could not read a workspace's session", withCause(fields, err))
@@ -187,14 +185,13 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	return true
 }
 
-// workspaceLog resolves one workspace's own durable sink. A record about a
-// workspace belongs there and nowhere else.
-func (c *controller) workspaceLog(ws wsm.Workspace) (dlog.Logger, error) {
-	log, err := c.deps.Log.Workspace(ws.Dir)
-	if err != nil {
-		return nil, err
-	}
-	return log.With(dlog.Context{"workspace": string(ws.ID)}), nil
+// workspaceLog resolves one workspace's own durable sink, or the central sink
+// with the workspace named on the record when the workspace cannot host one.
+// The sweep runs over every registry row, so its logging is TOTAL: a
+// workspace's unavailable directory can cost the record's placement, never the
+// sweep of that workspace.
+func (c *controller) workspaceLog(ws wsm.Workspace) dlog.Logger {
+	return c.deps.Log.WorkspaceOrCentral(ws.Dir).With(dlog.Context{"workspace": string(ws.ID)})
 }
 
 // hibernateRefusal names the shim's refusal arm for a record. The ARM is the

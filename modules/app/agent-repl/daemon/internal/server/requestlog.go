@@ -61,13 +61,14 @@ func (s *server) beginRequest(
 			record, err := s.deps.DB.Workspace(ctx, workspaceID)
 			switch {
 			case err == nil:
-				log, err = s.deps.Log.Workspace(record.Dir)
-				if err != nil {
-					s.log.Error("daemon.server.request_boundary", "could not resolve the request's workspace log sink",
-						dlog.Context{"rpc": rpc, "workspace_id": workspaceIDText, "workspace_dir": record.Dir, "cause": err.Error()})
-					return requestBoundary{}, err
-				}
-				log = log.With(dlog.Context{dlog.KeyWorkspaceID: workspaceIDText, dlog.KeyWorkspaceDir: record.Dir})
+				// THE BOUNDARY NEVER FAILS A REQUEST OVER ITS OWN LOGGING. A
+				// workspace whose directory is a scratch path or has been
+				// deleted resolves to the central sink with the workspace
+				// named on the record; the handler then answers the request on
+				// its own terms — a typed refusal where one is owed — instead
+				// of the client meeting an internal error raised by logging.
+				log = s.deps.Log.WorkspaceOrCentral(record.Dir).
+					With(dlog.Context{dlog.KeyWorkspaceID: workspaceIDText, dlog.KeyWorkspaceDir: record.Dir})
 			case errors.Is(err, wsm.ErrNotFound):
 				log = log.With(dlog.Context{"workspace_id": workspaceIDText, "workspace_known": false})
 			default:
