@@ -577,6 +577,115 @@ highlighted. The drawn order cannot carry either name."
     (agent-repl-switch-right)
     (should-not agent-repl-test-commands--switched)))
 
+;;;; ---- A switch is DURABLE in the log ----
+
+;; The switch records were emitted on the `agent-repl--log' (debug) rung, and
+;; the durable threshold is `info' by default, so every switch the user made
+;; left NOTHING on disk: realtest 4 drove four real chords, every one of them
+;; switched correctly, and not one of them could be read back afterwards.  A
+;; switch is a user action and a lifecycle edge, so it records at `info'.
+
+(defvar agent-repl-test-commands--info nil
+  "Records the stubbed `agent-repl--info' rung received, as (WS . MESSAGE).")
+
+(defmacro agent-repl-test-commands--capturing-info (&rest body)
+  "Run BODY with the `info' and `debug' logging rungs captured separately."
+  (declare (indent 0))
+  `(let ((agent-repl-test-commands--info nil)
+         (agent-repl-test-commands--debug nil))
+     (cl-letf (((symbol-function 'agent-repl--info)
+                (lambda (ws fmt &rest args)
+                  (push (cons ws (apply #'format fmt args))
+                        agent-repl-test-commands--info)))
+               ((symbol-function 'agent-repl--log)
+                (lambda (ws fmt &rest args)
+                  (push (cons ws (apply #'format fmt args))
+                        agent-repl-test-commands--debug))))
+       ,@body)))
+
+(defvar agent-repl-test-commands--debug nil
+  "Records the stubbed `agent-repl--log' (debug) rung received.")
+
+(defun agent-repl-test-commands--info-messages ()
+  "The messages the `info' rung received, oldest first."
+  (mapcar #'cdr (reverse agent-repl-test-commands--info)))
+
+(defun agent-repl-test-commands--debug-messages ()
+  "The messages the debug rung received, oldest first."
+  (mapcar #'cdr (reverse agent-repl-test-commands--debug)))
+
+(ert-deftest agent-repl-test-commands-cycle-right-records-its-target ()
+  "Cycling right writes `elisp.commands.cycle n=1 target=<ws>'."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+      (agent-repl-switch-right))
+    ;; Assert
+    (should (member "elisp.commands.cycle n=1 target=second"
+                    (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-cycle-left-records-its-target ()
+  "Cycling left writes `elisp.commands.cycle n=-1 target=<ws>'."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-bar '("first" "second" "third") "third"
+      (agent-repl-switch-left))
+    ;; Assert
+    (should (member "elisp.commands.cycle n=-1 target=second"
+                    (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-cycle-is-never-recorded-on-the-debug-rung ()
+  "The cycle record must not sit below the default durable threshold.
+This is the defect itself: on `agent-repl--log' the record never reached
+disk, so a switch the user made could not be read back."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-bar '("first" "second") "first"
+      (agent-repl-switch-right))
+    ;; Assert
+    (should-not (cl-find-if (lambda (m) (string-prefix-p "elisp.commands.cycle " m))
+                            (agent-repl-test-commands--debug-messages)))))
+
+(ert-deftest agent-repl-test-commands-cycle-with-no-position-records-the-miss ()
+  "A current workspace that is not on the bar records its no-op durably."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-bar '("first" "second") "elsewhere"
+      (agent-repl-switch-right))
+    ;; Assert
+    (should (member "elisp.commands.cycle-no-position n=1 tabs=2"
+                    (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-cycle-attributes-the-screened-log-name ()
+  "The cycle record is attributed through `agent-repl--ws-log-name'.
+The current workspace reaches the ladder from persp-mode, so a
+placeholder that owns no sink must be screened to nil rather than
+routed to a sink that does not exist."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (_ws) nil)))
+      (agent-repl-test-commands--with-bar '("first" "second") "first"
+        (agent-repl-switch-right)))
+    ;; Assert
+    (should (equal '(nil) (delete-dups
+                           (mapcar #'car agent-repl-test-commands--info))))))
+
+(ert-deftest agent-repl-test-commands-open-most-recent-records-its-target ()
+  "The recent-workspace route records its target durably too."
+  ;; Arrange
+  (let ((agent-repl--opened-recent-cycle nil))
+    ;; Act
+    (agent-repl-test-commands--capturing-info
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
+                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+                ((symbol-function 'agent-repl--roster-recent-names)
+                 (lambda () '("a")))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+        (agent-repl-open-most-recent-workspace))
+      ;; Assert
+      (should (member "elisp.commands.open-most-recent target=a"
+                      (agent-repl-test-commands--info-messages))))))
+
 ;;;; ---- The numerals index the drawn bar ----
 
 (ert-deftest agent-repl-test-commands-switch-to-workspace-lands-on-the-nth-tab ()
@@ -607,6 +716,47 @@ highlighted. The drawn order cannot carry either name."
   (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
     (agent-repl-switch-to-workspace-9)
     (should (equal agent-repl-test-commands--switched "third"))))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-records-its-target ()
+  "A numeral chord writes `elisp.commands.switch-to-workspace n=N target=<ws>'."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+      (agent-repl-switch-to-workspace 2))
+    ;; Assert
+    (should (member "elisp.commands.switch-to-workspace n=2 target=second"
+                    (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-records-out-of-range ()
+  "A press past the end of the bar records its miss durably."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-bar '("first" "second") "first"
+      (agent-repl-switch-to-workspace 3))
+    ;; Assert
+    (should (member "elisp.commands.switch-to-workspace-out-of-range n=3 tabs=2"
+                    (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-records-an-empty-bar ()
+  "An empty bar records its no-op durably."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-bar nil "first"
+      (agent-repl-switch-to-workspace 1))
+    ;; Assert
+    (should (member "elisp.commands.switch-to-workspace-no-tabs n=1"
+                    (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-records-the-picker-choice ()
+  "The completing-read route records the workspace the user chose."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "second")))
+      (agent-repl-test-commands--with-bar '("first" "second") "first"
+        (agent-repl-switch-to-workspace nil)))
+    ;; Assert
+    (should (member "elisp.commands.switch-to-workspace-chosen ws=second"
+                    (agent-repl-test-commands--info-messages)))))
 
 (ert-deftest agent-repl-test-commands-switch-to-project-refuses-with-no-workspaces ()
   "With nothing live there is nothing to switch to."
