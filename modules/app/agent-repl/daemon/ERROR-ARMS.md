@@ -28,7 +28,6 @@ landed arm.
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
 | SetModel | `unspecified` | a `SetSessionModelFailure` whose `cause` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
-| CreateWorkspace | `spawn_failed` | the created workspace's bring-up could not start a shim. `OpenWorkspaceError` has carried `spawn_failed{detail}` since landing 4 and the SAME refusal is raised for both rpcs (`workspace.ArmSpawnFailed`), so a create answers out of band while an open answers in band. Found by the workspace realtests, 2026-09-12. NEEDED: `CreateWorkspaceSpawnFailed spawn_failed = 11;` in `CreateWorkspaceError.cause` with `message CreateWorkspaceSpawnFailed { string detail = 1; }`, exactly `OpenWorkspaceSpawnFailed`'s shape. No daemon change follows it: `server.fill` already supplies `detail`, so the handler switches onto the arm by the arm simply existing | workspace |
 
 `CloseWorkspaceBlocked` gained its five fields in landing 7 (turn_in_flight,
 live_work, held_prompts, merge_queued, summary), and `internal/workspace`'s
@@ -155,18 +154,31 @@ distinguishable by arm. The integration test
 `TestAnAbandonedQueuedMergeHasNoReachableCause` stays skipped, for the separate
 reason its skip states: the third cause has no production call site at all.
 
-## ForgetWorkspace — the WHOLE rpc is unlanded (2026-09-12)
+## ForgetWorkspace — LANDED WHOLE (2026-09-12)
 
-`ForgetWorkspace` has no proto at all yet: the verb, its refusals and the
-command-file entry are implemented, and the connect handler cannot be written
-until the endpoint lands. The rows below are what the endpoint's error message
-must carry; every one of them is raised today by `internal/workspace`'s Forget
-and reaches a caller only through the command-file route (where a refusal is
-recorded and the file is quarantined).
+`endpoint_forget_workspace.proto` and the `ForgetWorkspace` rpc landed on
+2026-09-12, and `internal/server/workspaces.go` gained the handler in the same
+commit. `ForgetWorkspaceError` carries `not_closed`, `blocked` (the same five
+fields `CloseWorkspaceBlocked` does, from the same composer), `has_children`
+(the children's ids as a repeated `children`, the contract's first repeated arm
+field) and the four every per-workspace verb raises through the shared `owned`
+helper. NOTHING IS OWED HERE: the verb's every refusal now has an arm, and the
+command-file route and the rpc reach the same `internal/workspace` Forget.
 
-| rpc | arm | condition | package |
-| --- | --- | --- | --- |
-| ForgetWorkspace | `not_closed` | the workspace is still open; forget is a registry act with no way to tear editor state down, and the close verb owns the quiet requirement it would otherwise duplicate or bypass | workspace |
-| ForgetWorkspace | `blocked` | the workspace is not quiet — a turn in flight, live detached work, held prompts, or a queued merge. Carries the SAME five fields `CloseWorkspaceBlocked` does, filled by the same composer | workspace |
-| ForgetWorkspace | `has_children` | other workspaces were spawned from this one; the schema's `parent_id` is `ON DELETE SET NULL`, so the forget would silently flatten the fork's lineage. Carries the children's ids as `children` | workspace |
-| ForgetWorkspace | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away{address}`, `not_yet_adopted` | the four every per-workspace verb raises, through the shared `owned` helper | workspace |
+## The five armless SESSION fault kinds — LANDED (2026-09-12)
+
+These were never rows in the table above, because they are not RPC refusals:
+they are recorded faults whose kind `SessionFault.kind` / `HostFault.kind`
+spelled no arm for, so `health.armlessSessionKinds` withheld them from both
+surfaces rather than publish a fault with the oneof unset. All five landed on
+2026-09-12 — `conversation_abandoned`, `session_absent`, `watch_open_refused`,
+`daemon_state_unreadable` and the workspace-scoped `adoption_window_expired`
+— and each left `armlessSessionKinds` in the same commit that switched its
+renderer onto the landed arm. `DaemonFault` gained `daemon_state_unreadable`
+too, which retires the last site (`health.selfCheckFault`) that put a fault on
+the wire with its kind unset.
+
+What remains in `armlessSessionKinds` is armless BY DESIGN, not by debt: the
+reconciled bounce disposition, which is per-session accounting and never a
+standing condition a host view should draw. See
+`docs/overhaul/PROTO-CHANGES.md` for the arms and their tag numbers.
