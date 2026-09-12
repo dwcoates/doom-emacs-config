@@ -83,6 +83,10 @@ func (s *fakeServer) NukeWorkspace(ctx context.Context, req *connect.Request[v1.
 	return handleUnary[v1.NukeWorkspaceRequest, v1.NukeWorkspaceResponse](ctx, s, "NukeWorkspace", req.Msg)
 }
 
+func (s *fakeServer) ForgetWorkspace(ctx context.Context, req *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error) {
+	return handleUnary[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse](ctx, s, "ForgetWorkspace", req.Msg)
+}
+
 func (s *fakeServer) MergeWorkspace(ctx context.Context, req *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error) {
 	return handleUnary[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse](ctx, s, "MergeWorkspace", req.Msg)
 }
