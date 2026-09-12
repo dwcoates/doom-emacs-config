@@ -41,6 +41,23 @@ const (
 	// PhaseModuleLoaded is spawn to the module's own startup completing —
 	// the daemon ensure being COMMANDED, which config.el schedules once the
 	// module is loaded.
+	//
+	// ITS MARKER IS `elisp.daemon.ensure-scheduled`, NOT
+	// `elisp.daemon.ensure-command`. The reader matched the latter for the
+	// whole life of this file and consequently never once observed this
+	// phase: across the 23 MANIFEST.md runs under ~/.claude-emacs/realtest/
+	// there is not a single `ensure-command` record, because that record is
+	// written by `agent-repl-frontend-daemon-ensure` — the INTERACTIVE
+	// command, the retry a person invokes after a build failure — and a
+	// startup never invokes it. What config.el actually registers on
+	// `emacs-startup-hook` is `agent-repl-daemon-schedule-ensure`, whose
+	// record is `elisp.daemon.ensure-scheduled idle=N` (46 of them in the
+	// same history). That is the commanding this phase names, so that is
+	// what is matched.
+	//
+	// `ensure-command` is deliberately NOT matched as well. It fires only on
+	// a manual retry, which is not a startup edge, and crediting it to a
+	// startup phase would report a person's keypress as module-load latency.
 	PhaseModuleLoaded PhaseName = "module-loaded"
 	// PhaseDaemonSpawned is spawn to the daemon process existing:
 	// `elisp.daemon.started` for one this launch spawned, or
@@ -70,7 +87,18 @@ const (
 	// rather than from the request, which is what makes it evidence.
 	PhaseRosterSubscribed PhaseName = "roster-subscribed"
 	// PhaseFirstRoster is spawn to the first roster reconcile: the daemon
-	// pushed the workspace set and Emacs applied it.
+	// pushed the workspace set and Emacs applied it. Its marker is
+	// `elisp.roster.reconcile: tabs=N order=(...)`, written by
+	// `agent-repl-roster-reconcile` once the tab walk has settled the order.
+	//
+	// That record existed but was invisible until 2026-09-12: roster.el wrote
+	// it through `agent-repl--log`, which is the DEBUG rung, and the durable
+	// sink's default level is `info`, so it never reached any file. Across
+	// the same 23-run history there are 108 `elisp.roster.tab-open` records
+	// (INFO, written by the very same walk) and zero `elisp.roster.reconcile`
+	// ones. Per AGENTS.md, "An invisible action is a logging defect": the
+	// record now goes out at INFO like its siblings in that file, so the
+	// phase is observable.
 	PhaseFirstRoster PhaseName = "first-roster"
 	// PhaseTabDrawn is spawn to a WORKSPACE'S tab appearing
 	// (`elisp.roster.tab-open`). Measured per workspace.
@@ -167,7 +195,7 @@ type marker struct {
 // `link-up-skipped`, and `adopted\b` also matches `adopted-unhealthy`. Both of
 // those are the OPPOSITE of the phase they would be credited to.
 var markers = []marker{
-	{name: PhaseModuleLoaded, re: regexp.MustCompile(`^elisp\.daemon\.ensure-command`)},
+	{name: PhaseModuleLoaded, re: regexp.MustCompile(`^elisp\.daemon\.ensure-scheduled(\s|$)`)},
 	{name: PhaseDaemonSpawned, re: regexp.MustCompile(`^elisp\.daemon\.(started|adopted)(\s|$)`)},
 	{name: PhaseLinkUp, re: regexp.MustCompile(`^elisp\.(link\.(up|reconnected)|host\.link-up)(\s|$)`)},
 	{name: PhaseRosterSubscribed, re: regexp.MustCompile(`^elisp\.roster\.subscribed(\s|$)`)},
