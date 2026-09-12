@@ -320,7 +320,7 @@ func TestCloseOrphansStampsEngagement(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
 	openTurn(t, s, ws.ID)
@@ -368,7 +368,7 @@ func TestCloseOrphansIsOneTransaction(t *testing.T) {
 	// crash mid-teardown can never leave half the bookkeeping done.
 	s, log := testStore(t)
 	ws := testWorkspace(t, s)
-	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
 		t.Fatalf("PutSession: %v", err)
 	}
 	sound := openTurn(t, s, ws.ID)
