@@ -685,6 +685,20 @@ foreground harnesses may use `logging.NewAtLevel`.
   cause, keeping its workspace attribution. Dropping it, which is what this
   loop used to do, silently swallowed every file-plane diagnostic for the whole
   of a daemon outage.
+- AN UNRESOLVABLE WORKSPACE IS FORWARDED UNATTRIBUTED, NOT WARNED, NOT RETRIED.
+  A file-scoped diagnostic can name a dir that is not a real workspace -- a
+  macOS temp-root, an unknown path -- and so will never appear in the roster.
+  `WatchWorkspaceRoster` replays its COMPLETE current snapshot to a fresh
+  subscriber, so `resolveWorkspace` concludes on the FIRST delivered roster: if
+  that snapshot lacks the dir, the dir is unresolvable and `Forward` returns
+  `logging.ErrForwardWorkspaceUnresolvable` AT ONCE, never holding the standing
+  stream open to its deadline waiting for a workspace that will never register.
+  The forward ladder does NOT retry that sentinel; `forwardLoop` narrates it as
+  `sidecar.logging.forward-deferred` at DEBUG and the record still lands in the
+  GLOBAL durable sink via the same `forward_undelivered` no-loss path. This is
+  the roster-delivered-but-absent case ONLY: a roster stream that errors or
+  never delivers a snapshot is a transport transient handled by the pid/boot
+  sentinels above, not an unresolvable workspace.
 - Lifecycle records persist in
   `~/.cache/agent-repl/log/shim-claude-sidecar.log` (`--log`).
 - THE DURABLE LOG IS THE ONLY COPY, AND IT IS BOUNDED. `--log` is opened
