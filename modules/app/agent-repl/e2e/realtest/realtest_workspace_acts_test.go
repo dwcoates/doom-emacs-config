@@ -89,6 +89,11 @@ var (
 		Keycode:   53,
 		Modifiers: nil,
 		Why:       "returns evil to normal state so SPC is the leader; a no-op when it already is",
+		// A second `<escape>` lands in the state the first one produced,
+		// where it does nothing at all, so re-posting a dropped one cannot
+		// make anything happen twice.
+		Repeatable: true,
+		RepeatWhy:  "it returns evil to normal state, and in normal state it is a no-op",
 	}
 	// wsActLeader is `SPC`, Doom's leader.
 	wsActLeader = Chord{
@@ -134,6 +139,13 @@ var (
 		Keycode:   5,
 		Modifiers: []string{"control"},
 		Why:       "aborts the minibuffer read the chord under test opened, leaving no half-finished command",
+		// A quit is a return to rest, not an advance: the second one aborts
+		// the read the first one did not, or signals quit at top level, which
+		// is what a `C-g` at rest already does. It is only ever pressed here
+		// to clear a prompt this side opened, so a late duplicate has nothing
+		// of the owner's to interrupt.
+		Repeatable: true,
+		RepeatWhy:  "it aborts a standing read, and with no read standing it is a top-level quit that changes nothing",
 	}
 )
 
@@ -640,6 +652,11 @@ func wsActProveChord(ctx context.Context, t *testing.T, client *Client, driver *
 	sequence []Chord, wantPrompt string, manifest *Manifest) bool {
 	t.Helper()
 
+	// Every press inside this chord — the escapes, the sequence, the `C-g`
+	// that clears up after it — reports what it knew about its own delivery,
+	// and the report lands in the manifest whichever way the chord goes.
+	defer wsActReportKeyDelivery(t, driver, manifest)
+
 	if driver == nil {
 		note := fmt.Sprintf("CHORD NOT PRESSED: the key driver is unavailable, so `%s` was never sent; "+
 			"the act below was driven through the command instead", wsActSpell(sequence))
@@ -710,6 +727,26 @@ func wsActProveChord(ctx context.Context, t *testing.T, client *Client, driver *
 	wsActClearPendingInput(ctx, t, client, driver,
 		fmt.Sprintf("leaving `%s`", wsActSpell(sequence)), manifest)
 	return reached
+}
+
+// wsActReportKeyDelivery moves what the presses said about themselves into the
+// manifest.
+//
+// A key that never arrived is already the press's own error and is reported
+// where it happened; these are the quieter ones — a key that had to be posted
+// twice before Emacs accounted for it, and a key the ring could not answer for.
+// They are findings against THIS HARNESS, so they are logged rather than
+// failed: the chord they belong to did happen, and the run's verdict on the
+// editor must not turn on the driver's own retries.
+func wsActReportKeyDelivery(t *testing.T, driver *KeyDriver, manifest *Manifest) {
+	t.Helper()
+	if driver == nil {
+		return
+	}
+	for _, note := range driver.DrainNotes() {
+		manifest.Notes = append(manifest.Notes, note)
+		t.Logf("%s", note)
+	}
 }
 
 // wsActClearPendingInput presses a real `<escape>` and reports what it cleared.
@@ -817,6 +854,7 @@ func wsActReadInputState(ctx context.Context, client *Client) (wsActInputState, 
 // minibuffer has nothing left to say, so it stops immediately and says why.
 func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver, manifest *Manifest) {
 	t.Helper()
+	defer wsActReportKeyDelivery(t, driver, manifest)
 
 	prompt, err := wsActMinibufferPrompt(ctx, client)
 	if err != nil {
@@ -837,10 +875,12 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 	if driver != nil {
 		evidence = wsActReadQuitEvidenceBefore(ctx, client)
 		if pressErr := driver.Press(ctx, wsActQuit); pressErr != nil {
-			note := fmt.Sprintf("C-g COULD NOT BE DELIVERED while %q was standing: %v. keydriver.swift refuses "+
-				"to post a key event to an Emacs it could not make the active application with a focused "+
-				"window, because AppKit dispatches a key event only to a key window and drops such a post "+
-				"silently; the read channel is used below and this delivery failure is the finding",
+			note := fmt.Sprintf("C-g COULD NOT BE DELIVERED while %q was standing: %v. Either keydriver.swift "+
+				"refused to post — it will not post to an Emacs the window server does not report as "+
+				"frontmost with a focused window, because AppKit dispatches a key event only to a key "+
+				"window and drops such a post silently — or it posted, held the target key, and Emacs's own "+
+				"account never showed the key arriving. The read channel is used below and this delivery "+
+				"failure is the finding",
 				prompt, pressErr)
 			manifest.Notes = append(manifest.Notes, note)
 			t.Errorf("%s", note)
@@ -975,7 +1015,7 @@ func wsActKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	if err != nil {
 		t.Fatalf("read the Emacs pid for the key driver: %v", err)
 	}
-	driver := &KeyDriver{Pid: pid, Scratch: runDir}
+	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client}
 	if err := driver.Build(ctx); err != nil {
 		note := fmt.Sprintf("KEY DRIVER UNAVAILABLE: %v", err)
 		manifest.Notes = append(manifest.Notes, note)
