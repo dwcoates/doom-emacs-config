@@ -354,6 +354,40 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## An invisible action is a logging defect, not a test problem
+
+When a test, an investigation, or a person cannot tell from the logs what the
+software just did, the logs are what is wrong. This holds whenever it comes up,
+not only when a test happens to assert on it.
+
+The reflex to resist is treating the gap as the observer's problem: relaxing the
+assertion, reading process state instead, or concluding the behavior is fine
+because it visibly worked. A workspace switch that selects the right workspace
+and underlines the right tab while writing nothing to any sink is still a defect,
+because afterwards nobody can say it happened, in what order, or why.
+
+The fix is to emit the missing record at the site that performs the action, once,
+naming the action and the subject it acted on.
+
+CHATTINESS IS NOT A REASON TO STAY SILENT; IT IS A REASON TO PICK THE RIGHT
+LEVEL. Do not skip a record because the log would get noisy, and do not promote
+one to WARN so it is easier to find. Both are how a log stops being readable.
+
+- ERROR and WARN are for conditions somebody must act on. The realtest harvest
+  fails a run on every one of them, with no allowlist, so a routine event logged
+  at WARN breaks the gate for everyone.
+- INFO is for actions a person took and lifecycle a person would ask about.
+- DEBUG is for the per-item detail that explains an INFO record when someone is
+  already looking. High-frequency and loop-body records belong here.
+
+A record that fires on a routine action almost always belongs at DEBUG or INFO.
+Use the level the existing operations in the same file already use.
+
+Follow the module's logging contract for shape and routing: one log function per
+codebase, the established operation naming, and per-workspace routing so the
+record reaches that workspace's sink. See `logging-contract.md` and
+`docs/LOGGING.md`.
+
 ## Logs
 
 `bin/logs.sh` is the one reader for persisted agent-repl records. It resolves a
