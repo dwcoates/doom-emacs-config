@@ -458,10 +458,10 @@ func TestStartupCatchUpSummarizesABacklogOfSilentRunsAsOneRecord(t *testing.T) {
 	// Act: the first sweep catches up on the whole backlog at once.
 	tr.Sweep(bootMs, startMs+shellMs)
 
-	// Assert: one summary at warn naming the class and the count, never three
+	// Assert: one summary at info naming the class and the count, never three
 	// per-item warnings.
 	records := parseLogLines(t, *logs)
-	rec := requireOnceIn(t, records, "catchup-summary", "warn")
+	rec := requireOnceIn(t, records, "catchup-summary", "info")
 	if got := ctxString(t, rec, "reason"); got != string(ReasonWentSilent) {
 		t.Fatalf("summary reason = %q, want %q", got, ReasonWentSilent)
 	}
@@ -531,7 +531,7 @@ func TestStartupCatchUpSummarizesEachClassSeparately(t *testing.T) {
 	// Assert: the arm IS the class, so each gets its own one-line summary.
 	records := parseLogLines(t, *logs)
 	summaries := map[string]int{}
-	for _, r := range opsAt(records, "catchup-summary", "warn") {
+	for _, r := range opsAt(records, "catchup-summary", "info") {
 		summaries[ctxString(t, r, "reason")] = ctxInt(t, r, "repeat_count")
 	}
 	want := map[string]int{string(ReasonWentSilent): 1, string(ReasonSweptUp): 1}
@@ -556,7 +556,7 @@ func TestABootSweepBacklogIsSummarizedNotStatedPerRun(t *testing.T) {
 
 	// Assert.
 	records := parseLogLines(t, *logs)
-	rec := requireOnceIn(t, records, "catchup-summary", "warn")
+	rec := requireOnceIn(t, records, "catchup-summary", "info")
 	if got := ctxString(t, rec, "reason"); got != string(ReasonSweptUp) {
 		t.Fatalf("boot-sweep summary reason = %q, want %q", got, ReasonSweptUp)
 	}

@@ -165,7 +165,7 @@ func TestARefusedWriteNamesBothTheRefusalsKindAndItsSite(t *testing.T) {
 	}})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	if err == nil {

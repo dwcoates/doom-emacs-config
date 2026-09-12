@@ -245,12 +245,34 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	}
 
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
-		"batch durable written=%d absorbed=%d page_lines=%d bash_rows=%d", result.Written, result.Absorbed, len(result.Lines), len(result.BashRows))
+		"batch durable written=%d absorbed=%d skipped=%d page_lines=%d bash_rows=%d",
+		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), len(result.BashRows))
 	s.publish(log, msg.GetProducer(), result.Lines)
 	s.publishBashRows(log, msg.GetProducer(), result.BashRows)
 	return connect.NewResponse(&storev1.WriteBatchResponse{
-		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
+		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{
+			Skipped: skippedEntries(result.Skipped),
+		}},
 	}), nil
+}
+
+// skippedEntries carries the store's per-entry legacy book-conflict skips onto
+// the success arm so the producer can fold them into its own catch-up summary.
+// A skip is not a refusal — the batch was durable — so it rides success, never
+// failure.
+func skippedEntries(skipped []SkippedEntry) []*storev1.WriteBatchSkippedEntry {
+	if len(skipped) == 0 {
+		return nil
+	}
+	out := make([]*storev1.WriteBatchSkippedEntry, 0, len(skipped))
+	for _, s := range skipped {
+		out = append(out, &storev1.WriteBatchSkippedEntry{
+			UpsertKey: s.UpsertKey,
+			FromBook:  s.FromBook,
+			ToBook:    s.ToBook,
+		})
+	}
+	return out
 }
 
 // batchAttribution names every agent and book the aggregate write concerns.

@@ -43,6 +43,17 @@ import (
 // Producer is the sidecar's fixed WriteBatchRequest producer identity.
 const Producer = "shim-claude-sidecar"
 
+// SkippedEntry is one entry the store left UNCHANGED because its upsert_key
+// already names a row under a different book — the store's re-ingest idempotency
+// answer, carried on the WriteBatch success arm. It is NOT a refusal: the batch
+// was durable and every other entry committed. The producer folds these into
+// its own startup catch-up summary; a skip in steady state is unexpected.
+type SkippedEntry struct {
+	UpsertKey string
+	FromBook  string
+	ToBook    string
+}
+
 // RPC names, carried in the `rpc` log key so a sidecar record joins against the
 // store's record for the same call.
 const (
@@ -201,9 +212,15 @@ func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorS
 // means nothing was committed, so the caller must not advance; it holds no
 // retry buffer and spills nothing, because its sources are durable files it
 // re-reads from the last committed cursor.
-func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) error {
+//
+// A DURABLE SUCCESS MAY STILL NAME SKIPS: an entry whose upsert_key already
+// names a row under a different book is kept-and-skipped rather than refused, so
+// re-ingesting already-stored content is idempotent. Those entries are returned
+// so the caller can fold them into its own catch-up summary; they are not a
+// failure and the cursor still advances.
+func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) ([]SkippedEntry, error) {
 	if batch == nil {
-		return errors.New("storeclient: WriteBatch requires a batch")
+		return nil, errors.New("storeclient: WriteBatch requires a batch")
 	}
 	bound := c.log.With(logging.Context{
 		Operation: "storeclient-write-batch", StoreSocket: c.socket, RPC: rpcWriteBatch, Producer: Producer,
@@ -220,12 +237,13 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) erro
 	}))
 	if err != nil {
 		bound.With(logging.Context{Level: "error"}).Log("write transport failure for %d entrie(s): %v", len(batch.GetEntries()), err)
-		return fmt.Errorf("storeclient: %s: %w", rpcWriteBatch, err)
+		return nil, fmt.Errorf("storeclient: %s: %w", rpcWriteBatch, err)
 	}
 	switch result := response.Msg.GetResult().(type) {
 	case *storev1.WriteBatchResponse_Success:
-		bound.LogVerbose("write durable entries=%d", len(batch.GetEntries()))
-		return nil
+		skipped := skippedFrom(result.Success.GetSkipped())
+		bound.LogVerbose("write durable entries=%d skipped=%d", len(batch.GetEntries()), len(skipped))
+		return skipped, nil
 	case *storev1.WriteBatchResponse_Failure:
 		refusal := writeRefusal(result.Failure)
 		if refusal.Kind == RefusalKindUnset {
@@ -239,7 +257,7 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) erro
 				"write refused with NO failure kind, which this contract forbids; treating it as %s so recovery still runs: %s",
 				RefusalStorageFailure, refusal.Detail)
 			refusal.Kind = RefusalStorageFailure
-			return refusal
+			return nil, refusal
 		}
 		// THE SITE RIDES WITH THE KIND. The kind says whether a retry can help;
 		// the site says which call was refused, which is what a reader joins
@@ -249,11 +267,29 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) erro
 			RefusalSite: rpcWriteBatch, Field: refusal.Field,
 		}).Log(
 			"write refused as %s for %d entrie(s), nothing committed: %s", refusal.Kind, len(batch.GetEntries()), refusal.Detail)
-		return refusal
+		return nil, refusal
 	default:
 		bound.With(logging.Context{Level: "error"}).Log("write answer carries neither success nor failure; the batch's durability is unknown")
-		return fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcWriteBatch)
+		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcWriteBatch)
 	}
+}
+
+// skippedFrom maps the store's per-entry legacy book-conflict skips off the
+// success arm into the caller's own type, so nothing downstream imports the
+// store proto to read a skip.
+func skippedFrom(skipped []*storev1.WriteBatchSkippedEntry) []SkippedEntry {
+	if len(skipped) == 0 {
+		return nil
+	}
+	out := make([]SkippedEntry, 0, len(skipped))
+	for _, s := range skipped {
+		out = append(out, SkippedEntry{
+			UpsertKey: s.GetUpsertKey(),
+			FromBook:  s.GetFromBook(),
+			ToBook:    s.GetToBook(),
+		})
+	}
+	return out
 }
 
 // writeRefusal reads a WriteBatchFailure's arm into the typed refusal.

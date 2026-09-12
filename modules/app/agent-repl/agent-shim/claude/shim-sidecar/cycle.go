@@ -218,6 +218,13 @@ type sidecar struct {
 	// hold-expired and resolve-transcript-workspace paths.
 	catchupSpools     catchupTally
 	catchupWorkspaces catchupTally
+	// catchupBookConflicts tallies the legacy book-conflict entries the store
+	// SKIPPED during startup catch-up: a corrected converter re-ingesting the
+	// pre-existing corpus writes an already-stored key under its now-right book,
+	// which the store keeps-and-skips. It is expected on a restart re-scan, so it
+	// is summarized once per pass rather than warned per entry, exactly as the
+	// spool and workspace backlogs are; a skip in steady state is warned instead.
+	catchupBookConflicts catchupTally
 	// suspensionStated remembers that the WARNING opening this outage has been
 	// written. THE OUTAGE IS STATED ONCE, and a process that starts with no
 	// store is in an outage exactly like one whose store died mid-run — so the
@@ -1037,7 +1044,8 @@ func (s *sidecar) pollAll() {
 		if !result.Changed {
 			continue
 		}
-		if err := s.writeBatch(result); err != nil {
+		skips, err := s.writeBatch(result)
+		if err != nil {
 			if s.interrupted(err) {
 				// The process is going away; storeWrite stated the replay and
 				// the cursor stayed where it was.
@@ -1063,6 +1071,7 @@ func (s *sidecar) pollAll() {
 			return
 		}
 		w.tailer.Commit(result)
+		s.noteSkips(path, skips, nowMs)
 		s.applySettled()
 		// A stop that arrived before this file had a reader is applied HERE,
 		// once a batch of it is durable: only now does its handler hold the
@@ -1155,7 +1164,7 @@ func (s *sidecar) pollFailed(path string, w *watched, err error, nowMs int64) {
 // the two either loses records (cursor advanced first) or duplicates them
 // (records first); only the second is survivable, by the deterministic write_id
 // on every record, which is a recovery rather than a guarantee.
-func (s *sidecar) writeBatch(result tail.PollResult) error {
+func (s *sidecar) writeBatch(result tail.PollResult) ([]storeclient.SkippedEntry, error) {
 	return s.storeWrite("tailer batch", &storev1.EntryBatch{
 		Entries:       result.Entries,
 		CursorAdvance: result.Next,
@@ -1176,7 +1185,8 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
 	if len(entries) == 0 {
 		return
 	}
-	if err := s.storeWrite(what, &storev1.EntryBatch{Entries: entries}); err != nil {
+	skips, err := s.storeWrite(what, &storev1.EntryBatch{Entries: entries})
+	if err != nil {
 		if s.interrupted(err) {
 			// storeWrite already stated the shutdown; there is no outage here.
 			return
@@ -1197,7 +1207,11 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
 		}
 		s.log.With(logging.Context{Operation: "store-write", Level: "error"}).
 			Log("%s write failed for %d record(s); production is suspended and the conclusions are restated on the next cycle: %v", what, len(entries), err)
+		return
 	}
+	// The write was durable. Inferred records name no file, so a skip here is
+	// never catch-up backlog: it is unexpected and warned per entry.
+	s.warnUnexpectedSkips("inferred "+what, skips)
 }
 
 // rpcContext bounds one store call by rpcTimeout AND ties it to the process's
@@ -1219,20 +1233,56 @@ func (s *sidecar) interrupted(err error) bool {
 
 // storeWrite is the sidecar's ONLY path to the store. Routing every write
 // through here is what makes an unreachable store impossible to miss.
-func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) error {
+func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) ([]storeclient.SkippedEntry, error) {
 	ctx, cancel := s.rpcContext()
 	defer cancel()
-	err := s.store.WriteBatch(ctx, batch)
+	skipped, err := s.store.WriteBatch(ctx, batch)
 	if s.interrupted(err) {
 		// NOT AN OUTAGE AND NOT SWALLOWED: the error still returns, but the
 		// store was fine and the records replay from the unadvanced cursor on
 		// the next boot.
 		s.log.With(logging.Context{Operation: "shutdown"}).Log(
 			"shutdown interrupted a write; it will replay (%s, %d record(s))", what, len(batch.GetEntries()))
-		return err
+		return nil, err
 	}
 	s.noteStoreErr(what, err)
-	return err
+	return skipped, err
+}
+
+// noteSkips records the legacy book-conflict entries the store skipped for a
+// batch read from `path`. A skip during STARTUP CATCH-UP is the corrected
+// converter re-ingesting already-stored content under its now-right book:
+// expected, and folded into ONE per-pass summary (flushCatchupSummaries) rather
+// than warned per entry. A skip in STEADY STATE is unexpected — nothing should
+// re-book a live row — so it is warned per entry.
+func (s *sidecar) noteSkips(path string, skips []storeclient.SkippedEntry, nowMs int64) {
+	if len(skips) == 0 {
+		return
+	}
+	mtimeMs := fileActivityMs(path, nowMs)
+	if s.isBacklog(mtimeMs) {
+		for range skips {
+			s.catchupBookConflicts.add(mtimeMs)
+		}
+		s.log.With(logging.Context{
+			Operation: "book-conflict-skip", Path: path, Reason: "legacy_book_conflict", Level: "debug",
+		}).LogVerbose("store skipped %d legacy book-conflict entrie(s) during startup catch-up; the stored rows are kept and this is summarized rather than stated one by one", len(skips))
+		return
+	}
+	s.warnUnexpectedSkips("tailer batch from "+path, skips)
+}
+
+// warnUnexpectedSkips states one WARN per legacy book-conflict skip that arose
+// where a skip is NOT expected — steady-state reads and inferred records. It is
+// the sad-path record for "the store kept a row this write tried to re-book";
+// nothing is swallowed, and the write still succeeded for every other entry.
+func (s *sidecar) warnUnexpectedSkips(what string, skips []storeclient.SkippedEntry) {
+	for _, skip := range skips {
+		s.log.With(logging.Context{
+			Operation: "book-conflict-skip", Reason: "legacy_book_conflict", Level: "warn",
+		}).Log("store skipped a legacy book-conflict entry in steady state (%s): upsert_key=%q is stored under book %q and this write would have moved it to %q; the stored row is kept -- nothing should re-book a live row",
+			what, skip.UpsertKey, skip.FromBook, skip.ToBook)
+	}
 }
 
 // indexCursorsByFileID keys recovered cursors by the FILE'S OWN IDENTITY for
