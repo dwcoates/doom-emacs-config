@@ -77,10 +77,36 @@ e2e and Emacs-layer suites stay.
 ## Before each run
 
 - Back up `~/.claude-emacs/wsm.db` (with `-wal`/`-shm`) and the store's
-  `events.db` to timestamped siblings and report the paths.
+  `events.db` to timestamped siblings and report the paths. ONCE PER RUN, not
+  once per realtest: the copy is of the state as it was before the run began.
 - Refuse to run unless every deployed system is at master's HEAD (the
   readiness report is the judge) and no human is using Emacs.
 - After the run the owner's editor is left working and the stack untouched.
+
+## Running a sweep
+
+`bin/realtest.sh` takes realtests by number or by name — `bin/realtest.sh 2 3
+4`, `bin/realtest.sh -run TestRealtestForkAWorkspace` — and with no argument
+runs the whole set. A sweep is SEQUENCED: one `go test` invocation per
+realtest, with the world each one's precondition demands established between
+them, from the world table in the script. No test's own refusal is relaxed by
+this; the runner is what gets out of their way.
+
+- **The editor.** A cold-start realtest (1, 5, 6, 7, 8) gets a socket with
+  nothing answering: the runner quits what the previous realtest left.
+  Realtests 2 and 4 keep the standing editor, because a restart and an
+  adoption are what they measure. `AGENT_REPL_REALTEST_TAKEOVER=1` is one
+  answer for the whole run, and the refusal says how many quits the plan holds
+  before any of them happens.
+- **The daemon.** Realtest 3 needs none running, and stopping the owner's
+  daemon is a consent of its own: `AGENT_REPL_REALTEST_STOP_DAEMON=1`. Without
+  it realtest 3 is SKIPPED with the reason rather than run into its refusal.
+  SIGTERM only; a daemon that ignores it is a skip too.
+- **What the exit status means.** 0 — everything asked for ran and passed. 78
+  — what ran passed, but at least one realtest never ran (each skip's reason is
+  printed). 77 — DECLINED, nothing ran at all. Anything else is a realtest
+  failing, and a failure does not stop the sweep: the rest still run, so one
+  run gathers every finding.
 
 ## The set
 
@@ -192,18 +218,22 @@ reopen's bring-up spawns a fake shim for the same reason.
 
 ### Running realtests 2 and 3
 
-Both are `bin/realtest.sh -run <name>`, one at a time, and each has a
-precondition the script's own preflight does not establish:
+Each has a precondition the tests themselves will not establish, and the runner
+establishes both (see "Running a sweep"):
 
 - **2 — restart with the daemon up** needs a daemon already serving. Realtest 1
-  leaves one behind, and so does starting Emacs by hand. The test quits the
-  standing editor itself, which needs `AGENT_REPL_REALTEST_TAKEOVER=1` exactly
-  as the script's second refusal does.
-- **3 — start with the daemon down** needs NO daemon running. The test refuses
-  and names the pid rather than stopping the owner's daemon: stop it
-  deliberately first (`SPC o C-d` from the editor, or kill the pid), then run
-  realtest 3 ALONE. It is not the third test of a sweep, because realtests 1
-  and 2 each leave a daemon behind them.
+  leaves one behind, and so does starting Emacs by hand; the runner cannot
+  start one, so with no daemon running it SKIPS realtest 2 and says so. The
+  test quits the standing editor itself — the quit is the restart it measures,
+  so the runner leaves the editor alone for it — which needs
+  `AGENT_REPL_REALTEST_TAKEOVER=1` exactly as the script's second refusal does.
+- **3 — start with the daemon down** needs NO daemon running. The test still
+  refuses and names the pid rather than stopping the owner's daemon. What
+  changed is who may: with `AGENT_REPL_REALTEST_STOP_DAEMON=1` the runner quits
+  the editor, SIGTERMs the daemon and waits for it to go before realtest 3
+  starts, so it can be the third test of a sweep after all. Without that
+  consent it is skipped, and the manual route is unchanged — stop the daemon
+  deliberately (`SPC o C-d`, or kill the pid) and run realtest 3 alone.
 
 ### Realtest 1, run 1 — 2026-09-11 12:13, FAILED
 

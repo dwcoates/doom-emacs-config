@@ -46,15 +46,21 @@ import (
 // asserts the spawn records absent: a test that only checked its own path
 // would pass on a run that took both.
 //
-// THE PRECONDITION IS THE LEAD'S TO ESTABLISH, AND THIS TEST WILL NOT
+// THE PRECONDITION IS THE RUNNER'S TO ESTABLISH, AND THIS TEST WILL NOT
 // ESTABLISH IT. No daemon may be running when this test starts, and if one is,
-// the test refuses and names the pid. It does NOT kill it. There is no harness
-// path that stops the owner's daemon and this test does not invent one:
-// bin/realtest.sh, faced with a daemon it cannot work with, declines and tells
-// the operator to stop it ("SPC o C-d from the editor, or kill <pid>"), and
-// that is the same instruction this refusal gives. So realtest 3 is run ALONE,
-// after the daemon has been stopped deliberately — not as the third test of a
-// sweep, where realtests 1 and 2 each leave a daemon behind them.
+// the test refuses and names the pid. It does NOT kill it, in a sweep or
+// alone: the process it would be killing is the owner's, and a test does not
+// make that decision.
+//
+// bin/realtest.sh does, and only when it is told to. Stopping the daemon ends
+// every live session it holds, which the editor takeover says nothing about,
+// so it is a consent of its own: with AGENT_REPL_REALTEST_STOP_DAEMON=1 the
+// runner quits the editor, SIGTERMs the daemon and waits for it to go before
+// this test starts; without it the runner SKIPS realtest 3 and says why,
+// rather than running it into the refusal below. Either way this refusal is
+// what decides, and the manual route — stop the daemon deliberately (SPC o C-d
+// from the editor, or kill the pid) and run realtest 3 on its own — is
+// unchanged.
 //
 // "IT IS BUILT AND SPAWNED" — the spawn is asserted, the build is only
 // REPORTED. bin/realtest.sh's readiness refusal already guarantees every
@@ -249,9 +255,10 @@ func requireNoDaemonRunning(ctx context.Context, t *testing.T, when string) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("%d `%s` process(es) are still running %s (pids %v), and realtest 3 measures a startup with "+
-				"the daemon DOWN. This test does not stop the owner's daemon: stop it deliberately (SPC o C-d from "+
-				"the editor, or kill %v) and run realtest 3 on its own — realtests 1 and 2 each leave a daemon "+
-				"behind, so it is not the third test of a sweep (docs/REALTEST-PLAN.md, startup item 3).",
+				"the daemon DOWN. This test does not stop the owner's daemon. Either let bin/realtest.sh do it "+
+				"with AGENT_REPL_REALTEST_STOP_DAEMON=1 (a consent of its own, because stopping the daemon ends "+
+				"every live session it holds), or stop it deliberately (SPC o C-d from the editor, or kill %v) and "+
+				"run realtest 3 on its own (docs/REALTEST-PLAN.md, startup item 3).",
 				len(pids), daemonPattern, when, pids, pids)
 		}
 		select {
