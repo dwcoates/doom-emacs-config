@@ -161,7 +161,7 @@ Scale
 | 4 | authored, not yet run (`TestRealtestSwitchBetweenWorkspaces`) | needs a bar drawing at least THREE tabs: with two, `s-{` and `s-}` reach the same tab and a reversed direction cannot be told from a correct one |
 | 5 | authored, not yet run | `TestRealtestCreateWorkDeleteAWorkspace`; acts against a dedicated scratch repo under the run directory |
 | 6 | authored, not yet run | `TestRealtestRegisterAndReopen`; same scratch-repo rule |
-| 7 | authored, not yet run | `TestRealtestForkAWorkspace`; same scratch-repo rule. Needs `AGENT_REPL_FAKE_SHIMS=1` on the launch, see below |
+| 7 | authored, not yet run | `TestRealtestForkAWorkspace`; same scratch-repo rule. Needs a prompt ANSWERED, which the vendor guard now provides on its own, see below |
 | 8 | authored, not yet run | `TestRealtestPriorityCloseReopenKill`; same scratch-repo rule |
 
 The lead updates this table as each realtest runs, is ruled on, and is
@@ -172,21 +172,23 @@ confirmed.
 It is the first realtest that needs a prompt to be ANSWERED. The daemon refuses
 a fork whose parent has no conversation, so realtest 7 gives its parent one
 before it forks, and a submitted prompt reaches the shim's `createRealQuery`,
-which is where `AGENT_REPL_FORBID_VENDOR_CALLS=1` makes the guard throw. The
-Emacs process therefore needs `AGENT_REPL_FAKE_SHIMS=1` beside the guard, so
-every shim spawn carries `--fake` and answers from the offline scripted SDK.
+which is where `AGENT_REPL_FORBID_VENDOR_CALLS=1` makes the shim's own guard
+throw.
 
-`open` hands Emacs to launchd, which does not inherit the caller's environment,
-so the hook has to be stated with `--env` on the launch: `openBackgroundArgs` in
-`e2e/realtest/launch.go`. That file is shared by every realtest, so the test
-does NOT change it. It checks the Emacs process for the hook and fails naming
-this remedy. The lead rules on whether the launcher states it always or only for
-the realtests that need an answered prompt.
+NOTHING EXTRA IS STATED ON THE LAUNCH. A daemon that is itself under the guard
+spawns every shim with `--fake` and never a real-vendor one
+(`daemon/internal/shimclient/supervisor.go`, `fakeMode`), so the prompt is
+answered from the offline scripted SDK and `createRealQuery` is never reached.
+The guard used to REFUSE that spawn instead, which is what made realtests 4, 5
+and 7 impossible to run: creating or forking a workspace brings a session up,
+and the refusal cascaded to "the shim did not come up".
 
-Realtest 8 does not require the hook: nothing in it submits a prompt. Its reopen
-does bring a session up, so if a bring-up turns out to reach the vendor on this
-machine the refusal appears in that run's harvest, and the remedy is the same
-one.
+`AGENT_REPL_FAKE_SHIMS=1` remains a separate daemon test hook — it turns fake
+shims on WITHOUT the guard, so a suite can exercise a real vendor call site
+against a live session — and it is not needed here.
+
+Realtest 8 needs nothing extra either: nothing in it submits a prompt, and its
+reopen's bring-up spawns a fake shim for the same reason.
 
 ### Running realtests 2 and 3
 

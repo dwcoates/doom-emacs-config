@@ -987,3 +987,125 @@ func createArgsContainAll(args []string, want ...string) bool {
 	}
 	return true
 }
+
+// TestCreateWorkspaceUnderTheVendorGuardAloneSpawnsAFakeShim asserts a guarded
+// daemon CREATES a workspace, and that the shim its bring-up spawned is running
+// in fake mode.
+//
+// THIS IS THE REGRESSION THE WORKSPACE REALTESTS FOUND. The guard used to
+// refuse the shim spawn outright, so a guarded daemon could not create a
+// workspace at all: the spawn raised the guard's ForbiddenError, the bring-up
+// answered `spawn_failed`, and every realtest that needed a second workspace
+// died there. The guard means "never touch the real vendor", and a shim is our
+// own process with a fake mode, so it now FORCES the fake instead of refusing.
+//
+// NoFake withholds the whole stack's fake mode and WithoutFakeShimsHook
+// withholds AGENT_REPL_FAKE_SHIMS, which leaves the vendor guard as the ONLY
+// thing that can make this spawn fake — so a shim that comes up fake here came
+// up fake because of the guard and nothing else.
+func TestCreateWorkspaceUnderTheVendorGuardAloneSpawnsAFakeShim(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := newDaemon(t, harness.Opts{NoFake: true, WithoutFakeShimsHook: true})
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+
+	// Act
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			InitialPrompt: said("fix the flaky reconnect test"),
+		}},
+	}))
+
+	// Assert: the create succeeded rather than answering the spawn refusal.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace under the vendor guard alone = (%v, %v), want a success", resp, err)
+	}
+	ws := resp.Msg.GetSuccess().GetWorkspace()
+
+	// Assert: the bring-up spawned a shim, and it is a FAKE one.
+	shim := d.Shim(ws)
+	if !shim.Info().Fake {
+		t.Fatalf("the spawned shim's argv = %v, want --fake forced by the vendor guard", shim.Info().Argv)
+	}
+}
+
+// TestCreateWorkspaceUnderTheVendorGuardAloneStartsTheSession asserts the
+// bring-up under the guard goes all the way to a started session, not merely to
+// a live process: the fake-mode shim serves StartSession and the initial prompt
+// reaches it.
+func TestCreateWorkspaceUnderTheVendorGuardAloneStartsTheSession(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := newDaemon(t, harness.Opts{NoFake: true, WithoutFakeShimsHook: true})
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+
+	// Act
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			InitialPrompt: said("fix the flaky reconnect test"),
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace under the vendor guard alone = (%v, %v), want a success", resp, err)
+	}
+
+	// Assert
+	shim := d.Shim(resp.Msg.GetSuccess().GetWorkspace())
+	if fresh := shim.ExpectStartSession(); fresh.GetFresh() == nil {
+		t.Fatalf("StartSession request = %v, want fresh for a brand-new workspace", fresh)
+	}
+	if turn := shim.ExpectStartTurn(); text(turn.GetSaid()) != "fix the flaky reconnect test" {
+		t.Fatalf("StartTurn.said = %q, want the initial prompt verbatim", text(turn.GetSaid()))
+	}
+}
+
+// TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheUnlandedSpawnFailedArm
+// pins the ONE gap the workspace realtests left behind: CreateWorkspaceError
+// has no `spawn_failed` arm, so a create whose bring-up cannot start a shim
+// cannot state its refusal in band.
+//
+// The refusal itself is right — `workspace.ArmSpawnFailed`, renamed onto the
+// rpc that raised it — and the transport already carries the arm's evidence:
+// `server.fill` supplies `detail` for any arm that has the field. Only the
+// contract is missing, so the answer is the unlanded-arm Connect error and a
+// WARN under `daemon.refusal.unlanded_arm`.
+//
+// daemon/ERROR-ARMS.md carries the row. When the arm lands, this test flips to
+// asserting `resp.Msg.GetError().GetSpawnFailed()` the way its OpenWorkspace
+// twin (roster_test.go) already does, and the row is deleted in that commit.
+func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheUnlandedSpawnFailedArm(t *testing.T) {
+	t.Parallel()
+	// Arrange: the create mints the workspace dir, so the dying shim is
+	// scripted through the profile EVERY spawn falls back to.
+	d := newDaemon(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the bring-up death the test scripts.
+	d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.exit", "daemon.shimclient.spawn",
+		"daemon.workspace.bring_up", "daemon.workspace.open", "daemon.workspace.create",
+		"daemon.refusal.unlanded_arm")
+	d.WriteDefaultShimProfile(harness.ShimProfile{
+		ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death",
+	})
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+
+	// Act
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			InitialPrompt: said("fix the flaky reconnect test"),
+		}},
+	}))
+
+	// Assert: the intended arm is named EXACTLY as ERROR-ARMS.md prescribes.
+	if err == nil {
+		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the unlanded-arm refusal", resp)
+	}
+	if !strings.HasPrefix(err.Error(), "failed_precondition: intended arm: CreateWorkspaceError.spawn_failed: ") {
+		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the unlanded arm "+
+			"\"intended arm: CreateWorkspaceError.spawn_failed: <reason>\"", err)
+	}
+}

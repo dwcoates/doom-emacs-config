@@ -28,6 +28,7 @@ landed arm.
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
 | SetModel | `unspecified` | a `SetSessionModelFailure` whose `cause` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
+| CreateWorkspace | `spawn_failed` | the created workspace's bring-up could not start a shim. `OpenWorkspaceError` has carried `spawn_failed{detail}` since landing 4 and the SAME refusal is raised for both rpcs (`workspace.ArmSpawnFailed`), so a create answers out of band while an open answers in band. Found by the workspace realtests, 2026-09-12. NEEDED: `CreateWorkspaceSpawnFailed spawn_failed = 11;` in `CreateWorkspaceError.cause` with `message CreateWorkspaceSpawnFailed { string detail = 1; }`, exactly `OpenWorkspaceSpawnFailed`'s shape. No daemon change follows it: `server.fill` already supplies `detail`, so the handler switches onto the arm by the arm simply existing | workspace |
 
 `CloseWorkspaceBlocked` gained its five fields in landing 7 (turn_in_flight,
 live_work, held_prompts, merge_queued, summary), and `internal/workspace`'s

@@ -77,6 +77,12 @@ const emacsBundle = "/Applications/Emacs.app"
 // not on run 3 (row 29). --env states the vendor guard on the command line
 // because `open` hands the app to launchd, which does not pass this process's
 // environment along.
+//
+// THE GUARD IS THE ONLY VARIABLE, and that is a choice rather than an
+// omission: a daemon under the guard spawns every shim with `--fake`
+// (daemon/internal/shimclient/supervisor.go, `fakeMode`), so stating the guard
+// states offline shims too. A second knob would be a second contract for one
+// rule, and the two could disagree.
 func openBackgroundArgs() []string {
 	return []string{"-gj", "-a", emacsBundle, "--env", vendorGuardEnv + "=1"}
 }
