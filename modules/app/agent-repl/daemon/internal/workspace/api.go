@@ -149,6 +149,12 @@ type Verbs interface {
 	// Nuke destroys data: kill if live, then delete the worktree and the
 	// branch, then forget the record. A nuked workspace LEAVES the roster.
 	Nuke(ctx context.Context, ws ids.WorkspaceID) error
+	// Forget removes a CLOSED workspace's registry record, and its repository
+	// record when no other workspace references that repository. It destroys
+	// no files: the directory survives and re-registering it mints a fresh
+	// record. It refuses an open workspace, a workspace that is not quiet, and
+	// a workspace others were spawned from.
+	Forget(ctx context.Context, ws ids.WorkspaceID) error
 	// Restart bounces the workspace's shim by delegating to
 	// rollout.RelaunchShim. force sends KillSession{force:true} first. It owns
 	// the reload_webapp push when the webapp changed too.
