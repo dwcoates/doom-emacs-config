@@ -46,6 +46,7 @@
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
+(declare-function agent-repl--ws-log-name "agent-repl-workspace" (ws))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key value))
 (declare-function agent-repl--ws-known-p "agent-repl-workspace" (ws))
@@ -720,10 +721,12 @@ resets."
     (if target
         (progn
           (push target agent-repl--opened-recent-cycle)
-          (agent-repl--log current "elisp.commands.open-most-recent target=%s" target)
+          (agent-repl--info (agent-repl--ws-log-name current)
+                            "elisp.commands.open-most-recent target=%s" target)
           (agent-repl--ws-switch target))
       (setq agent-repl--opened-recent-cycle nil)
-      (agent-repl--log current "elisp.commands.open-most-recent-cycle-reset")
+      (agent-repl--info (agent-repl--ws-log-name current)
+                        "elisp.commands.open-most-recent-cycle-reset")
       (message "All workspaces visited -- cycle reset"))))
 
 (defun agent-repl--drawn-tab-names ()
@@ -754,15 +757,23 @@ Wraps at both ends, so `s-{' and `s-}' match the bar in both directions.
 A bar with no tabs, and a current workspace that is not ON the bar (a
 pseudo perspective, or a workspace whose tab the roster has torn down),
 are LOGGED NO-OPS: there is no slot to count from, and inventing one would
-land the user somewhere the picture never offered."
+land the user somewhere the picture never offered.
+
+THE RECORD IS `info', NOT `debug'.  A cycle is an action a PERSON took, and
+the durable threshold is `info' by default, so on the debug rung every switch
+the user made left nothing on disk: realtest 4 drove four real chords, every
+one switched correctly, and not one could be read back afterwards.  A routine
+action is never promoted to `warn' to make it easier to find -- the realtest
+harvest fails a run on every warning."
   (let* ((names (agent-repl--drawn-tab-names))
          (current (agent-repl--ws-current-name))
+         (log-ws (agent-repl--ws-log-name current))
          (index (cl-position current names :test #'equal)))
     (if (or (null names) (null index))
-        (agent-repl--log current "elisp.commands.cycle-no-position n=%d tabs=%d"
-                         n (length names))
+        (agent-repl--info log-ws "elisp.commands.cycle-no-position n=%d tabs=%d"
+                          n (length names))
       (let ((target (nth (mod (+ index n) (length names)) names)))
-        (agent-repl--log current "elisp.commands.cycle n=%d target=%s" n target)
+        (agent-repl--info log-ws "elisp.commands.cycle n=%d target=%s" n target)
         (agent-repl--ws-switch target)))))
 
 (defun agent-repl-switch-left ()
@@ -790,29 +801,33 @@ so the picker cannot offer a target a chord could not.
 
 An empty bar and a slot the bar does not draw are REPORTED no-ops rather
 than errors: the numerals are a glance-and-press gesture, and a press
-past the end of the bar is a miss, not a fault."
+past the end of the bar is a miss, not a fault.
+
+Every outcome records at `info' for the reason `agent-repl--workspace-cycle'
+gives: the numerals are a user action, and an action nobody can read back
+afterwards is a logging defect."
   (interactive "P")
   (let* ((names (agent-repl--drawn-tab-names))
          (log-ws (agent-repl--ws-current-log-name))
          (index (and n (prefix-numeric-value n))))
     (cond
      ((null names)
-      (agent-repl--log log-ws "elisp.commands.switch-to-workspace-no-tabs n=%S" n)
+      (agent-repl--info log-ws "elisp.commands.switch-to-workspace-no-tabs n=%S" n)
       (message "[agent-repl] No workspace tabs on the bar"))
      ((null index)
       (let ((choice (completing-read "Switch to workspace: " names nil t)))
-        (agent-repl--log log-ws "elisp.commands.switch-to-workspace-chosen ws=%s" choice)
+        (agent-repl--info log-ws "elisp.commands.switch-to-workspace-chosen ws=%s" choice)
         (agent-repl--ws-switch choice)))
      ((or (< index 1) (> index (length names)))
-      (agent-repl--log log-ws
-                       "elisp.commands.switch-to-workspace-out-of-range n=%d tabs=%d"
-                       index (length names))
+      (agent-repl--info log-ws
+                        "elisp.commands.switch-to-workspace-out-of-range n=%d tabs=%d"
+                        index (length names))
       (message "[agent-repl] No workspace tab %d -- the bar draws %d"
                index (length names)))
      (t
       (let ((target (nth (1- index) names)))
-        (agent-repl--log log-ws "elisp.commands.switch-to-workspace n=%d target=%s"
-                         index target)
+        (agent-repl--info log-ws "elisp.commands.switch-to-workspace n=%d target=%s"
+                          index target)
         (agent-repl--ws-switch target))))))
 
 (eval-and-compile
