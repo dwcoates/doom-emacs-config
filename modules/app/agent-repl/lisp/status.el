@@ -23,7 +23,6 @@
 (declare-function agent-repl--ws-render-status "workspace")
 (declare-function agent-repl--ws-resolve-persp "workspace")
 (declare-function agent-repl--ws-tab-face "workspace")
-(declare-function agent-repl--ws-tab-selected-face "workspace")
 (declare-function agent-repl--ws-tabline-names "workspace")
 (declare-function agent-repl--ws-window-conf "workspace")
 (declare-function agent-repl-roster-row-attention-p "roster")
@@ -401,7 +400,15 @@ the misread this color exists to prevent.")
   "White used for bracket numerals on unselected tabs of any state.")
 
 (defconst agent-repl--color-selected-bg      "#c0c0c0"
-  "Grey used for the background of selected tabs.")
+  "Historic grey once painted across a selected tab's whole background.
+
+NO LONGER THE SELECTION MARKER.  A full background now means one thing —
+the workspace's agent panels are open — and selection is an
+`:underline' the renderer layers on instead (see
+`agent-repl--tab-palette-row' and `agent-repl--render-tab'), so a
+selected tab keeps its connection COLOR and its panels EXTENT rather
+than dimming to this grey.  The constant is kept only so the value has a
+name where the history is written.")
 
 (defconst agent-repl--color-light            "white"
   "Light foreground for dark state backgrounds.")
@@ -563,17 +570,22 @@ What it does NOT do is inherit its foreground, which is the defect the
 un-armed row exists for — see the comment above
 `agent-repl-tab-contrast-floor\=' for the measurement.
 
-The SELECTED half states a pair of literals and is unchanged: a selected
-tab is grey with a dark numeral on it, whatever the theme."
+The SELECTED half is IDENTICAL to the unselected one plus `:underline t':
+a state absent from the palette still sits flush on the bar when the user
+is standing in it, and selection is signalled by the underline alone, not
+by a grey ground it would otherwise share with nothing.  Selection is
+orthogonal to both background extent and color here exactly as it is for
+the armed rows (see `agent-repl--tab-palette-row')."
   (let* ((bg (agent-repl--tab-bar-background))
          (fg (agent-repl--tab-bar-legible-fg bg)))
     `(:unselected (:bg ,bg
                    :fg ,fg
                    :bracket-fg ,fg
                    :weight ,agent-repl--tab-weight)
-      :selected   (:bg ,agent-repl--color-selected-bg
-                   :fg ,agent-repl--color-dark
-                   :bracket-fg ,agent-repl--color-dark
+      :selected   (:bg ,bg
+                   :fg ,fg
+                   :bracket-fg ,fg
+                   :underline t
                    :weight ,agent-repl--tab-weight))))
 
 ;; --- The six-color assignment --- ;;
@@ -740,35 +752,46 @@ for the cross-language assertion.  THERE IS NO TEAL in it any more.")
 Every row in that palette says the same three things, so the shape is
 built here once rather than written out twenty times:
 
-  FACE  — the `defface' the unselected name region takes.
-  COLOR — the state's color, painted across the WHOLE unselected entry
-          and on the SELECTED row's [N] bracket (selection dims the name
-          to the shared grey, so the bracket is where a selected tab
-          still carries its state).
-  FG    — the unselected foreground legible against COLOR: light for the
-          dark backgrounds, dark for the light ones.  Not derived from
-          COLOR, because the six are not separable by a luminance rule
-          that lands on the right answer for each.
+  FACE  — the `defface' the name region takes.
+  COLOR — the state's color, painted across the WHOLE entry — the SAME
+          color whether the tab is selected or not, because a tab's COLOR
+          is its connection state and selection is an orthogonal axis
+          (see `agent-repl--render-tab').
+  FG    — the foreground legible against COLOR: light for the dark
+          backgrounds, dark for the light ones.  Not derived from COLOR,
+          because the six are not separable by a luminance rule that
+          lands on the right answer for each.
 
-An entry is ONE color end to end, so no row may paint the [N] bracket
+An entry is ONE color end to end, so no row paints the [N] bracket
 differently from the name region: the bracket carries the tab's number
 and the state's color, and a second color inside one entry would be a
 second vocabulary saying what the state color already says.
 
-The invariant parts are the ones no row has ever varied: an unselected
-bracket numeral in `agent-repl--color-default-bracket', a selected row
-backed by `agent-repl--color-selected-bg' with a dark separator and a
-light bracket numeral, and `agent-repl--tab-weight' throughout."
-  `(:face       ,face
-    :unselected (:bg ,color
-                 :fg ,fg
-                 :bracket-fg ,agent-repl--color-default-bracket
-                 :weight ,agent-repl--tab-weight)
-    :selected   (:bg ,agent-repl--color-selected-bg
-                 :fg ,agent-repl--color-dark
-                 :bracket-bg ,color
-                 :bracket-fg ,agent-repl--color-light
-                 :weight ,agent-repl--tab-weight)))
+SELECTION IS NOT A COLOR.  The two looks are IDENTICAL in background and
+foreground — the selected look adds only `:underline t', the subtle,
+distinct indicator that says which workspace the user is standing in
+WITHOUT reusing a background.  The full-vs-bracket background EXTENT
+belongs to panel visibility (`agent-repl--ws-display-state'), and the
+color belongs to connection state, so selection cannot borrow either
+without collapsing two orthogonal axes into one.  The underline draws in
+each run's OWN foreground (`:underline t'), which is already chosen
+legible against that run's background, so it reads on every state color
+and on the bar alike.
+
+The invariant parts are the ones no row has ever varied: a bracket
+numeral in `agent-repl--color-default-bracket' and
+`agent-repl--tab-weight' throughout."
+  (let ((look `(:bg ,color
+                :fg ,fg
+                :bracket-fg ,agent-repl--color-default-bracket
+                :weight ,agent-repl--tab-weight)))
+    `(:face       ,face
+      :unselected ,look
+      :selected   (:bg ,color
+                   :fg ,fg
+                   :bracket-fg ,agent-repl--color-default-bracket
+                   :underline t
+                   :weight ,agent-repl--tab-weight))))
 
 (defconst agent-repl--tab-palette
   `((:init . ,(agent-repl--tab-palette-row
@@ -1074,7 +1097,11 @@ makes that redisplay actually reach the pixels when only a face changed."
 (defun agent-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.
 Falls back to `agent-repl--tab-default' when STATE has no palette entry.
-Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
+The selected and unselected looks share their background and foreground
+\(color is connection state, orthogonal to selection); the selected look
+differs ONLY by carrying `:underline', which `agent-repl--render-tab'
+turns into the selection marker.
+Keys in the returned plist: :bg :fg :bracket-fg :underline :weight."
   (let* ((row (alist-get state agent-repl--tab-palette))
          (key (if selected :selected :unselected)))
     (or (plist-get row key)
@@ -1082,13 +1109,20 @@ Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
 
 (defun agent-repl--tab-spec-bracket-only (state selected)
   "Return appearance spec applying STATE's color to the [N] bracket only.
-Pulls bracket-bg/bracket-fg/weight from STATE's palette row (per
-SELECTED) and leaves :bg/:fg unspecified so the separator and name
-region inherit defaults.  Used wherever `agent-repl--ws-display-state'
-suppresses the full-tab color — panels dismissed, or a `:ready'
-workspace the user has already viewed — so the bracket retains the
-state's color and the workspace's state stays visible while the rest
-of the tab falls back to the default appearance."
+Pulls bracket-bg/bracket-fg/weight from STATE's palette row and leaves
+:bg/:fg unspecified so the separator and name region inherit defaults.
+Used wherever `agent-repl--ws-display-state' suppresses the full-tab
+color — panels dismissed, or a `:ready' workspace the user has already
+viewed — so the bracket retains the state's color and the workspace's
+state stays visible while the rest of the tab falls back to the default
+appearance.
+
+When SELECTED, the selection `:underline' is carried through unchanged,
+so a selected panels-closed tab keeps BOTH its bracket color and the
+selection marker while its name region still blends into the bar — the
+EXTENT (bracket-only) says panels are closed, the color says the
+connection state, and the underline says it is the current tab, all
+three independent."
   (let* ((full (agent-repl--tab-spec state selected))
          (bracket-bg (or (plist-get full :bracket-bg)
                          (plist-get full :bg))))
@@ -1096,6 +1130,7 @@ of the tab falls back to the default appearance."
       :fg unspecified
       :bracket-bg ,bracket-bg
       :bracket-fg ,(plist-get full :bracket-fg)
+      ,@(when (plist-get full :underline) (list :underline t))
       :weight ,(or (plist-get full :weight) agent-repl--tab-weight))))
 
 ;; --- defface forms referencing the named constants --- ;;
@@ -1223,12 +1258,21 @@ for the cache-buster rationale."
 
 (defun agent-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
-SPEC is a plist with keys :bg :fg :bracket-fg :weight (see
+SPEC is a plist with keys :bg :fg :bracket-fg :underline :weight (see
 `agent-repl--tab-palette' docstring).  NAME-FACE is applied to the
 workspace-name portion.  LABEL is the bracket content (the tab number).
 IMG-STR, when non-nil, is the badge run (priority label and glyph)
 inserted between bracket and name with a single un-faced space on each
 side so it does not butt up against the name's background.
+
+SELECTION IS AN UNDERLINE, not a background.  When SPEC carries
+`:underline', the SELECTED tab's separator, bracket and name runs are all
+drawn `:underline t' — a subtle, distinct marker that says which
+workspace the user is standing in without touching the background the way
+the panels-open EXTENT and the connection COLOR do.  `:underline t' draws
+in each run's own foreground, so it reads on every state color and on the
+bar alike.  The underline is layered OVER NAME-FACE (a symbol or a
+list of faces) so the name keeps its arm color and gains the marker.
 
 The string ends with an un-faced trailing space so each entry
 self-terminates.  Emacs's `display_tab_bar_line' calls
@@ -1241,31 +1285,41 @@ whenever an entry landed at a wrap (or the final row's) end."
          (bracket-bg (or (plist-get spec :bracket-bg) bg))
          (bracket-fg (or (plist-get spec :bracket-fg) 'unspecified))
          (weight     (or (plist-get spec :weight)     'normal))
-         (separator-face `(:background unspecified :foreground ,fg :weight ,weight))
-         (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight)))
+         (underline  (plist-get spec :underline))
+         (separator-face `(:background unspecified :foreground ,fg :weight ,weight
+                           ,@(when underline (list :underline t))))
+         (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight
+                           ,@(when underline (list :underline t))))
+         (name-face*     (if underline
+                             (cons '(:underline t)
+                                   (if (listp name-face) name-face (list name-face)))
+                           name-face)))
     (concat (propertize " " 'face separator-face)
             (propertize (format agent-repl-tab-bracket-format label) 'face bracket-face)
             (when img-str (concat " " img-str " "))
-            (propertize (format agent-repl-tab-name-padding name) 'face name-face)
+            (propertize (format agent-repl-tab-name-padding name) 'face name-face*)
             " ")))
 
-(defun agent-repl--tab-face (state selected)
+(defun agent-repl--tab-face (state _selected)
   "Return the face for the NAME portion of a tab.
-For an unselected ARMED tab this is the palette row's `:face' symbol —
-the arm's color, untouched.  For a selected tab it is always the Doom
-selected-tab face, so selection dims the state color.  For an unselected
-UN-ARMED tab it is `agent-repl--tab-unarmed-face', which is a face SPEC
-rather than a symbol.
+For an ARMED tab this is the palette row's `:face' symbol — the arm's
+color, untouched.  For an UN-ARMED tab it is `agent-repl--tab-unarmed-face',
+which is a face SPEC rather than a symbol.
 
-THE UNSELECTED FALLTHROUGH IS THIS MODULE'S OWN FACE, not Doom's
+SELECTION DOES NOT CHANGE THE FACE.  A selected tab keeps its arm's color
+exactly as an unselected one does — color is connection state and is
+orthogonal to selection — and the selection marker is the underline
+`agent-repl--render-tab' layers on when the SPEC says so, never a
+different face.  `_SELECTED' is therefore ignored here; it is kept in the
+signature only so callers need not special-case the two cases.
+
+THE UN-ARMED FALLTHROUGH IS THIS MODULE'S OWN FACE, not Doom's
 `+workspace-tab-face'.  Every other row here states a foreground legible
 against its background; that one inherited both from the frame, which is
 no pairing at all — measured, it drew BLACK glyphs on `#14141a', about
 1.06:1."
-  (cond
-   (selected (agent-repl--ws-tab-selected-face))
-   ((plist-get (alist-get state agent-repl--tab-palette) :face))
-   (t (agent-repl--tab-unarmed-face))))
+  (or (plist-get (alist-get state agent-repl--tab-palette) :face)
+      (agent-repl--tab-unarmed-face)))
 
 (defun agent-repl--tab-unarmed-face ()
   "Return the face spec for the name of an unselected UN-ARMED tab.
