@@ -1062,7 +1062,8 @@ address is already published and recorded before it is replaced."
   '(agent-repl--frontend-run-build-script
     agent-repl--frontend-spawn-daemon
     agent-repl--frontend-artifact-exists-p
-    agent-repl--frontend-run-log-tail)
+    agent-repl--frontend-run-log-tail
+    agent-repl--frontend-stdio-log-tail)
   "The external boundaries a cold-start scenario exercises for real.
 Their targets are all test-owned: a stub script and a stub argv written
 into the scenario's own temp dir, `file-exists-p' on those paths, and the

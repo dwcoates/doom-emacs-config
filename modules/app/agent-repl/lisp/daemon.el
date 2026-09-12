@@ -49,6 +49,38 @@
 ;; this file waits on, and a daemon that EXITS before publishing it ends the
 ;; wait immediately with the tail of its own run log.
 ;;
+;; THE DAEMON IS A RESIDENT SERVICE, AND IT OUTLIVES THIS EMACS.  A
+;; daemon spawned as a plain `make-process' child does not: Emacs's own
+;; shutdown walks its process list and sends each child a SIGHUP
+;; (`kill_buffer_processes'), so quitting the editor took the daemon with
+;; it — and with it the whole adopt-on-restart path this file's triage is
+;; written around.  Restarting Emacs always respawned, never adopted.
+;;
+;; So the spawn goes through a DETACHER, `agent-repl-daemon--spawn-argv':
+;; a `/bin/sh' that sets SIGHUP to ignore, redirects the child's stdout
+;; and stderr to `logs/daemon.stdio.log', and then EXECS the daemon.  Two
+;; deaths are closed by that, and nothing else changes:
+;;
+;;   - the exit-time SIGHUP is ignored, because a disposition of SIG_IGN
+;;     survives `exec' and Go leaves an initially-ignored signal ignored
+;;     (the daemon asks for SIGINT/SIGTERM/SIGQUIT and no others);
+;;   - the child's stdout no longer names a pipe whose read end dies with
+;;     Emacs, so the first log line written after Emacs exits cannot take
+;;     the daemon down with SIGPIPE.
+;;
+;; It is an `exec', so the pid Emacs holds IS the daemon's: the sentinel,
+;; the boot wait's "it exited before publishing an address" branch and
+;; `agent-repl-daemon--spawned-here-p' all keep working on the real
+;; process.  Emacs's own children are already `setsid'-ed by
+;; `make-process', so the daemon is in its own session either way.
+;;
+;; STOPPING IT IS STILL EMACS'S TO DO, and it is unchanged: the stop verb
+;; is `UpdateShutdownSchedule{now}' over the link
+;; (`agent-repl-frontend-daemon-stop'), which asks the daemon to flush and
+;; exit itself, and the restart verb sequences that stop ahead of a fresh
+;; ensure.  Neither ever signalled the process object, so neither loses
+;; anything to the detach.  Only the IMPLICIT death-on-exit is gone.
+;;
 ;; NO SLEEPS AND NO BLOCKING.  The boot wait is a timer poll whose tick is
 ;; a named function, and the build is an ASYNCHRONOUS `make-process' whose
 ;; sentinel carries the continuation.  Nothing in this file blocks the
@@ -103,10 +135,28 @@ constant exists for the build-artifact identity frontend.el reads, not
 for any flag — no webapp path rides the daemon's argv any more.")
 
 (defconst agent-repl--frontend-daemon-buffer "*claude-repld*"
-  "Buffer the spawned daemon's stdout and stderr are captured into.")
+  "Buffer the detacher's own stdout and stderr are captured into.
+
+THE DAEMON\='S OWN OUTPUT DOES NOT LAND HERE ANY MORE, and it must not: a
+buffer is an Emacs pipe, and a pipe whose read end dies with Emacs is a
+SIGPIPE waiting for the daemon\='s next line.  The detacher redirects the
+exec\='d daemon to `agent-repl-daemon--stdio-log-path\=' instead, which is a
+file that outlives the editor and is read back by
+`agent-repl--frontend-stdio-log-tail\='.  What still arrives here is the
+detacher\='s own failure to get that far — an unmakeable log directory, an
+unexecutable binary.")
 
 (defconst agent-repl-daemon-build-buffer "*agent-repl-build-frontend*"
   "Capture buffer for the build script; SHOWN to the user on a failure.")
+
+(defun agent-repl-daemon--stdio-log-path ()
+  "Absolute path the detached daemon\='s stdout and stderr are appended to.
+
+Under the state root\='s `logs/', beside the daemon\='s own run log and
+NEVER the same file: the run log is contract JSONL that readers parse a
+line at a time, and raw stderr interleaved into it would break every one
+of them."
+  (agent-repl--global-state-file "logs/daemon.stdio.log"))
 
 ;;;; ---- Customization ----
 
@@ -423,6 +473,28 @@ Returns a DESCRIPTION when there is no line to return — an unreadable or
 empty run log is itself the diagnosis, and answering nil would hand the
 caller a blank where the reason belongs."
   (let ((path (agent-repl--global-state-file "logs/daemon.run.log")))
+    (if (not (file-readable-p path)) ;; ALLOW-EXTERNAL-BOUNDARY
+        (format "<no readable %s>" path)
+      (with-temp-buffer
+        (insert-file-contents path) ;; ALLOW-EXTERNAL-BOUNDARY
+        (goto-char (point-max))
+        (skip-chars-backward " \t\n\r")
+        (let ((end (point)))
+          (forward-line 0)
+          (if (= (point) end)
+              (format "<%s is empty>" path)
+            (buffer-substring-no-properties (point) end)))))))
+
+(defun agent-repl--frontend-stdio-log-tail ()
+  "External-boundary wrapper: the last non-blank line of the daemon stdio log.
+
+THE OTHER HALF OF THE DIAGNOSIS.  The run log is the daemon\='s own
+contract JSONL, so a daemon that died before its logger stood up writes
+nothing to it; whatever it did say went to stderr, and since the spawn is
+detached that stderr is a FILE rather than the `*claude-repld*' buffer.
+Answers a DESCRIPTION rather than nil for the same reason the run-log
+tail does: an absent or empty file is itself part of the answer."
+  (let ((path (agent-repl-daemon--stdio-log-path)))
     (if (not (file-readable-p path)) ;; ALLOW-EXTERNAL-BOUNDARY
         (format "<no readable %s>" path)
       (with-temp-buffer
@@ -1039,9 +1111,14 @@ dependence on the scheduler and no sleep anywhere."
       (when on-ready (funcall on-ready address)))
      ((agent-repl-daemon--exited-p agent-repl-daemon--boot-process)
       (let ((status (process-exit-status agent-repl-daemon--boot-process))
-            (tail (agent-repl--frontend-run-log-tail)))
-        (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.boot-exited status=%S run-log=%s"
-                           status tail)
+            (tail (agent-repl--frontend-run-log-tail))
+            ;; BOTH TAILS, because the spawn is detached: a daemon that
+            ;; died before its own logger stood up wrote nothing to the run
+            ;; log, and what it did say went to the stdio log the detacher
+            ;; redirects into rather than to a buffer in this Emacs.
+            (stdio (agent-repl--frontend-stdio-log-tail)))
+        (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.boot-exited status=%S run-log=%s stdio-log=%s"
+                           status tail stdio)
         (agent-repl-daemon--cancel-boot-wait)
         (agent-repl-daemon--report-launch-failure
          (format "the daemon exited (status %s) before it published its address: %s"
@@ -1187,6 +1264,55 @@ resolved workspace paths and a `~\=' the shell never saw would never match."
                     (list (car entry) (agent-repl-daemon--config-value (cdr entry))))
                   agent-repl-daemon--required-config-flags)))
 
+(defconst agent-repl-daemon--detach-shell "/bin/sh"
+  "The shell that detaches the daemon from this Emacs\='s lifetime.
+POSIX `sh\=' is the whole requirement — `trap\=', a redirection and `exec\='
+— so the system shell is enough and no launcher of our own has to exist
+on disk before a cold start can happen.")
+
+(defconst agent-repl-daemon--detach-script
+  "mkdir -p \"$1\" || exit 1; shift; trap '' HUP; exec \"$@\" >>\"$0\" 2>&1"
+  "The detacher, run as `sh -c SCRIPT STDIO-LOG LOG-DIR DAEMON-ARGV...\='.
+
+READ IT IN ORDER, because each clause closes one way the daemon used to
+die with the editor:
+
+  `mkdir -p \"$1\"\='  the state root\='s `logs/\=' need not exist yet on a
+                    first ever cold start, and a redirection into a
+                    missing directory would fail the spawn outright.  A
+                    failure here EXITS 1, which the boot wait already
+                    reports as \"exited before it published its address\".
+  `trap \='\=' HUP\='    sets SIGHUP to SIG_IGN, and that disposition survives
+                    the `exec\='.  Emacs SIGHUPs every child from
+                    `kill-emacs\='; the daemon now outlives it.
+  `exec \"$@\"\='      REPLACES the shell, so the pid Emacs holds is the
+                    daemon\='s own — the sentinel, the boot wait\='s exit
+                    branch and `agent-repl-daemon--spawned-here-p\=' all
+                    keep watching the real process.
+  `>>\"$0\" 2>&1\='   sends the daemon\='s output to a FILE.  Left on Emacs\='s
+                    pipe, the first line written after Emacs exits would
+                    reach a closed read end and kill the daemon with
+                    SIGPIPE — a detach that only held until the daemon
+                    next spoke.
+
+The stdio log rides in `$0\=' and the log directory in `$1\=' rather than
+being interpolated into the script text, so no path is ever re-parsed by
+the shell.")
+
+(defun agent-repl-daemon--spawn-argv ()
+  "The argv Emacs actually spawns: the detacher, then the daemon\='s own argv.
+
+`agent-repl-daemon--argv\=' remains the DAEMON\='S argv, unprefixed — it is
+what the daemon sees in its own `argv\=' after the `exec\=', and every flag
+assertion is about that list.  This is the launch wrapper around it."
+  (let ((stdio (agent-repl-daemon--stdio-log-path)))
+    (append (list agent-repl-daemon--detach-shell
+                  "-c"
+                  agent-repl-daemon--detach-script
+                  stdio
+                  (directory-file-name (file-name-directory stdio)))
+            (agent-repl-daemon--argv))))
+
 (defun agent-repl-daemon--environment ()
   "Return the spawn environment, with `AGENT_REPL_STATE_DIR' set EXPLICITLY.
 ONE state root is the cross-system contract; a child that inherited a
@@ -1237,7 +1363,7 @@ is stated on the spawn rather than assumed."
       (agent-repl--info
        '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
        "starting the daemon...")
-      (let* ((argv (agent-repl-daemon--argv))
+      (let* ((argv (agent-repl-daemon--spawn-argv))
              (proc (agent-repl--frontend-spawn-daemon
                     argv (agent-repl-daemon--environment))))
         (setq agent-repl--frontend-daemon-process proc)
