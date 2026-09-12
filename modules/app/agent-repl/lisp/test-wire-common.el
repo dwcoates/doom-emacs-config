@@ -584,6 +584,48 @@ without a keyword here fails this test instead of failing a send."
                   #'agent-repl-wire-decode-session-fault-link-severed "{}")
                  nil)))
 
+(ert-deftest agent-repl-test-wire-common-session-fault-conversation-abandoned-decodes ()
+  "The abandoned-conversation class names the vendor session id left behind."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-conversation-abandoned
+                  "{\"vendorSessionId\":\"vs-9\"}")
+                 '(:vendor-session-id "vs-9"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-session-absent-decodes ()
+  "The session-absent class is empty: the arm is the whole fact."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-session-absent "{}")
+                 nil)))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-watch-open-refused-decodes ()
+  "The refused-open class names the operation and the handle it named."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-watch-open-refused
+                  "{\"operation\":\"WatchTranscript\",\"handle\":\"h-3\"}")
+                 '(:operation "WatchTranscript" :handle "h-3"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-daemon-state-unreadable-decodes ()
+  "The unreadable-state class carries the state client's own account."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-daemon-state-unreadable
+                  "{\"cause\":\"store closed\"}")
+                 '(:cause "store closed"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-adoption-window-expired-decodes ()
+  "The expired-window class carries the window as the controller rendered it."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-adoption-window-expired
+                  "{\"adoptionWindow\":\"30s\"}")
+                 '(:adoption-window "30s"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-session-absent-refuses-a-field ()
+  "A field inside the empty session-absent class is refused, never dropped."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-session-fault-session-absent
+                     (agent-repl-test-wire-common--parse "{\"why\":\"x\"}"))))
+                 '("SessionFaultSessionAbsent" why "unknown field"))))
+
 (provide 'test-wire-common)
 
 ;;; test-wire-common.el ends here

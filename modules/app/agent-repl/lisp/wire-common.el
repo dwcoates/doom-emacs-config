@@ -561,7 +561,7 @@ rather than sent for the daemon to reject."
 
 ;;;; ---- agentrepl.v1 SessionFault arm messages (shared leaf) ----
 ;;
-;; The eight fault classes the session controller mints.  They are declared
+;; The thirteen fault classes the session controller mints.  They are declared
 ;; once in the proto and carried by TWO parents — `SessionFault' on the
 ;; SessionHealth response (wire-verbs.el) and `HostFault' on the host stream
 ;; (wire-host.el) — because a session's fault classes do not change with the
@@ -630,6 +630,72 @@ rather than sent for the daemon to reject."
                     "SessionFaultShimReported" 'component object)
            :kind (agent-repl-wire--decode-string
                     "SessionFaultShimReported" 'kind object)))))
+
+(defun agent-repl-wire-decode-session-fault-conversation-abandoned (value)
+  "Decode VALUE as `SessionFaultConversationAbandoned', a plist
+(`:vendor-session-id').
+A recorded conversation whose transcript was gone at bring-up: the session
+came up FRESH and the old vendor session id was left behind.  NOT a failure
+to serve — the workspace has a live session — it is the record of what was
+abandoned, which is why it is its own arm and not a resume failure."
+  (let ((object (agent-repl-wire--object "SessionFaultConversationAbandoned" value)))
+    (agent-repl-wire--check-keys "SessionFaultConversationAbandoned" object '(vendorSessionId))
+    (agent-repl-wire--decoded
+     "SessionFaultConversationAbandoned"
+     (list :vendor-session-id (agent-repl-wire--decode-string
+                    "SessionFaultConversationAbandoned" 'vendorSessionId object)))))
+
+(defun agent-repl-wire-decode-session-fault-session-absent (value)
+  "Decode VALUE as the empty message `SessionFaultSessionAbsent'.
+The LIVENESS PROBE'S OWN observation: this workspace has no live session at
+all.  Nothing RAISED it — no shim reported it and no controller opened it, so
+it is never a recorded fault — it is what the probe answers when there is
+nothing there to answer for itself.  Empty: the arm is the whole fact."
+  (agent-repl-wire--decode-empty "SessionFaultSessionAbsent" value))
+
+(defun agent-repl-wire-decode-session-fault-watch-open-refused (value)
+  "Decode VALUE as `SessionFaultWatchOpenRefused', a plist
+(`:operation' `:handle').
+A shim watch OPEN the shim REFUSED for a handle nothing announced: the
+daemon and the shim disagree about what exists.  NOT a severed link — the
+shim answered the open, so the hop is serving and a redial would change
+nothing, which is why it is its own arm beside `link_severed'."
+  (let ((object (agent-repl-wire--object "SessionFaultWatchOpenRefused" value)))
+    (agent-repl-wire--check-keys "SessionFaultWatchOpenRefused" object '(operation handle))
+    (agent-repl-wire--decoded
+     "SessionFaultWatchOpenRefused"
+     (list :operation (agent-repl-wire--decode-string
+                    "SessionFaultWatchOpenRefused" 'operation object)
+           :handle (agent-repl-wire--decode-string
+                    "SessionFaultWatchOpenRefused" 'handle object)))))
+
+(defun agent-repl-wire-decode-session-fault-daemon-state-unreadable (value)
+  "Decode VALUE as `SessionFaultDaemonStateUnreadable', a plist (`:cause').
+The health reporter's own fault: the daemon's state client would not answer,
+so the workspace's recorded faults could not be read at all.  It says THE
+ANSWER IS INCOMPLETE, not that the session is broken — every other arm here
+is a condition of the session, and this one is a condition of the reporting."
+  (let ((object (agent-repl-wire--object "SessionFaultDaemonStateUnreadable" value)))
+    (agent-repl-wire--check-keys "SessionFaultDaemonStateUnreadable" object '(cause))
+    (agent-repl-wire--decoded
+     "SessionFaultDaemonStateUnreadable"
+     (list :cause (agent-repl-wire--decode-string
+                    "SessionFaultDaemonStateUnreadable" 'cause object)))))
+
+(defun agent-repl-wire-decode-session-fault-adoption-window-expired (value)
+  "Decode VALUE as `SessionFaultAdoptionWindowExpired', a plist
+(`:adoption-window').
+A handover whose adoption window ran out with this workspace unclaimed: the
+successor never took it.  DaemonFault spells the DAEMON-scoped arm; this is
+the WORKSPACE's own, because the rollout controller records the expiry
+against the workspace it was handing over and the daemon-health filter
+\(workspace-bound faults are SessionHealth's answer) passes it here."
+  (let ((object (agent-repl-wire--object "SessionFaultAdoptionWindowExpired" value)))
+    (agent-repl-wire--check-keys "SessionFaultAdoptionWindowExpired" object '(adoptionWindow))
+    (agent-repl-wire--decoded
+     "SessionFaultAdoptionWindowExpired"
+     (list :adoption-window (agent-repl-wire--decode-string
+                    "SessionFaultAdoptionWindowExpired" 'adoptionWindow object)))))
 
 (provide 'wire-common)
 

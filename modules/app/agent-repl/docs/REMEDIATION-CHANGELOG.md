@@ -56,6 +56,10 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - daemon/sidebar: roster order is priority then name then id, with the selection instant dropped as an ordering key, so the drawn bar no longer moves under the user and cycling right then left returns where it started.
 - realtest: a key window is a reading, not a gate — keydriver stops refusing a confirmed press on `NSRunningApplication.isActive` (the cached answer that refused 40 healthy presses in the 2026-09-12 16:12 sweep), reports the accessibility reading in the receipt instead, and keeps the hard refusal only on an unheld press, where nothing reads Emacs's marks back.
 - realtest: a requested activation is not a focus edge — the show phase now reads Emacs's own `frame-focus-state` inside the keydriver hold, and when no press ever produced real focus it names the cause (a locked screen, where the window server activates nobody, versus an activation declined on an unlocked session) in seconds instead of waiting out a two-minute paint ceiling; key delivery, the advisory readiness reading and the product's pre-creation hold are unchanged.
+- proto/daemon: the five fault kinds the daemon opens and neither session surface could carry — `conversation_abandoned`, `session_absent`, `watch_open_refused`, `daemon_state_unreadable` and the workspace-scoped `adoption_window_expired` — have arms on `SessionFault` and `HostFault`, so a fresh bring-up's standing fault no longer costs the editor every host view of that workspace.
+- proto/daemon: `DaemonFault` spells `daemon_state_unreadable`, retiring the last site (`health.selfCheckFault`) that put a fault on the wire with its `kind` oneof unset.
+- proto/daemon: `CreateWorkspaceError.spawn_failed` lands, so the one refusal both a create and an open raise is answered in band by both instead of out of band by one.
+- proto/daemon: `ForgetWorkspace` lands whole — endpoint, rpc and handler — for a verb whose refusals and command-file route were already built with no wire to answer on; `server.setArm` learned repeated fields so `has_children` names the children instead of dropping them.
 
 ## Standing measurements to protect
 

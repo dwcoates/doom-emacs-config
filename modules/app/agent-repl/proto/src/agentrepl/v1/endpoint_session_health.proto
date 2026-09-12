@@ -62,6 +62,16 @@ message SessionFault {
     SessionFaultClassifierFailed classifier_failed = 8;
     // A shim-side SessionFault, relayed.
     SessionFaultShimReported shim_reported = 9;
+    // A recorded conversation whose transcript was gone at bring-up.
+    SessionFaultConversationAbandoned conversation_abandoned = 10;
+    // The liveness probe's own answer: there is no session here at all.
+    SessionFaultSessionAbsent session_absent = 11;
+    // The shim refused a watch open for a handle nothing announced.
+    SessionFaultWatchOpenRefused watch_open_refused = 12;
+    // The daemon's own state client would not answer the fault read.
+    SessionFaultDaemonStateUnreadable daemon_state_unreadable = 13;
+    // A handover whose adoption window ran out with this workspace unclaimed.
+    SessionFaultAdoptionWindowExpired adoption_window_expired = 14;
   }
 }
 message SessionFaultShimStartFailed {
@@ -90,6 +100,51 @@ message SessionFaultShimReported {
   string component = 1;
   // The shim's own kind name.
   string kind = 2;
+}
+
+// A recorded conversation whose transcript was gone at bring-up: the session
+// came up FRESH and the old vendor session id was left behind. NOT a failure
+// to serve — the workspace has a live session — it is the record of what was
+// abandoned, which is why it is its own arm and not a resume failure.
+message SessionFaultConversationAbandoned {
+  // The vendor session id the bring-up abandoned.
+  string vendor_session_id = 1;
+}
+
+// The LIVENESS PROBE'S OWN observation: this workspace has no live session at
+// all. Nothing RAISED it — no shim reported it and no controller opened it, so
+// it is never a recorded fault — it is what the probe answers when there is
+// nothing there to answer for itself. Empty: the arm is the whole fact.
+message SessionFaultSessionAbsent {}
+
+// A shim watch OPEN the shim REFUSED for a handle nothing announced: the
+// daemon and the shim disagree about what exists. NOT a severed link — the
+// shim answered the open, so the hop is serving and a redial would change
+// nothing, which is why it is its own arm beside link_severed.
+message SessionFaultWatchOpenRefused {
+  // The watch operation whose open was refused.
+  string operation = 1;
+  // The handle the refused open named.
+  string handle = 2;
+}
+
+// The health reporter's own fault: the daemon's state client would not answer,
+// so the workspace's recorded faults could not be read at all. It says THE
+// ANSWER IS INCOMPLETE, not that the session is broken — every other arm here
+// is a condition of the session, and this one is a condition of the reporting.
+message SessionFaultDaemonStateUnreadable {
+  // The state client's own account of the refusal.
+  string cause = 1;
+}
+
+// A handover whose adoption window ran out with this workspace unclaimed: the
+// successor never took it. DaemonFault spells the DAEMON-scoped arm; this is
+// the WORKSPACE's own, because the rollout controller records the expiry
+// against the workspace it was handing over and the daemon-health filter
+// (workspace-bound faults are SessionHealth's answer) passes it here.
+message SessionFaultAdoptionWindowExpired {
+  // How long the window was, as the controller rendered it ("30s").
+  string adoption_window = 1;
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).

@@ -504,6 +504,34 @@ func hostFault(f wsm.Fault) (*agentreplv1.HostFault, bool) {
 				Kind:      f.Evidence["kind"],
 			},
 		}
+	case health.KindConversationAbandoned:
+		out.Kind = &agentreplv1.HostFault_ConversationAbandoned{
+			ConversationAbandoned: &agentreplv1.SessionFaultConversationAbandoned{
+				VendorSessionId: f.Evidence["vendor_session_id"],
+			},
+		}
+	case health.KindSessionAbsent:
+		out.Kind = &agentreplv1.HostFault_SessionAbsent{
+			SessionAbsent: &agentreplv1.SessionFaultSessionAbsent{}}
+	case health.KindWatchOpenRefused:
+		out.Kind = &agentreplv1.HostFault_WatchOpenRefused{
+			WatchOpenRefused: &agentreplv1.SessionFaultWatchOpenRefused{
+				Operation: f.Evidence["operation"],
+				Handle:    f.Evidence["handle"],
+			},
+		}
+	case health.KindStateUnreadable:
+		out.Kind = &agentreplv1.HostFault_DaemonStateUnreadable{
+			DaemonStateUnreadable: &agentreplv1.SessionFaultDaemonStateUnreadable{
+				Cause: faultEvidence(f, "cause"),
+			},
+		}
+	case health.KindAdoptionWindowExpired:
+		out.Kind = &agentreplv1.HostFault_AdoptionWindowExpired{
+			AdoptionWindowExpired: &agentreplv1.SessionFaultAdoptionWindowExpired{
+				AdoptionWindow: f.Evidence["adoption_window"],
+			},
+		}
 	default:
 		return nil, false
 	}

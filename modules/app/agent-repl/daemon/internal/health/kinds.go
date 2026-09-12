@@ -84,21 +84,12 @@ const (
 // break the whole push. The fault itself is recorded, loudly, at the site that
 // opened it; this set only governs what the two RENDERERS can carry.
 //
-// Every kind here is one the surfaces are OWED an arm for. Until they have one
-// the honest answer is silence on the wire, not a malformed message.
+// THE FIVE KINDS THAT WERE OWED AN ARM NOW HAVE ONE (2026-09-12): the surfaces
+// spell conversation_abandoned, session_absent, watch_open_refused,
+// daemon_state_unreadable and the workspace-scoped adoption_window_expired,
+// and each was removed from this set in the commit that switched its renderer
+// onto the landed arm. What remains here is armless BY DESIGN, not by debt.
 var armlessSessionKinds = map[string]struct{}{
-	// The liveness probe's own answer, not a fault anything raised.
-	KindSessionAbsent: {},
-	// The record of a conversation abandoned at bring-up; the session is live.
-	KindConversationAbandoned: {},
-	// A watch OPEN the shim refused for a handle nothing announced.
-	KindWatchOpenRefused: {},
-	// The self-check's fault when the state client will not answer.
-	KindStateUnreadable: {},
-	// A handover whose adoption window expired. DaemonFault spells an arm for
-	// it; the session surfaces do not, and the rollout controller records it
-	// against the workspace it was handing over.
-	KindAdoptionWindowExpired: {},
 	// An ordinary reconciled bounce disposition, opened and closed in one
 	// breath. It needs no arm: it is per-session accounting, never a standing
 	// condition a host view should draw.
@@ -142,6 +133,10 @@ func daemonFault(f wsm.Fault) *agentreplv1.DaemonFault {
 		}
 	case KindWsmReadOnly:
 		out.Kind = &agentreplv1.DaemonFault_WsmReadOnly{WsmReadOnly: &agentreplv1.DaemonFaultWsmReadOnly{}}
+	case KindStateUnreadable:
+		out.Kind = &agentreplv1.DaemonFault_DaemonStateUnreadable{
+			DaemonStateUnreadable: &agentreplv1.DaemonFaultDaemonStateUnreadable{Cause: evidenceCause(f)},
+		}
 	}
 	return out
 }
@@ -187,6 +182,33 @@ func sessionFault(f wsm.Fault) (*agentreplv1.SessionFault, bool) {
 			ShimReported: &agentreplv1.SessionFaultShimReported{
 				Component: f.Evidence["component"],
 				Kind:      f.Evidence["kind"],
+			},
+		}
+	case KindConversationAbandoned:
+		out.Kind = &agentreplv1.SessionFault_ConversationAbandoned{
+			ConversationAbandoned: &agentreplv1.SessionFaultConversationAbandoned{
+				VendorSessionId: f.Evidence["vendor_session_id"],
+			},
+		}
+	case KindSessionAbsent:
+		out.Kind = &agentreplv1.SessionFault_SessionAbsent{
+			SessionAbsent: &agentreplv1.SessionFaultSessionAbsent{},
+		}
+	case KindWatchOpenRefused:
+		out.Kind = &agentreplv1.SessionFault_WatchOpenRefused{
+			WatchOpenRefused: &agentreplv1.SessionFaultWatchOpenRefused{
+				Operation: f.Evidence["operation"],
+				Handle:    f.Evidence["handle"],
+			},
+		}
+	case KindStateUnreadable:
+		out.Kind = &agentreplv1.SessionFault_DaemonStateUnreadable{
+			DaemonStateUnreadable: &agentreplv1.SessionFaultDaemonStateUnreadable{Cause: evidenceCause(f)},
+		}
+	case KindAdoptionWindowExpired:
+		out.Kind = &agentreplv1.SessionFault_AdoptionWindowExpired{
+			AdoptionWindowExpired: &agentreplv1.SessionFaultAdoptionWindowExpired{
+				AdoptionWindow: f.Evidence["adoption_window"],
 			},
 		}
 	default:
@@ -245,8 +267,16 @@ func faultDetail(f wsm.Fault) string {
 
 // selfCheckFault is the reporter's own fault when its state client will not
 // answer. It is the one fault the daemon can always detect about itself.
+//
+// IT CARRIES ITS ARM. This was the last site that put a fault on the wire with
+// the `kind' oneof unset, and every consumer reads an unset kind as a contract
+// breach -- so the one fault the daemon can always report about itself was the
+// one it could not report at all.
 func selfCheckFault(err error) *agentreplv1.DaemonFault {
 	return &agentreplv1.DaemonFault{
 		Detail: fmt.Sprintf("%s: %v", KindStateUnreadable, err),
+		Kind: &agentreplv1.DaemonFault_DaemonStateUnreadable{
+			DaemonStateUnreadable: &agentreplv1.DaemonFaultDaemonStateUnreadable{Cause: err.Error()},
+		},
 	}
 }

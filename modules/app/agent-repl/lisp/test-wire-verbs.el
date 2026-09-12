@@ -1263,8 +1263,19 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "finishRequired" "finishNotOneShot" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "finishRequired" "finishNotOneShot" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-spawn-failed-arm ()
+  "CreateWorkspaceError's `spawn_failed' arm decodes with everything it
+carries.  It is the SAME daemon refusal an open answers with, so a create
+that could not start a shim states it in band rather than out of it."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"spawnFailed\":{\"detail\":\"the shim would not come up\"}}"))
+                   '(:cause (:arm :spawn-failed
+                             :value (:detail "the shim would not come up")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-open-error-unknown-workspace-arm ()
   "OpenWorkspaceError's `unknown_workspace' arm decodes with everything it
@@ -2169,6 +2180,45 @@ at."
                     (agent-repl-test-wire-verbs--parse "{\"shimReported\":{\"component\":\"stdout\",\"kind\":\"parse\"}}"))
                    '(:detail "" :kind (:arm :shim-reported :value (:component "stdout" :kind "parse")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-session-fault-conversation-abandoned-kind ()
+  "SessionFault's `conversation_abandoned' kind decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"conversationAbandoned\":{\"vendorSessionId\":\"vs-9\"}}"))
+                   '(:detail "" :kind (:arm :conversation-abandoned :value (:vendor-session-id "vs-9")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-session-absent-kind ()
+  "SessionFault's `session_absent' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"sessionAbsent\":{}}"))
+                   '(:detail "" :kind (:arm :session-absent :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-watch-open-refused-kind ()
+  "SessionFault's `watch_open_refused' kind decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"watchOpenRefused\":{\"operation\":\"WatchTranscript\",\"handle\":\"h-3\"}}"))
+                   '(:detail "" :kind (:arm :watch-open-refused :value (:operation "WatchTranscript" :handle "h-3")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-daemon-state-unreadable-kind ()
+  "SessionFault's `daemon_state_unreadable' kind decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"daemonStateUnreadable\":{\"cause\":\"store closed\"}}"))
+                   '(:detail "" :kind (:arm :daemon-state-unreadable :value (:cause "store closed")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-adoption-window-expired-kind ()
+  "SessionFault's `adoption_window_expired' kind decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"adoptionWindowExpired\":{\"adoptionWindow\":\"30s\"}}"))
+                   '(:detail "" :kind (:arm :adoption-window-expired :value (:adoption-window "30s")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-session-fault-unknown-kind-is-a-breach ()
   "A SessionFault kind this codec does not know is refused, never dropped."
   (agent-repl-test-wire-verbs--with-common
@@ -2177,11 +2227,11 @@ at."
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-session-fault-kind-arms-pinned ()
-  "SessionFault's kind oneof has exactly the eight arms decoded here."
+  "SessionFault's kind oneof has exactly the thirteen arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_session_health.pb.go" "SessionFault")
                        #'string<)
-                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported")
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired")
                        #'string<))))
 
 ;;;; ---- DaemonFault kinds (landing 4) ------------------------------------
@@ -2241,12 +2291,20 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"wsmReadOnly\":{}}"))
                    '(:detail "" :kind (:arm :wsm-read-only :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-daemon-state-unreadable-kind ()
+  "DaemonFault's `daemon_state_unreadable' kind decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{\"daemonStateUnreadable\":{\"cause\":\"state client refused\"}}"))
+                   '(:detail "" :kind (:arm :daemon-state-unreadable :value (:cause "state client refused")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-kind-arms-pinned ()
-  "DaemonFault's kind oneof has exactly the six arms decoded here."
+  "DaemonFault's kind oneof has exactly the seven arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFault")
                        #'string<)
-                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "deployScriptFailed" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly")
+                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "deployScriptFailed" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable")
                        #'string<))))
 
 (provide 'test-wire-verbs)

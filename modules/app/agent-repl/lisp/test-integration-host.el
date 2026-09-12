@@ -2579,7 +2579,12 @@ non-nil for exactly this reason."
     (bounceDied . :bounce-died)
     (bounceUnknown . :bounce-unknown)
     (classifierFailed . :classifier-failed)
-    (shimReported . :shim-reported))
+    (shimReported . :shim-reported)
+    (conversationAbandoned . :conversation-abandoned)
+    (sessionAbsent . :session-absent)
+    (watchOpenRefused . :watch-open-refused)
+    (daemonStateUnreadable . :daemon-state-unreadable)
+    (adoptionWindowExpired . :adoption-window-expired))
   "Every `HostFault.kind' arm `endpoint_watch_host_workspace.proto' declares.")
 
 (ert-deftest agent-repl-itest-host-declares-every-fault-kind ()
@@ -2587,11 +2592,11 @@ non-nil for exactly this reason."
 A drifted table would let a newly landed kind ship with no decode test at
 all, which is how a kind quietly collapses into another one."
   ;; Arrange / Act / Assert.
-  (should (equal 8 (length agent-repl-itest-host--fault-kinds))))
+  (should (equal 13 (length agent-repl-itest-host--fault-kinds))))
 
 (ert-deftest agent-repl-itest-host-every-fault-kind-reaches-the-decoded-plist ()
-  "Each of `HostFault''s eight kinds decodes to its OWN `:kind' arm.
-Landing-4 relay declares eight arms; only `link_severed' ever rode a push
+  "Each of `HostFault''s thirteen kinds decodes to its OWN `:kind' arm.
+Landing-4 relay declares thirteen arms; only `link_severed' ever rode a push
 in this suite before, and `agent-repl-verbs--fault-lines' prints `detail'
 alone -- so a decoder collapsing every OTHER kind into the same arm would
 still pass every existing test."
