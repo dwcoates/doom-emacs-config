@@ -72,11 +72,23 @@ message DaemonFault {
     DaemonFaultPromptsDirMissing prompts_dir_missing = 6;
     // The workspace-state store is read-only.
     DaemonFaultWsmReadOnly wsm_read_only = 7;
+    // The daemon's own state client would not answer the fault read.
+    DaemonFaultDaemonStateUnreadable daemon_state_unreadable = 8;
   }
 }
 message DaemonFaultAdoptionWindowExpired {
   // The workspace whose window expired.
   workspace.v1.WorkspaceRef workspace = 1;
+}
+// The self-check's OWN fault: the state client would not answer, so the
+// daemon's standing faults could not be read at all. It is the one fault the
+// daemon can always detect about itself, and it says THE ANSWER IS INCOMPLETE
+// rather than naming a condition the daemon is in. Before this arm existed the
+// self-check was the one site that put a fault on the wire with the `kind`
+// oneof unset, which every consumer reads as a contract breach.
+message DaemonFaultDaemonStateUnreadable {
+  // The state client's own account of the refusal.
+  string cause = 1;
 }
 message DaemonFaultLogSinkPoisoned {
   // Which sink.
