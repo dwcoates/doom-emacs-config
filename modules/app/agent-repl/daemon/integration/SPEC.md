@@ -204,6 +204,11 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   succeeds
 - NukeWorkspace kills, removes the worktree and branch (assert on the fake
   git repo), and removes the row
+- a `forget` command-file entry on a CLOSED workspace removes the row and,
+  when it was the last workspace under its repository, that repository's
+  section too, touching no files; on an OPEN one the file is quarantined and
+  the row stands (the rpc is unlanded, so the command-file ingress is the only
+  route -- see ERROR-ARMS.md)
 - RestartWorkspace{force:false} prelaunches a second fake shim (inert: no
   StartSession until freeness), waits for the running turn to end, sends
   KillSession to the old, reaps it, then StartSession(resume) on the new;

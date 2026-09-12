@@ -78,6 +78,11 @@ func (v *fakeVerbs) Close(_ context.Context, ws ids.WorkspaceID) error {
 	return v.err
 }
 
+func (v *fakeVerbs) Forget(_ context.Context, ws ids.WorkspaceID) error {
+	v.calls = append(v.calls, verbCall{Verb: "forget", WS: ws})
+	return v.err
+}
+
 func (v *fakeVerbs) Open(_ context.Context, ws ids.WorkspaceID) error {
 	v.calls = append(v.calls, verbCall{Verb: "open", WS: ws})
 	return v.err
