@@ -1104,6 +1104,18 @@ func (d *Daemon) WriteShimProfile(dir string, profile any) {
 	writeJSON(d.t, filepath.Join(d.ProfileDir, profileFileName(dir)), profile)
 }
 
+// WriteDefaultShimProfile scripts EVERY fake shim this daemon spawns, whatever
+// workspace it serves (fakeshim's `default.json` fallback).
+//
+// It exists for the workspace whose dir the test does not know in advance: a
+// CREATE mints the dir, so there is no key to write a per-workspace profile
+// under until the verb whose behavior is under test has already run. A
+// per-workspace profile still wins over this one.
+func (d *Daemon) WriteDefaultShimProfile(profile any) {
+	d.t.Helper()
+	writeJSON(d.t, filepath.Join(d.ProfileDir, "default.json"), profile)
+}
+
 // ExpectFileUnchanged asserts a file still holds exactly `want` after the
 // probe window. It is a negative assertion, so it necessarily waits out a
 // bound rather than synchronizing on an event.

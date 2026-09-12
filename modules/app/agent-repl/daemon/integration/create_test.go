@@ -1062,3 +1062,50 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneStartsTheSession(t *testing.T) {
 		t.Fatalf("StartTurn.said = %q, want the initial prompt verbatim", text(turn.GetSaid()))
 	}
 }
+
+// TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheUnlandedSpawnFailedArm
+// pins the ONE gap the workspace realtests left behind: CreateWorkspaceError
+// has no `spawn_failed` arm, so a create whose bring-up cannot start a shim
+// cannot state its refusal in band.
+//
+// The refusal itself is right — `workspace.ArmSpawnFailed`, renamed onto the
+// rpc that raised it — and the transport already carries the arm's evidence:
+// `server.fill` supplies `detail` for any arm that has the field. Only the
+// contract is missing, so the answer is the unlanded-arm Connect error and a
+// WARN under `daemon.refusal.unlanded_arm`.
+//
+// daemon/ERROR-ARMS.md carries the row. When the arm lands, this test flips to
+// asserting `resp.Msg.GetError().GetSpawnFailed()` the way its OpenWorkspace
+// twin (roster_test.go) already does, and the row is deleted in that commit.
+func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheUnlandedSpawnFailedArm(t *testing.T) {
+	t.Parallel()
+	// Arrange: the create mints the workspace dir, so the dying shim is
+	// scripted through the profile EVERY spawn falls back to.
+	d := newDaemon(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the bring-up death the test scripts.
+	d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.exit", "daemon.shimclient.spawn",
+		"daemon.workspace.bring_up", "daemon.workspace.open", "daemon.workspace.create",
+		"daemon.refusal.unlanded_arm")
+	d.WriteDefaultShimProfile(harness.ShimProfile{
+		ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death",
+	})
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+
+	// Act
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			InitialPrompt: said("fix the flaky reconnect test"),
+		}},
+	}))
+
+	// Assert: the intended arm is named EXACTLY as ERROR-ARMS.md prescribes.
+	if err == nil {
+		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the unlanded-arm refusal", resp)
+	}
+	if !strings.HasPrefix(err.Error(), "failed_precondition: intended arm: CreateWorkspaceError.spawn_failed: ") {
+		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the unlanded arm "+
+			"\"intended arm: CreateWorkspaceError.spawn_failed: <reason>\"", err)
+	}
+}
