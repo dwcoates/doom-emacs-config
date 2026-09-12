@@ -140,7 +140,7 @@ Scale
 | # | status | ruling |
 |---|---|---|
 | 0 | done (cc93abb9d) | retire the old playtest layer |
-| 1 | run 1, 2026-09-11 12:13 — FAILED | the owner rules on the classes below |
+| 1 | DONE — twice-green 2026-09-12, clean harvest | remediated; see judgement ledger rows 1-57 |
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
