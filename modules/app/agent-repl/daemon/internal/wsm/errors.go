@@ -18,6 +18,13 @@ var ErrReadOnly = errors.New("wsm: handle is read-only")
 // asked to come back. A deleted session REFUSES resurrection.
 var ErrSessionDeleted = errors.New("wsm: session was deleted and refuses resurrection")
 
+// ErrSessionIdentityMissing is returned when a session row is written with no
+// host session identity. The identity is what Emacs correlates transcripts,
+// health probes and fault windows against, and a row without one is not a
+// session the host view can ever be composed from — so the write is REFUSED
+// here rather than persisted to fail every later compose forever.
+var ErrSessionIdentityMissing = errors.New("wsm: a session record carries no host session id")
+
 // ErrTombstoned is returned when a retired held prompt is written to. A
 // tombstoned hold never resurrects.
 var ErrTombstoned = errors.New("wsm: held prompt is tombstoned")

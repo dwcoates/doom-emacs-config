@@ -9,6 +9,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
+	"claude-repld/internal/wsm"
 )
 
 // TestBootServesAWorkspaceRegisteredUnderTheOlderLayout is the defect this
@@ -58,8 +59,10 @@ func TestBootStampsTheMigratedLayoutOnTheStateDatabase(t *testing.T) {
 			t.Fatalf("read the migrated layout version: %v", err)
 		}
 	})
-	if version != 4 {
-		t.Fatalf("layout version after a migrated boot = %d, want 4", version)
+	// The build's own layout, never a literal: a step appended to the
+	// migration list must not have to be restated here to keep this pinned.
+	if version != wsm.LayoutVersion {
+		t.Fatalf("layout version after a migrated boot = %d, want %d", version, wsm.LayoutVersion)
 	}
 }
 
