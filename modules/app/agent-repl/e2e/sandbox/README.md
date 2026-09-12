@@ -494,7 +494,14 @@ variables above is set there.
 `bin/preflight.sh` is what the harness calls to decide whether to run or to
 skip. It exits `0` when ready, and otherwise prints an actionable message and
 exits `10` (no runtime), `11` (runtime present, daemon unusable), `12` (image
-not built) or `13` (insufficient disk).
+not built), `13` (insufficient disk) or `14` (the runtime did not answer within
+the bound; its engine is wedged).
+
+Every call it makes into the runtime is BOUNDED, so a preflight either answers
+or is reported as not answering. A wedged Docker Desktop — backend alive, socket
+never answering — once held `docker info` for over nine minutes inside the Go
+harness's `sync.Once` and killed the whole e2e package on its own timeout. The
+per-call bound is `AGENT_REPL_SANDBOX_RUNTIME_TIMEOUT_SECONDS` (default 10).
 
 The harness must turn a non-zero exit into a **loud skip that quotes this
 output verbatim** — never a silent pass, and never a fallback to an
@@ -510,7 +517,8 @@ agent-repl e2e sandbox UNAVAILABLE: 'docker' is installed but not usable.
 ```
 
 and exits `11`. Knobs: `AGENT_REPL_SANDBOX_RUNTIME`,
-`AGENT_REPL_SANDBOX_IMAGE`, `AGENT_REPL_SANDBOX_MIN_FREE_GB` (default 12).
+`AGENT_REPL_SANDBOX_IMAGE`, `AGENT_REPL_SANDBOX_MIN_FREE_GB` (default 12),
+`AGENT_REPL_SANDBOX_RUNTIME_TIMEOUT_SECONDS` (default 10).
 
 ## podman
 
