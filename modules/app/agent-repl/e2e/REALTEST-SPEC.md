@@ -191,6 +191,66 @@ hangs the run holding the owner's editor open on a modal question nobody will
 answer. It does not save; the human-in-Emacs refusal upstream is what protects
 unsaved work.
 
+## The workspace-act realtests, and their scratch repository
+
+Realtests 5 and 6 are the first that ACT rather than observe: they create,
+register, close, re-open and delete workspaces. Three things about them are
+settled by the lead's standing decision of 2026-09-12 and are worth reading
+before a run.
+
+**Real git runs, and that is not the no-real-git rule being broken.** The
+editor creates a workspace by asking the daemon for a git worktree, so driving
+the real editor means real git executes. The repo's standing rule that no test
+runs real git governs the unit and integration suites, where git is mocked
+entirely and a fake git executable stands in at the leaf. A realtest has no
+fixture by definition; substituting git here would be substituting the product.
+
+**Never against the owner's repositories.** Each act realtest creates its own
+repository under the run directory — `git init -b master`, one file, one commit,
+identity and signing passed as `-c` overrides so the owner's global git config
+is neither read for a signer nor written to. Every act is against that
+directory and nothing else.
+
+**Everything created is removed, including on failure.** Each cleanup is
+registered through `t.Cleanup` the moment the thing exists, so a test that
+fails between the create and the delete still tears down what it had made. A
+created workspace is NUKED, which is the one verb that deletes the worktree,
+deletes the branch and forgets the registry record.
+
+One residue the product cannot remove is reported rather than hidden. Register
+mints a workspace record AND a repository record, and no RPC forgets either:
+close and kill mark a row closed, and nuke — the only verb that forgets a
+record — destroys the worktree first, which for a registered main checkout is
+the repository itself, and git refuses to remove a main working tree. So a run
+that registers a directory leaves one closed workspace row and its repository
+row, both naming a deleted path under the run directory. Each run says so in
+its own output, with the ids, for the owner to rule on.
+
+**The chord is real; the minibuffer answers are not.** A realtest prefers real
+keys, and where the plan names a binding the chord IS pressed as real key
+events — then the command's own first prompt is read back out of the minibuffer
+as the proof it arrived (`SPC TAB n` is the only thing that asks "Repository: "
+first), and a real `C-g` aborts it. The parameterized act that follows enters
+the SAME user-facing command through `call-interactively` with only its
+minibuffer reads answered, because those reads are a `require-match`
+`completing-read` and a directory-name prompt, and typing into either with
+synthetic keystrokes would test the completion UI rather than the product.
+Nothing reaches past a command into the verb layer: a test that called
+`agent-repl-verb-create` would be testing the wire call and saying nothing
+about the command the owner invokes.
+
+**A nuke deletes the log LINK, not the bytes.** A workspace's canonical sink is
+a symlink into the state root, so destroying the worktree leaves the records
+unreachable through the enumeration even though they still exist at the target.
+Realtest 5 captures those targets while the workspace still stands and appends
+them to the harvest as ordinary sources, so the remediation bar is not quietly
+claiming a clean harvest over a log it never opened.
+
+**One `-run` invocation per act realtest.** Each performs a cold start, and a
+cold start refuses to run against an Emacs that is already answering, so two of
+them in one `go test` process would have the second refuse against the editor
+the first left standing.
+
 ## The phases: hidden, then shown
 
 Every phase from spawn to usable is bounded by a record the module already
@@ -429,7 +489,12 @@ e2e/realtest/
   keydriver.swift              CGEventPostToPid, with the trust check
   state.go                     what the state database holds, read-only
   manifest.go                  MANIFEST.md
+  realtest_workspace_acts_test.go
+                               the scratch repository, the workspace acts and
+                               the cleanup realtests 5 and 6 share
   realtest_1_start_the_editor_test.go
+  realtest_5_create_work_delete_a_workspace_test.go
+  realtest_6_register_and_reopen_test.go
 ```
 
 The unit tests run under the same build tag and need none of the above: they
