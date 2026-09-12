@@ -812,6 +812,35 @@ the click happened and went nowhere, which is worth the record."
 
 ;;;; ---- Tests: agent-repl--emacs-focused-p ----
 
+(ert-deftest agent-repl-test-emacs-focused-p-with-no-workspace-records-centrally ()
+  "With no WS, the focus observation names the CENTRAL scope explicitly.
+Desktop focus is a global fact.  Passing nil down the workspace-owned
+rung with nothing else naming a workspace earns
+`elisp.core.log-routing-error' at ERROR -- correctly, since missing
+attribution at a call site is a defect no directory can supply -- so this
+call site states the central scope instead of leaving one missing."
+  ;; Arrange.
+  (let ((scopes nil))
+    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+               (lambda (ws &rest _) (push ws scopes))))
+      ;; Act.
+      (let ((noninteractive t))
+        (agent-repl--emacs-focused-p))
+      ;; Assert.
+      (should (equal scopes (list agent-repl--global-log-scope))))))
+
+(ert-deftest agent-repl-test-emacs-focused-p-with-a-workspace-records-on-it ()
+  "With a WS, the focus observation is attributed to that workspace."
+  ;; Arrange.
+  (let ((scopes nil))
+    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+               (lambda (ws &rest _) (push ws scopes))))
+      ;; Act.
+      (let ((noninteractive t))
+        (agent-repl--emacs-focused-p "ws1"))
+      ;; Assert.
+      (should (equal scopes (list "ws1"))))))
+
 (ert-deftest agent-repl-test-emacs-focused-p-nil-in-batch ()
   "Under `noninteractive', emacs-focused-p returns nil without scanning frames."
   (cl-letf (((symbol-function 'frame-list)
