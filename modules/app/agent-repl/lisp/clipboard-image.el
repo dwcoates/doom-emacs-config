@@ -55,6 +55,7 @@
 
 (require 'image)
 (require 'seq)
+(require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
