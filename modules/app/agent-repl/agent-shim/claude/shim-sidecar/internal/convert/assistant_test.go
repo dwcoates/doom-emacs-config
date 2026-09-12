@@ -378,3 +378,151 @@ func TestDescribeNoUnitsCallsAnUnnamedCauseAModellingGap(t *testing.T) {
 		t.Errorf("describeNoUnits(nil) = %q, want it named as a modelling gap", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Quoted (inherited) assistant records — ledger row 51.
+//
+// A fork transcript COPIES the parent's whole conversation ahead of its own
+// work, keeping each copied record's `message.id`. Re-booking a copied block
+// under the fork hands the store `activity:<message id>:<block>` — a key its
+// producer already used under ANOTHER book — and an upsert may supersede a row's
+// content but never MOVE it between books, so the whole batch is refused and
+// lost. The producer already stored the row, so the fork keeps only residue.
+// ---------------------------------------------------------------------------
+
+// forkAt is the attribution a FORK sidechain is read under: its own book (the
+// spawning call's tool_use_id) and its own type, "fork".
+func forkAt(offset int64) Attribution {
+	return Attribution{
+		VendorSessionID: "session-uuid",
+		MainAgentID:     "session-uuid",
+		AgentID:         "toolu_fork",
+		AgentType:       "fork",
+		Path:            "/p/projects/proj/session-uuid/subagents/agent-afork.jsonl",
+		FileID:          "dev:fork",
+		Offset:          offset,
+	}
+}
+
+// assistantAttributed builds a sidechain assistant line carrying the vendor's
+// `attributionAgent` — the TYPE of the agent that produced the record, which the
+// vendor stamps on every sidechain record and PRESERVES across a fork's copy of
+// its parent's conversation.
+func assistantAttributed(uuid, messageID, attributionAgent, blocks string) string {
+	return `{"type":"assistant","uuid":"` + uuid + `","isSidechain":true,"attributionAgent":"` +
+		attributionAgent + `","timestamp":"` + ts1 + `","message":{"id":"` + messageID +
+		`","role":"assistant","content":[` + blocks + `]}}`
+}
+
+func TestQuotedAssistantIsNotReBookedUnderTheQuotingAgent(t *testing.T) {
+	// Arrange: a fork reads an assistant record it merely QUOTES from its parent
+	// — attributed to the parent's type, not the fork's.
+	c := newTestConverter(t)
+	line := assistantAttributed("q1", "msg_parent", "general-purpose", `{"type":"text","text":"a parent message"}`)
+
+	// Act.
+	entries := c.Line(decode(t, line), forkAt(0), nil)
+
+	// Assert: it books no page line, so the producer's `activity:<id>:<block>`
+	// row under another book is never restated here.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want exactly 1 residue entry: keys=%v", len(entries), allKeys(entries))
+	}
+	if pl := pageLine(entries[0]); pl != nil {
+		t.Fatalf("a quoted record produced a page line under book %q; it must be residue", pl.GetPageAgentId().GetValue())
+	}
+	if key := entries[0].GetUpsertKey(); key == ActivityKey(BlockActivityID("msg_parent", 0)) {
+		t.Fatalf("quoted record keyed as the block activity %q — exactly the book-move key", key)
+	}
+	if got := vendorKindOf(entries[0]); got != "assistant/quoted_context" {
+		t.Fatalf("kind = %q, want assistant/quoted_context", got)
+	}
+}
+
+func TestQuotedAssistantResidueCarriesNoBook(t *testing.T) {
+	// Arrange. The residue must be an UNSERVED item so the store books it NULL:
+	// only a NULL book collapses across every fork that quotes the record instead
+	// of each write asking to move the row.
+	c := newTestConverter(t)
+	line := assistantAttributed("q1", "msg_parent", "general-purpose", `{"type":"text","text":"x"}`)
+
+	// Act.
+	entries := c.Line(decode(t, line), forkAt(0), nil)
+
+	// Assert.
+	if entries[0].GetAgentUpdate().GetUnservedItem() == nil {
+		t.Fatal("a quoted record must be an unserved item so the store books it NULL")
+	}
+	if entries[0].GetAgentUpdate().GetServeableFrame() != nil {
+		t.Fatal("a quoted record must carry no serveable frame, which would name a book")
+	}
+}
+
+func TestQuotedAssistantResidueKeyIsIdenticalAcrossForks(t *testing.T) {
+	// Arrange. The vendor copies ONE record — uuid and all — into every fork that
+	// inherits the context, so each fork keys its residue by that shared uuid and
+	// the writes collapse onto ONE book-NULL row rather than each moving it.
+	line := assistantAttributed("q1", "msg_parent", "general-purpose", `{"type":"text","text":"x"}`)
+	a := forkAt(0)
+	a.AgentID = "toolu_A"
+	b := forkAt(0)
+	b.AgentID = "toolu_B"
+
+	// Act.
+	inA := newTestConverter(t).Line(decode(t, line), a, nil)
+	inB := newTestConverter(t).Line(decode(t, line), b, nil)
+
+	// Assert.
+	if inA[0].GetUpsertKey() != inB[0].GetUpsertKey() {
+		t.Fatalf("two forks keyed the same quoted record differently (%q vs %q); the writes would not collapse",
+			inA[0].GetUpsertKey(), inB[0].GetUpsertKey())
+	}
+	if got := inA[0].GetUpsertKey(); got != "residue:q1" {
+		t.Fatalf("quoted residue key = %q, want it keyed by the shared record uuid (residue:q1)", got)
+	}
+}
+
+func TestForkOwnAssistantIsStillBooked(t *testing.T) {
+	// Arrange. A fork's OWN work attributes to its own type. Skipping it would be
+	// real data loss — the fork's work is booked NOWHERE else.
+	c := newTestConverter(t)
+	line := assistantAttributed("o1", "msg_own", "fork", `{"type":"text","text":"my own work"}`)
+
+	// Act.
+	entries := c.Line(decode(t, line), forkAt(0), nil)
+
+	// Assert.
+	e := entryByKey(t, entries, ActivityKey(BlockActivityID("msg_own", 0)))
+	if got := pageLine(e).GetPageAgentId().GetValue(); got != "toolu_fork" {
+		t.Fatalf("the fork's own work is booked under %q, want its own book toolu_fork", got)
+	}
+}
+
+func TestQuotesInheritedContextDistinguishesQuotedFromProduced(t *testing.T) {
+	// Arrange. The vendor states the producer's TYPE on every sidechain record.
+	c := newTestConverter(t)
+	tests := []struct {
+		name string
+		at   Attribution
+		attr string
+		want bool
+	}{
+		{name: "a session record names no producer and is never quoted", at: Attribution{}, attr: "", want: false},
+		{name: "a session record with no agent type is not quoted even if attributed", at: Attribution{}, attr: "general-purpose", want: false},
+		{name: "a non-fork subagent's own record attributes to its own type", at: Attribution{AgentType: "general-purpose"}, attr: "general-purpose", want: false},
+		{name: "a fork's own record attributes to fork", at: Attribution{AgentType: "fork"}, attr: "fork", want: false},
+		{name: "a fork's own record with no attribution is not quoted", at: Attribution{AgentType: "fork"}, attr: "", want: false},
+		{name: "a fork's quoted record attributes to the parent's type", at: Attribution{AgentType: "fork"}, attr: "general-purpose", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := c.quotesInheritedContext(tt.at, envelope{attributionAgent: tt.attr})
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("quotesInheritedContext(AgentType=%q, attributionAgent=%q) = %v, want %v", tt.at.AgentType, tt.attr, got, tt.want)
+			}
+		})
+	}
+}

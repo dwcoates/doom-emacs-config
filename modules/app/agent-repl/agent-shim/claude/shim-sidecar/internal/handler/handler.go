@@ -69,6 +69,10 @@ func attribute(ctx *Context, offset int64) convert.Attribution {
 		// read is HELD by the reader and never reaches here, so an empty id is a
 		// reader defect and is stated as one.
 		at.AgentID = ctx.AgentID
+		// The agent's OWN type, so an assistant record it merely QUOTES from a
+		// parent (a fork's inherited context) can be told from one it produced
+		// and is not re-booked under this agent (convert assistant.go).
+		at.AgentType = ctx.AgentType
 	default:
 		// A spool or a journal: the run's frames name the run, and the owning
 		// agent is whatever the reader resolved.

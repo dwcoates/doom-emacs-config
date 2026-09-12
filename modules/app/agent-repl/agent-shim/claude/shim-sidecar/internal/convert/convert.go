@@ -89,6 +89,13 @@ type openCall struct {
 	// NIL means the acknowledgement declared none, which the proto distinguishes
 	// from an empty declared set.
 	retainedAllowedTools *conversationv1.AgentSkillAllowedTools
+
+	// inherited marks a call that this transcript merely QUOTES from a parent —
+	// a tool_use block of a fork's copied context. Its producer already booked
+	// the settled unit under the producing agent, so this reader must not
+	// settle it a second time under its own book (which the store would refuse
+	// as a book move). The result is kept as residue instead; see settle.go.
+	inherited bool
 }
 
 // Converter holds the per-file correlation a conversion needs beyond the record
@@ -255,15 +262,22 @@ type envelope struct {
 	isSummary   bool
 	sourceTool  string
 	timestampMs int64
+	// attributionAgent is the TYPE of the agent that actually produced this
+	// record, which the vendor stamps on every sidechain assistant record and
+	// PRESERVES across a fork's copy of the parent's conversation. It is how a
+	// quoted record is told from a produced one; empty on records the vendor
+	// does not attribute (a session transcript's, a non-sidechain's).
+	attributionAgent string
 }
 
 func readEnvelope(obj map[string]any) envelope {
 	return envelope{
-		uuid:        str(obj["uuid"]),
-		isMeta:      boolean(obj["isMeta"]),
-		isSummary:   boolean(obj["isCompactSummary"]),
-		sourceTool:  str(obj["sourceToolUseID"]),
-		timestampMs: parseInstant(str(obj["timestamp"])),
+		uuid:             str(obj["uuid"]),
+		isMeta:           boolean(obj["isMeta"]),
+		isSummary:        boolean(obj["isCompactSummary"]),
+		sourceTool:       str(obj["sourceToolUseID"]),
+		timestampMs:      parseInstant(str(obj["timestamp"])),
+		attributionAgent: str(obj["attributionAgent"]),
 	}
 }
 

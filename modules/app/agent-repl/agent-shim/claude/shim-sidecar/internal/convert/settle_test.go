@@ -578,3 +578,45 @@ func TestBashResultRoutingIgnoresIsErrorWhenAnExitWasStated(t *testing.T) {
 		})
 	}
 }
+
+// convertForkLines runs lines through ONE converter under a FORK's attribution,
+// so a quoted call registers before the result that quotes it — the same order a
+// fork transcript presents them on disk. forkAt lives in assistant_test.go.
+func convertForkLines(t *testing.T, c *Converter, lines ...string) []*storev1.StoreEntry {
+	t.Helper()
+	var out []*storev1.StoreEntry
+	for i, line := range lines {
+		out = append(out, c.Line(decode(t, line), forkAt(int64(i*1000)), nil)...)
+	}
+	return out
+}
+
+func TestQuotedToolResultIsResidueNotReSettledUnderThisAgent(t *testing.T) {
+	// Arrange. A fork quotes a parent's tool_use AND its result. The call was
+	// remembered as inherited, so the result must NOT settle the unit a second
+	// time under the fork's book (which the store would refuse as a book move) —
+	// it is kept as residue, and it must NOT orphan-warn either, because the call
+	// WAS observed on this stream.
+	c := newTestConverter(t)
+	call := assistantAttributed("q1", "msg_parent", "general-purpose",
+		toolCall("toolu_q", "Read", `{"file_path":"/f.go"}`))
+	result := toolResultLine("u1", "toolu_q", ts2, `[{"type":"text","text":"c"}]`,
+		`{"type":"text","file":{"filePath":"/f.go","content":"c","numLines":1,"totalLines":1}}`)
+
+	// Act.
+	entries := convertForkLines(t, c, call, result)
+
+	// Assert: two residue entries and no page line — nothing re-booked.
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (the quoted call record and its quoted result): keys=%v", len(entries), allKeys(entries))
+	}
+	for _, e := range entries {
+		if e.GetAgentUpdate().GetServeableFrame() != nil {
+			t.Fatalf("a quoted call/result produced a page line under book %q; both must be residue",
+				e.GetAgentUpdate().GetServeableFrame().GetPageAgentId().GetValue())
+		}
+	}
+	if got := vendorKindOf(entries[1]); got != "tool_result/quoted_context" {
+		t.Fatalf("the result kind = %q, want tool_result/quoted_context (not orphan_tool_result and not a settle)", got)
+	}
+}
