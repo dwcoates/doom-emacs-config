@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 )
 
@@ -318,57 +317,20 @@ func rt78ProcessAlive(ctx context.Context, pid string) bool {
 
 // ---- The one precondition a run cannot arrange for itself ------------------
 
-// rt78FakeShimsEnv is the daemon's shim-only fake hook
-// (daemon/cmd/claude-repld/graph.go, `FakeShimsEnv`), which makes every shim
-// spawn carry `--fake` and answer from the offline scripted SDK.
+// THE SHIM FAKE HOOK IS NO LONGER A PRECONDITION, and this note is why the
+// check that used to live here is gone.
 //
-// REALTEST 7 CANNOT RUN WITHOUT IT. It has to give a workspace a conversation
-// before it can fork one, because the daemon refuses a fork whose parent has
-// none (`fork_parent_has_no_conversation`), and submitting a prompt is what
-// reaches the vendor: the shim's single chokepoint, `importRealSDK`, is
-// entered from `createRealQuery`, and with AGENT_REPL_FORBID_VENDOR_CALLS=1
-// set it THROWS there. That is the guard working exactly as designed, and the
-// fake is how a realtest gets an answered prompt without a real call.
+// Realtest 7 has to give a workspace a conversation before it can fork one,
+// because the daemon refuses a fork whose parent has none
+// (`fork_parent_has_no_conversation`), and submitting a prompt is what reaches
+// the vendor. That used to demand AGENT_REPL_FAKE_SHIMS=1 on the Emacs process
+// beside the vendor guard, stated with `open --env`, because a guarded daemon
+// REFUSED the shim spawn outright and a real-vendor shim would have thrown at
+// `createRealQuery`.
 //
-// The launcher states AGENT_REPL_FORBID_VENDOR_CALLS on the Emacs process and
-// nothing else (launch.go, `openBackgroundArgs`), and `open` hands the
-// application to launchd, which does not pass this process's environment
-// along, so the hook cannot be exported from here: it has to be stated with
-// `--env` on the launch the same way the vendor guard is. That is a change to
-// a shared file every realtest goes through, so this is a CHECK and not a
-// workaround. The lead rules on whether the launcher states the hook always or
-// only for the realtests that need an answered prompt.
-const rt78FakeShimsEnv = "AGENT_REPL_FAKE_SHIMS"
-
-// rt78RequireFakeShims fails the run when the Emacs process does not carry the
-// hook.
-//
-// It reads the KERNEL'S copy of the environment (`ps -Eww`, through
-// ProcessEnvironment) for the same reason verifyVendorGuard does: what the
-// launcher intended and what the process holds are different facts, and only
-// the second decides whether a prompt will be answered.
-func rt78RequireFakeShims(ctx context.Context, t *testing.T, client *Client) {
-	t.Helper()
-	pid, err := client.ReadInt(ctx, `(emacs-pid)`)
-	if err != nil {
-		t.Fatalf("read the Emacs pid to check the shim fake hook: %v", err)
-	}
-	env, err := ProcessEnvironment(ctx, pid)
-	if err != nil {
-		t.Fatalf("read the Emacs process (pid %d) environment to check the shim fake hook: %v", pid, err)
-	}
-	value := env[rt78FakeShimsEnv]
-	if value == "" || value == "0" || strings.EqualFold(value, "false") {
-		t.Fatalf("the Emacs process (pid %d) does not carry %s, so no prompt can be answered in this run: "+
-			"the shim reaches the vendor at `createRealQuery` and %s=1 makes its guard throw there. "+
-			"This realtest must give a workspace a conversation before it can fork one, because the daemon "+
-			"refuses a fork whose parent has none, so it cannot run as launched. "+
-			"The remedy is on the launch, not here: `open` hands Emacs to launchd, which does not inherit "+
-			"this process's environment, so %s=1 has to be stated with `--env` in openBackgroundArgs "+
-			"(launch.go) beside %s=1. That file is shared by every realtest, so this test does not change "+
-			"it, and the lead rules on whether the launcher states the hook always or per test",
-			pid, rt78FakeShimsEnv, vendorGuardEnv, rt78FakeShimsEnv, vendorGuardEnv)
-	}
-	t.Logf("the Emacs process (pid %d) carries %s=%s, so a submitted prompt is answered offline",
-		pid, rt78FakeShimsEnv, value)
-}
+// The daemon now reads the guard as what it always meant -- never touch the
+// real vendor -- and spawns every shim with `--fake` instead of refusing
+// (daemon/internal/shimclient/supervisor.go, `fakeMode`). So the ONE variable
+// the launcher already states is enough: `verifyVendorGuard` proves the guard
+// reached both Emacs and the daemon, and a guarded daemon cannot spawn
+// anything but a fake shim.
