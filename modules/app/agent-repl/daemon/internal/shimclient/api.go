@@ -153,6 +153,20 @@ type Client interface {
 	// the session's shim_died fault — reads it here instead of racing that
 	// waiter for the value.
 	Reaped() (ExitInfo, bool)
+	// StandingDown answers whether a KillSession has been asked of this shim.
+	//
+	// IT IS THE ONE PLACE THE DAEMON'S OWN TEARDOWN IS RECORDED, and every
+	// route to ending a session -- `Fleet.KillSession`, the verbs' kill and
+	// nuke, the rollout's stand-down, the drain's sweep -- reaches the shim
+	// through `KillSession` above, which latches it before the verb goes. A
+	// consumer that reads it therefore cannot be bypassed by a caller that
+	// forgot to announce the teardown out of band; a caller that forgot is
+	// exactly how a deliberate stand-down came to be recorded as a transport
+	// fault.
+	//
+	// The latch is one-way: a shim asked to end its session is never asked to
+	// un-end it, and a revival is a new process with a new client.
+	StandingDown() bool
 	// Kill stops the process, recording who asked and why. ctx bounds the
 	// call's WAITS -- the SIGTERM grace and the wait for the exit decode --
 	// and never the reap itself, which runs on the client's own goroutine. A

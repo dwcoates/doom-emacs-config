@@ -1507,3 +1507,111 @@ func TestAnUnavailableWatchOpenStillSevers(t *testing.T) {
 		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultSevered)
 	}
 }
+
+// ---- a teardown this daemon ordered is not a fault ----
+
+// TestStreamEndAfterAnAskedStandDownIsNotAFailure covers the teardown route
+// that announces NOTHING. `Fleet.KillSession` tells the watcher through
+// SessionEnding, but the rollout's stand-down and the verbs' kill reach the
+// shim's `KillSession` rpc directly, and the shim ends its process on it. The
+// watcher reads the shim's own latch instead of waiting to be told, so the
+// streams the shim closes on its way out are the answer to an act this daemon
+// performed rather than a severing to redial.
+//
+// MEASURED: a stale-build relaunch bounce recorded two ERRORs, a link_severed
+// WARN and its health fault against exactly this, in the realtest sweep of
+// 2026-09-12T15:23:03.
+func TestStreamEndAfterAnAskedStandDownIsNotAFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.standDown()
+
+	// Act.
+	h.main.Close()
+
+	// Assert.
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.stream_closed")
+	if !h.w.Connected() {
+		t.Fatal("a stream ending inside an asked-for stand-down severed the link")
+	}
+}
+
+// TestASessionStreamEndAfterAnAskedStandDownIsNotAFailure is the same edge on
+// the SESSION stream, which is the other standing stream a stand-down ends and
+// the one the sweep recorded first.
+func TestASessionStreamEndAfterAnAskedStandDownIsNotAFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.standDown()
+
+	// Act.
+	h.session.Close()
+
+	// Assert.
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.stream_closed")
+	if h.hasRecord("error", "daemon.sessionwatcher.watch_session") {
+		t.Fatal("the session stream's end inside an asked-for stand-down was recorded as a severing")
+	}
+}
+
+// TestAStreamEndWithNoStandDownStillSevers is the other half, and it is the
+// point of the whole distinction: nothing asked this shim to stand down, so a
+// standing stream ending is exactly as loud as it has always been.
+func TestAStreamEndWithNoStandDownStillSevers(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.session.fail(errors.New("connection reset"))
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultSevered {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultSevered)
+	}
+	if !h.hasRecord("error", "daemon.sessionwatcher.watch_session") {
+		t.Fatal("an unasked stream end was not recorded as a severing")
+	}
+}
+
+// TestADeadLinkInsideAnAskedStandDownRaisesNoFault covers the fault half. The
+// shim's process going is the END of the teardown this daemon ordered, and a
+// `link_dead` fault raised against it would stand on the health surface for a
+// workspace whose session the user deliberately ended.
+func TestADeadLinkInsideAnAskedStandDownRaisesNoFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.standDown()
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+
+	// Assert.
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link_fault")
+	for _, e := range h.rec.drain() {
+		if e.name() == "lifecycle.OnLinkFault" {
+			t.Fatal("a link fault was raised inside a stand-down this daemon asked for")
+		}
+	}
+}
+
+// TestADeadLinkWithNoStandDownStillRaisesItsFault is that fault's other half:
+// a shim that went away unasked is still the loudest thing the watcher says.
+func TestADeadLinkWithNoStandDownStillRaisesItsFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultDead {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultDead)
+	}
+}
