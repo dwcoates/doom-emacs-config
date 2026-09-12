@@ -911,21 +911,32 @@ user's own choice was silently overwritten on the next save."
               (should (null (plist-get data :model)))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-test-state-save-snapshot-error-does-not-block-state ()
-  "A snapshot-save failure must not propagate out of state-save (state file
-write is the primary obligation; snapshot is the piggyback)."
+(ert-deftest agent-repl-test-state-save-requests-no-roster-snapshot ()
+  "state-save asks for no workspace roster snapshot.
+The local snapshot subsystem was retired when the daemon became the
+source of which workspaces exist.  Its call site survived as an
+`fboundp' guard on a function that no longer existed, so every single
+save warned `reason=function-unavailable' about a subsystem that was
+deliberately gone.  No snapshot symbol may reappear in this path."
+  (should-not (fboundp 'agent-repl--snapshot-save-request))
+  (should-not (fboundp 'agent-repl-save-workspace-snapshot)))
+
+(ert-deftest agent-repl-test-state-save-warns-nothing-on-a-first-save ()
+  "The very first state-save for a workspace raises no warning.
+This is the earliest point a save can fire, and it was the point that
+produced the `snapshot skipped' warning twice per run."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t)))
+    (let ((tmpdir (make-temp-file "test-state-nowarn-" t))
+          (warnings nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--snapshot-save-request)
-                     (lambda () (error "boom"))))
+          (cl-letf (((symbol-function 'agent-repl--warn)
+                     (lambda (_ws fmt &rest args)
+                       (push (apply #'format fmt args) warnings))))
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
-            (let* ((file (agent-repl--state-file tmpdir))
-                   (data (agent-repl--read-sexp-file file)))
-              (should (equal (plist-get data :project-dir) tmpdir))))
+            (should (null warnings)))
         (delete-directory tmpdir t)))))
 
 ;;;; ---- Tests: validate-ws-env ----
