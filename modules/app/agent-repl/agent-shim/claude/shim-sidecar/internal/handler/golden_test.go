@@ -127,6 +127,12 @@ func TestGoldenCorpusVendorSpecificKindsAreTheDeclaredSet(t *testing.T) {
 		"user_prompt": true, "user/meta": true,
 		// A settle whose call is behind the cursor.
 		"orphan_tool_result": true,
+		// A fork's copied context: an assistant record it QUOTES from a parent,
+		// and a tool result for such a quoted call. Their producer already booked
+		// the units, so this reader keeps only residue rather than re-booking a
+		// row under this agent (convert assistant.go / settle.go, ledger row 51).
+		"assistant/quoted_context":   true,
+		"tool_result/quoted_context": true,
 		// A content block kind this schema does not model.
 		"content_block/fallback": true,
 		// WORKFLOW IS KICKED THIS WAVE: the files are still discovered, tailed

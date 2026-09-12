@@ -31,6 +31,18 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 	message := obj(record["message"])
 	agent := c.frameAgent(at, env)
 
+	// A record this transcript merely QUOTES from a parent is not this agent's
+	// to book. A fork copies the parent's whole conversation ahead of its own
+	// work, and the copied assistant records keep the parent's `message.id` — so
+	// re-booking their blocks under THIS agent hands the store the same
+	// `activity:<message id>:<block>` key the producer already used under ANOTHER
+	// book, and an upsert may supersede a row's content but never move it between
+	// books. The producer already stored it correctly, so nothing new is lost by
+	// keeping only a durable residue copy here.
+	if c.quotesInheritedContext(at, env) {
+		return c.quotedAssistant(record, message, at, env, agent)
+	}
+
 	// The response's identity. A response the vendor did not name falls back to
 	// the LINE's own uuid, which is a real identity — it simply cannot fold two
 	// lines of one response together.
@@ -100,6 +112,64 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 			Log("assistant record produced no units (%s), so this response's usage is not carried", describeNoUnits(reasons))
 	}
 	return out
+}
+
+// quotesInheritedContext reports that this assistant record was produced by
+// ANOTHER agent and is only quoted here.
+//
+// THE VENDOR ITSELF STATES THE PRODUCER. Every sidechain assistant record
+// carries `attributionAgent`, the TYPE of the agent that produced it, and a fork
+// PRESERVES it across the copy of the parent's conversation it prepends to its
+// own transcript while stamping its OWN records with its own type. So a record
+// whose `attributionAgent` names a type OTHER than this agent's is inherited
+// context, not this agent's work. The guard is narrow on purpose: a session
+// transcript has no `AgentType` and its records carry no `attributionAgent`, so
+// it never matches, and a non-fork subagent's records all attribute to its own
+// type, so it never matches either — only a fork's copied prefix does.
+func (c *Converter) quotesInheritedContext(at Attribution, env envelope) bool {
+	return at.AgentType != "" && env.attributionAgent != "" && env.attributionAgent != at.AgentType
+}
+
+// quotedAssistant handles an assistant record this transcript only QUOTES. It
+// books nothing under this agent — the producing agent already booked every unit
+// — and keeps the record as residue so the copy is durable and total ingestion
+// holds. Residue carries NO book (route.go leaves an unserved item's book NULL)
+// and is keyed by the record's own uuid, which is IDENTICAL across every fork
+// that quotes it, so all those writes collapse onto one row rather than each
+// asking to move it.
+//
+// THE QUOTED TOOL CALLS ARE STILL REMEMBERED, marked inherited, so the results
+// the fork also copied settle as residue in settle.go rather than orphaning at a
+// warning or re-booking the settled unit under this agent.
+func (c *Converter) quotedAssistant(record, message map[string]any, at Attribution, env envelope, agent string) []*storev1.StoreEntry {
+	for _, raw := range list(message["content"]) {
+		block := obj(raw)
+		if block == nil {
+			continue
+		}
+		switch str(block["type"]) {
+		case "tool_use", "server_tool_use", "mcp_tool_use":
+			id := str(block["id"])
+			if id == "" {
+				continue
+			}
+			input := obj(block["input"])
+			if input == nil {
+				input = map[string]any{}
+			}
+			c.rememberCall(id, openCall{
+				name:       str(block["name"]),
+				input:      input,
+				startedAt:  env.timestampMs,
+				activityID: id,
+				agentID:    agent,
+				inherited:  true,
+			})
+		}
+	}
+	c.log.With(at.ctxFor("quoted-context")).
+		LogVerbose("assistant record attributed to %q is quoted context, not produced by this %q agent; kept as residue, not re-booked", env.attributionAgent, at.AgentType)
+	return []*storev1.StoreEntry{VendorSpecificEntry(at, "assistant/quoted_context", record)}
 }
 
 // stampAccounting puts the response's usage and effort on the FIRST unit the
