@@ -24,6 +24,8 @@
 (require 'cl-lib)
 (require 'url-util)
 
+(declare-function agent-repl--with-deferred-quit "agent-repl-core")
+(declare-function agent-repl--deferred-quit-arm-delivery "agent-repl-core" (context))
 (declare-function agent-repl--log"agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -261,7 +263,31 @@ hold per item is what stranded a cold start for twenty seconds, because
 the mount itself perturbs the focus state the hold reads -- see
 `agent-repl--webview-precreate-pass-open' for the whole argument.  A tick
 that finds the hold set with NO pass open still parks, whole, and waits
-for `agent-repl--webview-precreate-on-focus-change'."
+for `agent-repl--webview-precreate-on-focus-change'.
+
+A TICK IS A CRITICAL SECTION FOR QUITS.  This drain is set off by the
+desktop FOCUS EDGE, which is the same instant a keypress arrives -- a key
+event can only reach Emacs once Emacs is the active application, so
+bringing it forward is what precedes one.  A `C-g' landing here found
+Emacs BUSY rather than waiting in `read_char', so Emacs could only arm
+`quit-flag'; the flag was then taken at a checkpoint inside this tick,
+which sits inside a standing minibuffer's own recursive edit, so the echo
+area said `Quit' and the prompt stayed up.  That is the 2026-09-12 \"a
+real C-g did not dismiss the standing minibuffer\" finding, and it is why
+the tick runs under `agent-repl--with-deferred-quit\': the guard holds the
+quit off the tick AND hands it to the command loop afterwards, where it
+reaches the read the user aimed it at.
+
+The mid-tick state this also protects is real on its own terms: the timer
+is cleared at the top and re-armed at the bottom, so a quit between them
+would leave the queue standing with no timer to drain it."
+  (agent-repl--with-deferred-quit "webview-precreate-drain"
+    (agent-repl--webview-precreate-tick)))
+
+(defun agent-repl--webview-precreate-tick ()
+  "Run one pre-creation tick: the quit-guarded body of the drain.
+Named separately so `agent-repl--webview-precreate-drain\' has a body to
+guard and so a tick is drivable from a test without a timer."
   (setq agent-repl--webview-precreate-timer nil)
   (if (and agent-repl--webview-precreate-queue
            (not agent-repl--webview-precreate-pass-open)

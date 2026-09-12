@@ -48,6 +48,8 @@
 (require 'url-util)
 (require 'url-parse)
 
+(declare-function agent-repl--with-deferred-quit "agent-repl-core")
+(declare-function agent-repl--deferred-quit-arm-delivery "agent-repl-core" (context))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-live-p "agent-repl-workspace" (ws))
@@ -398,13 +400,24 @@ foreign directory the xwidget session inherited at creation."
   ;; to `gui-kill', so it is never released — or an adopted-but-unbound
   ;; buffer the next open mounts a SECOND webview beside.  Quit is held off
   ;; until the registry names the buffer it just created.
+  ;;
+  ;; THROUGH `agent-repl--with-deferred-quit' RATHER THAN A BARE
+  ;; `inhibit-quit', because holding the quit off is only half the job.  This
+  ;; mount runs from the paced pre-creation drain, which the desktop FOCUS
+  ;; EDGE sets off — the same instant a keypress arrives, since bringing
+  ;; Emacs forward is what precedes one.  A quit armed here and merely left
+  ;; in `quit-flag' is taken at the next checkpoint inside a standing
+  ;; minibuffer's own recursive edit, which prints `Quit' and leaves the
+  ;; prompt up; that is the 2026-09-12 "a real C-g did not dismiss the
+  ;; prompt" finding.  The guard arms a delivery as well as the flag, so the
+  ;; quit reaches the read the user aimed it at.
   (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
          (buf (if (buffer-live-p existing)
                   (progn
                     (agent-repl--log ws "ensure-webview: outcome=reused buf=%s"
                                      (buffer-name existing))
                     existing)
-                (let ((inhibit-quit t))
+                (agent-repl--with-deferred-quit "frontend-ensure-webview"
                   (let* ((buf (agent-repl--frontend-make-webview-buffer url))
                          (name (agent-repl--frontend-webview-buffer-name ws)))
                     (agent-repl--frontend-adopt-webview-buffer buf name ws)

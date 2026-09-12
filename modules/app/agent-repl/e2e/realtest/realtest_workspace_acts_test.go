@@ -650,8 +650,14 @@ func wsActProveChord(ctx context.Context, t *testing.T, client *Client, driver *
 
 	// The escape is not part of the chord under test: it puts evil in normal
 	// state so `SPC` is the leader rather than a self-inserted space, and in
-	// normal state it does nothing at all.
-	for _, chord := range append([]Chord{wsActEscape}, sequence...) {
+	// normal state it does nothing at all. It is pressed through
+	// `wsActClearPendingInput` so the run also SAYS what it cleared: an
+	// operator or a prefix standing here would have eaten the first key of
+	// the sequence below (inputstate.go says why that is not theoretical).
+	wsActClearPendingInput(ctx, t, client, driver,
+		fmt.Sprintf("pressing `%s`", wsActSpell(sequence)), manifest)
+
+	for _, chord := range sequence {
 		if err := driver.Press(ctx, chord); err != nil {
 			note := fmt.Sprintf("CHORD NOT DELIVERED: pressing %s of `%s` (%s) failed: %v",
 				chord.Emacs, wsActSpell(sequence), chord.Why, err)
@@ -695,7 +701,102 @@ func wsActProveChord(ctx context.Context, t *testing.T, client *Client, driver *
 	}
 
 	wsActAbortMinibuffer(ctx, t, client, driver, manifest)
+
+	// LEAVE NOTHING BEHIND. A sequence whose leading keys did not land leaves
+	// its tail pending — a bare `d` out of `SPC j d` is an evil operator, and
+	// an operator does not expire. The next act, the next realtest, and the
+	// owner's next keystroke all inherit it, because runs adopt a standing
+	// Emacs rather than starting one. inputstate.go carries the whole story.
+	wsActClearPendingInput(ctx, t, client, driver,
+		fmt.Sprintf("leaving `%s`", wsActSpell(sequence)), manifest)
 	return reached
+}
+
+// wsActClearPendingInput presses a real `<escape>` and reports what it cleared.
+//
+// WHY IT READS FIRST AND PRESSES SECOND. The state BEFORE the escape is the
+// finding — it says the editor was standing where the next key would be eaten
+// — and it is unrecoverable once the escape has landed. Reading it first is
+// what makes the difference between reporting an inherited operator and
+// silently sweeping one up.
+//
+// A probe that will not answer is NOT treated as a clean editor: an editor
+// that cannot say what it would do with the next key has said nothing, and the
+// run reports that rather than pressing on as if it had.
+func wsActClearPendingInput(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver,
+	why string, manifest *Manifest) {
+	t.Helper()
+
+	if driver == nil {
+		note := fmt.Sprintf("PENDING INPUT NOT CLEARED: the key driver is unavailable, so no `<escape>` was "+
+			"sent before %s and whatever the editor was standing at is still standing", why)
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
+		return
+	}
+
+	before, err := wsActReadInputState(ctx, client)
+	if err != nil {
+		t.Fatalf("read what the editor would do with the next key before %s: %v", why, err)
+	}
+
+	if err := driver.Press(ctx, wsActEscape); err != nil {
+		note := fmt.Sprintf("ESCAPE COULD NOT BE DELIVERED before %s: %v. The editor was standing at %s and "+
+			"nothing has changed that", why, err, before)
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
+		return
+	}
+
+	after := before
+	if !before.Pending() {
+		// Nothing was standing, so there is nothing to wait for: the escape
+		// is a no-op in every state that reads the next key as itself, and
+		// polling for a change that cannot come would only cost the ceiling.
+		t.Logf("%s", wsActInputAlreadyCleanNote(why, before))
+		return
+	}
+
+	// Poll rather than wait a fixed span: the escape has already been posted
+	// and acknowledged, so the only question is when Emacs's command loop
+	// dispatched it, and a run must report a failure in seconds rather than
+	// spend the whole ceiling on the ordinary case. A probe that errors counts
+	// as still pending — an editor that cannot answer is not a clean one.
+	deadline := time.Now().Add(wsActInputClearCeiling)
+	for {
+		if read, readErr := wsActReadInputState(ctx, client); readErr == nil {
+			after = read
+			if !after.Pending() {
+				break
+			}
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(wsActInputClearPollInterval):
+		}
+	}
+
+	if after.Pending() {
+		note := wsActInputNotClearedNote(why, before, after)
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
+		return
+	}
+	note := wsActInputInheritedNote(why, before, after)
+	manifest.Notes = append(manifest.Notes, note)
+	t.Errorf("%s", note)
+}
+
+// wsActReadInputState asks the editor what it would do with the next key.
+func wsActReadInputState(ctx context.Context, client *Client) (wsActInputState, error) {
+	raw, err := client.ReadString(ctx, wsActPendingInputForm())
+	if err != nil {
+		return wsActInputState{}, err
+	}
+	return parseWsActInputState(raw)
 }
 
 // wsActAbortMinibuffer clears whatever minibuffer read is standing, so nothing
