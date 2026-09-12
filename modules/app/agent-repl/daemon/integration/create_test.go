@@ -1063,29 +1063,25 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneStartsTheSession(t *testing.T) {
 	}
 }
 
-// TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheUnlandedSpawnFailedArm
-// pins the ONE gap the workspace realtests left behind: CreateWorkspaceError
-// has no `spawn_failed` arm, so a create whose bring-up cannot start a shim
-// cannot state its refusal in band.
+// TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm pins the
+// gap the workspace realtests left behind, now closed: CreateWorkspaceError
+// carries `spawn_failed` as of 2026-09-12, so a create whose bring-up cannot
+// start a shim states its refusal IN BAND, as its OpenWorkspace twin
+// (roster_test.go) always could.
 //
-// The refusal itself is right — `workspace.ArmSpawnFailed`, renamed onto the
-// rpc that raised it — and the transport already carries the arm's evidence:
-// `server.fill` supplies `detail` for any arm that has the field. Only the
-// contract is missing, so the answer is the unlanded-arm Connect error and a
-// WARN under `daemon.refusal.unlanded_arm`.
-//
-// daemon/ERROR-ARMS.md carries the row. When the arm lands, this test flips to
-// asserting `resp.Msg.GetError().GetSpawnFailed()` the way its OpenWorkspace
-// twin (roster_test.go) already does, and the row is deleted in that commit.
-func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheUnlandedSpawnFailedArm(t *testing.T) {
+// The refusal itself never changed — `workspace.ArmSpawnFailed`, renamed onto
+// the rpc that raised it — and no daemon change followed the arm: `server.fill`
+// already supplied `detail` for any arm that has the field, so the handler
+// switched onto the arm by the arm simply existing. This test was written
+// asserting the unlanded-arm Connect error and prescribing this very flip.
+func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testing.T) {
 	t.Parallel()
 	// Arrange: the create mints the workspace dir, so the dying shim is
 	// scripted through the profile EVERY spawn falls back to.
 	d := newDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the bring-up death the test scripts.
 	d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.exit", "daemon.shimclient.spawn",
-		"daemon.workspace.bring_up", "daemon.workspace.open", "daemon.workspace.create",
-		"daemon.refusal.unlanded_arm")
+		"daemon.workspace.bring_up", "daemon.workspace.open", "daemon.workspace.create")
 	d.WriteDefaultShimProfile(harness.ShimProfile{
 		ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death",
 	})
@@ -1100,12 +1096,13 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheUnlandedSpawnFailedArm(t
 		}},
 	}))
 
-	// Assert: the intended arm is named EXACTLY as ERROR-ARMS.md prescribes.
-	if err == nil {
-		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the unlanded-arm refusal", resp)
+	// Assert: the refusal is the typed arm, carrying the spawn's own account.
+	if err != nil {
+		t.Fatalf("CreateWorkspace onto a dying shim: %v", err)
 	}
-	if !strings.HasPrefix(err.Error(), "failed_precondition: intended arm: CreateWorkspaceError.spawn_failed: ") {
-		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the unlanded arm "+
-			"\"intended arm: CreateWorkspaceError.spawn_failed: <reason>\"", err)
+	detail := resp.Msg.GetError().GetSpawnFailed().GetDetail()
+	if detail == "" {
+		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the spawn_failed arm carrying a detail",
+			resp.Msg.GetResult())
 	}
 }

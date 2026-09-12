@@ -184,6 +184,7 @@ type fakeVerbs struct {
 	selectErr error
 	closeErr  error
 	openErr   error
+	forgetErr error
 
 	setModel    string
 	setModelErr error
@@ -221,6 +222,8 @@ func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 func (f *fakeVerbs) Select(context.Context, ids.WorkspaceID) error { return f.selectErr }
 
 func (f *fakeVerbs) Close(context.Context, ids.WorkspaceID) error { return f.closeErr }
+
+func (f *fakeVerbs) Forget(context.Context, ids.WorkspaceID) error { return f.forgetErr }
 
 func (f *fakeVerbs) AnswerPermission(context.Context, ids.WorkspaceID, *conversationv1.AgentAnswer) error {
 	return f.answerPermissionErr

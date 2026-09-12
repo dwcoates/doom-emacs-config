@@ -292,6 +292,35 @@ func (s *server) NukeWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
+// ForgetWorkspace removes a CLOSED workspace's registry record and touches no
+// file. It is the undo for a registration, and the verb it delegates to owns
+// every refusal: an open workspace, a workspace that is not quiet, and a
+// workspace others were spawned from. The roster's new state arrives on its
+// own stream, as a nuke's does.
+//
+// No PublishHostWorkspace follows it, deliberately, and this is the one
+// lifecycle verb where that is so: the record the host view is composed FROM
+// is gone by the time the verb returns, so a recompose could only fail to
+// resolve the workspace it was asked to draw.
+func (s *server) ForgetWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ForgetWorkspaceRequest],
+) (*connect.Response[agentreplv1.ForgetWorkspaceResponse], error) {
+	const rpc = "ForgetWorkspace"
+	resp := &agentreplv1.ForgetWorkspaceResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	if err := s.deps.Verbs.Forget(ctx, subject.Record.ID); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.ForgetWorkspaceResponse_Success{
+		Success: &agentreplv1.ForgetWorkspaceSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // MergeWorkspace enqueues the workspace's merge. Its life from there is the
 // feed's merge bubble.
 func (s *server) MergeWorkspace(

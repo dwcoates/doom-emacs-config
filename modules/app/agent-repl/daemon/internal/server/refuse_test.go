@@ -507,3 +507,58 @@ func TestResolveRefRefusesOnceTheDaemonIsShuttingDown(t *testing.T) {
 		t.Fatalf("SubmitPrompt = %v, want CodeUnavailable while the daemon is shutting down", err)
 	}
 }
+
+// TestSetArmFillsARepeatedStringField pins that an arm carrying a LIST states
+// its evidence. A repeated string's Kind() is StringKind, so before the list
+// branch existed the copy tried a `value.(string)` on a slice, failed it, and
+// left ForgetWorkspaceHasChildren.children empty beside a sentence saying the
+// workspace has children.
+func TestSetArmFillsARepeatedStringField(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.ForgetWorkspaceResponse{}
+
+	// Act.
+	ok := setResponseError(resp, workspace.ArmHasChildren,
+		map[string]any{"children": []string{"ws-2", "ws-3"}})
+
+	// Assert.
+	got := resp.GetError().GetHasChildren().GetChildren()
+	if !ok || len(got) != 2 || got[0] != "ws-2" || got[1] != "ws-3" {
+		t.Fatalf("setResponseError = %v, children = %v, want the two spawned ids", ok, got)
+	}
+}
+
+// TestSetArmLeavesARepeatedFieldUnsetForAWrongValueType pins that a value the
+// list branch cannot convert leaves the field UNSET rather than writing a
+// wrong one; the refusal's prose still states the evidence.
+func TestSetArmLeavesARepeatedFieldUnsetForAWrongValueType(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.ForgetWorkspaceResponse{}
+
+	// Act.
+	ok := setResponseError(resp, workspace.ArmHasChildren, map[string]any{"children": "ws-2"})
+
+	// Assert: the ARM is still answered — only its evidence is missing.
+	if !ok || len(resp.GetError().GetHasChildren().GetChildren()) != 0 {
+		t.Fatalf("setResponseError = %v, children = %v, want the arm answered with no children",
+			ok, resp.GetError().GetHasChildren().GetChildren())
+	}
+}
+
+// TestSetResponseErrorFillsTheCreateSpawnFailedDetail pins the arm that made a
+// create answer out of band while an open answered in band: ONE daemon refusal
+// (workspace.ArmSpawnFailed) is raised for both rpcs, and `fill` already
+// supplies `detail`, so the handler switches onto the arm by its existing.
+func TestSetResponseErrorFillsTheCreateSpawnFailedDetail(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.CreateWorkspaceResponse{}
+
+	// Act.
+	ok := setResponseError(resp, workspace.ArmSpawnFailed,
+		map[string]any{"detail": "the shim would not come up"})
+
+	// Assert.
+	if !ok || resp.GetError().GetSpawnFailed().GetDetail() != "the shim would not come up" {
+		t.Fatalf("setResponseError = %v, resp = %v, want spawn_failed carrying the spawn's account", ok, resp)
+	}
+}

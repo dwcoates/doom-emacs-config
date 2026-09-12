@@ -272,6 +272,23 @@ func (s *requestLoggingServer) NukeWorkspace(
 	return s.server.NukeWorkspace(ctx, req)
 }
 
+func (s *requestLoggingServer) ForgetWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ForgetWorkspaceRequest],
+) (resp *connect.Response[agentreplv1.ForgetWorkspaceResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "ForgetWorkspace", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	boundary.log.Debug("daemon.server.forget_workspace", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.forget_workspace", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.ForgetWorkspace(ctx, req)
+}
+
 func (s *requestLoggingServer) MergeWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.MergeWorkspaceRequest],

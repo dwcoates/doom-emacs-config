@@ -177,3 +177,130 @@ func TestCreateWorkspaceRefusesAnUnknownRepository(t *testing.T) {
 		t.Fatalf("result = %v, want unknown_repository", resp.Msg.GetResult())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ForgetWorkspace. The verb, its three refusals and its command-file route all
+// existed before the endpoint did; these pin that the wire now carries them.
+// ---------------------------------------------------------------------------
+
+// TestForgetWorkspaceAnswersSuccessWhenTheVerbForgets pins the ordinary answer:
+// the record is gone and the caller is told so.
+func TestForgetWorkspaceAnswersSuccessWhenTheVerbForgets(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.ForgetWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ForgetWorkspace: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+}
+
+// TestForgetWorkspaceMapsTheNotClosedArm pins the refusal that keeps the close
+// verb the one owner of the quiet requirement.
+func TestForgetWorkspaceMapsTheNotClosedArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.forgetErr = &workspace.Refusal{
+		Rpc: "ForgetWorkspace", Arm: workspace.ArmNotClosed,
+		Reason: `workspace "ws-1" is open; close it before forgetting it`,
+	}
+
+	// Act.
+	resp, err := h.Client.ForgetWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ForgetWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetNotClosed() == nil {
+		t.Fatalf("result = %v, want not_closed", resp.Msg.GetResult())
+	}
+}
+
+// TestForgetWorkspaceBlockedCarriesTheSameFiveFieldsACloseDoes pins that the
+// re-run quiet check states its evidence, not only a sentence: a hold outlives
+// a close when the close raced it, and the caller must be able to see it.
+func TestForgetWorkspaceBlockedCarriesTheSameFiveFieldsACloseDoes(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.forgetErr = &workspace.Refusal{
+		Rpc: "ForgetWorkspace", Arm: "blocked", Reason: "2 held prompts are undelivered",
+		Fields: map[string]any{
+			"turn_in_flight": true,
+			"live_work":      uint32(3),
+			"held_prompts":   uint32(2),
+			"merge_queued":   true,
+			"summary":        "2 held prompts are undelivered",
+		},
+	}
+
+	// Act.
+	resp, err := h.Client.ForgetWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ForgetWorkspace: %v", err)
+	}
+	blocked := resp.Msg.GetError().GetBlocked()
+	if !blocked.GetTurnInFlight() || blocked.GetLiveWork() != 3 || blocked.GetHeldPrompts() != 2 ||
+		!blocked.GetMergeQueued() || blocked.GetSummary() != "2 held prompts are undelivered" {
+		t.Fatalf("blocked = %v, want all five fields as the composer stated them", blocked)
+	}
+}
+
+// TestForgetWorkspaceHasChildrenNamesTheChildren pins the REPEATED arm field:
+// the schema's parent_id is ON DELETE SET NULL, so the caller is owed the ids
+// it must deal with first rather than a count in a sentence.
+func TestForgetWorkspaceHasChildrenNamesTheChildren(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.forgetErr = &workspace.Refusal{
+		Rpc: "ForgetWorkspace", Arm: workspace.ArmHasChildren,
+		Reason: `2 workspaces were spawned from "ws-1"; forget them first`,
+		Fields: map[string]any{"children": []string{"ws-2", "ws-3"}},
+	}
+
+	// Act.
+	resp, err := h.Client.ForgetWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ForgetWorkspace: %v", err)
+	}
+	got := resp.Msg.GetError().GetHasChildren().GetChildren()
+	if len(got) != 2 || got[0] != "ws-2" || got[1] != "ws-3" {
+		t.Fatalf("children = %v, want the two spawned ids", got)
+	}
+}
+
+// TestForgetWorkspaceRefusesAnUnknownWorkspace pins that the shared per-verb
+// resolution refuses before the verb is reached, as it does for every other
+// per-workspace rpc.
+func TestForgetWorkspaceRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.ForgetWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{
+			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ForgetWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+}
