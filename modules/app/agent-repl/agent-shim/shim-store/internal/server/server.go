@@ -138,9 +138,14 @@ func correlated(ctx context.Context, header http.Header) context.Context {
 
 // logRefusal records a refusal exactly once, at its owning layer, with the site
 // in its own context key.
+//
+// THE LEVEL COMES FROM THE CLASS (`refusalClass.logLevel`), never from this
+// call site. Every site that says no reaches this one function, so a level
+// written here would be one severity for refusals that mean something is wrong
+// and refusals that are a verb's ordinary answer alike.
 func (s *Server) logRefusal(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
 	fields.Operation = operation
-	fields.Level = "warn"
+	fields.Level = ref.class.logLevel()
 	fields.RefusalSite = ref.site
 	fields.RefusalKind = ref.class.armName()
 	log.Log(fields, "refused: %s", ref.detail)
@@ -208,7 +213,7 @@ func (s *Server) storeFailure(log *logging.Logger, operation string, err error, 
 // already logged this one with its own statement and table context — so this
 // is a VERBOSE trace that ties the rpc to it, not a second error record. The
 // refusals this layer owns (validation, tokens, overflow) go through
-// logRefusal at warn instead.
+// logRefusal instead, at the level their class warrants.
 func (s *Server) logStoreFailure(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
 	fields.Operation = operation
 	fields.RefusalSite = ref.site

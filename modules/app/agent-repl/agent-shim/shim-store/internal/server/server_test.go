@@ -797,10 +797,13 @@ func TestOpenAgentSessionMapsAnUnknownAgentToItsOwnArm(t *testing.T) {
 	}
 }
 
-// TestOpenAgentSessionRecordsAnUnknownAgentAtWarnWithBothRefusalKeys: a refused
+// TestOpenAgentSessionRecordsAnUnknownAgentAtInfoWithBothRefusalKeys: a refused
 // request belongs to the CALL, so this layer writes the one normal-level record
-// — at warn, never error, since a stale target is an ordinary consumer race.
-func TestOpenAgentSessionRecordsAnUnknownAgentAtWarnWithBothRefusalKeys(t *testing.T) {
+// — and for this class it is an `info`, because "no such book" is the verb's
+// ordinary answer rather than a report that something is wrong. The record is
+// still a normal-level one carrying both refusal keys, so an operator counting
+// refusals loses nothing.
+func TestOpenAgentSessionRecordsAnUnknownAgentAtInfoWithBothRefusalKeys(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()
 	store.openErr = fmt.Errorf("%w: agent \"ghost\" names no book of this store", ErrUnknownAgent)
@@ -814,12 +817,34 @@ func TestOpenAgentSessionRecordsAnUnknownAgentAtWarnWithBothRefusalKeys(t *testi
 	}
 
 	// Assert.
-	rec, ok := findRecord(t, h.logs, "store.rpc.open-agent-session", "warn")
+	rec, ok := findRecord(t, h.logs, "store.rpc.open-agent-session", "info")
 	if !ok || rec.Context["refusal_site"] != SiteUnknownAgent || rec.Context["refusal_kind"] != "unknown_agent" {
-		t.Fatalf("records = %+v, want one warn record at site %q and kind %q", records(t, h.logs), SiteUnknownAgent, "unknown_agent")
+		t.Fatalf("records = %+v, want one info record at site %q and kind %q", records(t, h.logs), SiteUnknownAgent, "unknown_agent")
 	}
-	if _, isError := findRecord(t, h.logs, "store.rpc.open-agent-session", "error"); isError {
-		t.Fatalf("an unknown agent produced an error record: %+v", records(t, h.logs))
+}
+
+// TestOpenAgentSessionDoesNotRecordAnUnknownAgentAtWarnOrError: the whole point
+// of the class carrying its own level. An open against an agent whose first row
+// has not landed yet is a request the consumer makes on every cold bring-up, and
+// a store that wrote a warning for it made every healthy run look degraded.
+func TestOpenAgentSessionDoesNotRecordAnUnknownAgentAtWarnOrError(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.openErr = fmt.Errorf("%w: agent \"ghost\" names no book of this store", ErrUnknownAgent)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("ghost"), PageSize: 10,
+	})); err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+
+	// Assert.
+	for _, level := range []string{"warn", "error"} {
+		if _, loud := findRecord(t, h.logs, "store.rpc.open-agent-session", level); loud {
+			t.Fatalf("an unknown agent produced a %s record: %+v", level, records(t, h.logs))
+		}
 	}
 }
 

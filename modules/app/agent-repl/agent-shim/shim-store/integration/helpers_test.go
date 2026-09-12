@@ -573,14 +573,32 @@ func (s *storeProcess) assertNoErrorRecords() {
 // refusal from two.
 func assertExactlyOneNormalRecord(t *testing.T, records []logRecord, what string) logRecord {
 	t.Helper()
+	return assertExactlyOneNormalRecordAtLevel(t, records, what, "warn", "error")
+}
+
+// assertExactlyOneNormalRecordAtLevel is the same count for a refusal whose
+// class is NOT recorded loudly.
+//
+// A LEVEL IS NOT A COUNT. The exactly-once rule is about how many layers wrote
+// a record for one refusal, and it holds whatever severity the class carries —
+// `unknown_agent` is an `info` because "no such book" is OpenAgentSession's
+// ordinary answer, and it must still be written once and only once. Scoping the
+// count to the levels the subject expects is what keeps the assertion from
+// passing on a record of the wrong severity entirely.
+func assertExactlyOneNormalRecordAtLevel(t *testing.T, records []logRecord, what string, levels ...string) logRecord {
+	t.Helper()
+	wanted := make(map[string]bool, len(levels))
+	for _, level := range levels {
+		wanted[level] = true
+	}
 	var normal []logRecord
 	for _, rec := range records {
-		if rec.Verbosity == "normal" && (rec.Level == "warn" || rec.Level == "error") {
+		if rec.Verbosity == "normal" && wanted[rec.Level] {
 			normal = append(normal, rec)
 		}
 	}
 	if len(normal) != 1 {
-		t.Fatalf("%s produced %d normal-level records, want exactly 1: %v", what, len(normal), normal)
+		t.Fatalf("%s produced %d normal-level records at %v, want exactly 1: %v", what, len(normal), levels, normal)
 	}
 	return normal[0]
 }
