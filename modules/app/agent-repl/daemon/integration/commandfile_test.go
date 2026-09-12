@@ -455,3 +455,87 @@ func commandfileHasTaskTitled(r *frontendv1.WorkspaceRoster, title string) bool 
 	}
 	return false
 }
+
+func TestAForgetEntryRemovesTheWorkspaceFromTheRoster(t *testing.T) {
+	t.Parallel()
+	// Arrange: registered but never opened, so it is quiet and closable. The
+	// close and the forget travel in ONE file, applied in order: forget is the
+	// undo for a registration and it refuses an open workspace.
+	d := harness.StartDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	roster := d.WatchRoster()
+
+	// Act
+	commandfileWrite(t, d, "workspace_commands_forget.json",
+		`[{"type":"close","workspace":"`+ws.GetId()+`"},`+
+			`{"type":"forget","workspace":"`+ws.GetId()+`"}]`)
+
+	// Assert: the row LEAVES the roster — nothing else ever removed a
+	// registration, so a registered directory could only ever be closed.
+	awaitRoster(t, d, roster, "the command-file forget's row removal", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, ws.GetId()) == nil
+	})
+}
+
+func TestAForgetEntryTakesTheLastWorkspacesRepositoryWithIt(t *testing.T) {
+	t.Parallel()
+	// Arrange: one workspace, so its repository holds nothing else once it is
+	// forgotten. Registering a directory mints BOTH records and nothing ever
+	// deleted the repository one.
+	d := harness.StartDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	roster := d.WatchRoster()
+
+	// Act
+	commandfileWrite(t, d, "workspace_commands_forget_repo.json",
+		`[{"type":"close","workspace":"`+ws.GetId()+`"},`+
+			`{"type":"forget","workspace":"`+ws.GetId()+`"}]`)
+
+	// Assert: the repository grouping has no section left naming a path the
+	// registry no longer holds a workspace for.
+	awaitRoster(t, d, roster, "the forgotten repository's section", func(r *frontendv1.WorkspaceRoster) bool {
+		return len(r.GetRepository().GetSections()) == 0
+	})
+}
+
+func TestAForgetEntryOnAnOpenWorkspaceIsQuarantined(t *testing.T) {
+	t.Parallel()
+	// Arrange: registered and never closed. Forget cannot tear editor state
+	// down, and the close verb owns the quiet requirement it would otherwise
+	// have to bypass, so the open workspace is refused.
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	path := commandfileWrite(t, f.d, "workspace_commands_forget_open.json",
+		`[{"type":"forget","workspace":"`+f.ws.GetId()+`"}]`)
+
+	// Assert
+	f.d.AwaitFileGone(path)
+	quarantined := filepath.Join(f.d.StateDir, "output", "quarantine", "workspace_commands_forget_open.json")
+	f.d.AwaitFileExists(quarantined)
+	f.d.AwaitRunLogOperation("daemon.commandfile.quarantine")
+	f.d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry")
+}
+
+func TestAQuarantinedForgetLeavesTheWorkspaceOnTheRoster(t *testing.T) {
+	t.Parallel()
+	// Arrange: a refused forget destroys nothing, so the registration stands.
+	f := newRegistered(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the registered workspace's row", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()) != nil
+	})
+
+	// Act
+	path := commandfileWrite(t, f.d, "workspace_commands_forget_refused.json",
+		`[{"type":"forget","workspace":"`+f.ws.GetId()+`"}]`)
+	f.d.AwaitFileGone(path)
+	f.d.AwaitRunLogOperation("daemon.commandfile.quarantine")
+
+	// Assert: the refusal republished nothing, so the row the roster already
+	// carries is still the registry's answer.
+	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "a refused forget changes no registry fact")
+	f.d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry")
+}

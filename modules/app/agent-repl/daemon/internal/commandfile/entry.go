@@ -7,8 +7,13 @@ import (
 
 // The entry types the ingress accepts. They are the shapes the managed
 // emit-workspace-commands skill and the workspace-dispatch scripts have always
-// written; the daemon adds no new ones, because a producer that predates this
-// rebuild must keep working unchanged.
+// written, and every one of them still means exactly what it meant, because a
+// producer that predates this rebuild must keep working unchanged.
+//
+// TypeForget is the one ADDITION. It is here rather than only on the wire
+// because a registry record the user wants gone is reachable from a shell — the
+// same place the register-then-clean-up cycles that stranded those records run
+// from — and an added type breaks no existing producer.
 const (
 	// TypeCreate materializes a workspace and prompts it.
 	TypeCreate = "create"
@@ -20,6 +25,10 @@ const (
 	TypeMerge = "merge"
 	// TypeClose closes a workspace.
 	TypeClose = "close"
+	// TypeForget removes a CLOSED workspace's registry record, and its
+	// repository's record when no other workspace references it. It destroys
+	// no files.
+	TypeForget = "forget"
 	// TypeOpen re-opens a closed workspace.
 	TypeOpen = "open"
 	// TypeSwitch selects a workspace.
@@ -89,7 +98,7 @@ func (e Entry) Validate() error {
 			return fmt.Errorf("%s: prompt is required", e.Type)
 		}
 		return nil
-	case TypeMerge, TypeClose, TypeOpen, TypeSwitch:
+	case TypeMerge, TypeClose, TypeForget, TypeOpen, TypeSwitch:
 		return e.requireTarget()
 	case TypeTaskCreate:
 		if e.Title == "" {

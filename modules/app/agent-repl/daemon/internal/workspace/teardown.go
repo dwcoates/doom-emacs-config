@@ -116,12 +116,16 @@ func (v *verbs) Nuke(ctx context.Context, ws ids.WorkspaceID) error {
 			fmt.Sprintf("destroying %q: %v", record.Dir, err), false)
 	}
 
-	if err := v.deps.DB.Forget(ctx, ws); err != nil {
+	report, err := v.deps.DB.Forget(ctx, ws)
+	if err != nil {
 		log.Error(opNuke, "could not forget the workspace record", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("nuke %q: forget: %w", ws, err)
 	}
 
-	log.Info(opNuke, "nuked the workspace", dlog.Context{"dir": record.Dir, "branch": record.Branch})
+	log.Info(opNuke, "nuked the workspace", dlog.Context{
+		"dir": record.Dir, "branch": record.Branch,
+		"repository_forgotten": report.RepositoryDir,
+	})
 	v.republishRegistry(ctx, log, opNuke)
 	return nil
 }

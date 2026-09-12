@@ -79,12 +79,16 @@ type fakeDB struct {
 	attention       map[ids.WorkspaceID]bool
 	currentAt       time.Time
 	forgotten       []ids.WorkspaceID
-	terminals       map[ids.WorkspaceID]wsm.SessionTerminal
-	orphanReport    wsm.OrphanReport
-	createdTasks    []string
-	taskChanges     map[ids.TaskID]wsm.TaskChange
-	assignments     map[ids.WorkspaceID]*ids.TaskID
-	taskErr         error
+	// forgetReport is what Forget answers, and forgetErr makes it fail; the
+	// fake's own map cannot do either on its own.
+	forgetReport wsm.ForgetReport
+	forgetErr    error
+	terminals    map[ids.WorkspaceID]wsm.SessionTerminal
+	orphanReport wsm.OrphanReport
+	createdTasks []string
+	taskChanges  map[ids.TaskID]wsm.TaskChange
+	assignments  map[ids.WorkspaceID]*ids.TaskID
+	taskErr      error
 
 	// dbFaults is the fault table the fleet opens and closes lost-link rows
 	// in; dbClosed records the ids CloseFault was called with.
@@ -219,9 +223,13 @@ func (d *fakeDB) SetPriority(_ context.Context, id ids.WorkspaceID, p *wsm.Prior
 	return nil
 }
 
-func (d *fakeDB) Forget(_ context.Context, id ids.WorkspaceID) error {
+func (d *fakeDB) Forget(_ context.Context, id ids.WorkspaceID) (wsm.ForgetReport, error) {
+	if d.forgetErr != nil {
+		return wsm.ForgetReport{}, d.forgetErr
+	}
 	d.forgotten = append(d.forgotten, id)
-	return nil
+	delete(d.workspaces, id)
+	return d.forgetReport, nil
 }
 
 func (d *fakeDB) PutCreationJob(_ context.Context, job wsm.CreationJob) error {

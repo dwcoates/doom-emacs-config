@@ -153,3 +153,19 @@ still share one arm. `summary` states the cause in prose; it does not make them
 distinguishable by arm. The integration test
 `TestAnAbandonedQueuedMergeHasNoReachableCause` stays skipped, for the separate
 reason its skip states: the third cause has no production call site at all.
+
+## ForgetWorkspace — the WHOLE rpc is unlanded (2026-09-12)
+
+`ForgetWorkspace` has no proto at all yet: the verb, its refusals and the
+command-file entry are implemented, and the connect handler cannot be written
+until the endpoint lands. The rows below are what the endpoint's error message
+must carry; every one of them is raised today by `internal/workspace`'s Forget
+and reaches a caller only through the command-file route (where a refusal is
+recorded and the file is quarantined).
+
+| rpc | arm | condition | package |
+| --- | --- | --- | --- |
+| ForgetWorkspace | `not_closed` | the workspace is still open; forget is a registry act with no way to tear editor state down, and the close verb owns the quiet requirement it would otherwise duplicate or bypass | workspace |
+| ForgetWorkspace | `blocked` | the workspace is not quiet — a turn in flight, live detached work, held prompts, or a queued merge. Carries the SAME five fields `CloseWorkspaceBlocked` does, filled by the same composer | workspace |
+| ForgetWorkspace | `has_children` | other workspaces were spawned from this one; the schema's `parent_id` is `ON DELETE SET NULL`, so the forget would silently flatten the fork's lineage. Carries the children's ids as `children` | workspace |
+| ForgetWorkspace | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away{address}`, `not_yet_adopted` | the four every per-workspace verb raises, through the shared `owned` helper | workspace |

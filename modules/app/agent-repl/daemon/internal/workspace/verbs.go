@@ -25,6 +25,7 @@ const (
 	opClose          = "daemon.workspace.close"
 	opKill           = "daemon.workspace.kill"
 	opNuke           = "daemon.workspace.nuke"
+	opForget         = "daemon.workspace.forget"
 	opRestart        = "daemon.workspace.restart"
 	opSelect         = "daemon.workspace.select"
 	opSetPriority    = "daemon.workspace.set_priority"

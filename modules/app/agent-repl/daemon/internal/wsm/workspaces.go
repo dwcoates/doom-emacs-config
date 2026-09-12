@@ -367,11 +367,39 @@ func (s *store) Current(ctx context.Context) (*WorkspaceID, error) {
 	return out, err
 }
 
-// Forget deletes a workspace's every record — the nuke's durable half. The
-// dependent rows cascade; the creation job, which predates registration and so
-// carries no reference, is deleted here in the same transaction.
-func (s *store) Forget(ctx context.Context, id WorkspaceID) error {
-	return s.write(ctx, "daemon.wsm.forget", dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
+// Forget deletes a workspace's every record — the nuke's durable half, and the
+// whole of the forget verb. The dependent rows cascade; the creation job, which
+// predates registration and so carries no reference, is deleted here in the
+// same transaction.
+//
+// THE REPOSITORY GOES TOO when the forgotten workspace was the last one
+// registered under it. Registering a directory mints BOTH records and nothing
+// else ever deleted the repository one, so every register-then-clean-up left a
+// repository row naming a path that may no longer exist — and a row naming a
+// deleted path breaks workspace and sink resolution elsewhere. A repository
+// still referenced by another workspace is left exactly as it was.
+//
+// The whole deletion is ONE transaction: a Forget either removes every record
+// or removes none, so a failure mid-way cannot leave a workspace whose
+// repository is gone or a repository whose workspaces are.
+func (s *store) Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error) {
+	var out ForgetReport
+	err := s.write(ctx, "daemon.wsm.forget", dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
+		out = ForgetReport{}
+		var (
+			repo    RepoID
+			repoDir string
+		)
+		err := tx.QueryRowContext(ctx,
+			`SELECT repositories.id, repositories.dir
+			   FROM workspaces JOIN repositories ON repositories.id = workspaces.repo_id
+			  WHERE workspaces.id = ?`, id).Scan(&repo, &repoDir)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
+		case err != nil:
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM creation_jobs WHERE workspace_id = ?`, id); err != nil {
 			return err
 		}
@@ -379,6 +407,32 @@ func (s *store) Forget(ctx context.Context, id WorkspaceID) error {
 		if err != nil {
 			return err
 		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
+		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+			return err
+		}
+		var remaining int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM workspaces WHERE repo_id = ?`, repo).Scan(&remaining); err != nil {
+			return err
+		}
+		if remaining > 0 {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repo); err != nil {
+			return err
+		}
+		// The merge queue's per-repository row is keyed by the repository's
+		// own dir rather than by its id, so the cascade cannot reach it. A
+		// pause flag for a repository no workspace is registered under names
+		// the same path the repository row just stopped naming.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM merge_queue_repos WHERE repo_key = ?`, repoDir); err != nil {
+			return err
+		}
+		out.Repository = repo
+		out.RepositoryDir = repoDir
+		return nil
 	})
+	if err != nil {
+		return ForgetReport{}, err
+	}
+	return out, nil
 }
