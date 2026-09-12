@@ -113,3 +113,27 @@ rows top-level, so it had never been seen or ruled on.
 survives as `compareRecentFirst`, still used by the recently-merged section, so
 only the call site has to come back. Realtest 4's identity assertion would then
 have to be dropped, since the two cannot both hold.
+
+## The state-save snapshot warning is deleted, not fixed (2026-09-12, lead)
+
+**Call.** `lisp/history.el`'s `--state-save` guarded a call to
+`agent-repl--snapshot-save-request` with `fboundp` and warned when it was
+absent. That function does not exist anywhere in the repo and never did after
+`832ad299f`, which deliberately deleted the workspace-snapshot subsystem
+("the daemon is the source of which workspaces exist"). `0fe3dde57` had
+repointed the call at it shortly before; the deletion missed the seam. The guard
+therefore fires on EVERY state save in every process, forever, and the record
+was the last one failing the workspace realtests' harvest.
+
+**Why it is a judgement call.** Deleting it removes a warning and an error-
+handling branch, which two standing rules exist to prevent. Both rules protect
+coverage of a failure that can actually happen. This guard reports the absence
+of a function whose whole subsystem was retired on purpose, so no user state is
+lost when it fires and nothing is covered by keeping it. A permanent false
+warning is worse than no warning: it fails every run for everyone and trains
+readers to skip the harvest.
+
+**Reversing it.** Only meaningful alongside restoring the elisp workspace
+snapshot subsystem, which would contradict the daemon-owns-the-roster ruling.
+If that ruling changes, restore the block from `832ad299f`'s parent and the
+guard comes back with it.
