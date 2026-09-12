@@ -494,3 +494,50 @@ func TestStoreRefusalClassifiesAnythingElseAsStorage(t *testing.T) {
 		t.Fatalf("class = %v, want classStorage", got.class)
 	}
 }
+
+// TestRefusalClassLogLevel is the severity table itself: which refusal classes
+// claim that something is WRONG, and which one is a verb answering an existence
+// question. Every class is enumerated so a class added later without a level
+// fails here rather than being recorded at whatever the logger defaults to.
+func TestRefusalClassLogLevel(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name  string
+		class refusalClass
+		want  string
+	}{
+		{name: "an illegal request is a warning", class: classInvalid, want: "warn"},
+		{name: "a pointer that must be repainted is a warning", class: classStalePointer, want: "warn"},
+		{name: "a database failure is a warning here and an error in db", class: classStorage, want: "warn"},
+		{name: "a verb this wave cannot answer is a warning", class: classNotImplemented, want: "warn"},
+		{name: "an agent id naming no book is the ordinary answer", class: classUnknownAgent, want: "info"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got := test.class.logLevel()
+
+			// Assert.
+			if got != test.want {
+				t.Fatalf("logLevel() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// TestRefusalClassLogLevelPanicsForAClassItDoesNotKnow: a refusal recorded at
+// the logger's default level is a severity nobody chose, so an unmapped class
+// is a programming error the process reports rather than absorbs.
+func TestRefusalClassLogLevelPanicsForAClassItDoesNotKnow(t *testing.T) {
+	// Arrange.
+	unmapped := refusalClass(len([]string{"invalid", "stale", "storage", "not_implemented", "unknown_agent"}) + 1)
+
+	// Act & Assert.
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatalf("logLevel() of an unmapped class returned instead of panicking")
+		}
+	}()
+	_ = unmapped.logLevel()
+}
