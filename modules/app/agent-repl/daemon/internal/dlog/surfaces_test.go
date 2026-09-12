@@ -215,6 +215,141 @@ func TestWorkspaceRefusesAnUnresolvableWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOrCentralWritesToTheWorkspaceSinkWhenItResolves(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	s.WorkspaceOrCentral(dir).Info("daemon.workspace.opened", "opened", nil)
+
+	// Assert.
+	if !hasOperation(workspaceRecords(t, dir, "daemon"), "daemon.workspace.opened") {
+		t.Fatalf("the record did not reach the workspace's own sink")
+	}
+	if hasOperation(readRecords(t, runLogPath), "daemon.workspace.opened") {
+		t.Fatalf("a resolvable workspace's record reached the central sink")
+	}
+}
+
+func TestWorkspaceOrCentralRoutesAnUnresolvableWorkspaceCentrally(t *testing.T) {
+	// Arrange: a workspace directory that does not exist.
+	s, runLogPath := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "gone")
+
+	// Act.
+	s.WorkspaceOrCentral(dir).Info("daemon.workspace.opened", "opened", nil)
+
+	// Assert.
+	records := readRecords(t, runLogPath)
+	if !hasOperation(records, "daemon.workspace.opened") {
+		t.Fatalf("the record did not reach the central sink")
+	}
+}
+
+func TestWorkspaceOrCentralNamesTheWorkspaceOnACentrallyRoutedRecord(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "gone")
+
+	// Act.
+	s.WorkspaceOrCentral(dir).Info("daemon.workspace.opened", "opened", nil)
+
+	// Assert: the line still says which workspace it is about.
+	for _, rec := range readRecords(t, runLogPath) {
+		if rec["operation"] != "daemon.workspace.opened" {
+			continue
+		}
+		context, _ := rec["context"].(map[string]any)
+		if context[KeyUnroutableWorkspace] != dir {
+			t.Fatalf("unroutable_workspace = %v, want %q", context[KeyUnroutableWorkspace], dir)
+		}
+		return
+	}
+	t.Fatalf("the centrally routed record was not written")
+}
+
+func TestWorkspaceOrCentralRecordsNoErrorForAnUnresolvableWorkspace(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "gone")
+
+	// Act.
+	s.WorkspaceOrCentral(dir).Info("daemon.workspace.opened", "opened", nil)
+
+	// Assert: an unavailable directory is an ordinary outcome, not a fault.
+	for _, rec := range readRecords(t, runLogPath) {
+		if rec["level"] == LevelError {
+			t.Fatalf("an unresolvable workspace produced an error record: %v", rec)
+		}
+	}
+}
+
+func TestWorkspaceOrCentralReportsTheFallbackOncePerWorkspace(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "gone")
+
+	// Act: many records about the one workspace.
+	for i := 0; i < 5; i++ {
+		s.WorkspaceOrCentral(dir).Info("daemon.workspace.opened", "opened", nil)
+	}
+
+	// Assert.
+	notices := 0
+	for _, rec := range readRecords(t, runLogPath) {
+		if rec["operation"] == "daemon.dlog.central_fallback" {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("central_fallback notices = %d, want 1", notices)
+	}
+}
+
+func TestWorkspaceOrCentralReportsTheFallbackAtDebug(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "gone")
+
+	// Act.
+	s.WorkspaceOrCentral(dir).Info("daemon.workspace.opened", "opened", nil)
+
+	// Assert.
+	for _, rec := range readRecords(t, runLogPath) {
+		if rec["operation"] != "daemon.dlog.central_fallback" {
+			continue
+		}
+		if rec["level"] != LevelDebug {
+			t.Fatalf("central_fallback level = %v, want %q", rec["level"], LevelDebug)
+		}
+		return
+	}
+	t.Fatalf("the fallback was never reported")
+}
+
+func TestWorkspaceOrCentralReportsEachUnresolvableWorkspaceSeparately(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	root := t.TempDir()
+	first, second := filepath.Join(root, "gone-a"), filepath.Join(root, "gone-b")
+
+	// Act.
+	s.WorkspaceOrCentral(first).Info("daemon.workspace.opened", "opened", nil)
+	s.WorkspaceOrCentral(second).Info("daemon.workspace.opened", "opened", nil)
+
+	// Assert.
+	notices := 0
+	for _, rec := range readRecords(t, runLogPath) {
+		if rec["operation"] == "daemon.dlog.central_fallback" {
+			notices++
+		}
+	}
+	if notices != 2 {
+		t.Fatalf("central_fallback notices = %d, want 2", notices)
+	}
+}
+
 func TestShimSinkBorrowsTheOpenShimLog(t *testing.T) {
 	// Arrange.
 	s, _ := testSurfaces(t)
