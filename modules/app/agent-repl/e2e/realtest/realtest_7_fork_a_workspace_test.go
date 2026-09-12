@@ -236,9 +236,8 @@ func TestRealtestForkAWorkspace(t *testing.T) {
 	rt78RequireFakeShims(ctx, t, client)
 
 	driver := wsActKeyDriver(ctx, t, client, runDir, &manifest)
-	wsActShowEmacs(ctx, t, driver, &manifest)
-
-	shown := waitForShown(ctx, t, run, sources, snapshot, launch.SpawnedAt, openBefore)
+	shown := showEmacsAndWaitForPaint(ctx, t, run, client, driver, sources, snapshot,
+		launch.SpawnedAt, openBefore, &manifest)
 	shownMeasurements := shown.Measure()
 	manifest.Runs[len(manifest.Runs)-1].Measurements = shownMeasurements
 	assertEveryWorkspacePainted(t, run, openBefore, shown)

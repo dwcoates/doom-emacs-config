@@ -835,46 +835,6 @@ func wsActKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	return driver
 }
 
-// wsActShowEmacs brings Emacs forward once, before the acts, and restores the
-// application that was frontmost.
-//
-// It presses the harmless `<escape>`, which is the key driver's own way of
-// activating the target for the instant of a keypress (keydriver.swift says
-// why a no-activation post reaches no key window). That activation is the
-// focus edge; the escape itself does nothing in evil's normal state.
-//
-// The focus check is a NET check, exactly as realtest 1's is: it fails only
-// when focus was left somewhere other than where it started, which is a
-// failure to restore rather than the momentary activation the driver
-// deliberately performs.
-func wsActShowEmacs(ctx context.Context, t *testing.T, driver *KeyDriver, manifest *Manifest) {
-	t.Helper()
-	if driver == nil {
-		return
-	}
-	before, err := FrontmostApp(ctx)
-	if err != nil {
-		t.Fatalf("read which application is frontmost before Emacs is shown: %v", err)
-	}
-	if err := driver.Press(ctx, wsActEscape); err != nil {
-		t.Errorf("bring Emacs forward for the acts by pressing %s: %v", wsActEscape.Emacs, err)
-		return
-	}
-	after, err := FrontmostApp(ctx)
-	if err != nil {
-		t.Fatalf("read which application is frontmost after Emacs is shown: %v", err)
-	}
-	if before != after {
-		note := fmt.Sprintf("showing Emacs left focus on %q, not on %q where it started: the driver activates "+
-			"Emacs for each keypress and must restore the prior frontmost app, and here it did not", after, before)
-		manifest.Notes = append(manifest.Notes, note)
-		t.Errorf("%s", note)
-		return
-	}
-	manifest.Notes = append(manifest.Notes,
-		fmt.Sprintf("Emacs was brought forward for the acts and focus was restored to %q", after))
-}
-
 // ---- The state database, polled ---------------------------------------
 
 // wsActWorkspacesNow reads every workspace the state database holds, open and

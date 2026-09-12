@@ -326,6 +326,17 @@ row 40). Realtest 1 therefore reads the startup in two windows:
 
 - **Hidden** — every phase up through `tab-drawn`, plus `webview-armed`.
   Nothing here requires a painted panel.
+**The show phase is ONE shared helper**, `showEmacsAndWaitForPaint`, called by
+every realtest that asserts a paint. It brings Emacs forward, waits for the
+panels, RE-ISSUES the focus edge up to three times while it waits, checks focus
+was restored to where it started, and reports how many edges the paint needed.
+The re-issuing is not padding: `agent-repl--webview-precreate-drain` pops one
+workspace per tick and re-checks its hold before each, so the remaining queue
+re-parks the instant Emacs is visible-but-unfocused again, and the driver hands
+focus back about 0.3s after each keypress by design. One edge is the healthy
+shape; more than one is written into the manifest as a PRODUCT FINDING rather
+than smoothed over (docs/REALTEST-JUDGEMENT-CALLS.md, row 59).
+
 - **Show** — `focus-edge` and `panel-painted`, read only AFTER the key
   self-test (below) brings Emacs forward for the first time. That activation
   IS `focus-edge` — the focus edge the parked queue was waiting on — and once

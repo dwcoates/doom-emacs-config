@@ -198,9 +198,8 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 	// bug that isn't one. Showing it here is what makes "the panel becomes
 	// usable" an honest assertion about the create.
 	driver := wsActKeyDriver(ctx, t, client, runDir, &manifest)
-	wsActShowEmacs(ctx, t, driver, &manifest)
-
-	shown := waitForShown(ctx, t, run, sources, snapshot, launch.SpawnedAt, openBefore)
+	shown := showEmacsAndWaitForPaint(ctx, t, run, client, driver, sources, snapshot,
+		launch.SpawnedAt, openBefore, &manifest)
 	shownMeasurements := shown.Measure()
 	manifest.Runs[len(manifest.Runs)-1].Measurements = shownMeasurements
 	assertEveryWorkspacePainted(t, run, openBefore, shown)
