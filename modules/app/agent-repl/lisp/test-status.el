@@ -2635,6 +2635,41 @@ test can assert the re-assertion left an already-correct frame alone."
       ;; Act / Assert
       (should (null (agent-repl-status-tab-state "beta"))))))
 
+;;;; ---- Rendering a workspace that owns no durable log sink -------------
+;;
+;; The tab renderer logs against the workspace it is drawing.  A workspace
+;; whose directory is a scratch path or has been deleted owns no durable
+;; sink, and a single render of one such workspace once wrote 22 ERROR
+;; lines.  RENDERING MUST NOT FAIL OR SPAM over an unavailable directory.
+
+(ert-deftest agent-repl-test-status-tab-state-renders-a-workspace-with-no-sink ()
+  "A tab whose workspace owns no durable sink is still drawn."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      (let ((agent-repl--log-context-workspace nil)
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          (agent-repl-test-status--with-arm "sinkless" :thinking
+            ;; Act / Assert
+            (should (eq (agent-repl-status-tab-state "sinkless") :thinking))))))))
+
+(ert-deftest agent-repl-test-status-tab-state-with-no-sink-records-no-routing-error ()
+  "Drawing such a tab repeatedly must not produce a routing-error flood."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      (let ((agent-repl--log-context-workspace nil)
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          (agent-repl-test-status--with-arm "sinkless" :thinking
+            ;; Act
+            (dotimes (_ 5) (agent-repl-status-tab-state "sinkless"))))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents sink)
+          (should-not (string-match-p "log-routing-error" (buffer-string))))))))
+
 ;;;; ---- The five colour classes, arm by arm ----------------------------
 
 (defun agent-repl-test-status--arms-taking (color)
