@@ -10,6 +10,7 @@ import {
   importRealSDK,
 } from "../src/vendor-guard.js";
 import { createFakeQuery } from "../src/fake/index.js";
+import { driveScenario } from "./fake/harness.js";
 
 // test/setup.ts sets the variable for the whole suite; the "allowed" cases
 // below clear it and this restores the suite-wide posture afterwards.
@@ -98,6 +99,23 @@ describe("fake mode", () => {
       forbidden: raised instanceof VendorCallsForbiddenError,
       message: raised instanceof Error ? raised.message : JSON.stringify(raised) ?? "",
     }).toEqual({ built: true, forbidden: false, message: "" });
+  });
+
+  it("SERVES a whole turn under the guard, not merely constructs a query", async () => {
+    // Arrange. The daemon now spawns every shim in fake mode when it is itself
+    // under the guard, so a guarded run's workspaces are created, forked and
+    // PROMPTED against this engine. Constructing the query is not enough for
+    // that: the turn has to be answered end to end with the guard armed.
+    process.env[FORBID_VENDOR_CALLS_ENV] = "1";
+
+    // Act.
+    const driven = await driveScenario(["hello"]);
+
+    // Assert.
+    expect({
+      forbidden: driven.failure instanceof VendorCallsForbiddenError,
+      results: driven.messages.filter((m) => m.type === "result").length,
+    }).toEqual({ forbidden: false, results: 1 });
   });
 });
 

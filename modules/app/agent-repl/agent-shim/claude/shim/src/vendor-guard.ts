@@ -14,6 +14,12 @@
  * handler prints it to stderr and exits nonzero. It is never a silent no-op and
  * never falls back to a fake — a test that expected offline behavior must pass
  * `--fake`, and a test that reached here has a real bug.
+ *
+ * A GUARDED DAEMON NEVER PRODUCES THAT BUG: it spawns every shim with `--fake`
+ * (daemon/internal/shimclient/supervisor.go, `fakeMode`) precisely so a guarded
+ * run can create and prompt workspaces over the mocked vendor. It still states
+ * the variable on the child, so this module stays armed as the backstop rather
+ * than as the thing that makes a workspace impossible.
  */
 
 /** The environment variable that forbids real vendor calls. */
