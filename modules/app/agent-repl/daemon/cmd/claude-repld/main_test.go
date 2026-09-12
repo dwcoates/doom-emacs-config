@@ -1,10 +1,15 @@
 package main
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"claude-repld/internal/daemonaddr"
+	"claude-repld/internal/merge"
 )
 
 // TestTheStoreSocketPrecedence pins the store socket's three-way precedence:
@@ -293,5 +298,104 @@ func TestTheFooterMomentaryDwellDefaultsToTheResolversOwn(t *testing.T) {
 	}
 	if got != 0 {
 		t.Fatalf("dwell = %s, want zero so the resolver's own default stands", got)
+	}
+}
+
+// TestTheClaimWaitOutlastsTheMergeDrain is the drift guard on
+// daemonaddr.ClaimWaitBound. This is the one package that may see both the
+// claim bound and the term that dominates a healthy shutdown, and the bound is
+// only meaningful while it outlasts that term: a replacement that gives up
+// before the outgoing daemon's merge drain has even finished is the
+// 2026-09-12 restart that destroyed the daemon.
+func TestTheClaimWaitOutlastsTheMergeDrain(t *testing.T) {
+	// Arrange, Act.
+	got := daemonaddr.ClaimWaitBound
+
+	// Assert.
+	if got <= merge.TerminalDrainBound {
+		t.Fatalf("ClaimWaitBound = %s, want more than the merge drain bound %s", got, merge.TerminalDrainBound)
+	}
+}
+
+// TestProductionHooksWaitForAHeldClaim pins that the production boot -- and
+// only the production boot -- pays the claim bound. A hooks value that left it
+// zero would boot with the pre-2026-09-12 exit-on-first-refusal behavior.
+func TestProductionHooksWaitForAHeldClaim(t *testing.T) {
+	// Arrange, Act.
+	got := productionHooks().ClaimWait
+
+	// Assert.
+	if got != daemonaddr.ClaimWaitBound {
+		t.Fatalf("productionHooks().ClaimWait = %s, want %s", got, daemonaddr.ClaimWaitBound)
+	}
+}
+
+// TestProbeBootClaimReportsAFreeClaim pins the elisp departure wait's answer
+// for a state root nobody holds.
+func TestProbeBootClaimReportsAFreeClaim(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Act.
+	err := probeBootClaim(options{stateDir: root})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("probeBootClaim on a free claim = %v, want nil", err)
+	}
+}
+
+// TestProbeBootClaimReportsAHeldClaim pins the other answer: while a daemon
+// holds the claim it has NOT departed, whatever daemon.addr says.
+func TestProbeBootClaimReportsAHeldClaim(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	incumbent, err := daemonaddr.Bind(filepath.Join(root, "daemon.addr"), 0)
+	if err != nil {
+		t.Fatalf("the incumbent could not bind: %v", err)
+	}
+	defer incumbent.Close()
+
+	// Act.
+	got := probeBootClaim(options{stateDir: root})
+
+	// Assert.
+	if !errors.Is(got, daemonaddr.ErrClaimed) {
+		t.Fatalf("probeBootClaim = %v, want it to wrap %v", got, daemonaddr.ErrClaimed)
+	}
+}
+
+// TestProbeBootClaimIsOffByDefault pins that no ordinary launch ever probes:
+// the daemon Emacs spawns must still be a daemon.
+func TestProbeBootClaimIsOffByDefault(t *testing.T) {
+	// Arrange, Act.
+	opts, err := parseFlags("claude-repld", nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if opts.probeBootClaim {
+		t.Fatalf("probeBootClaim = true with no argv, want false")
+	}
+}
+
+// TestProbeBootClaimFlagIsParsed pins the flag Emacs's departure wait spells.
+func TestProbeBootClaimFlagIsParsed(t *testing.T) {
+	// Arrange, Act.
+	opts, err := parseFlags("claude-repld", []string{"-probe-boot-claim"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if !opts.probeBootClaim {
+		t.Fatalf("probeBootClaim = false with -probe-boot-claim, want true")
 	}
 }
