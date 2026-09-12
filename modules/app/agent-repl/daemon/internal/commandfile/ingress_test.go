@@ -236,6 +236,7 @@ func TestApplyFileMapsEveryWorkspaceVerb(t *testing.T) {
 		want string
 	}{
 		{name: "close", body: `[{"type":"close","workspace":"w1"}]`, want: "close"},
+		{name: "forget", body: `[{"type":"forget","workspace":"w1"}]`, want: "forget"},
 		{name: "open", body: `[{"type":"open","workspace":"w1"}]`, want: "open"},
 		{name: "switch", body: `[{"type":"switch","workspace":"w1"}]`, want: "select"},
 		{name: "task create", body: `[{"type":"task-create","title":"t"}]`, want: "create_task"},

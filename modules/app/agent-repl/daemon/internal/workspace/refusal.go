@@ -134,6 +134,16 @@ const (
 	// ArmGitFailed is a NukeWorkspace whose destruction of the worktree and
 	// branch failed in git. It carries git's OWN account as `detail`.
 	ArmGitFailed = "git_failed"
+	// ArmNotClosed is a ForgetWorkspace on a workspace that is still open.
+	// Forget is a registry act with no way to tear editor state down, and the
+	// close verb owns the quiet requirement it would otherwise have to
+	// duplicate or bypass.
+	ArmNotClosed = "not_closed"
+	// ArmHasChildren is a ForgetWorkspace on a workspace other workspaces were
+	// spawned from. The schema nulls their parent_id rather than refusing, so
+	// the forget would silently flatten a fork's lineage. It carries the
+	// children's ids as `children`.
+	ArmHasChildren = "has_children"
 )
 
 // Refusal is a state the daemon must refuse for which the contract has no
