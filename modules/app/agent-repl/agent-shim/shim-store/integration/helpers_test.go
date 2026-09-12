@@ -816,6 +816,27 @@ func (p *producer) writeExpectingFailure(ctx context.Context, t *testing.T, curs
 	return failure
 }
 
+// writeExpectingSkips sends one batch, asserts the DURABLE success arm, and
+// returns the legacy book-conflict entries the store skipped. It is the
+// re-ingest idempotency path: an entry whose upsert_key already names a row
+// under a different book is kept-and-skipped rather than refused, so the batch
+// succeeds and names the skips on its success arm.
+func (p *producer) writeExpectingSkips(ctx context.Context, t *testing.T, cursor *storev1.CursorState, entries ...*storev1.StoreEntry) []*storev1.WriteBatchSkippedEntry {
+	t.Helper()
+	resp, err := p.attempt(ctx, &storev1.EntryBatch{Entries: entries, CursorAdvance: cursor})
+	if err != nil {
+		t.Fatalf("WriteBatch transport error: %v", err)
+	}
+	if failure := resp.GetFailure(); failure != nil {
+		t.Fatalf("WriteBatch refused where a skip was owed: %s", failure.GetDetail())
+	}
+	success := resp.GetSuccess()
+	if success == nil {
+		t.Fatalf("WriteBatch answered neither success nor failure: %v", resp)
+	}
+	return success.GetSkipped()
+}
+
 // ---- failure-arm assertions ----
 //
 // A FAILURE WITH AN UNSET KIND IS ITSELF A DEFECT. `detail` is prose for a

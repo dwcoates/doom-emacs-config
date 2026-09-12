@@ -360,10 +360,15 @@ func (c *catchupCount) add(activityMs int64) {
 	}
 }
 
-// summarizeCatchup states ONE warning per stale class the sweep caught up on,
-// naming the class, the count and the oldest run's age, so the owner sees "N
-// runs concluded" without N lines. Caller holds mu. A sweep that caught nothing
-// up states nothing.
+// summarizeCatchup states ONE INFORMATIONAL summary per stale class the sweep
+// caught up on, naming the class, the count and the oldest run's age, so the
+// owner sees "N runs concluded" without N lines. Caller holds mu. A sweep that
+// caught nothing up states nothing.
+//
+// IT IS INFO, NOT WARN: a startup catch-up summary is an account of PRE-EXISTING
+// backlog a restart re-derived, not a fault the owner must act on, so it must
+// not trip a strict harvest. The per-item steady-state conclusions this
+// summarizes AWAY stay at their own levels; only this roll-up is informational.
 func (t *Tracker) summarizeCatchup(catchup map[Reason]*catchupCount, nowMs int64) {
 	reasons := make([]Reason, 0, len(catchup))
 	for reason := range catchup {
@@ -374,7 +379,7 @@ func (t *Tracker) summarizeCatchup(catchup map[Reason]*catchupCount, nowMs int64
 		c := catchup[reason]
 		age := time.Duration(nowMs-c.oldestMs) * time.Millisecond
 		t.log.With(logging.Context{
-			Operation: "catchup-summary", Level: "warn",
+			Operation: "catchup-summary", Level: "info",
 			Reason: string(reason), Repeat: logging.Repeat(c.count),
 		}).Log("startup catch-up concluded %d pre-existing run(s) LOST reason=%s; the oldest last grew %s ago — these predate this sidecar and are summarized here, not stated one by one",
 			c.count, reason, age)
