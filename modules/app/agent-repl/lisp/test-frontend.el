@@ -1394,6 +1394,37 @@ accessor would not reach the code under test."
             (should (null noted)))
         (kill-buffer buf)))))
 
+(ert-deftest agent-repl-test-frontend-load-watcher-reports-on-the-info-rung ()
+  "The load report survives the default `info' log level.
+It is the ONE marker every painted panel leaves, whatever brought the
+workspace into being; on the debug rung it never reached disk, and
+realtest 5 reported a created workspace that had painted as one that
+never did."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((rungs nil)
+          (props nil)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                     (lambda (_buf) 'widget))
+                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
+                    ((symbol-function 'xwidget-put)
+                     (lambda (_w _p v) (setq props v)))
+                    ((symbol-function 'agent-repl-open-progress-note-loaded) #'ignore)
+                    ((symbol-function 'agent-repl--info)
+                     (lambda (_ws fmt &rest _args)
+                       (when (string-match-p "load-changed" fmt) (push :info rungs))))
+                    ((symbol-function 'agent-repl--log)
+                     (lambda (_ws fmt &rest _args)
+                       (when (string-match-p "load-changed" fmt) (push :debug rungs)))))
+            (agent-repl--frontend-watch-load "alpha" buf)
+            ;; Act
+            (funcall props 'widget 'load-changed)
+            ;; Assert
+            (should (equal '(:info) rungs)))
+        (kill-buffer buf)))))
+
 ;;;; ---- No JavaScript surface remains -----------------------------------
 
 (ert-deftest agent-repl-test-frontend-defines-no-script-evaluator ()

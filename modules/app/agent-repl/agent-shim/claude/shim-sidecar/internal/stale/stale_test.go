@@ -583,3 +583,39 @@ func TestProcessStartBoundaryIsSetOnlyOnce(t *testing.T) {
 		t.Fatalf("process start = %d, want it pinned to the first value %d", tr.processStartMs, startMs)
 	}
 }
+
+func TestABacklogConclusionIsHandedToTheCallerAsCatchUp(t *testing.T) {
+	// Arrange: a run that was already silent before this sidecar started.
+	tr, _ := trackerFromStart(t, Options{}, startMs)
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs-10_000), nowMs)
+
+	// Act.
+	lost := tr.Sweep(bootMs, startMs+shellMs)
+
+	// Assert: the classification rides out, so the TERMINAL's own record can
+	// follow it instead of restating summarized backlog as a fresh warning.
+	if len(lost) != 1 {
+		t.Fatalf("concluded %d run(s), want 1", len(lost))
+	}
+	if !lost[0].Catchup {
+		t.Fatal("a run stale before the process start was not handed out as catch-up")
+	}
+}
+
+func TestAConclusionReachedWhileWatchingIsNotCatchUp(t *testing.T) {
+	// Arrange: a run that was still growing after this sidecar started and only
+	// then went quiet.
+	tr, _ := trackerFromStart(t, Options{}, startMs)
+	tr.Observe(shellRun("/private/tmp/b2.output", startMs+1000), nowMs)
+
+	// Act.
+	lost := tr.Sweep(bootMs, startMs+1000+shellMs)
+
+	// Assert.
+	if len(lost) != 1 {
+		t.Fatalf("concluded %d run(s), want 1", len(lost))
+	}
+	if lost[0].Catchup {
+		t.Fatal("a newly-arising conclusion was classified as startup backlog")
+	}
+}

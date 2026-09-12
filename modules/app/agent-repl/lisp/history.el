@@ -9,6 +9,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--warn "core")
+(declare-function agent-repl--info "core")
 (declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--buffer-owner "core")
 (declare-function agent-repl--ws-current-log-name "workspace")
@@ -374,12 +375,34 @@ stray save never clobbers it.  The project picker sorts on this key.
 alias, or whatever a model-picking variant like `SPC j C-o' supplied — and
 never the model a live session happens to be running.
 the daemon's own pushed views restore it, so the re-booted session
-launches under the same request."
+launches under the same request.
+
+A SAVE NEVER BRINGS A WORKSPACE'S DIRECTORY BACK INTO EXISTENCE.  The
+write goes through `agent-repl--write-sexp-file', which creates the
+state file's parent WITH ITS PARENTS so a first save can provision
+`.claude/emacs/' — and that same `t' will happily re-make the project
+root itself.  A nuke removes the worktree, and Emacs's own teardown then
+saves state for the workspace it is tearing down: on 2026-09-12 that
+re-made `<root>/.claude/emacs/' four milliseconds after the daemon had
+destroyed the worktree (`daemon.workspace.nuke nuked the workspace'),
+and realtest 5 reported the two files Emacs had just minted as an
+orphaned working tree the delete had left behind.  A workspace whose
+root is gone is gone: there is nowhere to persist it to, the save is
+refused, and the refusal is recorded rather than passed over.  The log
+ladder needs no matching guard — `agent-repl--ws-log-routable-p' already
+requires the directory to exist, so once nothing re-creates it the
+workspace's records route centrally on their own."
   (let* ((root (agent-repl--ws-get ws :project-dir))
          (file (agent-repl--state-file root)))
     (agent-repl--log ws "state-save ws=%s file=%s" ws file)
-    (if (null file)
-        (agent-repl--log ws "state-save: no :project-dir for ws=%s, skipping" ws)
+    (cond
+     ((null file)
+      (agent-repl--log ws "state-save: no :project-dir for ws=%s, skipping" ws))
+     ((not (file-directory-p root))
+      (agent-repl--info
+       '(:agent-repl-central "a workspace with no directory owns no durable sink")
+       "elisp.history.state-save: skipped ws=%s reason=root-gone root=%s" ws root))
+     (t
       (let* ((existing (when (file-exists-p file)
                          (condition-case err
                              (agent-repl--read-sexp-file file)
@@ -450,7 +473,7 @@ launches under the same request."
                              (agent-repl--collect-env-state ws))))
           (agent-repl--with-error-logging "state-save"
             (agent-repl--write-sexp-file file state)
-            (agent-repl--log ws "state-save: write complete ws=%s file=%s" ws file)))))
+            (agent-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))))
     ;; Roster write goes through the DEBOUNCED request, not a direct save:
     ;; state-save fires on every state mutation, and a burst of mutations
     ;; previously meant a burst of full-roster serializations on the main

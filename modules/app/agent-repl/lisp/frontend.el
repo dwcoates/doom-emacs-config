@@ -354,6 +354,20 @@ that comes from the page at all, and it is a fact the widget emits —
 nothing is asked of the page, which is what makes it trustworthy for
 diagnosing a page too broken to answer a question.
 
+THE LOAD REPORT IS AN INFO RECORD, and that rung is load-bearing.  It is
+the ONE marker every painted panel leaves, whatever brought the workspace
+into being: every mount arrives through
+`agent-repl--frontend-ensure-webview-buffer' and every mount arms this
+watcher.  On the DEBUG rung it never reached disk at all, because the
+default `AGENT_REPL_LOG_LEVEL' is `info' — so realtest 5's created
+workspace painted its panel (`elisp.frontend.gui-open: displayed', with
+the page's own boot record beside it) while the run's harvest held no
+evidence of any load and reported a workspace the owner could not work
+in.  The pre-creation drain's `precreate-created' cannot cover for it: a
+created workspace is mounted and DISPLAYED by the open path first, so
+pre-creation refuses it `:already-mounted' and never writes a record
+naming it.  One record per mount is the whole cost.
+
 No-op when BUF holds no live widget."
   (let ((widget (agent-repl--frontend-webview-live-widget buf)))
     (if (not widget)
@@ -363,7 +377,7 @@ No-op when BUF holds no live widget."
          widget 'callback
          (lambda (xwidget event-type)
            (when (eq event-type 'load-changed)
-             (agent-repl--log ws "elisp.frontend.watch-load: load-changed ws=%s" ws)
+             (agent-repl--info ws "elisp.frontend.watch-load: load-changed ws=%s" ws)
              (when (fboundp 'agent-repl-open-progress-note-loaded)
                (agent-repl-open-progress-note-loaded ws)))
            (when (functionp prior) (funcall prior xwidget event-type))))
