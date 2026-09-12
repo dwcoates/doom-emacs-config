@@ -1835,6 +1835,11 @@ type HostFault struct {
 	//	*HostFault_BounceUnknown
 	//	*HostFault_ClassifierFailed
 	//	*HostFault_ShimReported
+	//	*HostFault_ConversationAbandoned
+	//	*HostFault_SessionAbsent
+	//	*HostFault_WatchOpenRefused
+	//	*HostFault_DaemonStateUnreadable
+	//	*HostFault_AdoptionWindowExpired
 	Kind          isHostFault_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1963,6 +1968,51 @@ func (x *HostFault) GetShimReported() *SessionFaultShimReported {
 	return nil
 }
 
+func (x *HostFault) GetConversationAbandoned() *SessionFaultConversationAbandoned {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_ConversationAbandoned); ok {
+			return x.ConversationAbandoned
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetSessionAbsent() *SessionFaultSessionAbsent {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_SessionAbsent); ok {
+			return x.SessionAbsent
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetWatchOpenRefused() *SessionFaultWatchOpenRefused {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_WatchOpenRefused); ok {
+			return x.WatchOpenRefused
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetDaemonStateUnreadable() *SessionFaultDaemonStateUnreadable {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_DaemonStateUnreadable); ok {
+			return x.DaemonStateUnreadable
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetAdoptionWindowExpired() *SessionFaultAdoptionWindowExpired {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_AdoptionWindowExpired); ok {
+			return x.AdoptionWindowExpired
+		}
+	}
+	return nil
+}
+
 type isHostFault_Kind interface {
 	isHostFault_Kind()
 }
@@ -2007,6 +2057,31 @@ type HostFault_ShimReported struct {
 	ShimReported *SessionFaultShimReported `protobuf:"bytes,10,opt,name=shim_reported,json=shimReported,proto3,oneof"`
 }
 
+type HostFault_ConversationAbandoned struct {
+	// A recorded conversation whose transcript was gone at bring-up.
+	ConversationAbandoned *SessionFaultConversationAbandoned `protobuf:"bytes,11,opt,name=conversation_abandoned,json=conversationAbandoned,proto3,oneof"`
+}
+
+type HostFault_SessionAbsent struct {
+	// The liveness probe's own answer: there is no session here at all.
+	SessionAbsent *SessionFaultSessionAbsent `protobuf:"bytes,12,opt,name=session_absent,json=sessionAbsent,proto3,oneof"`
+}
+
+type HostFault_WatchOpenRefused struct {
+	// The shim refused a watch open for a handle nothing announced.
+	WatchOpenRefused *SessionFaultWatchOpenRefused `protobuf:"bytes,13,opt,name=watch_open_refused,json=watchOpenRefused,proto3,oneof"`
+}
+
+type HostFault_DaemonStateUnreadable struct {
+	// The daemon's own state client would not answer the fault read.
+	DaemonStateUnreadable *SessionFaultDaemonStateUnreadable `protobuf:"bytes,14,opt,name=daemon_state_unreadable,json=daemonStateUnreadable,proto3,oneof"`
+}
+
+type HostFault_AdoptionWindowExpired struct {
+	// A handover whose adoption window ran out with this workspace unclaimed.
+	AdoptionWindowExpired *SessionFaultAdoptionWindowExpired `protobuf:"bytes,15,opt,name=adoption_window_expired,json=adoptionWindowExpired,proto3,oneof"`
+}
+
 func (*HostFault_ShimStartFailed) isHostFault_Kind() {}
 
 func (*HostFault_ShimDied) isHostFault_Kind() {}
@@ -2022,6 +2097,16 @@ func (*HostFault_BounceUnknown) isHostFault_Kind() {}
 func (*HostFault_ClassifierFailed) isHostFault_Kind() {}
 
 func (*HostFault_ShimReported) isHostFault_Kind() {}
+
+func (*HostFault_ConversationAbandoned) isHostFault_Kind() {}
+
+func (*HostFault_SessionAbsent) isHostFault_Kind() {}
+
+func (*HostFault_WatchOpenRefused) isHostFault_Kind() {}
+
+func (*HostFault_DaemonStateUnreadable) isHostFault_Kind() {}
+
+func (*HostFault_AdoptionWindowExpired) isHostFault_Kind() {}
 
 var File_agentrepl_v1_endpoint_watch_host_workspace_proto protoreflect.FileDescriptor
 
@@ -2119,7 +2204,7 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x13HostComposerMerging\"\x16\n" +
 	"\x14HostComposerDraining\"\x18\n" +
 	"\x16HostComposerRestarting\"\x19\n" +
-	"\x17HostComposerMergeParked\"\xc9\x05\n" +
+	"\x17HostComposerMergeParked\"\xb7\t\n" +
 	"\tHostFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12 \n" +
 	"\fopened_at_ms\x18\x02 \x01(\x03R\n" +
@@ -2133,7 +2218,12 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x0ebounce_unknown\x18\b \x01(\v2'.agentrepl.v1.SessionFaultBounceUnknownH\x00R\rbounceUnknown\x12Y\n" +
 	"\x11classifier_failed\x18\t \x01(\v2*.agentrepl.v1.SessionFaultClassifierFailedH\x00R\x10classifierFailed\x12M\n" +
 	"\rshim_reported\x18\n" +
-	" \x01(\v2&.agentrepl.v1.SessionFaultShimReportedH\x00R\fshimReportedB\x06\n" +
+	" \x01(\v2&.agentrepl.v1.SessionFaultShimReportedH\x00R\fshimReported\x12h\n" +
+	"\x16conversation_abandoned\x18\v \x01(\v2/.agentrepl.v1.SessionFaultConversationAbandonedH\x00R\x15conversationAbandoned\x12P\n" +
+	"\x0esession_absent\x18\f \x01(\v2'.agentrepl.v1.SessionFaultSessionAbsentH\x00R\rsessionAbsent\x12Z\n" +
+	"\x12watch_open_refused\x18\r \x01(\v2*.agentrepl.v1.SessionFaultWatchOpenRefusedH\x00R\x10watchOpenRefused\x12i\n" +
+	"\x17daemon_state_unreadable\x18\x0e \x01(\v2/.agentrepl.v1.SessionFaultDaemonStateUnreadableH\x00R\x15daemonStateUnreadable\x12i\n" +
+	"\x17adoption_window_expired\x18\x0f \x01(\v2/.agentrepl.v1.SessionFaultAdoptionWindowExpiredH\x00R\x15adoptionWindowExpiredB\x06\n" +
 	"\x04kindB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -2189,6 +2279,11 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*SessionFaultBounceUnknown)(nil),           // 36: agentrepl.v1.SessionFaultBounceUnknown
 	(*SessionFaultClassifierFailed)(nil),        // 37: agentrepl.v1.SessionFaultClassifierFailed
 	(*SessionFaultShimReported)(nil),            // 38: agentrepl.v1.SessionFaultShimReported
+	(*SessionFaultConversationAbandoned)(nil),   // 39: agentrepl.v1.SessionFaultConversationAbandoned
+	(*SessionFaultSessionAbsent)(nil),           // 40: agentrepl.v1.SessionFaultSessionAbsent
+	(*SessionFaultWatchOpenRefused)(nil),        // 41: agentrepl.v1.SessionFaultWatchOpenRefused
+	(*SessionFaultDaemonStateUnreadable)(nil),   // 42: agentrepl.v1.SessionFaultDaemonStateUnreadable
+	(*SessionFaultAdoptionWindowExpired)(nil),   // 43: agentrepl.v1.SessionFaultAdoptionWindowExpired
 }
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	30, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -2228,11 +2323,16 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	36, // 34: agentrepl.v1.HostFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
 	37, // 35: agentrepl.v1.HostFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
 	38, // 36: agentrepl.v1.HostFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
-	37, // [37:37] is the sub-list for method output_type
-	37, // [37:37] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	39, // 37: agentrepl.v1.HostFault.conversation_abandoned:type_name -> agentrepl.v1.SessionFaultConversationAbandoned
+	40, // 38: agentrepl.v1.HostFault.session_absent:type_name -> agentrepl.v1.SessionFaultSessionAbsent
+	41, // 39: agentrepl.v1.HostFault.watch_open_refused:type_name -> agentrepl.v1.SessionFaultWatchOpenRefused
+	42, // 40: agentrepl.v1.HostFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
+	43, // 41: agentrepl.v1.HostFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
+	42, // [42:42] is the sub-list for method output_type
+	42, // [42:42] is the sub-list for method input_type
+	42, // [42:42] is the sub-list for extension type_name
+	42, // [42:42] is the sub-list for extension extendee
+	0,  // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() }
@@ -2286,6 +2386,11 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostFault_BounceUnknown)(nil),
 		(*HostFault_ClassifierFailed)(nil),
 		(*HostFault_ShimReported)(nil),
+		(*HostFault_ConversationAbandoned)(nil),
+		(*HostFault_SessionAbsent)(nil),
+		(*HostFault_WatchOpenRefused)(nil),
+		(*HostFault_DaemonStateUnreadable)(nil),
+		(*HostFault_AdoptionWindowExpired)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

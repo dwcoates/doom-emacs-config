@@ -166,6 +166,8 @@ message CreateWorkspaceError {
     CreateWorkspaceBaseRefUnresolved base_ref_unresolved = 9;
     // Creating the worktree failed.
     CreateWorkspaceWorktreeCreationFailed worktree_creation_failed = 10;
+    // Spawning the created workspace's shim failed.
+    CreateWorkspaceSpawnFailed spawn_failed = 11;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -185,5 +187,14 @@ message CreateWorkspaceBaseRefUnresolved {
 }
 message CreateWorkspaceWorktreeCreationFailed {
   // Git's own account of the failure.
+  string detail = 1;
+}
+
+// The created workspace's bring-up could not start a shim. The SAME daemon
+// refusal OpenWorkspaceError.spawn_failed carries, and deliberately the same
+// shape: a create and an open raise it from one site, so the two rpcs may not
+// spell it differently.
+message CreateWorkspaceSpawnFailed {
+  // The spawn's own account of the failure.
   string detail = 1;
 }

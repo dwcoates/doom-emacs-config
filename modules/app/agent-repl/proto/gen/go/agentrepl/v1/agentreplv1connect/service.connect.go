@@ -79,6 +79,9 @@ const (
 	AgentReplKillWorkspaceProcedure = "/agentrepl.v1.AgentRepl/KillWorkspace"
 	// AgentReplNukeWorkspaceProcedure is the fully-qualified name of the AgentRepl's NukeWorkspace RPC.
 	AgentReplNukeWorkspaceProcedure = "/agentrepl.v1.AgentRepl/NukeWorkspace"
+	// AgentReplForgetWorkspaceProcedure is the fully-qualified name of the AgentRepl's ForgetWorkspace
+	// RPC.
+	AgentReplForgetWorkspaceProcedure = "/agentrepl.v1.AgentRepl/ForgetWorkspace"
 	// AgentReplMergeWorkspaceProcedure is the fully-qualified name of the AgentRepl's MergeWorkspace
 	// RPC.
 	AgentReplMergeWorkspaceProcedure = "/agentrepl.v1.AgentRepl/MergeWorkspace"
@@ -186,6 +189,7 @@ var (
 	agentReplCloseWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("CloseWorkspace")
 	agentReplKillWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("KillWorkspace")
 	agentReplNukeWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("NukeWorkspace")
+	agentReplForgetWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ForgetWorkspace")
 	agentReplMergeWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("MergeWorkspace")
 	agentReplRestartWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
@@ -264,6 +268,9 @@ type AgentReplClient interface {
 	KillWorkspace(context.Context, *connect.Request[v1.KillWorkspaceRequest]) (*connect.Response[v1.KillWorkspaceResponse], error)
 	// Data destruction: kill if live, then delete worktree and branch.
 	NukeWorkspace(context.Context, *connect.Request[v1.NukeWorkspaceRequest]) (*connect.Response[v1.NukeWorkspaceResponse], error)
+	// Remove a CLOSED workspace's registry record; every file survives. The
+	// undo for a registration. See endpoint_forget_workspace.proto.
+	ForgetWorkspace(context.Context, *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error)
 	// Enqueue this workspace's merge; its life from there is the feed's bubble.
 	MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
@@ -461,6 +468,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplNukeWorkspaceProcedure,
 			connect.WithSchema(agentReplNukeWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		forgetWorkspace: connect.NewClient[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplForgetWorkspaceProcedure,
+			connect.WithSchema(agentReplForgetWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		mergeWorkspace: connect.NewClient[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse](
@@ -687,6 +700,7 @@ type agentReplClient struct {
 	closeWorkspace         *connect.Client[v1.CloseWorkspaceRequest, v1.CloseWorkspaceResponse]
 	killWorkspace          *connect.Client[v1.KillWorkspaceRequest, v1.KillWorkspaceResponse]
 	nukeWorkspace          *connect.Client[v1.NukeWorkspaceRequest, v1.NukeWorkspaceResponse]
+	forgetWorkspace        *connect.Client[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse]
 	mergeWorkspace         *connect.Client[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse]
 	restartWorkspace       *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	setWorkspacePriority   *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
@@ -796,6 +810,11 @@ func (c *agentReplClient) KillWorkspace(ctx context.Context, req *connect.Reques
 // NukeWorkspace calls agentrepl.v1.AgentRepl.NukeWorkspace.
 func (c *agentReplClient) NukeWorkspace(ctx context.Context, req *connect.Request[v1.NukeWorkspaceRequest]) (*connect.Response[v1.NukeWorkspaceResponse], error) {
 	return c.nukeWorkspace.CallUnary(ctx, req)
+}
+
+// ForgetWorkspace calls agentrepl.v1.AgentRepl.ForgetWorkspace.
+func (c *agentReplClient) ForgetWorkspace(ctx context.Context, req *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error) {
+	return c.forgetWorkspace.CallUnary(ctx, req)
 }
 
 // MergeWorkspace calls agentrepl.v1.AgentRepl.MergeWorkspace.
@@ -1010,6 +1029,9 @@ type AgentReplHandler interface {
 	KillWorkspace(context.Context, *connect.Request[v1.KillWorkspaceRequest]) (*connect.Response[v1.KillWorkspaceResponse], error)
 	// Data destruction: kill if live, then delete worktree and branch.
 	NukeWorkspace(context.Context, *connect.Request[v1.NukeWorkspaceRequest]) (*connect.Response[v1.NukeWorkspaceResponse], error)
+	// Remove a CLOSED workspace's registry record; every file survives. The
+	// undo for a registration. See endpoint_forget_workspace.proto.
+	ForgetWorkspace(context.Context, *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error)
 	// Enqueue this workspace's merge; its life from there is the feed's bubble.
 	MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
@@ -1203,6 +1225,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplNukeWorkspaceProcedure,
 		svc.NukeWorkspace,
 		connect.WithSchema(agentReplNukeWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplForgetWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplForgetWorkspaceProcedure,
+		svc.ForgetWorkspace,
+		connect.WithSchema(agentReplForgetWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplMergeWorkspaceHandler := connect.NewUnaryHandler(
@@ -1441,6 +1469,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplKillWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplNukeWorkspaceProcedure:
 			agentReplNukeWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplForgetWorkspaceProcedure:
+			agentReplForgetWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplMergeWorkspaceProcedure:
 			agentReplMergeWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplRestartWorkspaceProcedure:
@@ -1576,6 +1606,10 @@ func (UnimplementedAgentReplHandler) KillWorkspace(context.Context, *connect.Req
 
 func (UnimplementedAgentReplHandler) NukeWorkspace(context.Context, *connect.Request[v1.NukeWorkspaceRequest]) (*connect.Response[v1.NukeWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.NukeWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ForgetWorkspace(context.Context, *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ForgetWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error) {

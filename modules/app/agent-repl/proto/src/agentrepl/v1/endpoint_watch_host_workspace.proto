@@ -277,6 +277,16 @@ message HostFault {
     SessionFaultClassifierFailed classifier_failed = 9;
     // A shim-side SessionFault, relayed.
     SessionFaultShimReported shim_reported = 10;
+    // A recorded conversation whose transcript was gone at bring-up.
+    SessionFaultConversationAbandoned conversation_abandoned = 11;
+    // The liveness probe's own answer: there is no session here at all.
+    SessionFaultSessionAbsent session_absent = 12;
+    // The shim refused a watch open for a handle nothing announced.
+    SessionFaultWatchOpenRefused watch_open_refused = 13;
+    // The daemon's own state client would not answer the fault read.
+    SessionFaultDaemonStateUnreadable daemon_state_unreadable = 14;
+    // A handover whose adoption window ran out with this workspace unclaimed.
+    SessionFaultAdoptionWindowExpired adoption_window_expired = 15;
   }
 }
 
