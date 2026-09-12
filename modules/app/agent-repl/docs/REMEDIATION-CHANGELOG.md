@@ -13,6 +13,10 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- daemon: forgetting a workspace stands its live session down first, so a forgotten row no longer leaves a shim holding the directory's workspace lock for the next registration of that directory to mis-adopt (realtest 7)
+- daemon: a bring-up whose lock reads held resolves the shim's newest socket generation and refuses at once when nothing is listening, instead of spending the whole adoption bound dialing a path no process ever bound (realtest 7)
+- daemon: a failed adoption raises the same shim_start_failed fault and dead link a failed spawn does, so the footer states the cause of a dropped prompt (realtest 7)
+- daemon: the bring-up records both kernel facts and the branch it chose at info, so which path a bring-up took is readable without rerunning at debug (realtest 7)
 - daemon/roster: a repository's default branch is no longer read as a family link, so a workspace cut from it draws at the top level and priority can reorder the tab bar (realtest 8)
 - daemon: every fleet adoption is dialed under the one adoption bound and records both its edges, so a revival can no longer hang forever with a prompt held and no turn recorded (realtest 7)
 - elisp: a webview's load report is an info record, so the ONE marker every painted panel leaves survives the default log level and a created workspace stops reading as one that never painted
