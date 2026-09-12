@@ -13,6 +13,9 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- elisp: a webview's load report is an info record, so the ONE marker every painted panel leaves survives the default log level and a created workspace stops reading as one that never painted
+- elisp: a state save for a workspace whose root is gone is refused instead of re-creating the directory a nuke had just destroyed, so a delete leaves nothing on disk
+- sidecar: a LOST verdict about startup backlog is recorded on the rung the catch-up policy already chose for it, ending 161 warnings per run about runs that were stale before the process started
 - elisp: the composer mounts at a height derived once per frame instead of a fraction of whatever window the mount split, so every workspace's input window is the same fixed height and stays it across remounts
 - elisp/realtest: a quit arriving while a guarded section runs is delivered to the command loop afterwards, so C-g reaches the prompt the user aimed it at; a run clears pending input before it measures (DD, EE)
 - daemon/elisp: registering a directory re-opens the closed row it names, and the roster stops offering repositories whose worktree is gone (AA, BB, GG)
