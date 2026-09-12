@@ -1288,9 +1288,10 @@ Runs under `agent-repl--with-deferred-quit\', which this sentinel had
 before the overhaul refactor dropped it.  A `C-g\' between retiring
 `daemon.addr\' and forgetting the process leaves the address file naming
 a dead daemon while Emacs still believes it owns a live one, which is the
-stale address the next cold start reads back as readiness.  The guard
-also delivers the quit afterwards, so a `C-g\' the user pressed at a
-standing prompt is not spent here."
+stale address the next cold start reads back as readiness.  Atomicity is
+the whole reason: Emacs already binds `inhibit-quit\' around sentinels,
+so the guard adds the record of the deferral and the handing on of the
+flag, not the protection itself."
   (unless (process-live-p proc)
     (agent-repl--with-deferred-quit "daemon-sentinel"
       (agent-repl-daemon--record-exit proc event))))

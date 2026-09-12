@@ -850,10 +850,3 @@ func prefixEach(prefix string, values []string) []string {
 	sort.Strings(out)
 	return out
 }
-
-func tail(text string, n int) string {
-	if len(text) <= n {
-		return text
-	}
-	return "..." + text[len(text)-n:]
-}
