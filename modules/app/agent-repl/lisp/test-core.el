@@ -4692,6 +4692,164 @@ entry per tick for the whole bring-up."
                   (error "boom"))
                 :type 'error))
 
+;;;; ---- Tests: a deferred quit is DELIVERED, not just left armed -----------
+;;
+;; Arming `quit-flag' is half of a deferral.  The other half is that the quit
+;; reaches somewhere the user can see it: an armed flag taken at a checkpoint
+;; inside a standing minibuffer's own recursive edit prints `Quit' and leaves
+;; the prompt up, which is what a real `C-g' did twice in the 2026-09-12
+;; sweep.  These cover the delivery.
+
+(ert-deftest agent-repl-test-deferred-quit-arms-a-delivery-for-the-command-loop ()
+  "A quit deferred out of a guarded section arms a delivery naming it."
+  ;; Arrange
+  (let ((armed nil))
+    (cl-letf (((symbol-function 'agent-repl--deferred-quit-arm-delivery)
+               (lambda (context) (push context armed))))
+      ;; Act
+      (agent-repl-test--quit-deferred-p
+        (agent-repl--with-deferred-quit "uds-filter"
+          (setq quit-flag t))))
+    ;; Assert
+    (should (equal armed '("uds-filter")))))
+
+(ert-deftest agent-repl-test-deferred-quit-arms-no-delivery-without-a-quit ()
+  "No quit means no delivery -- the guard is inert on the ordinary path."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (armed nil))
+    (cl-letf (((symbol-function 'agent-repl--deferred-quit-arm-delivery)
+               (lambda (context) (push context armed))))
+      ;; Act
+      (agent-repl--with-deferred-quit "uds-filter" t))
+    ;; Assert
+    (should-not armed)))
+
+(ert-deftest agent-repl-test-deferred-quit-delivery-is-armed-on-a-zero-delay-timer ()
+  "Delivery goes through a timer: the one context that reaches a waiting read."
+  ;; Arrange
+  (let ((scheduled nil))
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (delay repeat function &rest args)
+                 (setq scheduled (list delay repeat function args)))))
+      ;; Act
+      (agent-repl--deferred-quit-arm-delivery "uds-filter"))
+    ;; Assert
+    (should (equal scheduled
+                   (list 0 nil #'agent-repl--deferred-quit-deliver '("uds-filter"))))))
+
+(ert-deftest agent-repl-test-deferred-quit-delivery-does-nothing-when-the-flag-is-down ()
+  "A quit the command loop already honoured is not delivered a second time."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (aborted nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'abort-minibuffers) (lambda () (setq aborted t))))
+      ;; Act
+      (agent-repl--deferred-quit-deliver "uds-filter")
+      ;; Assert
+      (should-not aborted))))
+
+(ert-deftest agent-repl-test-deferred-quit-delivery-aborts-a-standing-minibuffer ()
+  "A quit owed while a prompt stands aborts the prompt, which is what C-g means."
+  ;; Arrange
+  (let ((aborted nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'abort-minibuffers) (lambda () (setq aborted t))))
+      ;; Act
+      (let ((quit-flag nil))
+        (let ((inhibit-quit t))
+          (setq quit-flag t)
+          (agent-repl--deferred-quit-deliver "uds-filter")
+          (setq quit-flag nil))))
+    ;; Assert
+    (should aborted)))
+
+(ert-deftest agent-repl-test-deferred-quit-delivery-unwinds-every-minibuffer-level ()
+  "`abort-minibuffers' is preferred: `abort-recursive-edit' peels one level."
+  ;; Arrange
+  (let ((called nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'abort-minibuffers) (lambda () (push 'all called)))
+              ((symbol-function 'abort-recursive-edit) (lambda () (push 'one called))))
+      ;; Act
+      (let ((quit-flag nil))
+        (let ((inhibit-quit t))
+          (setq quit-flag t)
+          (agent-repl--deferred-quit-deliver "uds-filter")
+          (setq quit-flag nil))))
+    ;; Assert
+    (should (equal called '(all)))))
+
+(ert-deftest agent-repl-test-deferred-quit-delivery-falls-back-on-an-older-emacs ()
+  "Without `abort-minibuffers', the prompt is still aborted, one level at a time."
+  ;; Arrange
+  (let ((called nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'abort-minibuffers) nil)
+              ((symbol-function 'abort-recursive-edit) (lambda () (push 'one called))))
+      ;; Act
+      (let ((quit-flag nil))
+        (let ((inhibit-quit t))
+          (setq quit-flag t)
+          (agent-repl--deferred-quit-deliver "uds-filter")
+          (setq quit-flag nil))))
+    ;; Assert
+    (should (equal called '(one)))))
+
+(ert-deftest agent-repl-test-deferred-quit-delivery-signals-a-quit-with-no-prompt-standing ()
+  "With nothing to abort the quit is signalled as itself, exactly as C-g does."
+  ;; Arrange
+  (let ((signalled nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () nil)))
+      ;; Act
+      (let ((quit-flag nil))
+        (let ((inhibit-quit t))
+          (setq quit-flag t)
+          (setq signalled (condition-case nil
+                              (progn (agent-repl--deferred-quit-deliver "uds-filter") nil)
+                            (quit t)))
+          (setq quit-flag nil))))
+    ;; Assert
+    (should signalled)))
+
+(ert-deftest agent-repl-test-deferred-quit-delivery-takes-the-flag-down ()
+  "The flag is consumed BY BEING HONOURED, so no later checkpoint re-takes it."
+  ;; Arrange
+  (let ((observed 'unset))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'abort-minibuffers) #'ignore))
+      ;; Act
+      (let ((quit-flag nil))
+        (let ((inhibit-quit t))
+          (setq quit-flag t)
+          (agent-repl--deferred-quit-deliver "uds-filter")
+          (setq observed quit-flag)
+          (setq quit-flag nil))))
+    ;; Assert
+    (should (eq observed nil))))
+
+(ert-deftest agent-repl-test-deferred-quit-delivery-records-the-delivery ()
+  "A delivered quit is explainable from the canonical log alone."
+  ;; Arrange
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+              ((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'abort-minibuffers) #'ignore))
+      ;; Act
+      (let ((quit-flag nil))
+        (let ((inhibit-quit t))
+          (setq quit-flag t)
+          (agent-repl--deferred-quit-deliver "uds-filter")
+          (setq quit-flag nil))))
+    ;; Assert
+    (should (seq-find (lambda (line)
+                        (and (string-match-p "deferred-quit" line)
+                             (string-match-p "delivering" line)
+                             (string-match-p "uds-filter" line)))
+                      logged))))
+
 ;;;; ---- Tests: a workspace's directory is canonicalized to its registry key ----
 
 (ert-deftest agent-repl-test-log-workspace-dir-routes-to-its-registered-name ()
