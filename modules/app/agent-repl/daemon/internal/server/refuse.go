@@ -208,6 +208,15 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 		if !ok {
 			continue
 		}
+		// A REPEATED FIELD IS SET BEFORE THE SCALAR SWITCH, because a repeated
+		// string's Kind() is StringKind too: falling through would try a
+		// `value.(string)` on a slice, fail it, and leave the arm's evidence
+		// EMPTY beside a prose sentence that says it has some.
+		// ForgetWorkspaceHasChildren.children is the first such arm.
+		if field.IsList() {
+			setListField(armMessage, field, value)
+			continue
+		}
 		switch field.Kind() {
 		case protoreflect.StringKind:
 			if text, ok := value.(string); ok {
@@ -233,6 +242,26 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 	}
 	errMessage.Set(armField, protoreflect.ValueOfMessage(armMessage))
 	return true
+}
+
+// setListField fills one REPEATED arm field from the refusal's value. Only the
+// string element kind is supported, which is every repeated arm field the
+// contract spells today; an element kind or value type it cannot convert
+// leaves the field unset rather than writing a wrong value, and the refusal's
+// prose still states the evidence.
+func setListField(armMessage protoreflect.Message, field protoreflect.FieldDescriptor, value any) {
+	if field.Kind() != protoreflect.StringKind {
+		return
+	}
+	items, ok := value.([]string)
+	if !ok {
+		return
+	}
+	list := armMessage.NewField(field).List()
+	for _, item := range items {
+		list.Append(protoreflect.ValueOfString(item))
+	}
+	armMessage.Set(field, protoreflect.ValueOfList(list))
 }
 
 // setNestedArms selects the arm of every NESTED oneof the refusal named,

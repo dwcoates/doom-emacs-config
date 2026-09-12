@@ -537,12 +537,17 @@ func TestAFaultCarriesItsOpeningInstant(t *testing.T) {
 // fault cost the editor every host view of the workspace. The invariant
 // supersedes the old pin: a fault the wire cannot carry is withheld, and it
 // stays recorded, loudly, at the site that opened it.
+//
+// The kind it is driven with is a RECONCILED BOUNCE DISPOSITION, which is
+// armless BY DESIGN -- per-session accounting, never a standing condition a
+// host view should draw. It used to be driven with `session_absent', which
+// landed its own arm on 2026-09-12.
 func TestAFaultKindWithNoTypedArmIsWithheldFromTheView(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
 	h.Facts.facts[testWorkspaceID] = liveFacts()
-	h.Health.faults = []wsm.Fault{{Kind: health.KindSessionAbsent, Detail: "no live session"}}
+	h.Health.faults = []wsm.Fault{{Kind: "bounce_disposition", Detail: "reconciled"}}
 
 	// Act.
 	faults := composeHost(t, h).GetExisting().GetLive().GetFaults()
@@ -561,7 +566,7 @@ func TestAnArmlessFaultDoesNotWithholdTheArmedOnesBesideIt(t *testing.T) {
 	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
 	h.Facts.facts[testWorkspaceID] = liveFacts()
 	h.Health.faults = []wsm.Fault{
-		{Kind: health.KindConversationAbandoned, Detail: "no transcript"},
+		{Kind: "bounce_disposition", Detail: "reconciled"},
 		{Kind: health.KindShimDied, Detail: "exited"},
 	}
 
@@ -571,6 +576,28 @@ func TestAnArmlessFaultDoesNotWithholdTheArmedOnesBesideIt(t *testing.T) {
 	// Assert.
 	if len(faults) != 1 || faults[0].GetShimDied() == nil {
 		t.Fatalf("faults = %v, want only the shim-died fault", faults)
+	}
+}
+
+// TestAnAbandonedConversationNoLongerCostsTheWholeView pins the end of the
+// failure this whole batch exists for: the fault a fresh bring-up leaves
+// standing now reaches the view through its own arm, beside every other fault.
+func TestAnAbandonedConversationNoLongerCostsTheWholeView(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
+	h.Facts.facts[testWorkspaceID] = liveFacts()
+	h.Health.faults = []wsm.Fault{
+		{Kind: health.KindConversationAbandoned, Detail: "no transcript",
+			Evidence: map[string]string{"vendor_session_id": "sess-abc"}},
+	}
+
+	// Act.
+	faults := composeHost(t, h).GetExisting().GetLive().GetFaults()
+
+	// Assert.
+	if len(faults) != 1 || faults[0].GetConversationAbandoned().GetVendorSessionId() != "sess-abc" {
+		t.Fatalf("faults = %v, want the abandoned conversation carried with its vendor id", faults)
 	}
 }
 
@@ -955,6 +982,11 @@ func TestHostFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "bounce unknown", kind: health.KindBounceUnknown},
 		{name: "classifier failed", kind: health.KindClassifierFailed},
 		{name: "shim reported", kind: health.KindShimReported},
+		{name: "conversation abandoned", kind: health.KindConversationAbandoned},
+		{name: "session absent", kind: health.KindSessionAbsent},
+		{name: "watch open refused", kind: health.KindWatchOpenRefused},
+		{name: "daemon state unreadable", kind: health.KindStateUnreadable},
+		{name: "adoption window expired", kind: health.KindAdoptionWindowExpired},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -973,21 +1005,58 @@ func TestHostFaultFillsEveryTypedArm(t *testing.T) {
 	}
 }
 
-// TestAnAbandonedConversationIsWithheldFromTheHostView pins the fault that
-// actually broke a live push: it stands open for the whole life of a workspace
-// that came up fresh, and rendered with an unset `kind' oneof Emacs refused the
-// WHOLE WatchHostWorkspace push, losing the host view with it.
-func TestAnAbandonedConversationIsWithheldFromTheHostView(t *testing.T) {
+// TestAnAbandonedConversationReachesTheHostView pins the fault that actually
+// broke a live push: it stands open for the whole life of a workspace that
+// came up fresh, and rendered with an unset `kind' oneof Emacs refused the
+// WHOLE WatchHostWorkspace push, losing the host view with it. It has its own
+// arm as of 2026-09-12, and the id it abandoned is the evidence it carries.
+func TestAnAbandonedConversationReachesTheHostView(t *testing.T) {
 	// Arrange. Act.
 	got, ok := hostFault(wsm.Fault{
-		Kind:   health.KindConversationAbandoned,
-		Detail: "the recorded conversation had no transcript; the session came up fresh",
+		Kind:     health.KindConversationAbandoned,
+		Detail:   "the recorded conversation had no transcript; the session came up fresh",
+		Evidence: map[string]string{"vendor_session_id": "sess-abc"},
 	})
 
 	// Assert.
-	if ok || got != nil {
-		t.Fatalf("hostFault(%q) = (%v, %v), want it withheld from the wire",
+	if !ok || got.GetConversationAbandoned().GetVendorSessionId() != "sess-abc" {
+		t.Fatalf("hostFault(%q) = (%v, %v), want the abandoned vendor id",
 			health.KindConversationAbandoned, got, ok)
+	}
+}
+
+// TestARefusedWatchOpenReachesTheHostViewWithItsHandle pins that the host
+// stream carries the same evidence SessionHealth does: which operation asked,
+// and for what handle.
+func TestARefusedWatchOpenReachesTheHostViewWithItsHandle(t *testing.T) {
+	// Arrange. Act.
+	got, ok := hostFault(wsm.Fault{
+		Kind:     health.KindWatchOpenRefused,
+		Evidence: map[string]string{"operation": "watch_agent", "handle": "sub-1"},
+	})
+
+	// Assert.
+	arm := got.GetWatchOpenRefused()
+	if !ok || arm.GetOperation() != "watch_agent" || arm.GetHandle() != "sub-1" {
+		t.Fatalf("hostFault(%q) = (%v, %v), want the refused operation and handle",
+			health.KindWatchOpenRefused, got, ok)
+	}
+}
+
+// TestAnExpiredAdoptionWindowReachesTheHostViewWithItsWindow pins the arm the
+// ROLLOUT controller's record needs: it opens the expiry against the WORKSPACE,
+// so the host stream is one of the two surfaces that can spell it at all.
+func TestAnExpiredAdoptionWindowReachesTheHostViewWithItsWindow(t *testing.T) {
+	// Arrange. Act.
+	got, ok := hostFault(wsm.Fault{
+		Kind:     health.KindAdoptionWindowExpired,
+		Evidence: map[string]string{"adoption_window": "30s"},
+	})
+
+	// Assert.
+	if !ok || got.GetAdoptionWindowExpired().GetAdoptionWindow() != "30s" {
+		t.Fatalf("hostFault(%q) = (%v, %v), want the recorded window",
+			health.KindAdoptionWindowExpired, got, ok)
 	}
 }
 
