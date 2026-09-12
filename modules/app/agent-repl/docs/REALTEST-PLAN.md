@@ -181,14 +181,14 @@ Scale
 | # | status | ruling |
 |---|---|---|
 | 0 | done (cc93abb9d) | retire the old playtest layer |
-| 1 | DONE — twice-green 2026-09-12, clean harvest | remediated; see judgement ledger rows 1-57 |
-| 2 | authored, not yet run | `TestRealtestRestartWithTheDaemonUp` |
-| 3 | authored, not yet run | `TestRealtestStartWithTheDaemonDown` |
-| 4 | authored, not yet run (`TestRealtestSwitchBetweenWorkspaces`) | needs a bar drawing at least THREE tabs: with two, `s-{` and `s-}` reach the same tab and a reversed direction cannot be told from a correct one |
-| 5 | authored, not yet run | `TestRealtestCreateWorkDeleteAWorkspace`; acts against a dedicated scratch repo under the run directory |
-| 6 | authored, not yet run | `TestRealtestRegisterAndReopen`; same scratch-repo rule |
-| 7 | authored, not yet run | `TestRealtestForkAWorkspace`; same scratch-repo rule. Needs a prompt ANSWERED, which the vendor guard now provides on its own, see below |
-| 8 | authored, not yet run | `TestRealtestPriorityCloseReopenKill`; same scratch-repo rule |
+| 1 | PASSED 2026-09-12 (sweep 152051), clean harvest; needs one more green for twice-green | remediated; see judgement ledger |
+| 2 | PASSED 2026-09-12 (sweeps 133741 and 152051) — TWICE-GREEN | `TestRealtestRestartWithTheDaemonUp` |
+| 3 | PASSED 2026-09-12 (sweeps 133741 and 152051) — TWICE-GREEN | `TestRealtestStartWithTheDaemonDown` |
+| 4 | passed once (sweep 133741); FAILING on the tab bar reordering under a switch (finding SS) | needs a bar drawing at least THREE tabs: with two, `s-{` and `s-}` reach the same tab and a reversed direction cannot be told from a correct one |
+| 5 | RUNS; runs end to end; harvest not yet clean | `TestRealtestCreateWorkDeleteAWorkspace`; acts against a dedicated scratch repo under the run directory |
+| 6 | RUNS; blocked on harness key delivery (finding TT) | `TestRealtestRegisterAndReopen`; same scratch-repo rule |
+| 7 | RUNS; blocked on a phantom shim adoption (finding UU) | `TestRealtestForkAWorkspace`; same scratch-repo rule. Needs a prompt ANSWERED, which the vendor guard now provides on its own, see below |
+| 8 | RUNS; blocked on harness key delivery (finding TT) | `TestRealtestPriorityCloseReopenKill`; same scratch-repo rule |
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
