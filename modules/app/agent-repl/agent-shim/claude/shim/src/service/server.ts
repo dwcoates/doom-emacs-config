@@ -130,6 +130,19 @@ const H2_CANCEL = 8;
  * only place to learn it — but it is recorded as the cancel it is, with the
  * reason named, and only a reset this side cannot account for stays an error.
  *
+ * AND IT IS NOT A WARNING EITHER, which is where that reasoning stopped one
+ * level short. `CANCEL` is the one reset code whose whole meaning is that the
+ * peer decided: RFC 9113 §7 defines it as the endpoint no longer needing the
+ * stream. Every workspace the daemon closes cancels its two standing watches on
+ * the way out, so a warning here is a warning for an ordinary close — and a
+ * warning that fires on every ordinary close tells nobody anything, while
+ * costing a realtest run whose harvest bar admits no WARN at all. The record
+ * stays, at the level a deliberate departure warrants.
+ *
+ * A PEER THAT VANISHED MID-SERVE IS A DIFFERENT THING and is untouched: any
+ * reset code that is neither `NO_ERROR` nor `CANCEL` is still an ERROR, because
+ * this side cannot account for it.
+ *
  * Exported so the classification is testable for the codes no suite can
  * provoke from a real peer.
  */
@@ -140,8 +153,7 @@ export function recordStreamReset(
 ): void {
   if (rstCode === undefined || rstCode === H2_NO_ERROR) return;
   if (rstCode === H2_CANCEL) {
-    // warn: a decision because a peer cancel ends a stream this server was still serving.
-    LOGGER.warn(
+    LOGGER.info(
       {
         stream_id: streamId,
         rst_code: rstCode,
