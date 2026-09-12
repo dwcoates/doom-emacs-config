@@ -452,7 +452,8 @@ func (h *harness) workspace(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
 	}
 	pid := 4242
 	if err := h.db.PutSession(context.Background(), wsm.Session{
-		Workspace: ws.ID, VendorSessionID: "vendor-" + string(ws.ID), ConfigDir: dir,
+		Workspace: ws.ID, HostSessionID: "host-" + string(ws.ID),
+		VendorSessionID: "vendor-" + string(ws.ID), ConfigDir: dir,
 		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: engagedAt,
 		ShimPID: &pid,
 	}); err != nil {
