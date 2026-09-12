@@ -13,6 +13,8 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- elisp/realtest: a quit arriving while a guarded section runs is delivered to the command loop afterwards, so C-g reaches the prompt the user aimed it at; a run clears pending input before it measures (DD, EE)
+- daemon/elisp: registering a directory re-opens the closed row it names, and the roster stops offering repositories whose worktree is gone (AA, BB, GG)
 - daemon: an inert surviving shim is no longer counted as a surviving session, removing all five cold-start harvest records (CC)
 - realtest: a run forgets the workspaces it registered, via the command-file ingress (R)
 - webview: the precreate hold gates a drain pass instead of each item, so losing focus mid-paint no longer strands the queue; 20.9s to under 1.5s (FF)
@@ -34,4 +36,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 - Cold start 1.80-1.95s from spawn to usable, every phase measured.
 - Panels paint 216ms-1.5s after a single focus edge.
-- Full elisp suite 4131 tests, ~35s.
+- Full elisp suite 4152 tests, ~36s.
