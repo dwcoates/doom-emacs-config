@@ -79,9 +79,20 @@ cap kept whole in the active generation); no runtime truncates and loses the
 only copy of earlier records.
 
 Global service records use the runtime's canonical global log only when the
-record genuinely has no conceptual workspace or agent association. Failure to
-mechanically resolve a workspace for a workspace-owned record is a routing
+record genuinely has no conceptual workspace or agent association. A
+workspace-owned record whose call site named NO workspace is a routing
 invariant violation, not permission to write the record globally.
+
+RESOLVING A NAMED WORKSPACE'S SINK IS A TOTAL FUNCTION. A workspace that
+exists always resolves to some durable sink: its own when its directory can
+host one, and otherwise the central sink, with the workspace preserved on the
+record under `unroutable_workspace` so the line still says which workspace it
+is about. A directory that is a scratch or temporary path, has been deleted,
+or does not exist yet is an ORDINARY outcome — recorded once per workspace at
+`debug` (`elisp.core.log-central-fallback`, `daemon.dlog.central_fallback`),
+never as an error beside every record. Nothing that merely renders, sweeps or
+bounds a workspace may fail or repeat itself because that workspace's
+directory is unavailable.
 
 Operators resolve and query these paths through `bin/logs.sh`. It resolves a
 workspace by daemon ID, canonical directory, or daemon display name; selects
