@@ -13,6 +13,10 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- daemon: a teardown this daemon ordered is an ordinary event on every side that sees it — the watcher and the supervisor both read the shim client's stand-down latch, so a kill or a relaunch bounce no longer records two stream ERRORs, a severed link, its health fault and a clean exit as five failures; an unasked end stays exactly as loud
+- daemon/workspace: a resume opens its watch fleet on a context its caller cannot cancel, and a session that displaces a watcher closes it, so a relaunched workspace no longer tears down the fleet it just opened and reads its own cancel back as a severing
+- shim: a peer's h2c CANCEL is recorded at info rather than warn — every workspace close cancels two standing watches, so the warning fired on every ordinary departure; a reset this side cannot account for is still an error
+- store: a refusal's log level is a property of its refusal class, so an OpenAgentSession refused unknown_agent — the ordinary answer for an agent whose first row has not landed, which the shim already serves as an empty page — records at info while every other class keeps its level
 - daemon/workspace+account: a bring-up over a vendor id that never took a turn is the ordinary bounce it is, recorded once at info with no fault, while a conversation that DID take turns and whose transcript vanished stays exactly as loud; the account probe's own empty answer drops to debug, since a layer that cannot tell the two apart must not choose the level
 - daemon/roster: a repository's default branch is no longer read as a family link, so a workspace cut from it draws at the top level and priority can reorder the tab bar (realtest 8)
 - daemon: every fleet adoption is dialed under the one adoption bound and records both its edges, so a revival can no longer hang forever with a prompt held and no turn recorded (realtest 7)
