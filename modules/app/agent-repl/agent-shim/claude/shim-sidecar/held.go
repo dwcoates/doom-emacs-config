@@ -57,15 +57,22 @@ func (s *sidecar) isBacklog(itemMs int64) bool {
 	return s.processStartMs != 0 && itemMs < s.processStartMs
 }
 
-// flushCatchupSummaries states, at the end of a rescan pass, ONE warning per
-// stale class the pass caught up on, naming the count and the oldest item's
-// age. A class with nothing accumulated states nothing. Both tallies are reset,
-// so the summary is a per-pass edge rather than a running total.
+// flushCatchupSummaries states, at the end of a rescan pass, ONE INFORMATIONAL
+// summary per class the pass caught up on, naming the count and the oldest
+// item's age. A class with nothing accumulated states nothing. Every tally is
+// reset, so the summary is a per-pass edge rather than a running total.
+//
+// THE SUMMARIES ARE INFO, NOT WARN: each is an account of PRE-EXISTING backlog a
+// restart re-derived — transcripts without workspace attribution, unclaimed
+// spools ingested as residue, and records the store already holds under a
+// different book — not a fault the owner must act on, so a strict harvest must
+// not trip on them. The newly-arising per-item conditions these summarize away
+// keep their own WARN level.
 func (s *sidecar) flushCatchupSummaries(nowMs int64) {
 	if s.catchupWorkspaces.count > 0 {
 		age := time.Duration(nowMs-s.catchupWorkspaces.oldestMs) * time.Millisecond
 		s.log.With(logging.Context{
-			Operation: "catchup-summary", Level: "warn",
+			Operation: "catchup-summary", Level: "info",
 			Reason: "workspace_unattributed", Repeat: logging.Repeat(s.catchupWorkspaces.count),
 		}).Log("startup catch-up held %d pre-existing transcript(s) without workspace attribution; the oldest was last written %s ago — these predate this sidecar and are summarized here, not stated one by one",
 			s.catchupWorkspaces.count, age)
@@ -74,11 +81,20 @@ func (s *sidecar) flushCatchupSummaries(nowMs int64) {
 	if s.catchupSpools.count > 0 {
 		age := time.Duration(nowMs-s.catchupSpools.oldestMs) * time.Millisecond
 		s.log.With(logging.Context{
-			Operation: "catchup-summary", Level: "warn",
+			Operation: "catchup-summary", Level: "info",
 			Reason: "spool_unclaimed", Repeat: logging.Repeat(s.catchupSpools.count),
 		}).Log("startup catch-up ingested %d pre-existing unclaimed spool(s) as residue; the oldest was last written %s ago — these predate this sidecar and are summarized here, not stated one by one",
 			s.catchupSpools.count, age)
 		s.catchupSpools.reset()
+	}
+	if s.catchupBookConflicts.count > 0 {
+		age := time.Duration(nowMs-s.catchupBookConflicts.oldestMs) * time.Millisecond
+		s.log.With(logging.Context{
+			Operation: "catchup-summary", Level: "info",
+			Reason: "legacy_book_conflict", Repeat: logging.Repeat(s.catchupBookConflicts.count),
+		}).Log("startup catch-up skipped %d pre-existing record(s) the store already holds under a different book; the oldest was last written %s ago — re-ingesting already-stored content is idempotent, so these are kept as-is and summarized here, not stated one by one",
+			s.catchupBookConflicts.count, age)
+		s.catchupBookConflicts.reset()
 	}
 }
 

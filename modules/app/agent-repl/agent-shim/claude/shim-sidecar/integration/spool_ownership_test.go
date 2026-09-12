@@ -189,8 +189,8 @@ func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 
 	// Assert: the backlog is summarized, not stated one spool at a time. The
 	// bytes still landed as residue (awaited above), so nothing was silenced.
-	if rec.Level != "warn" {
-		t.Errorf("the catch-up summary is at level %q, want warn", rec.Level)
+	if rec.Level != "info" {
+		t.Errorf("the catch-up summary is at level %q, want info", rec.Level)
 	}
 	records := readLog(t, opts.LogPath)
 	var summed int

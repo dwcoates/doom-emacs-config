@@ -1551,3 +1551,25 @@ func TestARescanThatWatchedNothingStatesNothing(t *testing.T) {
 		t.Errorf("a rescan that watched nothing wrote %d more record(s), want none", got-before)
 	}
 }
+
+func TestASteadyStateBookConflictSkipWarns(t *testing.T) {
+	// Arrange: production is already live, so a book-conflict skip is NOT catch-up
+	// backlog — nothing should be re-booking a live row.
+	h := newHarness(t, &fakeStore{})
+	nowMs := h.clock.UnixMilli()
+	h.sc.processStartMs = nowMs - 1
+
+	// Act: the store reported a skip for a batch read from a file that grew now.
+	h.sc.noteSkips("/nonexistent/session.jsonl", []storeclient.SkippedEntry{
+		{UpsertKey: "activity:msg_1:0", FromBook: "toolu_A", ToBook: "toolu_B"},
+	}, nowMs)
+
+	// Assert: one WARN per skip, and it is NOT folded into a catch-up summary.
+	rec := h.requireOnce(t, "book-conflict-skip", "warn")
+	if got := ctxString(t, rec, "reason"); got != "legacy_book_conflict" {
+		t.Fatalf("reason = %q, want legacy_book_conflict", got)
+	}
+	if got := len(h.opsAt(t, "catchup-summary", "info")); got != 0 {
+		t.Fatalf("a steady-state skip produced %d catch-up summaries, want none", got)
+	}
+}
