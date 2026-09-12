@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,15 @@ type fakeSupervisor struct {
 	adopts   []string
 	spawnErr error
 	adoptErr error
+	// adoptBlocks makes an adoption wait out the caller's context, which is a
+	// shim whose socket is gone under a lock that reads held: shimclient's own
+	// dial ladder redials that forever.
+	adoptBlocks bool
+	// adoptDeadline / adoptHadDeadline record the context the adoption was
+	// actually dialed under, so a test can assert the bound rather than wait
+	// it out.
+	adoptDeadline    time.Time
+	adoptHadDeadline bool
 }
 
 func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimclient.Client, error) {
@@ -95,7 +105,12 @@ func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimcli
 	return s.client, nil
 }
 
-func (s *fakeSupervisor) Adopt(_ context.Context, _ ids.WorkspaceID, _ string, uds string) (shimclient.Client, error) {
+func (s *fakeSupervisor) Adopt(ctx context.Context, _ ids.WorkspaceID, _ string, uds string) (shimclient.Client, error) {
+	s.adoptDeadline, s.adoptHadDeadline = ctx.Deadline()
+	if s.adoptBlocks {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if s.adoptErr != nil {
 		return nil, s.adoptErr
 	}
@@ -172,6 +187,9 @@ type fleetFixture struct {
 	// decides adopt-versus-spawn beside the lock.
 	socketState shimsocket.State
 	socketErr   error
+	// adoptBound is the fixture's adoption bound, generous by default so no
+	// ordinary scenario can trip it; a scenario about the give-up shortens it.
+	adoptBound time.Duration
 	// standDown is the ORDER the stand-down's steps happened in, shared by the
 	// fake watcher and the fake client, because the ordering is the guarantee.
 	standDown *[]string
@@ -215,6 +233,14 @@ func (s sidebarLinkSink) OnLink(_ ids.WorkspaceID, link sessionwatcher.LinkState
 // bring-up succeeds.
 func newFleetFixture(t *testing.T) *fleetFixture {
 	t.Helper()
+	return newFleetFixtureBoundedAt(t, time.Minute)
+}
+
+// newFleetFixtureBoundedAt is newFleetFixture with the adoption bound stated,
+// for the scenarios that are ABOUT the bound. Every other scenario takes the
+// generous default so none of them can trip it.
+func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixture {
+	t.Helper()
 	order := &[]string{}
 	f := &fleetFixture{
 		standDown:  order,
@@ -227,6 +253,7 @@ func newFleetFixture(t *testing.T) *fleetFixture {
 		watcher:    &fakeWatcher{standDown: order},
 		links:      &recordingLinkSink{},
 		probeState: sessionlock.StateFree,
+		adoptBound: adoptBound,
 
 		socketState: shimsocket.StateAbsent,
 	}
@@ -249,7 +276,8 @@ func newFleetFixture(t *testing.T) *fleetFixture {
 		StartWatcher: func(context.Context, ids.WorkspaceID, shimclient.Client, sessionwatcher.Session, sessionwatcher.Sinks, dlog.Logger) (sessionwatcher.Watcher, error) {
 			return f.watcher, nil
 		},
-		Now: func() time.Time { return fixedNow },
+		Now:        func() time.Time { return fixedNow },
+		AdoptBound: f.adoptBound,
 	})
 	if err != nil {
 		t.Fatalf("NewFleet: %v", err)
@@ -1683,5 +1711,105 @@ func TestStartRevivesAWorkspaceWhoseShimWasReaped(t *testing.T) {
 	}
 	if !f.watcher.closed {
 		t.Fatal("the dead session's watches were left open by the revival")
+	}
+}
+
+// TestStartDialsAnAdoptionUnderTheAdoptionBound pins that the adoption is
+// dialed under a DEADLINE and never under the caller's bare context.
+// shimclient's dial ladder has no attempt limit, and an adopted client
+// concludes death only when the socket is gone AND the workspace lock reads
+// free, so a lock that reads held for a shim whose socket path is gone is
+// redialed forever: the caller's own bound is the only thing that ends it.
+func TestStartDialsAnAdoptionUnderTheAdoptionBound(t *testing.T) {
+	// Arrange: a held lock selects the adopt path.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+
+	// Act: the caller's context carries no deadline of its own.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if !f.supervisor.adoptHadDeadline {
+		t.Fatal("the adoption was dialed under a context with no deadline, want the adoption bound")
+	}
+}
+
+// TestStartBoundsAnAdoptionAtTheStatedBound pins that the deadline the
+// adoption is dialed under is the fleet's stated bound and not something
+// longer.
+func TestStartBoundsAnAdoptionAtTheStatedBound(t *testing.T) {
+	// Arrange.
+	f := newFleetFixtureBoundedAt(t, 30*time.Second)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+
+	// Act.
+	before := time.Now()
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	after := time.Now()
+
+	// Assert: the deadline is the bound measured from an instant inside the
+	// call, so it cannot fall outside [before+bound, after+bound] — an exact
+	// window rather than a tolerance.
+	if f.supervisor.adoptDeadline.Before(before.Add(f.adoptBound)) ||
+		f.supervisor.adoptDeadline.After(after.Add(f.adoptBound)) {
+		t.Fatalf("the adoption's deadline was %v, want the stated bound %v measured from inside the call",
+			f.supervisor.adoptDeadline, f.adoptBound)
+	}
+}
+
+// TestStartNamesAnAdoptionThatSpentItsWholeBound pins the give-up's own
+// sentence. Before the bound, this scenario was a caller that never returned
+// and a workspace log that said nothing after "adopting a running shim".
+func TestStartNamesAnAdoptionThatSpentItsWholeBound(t *testing.T) {
+	// Arrange: a shim whose socket never answers, under a bound short enough
+	// to observe.
+	f := newFleetFixtureBoundedAt(t, time.Millisecond)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+	f.supervisor.adoptBlocks = true
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start = nil error, want the adoption's give-up")
+	}
+	if !strings.Contains(err.Error(), "did not answer within") {
+		t.Fatalf("Start error = %q, want it to name the bound it spent", err)
+	}
+}
+
+// TestStartReportsACancelledAdoptionAsItsOwnCause pins that a caller that went
+// away is NOT reported as an overrun: the two send a reader to different
+// places, and only the caller's context tells them apart.
+func TestStartReportsACancelledAdoptionAsItsOwnCause(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+	f.supervisor.adoptBlocks = true
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	err := f.fleet.Start(ctx, ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start = nil error, want the cancellation")
+	}
+	if strings.Contains(err.Error(), "did not answer within") {
+		t.Fatalf("Start error = %q, want the cancellation rather than an overrun", err)
 	}
 }

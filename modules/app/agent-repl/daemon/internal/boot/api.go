@@ -50,14 +50,11 @@ import (
 // 128/128 — its lock read HELD for a shim whose socket path was gone, and
 // `shimclient.bringUp` redials THAT forever by design.
 //
-// Sized as a small multiple of a healthy adoption, which is a local AF_UNIX
-// connect plus the shim's first pushed diagnostics frame — healthy or not,
-// because an unhealthy arm is an ANSWER and adopts (internal/shimclient's
-// awaitDiagnostics); milliseconds, and
-// `shimsocket.DialTimeout` already bounds the connect at 2s. 10s is ~5x that
-// one bounded connect, so a shim that is merely busy is still adopted and one
-// that is unreachable costs the boot ten seconds instead of the whole run.
-const DefaultAdoptBound = 10 * time.Second
+// THE NUMBER HAS ONE AUTHOR, in the package whose operation it bounds: the
+// fleet's own adoptions are bounded by the same one, and a boot and a revival
+// that gave up at different instants would be two answers to one question.
+// The sizing lives with the constant.
+const DefaultAdoptBound = shimclient.DefaultAdoptBound
 
 // Report is what one boot reconciled. It is returned rather than only logged
 // so the daemon can answer for its own startup.
