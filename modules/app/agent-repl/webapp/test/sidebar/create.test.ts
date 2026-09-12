@@ -407,6 +407,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   briefMissing: { name: "ship-the-rail" },
   baseRefUnresolved: { ref: "origin/nope" },
   worktreeCreationFailed: { detail: "index.lock exists" },
+  spawnFailed: { detail: "the shim would not come up" },
 };
 
 describe("CreateWorkspace's typed refusal", () => {
@@ -434,6 +435,15 @@ describe("CreateWorkspace's typed refusal", () => {
         value: { detail: "index.lock exists" },
       } as never),
     ).toContain("index.lock exists");
+  });
+
+  it("carries the spawn's own detail when the created session would not start", () => {
+    expect(
+      createWorkspaceRefusal({
+        case: "spawnFailed",
+        value: { detail: "the shim would not come up" },
+      } as never),
+    ).toContain("the shim would not come up");
   });
 
   it("refuses an arm this build does not know", () => {
