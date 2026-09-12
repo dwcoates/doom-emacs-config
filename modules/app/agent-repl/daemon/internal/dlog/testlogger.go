@@ -172,6 +172,20 @@ func (s *TestSurfaces) Workspace(dir string) (Logger, error) {
 	}), nil
 }
 
+// WorkspaceOrCentral implements Surfaces with the production semantics: the
+// workspace's logger when it resolves, and otherwise the global logger with
+// the workspace named on every record.
+func (s *TestSurfaces) WorkspaceOrCentral(dir string) Logger {
+	log, err := s.Workspace(dir)
+	if err == nil {
+		return log
+	}
+	return s.logger.With(Context{
+		KeyWorkspaceDir:        dir,
+		KeyUnroutableWorkspace: dir,
+	})
+}
+
 // BindWorkspaceIDs implements Surfaces.
 func (s *TestSurfaces) BindWorkspaceIDs(lookup WorkspaceIDLookup) {
 	s.mu.Lock()

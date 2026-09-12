@@ -42,6 +42,16 @@ func (f *fakeSurfaces) Workspace(dir string) (dlog.Logger, error) {
 	return f.log, nil
 }
 
+// WorkspaceOrCentral implements dlog.Surfaces: the workspace's logger when it
+// resolves, and the global one when it does not.
+func (f *fakeSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
+	log, err := f.Workspace(dir)
+	if err != nil {
+		return f.Global()
+	}
+	return log
+}
+
 // ShimSink implements dlog.Surfaces.
 func (f *fakeSurfaces) ShimSink(dir string) (dlog.Borrowed, error) { return nil, nil }
 
