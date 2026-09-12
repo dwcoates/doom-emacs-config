@@ -112,6 +112,8 @@
 (declare-function agent-repl-rpc-daemon-health "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "rpc" (conn request &rest keys))
 
+(defvar agent-repl-roster-bringup-functions)
+
 (declare-function agent-repl-link-connect "daemon-link" ())
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-up-p "daemon-link" ())
@@ -569,18 +571,54 @@ Emacs started is `ready', one it attached to is `adopted'."
    (if (agent-repl-daemon--spawned-here-p) 'ready 'adopted)))
 
 (defvar agent-repl-daemon--workspace-echo-done nil
-  "Painted-workspace count the last bring-up echo reported, or nil.
+  "`(DONE . TOTAL)\=' the last bring-up echo reported, or nil for none yet.
 
-THE DEDUPE IS THE POINT.  `agent-repl-open-progress-change-functions'
-fires on every phase step of every pending open -- several times per
-workspace -- and echoing each one would turn the minibuffer into a
-scrolling log.  An echo is issued only when this number MOVES, so the
-user reads one line per workspace that finishes painting and nothing in
-between.")
+THE DEDUPE IS THE POINT.  Both feeds into this line repeat themselves:
+`agent-repl-open-progress-change-functions\=' fires on every phase step of
+every pending open -- several times per workspace -- and a reconcile can
+re-report a count a previous pass already said.  An echo is issued only
+when the PAIR moves, so the user reads one line per workspace and nothing
+in between.")
 
 (defun agent-repl-daemon--reset-workspace-echo ()
   "Forget the last bring-up echo so the next cold start starts from zero."
   (setq agent-repl-daemon--workspace-echo-done nil))
+
+(defun agent-repl-daemon--echo-workspace-progress (done total)
+  "Echo \"loading workspaces (DONE/TOTAL)\" unless that pair was just said.
+Returns the pair when it echoed, nil when the dedupe or an empty TOTAL
+suppressed it."
+  (unless (or (null total) (zerop total)
+              (equal (cons done total) agent-repl-daemon--workspace-echo-done))
+    (setq agent-repl-daemon--workspace-echo-done (cons done total))
+    (agent-repl--phase-echo
+     '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+     "loading workspaces (%d/%d)\u2026" done total)
+    agent-repl-daemon--workspace-echo-done))
+
+(defun agent-repl-daemon--echo-workspaces-ready (ready)
+  "Echo the bring-up\='s closing line naming READY workspaces, once.
+Silent unless a progress line was actually issued first: a session with
+no bring-up behind it has nothing to announce the end of."
+  (when agent-repl-daemon--workspace-echo-done
+    (agent-repl-daemon--reset-workspace-echo)
+    (agent-repl--phase-echo
+     '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+     "%d workspaces ready" ready)
+    ready))
+
+(defun agent-repl-daemon-on-roster-bringup (opened total finished)
+  "Echo the startup\='s workspace bring-up as the roster opens tabs.
+
+Registered on `agent-repl-roster-bringup-functions\='.  THIS IS THE PATH A
+HIDDEN STARTUP TAKES: panels park until focus, so a cold start paints
+nothing and the painted-count feed below never moves -- the roster
+opening the tabs is the only thing that does.  OPENED of TOTAL is the
+progress line; FINISHED closes the pass with the same ready line the
+painted feed ends on."
+  (if finished
+      (agent-repl-daemon--echo-workspaces-ready opened)
+    (agent-repl-daemon--echo-workspace-progress opened total)))
 
 (defun agent-repl-daemon-on-open-progress-change ()
   "Repaint the segment and echo the workspace bring-up count when it moves.
@@ -603,17 +641,8 @@ inside a workspace still opening -- echoes nothing."
            (done (- total (length opening))))
       (cond
        ((zerop total) nil)
-       (opening
-        (unless (equal done agent-repl-daemon--workspace-echo-done)
-          (setq agent-repl-daemon--workspace-echo-done done)
-          (agent-repl--phase-echo
-           '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
-           "loading workspaces (%d/%d)\u2026" done total)))
-       (agent-repl-daemon--workspace-echo-done
-        (agent-repl-daemon--reset-workspace-echo)
-        (agent-repl--phase-echo
-         '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
-         "%d workspaces ready" total))))))
+       (opening (agent-repl-daemon--echo-workspace-progress done total))
+       (t (agent-repl-daemon--echo-workspaces-ready total))))))
 
 (defun agent-repl-daemon--refresh-segment ()
   "Recompute `agent-repl-daemon-mode-line-segment' from the bring-up state.
@@ -1677,6 +1706,8 @@ the ensure."
 (add-hook 'agent-repl-link-up-functions #'agent-repl-daemon-on-link-up)
 (add-hook 'agent-repl-open-progress-change-functions
           #'agent-repl-daemon-on-open-progress-change)
+(add-hook 'agent-repl-roster-bringup-functions
+          #'agent-repl-daemon-on-roster-bringup)
 (agent-repl-daemon-install-segment)
 
 (provide 'daemon)

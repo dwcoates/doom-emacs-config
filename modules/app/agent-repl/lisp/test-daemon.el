@@ -2163,6 +2163,75 @@ the shutdown schedule exists to avoid."
       ;; Assert
       (should (null signalled)))))
 
+;;;; ---- The roster's own bring-up echo (a startup paints nothing) ----
+
+(ert-deftest agent-repl-test-daemon-a-hidden-startup-still-echoes-loading-workspaces ()
+  "Panels park until focus, so a cold start paints nothing at all.
+The painted-count feed cannot move on such a startup, and the phase the
+user was promised went missing entirely; the roster opening the tabs is
+what reports it."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 1 3 nil)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: loading workspaces (1/3)…"))))))
+
+(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-counts-up ()
+  "One line per tab the reconcile opens, naming how far along it is."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 1 2 nil)
+      (agent-repl-daemon-on-roster-bringup 2 2 nil)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: loading workspaces (1/2)…"
+                       "agent-repl: loading workspaces (2/2)…"))))))
+
+(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-dedupes ()
+  "A pair already said is not said twice, whichever feed repeats it."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon-on-roster-bringup 1 2 nil)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 1 2 nil)
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-ends-with-the-ready-line ()
+  "The pass closes with the same closing line the painted feed ends on."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon-on-roster-bringup 2 2 nil)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 2 2 t)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: 2 workspaces ready"))))))
+
+(ert-deftest agent-repl-test-daemon-a-roster-pass-that-opened-nothing-says-nothing ()
+  "A steady-state push opens no tab, so it announces no bring-up."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 0 0 t)
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-is-quiet-while-typing ()
+  "The minibuffer guard covers this feed exactly as it covers the other."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
+        ;; Act
+        (agent-repl-daemon-on-roster-bringup 1 2 nil))
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
 (provide 'test-daemon)
 
 ;;; test-daemon.el ends here
