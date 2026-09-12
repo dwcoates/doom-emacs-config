@@ -3,6 +3,7 @@ package health
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -215,6 +216,42 @@ func sessionFault(f wsm.Fault) (*agentreplv1.SessionFault, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+// StartFailedDetail composes the ONE line a bring-up failure explains itself
+// with, out of the very evidence the `shim_start_failed` fault carries — the
+// exit code and the stderr tail a spawn death records, or the refusal text an
+// adoption records instead. The footer draws it, the fault carries it, and
+// they read it from this one site, so a start failure cannot say two different
+// things about itself on two surfaces.
+//
+// The stderr tail is a RING of the shim's last output and the strip has one
+// line to draw, so its last non-empty line is what stands for it. Where there
+// is no evidence at all, the fault's own detail is the line.
+func StartFailedDetail(f wsm.Fault) string {
+	tail := lastLine(f.Evidence["stderr_tail"])
+	code, coded := f.Evidence["exit_code"]
+	switch {
+	case coded && tail != "":
+		return fmt.Sprintf("exit %s: %s", code, tail)
+	case coded:
+		return fmt.Sprintf("exit %s", code)
+	case tail != "":
+		return tail
+	default:
+		return f.Detail
+	}
+}
+
+// lastLine is the last non-empty line of a multi-line tail, trimmed.
+func lastLine(text string) string {
+	lines := strings.Split(text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // EvidenceExitCode is exitCode, exported for the HOST stream's HostFault,

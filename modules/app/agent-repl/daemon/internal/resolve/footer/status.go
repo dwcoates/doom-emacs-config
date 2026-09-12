@@ -127,7 +127,7 @@ func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterS
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
 		return nil
 	}
-	arm.Activity = r.disconnectedActivity(s)
+	arm.Activity = r.disconnectedActivity(s, log)
 	return &frontendv1.FooterStatus{
 		Status: &frontendv1.FooterStatus_Disconnected{Disconnected: arm}}
 }
