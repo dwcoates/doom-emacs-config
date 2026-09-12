@@ -35,31 +35,19 @@ import (
 // Everything is prefixed `rt78` so it cannot collide with a parallel author's
 // name, and nothing here writes anything anywhere.
 
-// ---- Reading wsm.db, read-only --------------------------------------------
+// ---- Reading wsm.db, through a snapshot ------------------------------------
 
-// rt78Query runs one read-only query against the state database.
+// rt78Query runs one query against the state database.
 //
-// `-readonly` for the reason state.go gives: this is the owner's live database
-// with the daemon holding it open in WAL mode, and a reader that opened it
-// read-write would create or touch `-wal` and `-shm` beside it. The field
-// separator is the substrate's unit separator, for the reason state.go gives
-// too: a prompt's own text may legitimately contain a pipe.
+// It is state.go's `queryStateDB` and nothing else: the snapshot rule — a
+// realtest reads a copy of the owner's database, never the live file — has to
+// be one piece of code or it drifts, and this file having its own `sqlite3
+// -readonly` invocation is exactly how it drifted the first time. The field
+// separator is `queryStateDB`'s, which is the substrate's unit separator by
+// the same value, for the reason state.go gives: a prompt's own text may
+// legitimately contain a pipe.
 func rt78Query(ctx context.Context, dbPath, query string) ([][]string, error) {
-	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(callCtx, "sqlite3", "-readonly", "-separator", wsActFieldSep, dbPath, query)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("query %s: %w; sqlite3 said: %s", dbPath, err, strings.TrimSpace(string(out)))
-	}
-	var rows [][]string
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		rows = append(rows, strings.Split(line, wsActFieldSep))
-	}
-	return rows, nil
+	return queryStateDB(ctx, dbPath, query)
 }
 
 // rt78Quote renders one SQL string literal.
