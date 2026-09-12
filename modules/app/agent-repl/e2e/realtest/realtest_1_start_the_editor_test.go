@@ -750,7 +750,7 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	if err != nil {
 		t.Fatalf("read the Emacs pid for the key driver: %v", err)
 	}
-	driver := &KeyDriver{Pid: pid, Scratch: runDir}
+	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client}
 	if err := driver.Build(ctx); err != nil {
 		// SURFACED, NOT WORKED AROUND. The plan rules that if key delivery to
 		// Emacs is impossible, the owner decides the alternative; there is no
