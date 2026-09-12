@@ -528,9 +528,16 @@ func TestAFaultCarriesItsOpeningInstant(t *testing.T) {
 	}
 }
 
-// TestAFaultKindWithNoTypedArmKeepsItsDetail pins that an unreportable fault
-// is still a fault, exactly as the health reporter treats one.
-func TestAFaultKindWithNoTypedArmKeepsItsDetail(t *testing.T) {
+// TestAFaultKindWithNoTypedArmIsWithheldFromTheView pins that a fault the
+// oneof spells no arm for does not reach the view at all.
+//
+// This test previously pinned the opposite -- the fault carried on the wire
+// with its detail and the `kind' oneof left unset. That is a CONTRACT BREACH
+// Emacs refuses, and it refuses the WHOLE push with it, so the one untyped
+// fault cost the editor every host view of the workspace. The invariant
+// supersedes the old pin: a fault the wire cannot carry is withheld, and it
+// stays recorded, loudly, at the site that opened it.
+func TestAFaultKindWithNoTypedArmIsWithheldFromTheView(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
@@ -541,8 +548,29 @@ func TestAFaultKindWithNoTypedArmKeepsItsDetail(t *testing.T) {
 	faults := composeHost(t, h).GetExisting().GetLive().GetFaults()
 
 	// Assert.
-	if len(faults) != 1 || faults[0].GetKind() != nil || faults[0].GetDetail() != "no live session" {
-		t.Fatalf("faults = %v, want one untyped fault keeping its detail", faults)
+	if len(faults) != 0 {
+		t.Fatalf("faults = %v, want the armless fault withheld", faults)
+	}
+}
+
+// TestAnArmlessFaultDoesNotWithholdTheArmedOnesBesideIt pins that withholding
+// is per fault: the one the wire can carry still reaches the view.
+func TestAnArmlessFaultDoesNotWithholdTheArmedOnesBesideIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
+	h.Facts.facts[testWorkspaceID] = liveFacts()
+	h.Health.faults = []wsm.Fault{
+		{Kind: health.KindConversationAbandoned, Detail: "no transcript"},
+		{Kind: health.KindShimDied, Detail: "exited"},
+	}
+
+	// Act.
+	faults := composeHost(t, h).GetExisting().GetLive().GetFaults()
+
+	// Assert.
+	if len(faults) != 1 || faults[0].GetShimDied() == nil {
+		t.Fatalf("faults = %v, want only the shim-died fault", faults)
 	}
 }
 
@@ -696,15 +724,17 @@ func TestPublishHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled(t *testing.
 	}{
 		{name: "cancelled", resolve: context.Canceled, wantQuiet: true},
 		{name: "deadline exceeded", resolve: context.DeadlineExceeded, wantQuiet: true},
-		{name: "a genuine sink failure", resolve: errors.New("the sink is gone"), wantQuiet: false},
+		{name: "a genuine workspace-read failure", resolve: errors.New("the state is gone"), wantQuiet: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
+			// Arrange: the WORKSPACE READ is what can refuse now -- resolving a
+			// named workspace's SINK is total.
 			log := &recordingLogger{}
 			h := newHarness(t, func(d *Deps) {
-				d.Log = &fakeSurfaces{global: log, workspaceErr: tc.resolve}
+				d.Log = &fakeSurfaces{global: log}
 			})
+			h.DB.workspaceErr = tc.resolve
 
 			// Act.
 			h.Server.(*server).PublishHostWorkspace(context.Background(), testWorkspaceID)
@@ -902,5 +932,107 @@ func TestComposingAHostIdentityClearsTheTransientWindow(t *testing.T) {
 	}
 	if awaitingIdentityDebug(log) == nil {
 		t.Fatalf("a withholding after a clear did not narrate a fresh transient: %v", log.records)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HostFault: the arm is the fault class.
+// ---------------------------------------------------------------------------
+
+// TestHostFaultFillsEveryTypedArm pins that every kind the oneof spells an arm
+// for is rendered through it, so no classifiable fault reaches the wire unset.
+func TestHostFaultFillsEveryTypedArm(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+	}{
+		{name: "shim start failed", kind: health.KindShimStartFailed},
+		{name: "shim died", kind: health.KindShimDied},
+		{name: "link severed", kind: health.KindLinkSevered},
+		{name: "resume failed", kind: health.KindResumeFailed},
+		{name: "the legacy relaunch spelling", kind: health.KindRelaunchResumeFailed},
+		{name: "bounce died", kind: health.KindBounceDied},
+		{name: "bounce unknown", kind: health.KindBounceUnknown},
+		{name: "classifier failed", kind: health.KindClassifierFailed},
+		{name: "shim reported", kind: health.KindShimReported},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange in the table. Act.
+			got, ok := hostFault(wsm.Fault{Kind: tt.kind})
+			// Assert.
+			if !ok {
+				t.Fatalf("hostFault(%q) withheld a kind that has an arm", tt.kind)
+			}
+			if got.GetKind() == nil {
+				t.Fatalf("hostFault(%q) left the kind oneof unset", tt.kind)
+			}
+		})
+	}
+}
+
+// TestAnAbandonedConversationIsWithheldFromTheHostView pins the fault that
+// actually broke a live push: it stands open for the whole life of a workspace
+// that came up fresh, and rendered with an unset `kind' oneof Emacs refused the
+// WHOLE WatchHostWorkspace push, losing the host view with it.
+func TestAnAbandonedConversationIsWithheldFromTheHostView(t *testing.T) {
+	// Arrange. Act.
+	got, ok := hostFault(wsm.Fault{
+		Kind:   health.KindConversationAbandoned,
+		Detail: "the recorded conversation had no transcript; the session came up fresh",
+	})
+
+	// Assert.
+	if ok || got != nil {
+		t.Fatalf("hostFault(%q) = (%v, %v), want it withheld from the wire",
+			health.KindConversationAbandoned, got, ok)
+	}
+}
+
+// TestAnUnknownFaultKindIsWithheldFromTheHostView pins that a kind nobody
+// declared is withheld too: the renderer never puts an unset oneof on the wire.
+func TestAnUnknownFaultKindIsWithheldFromTheHostView(t *testing.T) {
+	// Arrange. Act.
+	got, ok := hostFault(wsm.Fault{Kind: "something_nobody_landed", Detail: "the evidence"})
+
+	// Assert.
+	if ok || got != nil {
+		t.Fatalf("hostFault(unknown) = (%v, %v), want it withheld from the wire", got, ok)
+	}
+}
+
+// TestPublishHostWorkspaceSurvivesAWorkspaceThatOwnsNoLogSink pins that
+// RESOLVING A NAMED WORKSPACE'S SINK IS A TOTAL FUNCTION on the serving path
+// too: a directory that cannot host a durable sink no longer WITHHOLDS the
+// workspace's host view, and it records no error beside it.
+func TestPublishHostWorkspaceSurvivesAWorkspaceThatOwnsNoLogSink(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(d *Deps) {
+		d.Log = &fakeSurfaces{global: log, workspaceErr: errors.New("the workspace owns no sink")}
+	})
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
+	h.Facts.facts[testWorkspaceID] = liveFacts()
+	surface := h.Server.(*server)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	view := surface.hostStateTopic(testWorkspaceID).Subscribe(ctx)
+
+	// Act.
+	surface.PublishHostWorkspace(context.Background(), testWorkspaceID)
+
+	// Assert.
+	select {
+	case got := <-view:
+		if got.GetExisting() == nil {
+			t.Fatalf("published %v, want the existing arm", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no host view was published; an unroutable sink must not withhold one")
+	}
+	if errs := log.at("ERROR"); len(errs) != 0 {
+		t.Fatalf("recorded %v at ERROR, want none: an unroutable sink is an ordinary outcome", errs)
 	}
 }

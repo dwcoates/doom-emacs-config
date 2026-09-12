@@ -229,9 +229,14 @@ func TestSessionAbsentSessionIsAnUnhealthyAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
-	faults := got.GetSuccess().GetUnhealthy().GetFaults()
-	if len(faults) != 1 || !strings.HasPrefix(faults[0].GetDetail(), KindSessionAbsent) {
-		t.Fatalf("Session() faults = %v, want the session-absent fault", faults)
+	// The session-absent kind has no `SessionFault.kind' arm, so it is withheld
+	// from the wire rather than sent with an unset oneof; the VERDICT still
+	// comes from the records, so the answer is unhealthy all the same.
+	if got.GetSuccess().GetUnhealthy() == nil {
+		t.Fatalf("Session() = %v, want the unhealthy arm", got.GetSuccess().GetHealth())
+	}
+	if faults := got.GetSuccess().GetUnhealthy().GetFaults(); len(faults) != 0 {
+		t.Fatalf("Session() faults = %v, want the armless fault withheld", faults)
 	}
 }
 
@@ -269,9 +274,37 @@ func TestSessionReportsTheWorkspaceScopedFaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
+	// `store_unreachable' names no arm, so the fault is withheld; the session is
+	// still unhealthy because the fault STANDS.
+	if got.GetSuccess().GetUnhealthy() == nil {
+		t.Fatalf("Session() = %v, want the unhealthy arm", got.GetSuccess().GetHealth())
+	}
+	if faults := got.GetSuccess().GetUnhealthy().GetFaults(); len(faults) != 0 {
+		t.Fatalf("Session() faults = %v, want the armless fault withheld", faults)
+	}
+}
+
+// TestSessionReportsAnArmedWorkspaceScopedFault is the same read for a fault
+// the wire CAN carry: it reaches the answer, rendered.
+func TestSessionReportsAnArmedWorkspaceScopedFault(t *testing.T) {
+	// Arrange.
+	ws := ids.WorkspaceID("w1")
+	db := &stubDB{
+		workspaces: map[ids.WorkspaceID]wsm.Workspace{ws: {ID: ws, Dir: "/w1"}},
+		faults:     []wsm.Fault{{Kind: KindShimDied, Detail: "exited", Workspace: &ws}},
+	}
+	r := newReporter(t, db, alwaysLive, newStubSurfaces())
+
+	// Act.
+	got, err := r.Session(context.Background(), ws)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
 	faults := got.GetSuccess().GetUnhealthy().GetFaults()
-	if len(faults) != 1 || faults[0].GetDetail() != "store_unreachable: dial refused" {
-		t.Fatalf("Session() faults = %v, want the rendered workspace fault", faults)
+	if len(faults) != 1 || faults[0].GetShimDied() == nil {
+		t.Fatalf("Session() faults = %v, want the rendered shim-died fault", faults)
 	}
 }
 
@@ -291,20 +324,44 @@ func TestSessionScopesTheFaultQueryToTheWorkspace(t *testing.T) {
 	}
 }
 
-func TestSessionUnresolvableWorkspaceSinkIsSurfaced(t *testing.T) {
-	// Arrange: failing to resolve a KNOWN workspace's sink is an invariant
-	// violation, never a global write.
+// TestSessionAnswersEvenWhenTheWorkspaceOwnsNoSink pins that RESOLVING A NAMED
+// WORKSPACE'S SINK IS A TOTAL FUNCTION here too.
+//
+// This test previously pinned the opposite -- the whole SessionHealth rpc
+// failing when the sink would not open. Answering a workspace's HEALTH must not
+// fail over WHERE the answer is narrated: a directory that cannot host a
+// durable sink routes to the central sink carrying `unroutable_workspace'.
+func TestSessionAnswersEvenWhenTheWorkspaceOwnsNoSink(t *testing.T) {
+	// Arrange.
 	db := &stubDB{workspaces: map[ids.WorkspaceID]wsm.Workspace{"w1": {ID: "w1", Dir: "/w1"}}}
 	log := newStubSurfaces()
 	log.workspaceErr = errors.New("symlink target missing")
 	r := newReporter(t, db, alwaysLive, log)
 
 	// Act.
-	_, err := r.Session(context.Background(), "w1")
+	got, err := r.Session(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Session() = %v, want an answer despite the unresolvable sink", err)
+	}
+	if got.GetSuccess() == nil {
+		t.Fatalf("Session() = %v, want a success answer", got)
+	}
+}
+
+// TestSessionStillRefusesAnUnknownWorkspace pins the error that REMAINS: a
+// workspace the state store will not name has nothing to report health about.
+func TestSessionStillRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	r := newReporter(t, &stubDB{}, alwaysLive, newStubSurfaces())
+
+	// Act.
+	_, err := r.Session(context.Background(), "nobody")
 
 	// Assert.
 	if err == nil {
-		t.Fatal("Session() = nil error, want the unresolvable-sink failure surfaced")
+		t.Fatal("Session(unknown workspace) = nil error, want the refusal surfaced")
 	}
 }
 

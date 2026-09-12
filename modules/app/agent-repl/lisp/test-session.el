@@ -49,6 +49,21 @@
       ;; Assert
       (should (equal posted 1)))))
 
+(ert-deftest agent-repl-test-session-notify-names-the-workspace-in-its-focus-check ()
+  "The focus check is made ON THIS WORKSPACE'S behalf, so it names it.
+Passing nil left the check's own record unattributed, and the routing rung
+recorded `elisp.core.log-routing-error' at ERROR beside every finished
+turn."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (let ((asked nil))
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p)
+                 (lambda (&optional ws) (push ws asked) t)))
+        ;; Act.
+        (agent-repl--maybe-notify-finished "ws1")
+        ;; Assert.
+        (should (equal asked (list "ws1")))))))
+
 (ert-deftest agent-repl-test-session-notify-is-silent-when-emacs-is-focused ()
   "A banner is useless when the user is already looking at Emacs."
   ;; Arrange
