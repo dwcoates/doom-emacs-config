@@ -622,3 +622,6 @@ clears (selection, and the last open ask settling).
   with no new daemon; completion now requires observing a different instance.
 
 Claude-Session: https://claude.ai/code/session_01MydqUQAkLfSwBAz9wL5scJ
+
+## 2026-09-11 WriteBatchSuccess.skipped (store/v1/endpoint_write_batch.proto)
+Additive: repeated WriteBatchSkippedEntry skipped = 1 (+ new message WriteBatchSkippedEntry). Carries the entries the store skipped as a legacy book-conflict (re-ingest idempotency) across the store→sidecar process boundary. Backward compatible; shim ignores it. Landed 2026-09-11 for realtest 1. Agent proposed it mid-fix; lead accepted as an additive plain-data field.
