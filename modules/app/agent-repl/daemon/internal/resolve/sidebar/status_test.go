@@ -68,16 +68,21 @@ func TestRowIsInitWhileTheRouteIsBeingEstablished(t *testing.T) {
 	}
 }
 
-func TestRowIsInitWhileTheSessionHasNotAnnouncedItself(t *testing.T) {
+func TestRowIsReadyOnceTheLinkConnectsEvenBeforeSessionStarted(t *testing.T) {
 	// Arrange.
 	r := arrange(t)
 
-	// Act: the route serves but no SessionStarted has arrived.
+	// Act: the route is connected but no SessionStarted has arrived yet.
 	r.OnLink(theWS, shimclient.LinkConnected)
 
-	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "init" {
-		t.Fatalf("status = %q, want init", got)
+	// Assert: a CONNECTED route is proven and is not a link fault, so the row
+	// is not `init` (a BLUE, link-fault color) — it falls through to the
+	// session lifecycle, which for an idle session is `ready`. `init` on a
+	// connected route was the stuck-blue a resumed, idle session showed: a
+	// reconnect replays the link but never the one-shot SessionStarted, so the
+	// old `!s.started` guard held the row blue forever.
+	if got := statusName(onlyRow(t, r)); got != "ready" {
+		t.Fatalf("status = %q, want ready: a connected route is proven, not a link fault", got)
 	}
 }
 
