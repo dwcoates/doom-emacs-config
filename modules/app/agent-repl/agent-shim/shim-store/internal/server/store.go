@@ -31,6 +31,7 @@ type (
 	LineWritten    = db.LineWritten
 	BashRowWritten = db.BashRowWritten
 	WriteResult    = db.WriteResult
+	SkippedEntry   = db.SkippedEntry
 	OpenedPage     = db.OpenedPage
 	BashRunReplay  = db.BashRunReplay
 )

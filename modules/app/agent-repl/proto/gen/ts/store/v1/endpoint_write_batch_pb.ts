@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_write_batch.proto.
  */
 export const file_store_v1_endpoint_write_batch: GenFile = /*@__PURE__*/
-  fileDesc("CiNzdG9yZS92MS9lbmRwb2ludF93cml0ZV9iYXRjaC5wcm90bxIIc3RvcmUudjEiSgoRV3JpdGVCYXRjaFJlcXVlc3QSEAoIcHJvZHVjZXIYASABKAkSIwoFYmF0Y2gYAiABKAsyFC5zdG9yZS52MS5FbnRyeUJhdGNoIn4KEldyaXRlQmF0Y2hSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaEZhaWx1cmVIAEIICgZyZXN1bHQiEwoRV3JpdGVCYXRjaFN1Y2Nlc3MiqQEKEVdyaXRlQmF0Y2hGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI9Cg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyIi5zdG9yZS52MS5Xcml0ZUJhdGNoSW52YWxpZFJlcXVlc3RIABI9Cg9zdG9yYWdlX2ZhaWx1cmUYAyABKAsyIi5zdG9yZS52MS5Xcml0ZUJhdGNoU3RvcmFnZUZhaWx1cmVIAEIGCgRraW5kIikKGFdyaXRlQmF0Y2hJbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIaChhXcml0ZUJhdGNoU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_store_v1_store]);
+  fileDesc("CiNzdG9yZS92MS9lbmRwb2ludF93cml0ZV9iYXRjaC5wcm90bxIIc3RvcmUudjEiSgoRV3JpdGVCYXRjaFJlcXVlc3QSEAoIcHJvZHVjZXIYASABKAkSIwoFYmF0Y2gYAiABKAsyFC5zdG9yZS52MS5FbnRyeUJhdGNoIn4KEldyaXRlQmF0Y2hSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaEZhaWx1cmVIAEIICgZyZXN1bHQiRgoRV3JpdGVCYXRjaFN1Y2Nlc3MSMQoHc2tpcHBlZBgBIAMoCzIgLnN0b3JlLnYxLldyaXRlQmF0Y2hTa2lwcGVkRW50cnkiUAoWV3JpdGVCYXRjaFNraXBwZWRFbnRyeRISCgp1cHNlcnRfa2V5GAEgASgJEhEKCWZyb21fYm9vaxgCIAEoCRIPCgd0b19ib29rGAMgASgJIqkBChFXcml0ZUJhdGNoRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPQoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMiIuc3RvcmUudjEuV3JpdGVCYXRjaEludmFsaWRSZXF1ZXN0SAASPQoPc3RvcmFnZV9mYWlsdXJlGAMgASgLMiIuc3RvcmUudjEuV3JpdGVCYXRjaFN0b3JhZ2VGYWlsdXJlSABCBgoEa2luZCIpChhXcml0ZUJhdGNoSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiGgoYV3JpdGVCYXRjaFN0b3JhZ2VGYWlsdXJlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_store_v1_store]);
 
 /**
  * One producer's write. The rpc is the envelope: no separate carrier message
@@ -87,6 +87,21 @@ export const WriteBatchResponseSchema: GenMessage<WriteBatchResponse> = /*@__PUR
  * @generated from message store.v1.WriteBatchSuccess
  */
 export type WriteBatchSuccess = Message<"store.v1.WriteBatchSuccess"> & {
+  /**
+   * Entries the store left UNCHANGED because their upsert_key already names a
+   * row under a DIFFERENT book. RE-INGESTING ALREADY-STORED CONTENT IS
+   * IDEMPOTENT: a corrected converter re-reading the corpus writes the same
+   * cross-plane activity key under its now-right book, which disagrees with the
+   * legacy row an earlier ingest wrote — so the stored row is KEPT and this
+   * entry is skipped per entry, while the batch's genuinely-new entries still
+   * commit in the same transaction. A skip is NEVER a batch-fatal refusal, and
+   * it is reported here rather than swallowed so the producer can fold it into
+   * its own startup catch-up summary; a skip in steady state is unexpected and
+   * the producer warns. Empty on the ordinary path.
+   *
+   * @generated from field: repeated store.v1.WriteBatchSkippedEntry skipped = 1;
+   */
+  skipped: WriteBatchSkippedEntry[];
 };
 
 /**
@@ -95,6 +110,43 @@ export type WriteBatchSuccess = Message<"store.v1.WriteBatchSuccess"> & {
  */
 export const WriteBatchSuccessSchema: GenMessage<WriteBatchSuccess> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_write_batch, 2);
+
+/**
+ * One entry the store skipped as a legacy book-conflict (WriteBatchSuccess.
+ * skipped). It carries what the producer needs to attribute the skip without
+ * re-deriving it: the identity that already existed and the two books.
+ *
+ * @generated from message store.v1.WriteBatchSkippedEntry
+ */
+export type WriteBatchSkippedEntry = Message<"store.v1.WriteBatchSkippedEntry"> & {
+  /**
+   * The upsert_key whose stored row was kept, unchanged.
+   *
+   * @generated from field: string upsert_key = 1;
+   */
+  upsertKey: string;
+
+  /**
+   * The book the stored row KEEPS. "(none)" for a never-served row.
+   *
+   * @generated from field: string from_book = 2;
+   */
+  fromBook: string;
+
+  /**
+   * The book this skipped entry would have moved the row to.
+   *
+   * @generated from field: string to_book = 3;
+   */
+  toBook: string;
+};
+
+/**
+ * Describes the message store.v1.WriteBatchSkippedEntry.
+ * Use `create(WriteBatchSkippedEntrySchema)` to create a new message.
+ */
+export const WriteBatchSkippedEntrySchema: GenMessage<WriteBatchSkippedEntry> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_write_batch, 3);
 
 /**
  * Nothing was committed: the transaction failed whole, so the producer
@@ -144,7 +196,7 @@ export type WriteBatchFailure = Message<"store.v1.WriteBatchFailure"> & {
  * Use `create(WriteBatchFailureSchema)` to create a new message.
  */
 export const WriteBatchFailureSchema: GenMessage<WriteBatchFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 3);
+  messageDesc(file_store_v1_endpoint_write_batch, 4);
 
 /**
  * The request was malformed or violated the validation invariant.
@@ -166,7 +218,7 @@ export type WriteBatchInvalidRequest = Message<"store.v1.WriteBatchInvalidReques
  * Use `create(WriteBatchInvalidRequestSchema)` to create a new message.
  */
 export const WriteBatchInvalidRequestSchema: GenMessage<WriteBatchInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 4);
+  messageDesc(file_store_v1_endpoint_write_batch, 5);
 
 /**
  * The database failed; `detail` carries the driver's text.
@@ -181,5 +233,5 @@ export type WriteBatchStorageFailure = Message<"store.v1.WriteBatchStorageFailur
  * Use `create(WriteBatchStorageFailureSchema)` to create a new message.
  */
 export const WriteBatchStorageFailureSchema: GenMessage<WriteBatchStorageFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 5);
+  messageDesc(file_store_v1_endpoint_write_batch, 6);
 

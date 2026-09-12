@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -195,8 +196,8 @@ func TestStartupCatchUpSummarizesABacklogOfUnclaimedSpools(t *testing.T) {
 	h.advance(UnownedSpoolWindow)
 	h.sc.rescan()
 
-	// Assert: one summary at warn naming the count, not three per-spool warnings.
-	rec := h.requireOnce(t, "catchup-summary", "warn")
+	// Assert: one summary at info naming the count, not three per-spool warnings.
+	rec := h.requireOnce(t, "catchup-summary", "info")
 	if got := ctxString(t, rec, "reason"); got != "spool_unclaimed" {
 		t.Fatalf("summary reason = %q, want spool_unclaimed", got)
 	}
@@ -286,8 +287,8 @@ func TestStartupCatchUpSummarizesUnattributableTranscripts(t *testing.T) {
 		t.Fatalf("beginCycle: %v", err)
 	}
 
-	// Assert: one summary at warn, not one warning per transcript.
-	rec := h.requireOnce(t, "catchup-summary", "warn")
+	// Assert: one summary at info, not one warning per transcript.
+	rec := h.requireOnce(t, "catchup-summary", "info")
 	if got := ctxString(t, rec, "reason"); got != "workspace_unattributed" {
 		t.Fatalf("summary reason = %q, want workspace_unattributed", got)
 	}
@@ -315,5 +316,32 @@ func TestAnUnattributableTranscriptAfterCatchUpWarnsPerItem(t *testing.T) {
 	h.requireOnce(t, "resolve-transcript-workspace", "warn")
 	if got := len(h.opsAt(t, "catchup-summary", "")); got != 0 {
 		t.Fatalf("a steady-state transcript produced %d catch-up summaries, want none", got)
+	}
+}
+
+func TestStartupCatchUpSummarizesABacklogOfLegacyBookConflicts(t *testing.T) {
+	// Arrange: production began AFTER these records were written, so a corrected
+	// re-ingest of them is startup catch-up rather than steady state.
+	h := newHarness(t, &fakeStore{})
+	nowMs := h.clock.UnixMilli()
+	h.sc.processStartMs = nowMs + int64(time.Hour/time.Millisecond)
+
+	// Act: the store skipped two legacy book-conflicts, folded across the pass.
+	h.sc.noteSkips("/nonexistent/session.jsonl", []storeclient.SkippedEntry{
+		{UpsertKey: "activity:msg_1:0", FromBook: "toolu_A", ToBook: "toolu_B"},
+		{UpsertKey: "activity:msg_2:0", FromBook: "toolu_A", ToBook: "toolu_B"},
+	}, nowMs)
+	h.sc.flushCatchupSummaries(nowMs)
+
+	// Assert: one INFO summary naming the count, not two per-entry warnings.
+	rec := h.requireOnce(t, "catchup-summary", "info")
+	if got := ctxString(t, rec, "reason"); got != "legacy_book_conflict" {
+		t.Fatalf("summary reason = %q, want legacy_book_conflict", got)
+	}
+	if got := ctxInt(t, rec, "repeat_count"); got != 2 {
+		t.Fatalf("summary repeat_count = %d, want 2", got)
+	}
+	if got := len(h.opsAt(t, "book-conflict-skip", "warn")); got != 0 {
+		t.Fatalf("catch-up stated %d per-entry skip warnings, want none", got)
 	}
 }

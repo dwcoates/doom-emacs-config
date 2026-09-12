@@ -143,7 +143,7 @@ func TestWriteBatchSuccessIsDurable(t *testing.T) {
 	client := serve(t, store)
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{{WriteId: "w1", UpsertKey: "activity:a1"}},
 		CursorAdvance: cursor("1:2", "/tmp/session.jsonl", 128),
 	})
@@ -166,7 +166,7 @@ func TestWriteBatchCarriesCursorAdvance(t *testing.T) {
 	want := cursor("1:2", "/tmp/session.jsonl", 512)
 
 	// Act.
-	if err := client.WriteBatch(ctx(), &storev1.EntryBatch{CursorAdvance: want}); err != nil {
+	if _, err := client.WriteBatch(ctx(), &storev1.EntryBatch{CursorAdvance: want}); err != nil {
 		t.Fatalf("WriteBatch returned %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestWriteBatchFailureArmIsRefusal(t *testing.T) {
 	}})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	var refusal *RefusalError
@@ -202,7 +202,7 @@ func TestWriteBatchUnsetResultIsAnError(t *testing.T) {
 	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{}})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	if err == nil {
@@ -215,7 +215,7 @@ func TestWriteBatchConnectErrorIsNotARefusal(t *testing.T) {
 	client := serve(t, &fakeStore{writeErr: connect.NewError(connect.CodeInternal, errors.New("boom"))})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	if err == nil {
@@ -231,7 +231,7 @@ func TestWriteBatchRejectsNilBatch(t *testing.T) {
 	client := serve(t, &fakeStore{})
 
 	// Act.
-	err := client.WriteBatch(ctx(), nil)
+	_, err := client.WriteBatch(ctx(), nil)
 
 	// Assert.
 	if err == nil {
@@ -244,7 +244,7 @@ func TestWriteBatchUnreachableStoreFails(t *testing.T) {
 	client := clientTo(t, filepath.Join(os.TempDir(), "ar-absent.sock"))
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	if err == nil {
@@ -267,7 +267,7 @@ func TestAStorageFailureRefusalCarriesItsKind(t *testing.T) {
 	}})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	var refusal *RefusalError
@@ -295,7 +295,7 @@ func TestAnInvalidRequestRefusalNamesTheOffendingField(t *testing.T) {
 	}})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	field, invalid := InvalidRequest(err)
@@ -321,7 +321,7 @@ func TestAStorageFailureIsNotAnInvalidRequest(t *testing.T) {
 	}})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	if _, invalid := InvalidRequest(err); invalid {
@@ -342,7 +342,7 @@ func TestAKindLessFailureIsTreatedAsAStorageFailure(t *testing.T) {
 	}})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	var refusal *RefusalError
@@ -364,10 +364,60 @@ func TestAKindLessFailureIsNeverAnInvalidRequest(t *testing.T) {
 	}})
 
 	// Act.
-	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
 	// Assert.
 	if _, invalid := InvalidRequest(err); invalid {
 		t.Fatalf("a kind-less failure was read as an invalid request: %v", err)
+	}
+}
+
+func TestWriteBatchReturnsTheSkippedLegacyBookConflicts(t *testing.T) {
+	// Arrange: the batch was durable but the store kept one row it would have
+	// re-booked, naming the skip on the success arm.
+	store := &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{
+			Skipped: []*storev1.WriteBatchSkippedEntry{
+				{UpsertKey: "activity:msg_1:0", FromBook: "toolu_A", ToBook: "toolu_B"},
+			},
+		}},
+	}}
+	client := serve(t, store)
+
+	// Act.
+	skipped, err := client.WriteBatch(ctx(), &storev1.EntryBatch{
+		Entries: []*storev1.StoreEntry{{WriteId: "w1", UpsertKey: "activity:msg_1:0"}},
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch returned %v, want success", err)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped = %d, want 1", len(skipped))
+	}
+	if got := skipped[0]; got.UpsertKey != "activity:msg_1:0" || got.FromBook != "toolu_A" || got.ToBook != "toolu_B" {
+		t.Fatalf("skipped[0] = %+v, want {activity:msg_1:0 toolu_A toolu_B}", got)
+	}
+}
+
+func TestWriteBatchReturnsNoSkipsOnTheOrdinaryPath(t *testing.T) {
+	// Arrange: a plain durable batch with an empty skipped list.
+	store := &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
+	}}
+	client := serve(t, store)
+
+	// Act.
+	skipped, err := client.WriteBatch(ctx(), &storev1.EntryBatch{
+		Entries: []*storev1.StoreEntry{{WriteId: "w1", UpsertKey: "activity:a1"}},
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch returned %v, want success", err)
+	}
+	if skipped != nil {
+		t.Fatalf("skipped = %v, want nil on the ordinary path", skipped)
 	}
 }

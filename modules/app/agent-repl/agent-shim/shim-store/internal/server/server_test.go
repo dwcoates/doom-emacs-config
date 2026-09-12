@@ -401,6 +401,37 @@ func TestWriteBatchSuccessArmOnACommittedBatch(t *testing.T) {
 	}
 }
 
+func TestWriteBatchSuccessArmCarriesLegacyBookConflictSkips(t *testing.T) {
+	// Arrange. The batch committed its new entry and skipped one legacy
+	// book-conflict; the skip rides the SUCCESS arm, never a failure.
+	store := newFakeStore()
+	store.writeResult = WriteResult{Written: 1, Skipped: []SkippedEntry{
+		{UpsertKey: "u1", FromBook: "agent-1", ToBook: "agent-2"},
+	}}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "shim-claude-sidecar",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+	if len(success.GetSkipped()) != 1 {
+		t.Fatalf("skipped = %d, want 1", len(success.GetSkipped()))
+	}
+	if got := success.GetSkipped()[0]; got.GetUpsertKey() != "u1" || got.GetFromBook() != "agent-1" || got.GetToBook() != "agent-2" {
+		t.Fatalf("skipped[0] = {%s %s %s}, want {u1 agent-1 agent-2}", got.GetUpsertKey(), got.GetFromBook(), got.GetToBook())
+	}
+}
+
 func TestWriteBatchAnswersAnAbsorbedReplayWithTheSameSuccessArm(t *testing.T) {
 	// Arrange. Every write_id landed before; nothing new was written.
 	store := newFakeStore()
