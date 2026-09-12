@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/wsm"
 )
 
@@ -79,9 +80,9 @@ func TestRepublishRegistryCarriesEveryDurableHalf(t *testing.T) {
 	}
 }
 
-func TestRecordSurfacesAnUnresolvableWorkspaceSink(t *testing.T) {
-	// Arrange: failing to resolve a KNOWN workspace's sink is an invariant
-	// violation, never a reason to write globally.
+func TestRecordRunsTheVerbWhenTheWorkspaceSinkCannotBeResolved(t *testing.T) {
+	// Arrange: a registered workspace whose directory cannot host a sink —
+	// a scratch path, or a worktree that has been deleted.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.log.workspaceErr = errors.New("the symlink target is gone")
@@ -89,13 +90,30 @@ func TestRecordSurfacesAnUnresolvableWorkspaceSink(t *testing.T) {
 	// Act.
 	err := f.verbs.Select(context.Background(), "w1")
 
-	// Assert.
-	if err == nil {
-		t.Fatal("Select() = nil error, want the unresolvable sink surfaced")
+	// Assert: resolving a sink is total, so the verb answers on its own terms.
+	if err != nil {
+		t.Fatalf("Select() = %v, want the verb to run against the central sink", err)
 	}
-	if _, ok := AsRefusal(err); ok {
-		t.Fatalf("Select() = %v, want a failure rather than a refusal", err)
+}
+
+func TestRecordNamesTheWorkspaceOnCentrallyRoutedRecords(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+	f.log.workspaceErr = errors.New("the symlink target is gone")
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select: %v", err)
 	}
+
+	// Assert: the record still says which workspace it is about.
+	for _, rec := range f.log.logger.Records() {
+		if rec.Context[dlog.KeyUnroutableWorkspace] == ws.Dir {
+			return
+		}
+	}
+	t.Fatalf("no record named the unroutable workspace %q", ws.Dir)
 }
 
 func TestPromptSubmissionCarriesTheCreationOrigin(t *testing.T) {

@@ -927,6 +927,16 @@ func (s *fakeSurfaces) Workspace(dir string) (dlog.Logger, error) {
 	return s.logger.With(dlog.Context{"dir": dir}), nil
 }
 
+// WorkspaceOrCentral implements dlog.Surfaces: the workspace's logger when it
+// resolves, and the global one when it does not.
+func (s *fakeSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
+	log, err := s.Workspace(dir)
+	if err != nil {
+		return s.Global().With(dlog.Context{dlog.KeyUnroutableWorkspace: dir})
+	}
+	return log
+}
+
 func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error) {
 	if s.shimSinkErr != nil {
 		return nil, s.shimSinkErr

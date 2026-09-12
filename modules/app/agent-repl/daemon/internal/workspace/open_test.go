@@ -3,6 +3,9 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -136,6 +139,72 @@ func TestOpenRefusesAnUnknownWorkspace(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmUnknownWorkspace)
+}
+
+// TestOpenRefusesAWorkspaceWhoseDirectoryIsGone pins the decision that a
+// re-open of a workspace whose worktree no longer exists is a NAMED refusal
+// rather than an internal error: boot already closes such a row, and there is
+// nothing to open.
+func TestOpenRefusesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1")
+
+	// Assert.
+	asRefusal(t, err, ArmSpawnFailed)
+}
+
+func TestOpenNamesTheMissingDirectoryInItsRefusal(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1")
+
+	// Assert: the refusal's evidence says WHICH directory is gone.
+	refusal := asRefusal(t, err, ArmSpawnFailed)
+	if !strings.Contains(refusal.Reason, ws.Dir) {
+		t.Fatalf("refusal reason = %q, want it to name %q", refusal.Reason, ws.Dir)
+	}
+}
+
+func TestOpenStartsNoSessionWhenTheDirectoryIsGone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
+
+	// Act.
+	_ = f.verbs.Open(context.Background(), "w1")
+
+	// Assert: a shim with no working tree is never spawned.
+	if len(f.fleet.started) != 0 {
+		t.Fatalf("sessions started = %d, want none for a missing directory", len(f.fleet.started))
+	}
+}
+
+// TestOpenProceedsWhenTheDirectoryStatCannotTell pins boot's own discipline: a
+// stat that does not say "not exist" is never read as gone.
+func TestOpenProceedsWhenTheDirectoryStatCannotTell(t *testing.T) {
+	// Arrange: a path whose PARENT is a regular file, so the stat fails with
+	// ENOTDIR rather than ENOENT.
+	f := newFixture(t)
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f.workspace("w1", filepath.Join(blocker, "under"))
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open() = %v, want the open to proceed on an undecidable stat", err)
+	}
 }
 
 func TestCloseBlockerReportsATurnInFlight(t *testing.T) {

@@ -52,9 +52,12 @@ type verbs struct {
 	now    func() time.Time
 }
 
-// load resolves one workspace's durable record and its own logger. Failing to
-// resolve a KNOWN workspace's sink is an invariant violation, never a reason to
-// write globally, so it is surfaced.
+// load resolves one workspace's durable record and its own logger. A REGISTERED
+// WORKSPACE ALWAYS RESOLVES TO A SINK: when its directory cannot host one — a
+// scratch path, a worktree that has been deleted — the records go centrally
+// with the workspace named on them, and the verb still runs. Failing the verb
+// on its own logging turned every per-workspace rpc on such a workspace into an
+// internal error in place of the verb's own answer.
 func (v *verbs) record(ctx context.Context, rpc string, ws ids.WorkspaceID) (wsm.Workspace, dlog.Logger, error) {
 	global := v.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
 	record, err := v.deps.DB.Workspace(ctx, ws)
@@ -62,13 +65,7 @@ func (v *verbs) record(ctx context.Context, rpc string, ws ids.WorkspaceID) (wsm
 		return wsm.Workspace{}, nil, refuse(global, rpc, ArmUnknownWorkspace,
 			fmt.Sprintf("no workspace %q is registered", ws), true)
 	}
-	log, err := v.deps.Log.Workspace(record.Dir)
-	if err != nil {
-		global.Error(rpc, "could not resolve the workspace log sink", dlog.Context{
-			"dir": record.Dir, "cause": err.Error(),
-		})
-		return wsm.Workspace{}, nil, fmt.Errorf("workspace %q: resolve log sink %q: %w", ws, record.Dir, err)
-	}
+	log := v.deps.Log.WorkspaceOrCentral(record.Dir)
 	return record, log.With(dlog.Context{"workspace": string(ws)}), nil
 }
 
