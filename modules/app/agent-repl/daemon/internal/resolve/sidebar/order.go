@@ -57,11 +57,21 @@ func priorityBadge(p *wsm.Priority) *frontendv1.RosterRowPriorityBadge {
 // Emacs tab bar included — follows strictly and never re-sorts:
 //
 //  1. PRIORITY, strongest first: P0.5, P1, P2, P3, then unprioritized.
-//  2. LAST SELECTED, most recent first. A workspace never selected sorts after
-//     every one that has been: "not yet visited" is not "visited long ago".
-//  3. NAME, ascending, so the order is stable for workspaces alike in both.
-//  4. The workspace id, so two workspaces alike in all three still draw in one
+//  2. NAME, ascending, so the order is stable for workspaces alike in priority.
+//  3. The workspace id, so two workspaces alike in both still draw in one
 //     fixed order rather than swapping between pushes.
+//
+// THE ORDER IS A PROPERTY OF THE WORKSPACES, NEVER OF THE SELECTION. Roster
+// order once broke a priority tie on LAST SELECTED, and that made the drawn
+// order move under the user: selecting a workspace stamps its
+// last_selected_at, the registry re-pushes, and the row the user had just
+// landed on hopped to the front of its priority band. Cycling right and then
+// left therefore did not return the user where they started — realtest 4 went
+// explanation-engine → DWC/chess960-review-failures-enm → rt4-bootstrap-1.
+// Every individual switch was correct for the order it saw; the order was
+// what moved. Selection changes what is UNDERLINED and nothing about what is
+// where, so no field stamped at selection time may order the bar. The
+// selection instant still draws, in the row's when column.
 //
 // It sorts a copy: the slice belongs to the registry's caller.
 func sortWorkspaces(in []wsm.Workspace) []wsm.Workspace {
@@ -78,19 +88,16 @@ func lessWorkspace(a, b wsm.Workspace) bool {
 	if ap != bp {
 		return ap < bp
 	}
-	if sel := compareLastSelected(a.LastSelectedAt, b.LastSelectedAt); sel != 0 {
-		return sel < 0
-	}
 	if a.Name != b.Name {
 		return a.Name < b.Name
 	}
 	return a.ID < b.ID
 }
 
-// compareLastSelected orders two selection instants MOST RECENT FIRST, with
-// "never selected" sorting last. It answers a three-way comparison so the
-// caller can fall through to the next key on a tie.
-func compareLastSelected(a, b *time.Time) int {
+// compareRecentFirst orders two instants MOST RECENT FIRST, with "never"
+// sorting last. It answers a three-way comparison so the caller can fall
+// through to the next key on a tie.
+func compareRecentFirst(a, b *time.Time) int {
 	switch {
 	case a == nil && b == nil:
 		return 0
@@ -116,7 +123,7 @@ func sortMerged(in []wsm.Workspace) []wsm.Workspace {
 	copy(out, in)
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i].MergedAt, out[j].MergedAt
-		if c := compareLastSelected(a, b); c != 0 {
+		if c := compareRecentFirst(a, b); c != 0 {
 			return c < 0
 		}
 		return out[i].ID < out[j].ID
