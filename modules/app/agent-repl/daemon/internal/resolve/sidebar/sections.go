@@ -135,10 +135,21 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 // is scoped to the section, so the SAME workspace can be a root in the task
 // view (its parent is on another task) and a child in the repo view.
 func (r *resolver) sectionRows(in []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRows {
-	rc.tree = nest(in, log)
+	rc.tree = nest(in, r.defaultBranches(), log)
 	out := &frontendv1.RosterRows{}
 	for _, ws := range rc.tree.roots {
 		out.Rows = append(out.Rows, r.row(ws, rc, log))
+	}
+	return out
+}
+
+// defaultBranches names every registered repository's default branch. The
+// branch lineage reads it to refuse a family derived from the default branch,
+// which every ordinary workspace in a repository is cut from.
+func (r *resolver) defaultBranches() map[ids.RepoID]string {
+	out := make(map[ids.RepoID]string, len(r.state.reg.Repositories))
+	for _, repo := range r.state.reg.Repositories {
+		out[repo.ID] = repo.DefaultBranch
 	}
 	return out
 }
