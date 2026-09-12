@@ -649,11 +649,24 @@ runs after it has reconciled a push into tabs, so the ARRIVAL of the tab
 is what lands the user.  Fires exactly once: the pending ref is cleared
 before the landing runs."
   (when-let* ((ref agent-repl-verbs--pending-landing)
-              (id (plist-get ref :id))
-              (ws (agent-repl--ws-by-ref-id id)))
-    (setq agent-repl-verbs--pending-landing nil)
-    (agent-repl--info ws "elisp.verbs.pending-landing-arrived ws=%s id=%s" ws id)
-    (agent-repl-verbs--land-on ref "tab-arrived" ws)))
+              (id (plist-get ref :id)))
+    (let ((ws (agent-repl--ws-by-ref-id id)))
+      (if ws
+          (progn
+            (setq agent-repl-verbs--pending-landing nil)
+            (agent-repl--info ws "elisp.verbs.pending-landing-arrived ws=%s id=%s" ws id)
+            (agent-repl-verbs--land-on ref "tab-arrived" ws))
+        ;; A LANDING THAT IS STILL WAITING SAYS SO.  Nothing here polls or
+        ;; times out -- a tab that never arrives simply leaves the landing
+        ;; pending -- and for as long as that lasted the log went silent
+        ;; between `pending-landing-registered\=' and nothing at all: a
+        ;; register whose row came back CLOSED drew no tab, and three minutes
+        ;; of waiting left no record saying what was being waited for.  Once
+        ;; per push, which is why it is DEBUG.
+        (agent-repl--log '(:agent-repl-central
+                           "a landing whose tab has not arrived owns no workspace sink")
+                         "elisp.verbs.pending-landing-waiting id=%s dir=%s"
+                         id (plist-get ref :dir))))))
 
 ;; `agent-repl-roster-update-functions' is roster.el's, and roster.el loads
 ;; AFTER this file (config.el); `add-hook' binds the symbol itself, and a
