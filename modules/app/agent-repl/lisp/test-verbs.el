@@ -68,6 +68,12 @@ to STAND on what it made therefore has to let that tab arrive."
   "Return a decoded `RepositoryRef' plist."
   (list :id (or id "repo-id-1") :dir (or dir "/tmp/agent-repl-test/repo")))
 
+(defun agent-repl-test-verbs--repo-section ()
+  "Return the fixture roster's single repository section.
+The DYNAMIC creation modes derive their repository from the section the
+current workspace's row sits in, so a create test hands them this."
+  (car (agent-repl-verbs--repo-sections (agent-repl-test-verbs--roster nil))))
+
 (defun agent-repl-test-verbs--row (&rest overrides)
   "Return a decoded `RosterRow' with OVERRIDES applied at the top level."
   (let ((row (list :workspace (list :workspace (agent-repl-test-verbs--ref))
@@ -649,13 +655,16 @@ daemon starts sending it, with no table to update here."
       (should-not (plist-get request :priority))
       (should-not (plist-get request :allow-ungated)))))
 
-(ert-deftest agent-repl-verbs-create-command-blank-name-is-absence ()
-  "A blank name is ABSENCE -- the daemon mints one -- never an empty string."
+(ert-deftest agent-repl-verbs-create-command-sends-no-name-and-no-base-ref ()
+  "A DYNAMIC create asks for neither a name nor a base ref, and sends neither.
+The daemon mints the name, and an absent base ref IS the repo's main
+branch -- so a `read-string' here would be a question the ruling removed."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
-              ((symbol-function 'read-string) (lambda (&rest _) "")))
+              ((symbol-function 'read-string)
+               (lambda (&rest _) (error "a dynamic create asks nothing but its prompt"))))
       (agent-repl-create-workspace nil)
       (let ((standard (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
                                  :value)))
@@ -665,8 +674,8 @@ daemon starts sending it, with no table to update here."
 (ert-deftest agent-repl-verbs-create-command-prefix-arg-sets-the-parent ()
   "A prefix argument makes the new workspace a CHILD of the current one."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       (agent-repl-create-workspace t)
@@ -676,13 +685,177 @@ daemon starts sending it, with no table to update here."
 (ert-deftest agent-repl-verbs-fork-command-sets-fork-inside-the-parent ()
   "A fork lives INSIDE the parent: a fork without a parent is unrepresentable."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it")))
       (agent-repl-fork-workspace)
       (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :create) :parent)
                              :fork)
                   t)))))
+
+;;;; ---- Create: the four modes and the questions each one asks ----
+
+(ert-deftest agent-repl-verbs-create-command-asks-no-repository ()
+  "A DYNAMIC create never asks for a repository (owner ruling, 2026-09-12)."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) (error "a dynamic create must not ask for a repository"))))
+        ;; Act.
+        (agent-repl-create-workspace nil)
+        ;; Assert.
+        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                       (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-create-command-uses-the-current-workspaces-section ()
+  "The derived repository is the section the CURRENT workspace's row sits in."
+  ;; Arrange: two sections, the current workspace's row in the second.
+  (let* ((other (list :key (list :repository (agent-repl-test-verbs--repo-ref
+                                              "other-id" "/tmp/other"))
+                      :header (list :label (list :text "other-repo"))
+                      :rows (list :rows nil)))
+         (mine (list :key (list :repository (agent-repl-test-verbs--repo-ref))
+                     :header (list :label (list :text "repo-one"))
+                     :rows (list :rows (list (agent-repl-test-verbs--row)))))
+         (agent-repl-roster-view
+          (agent-repl-test-verbs--roster nil nil (list other mine))))
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing")))
+        ;; Act.
+        (agent-repl-create-workspace nil)
+        ;; Assert.
+        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                       (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-create-command-without-a-current-workspace-refuses ()
+  "With no current workspace a dynamic create has nothing to derive from."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+        ;; Act / Assert.
+        (should-error (agent-repl-create-workspace nil) :type 'user-error)
+        (should-not agent-repl-test-verbs--sent)))))
+
+(ert-deftest agent-repl-verbs-fork-command-asks-no-repository ()
+  "A fork is a DYNAMIC mode too: prompt only, repository derived."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it"))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) (error "a fork must not ask for a repository"))))
+        ;; Act.
+        (agent-repl-fork-workspace)
+        ;; Assert.
+        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                       (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-oneshot-self-merge-asks-no-repository ()
+  "The self-merge one-shot derives its repository instead of asking."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission"))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
+        ;; Act.
+        (agent-repl-create-oneshot-self-merge nil)
+        ;; Assert.
+        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                       (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-oneshot-open-pr-asks-no-repository ()
+  "The queued-PR one-shot derives its repository instead of asking."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission"))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
+        ;; Act.
+        (agent-repl-create-oneshot-open-pr nil)
+        ;; Assert.
+        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                       (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-oneshot-open-pr-reviewed-asks-no-repository ()
+  "The review-demanding one-shot derives its repository instead of asking."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission"))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
+        ;; Act.
+        (agent-repl-create-oneshot-open-pr-reviewed nil)
+        ;; Assert.
+        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                       (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-static-create-sends-its-name ()
+  "The STATIC create asks a repository and a REQUIRED name, and sends both."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
+      ;; Act.
+      (agent-repl-create-workspace-static nil)
+      ;; Assert.
+      (let ((request (agent-repl-test-verbs--request :create)))
+        (should (equal (plist-get request :repository) (agent-repl-test-verbs--repo-ref)))
+        (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
+                       "named-one"))))))
+
+(ert-deftest agent-repl-verbs-static-create-sends-no-initial-prompt ()
+  "The STATIC create sends NO prompt: the workspace comes up idle."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'agent-repl-verbs--read-prompt)
+               (lambda (_p) (error "a static create asks for no prompt")))
+              ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
+      ;; Act.
+      (agent-repl-create-workspace-static nil)
+      ;; Assert.
+      (should-not (plist-get (plist-get (plist-get (agent-repl-test-verbs--request :create)
+                                                   :form)
+                                        :value)
+                             :initial-prompt)))))
+
+(ert-deftest agent-repl-verbs-static-create-refuses-a-blank-name ()
+  "The static create's name is REQUIRED: a blank one is refused before send."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'read-string) (lambda (&rest _) "   ")))
+      ;; Act / Assert.
+      (should-error (agent-repl-create-workspace-static nil) :type 'user-error)
+      (should-not agent-repl-test-verbs--sent))))
+
+(ert-deftest agent-repl-verbs-static-create-prefix-arg-sets-the-parent ()
+  "The static create takes the same CHILD prefix the dynamic one does."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
+      ;; Act.
+      (agent-repl-create-workspace-static t)
+      ;; Assert.
+      (should (equal (plist-get (agent-repl-test-verbs--request :create) :parent)
+                     (list :workspace (agent-repl-test-verbs--ref)))))))
 
 ;;;; ---- Create: standing on what was just created ----
 
@@ -693,8 +866,8 @@ the create selects it the same way registering a directory does."
   ;; Arrange.
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created
                                 (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       ;; Act.
@@ -709,8 +882,8 @@ the create selects it the same way registering a directory does."
   ;; Arrange.
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created
                                 (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it")))
       ;; Act.
       (agent-repl-fork-workspace)
@@ -727,8 +900,8 @@ opened over the new workspace\'s panel shows up here as a magit call."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created
                                 (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
     (let (magit-dirs)
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-                 (lambda () (agent-repl-test-verbs--repo-ref)))
+      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                 ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
                 ((symbol-function 'read-string) (lambda (&rest _) ""))
                 ((symbol-function 'agent-repl--ws-name-for-dir)
@@ -753,8 +926,8 @@ opened over the new workspace\'s panel shows up here as a magit call."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created
                                 (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
     (let (magit-dirs)
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-                 (lambda () (agent-repl-test-verbs--repo-ref)))
+      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                 ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it"))
                 ((symbol-function 'agent-repl--ws-name-for-dir)
                  (lambda (dir) (and (equal dir "/tmp/agent-repl-test/fork") "fork-ws")))
@@ -824,8 +997,8 @@ a contract breach and the user is owed the reason nothing came up."
 (ert-deftest agent-repl-verbs-oneshot-self-merge-sets-that-finish-arm ()
   "The self-merge one-shot finishes through the ordinary merge engine."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission")))
       (agent-repl-create-oneshot-self-merge nil)
       (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
@@ -835,8 +1008,8 @@ a contract breach and the user is owed the reason nothing came up."
 (ert-deftest agent-repl-verbs-oneshot-open-pr-sets-both-flags-true ()
   "The queued one-shot PR is self-certified and added to the merge queue."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission")))
       (agent-repl-create-oneshot-open-pr nil)
       (let* ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
@@ -849,8 +1022,8 @@ a contract breach and the user is owed the reason nothing came up."
 (ert-deftest agent-repl-verbs-oneshot-open-pr-reviewed-states-both-flags-false ()
   "The review-demanding PR states both flags FALSE rather than omitting them."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission")))
       (agent-repl-create-oneshot-open-pr-reviewed nil)
       (let ((finish (plist-get (plist-get (plist-get (agent-repl-test-verbs--request :create)
@@ -863,8 +1036,8 @@ a contract breach and the user is owed the reason nothing came up."
 (ert-deftest agent-repl-verbs-oneshot-carries-its-prompt ()
   "A one-shot IS its prompt, so the prompt travels as a UserSaid text block."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission")))
       (agent-repl-create-oneshot-self-merge nil)
       (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
@@ -878,8 +1051,8 @@ a contract breach and the user is owed the reason nothing came up."
 (ert-deftest agent-repl-verbs-oneshot-refuses-a-blank-commission ()
   "A one-shot with no prompt is refused before a request is built."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "   ")))
       (should-error (agent-repl-create-oneshot-self-merge nil) :type 'user-error)
       (should-not agent-repl-test-verbs--sent))))
@@ -887,8 +1060,8 @@ a contract breach and the user is owed the reason nothing came up."
 (ert-deftest agent-repl-verbs-oneshot-prefix-arg-picks-a-model ()
   "A prefix argument threads the chosen model onto the shared facts."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission"))
               ((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
       (agent-repl-create-oneshot-self-merge t)
