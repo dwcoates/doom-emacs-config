@@ -403,9 +403,12 @@ func TestClassifySourceTable(t *testing.T) {
 
 func TestClassifySourceOpensTheAbandonedConversationFaultOnce(t *testing.T) {
 	// Arrange: the same recorded conversation classified twice must leave ONE
-	// record of what was abandoned, naming the old vendor session id.
+	// record of what was abandoned, naming the old vendor session id. The
+	// workspace has TAKEN A TURN, which is what makes the vanished transcript
+	// a real abandonment rather than a bounce before the first turn.
 	f := newFleetFixture(t)
 	f.accounts.transcriptErr = errors.New("no such file")
+	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
 	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
 
 	// Act.
@@ -427,6 +430,136 @@ func TestClassifySourceOpensTheAbandonedConversationFaultOnce(t *testing.T) {
 	}
 	if got := opened[0].Evidence["vendor_session_id"]; got != "vendor-old" {
 		t.Fatalf("fault evidence vendor_session_id = %q, want the abandoned id", got)
+	}
+}
+
+// abandonedFaults is the conversation-abandoned rows the fake state client
+// holds, which is the record a user gets that history was left behind.
+func abandonedFaults(db *fakeDB) []wsm.Fault {
+	var opened []wsm.Fault
+	for _, fault := range db.dbFaults {
+		if fault.Kind == health.KindConversationAbandoned {
+			opened = append(opened, fault)
+		}
+	}
+	return opened
+}
+
+// recordedAt reports whether the captured log holds a record at this level for
+// this operation carrying this message.
+func recordedAt(f *fleetFixture, level, operation, message string) bool {
+	for _, r := range f.log.logger.Records() {
+		if r.Level == level && r.Operation == operation && r.Message == message {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	abandonedMessage   = "the recorded conversation has no transcript on disk; the session comes up FRESH"
+	neverEngagedNotice = "the recorded conversation never took a turn and wrote no transcript; the session comes up FRESH"
+)
+
+func TestClassifySourceIsQuietWhenTheConversationNeverTookATurn(t *testing.T) {
+	// Arrange: a vendor id minted at spawn and bounced before its first turn.
+	// No turn was ever recorded, so no transcript was ever written and nothing
+	// is lost by coming up fresh.
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-never-turned"}
+
+	// Act.
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+	if !got.Fresh {
+		t.Fatalf("classifySource() = %+v, want a fresh source", got)
+	}
+	if recordedAt(f, "warn", opBringUp, abandonedMessage) {
+		t.Fatalf("records = %+v, want no abandonment warning for a conversation that never took a turn", f.log.logger.Records())
+	}
+	if !recordedAt(f, "info", opBringUp, neverEngagedNotice) {
+		t.Fatalf("records = %+v, want the ordinary never-engaged notice at info", f.log.logger.Records())
+	}
+}
+
+func TestClassifySourceOpensNoFaultWhenTheConversationNeverTookATurn(t *testing.T) {
+	// Arrange: as above. The fault is the user's only record of lost history,
+	// so a conversation that had none must not open one.
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-never-turned"}
+
+	// Act.
+	if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+
+	// Assert.
+	if opened := abandonedFaults(f.db); len(opened) != 0 {
+		t.Fatalf("abandoned-conversation faults = %+v, want none for a conversation that never took a turn", opened)
+	}
+}
+
+func TestClassifySourceWarnsWhenAnEngagedConversationsTranscriptIsGone(t *testing.T) {
+	// Arrange: the workspace took a turn, so a vanished transcript is real
+	// history abandoned and must stay exactly as loud as it has always been.
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	f.db.putTurns = append(f.db.putTurns, wsm.Turn{ID: "t1", Workspace: "w1"})
+	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
+
+	// Act.
+	if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+
+	// Assert.
+	if !recordedAt(f, "warn", opBringUp, abandonedMessage) {
+		t.Fatalf("records = %+v, want the abandonment warning", f.log.logger.Records())
+	}
+}
+
+func TestClassifySourceStaysLoudWhenTheTurnsExistenceReadFails(t *testing.T) {
+	// Arrange: the state client cannot answer whether the workspace was ever
+	// engaged. A read that could not tell is never read as proof of nothing
+	// lost, so the abandonment stays loud.
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	f.db.hasTurnsErr = errFake
+	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
+
+	// Act.
+	if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+
+	// Assert.
+	if opened := abandonedFaults(f.db); len(opened) != 1 {
+		t.Fatalf("abandoned-conversation faults = %+v, want exactly one when the engagement read failed", opened)
+	}
+}
+
+func TestClassifySourceReportsAFailedTurnsExistenceRead(t *testing.T) {
+	// Arrange: a state client that cannot answer an existence query is a fault
+	// of its own and is never swallowed by the branch that recovers from it.
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	f.db.hasTurnsErr = errFake
+	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
+
+	// Act.
+	if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+
+	// Assert.
+	if !recordedAt(f, "error", opBringUp, "could not tell whether the workspace ever took a turn; the abandoned conversation stays loud") {
+		t.Fatalf("records = %+v, want the failed engagement read reported", f.log.logger.Records())
 	}
 }
 

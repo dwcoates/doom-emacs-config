@@ -120,6 +120,11 @@ type DB interface {
 	CloseTurn(ctx context.Context, turn TurnID, at time.Time, how TurnClose) error
 	// OpenTurns loads a workspace's turns that have no terminal.
 	OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error)
+	// HasTurns reports whether a workspace has EVER recorded a turn, open or
+	// closed. It is an existence question, not a listing: the classifier asks
+	// it to tell a conversation that was never engaged from one that was, and
+	// a listing would make that answer cost the whole table.
+	HasTurns(ctx context.Context, id WorkspaceID) (bool, error)
 	// PutPortedPrompts writes a fork's whole ported conversation in one
 	// transaction: the parent's prompt rows, re-minted under the child's own
 	// turn identities. All or nothing.

@@ -13,6 +13,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- daemon/workspace+account: a bring-up over a vendor id that never took a turn is the ordinary bounce it is, recorded once at info with no fault, while a conversation that DID take turns and whose transcript vanished stays exactly as loud; the account probe's own empty answer drops to debug, since a layer that cannot tell the two apart must not choose the level
 - daemon/roster: a repository's default branch is no longer read as a family link, so a workspace cut from it draws at the top level and priority can reorder the tab bar (realtest 8)
 - daemon: every fleet adoption is dialed under the one adoption bound and records both its edges, so a revival can no longer hang forever with a prompt held and no turn recorded (realtest 7)
 - elisp: a webview's load report is an info record, so the ONE marker every painted panel leaves survives the default log level and a created workspace stops reading as one that never painted
