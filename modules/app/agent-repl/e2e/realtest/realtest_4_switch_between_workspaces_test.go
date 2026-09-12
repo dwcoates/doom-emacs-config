@@ -360,7 +360,8 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 	t.Logf("emacsclient: %s", EmacsClientPath)
 
 	stateDir := filepath.Join(home, ".claude-emacs")
-	openWorkspaces, closedWorkspaces, err := ReadWorkspaces(ctx, StateDBPath(stateDir))
+	dbPath := StateDBPath(stateDir)
+	openWorkspaces, closedWorkspaces, err := ReadWorkspaces(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("read the workspaces the state database holds: %v", err)
 	}
@@ -369,13 +370,11 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 	for _, ws := range openWorkspaces {
 		t.Logf("  open workspace %s (%s) at %s", ws.ID, ws.Name, ws.Dir)
 	}
-	if len(openWorkspaces) < rt4MinimumWorkspaces {
-		t.Fatalf("realtest 4 needs at least %d open workspaces and the state database holds %d. "+
-			"With fewer, `s-}` and `s-{` reach the same tab and a reversed direction is indistinguishable "+
-			"from a correct one, so the run would report green on the defect this item exists to catch. "+
-			"Open workspaces until the bar draws %d tabs, then re-run",
-			rt4MinimumWorkspaces, len(openWorkspaces), rt4MinimumWorkspaces)
-	}
+	// A REGISTRY ONE SHORT IS NOT A REASON TO REFUSE. It used to be: the run
+	// stopped here and told the owner to open workspaces until the bar drew
+	// three, which on 2026-09-12 meant realtest 4 could not run at all against
+	// a registry holding two. It bootstraps its own instead, below, once there
+	// is an editor to register through (bootstrap.go).
 
 	env := RealEnv(home, os.TempDir(), os.Getuid(), openWorkspaces)
 	sources, err := EnumerateSources(env)
@@ -399,6 +398,17 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 			"The log harvest IS enforced.")
 
 	rt4EnsureEditor(ctx, t, client, sources, snapshot, openWorkspaces, &manifest)
+
+	// THE THIRD TAB, BROUGHT BY THE RUN ITSELF. This is where the bootstrap
+	// goes and not earlier: registering a directory is a command in the
+	// editor, so there has to be one answering first.
+	openWorkspaces = rt4BootstrapWorkspaces(ctx, t, client, dbPath, runDir, openWorkspaces, &manifest)
+	manifest.Workspaces = openWorkspaces
+	sources, err = EnumerateSources(RealEnv(home, os.TempDir(), os.Getuid(), openWorkspaces))
+	if err != nil {
+		t.Fatalf("re-enumerate the logs now that the run has bootstrapped its own workspaces: %v", err)
+	}
+	rt4AssertBarMatchesState(ctx, t, client, openWorkspaces)
 
 	driver := rt4BuildKeyDriver(ctx, t, client, runDir, &manifest)
 	focusBefore, err := FrontmostApp(ctx)
@@ -516,6 +526,11 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 // drew its tabs before this run's window opened, so no `tab-open` record for
 // them exists inside it and a log-based assertion would report a correctly
 // drawn bar as an empty one.
+//
+// THE BAR ASSERTION ITSELF IS THE CALLER'S, not this function's: the run
+// bootstraps whatever workspaces the registry lacks between the two, and a bar
+// checked before that would be checked against a registry the run is about to
+// change.
 func rt4EnsureEditor(ctx context.Context, t *testing.T, client *Client, sources []Source, snap Snapshot, expected []Workspace, manifest *Manifest) {
 	t.Helper()
 
@@ -526,7 +541,6 @@ func rt4EnsureEditor(ctx context.Context, t *testing.T, client *Client, sources 
 			"before this run's harvest window opened", client.Socket)
 		manifest.Notes = append(manifest.Notes, note)
 		t.Logf("%s", note)
-		rt4AssertBarMatchesState(ctx, t, client, expected)
 		return
 	}
 
@@ -555,7 +569,6 @@ func rt4EnsureEditor(ctx context.Context, t *testing.T, client *Client, sources 
 	}
 	assertEveryWorkspaceDrawn(t, run, expected, phases)
 	verifyVendorGuard(ctx, t, client, run)
-	rt4AssertBarMatchesState(ctx, t, client, expected)
 }
 
 // rt4AssertBarMatchesState checks that the bar this run will navigate draws a
@@ -597,6 +610,83 @@ func rt4AssertBarMatchesState(ctx context.Context, t *testing.T, client *Client,
 			"same tab and a reversed direction cannot be told from a correct one",
 			len(state.Drawn), rt4MinimumWorkspaces)
 	}
+}
+
+// rt4BootstrapWorkspaces registers scratch repositories until the registry
+// holds the three open workspaces realtest 4 needs, and answers the whole open
+// set.
+//
+// bootstrap.go carries the reasoning. What is worth reading here is the
+// cleanup: each scratch repository is removed and each workspace it minted is
+// closed through `t.Cleanup`, registered the moment the thing exists, so a run
+// that fails halfway still leaves the registry without the rows it added. The
+// residue registering leaves behind — one closed workspace row and its
+// repository row, both naming a deleted path — is the one the substrate already
+// reports for realtests 5 through 8, and it is reported here the same way, by
+// the same function.
+func rt4BootstrapWorkspaces(ctx context.Context, t *testing.T, client *Client, dbPath, runDir string,
+	open []Workspace, manifest *Manifest) []Workspace {
+	t.Helper()
+
+	need := rt4BootstrapCount(len(open))
+	if need == 0 {
+		t.Logf("the registry holds %d open workspace(s), which is the %d realtest 4 needs or more, so it "+
+			"bootstraps none", len(open), rt4MinimumWorkspaces)
+		return open
+	}
+
+	note := fmt.Sprintf("BOOTSTRAP: the registry holds %d open workspace(s) and realtest 4 needs %d, so the run "+
+		"registers %d scratch repository(ies) of its own under %s and closes and deletes them on the way out, "+
+		"including on failure. None of the owner's repositories is touched",
+		len(open), rt4MinimumWorkspaces, need, runDir)
+	manifest.Notes = append(manifest.Notes, note)
+	t.Logf("%s", note)
+
+	bootstrapped := append([]Workspace{}, open...)
+	for index := 0; index < need; index++ {
+		scratch := wsActScratchRepo(t, runDir, rt4BootstrapRepoName(index))
+		t.Cleanup(func() { wsActRemoveScratchRepo(t, scratch) })
+
+		if err := wsActRegisterDirectory(ctx, client, scratch); err != nil {
+			t.Fatalf("%s", rt4BootstrapGuardMessage(scratch, fmt.Sprintf("the register command answered %v", err)))
+		}
+
+		all := wsActWaitForDB(ctx, t,
+			fmt.Sprintf("the registry to hold the bootstrap directory %s", scratch), dbPath,
+			func(all []Workspace) bool {
+				_, ok := wsActWorkspaceByDir(all, scratch)
+				return ok
+			})
+		workspace, ok := wsActWorkspaceByDir(all, scratch)
+		if !ok {
+			t.Fatalf("%s", rt4BootstrapGuardMessage(scratch,
+				"the state database holds no workspace at that directory, so registering minted no identity"))
+		}
+
+		// The TAB name, which is what the bar draws and what the cleanup's
+		// close command takes. It is the roster's spelling where the roster has
+		// one, because the registry's name and the drawn name can differ.
+		tabName := workspace.Name
+		if rows, rowsErr := wsActRosterRows(ctx, client); rowsErr == nil {
+			if row, has := wsActRowByID(rows, workspace.ID); has && row.Name != "" {
+				tabName = row.Name
+			}
+		}
+		record, name := workspace, tabName
+		t.Cleanup(func() { wsActCleanupRegistered(ctx, t, client, dbPath, record, name) })
+
+		tabs := wsActWaitForTabs(ctx, t, fmt.Sprintf("the bar to draw the bootstrap tab %q", tabName), client,
+			func(tabs []string) bool { return wsActHasTab(tabs, tabName) })
+		if !wsActHasTab(tabs, tabName) {
+			t.Fatalf("the bootstrap workspace %s (%q) is registered at %s and the bar draws %v, with no tab "+
+				"for it. Realtest 4 navigates the BAR, so a workspace without a drawn tab is not a workspace "+
+				"this run can reach", workspace.ID, tabName, workspace.Dir, tabs)
+		}
+		t.Logf("bootstrap: registered %s (%q) at %s and the bar draws its tab",
+			workspace.ID, tabName, workspace.Dir)
+		bootstrapped = append(bootstrapped, workspace)
+	}
+	return bootstrapped
 }
 
 // rt4BuildKeyDriver compiles realtest 1's key helper and establishes
