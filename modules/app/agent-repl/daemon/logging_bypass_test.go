@@ -25,7 +25,7 @@ func TestProductionDiagnosticsDoNotBypassDlog(t *testing.T) {
 		reason string
 	}
 	allowed := []allowance{
-		{path: "cmd/claude-repld/main.go", fn: "main", callee: "fmt.Fprintln", count: 3, reason: "process bootstrap and final exit reporting exist before or after the durable surfaces"},
+		{path: "cmd/claude-repld/main.go", fn: "main", callee: "fmt.Fprintln", count: 5, reason: "process bootstrap and final exit reporting exist before or after the durable surfaces; -probe-boot-claim adds two, and it opens no log surfaces at all because its whole answer is its exit status"},
 		{path: "internal/dlog/logger.go", fn: "emergency", callee: "fmt.Fprintf", count: 1, reason: "a durable sink cannot record its own write failure"},
 		{path: "internal/dlog/surfaces.go", fn: "write", callee: "fmt.Fprintf", count: 1, reason: "a request racing closed surfaces must be answered while the first dropped record is surfaced"},
 		{path: "internal/treefmt/treefmt.go", fn: "Report", callee: "fmt.Fprintf", count: 2, reason: "formatter warnings are the treefmt command's injected stderr output"},
