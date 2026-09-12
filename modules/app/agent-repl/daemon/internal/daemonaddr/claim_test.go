@@ -80,8 +80,9 @@ func TestSecondBindLosesTheClaim(t *testing.T) {
 	addrPath := newAddrPath(t)
 	mustBind(t, addrPath)
 
-	// Act.
-	loser, err := Bind(addrPath, 0)
+	// Act: no wait, because the incumbent here is not departing -- the
+	// production bound is exercised in lock_test.go.
+	loser, err := BindWithin(addrPath, 0, 0)
 
 	// Assert.
 	if err == nil {
@@ -99,7 +100,7 @@ func TestALosingBindLeavesTheIncumbentsListenerAlone(t *testing.T) {
 	incumbent := mustBind(t, addrPath)
 
 	// Act.
-	if _, err := Bind(addrPath, 0); err == nil {
+	if _, err := BindWithin(addrPath, 0, 0); err == nil {
 		t.Fatalf("the second bind was supposed to lose")
 	}
 
@@ -120,7 +121,7 @@ func TestALosingBindLeavesTheIncumbentsAdvertisementAlone(t *testing.T) {
 	}
 
 	// Act.
-	if _, err := Bind(addrPath, 0); err == nil {
+	if _, err := BindWithin(addrPath, 0, 0); err == nil {
 		t.Fatalf("the second bind was supposed to lose")
 	}
 
@@ -556,7 +557,7 @@ func TestAJoiningClaimTakesTheBootClaimWhenItAdvertises(t *testing.T) {
 	}
 
 	// Assert: nobody else can take the claim now.
-	if _, err := Bind(path, 0); !errors.Is(err, ErrClaimed) {
+	if _, err := BindWithin(path, 0, 0); !errors.Is(err, ErrClaimed) {
 		t.Fatalf("Bind after the successor advertised = %v, want ErrClaimed", err)
 	}
 }
