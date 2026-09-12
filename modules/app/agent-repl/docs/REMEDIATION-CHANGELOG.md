@@ -13,6 +13,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- e2e/sandbox: the sandbox preflight is bounded at both layers — each runtime call in preflight.sh exits 14 when it does not answer, and the Go probe runs the script under a 30s deadline — so a wedged Docker engine can no longer hang the whole e2e package (finding A)
 - daemon: forgetting a workspace stands its live session down first, so a forgotten row no longer leaves a shim holding the directory's workspace lock for the next registration of that directory to mis-adopt (realtest 7)
 - daemon: a bring-up whose lock reads held resolves the shim's newest socket generation and refuses at once when nothing is listening, instead of spending the whole adoption bound dialing a path no process ever bound (realtest 7)
 - daemon: a failed adoption raises the same shim_start_failed fault and dead link a failed spawn does, so the footer states the cause of a dropped prompt (realtest 7)
