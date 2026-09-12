@@ -625,3 +625,102 @@ Claude-Session: https://claude.ai/code/session_01MydqUQAkLfSwBAz9wL5scJ
 
 ## 2026-09-11 WriteBatchSuccess.skipped (store/v1/endpoint_write_batch.proto)
 Additive: repeated WriteBatchSkippedEntry skipped = 1 (+ new message WriteBatchSkippedEntry). Carries the entries the store skipped as a legacy book-conflict (re-ingest idempotency) across the store→sidecar process boundary. Backward compatible; shim ignores it. Landed 2026-09-11 for realtest 1. Agent proposed it mid-fix; lead accepted as an additive plain-data field.
+
+## 2026-09-12: the seven owed arms land, so a fault the daemon opens can be spelled
+
+Seven additions had accumulated as written-out text in agent reports because
+editing `.proto` files was off limits to agents. Every one below is ADDITIVE —
+a new message, a new oneof arm, or a new rpc. Nothing was renumbered, renamed,
+removed or repurposed, and no existing message was reshaped.
+
+### The five armless session fault kinds
+
+`agentrepl.v1 SessionFault.kind` gains five arms, and `HostFault.kind` gains
+the SAME five messages, because a session's fault classes do not change
+because the host stream is what reports them:
+
+| arm | `SessionFault` | `HostFault` | fields |
+| --- | --- | --- | --- |
+| `conversation_abandoned` | 10 | 11 | `SessionFaultConversationAbandoned { string vendor_session_id = 1; }` |
+| `session_absent` | 11 | 12 | `SessionFaultSessionAbsent {}` |
+| `watch_open_refused` | 12 | 13 | `SessionFaultWatchOpenRefused { string operation = 1; string handle = 2; }` |
+| `daemon_state_unreadable` | 13 | 14 | `SessionFaultDaemonStateUnreadable { string cause = 1; }` |
+| `adoption_window_expired` | 14 | 15 | `SessionFaultAdoptionWindowExpired { string adoption_window = 1; }` |
+
+WHY. The daemon opens all five today and neither surface could carry any of
+them. THE ARM IS THE FAULT CLASS — both consumers refuse a fault whose oneof is
+unset, and Emacs refuses the WHOLE `WatchHostWorkspace` push with it — so
+`conversation_abandoned` on a workspace that came up fresh cost the editor
+every host view of that workspace for the life of the workspace. The
+withholding fix (fb839e3bb) made that silence rather than a breach; these arms
+end the silence.
+
+Each arm's shape is READ OFF ITS OPENING SITE, not designed:
+
+- `conversation_abandoned` is opened by `workspace.(*Fleet).noteConversationAbandoned`
+  with `vendor_session_id` as its evidence, and de-duplicated on that same id.
+  It is NOT a resume failure: the workspace has a LIVE session, and the fault
+  is the record of what was abandoned. Text as the owner wrote it.
+- `session_absent` is the liveness probe's own answer in `health.(*reporter).Session`
+  — nothing raised it and it is never persisted — so it carries no evidence
+  and the arm is empty.
+- `watch_open_refused` is recorded by the lifecycle sink with `operation` and
+  `handle`, from `sessionwatcher.WatchOpenRefusal`. It is its own arm and not
+  `link_severed` because the shim ANSWERED the open.
+- `daemon_state_unreadable` is the reporter's own fault when the state client
+  refuses the fault read. It carries the refusal as `cause`, the field name
+  `resume_failed` already uses for a refusal's account.
+- `adoption_window_expired` carries `adoption_window`, the one evidence key
+  `rollout`'s handover writes. `DaemonFault` has spelled a daemon-scoped arm
+  for this kind since landing 4, but the controller records it against the
+  WORKSPACE, where the daemon-health filter (workspace-bound faults are
+  SessionHealth's answer) drops it — so the record reached no surface at all.
+
+### `DaemonFault.daemon_state_unreadable = 8`
+
+`DaemonFaultDaemonStateUnreadable { string cause = 1; }`. NOT one of the seven
+the owner listed, and recorded here as the addition it is: `health.selfCheckFault`
+was the last site in the daemon that put a fault on the wire with the `kind`
+oneof unset, which is the same contract breach the batch above exists to end,
+on the one fault the daemon can always detect about itself. The shape is forced
+— it mirrors the session-scoped arm — and the arm is isolated to its own hunk
+if the owner would rather it came out.
+
+### `CreateWorkspaceError.spawn_failed = 11`
+
+`CreateWorkspaceSpawnFailed { string detail = 1; }`, exactly
+`OpenWorkspaceSpawnFailed`'s shape. ONE daemon refusal (`workspace.ArmSpawnFailed`)
+is raised for both rpcs, so a create answered out of band while an open answered
+in band. No daemon change follows it: `server.fill` already supplies `detail`,
+so the handler switched onto the arm by the arm existing.
+
+### `ForgetWorkspace`, the whole rpc
+
+New `endpoint_forget_workspace.proto`, and the rpc beside `NukeWorkspace` in
+`service.proto`. The verb, its three refusal arms and its command-file route
+were all already built; only the wire was missing.
+
+`ForgetWorkspaceError` carries `not_closed`, `blocked`, `has_children` and the
+four every per-workspace verb raises. Two shapes worth recording:
+
+- `ForgetWorkspaceBlocked` respells `CloseWorkspaceBlocked`'s five fields
+  rather than importing it. That is the settled convention here and not a new
+  choice: every endpoint spells its own arm types, down to `unknown_workspace`.
+  The same composer fills both, because it is literally the same quiet check.
+- `ForgetWorkspaceHasChildren.children` is the contract's FIRST repeated arm
+  field, so `server.setArm` learned repeated strings to carry it. Named rather
+  than counted: `parent_id` is `ON DELETE SET NULL`, so the caller is owed the
+  ids it must deal with first.
+
+### Not landed: a bring-up failure as a feed row
+
+Described in the report for the owner to rule on, deliberately unimplemented.
+A bring-up failure drops a held prompt and the tray shows standing holds only,
+so the entry vanishes from view. The proposal was
+`FeedTurnErrorBringUpFailed { string detail = 1; }` on `FeedTurnEndedErrored`'s
+oneof at tag 24. Every existing arm in that oneof is a vendor-failure class or
+the query's own death, and nothing reached the vendor here — so whether the arm
+belongs in that oneof at all is a modelling decision, and modelling decisions
+are the owner's.
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
