@@ -441,18 +441,22 @@ func answer[R any](resp *R, cerr *connect.Error) (*connect.Response[R], error) {
 	return connect.NewResponse(resp), nil
 }
 
-// workspaceLog answers a workspace's own log sink. A workspace-bound record
-// that cannot resolve its sink is an invariant violation, never a global write.
+// workspaceLog answers a workspace's own log sink.
+//
+// RESOLVING A NAMED WORKSPACE'S SINK IS A TOTAL FUNCTION. Only the WORKSPACE
+// READ can fail here: a workspace the state store will not name has no records
+// to attribute. Once it is named, a directory that cannot host a durable sink
+// -- a scratch path, a deleted worktree, a directory that does not exist yet --
+// is an ORDINARY outcome, and the records go to the central sink carrying
+// `unroutable_workspace' so the line still says which workspace it is about.
+// Serving a workspace must never fail, or withhold what it was going to
+// publish, over WHERE its narration is written.
 func (s *server) workspaceLog(ctx context.Context, rpc string, ws ids.WorkspaceID) (dlog.Logger, error) {
 	record, err := s.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return nil, fmt.Errorf("%s: workspace %q: %w", rpc, ws, err)
 	}
-	log, err := s.deps.Log.Workspace(record.Dir)
-	if err != nil {
-		return nil, fmt.Errorf("%s: resolve log sink %q: %w", rpc, record.Dir, err)
-	}
-	return log.With(dlog.Context{"workspace": string(ws)}), nil
+	return s.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(ws)}), nil
 }
 
 // answerRefusal renders a verb's error onto resp, RENAMING the arm where one

@@ -101,15 +101,12 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 		return nil, fmt.Errorf("health: unknown workspace %q: %w", ws, err)
 	}
 
-	wsLog, err := r.log.Workspace(record.Dir)
-	if err != nil {
-		// Failing to resolve a KNOWN workspace's sink is an invariant
-		// violation, not a reason to write globally: it is surfaced.
-		log.Error(opSession, "could not resolve the workspace log sink", dlog.Context{
-			"dir": record.Dir, "cause": err.Error(),
-		})
-		return nil, fmt.Errorf("health: resolve log sink for %q: %w", record.Dir, err)
-	}
+	// RESOLVING A NAMED WORKSPACE'S SINK IS A TOTAL FUNCTION. A workspace whose
+	// directory cannot host a durable sink -- a scratch path, a deleted
+	// worktree -- still gets its records, on the central sink and carrying
+	// `unroutable_workspace'. Answering a workspace's HEALTH must not fail over
+	// where the answer is WRITTEN.
+	wsLog := r.log.WorkspaceOrCentral(record.Dir)
 
 	var faults []*agentreplv1.SessionFault
 
@@ -121,22 +118,27 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 	open, err := r.db.OpenFaults(ctx, wsm.FaultScope{Workspace: &ws})
 	if err != nil {
 		wsLog.Error(opSession, "state client refused the open-fault read", dlog.Context{"cause": err.Error()})
-		faults = append(faults, sessionFault(wsm.Fault{
+		faults = appendSessionFault(wsLog, faults, wsm.Fault{
 			Kind: KindStateUnreadable, Detail: err.Error(),
-		}))
+		})
 		return unhealthySession(faults), nil
 	}
 	for _, f := range open {
-		faults = append(faults, sessionFault(f))
+		faults = appendSessionFault(wsLog, faults, f)
 	}
+	// UNHEALTHY IS THE RECORDS' VERDICT, NOT THE RENDERER'S. A standing fault
+	// whose kind the wire has no arm for is withheld from the answer, and the
+	// session is still unhealthy because it STANDS.
+	unrenderable := len(open) > 0 && len(faults) == 0
 
 	exists, connected := r.live(ws)
 	switch {
 	case !exists:
 		wsLog.Warn(opSession, "no live session", dlog.Context{"kind": KindSessionAbsent})
-		faults = append(faults, sessionFault(wsm.Fault{
+		faults = appendSessionFault(wsLog, faults, wsm.Fault{
 			Kind: KindSessionAbsent, Detail: "the workspace has no live session",
-		}))
+		})
+		unrenderable = true
 	case !connected && !hasLostLinkFault(open):
 		// The probe's observation is only reported when NOTHING recorded the
 		// loss — a session parked behind a cold gate has no watcher and so no
@@ -144,14 +146,14 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 		wsLog.Warn(opSession, "the daemon-to-shim link is not serving", dlog.Context{
 			"kind": KindLinkSevered,
 		})
-		faults = append(faults, sessionFault(wsm.Fault{
+		faults = appendSessionFault(wsLog, faults, wsm.Fault{
 			Kind: KindLinkSevered, Detail: "the daemon-to-shim link is not serving",
-		}))
+		})
 	default:
 		wsLog.Debug(opSession, "the session's link needs no probe-derived fault", nil)
 	}
 
-	if len(faults) > 0 {
+	if len(faults) > 0 || unrenderable {
 		wsLog.Warn(opSession, "the session is unhealthy", dlog.Context{"faults": len(faults)})
 		return unhealthySession(faults), nil
 	}
@@ -216,6 +218,20 @@ func (r *reporter) OpenFaults(ctx context.Context, scope wsm.FaultScope) ([]wsm.
 	}
 	log.Debug(opOpenFaults, "read the open faults", dlog.Context{"count": len(out)})
 	return out, nil
+}
+
+// appendSessionFault appends one recorded fault's rendered SessionFault, or
+// notes at DEBUG that the wire has no arm to carry it. It is DEBUG because the
+// fault is already recorded, once, by the layer that opened it; a second voice
+// beside every render would say nothing new and would say it on every poll.
+func appendSessionFault(log dlog.Logger, faults []*agentreplv1.SessionFault, f wsm.Fault) []*agentreplv1.SessionFault {
+	rendered, ok := sessionFault(f)
+	if !ok {
+		log.Debug(opSession, "a standing fault has no SessionFault arm; it is withheld from the answer",
+			dlog.Context{"kind": f.Kind, "armless_by_design": ArmlessSessionKind(f.Kind)})
+		return faults
+	}
+	return append(faults, rendered)
 }
 
 func unhealthyDaemon(identity *agentreplv1.DaemonIdentity, faults []*agentreplv1.DaemonFault) *agentreplv1.DaemonHealthResponse {

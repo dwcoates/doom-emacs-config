@@ -515,3 +515,56 @@ func TestAFailedRevivalRepushesTheTrayWithoutTheDroppedEntry(t *testing.T) {
 		t.Fatalf("the last pushed tray = %+v, want it empty after the drop", last)
 	}
 }
+
+// unroutableSurfaces is dlog.Surfaces whose per-workspace sink never opens, so
+// a test can drive the one condition production hits when a workspace's
+// directory is a scratch path or a deleted worktree.
+type unroutableSurfaces struct {
+	*dlog.TestSurfaces
+}
+
+func (unroutableSurfaces) Workspace(string) (dlog.Logger, error) {
+	return nil, errors.New("the workspace owns no durable log sink")
+}
+
+func (s unroutableSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
+	return s.TestSurfaces.Global().With(dlog.Context{dlog.KeyUnroutableWorkspace: dir})
+}
+
+// TestSubmitSurvivesAWorkspaceThatOwnsNoLogSink pins that A PROMPT IS NEVER
+// LOST OVER ITS OWN LOGGING. Resolving a named workspace's sink is a TOTAL
+// function: a directory that cannot host one routes the records to the central
+// sink, and the submission goes through.
+func TestSubmitSurvivesAWorkspaceThatOwnsNoLogSink(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.q.deps.Log = unroutableSurfaces{h.log}
+
+	// Act.
+	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Submit() = %v, want the prompt delivered despite the unroutable sink", err)
+	}
+	if len(h.sender.started()) != 1 {
+		t.Fatalf("started = %d prompts, want the one submitted", len(h.sender.started()))
+	}
+}
+
+// TestSubmitStillRefusesAWorkspaceTheStateStoreWillNotName pins the error that
+// REMAINS: an unknown workspace has nothing to submit to.
+func TestSubmitStillRefusesAWorkspaceTheStateStoreWillNotName(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	sub := submission("t1", "hello")
+	sub.WS = "a-workspace-nobody-registered"
+
+	// Act.
+	_, err := h.q.Submit(context.Background(), sub)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Submit(unknown workspace) = nil error, want the refusal surfaced")
+	}
+}

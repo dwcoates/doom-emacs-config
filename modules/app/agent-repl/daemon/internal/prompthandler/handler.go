@@ -182,12 +182,11 @@ func (h *handler) logger(ctx context.Context, ws ids.WorkspaceID) (dlog.Logger, 
 			dlog.Context{"workspace": string(ws), "cause": err.Error()})
 		return nil, fmt.Errorf("resolve workspace %q: %w", ws, err)
 	}
-	log, err := h.deps.Log.Workspace(record.Dir)
-	if err != nil {
-		h.deps.Log.Global().Error(opSubmit, "could not open the workspace log sink",
-			dlog.Context{"workspace": string(ws), "dir": record.Dir, "cause": err.Error()})
-		return nil, fmt.Errorf("open the log sink for %q: %w", ws, err)
-	}
+	// RESOLVING A NAMED WORKSPACE'S SINK IS A TOTAL FUNCTION, and a prompt is
+	// never lost over WHERE its narration is written. A directory that cannot
+	// host a durable sink routes to the central sink carrying
+	// `unroutable_workspace'; only the WORKSPACE READ above can refuse.
+	log := h.deps.Log.WorkspaceOrCentral(record.Dir)
 	return log.With(dlog.Context{"workspace": string(ws)}), nil
 }
 

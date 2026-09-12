@@ -110,8 +110,11 @@ func TestSessionFaultFillsEveryTypedArm(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange in the table. Act.
-			got := sessionFault(wsm.Fault{Kind: tt.kind})
+			got, ok := sessionFault(wsm.Fault{Kind: tt.kind})
 			// Assert.
+			if !ok {
+				t.Fatalf("sessionFault(%q) withheld a kind that has an arm", tt.kind)
+			}
 			if got.GetKind() == nil {
 				t.Fatalf("sessionFault(%q) left the kind oneof unset", tt.kind)
 			}
@@ -127,9 +130,12 @@ func TestSessionFaultCarriesTheShimStartEvidence(t *testing.T) {
 	}
 
 	// Act.
-	got := sessionFault(fault)
+	got, ok := sessionFault(fault)
 
 	// Assert.
+	if !ok {
+		t.Fatalf("sessionFault(%q) withheld a kind that has an arm", fault.Kind)
+	}
 	arm := got.GetShimStartFailed()
 	if arm.GetExitCode() != 127 || arm.GetStderrTail() != "node: not found" {
 		t.Fatalf("shim_start_failed = %v, want exit 127 and the stderr tail", arm)
@@ -141,9 +147,12 @@ func TestSessionFaultCarriesTheResumeCause(t *testing.T) {
 	fault := wsm.Fault{Kind: KindResumeFailed, Evidence: map[string]string{"cause": "identity mismatch"}}
 
 	// Act.
-	got := sessionFault(fault)
+	got, ok := sessionFault(fault)
 
 	// Assert.
+	if !ok {
+		t.Fatalf("sessionFault(%q) withheld a kind that has an arm", fault.Kind)
+	}
 	if got.GetResumeFailed().GetCause() != "identity mismatch" {
 		t.Fatalf("cause = %q, want the recorded cause", got.GetResumeFailed().GetCause())
 	}
@@ -154,9 +163,12 @@ func TestSessionFaultFallsBackToTheProseDetailForACause(t *testing.T) {
 	fault := wsm.Fault{Kind: KindResumeFailed, Detail: "the shim refused the resume"}
 
 	// Act.
-	got := sessionFault(fault)
+	got, ok := sessionFault(fault)
 
 	// Assert.
+	if !ok {
+		t.Fatalf("sessionFault(%q) withheld a kind that has an arm", fault.Kind)
+	}
 	if got.GetResumeFailed().GetCause() != "the shim refused the resume" {
 		t.Fatalf("cause = %q, want the prose detail", got.GetResumeFailed().GetCause())
 	}
@@ -170,9 +182,12 @@ func TestSessionFaultRespellsAShimReportedFault(t *testing.T) {
 	}
 
 	// Act.
-	got := sessionFault(fault)
+	got, ok := sessionFault(fault)
 
 	// Assert.
+	if !ok {
+		t.Fatalf("sessionFault(%q) withheld a kind that has an arm", fault.Kind)
+	}
 	arm := got.GetShimReported()
 	if arm.GetComponent() != "store" || arm.GetKind() != "store_unreachable" {
 		t.Fatalf("shim_reported = %v, want the shim's own component and kind", arm)
@@ -185,25 +200,84 @@ func TestExitCodeOfAnUnparsableRecordIsZero(t *testing.T) {
 	fault := wsm.Fault{Kind: KindShimDied, Evidence: map[string]string{"exit_code": "not a number"}}
 
 	// Act.
-	got := sessionFault(fault)
+	got, ok := sessionFault(fault)
 
 	// Assert.
+	if !ok {
+		t.Fatalf("sessionFault(%q) withheld a kind that has an arm", fault.Kind)
+	}
 	if got.GetShimDied().GetExitCode() != 0 {
 		t.Fatalf("exit code = %d, want zero", got.GetShimDied().GetExitCode())
 	}
 }
 
-func TestSessionAbsentHasNoTypedArm(t *testing.T) {
+// TestSessionAbsentIsWithheldFromTheWire pins that the liveness probe's own
+// answer, which no `SessionFault.kind' arm spells, is kept OFF the wire.
+//
+// This test previously pinned the opposite -- a prose-only SessionFault with
+// the oneof left unset. That rendering is a CONTRACT BREACH the consumer
+// refuses, taking the whole message with it, so the invariant supersedes it:
+// a fault the wire cannot carry is withheld, never malformed.
+func TestSessionAbsentIsWithheldFromTheWire(t *testing.T) {
 	// Arrange: it is the liveness probe's answer, not a fault anyone raised.
 	// Act.
-	got := sessionFault(wsm.Fault{Kind: KindSessionAbsent, Detail: "no live session"})
+	got, ok := sessionFault(wsm.Fault{Kind: KindSessionAbsent, Detail: "no live session"})
 
 	// Assert.
-	if got.GetKind() != nil {
-		t.Fatalf("kind = %v, want no typed arm", got.GetKind())
+	if ok || got != nil {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want it withheld", KindSessionAbsent, got, ok)
 	}
-	if !strings.HasPrefix(got.GetDetail(), KindSessionAbsent) {
-		t.Fatalf("detail = %q, want it to lead with the kind", got.GetDetail())
+}
+
+// TestSessionAbsentIsArmlessByDesign pins that the withholding above is a
+// DECLARED gap in the vocabulary, not an unrecognized kind.
+func TestSessionAbsentIsArmlessByDesign(t *testing.T) {
+	// Arrange. Act. Assert.
+	if !ArmlessSessionKind(KindSessionAbsent) {
+		t.Fatalf("ArmlessSessionKind(%q) = false, want the kind declared armless", KindSessionAbsent)
+	}
+}
+
+// TestConversationAbandonedIsWithheldFromTheWire pins the fault that actually
+// broke a live WatchHostWorkspace push: it stands open for the life of a
+// workspace that came up fresh, and rendered with an unset oneof it cost the
+// editor every host view of that workspace.
+func TestConversationAbandonedIsWithheldFromTheWire(t *testing.T) {
+	// Arrange. Act.
+	got, ok := sessionFault(wsm.Fault{Kind: KindConversationAbandoned, Detail: "no transcript"})
+
+	// Assert.
+	if ok || got != nil {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want it withheld", KindConversationAbandoned, got, ok)
+	}
+}
+
+// TestTheLegacyRelaunchSpellingRendersAsResumeFailed pins that a fault recorded
+// under the rollout controller's old private spelling still reaches the
+// `resume_failed' arm: it names the same class, and standing records carry it.
+func TestTheLegacyRelaunchSpellingRendersAsResumeFailed(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{Kind: KindRelaunchResumeFailed, Detail: "the shim refused the resume"}
+
+	// Act.
+	got, ok := sessionFault(fault)
+
+	// Assert.
+	if !ok || got.GetResumeFailed() == nil {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want the resume_failed arm", KindRelaunchResumeFailed, got, ok)
+	}
+}
+
+// TestAnUnknownKindIsWithheldFromTheWire pins that a kind nobody declared is
+// withheld too: the renderer never puts an unset oneof on the wire, whatever
+// the reason it could not classify the fault.
+func TestAnUnknownKindIsWithheldFromTheWire(t *testing.T) {
+	// Arrange. Act.
+	got, ok := sessionFault(wsm.Fault{Kind: "something_nobody_landed", Detail: "the evidence"})
+
+	// Assert.
+	if ok || got != nil {
+		t.Fatalf("sessionFault(unknown) = (%v, %v), want it withheld", got, ok)
 	}
 }
 
@@ -219,14 +293,13 @@ func TestWatchOpenRefusedIsNotASeveredLink(t *testing.T) {
 	}
 
 	// Act.
-	got := sessionFault(fault)
+	got, ok := sessionFault(fault)
 
-	// Assert.
-	if got.GetLinkSevered() != nil {
-		t.Fatalf("kind = %v, want no severed-link arm", got.GetKind())
-	}
-	if !strings.HasPrefix(got.GetDetail(), KindWatchOpenRefused) {
-		t.Fatalf("detail = %q, want it to lead with the kind", got.GetDetail())
+	// Assert: it has no arm at all, so in particular it is not the severed one.
+	// (This test previously pinned a prose-only SessionFault; the unset-oneof
+	// rendering it asserted is a contract breach the invariant supersedes.)
+	if ok || got.GetLinkSevered() != nil {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want no severed-link arm", KindWatchOpenRefused, got, ok)
 	}
 }
 

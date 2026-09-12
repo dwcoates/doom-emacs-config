@@ -7,6 +7,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
@@ -14,7 +15,12 @@ import (
 
 // FaultRelaunchFailed is the fault kind a relaunch that could not resume
 // records. Its remediation is as-it-comes-up, per the ruling.
-const FaultRelaunchFailed = "relaunch_resume_failed"
+//
+// It is health.KindResumeFailed itself, not a second spelling of it. A relaunch
+// whose resume failed IS a resume that failed, and the surfaces render it
+// through `SessionFault.resume_failed'; a private spelling reached no arm at
+// all and put a HostFault with an unset oneof on the wire.
+const FaultRelaunchFailed = health.KindResumeFailed
 
 // RelaunchShim bounces one workspace's shim. It is the ONE engine for a
 // self-merge shim change, the build-staleness bounce and the operator's restart
