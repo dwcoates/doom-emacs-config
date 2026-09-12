@@ -908,6 +908,11 @@ func (f *Fleet) noteStartFailed(ctx context.Context, log dlog.Logger, ws ids.Wor
 	if _, err := f.deps.DB.OpenFault(ctx, fault); err != nil {
 		log.Error(opBringUp, "could not record the failed bring-up", dlog.Context{"cause": err.Error()})
 	}
+	// THE FOOTER ALONE CARRIES A BRING-UP FAILURE (the owner's ruling of
+	// 2026-09-12: no feed row). The dead link below states the `start_failed`
+	// step; this states the line that explains it, out of the fault's own
+	// evidence so the two cannot disagree.
+	f.deps.Footer.SetStartFailed(ws, &footer.StartFailed{Detail: health.StartFailedDetail(fault)})
 	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)

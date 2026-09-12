@@ -238,6 +238,50 @@ func (r *resolver) SetClosing(ws ids.WorkspaceID, blocked *CloseBlocked) {
 		func(s *wsState) { s.closing = blocked })
 }
 
+// SetStartFailed installs, or clears, the standing bring-up failure. A new
+// failure resets the dropped count: the count belongs to the failure that
+// dropped them, not to the workspace.
+func (r *resolver) SetStartFailed(ws ids.WorkspaceID, failure *StartFailed) {
+	ctx := dlog.Context{"standing": failure != nil}
+	if failure != nil {
+		ctx["detail"] = failure.Detail
+	}
+	r.mutate(ws, "daemon.footer.set_start_failed", "the footer took the bring-up failure", ctx,
+		func(s *wsState) {
+			if failure == nil {
+				s.startFailed = nil
+				return
+			}
+			s.startFailed = &startFailedState{detail: failure.Detail, at: r.opts.clock.Now()}
+		})
+}
+
+// AddDroppedPrompts accrues the held prompts a bring-up failure dropped onto
+// the failure already standing.
+//
+// A drop with NO standing failure is not lost quietly: the tray's own warning
+// already names every dropped turn, and the footer has no line to hang a count
+// on, so this records the mismatch and changes nothing.
+func (r *resolver) AddDroppedPrompts(ws ids.WorkspaceID, n uint32) {
+	if n == 0 {
+		return
+	}
+	r.mutate(ws, "daemon.footer.add_dropped_prompts",
+		"the footer took the held prompts a bring-up failure dropped",
+		dlog.Context{"dropped": n}, func(s *wsState) {
+			if s.startFailed == nil {
+				r.logOf(ws, s).Warn("daemon.footer.dropped_prompts_unattributed",
+					"held prompts were dropped with no standing bring-up failure to attribute them to",
+					dlog.Context{"dropped": n})
+				return
+			}
+			s.startFailed.dropped += n
+			// The count is part of the line, so a line already announced is
+			// announced again once it says something new.
+			s.startFailed.announced = false
+		})
+}
+
 // SetColdGate installs the standing cold gate.
 func (r *resolver) SetColdGate(ws ids.WorkspaceID, gate ColdGate) {
 	r.mutate(ws, "daemon.footer.set_cold_gate", "the footer took the cold gate",
@@ -304,6 +348,11 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			s.linkSeen = true
 			if link == shimclient.LinkConnected {
 				s.everConnected = true
+				// THE SUCCESSFUL LINK EDGE CLEARS THE BRING-UP FAILURE. A
+				// session that is serving has come up, so the line explaining
+				// why it would not is spent, and the status it hung under is
+				// gone with it.
+				s.startFailed = nil
 			}
 			// THE REVIVAL ENDS THE PARK. The session watcher latches a dead
 			// link ("a later transition is a consequence of the death",

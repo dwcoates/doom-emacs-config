@@ -5,6 +5,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
 )
 
 // THE ACTIVITY LINE is the strip's finest cell, and exactly ONE stands per
@@ -373,7 +375,32 @@ func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedAc
 }
 
 // disconnectedActivity resolves the line legal while the link is not serving.
-func (r *resolver) disconnectedActivity(s *wsState) *frontendv1.FooterStatusDisconnectedActivity {
+//
+// The bring-up failure OUTRANKS a notification, per footer.proto: it is the
+// standing line the `start_failed` step exists to explain, and it can only
+// stand while that step does — the successful link edge that would move the
+// status off `start_failed` clears the failure in the same breath.
+func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1.FooterStatusDisconnectedActivity {
+	if s.startFailed != nil {
+		if !s.startFailed.announced {
+			s.startFailed.announced = true
+			log.Info("daemon.footer.start_failed_activity",
+				"the footer composed the bring-up failure's standing line",
+				dlog.Context{
+					"workspace_dir":   s.dir,
+					"dropped_prompts": s.startFailed.dropped,
+					"detail":          s.startFailed.detail,
+				})
+		}
+		return &frontendv1.FooterStatusDisconnectedActivity{
+			At: stamp(s.startFailed.at),
+			Kind: &frontendv1.FooterStatusDisconnectedActivity_StartFailed{
+				StartFailed: &frontendv1.FooterStatusActivityStartFailed{
+					Detail:         s.startFailed.detail,
+					DroppedPrompts: s.startFailed.dropped,
+				}},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusDisconnectedActivity{
 			At:   stamp(s.notification.at),

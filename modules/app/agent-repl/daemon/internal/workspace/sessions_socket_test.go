@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -248,6 +249,45 @@ func TestStartRaisesAFaultWhenAnAdoptionFails(t *testing.T) {
 	// Assert.
 	if got := faultKinds(f.db.dbFaults); len(got) != 1 || got[0] != health.KindShimStartFailed {
 		t.Fatalf("faults = %v, want exactly one %s", got, health.KindShimStartFailed)
+	}
+}
+
+// TestAnUnreachableLockOwnerStandsTheFootersBringUpFailureLine pins the
+// owner's ruling of 2026-09-12: a bring-up failure writes no feed row, so the
+// footer's own line is the whole account of it and it has to name the cause.
+func TestAnUnreachableLockOwnerStandsTheFootersBringUpFailureLine(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateAbsent
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	failure := f.footer.startFailed[ws.ID]
+	if failure == nil || !strings.Contains(failure.Detail, "unreachable") {
+		t.Fatalf("the footer's bring-up failure = %+v, want the refusal's own words", failure)
+	}
+}
+
+// TestAFailedAdoptionStandsTheFootersBringUpFailureLine pins the same line for
+// the other adoption death.
+func TestAFailedAdoptionStandsTheFootersBringUpFailureLine(t *testing.T) {
+	// Arrange.
+	f := newFleetFixtureBoundedAt(t, 10*time.Millisecond)
+	ws := f.workspace("w1")
+	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
+	f.supervisor.adoptBlocks = true
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if failure := f.footer.startFailed[ws.ID]; failure == nil || failure.Detail == "" {
+		t.Fatalf("the footer's bring-up failure = %+v, want the adoption's own words", failure)
 	}
 }
 

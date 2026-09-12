@@ -82,6 +82,17 @@ type CloseBlocked struct {
 	MergeQueued bool
 }
 
+// StartFailed is a session bring-up that FAILED, which the footer alone
+// carries: the owner's ruling of 2026-09-12 is that a bring-up failure writes
+// no feed row, so the disconnected arm's `start_failed` step and this line are
+// the whole account of it.
+type StartFailed struct {
+	// Detail is WHY the bring-up failed, composed at the site that opened the
+	// `shim_start_failed` fault out of that fault's own evidence, so the strip
+	// and the fault cannot say different things about one failure.
+	Detail string
+}
+
 // ColdGate is the standing cold-context gate, which owns the composer while it
 // stands.
 type ColdGate struct {
@@ -153,6 +164,15 @@ type Resolver interface {
 	// SetInterrupting fires the waiting-interrupting status the MOMENT an
 	// interrupt registers, before the real turn end arrives.
 	SetInterrupting(ws ids.WorkspaceID, on bool)
+	// SetStartFailed installs the standing bring-up failure whose line the
+	// `disconnected · start_failed` step exists to explain, nil to clear it.
+	// The next successful link edge clears it on its own.
+	SetStartFailed(ws ids.WorkspaceID, failure *StartFailed)
+	// AddDroppedPrompts adds to the count of held prompts the STANDING
+	// bring-up failure dropped. The drop is decided by the prompt queue, after
+	// the failure is installed, so the count arrives second and accrues onto
+	// the failure already standing.
+	AddDroppedPrompts(ws ids.WorkspaceID, n uint32)
 	// Topic is the workspace's footer publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FooterView]
 }
