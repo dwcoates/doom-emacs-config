@@ -63,11 +63,13 @@ const wsActActCeiling = 180 * time.Second
 // delivery, not something to wait out.
 const wsActChordCeiling = 30 * time.Second
 
-// wsActFieldSep is the separator the probe forms join their fields with. A
-// unit separator rather than a pipe or a comma, for the reason state.go gives:
-// a workspace name or a directory containing the separator would otherwise
-// split into the wrong number of fields and read as a malformed answer.
-const wsActFieldSep = "\x1f"
+// wsActFieldSep is the separator the probe forms join their fields with. It is
+// state.go's own separator, so a probe form and a snapshot read cannot disagree
+// about where a field ends. A unit separator rather than a pipe or a comma, for
+// the reason state.go gives: a workspace name or a directory containing the
+// separator would otherwise split into the wrong number of fields and read as a
+// malformed answer.
+const wsActFieldSep = stateFieldSep
 
 // ---- The chords -------------------------------------------------------
 //
