@@ -249,9 +249,15 @@ func (d *KeyDriver) PressWithReceipt(ctx context.Context, chord Chord) (Delivery
 		started := time.Now()
 
 		var after InputMark
+		// focus is read INSIDE the hold, which is the only window in which the
+		// question means anything: the helper restores the previously frontmost
+		// application the moment the hold ends, so a reading taken afterwards
+		// would always say unfocused.
+		var focus FocusReading
 		verdict, reason := DeliveryUndetermined, "the helper never reported the key as posted"
 		out, err := d.post(ctx, chord, func() {
 			verdict, reason, after = d.confirm(ctx, before)
+			focus = ReadEmacsFocus(ctx, d.Client)
 		})
 
 		receipt = DeliveryReceipt{
@@ -263,6 +269,7 @@ func (d *KeyDriver) PressWithReceipt(ctx context.Context, chord Chord) (Delivery
 			Before:   before,
 			After:    after,
 			Elapsed:  time.Since(started),
+			Focus:    focus,
 		}
 		if err != nil {
 			return receipt, err
