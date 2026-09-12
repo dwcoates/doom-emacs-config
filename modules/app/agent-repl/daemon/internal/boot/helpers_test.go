@@ -59,7 +59,31 @@ func (s *fakeSupervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, _, udsPa
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return &fakeShimClient{pid: adoptedShimPID}, nil
+}
+
+// adoptedShimPID is the pid every adopted fake shim answers, so the bounce
+// accounting's record of WHICH process survived has something real to name.
+const adoptedShimPID = 4242
+
+// fakeShimClient is an adopted shim client. Only PID is answered: the boot
+// sequence reads nothing else off an adopted client, and a verb it does not
+// call has no honest fake.
+type fakeShimClient struct {
+	shimclient.Client
+	pid int
+}
+
+func (c *fakeShimClient) PID() int { return c.pid }
+
+// hasRecord reports whether the boot logged a record at level under operation.
+func (h *harness) hasRecord(level, operation string) bool {
+	for _, r := range h.log.Records() {
+		if r.Level == level && r.Operation == operation {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *fakeSupervisor) paths() []string {
@@ -121,13 +145,13 @@ type fakeRollout struct {
 	joinErr      error
 	// adopted is the adopted set the boot handed Reconcile, which is what the
 	// no-manifest accounting keys on.
-	adopted []ids.WorkspaceID
+	adopted []rollout.AdoptedSession
 }
 
-func (r *fakeRollout) Reconcile(_ context.Context, adopted []ids.WorkspaceID) ([]rollout.Disposition, error) {
+func (r *fakeRollout) Reconcile(_ context.Context, adopted []rollout.AdoptedSession) ([]rollout.Disposition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.adopted = append([]ids.WorkspaceID(nil), adopted...)
+	r.adopted = append([]rollout.AdoptedSession(nil), adopted...)
 	if r.reconcileErr != nil {
 		return nil, r.reconcileErr
 	}

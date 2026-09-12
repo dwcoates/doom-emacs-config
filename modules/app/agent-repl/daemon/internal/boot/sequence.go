@@ -164,15 +164,25 @@ func (s *sequence) closeMissingDirs(ctx context.Context, log dlog.Logger, worksp
 	return nil
 }
 
-// survivor is one workspace whose lock reads HELD: a shim this boot must dial
-// before it can say what the workspace is. The dial's outcome is filled in by
-// the concurrent pass and read by the sequential one that follows it.
+// survivor is one workspace whose shim this boot must dial before it can say
+// what the workspace is. The dial's outcome is filled in by the concurrent
+// pass and read by the sequential one that follows it.
 type survivor struct {
 	ws         wsm.Workspace
 	socketPath string
-	client     shimclient.Client
-	err        error
-	overran    bool
+	// inert marks a survivor reached through its LISTENING SOCKET while its
+	// workspace lock read FREE. The shim takes that lock at StartSession and
+	// not at process start (agent-shim/claude/shim/src/engine/session.ts: "it
+	// lands HERE rather than at process start because an inert shim owns no
+	// conversation and must not exclude the live one it will replace"), so a
+	// free lock behind a live listener is the shim's own statement that NO
+	// SESSION HAS BEEN STARTED ON IT. The process is adopted either way —
+	// spawning over a listener is what loses turns — but it carries no session,
+	// so the bounce accounting has nothing to judge for it.
+	inert   bool
+	client  shimclient.Client
+	err     error
+	overran bool
 }
 
 // adopt probes every open workspace's shim-held kernel lock and ADOPTS the
@@ -216,14 +226,23 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 		// and the turn was lost to a shim nobody adopted. So a live listener
 		// is adopted whatever the lock says, and the disagreement is recorded
 		// rather than resolved silently.
+		//
+		// IT IS NOT AN ANOMALY, AND IT IS NOT A WARNING. The lock is taken at
+		// StartSession, so free-and-listening is precisely what an INERT shim
+		// looks like: one that was spawned or prelaunched and never had a
+		// session started on it. It is adopted as the process it is and
+		// carried as INERT, so that neither the watches nor the bounce
+		// accounting treats it as a session that survived.
+		inert := false
 		if state == sessionlock.StateFree && socket == shimsocket.StateLive {
-			log.Warn("daemon.boot.adopt", "the workspace lock reads free but a shim is listening; adopting the survivor",
+			log.Info("daemon.boot.adopt", "a shim is listening with no session of its own; adopting the inert survivor",
 				dlog.Context{
 					"workspace_id": string(ws.ID),
 					"socket_path":  socketPath,
 					"lock_state":   state.String(),
 				})
 			state = sessionlock.StateHeld
+			inert = true
 		}
 		// A SOCKET THAT COULD NOT BE PROBED IS NEVER SPAWNED OVER, for the
 		// same reason an unreadable lock is never read as free: the answer
@@ -240,7 +259,7 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 		}
 		switch {
 		case state == sessionlock.StateHeld:
-			survivors = append(survivors, &survivor{ws: ws, socketPath: socketPath})
+			survivors = append(survivors, &survivor{ws: ws, socketPath: socketPath, inert: inert})
 		case state == sessionlock.StateFree:
 			// NOTHING HOLDS AND NOTHING LISTENS, so a socket FILE left here is
 			// a dead shim's leavings — an AF_UNIX path is not reclaimed on
@@ -305,6 +324,17 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			})
 			return nil, fmt.Errorf("boot: adopt the surviving shim of %s: %w", sv.ws.ID, sv.err)
 		}
+		// A NIL CLIENT WITH A NIL ERROR IS A SUPERVISOR CONTRACT VIOLATION,
+		// and it is caught here rather than dereferenced: the pid read below
+		// is the bounce accounting's only statement of WHICH process survived,
+		// and a boot that panicked on it would take the daemon down.
+		if sv.client == nil {
+			log.Error("daemon.boot.adopt", "the supervisor answered an adoption with no client and no error", dlog.Context{
+				"workspace_id": string(sv.ws.ID),
+				"socket_path":  sv.socketPath,
+			})
+			return nil, fmt.Errorf("boot: adopt the surviving shim of %s: the supervisor answered no client", sv.ws.ID)
+		}
 		if installErr := s.deps.Adopted(ctx, sv.ws.ID, sv.client); installErr != nil {
 			log.Error("daemon.boot.adopt", "an adopted shim could not be installed", dlog.Context{
 				"workspace_id": string(sv.ws.ID),
@@ -314,8 +344,17 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 		}
 		log.Debug("daemon.boot.adopt", "a surviving shim was adopted", dlog.Context{
 			"workspace_id": string(sv.ws.ID),
+			"inert":        sv.inert,
 		})
 		report.Adopted = append(report.Adopted, sv.ws.ID)
+		if sv.inert {
+			report.AdoptedInert = append(report.AdoptedInert, sv.ws.ID)
+			continue
+		}
+		report.AdoptedSessions = append(report.AdoptedSessions, rollout.AdoptedSession{
+			Workspace: sv.ws.ID,
+			ShimPID:   sv.client.PID(),
+		})
 	}
 	return clientless, nil
 }
@@ -343,7 +382,7 @@ func (s *sequence) dialSurvivors(ctx context.Context, survivors []*survivor) {
 // dispositions as faults; PRESERVED, ROLLED, DIED and UNKNOWN are never
 // collapsed, because WHICH sessions silently died is the whole point.
 func (s *sequence) reconcileManifest(ctx context.Context, log dlog.Logger, report *Report) error {
-	dispositions, err := s.deps.Rollout.Reconcile(ctx, report.Adopted)
+	dispositions, err := s.deps.Rollout.Reconcile(ctx, report.AdoptedSessions)
 	if err != nil {
 		log.Error("daemon.boot.reconcile", "the intent manifest could not be reconciled", dlog.Context{
 			"error": err.Error(),

@@ -200,7 +200,7 @@ func TestNoManifestWithASurvivingSessionAnswersBounceUnknown(t *testing.T) {
 	ws, _ := h.workspace(t)
 
 	// Act
-	got, err := h.c.Reconcile(context.Background(), []ids.WorkspaceID{ws})
+	got, err := h.c.Reconcile(context.Background(), []AdoptedSession{{Workspace: ws, ShimPID: 4242}})
 
 	// Assert
 	if err != nil {
@@ -217,7 +217,7 @@ func TestNoManifestWithASurvivingSessionLeavesAnOpenFault(t *testing.T) {
 	ws, _ := h.workspace(t)
 
 	// Act
-	if _, err := h.c.Reconcile(context.Background(), []ids.WorkspaceID{ws}); err != nil {
+	if _, err := h.c.Reconcile(context.Background(), []AdoptedSession{{Workspace: ws, ShimPID: 4242}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceUnknown})
@@ -228,6 +228,30 @@ func TestNoManifestWithASurvivingSessionLeavesAnOpenFault(t *testing.T) {
 	}
 	if len(open) != 1 {
 		t.Fatalf("open faults = %+v, want one bounce_unknown: an unaccounted session is surfaced per workspace", open)
+	}
+}
+
+// TestNoManifestFaultNamesTheSurvivingShimPID pins that the unaccounted
+// session's record says WHICH process survived. It recorded `shim_pid: 0` —
+// the zero value of an empty manifest entry, not a reading of anything — for
+// the one case where a process demonstrably answered the boot's dial.
+func TestNoManifestFaultNamesTheSurvivingShimPID(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if _, err := h.c.Reconcile(context.Background(), []AdoptedSession{{Workspace: ws, ShimPID: 4242}}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceUnknown})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(open) != 1 || open[0].Evidence["shim_pid"] != "4242" {
+		t.Fatalf("open faults = %+v, want one naming shim_pid 4242", open)
 	}
 }
 
