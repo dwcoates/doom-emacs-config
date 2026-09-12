@@ -43,7 +43,18 @@ audit found, which are the work.
   (the realtest remediation bar). An unavailable sink does not block readable
   peers; other modes summarize those findings on stderr. The reader exits
   nonzero when none of the selected sinks can be read.
-  `scripts/agent-repl-log-discovery.sh` is what it grows from.
+  `scripts/agent-repl-log-discovery.sh` is what it grows from. Reading logs is
+  expensive: `--tally`, `--sample`, `--fields`, and `--timeline` are compact
+  query modes for the questions that recur (what happened and how often, one
+  representative record per operation, a window's timeline, the full message
+  and context for one operation) instead of dumping and post-processing raw
+  records — see AGENTS.md "Logs" → "Querying compactly" for the canonical
+  recipes and `bin/logs.sh --help` for the flags. `--json` stays the escape
+  hatch for raw JSONL, not the default. The two non-JSONL sources a run can
+  carry — a service's `.err.log` stderr and a captured Emacs `*Messages*`
+  snapshot passed with `--messages` — are queryable the same compact way; the
+  reader synthesizes their `operation`/`runtime`/`level` fields rather than
+  requiring a separate look.
 5. Rotation everywhere: size cap with N generations (`agentrepl/logging`'s
    `OpenRotating`); never truncate-and-lose, never poison.
 6. Codified: the module's AGENTS.md carries the layout, every log path, the
