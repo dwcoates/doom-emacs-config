@@ -54,6 +54,12 @@ type DB struct {
 	// at warn. Non-positive disables the reporting entirely, which only an
 	// explicit Options caller can ask for.
 	slowQuery time.Duration
+	// bulkBase and bulkPerRow size the write_batch bulk budget: a healthy bulk
+	// write is bounded by bulkBase + bulkPerRow*rows rather than the fixed
+	// interactive threshold, so a large-but-healthy batch on a large database
+	// does not warn while a pathological per-row cost still does.
+	bulkBase   time.Duration
+	bulkPerRow time.Duration
 	// now is the clock every written timestamp is taken from. Injectable so a
 	// test can assert an exact instant without sleeping for one.
 	now func() int64
@@ -63,6 +69,12 @@ type DB struct {
 type Options struct {
 	// SlowQuery is the slow-query threshold; non-positive disables reporting.
 	SlowQuery time.Duration
+	// BulkBase and BulkPerRow size the write_batch bulk budget (base plus a
+	// per-row budget). Zero values fall back to the shipped defaults, so an
+	// Options caller that only cares about SlowQuery still gets a sane bulk
+	// budget rather than a zero one that would flag every bulk write.
+	BulkBase   time.Duration
+	BulkPerRow time.Duration
 	// Now overrides the wall clock. Zero value means time.Now.
 	Now func() int64
 }
@@ -83,7 +95,15 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 		}
 		return nil, err
 	}
-	return OpenWithOptions(path, log, Options{SlowQuery: slowQuery})
+	bulkBase, bulkPerRow, err := BulkBudgetFromEnv()
+	if err != nil {
+		if log != nil {
+			log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
+				"bulk write budget rejected: %v", err)
+		}
+		return nil, err
+	}
+	return OpenWithOptions(path, log, Options{SlowQuery: slowQuery, BulkBase: bulkBase, BulkPerRow: bulkPerRow})
 }
 
 // OpenWithOptions is Open with the knobs supplied rather than read from the
@@ -194,7 +214,8 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 // and the post-nuke attempt take.
 func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, error) {
 	log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path},
-		"SQLite database ready schema_version=%d slow_query_threshold_ms=%d", SchemaVersion, opts.SlowQuery.Milliseconds())
+		"SQLite database ready schema_version=%d slow_query_threshold_ms=%d bulk_base_ms=%d bulk_per_row_ms=%d",
+		SchemaVersion, opts.SlowQuery.Milliseconds(), d.bulkBase.Milliseconds(), d.bulkPerRow.Milliseconds())
 	return d, nil
 }
 
@@ -209,7 +230,15 @@ func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() in
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, storagef(err, "pinging %q", path)
 	}
-	d := &DB{sql: sqldb, log: log, slowQuery: opts.SlowQuery, now: clock}
+	bulkBase := opts.BulkBase
+	if bulkBase == 0 {
+		bulkBase = DefaultBulkBase
+	}
+	bulkPerRow := opts.BulkPerRow
+	if bulkPerRow == 0 {
+		bulkPerRow = DefaultBulkPerRow
+	}
+	d := &DB{sql: sqldb, log: log, slowQuery: opts.SlowQuery, bulkBase: bulkBase, bulkPerRow: bulkPerRow, now: clock}
 	if err := d.ensureSchema(context.Background(), path); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, err

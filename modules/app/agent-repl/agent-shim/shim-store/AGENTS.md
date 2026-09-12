@@ -443,14 +443,25 @@ arms are derived from, and each one is logged once with `refusal_site`.
   `level=debug`, `verbosity=verbose`. Service lifecycle edges are `info`;
   invariant violations and refusals are `warn`; owned failures are `error`.
   Slow queries are the
-  one deliberate exception: a statement past
-  `AGENT_REPL_STORE_SLOW_QUERY_MS` (default 250ms) emits a normal-verbosity
+  one deliberate exception: a statement past its budget emits a normal-verbosity
   `warn` at `store.db.slow-query` with `statement`, `duration_ms`, `rows` and
   `threshold_ms`, because by the time an operator knows to look the stall is
-  over. `statement` is a FAMILY NAME, never rendered SQL and never bound
+  over. The budget is NOT one fixed number. A point query's budget is the fixed
+  `AGENT_REPL_STORE_SLOW_QUERY_MS` (default 250ms). A `write_batch` is bulk
+  background I/O, not a point query — every write-path statement is fully
+  indexed (`MAX(write_seq)` is a covering-index seek; the `write_id` and
+  `upsert_key` probes and the upsert's conflict target ride unique indexes), so
+  a slow batch is index-maintenance and WAL I/O scaling with the row count, not
+  a query defect. Its budget is therefore `AGENT_REPL_STORE_BULK_BASE_MS`
+  (default 250ms) plus `AGENT_REPL_STORE_BULK_PER_ROW_MS` (default 5ms) per row,
+  floored at the interactive threshold, so a healthy large batch on a large
+  database does not warn while a pathological per-row cost (a reintroduced scan,
+  a lost index) still does; `threshold_ms` on the record is the budget actually
+  applied. `statement` is a FAMILY NAME, never rendered SQL and never bound
   values — the payloads are opaque to the store, and quoting a parameterized
   statement would put session content into the global log. A malformed
-  threshold aborts `db.Open`.
+  threshold or bulk-budget value aborts `db.Open`; a zero base is allowed
+  (budget purely per row), but a non-positive per-row budget is refused.
 
 Read store records and harvest run windows through `../../bin/logs.sh`; the
 full path, rotation, attribution, and level-switch table is in
