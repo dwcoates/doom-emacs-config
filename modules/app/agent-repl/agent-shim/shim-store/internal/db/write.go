@@ -155,12 +155,17 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			// A LEGACY BOOK-CONFLICT IS A SKIP, NOT A BATCH-FATAL REFUSAL. The
 			// stored row is kept, this entry lands nothing (no upsert, no ledger
 			// row, so a later replay skips it again — idempotent), and the
-			// batch's other entries still commit. The warn keeps the skip
-			// visible; it does not abort the transaction.
+			// batch's other entries still commit.
+			//
+			// THE STORE LOGS THE PER-ENTRY SKIP AT DEBUG. A skip is a benign
+			// idempotency outcome the store cannot contextualize; it still
+			// RETURNS the skipped entry in result.Skipped so the sidecar — which
+			// knows the ingest context — summarizes and decides. Left at warn,
+			// re-ingesting the corpus emitted one warn per already-stored entry
+			// and flooded a cold re-scan's strict harvest. The skip is still
+			// reported to the caller; only the store's own severity drops.
 			result.Skipped = append(result.Skipped, *skip)
-			warn := fields
-			warn.Level = "warn"
-			d.log.Log(warn, "entry skipped: upsert_key already names a row under book %q; the stored row is kept and this entry (book %q) is not applied — re-ingesting already-stored content is idempotent entries_index=%d",
+			d.log.LogVerbose(fields, "entry skipped: upsert_key already names a row under book %q; the stored row is kept and this entry (book %q) is not applied — re-ingesting already-stored content is idempotent entries_index=%d",
 				skip.FromBook, skip.ToBook, i)
 			continue
 		}
