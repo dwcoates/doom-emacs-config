@@ -17,7 +17,7 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 )
 
-func TestAnUpsertMovingARowToAnotherBookIsRefused(t *testing.T) {
+func TestAnUpsertMovingARowToAnotherBookIsSkipped(t *testing.T) {
 	// Arrange
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
@@ -26,15 +26,20 @@ func TestAnUpsertMovingARowToAnotherBookIsRefused(t *testing.T) {
 	shim.write(ctx, t, shim.agentEntry("w-id-1", "u-id",
 		frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))))
 
-	// Act
-	failure := shim.writeExpectingFailure(ctx, t, nil, shim.agentEntry("w-id-2", "u-id",
+	// Act: a corrected re-ingest claims the same key under a different book.
+	skipped := shim.writeExpectingSkips(ctx, t, nil, shim.agentEntry("w-id-2", "u-id",
 		frameLine(agentID("other"), responseFrame("other", "act-1", "moved"))))
 
-	// Assert
-	assertWriteInvalidRequest(t, failure, "entries[0].agent_update.serveable_frame.page_agent_id")
+	// Assert: the batch succeeded and named the skip rather than refusing it.
+	if len(skipped) != 1 {
+		t.Fatalf("skipped = %d, want 1", len(skipped))
+	}
+	if got := skipped[0]; got.GetUpsertKey() != "u-id" || got.GetFromBook() != "main" || got.GetToBook() != "other" {
+		t.Fatalf("skipped[0] = {%s %s %s}, want {u-id main other}", got.GetUpsertKey(), got.GetFromBook(), got.GetToBook())
+	}
 }
 
-func TestARefusedIdentityChangeLeavesTheOriginalLineServed(t *testing.T) {
+func TestASkippedIdentityChangeLeavesTheOriginalLineServed(t *testing.T) {
 	// Arrange
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
@@ -44,8 +49,8 @@ func TestARefusedIdentityChangeLeavesTheOriginalLineServed(t *testing.T) {
 	shim.write(ctx, t, shim.agentEntry("w-id-1", "u-id",
 		frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))))
 
-	// Act
-	shim.writeExpectingFailure(ctx, t, nil, shim.agentEntry("w-id-2", "u-id",
+	// Act: the book-move entry is skipped, not refused, and commits nothing.
+	shim.writeExpectingSkips(ctx, t, nil, shim.agentEntry("w-id-2", "u-id",
 		frameLine(agentID("other"), responseFrame("other", "act-1", "moved"))))
 
 	// Assert
