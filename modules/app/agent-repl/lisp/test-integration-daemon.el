@@ -96,6 +96,22 @@ within one directory is atomic."
   "Return non-nil when the stub NAME recorded a run in DIR."
   (file-exists-p (expand-file-name name dir)))
 
+(defmacro agent-repl-itest-daemon--with-claim-probe (daemon &rest body)
+  "Run BODY with the boot-claim probe answering for DAEMON\='s own process.
+
+THE FAKE DAEMON TAKES NO REAL BOOT CLAIM -- it is not the daemon binary
+and never touches `daemon.lock\=' -- so the probe cannot be run for real
+against it.  What the claim MEANS is modelled exactly: the real daemon
+holds it for the lifetime of its process and the kernel frees it when
+that process ends, so the fake\='s own process liveness is the answer."
+  (declare (indent 1) (debug (symbolp body)))
+  `(cl-letf (((symbol-function 'agent-repl--frontend-probe-boot-claim)
+              (lambda (_binary _state-dir)
+                (if (process-live-p (agent-repl-itest-daemon-process ,daemon))
+                    agent-repl-daemon--claim-held-status
+                  agent-repl-daemon--claim-free-status))))
+     ,@body))
+
 (defun agent-repl-itest-daemon--take-departure-tick ()
   "Cancel the scheduled departure tick without discarding its state.
 The test can then call `agent-repl-daemon--departure-tick' at the exact
@@ -791,45 +807,49 @@ answered would simply re-adopt the daemon it just asked to leave, and no
 fresh build would ever happen."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest--with-cold-start
-      (agent-repl-itest-daemon--with-stubs boot-dir
-        (let* ((build (agent-repl-itest-daemon--write-script
-                       (expand-file-name "build.sh" boot-dir)
-                       (format "touch %sbuild-ran" boot-dir)))
-               (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir)
-                       (format "touch %sstart-ran" boot-dir)))
-               (agent-repl-daemon-build-script build)
-               (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 2.0)
-               (agent-repl-link-up-functions nil)
-               (agent-repl-link-no-daemon-functions nil))
-          ;; The link must be standing: the stop goes out on the primary,
-          ;; and the restart sequences everything else on its ack.
-          (agent-repl-daemon-ensure)
-          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
-                                        nil "the link to come up")
-          ;; Act.
-          (agent-repl-frontend-daemon-restart)
-          (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
-          ;; The daemon does what it was asked: it exits and removes
-          ;; `daemon.addr', which is the state a fresh ensure must see.
-          ;; The fake honours the ask on its own control endpoint -- it has
-          ;; no shutdown scheduler of its own to run down.
-          (agent-repl-itest--exit daemon)
-          (agent-repl-itest--wait-until
-           (lambda () (null (agent-repl-itest--read-addr-file
-                             (agent-repl-itest-daemon-state-dir daemon))))
-           nil "the stopped daemon to remove daemon.addr")
-          ;; Assert: the ensure half of the restart built and started one.
-          (agent-repl-itest--wait-until
-           (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-           3 "the restart's own ensure to run the build script")
-          (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-          (agent-repl-itest--wait-until
-           (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
-           3 "the restart's own ensure to start a daemon")
-          (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))
+    (agent-repl-itest-daemon--with-claim-probe daemon
+      (agent-repl-itest--with-cold-start
+	(agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+			 (expand-file-name "build.sh" boot-dir)
+			 (format "touch %sbuild-ran" boot-dir)))
+		 (start (agent-repl-itest-daemon--write-script
+			 (expand-file-name "start.sh" boot-dir)
+			 (format "touch %sstart-ran" boot-dir)))
+		 (agent-repl-daemon-build-script build)
+		 (agent-repl-daemon-command (list start))
+		 (agent-repl-daemon-boot-timeout-seconds 2.0)
+		 (agent-repl-link-up-functions nil)
+		 (agent-repl-link-no-daemon-functions nil))
+            ;; The link must be standing: the stop goes out on the primary,
+            ;; and the restart sequences everything else on its ack.
+            (agent-repl-daemon-ensure)
+            (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                          nil "the link to come up")
+            ;; Act.
+            (agent-repl-frontend-daemon-restart)
+            (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+            ;; The daemon does what it was asked: it exits, which releases the
+            ;; boot claim -- the state a fresh ensure must see.
+            ;; The fake honours the ask on its own control endpoint -- it has
+            ;; no shutdown scheduler of its own to run down.
+            (agent-repl-itest--exit daemon)
+            ;; THE PROCESS ENDING IS THE DEPARTURE, not the address going away:
+            ;; the daemon withdraws `daemon.addr' at the START of its shutdown
+            ;; and holds the boot claim until its process ends.
+            (agent-repl-itest--wait-until
+             (lambda () (not (process-live-p
+                              (agent-repl-itest-daemon-process daemon))))
+             nil "the stopped daemon's process to end")
+            ;; Assert: the ensure half of the restart built and started one.
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+             3 "the restart's own ensure to run the build script")
+            (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+             3 "the restart's own ensure to start a daemon")
+            (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))))))))
 
 ;; audit-2 #42
 (ert-deftest agent-repl-itest-daemon-no-daemon-hook-is-globally-registered ()
@@ -874,106 +894,108 @@ directly — so the registration itself is unpinned everywhere else.  Here
 ;; audit-3 #12
 (ert-deftest agent-repl-itest-daemon-restart-awaits-departure-before-ensuring ()
   "The restart's departure wait is a GATE, not a race with the ack.
-R-RED-MISC: \"stop ack -> teardown -> await daemon.addr removal -> ensure\".
+R-RED-MISC: \"stop ack -> teardown -> await the departure -> ensure\".
 One departure tick while the fake still answers must show no re-probe and
 no ensure at all -- only the tick after it actually exits may run the
 build-and-start half of the restart."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest--with-cold-start
-      (agent-repl-itest-daemon--with-stubs boot-dir
-        (let* ((build (agent-repl-itest-daemon--write-script
-                       (expand-file-name "build.sh" boot-dir)
-                       (format "touch %sbuild-ran" boot-dir)))
-               (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir)
-                       (format "touch %sstart-ran" boot-dir)))
-               (agent-repl-daemon-build-script build)
-               (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 5.0)
-               (agent-repl-link-up-functions nil)
-               (agent-repl-link-no-daemon-functions nil))
-          (agent-repl-daemon-ensure)
-          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
-                                        nil "the link to come up")
-          (let ((health-calls-before (length (agent-repl-itest--calls daemon "DaemonHealth"))))
-            ;; Act: restart, but the fake is left running past its ack.
-            (agent-repl-frontend-daemon-restart)
-            (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
-            (agent-repl-itest--await-log daemon "elisp.daemon.departure-waiting")
-            ;; Assert: drive a complete pre-deadline poll while the fake is
-            ;; still alive.  The timeout behavior has its own test below; this
-            ;; subject fixes the deadline in the future so a host suspend
-            ;; cannot select that other branch between two assertions.
-            (setq agent-repl-daemon--departure-deadline most-positive-fixnum)
-            (agent-repl-itest-daemon--take-departure-tick)
-            (agent-repl-daemon--departure-tick)
-            (should agent-repl-daemon--departure-timer)
-            (should (= health-calls-before (length (agent-repl-itest--calls daemon "DaemonHealth"))))
-            (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-            (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
-            ;; Act: only now does the fake actually leave.
-            (agent-repl-itest-daemon--take-departure-tick)
-            (agent-repl-itest--exit daemon)
-            (agent-repl-itest--wait-until
-             (lambda () (null (agent-repl-itest--read-addr-file
-                               (agent-repl-itest-daemon-state-dir daemon))))
-             nil "the stopped daemon to remove daemon.addr")
-            ;; Assert: the ensure half proceeds once the address is gone.
-            (agent-repl-daemon--departure-tick)
-            (agent-repl-itest--wait-until
-             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-             3 "the restart's own ensure to run the build script")
-            (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-            (agent-repl-itest--wait-until
-             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
-             3 "the restart's own ensure to start a daemon")
-            (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))))))))
+    (agent-repl-itest-daemon--with-claim-probe daemon
+      (agent-repl-itest--with-cold-start
+	(agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+			 (expand-file-name "build.sh" boot-dir)
+			 (format "touch %sbuild-ran" boot-dir)))
+		 (start (agent-repl-itest-daemon--write-script
+			 (expand-file-name "start.sh" boot-dir)
+			 (format "touch %sstart-ran" boot-dir)))
+		 (agent-repl-daemon-build-script build)
+		 (agent-repl-daemon-command (list start))
+		 (agent-repl-daemon-boot-timeout-seconds 5.0)
+		 (agent-repl-link-up-functions nil)
+		 (agent-repl-link-no-daemon-functions nil))
+            (agent-repl-daemon-ensure)
+            (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                          nil "the link to come up")
+            (let ((health-calls-before (length (agent-repl-itest--calls daemon "DaemonHealth"))))
+              ;; Act: restart, but the fake is left running past its ack.
+              (agent-repl-frontend-daemon-restart)
+              (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+              (agent-repl-itest--await-log daemon "elisp.daemon.departure-waiting")
+              ;; Assert: drive a complete pre-deadline poll while the fake is
+              ;; still alive.  The timeout behavior has its own test below; this
+              ;; subject fixes the deadline in the future so a host suspend
+              ;; cannot select that other branch between two assertions.
+              (setq agent-repl-daemon--departure-deadline most-positive-fixnum)
+              (agent-repl-itest-daemon--take-departure-tick)
+              (agent-repl-daemon--departure-tick)
+              (should agent-repl-daemon--departure-timer)
+              (should (= health-calls-before (length (agent-repl-itest--calls daemon "DaemonHealth"))))
+              (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+              (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+              ;; Act: only now does the fake actually leave.
+              (agent-repl-itest-daemon--take-departure-tick)
+              (agent-repl-itest--exit daemon)
+              (agent-repl-itest--wait-until
+               (lambda () (not (process-live-p
+				(agent-repl-itest-daemon-process daemon))))
+               nil "the stopped daemon's process to end")
+              ;; Assert: the ensure half proceeds once the claim comes free.
+              (agent-repl-daemon--departure-tick)
+              (agent-repl-itest--wait-until
+               (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+               3 "the restart's own ensure to run the build script")
+              (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+              (agent-repl-itest--wait-until
+               (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+               3 "the restart's own ensure to start a daemon")
+              (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))))
 
 ;; audit-3 #12
 (ert-deftest agent-repl-itest-daemon-restart-departure-timeout-aborts-with-the-still-live-daemon ()
   "A departure wait that times out aborts without adopting the old daemon.
 `agent-repl-daemon-boot-timeout-seconds' doubles as the departure-wait
-deadline (cross-suite note); a daemon that never removes `daemon.addr'
+deadline (cross-suite note); a daemon that still holds the boot claim
 inside it is not gone, so the restart must remain failed rather than
 re-linking to the same process and reporting success."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest--with-cold-start
-      (agent-repl-itest-daemon--with-stubs boot-dir
-        (let* ((build (agent-repl-itest-daemon--write-script
-                       (expand-file-name "build.sh" boot-dir)
-                       (format "touch %sbuild-ran" boot-dir)))
-               (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir)
-                       (format "touch %sstart-ran" boot-dir)))
-               (agent-repl-daemon-build-script build)
-               (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 0.5)
-               (agent-repl-link-up-functions nil)
-               (agent-repl-link-no-daemon-functions nil)
-               (messages nil))
-          (agent-repl-daemon-ensure)
-          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
-                                        nil "the link to come up")
-          ;; Act: restart, but the fake is NEVER asked to exit -- it answers
-          ;; the stop and simply keeps running, exactly like a departure
-          ;; that never actually completes.
-          (cl-letf (((symbol-function 'message)
-                     (lambda (fmt &rest args)
-                       (push (if args (apply #'format fmt args) fmt) messages)
-                       nil)))
-            (agent-repl-frontend-daemon-restart)
-            (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
-            ;; Assert: the wait gives up and preserves a failed restart.
-            (agent-repl-itest--await-log daemon "elisp.daemon.departure-timeout" "warn")
-            (agent-repl-itest--await-log daemon "elisp.daemon.restart-abandoned" "error")
-            (should (member "agent-repl: not restarted: the accepted daemon stop never completed"
-                            messages)))
-          (should-not (agent-repl-link-up-p))
-          (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
-          (should (process-live-p (agent-repl-itest-daemon-process daemon))))))))
+    (agent-repl-itest-daemon--with-claim-probe daemon
+      (agent-repl-itest--with-cold-start
+	(agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+			 (expand-file-name "build.sh" boot-dir)
+			 (format "touch %sbuild-ran" boot-dir)))
+		 (start (agent-repl-itest-daemon--write-script
+			 (expand-file-name "start.sh" boot-dir)
+			 (format "touch %sstart-ran" boot-dir)))
+		 (agent-repl-daemon-build-script build)
+		 (agent-repl-daemon-command (list start))
+		 (agent-repl-daemon-boot-timeout-seconds 0.5)
+		 (agent-repl-link-up-functions nil)
+		 (agent-repl-link-no-daemon-functions nil)
+		 (messages nil))
+            (agent-repl-daemon-ensure)
+            (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                          nil "the link to come up")
+            ;; Act: restart, but the fake is NEVER asked to exit -- it answers
+            ;; the stop and simply keeps running, exactly like a departure
+            ;; that never actually completes.
+            (cl-letf (((symbol-function 'message)
+                       (lambda (fmt &rest args)
+			 (push (if args (apply #'format fmt args) fmt) messages)
+			 nil)))
+              (agent-repl-frontend-daemon-restart)
+              (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+              ;; Assert: the wait gives up and preserves a failed restart.
+              (agent-repl-itest--await-log daemon "elisp.daemon.departure-timeout" "warn")
+              (agent-repl-itest--await-log daemon "elisp.daemon.restart-abandoned" "error")
+              (should (member "agent-repl: not restarted: the accepted daemon stop never completed"
+                              messages)))
+            (should-not (agent-repl-link-up-p))
+            (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+            (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+            (should (process-live-p (agent-repl-itest-daemon-process daemon)))))))))
 
 ;; audit-3 #13
 (ert-deftest agent-repl-itest-daemon-restart-abandoned-on-stop-refusal ()

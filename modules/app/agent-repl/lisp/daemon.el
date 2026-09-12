@@ -469,6 +469,16 @@ ENVIRONMENT is a complete `process-environment' value, which is how
   "External-boundary wrapper: return non-nil when artifact PATH exists."
   (file-exists-p path)) ; ALLOW-EXTERNAL-BOUNDARY
 
+(defun agent-repl--frontend-probe-boot-claim (binary state-dir)
+  "External-boundary wrapper: ask BINARY whether STATE-DIR\='s boot claim is held.
+Returns whatever `call-process\=' returns: the daemon\='s integer exit status,
+or the signal that ended it.  The daemon answers
+`agent-repl-daemon--claim-free-status\=' for a free claim,
+`agent-repl-daemon--claim-held-status\=' for a held one, and anything else
+for a claim it could not decide."
+  (call-process binary nil nil nil ;; ALLOW-EXTERNAL-BOUNDARY
+                "-probe-boot-claim" "-state-dir" state-dir))
+
 (defun agent-repl--frontend-run-log-tail ()
   "External-boundary wrapper: the last non-blank line of `daemon.run.log\='.
 Returns a DESCRIPTION when there is no line to return — an unreadable or
@@ -1174,13 +1184,55 @@ dependence on the scheduler and no sleep anywhere."
         agent-repl-daemon--departure-deadline nil
         agent-repl-daemon--departure-continuation nil))
 
+(defconst agent-repl-daemon--claim-free-status 0
+  "The probe\='s exit status for a boot claim NOBODY holds.
+Mirrors the daemon\='s own `exitSuccess\='.")
+
+(defconst agent-repl-daemon--claim-held-status 3
+  "The probe\='s exit status for a boot claim a live process holds.
+Mirrors the daemon\='s own `exitClaimLost\='.")
+
+(defun agent-repl-daemon--boot-claim-state ()
+  "Return `free\=', `held\=' or `undecided\=' for this state root\='s boot claim.
+
+THE BOOT CLAIM IS WHAT \"THE PREVIOUS DAEMON IS GONE\" MEANS.  The daemon
+withdraws `daemon.addr\=' at the START of its shutdown so a client
+forwarding during shutdown finds no address; the claim -- an exclusive
+kernel lock on `daemon.lock\=' -- is released only when the process
+actually ends.  So the address file going away says nothing about
+whether a daemon is still there, and only the claim does.
+
+AN UNDECIDABLE CLAIM IS NOT A FREE ONE.  A probe that could not run, or
+that answered anything the daemon does not define, is reported as
+`undecided\=' and WARNED about; a caller that treated it as departure
+would be doing exactly what this function exists to prevent."
+  (let* ((binary (car agent-repl-daemon-command))
+         (state-dir (directory-file-name (agent-repl--global-state-dir)))
+         (outcome (condition-case err
+                      (cons :status
+                            (agent-repl--frontend-probe-boot-claim binary state-dir))
+                    (error (cons :error err))))
+         (status (and (eq (car outcome) :status) (cdr outcome))))
+    (cond
+     ((eql status agent-repl-daemon--claim-free-status) 'free)
+     ((eql status agent-repl-daemon--claim-held-status) 'held)
+     (t
+      (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.claim-probe-undecided outcome=%S binary=%S state-dir=%S"
+                        outcome binary state-dir)
+      'undecided))))
+
 (defun agent-repl-daemon--await-departure (on-gone)
-  "Poll until the stopped daemon removes `daemon.addr', then call ON-GONE.
-ON-GONE receives non-nil when the file went away and nil when the wait
-timed out with it still there.  A TIMER poll, never a sleep, and the
-mirror image of `agent-repl-daemon--await-address': a daemon asked to
-shut down removes its address as the last thing it does, so the file's
-disappearance IS its departure."
+  "Poll until the stopped daemon releases the BOOT CLAIM, then call ON-GONE.
+ON-GONE receives non-nil when the claim came free and nil when the wait
+timed out with it still held or undecidable.  A TIMER poll, never a
+sleep, and the mirror image of `agent-repl-daemon--await-address\='.
+
+IT IS THE CLAIM, NOT `daemon.addr\=', THAT SAYS THE DAEMON IS GONE.  The
+address is withdrawn at the start of the daemon\='s shutdown and the claim
+is held until its process ends, so a wait keyed on the address reported
+departure into a window where the outgoing daemon was still holding the
+claim -- and the replacement Emacs then spawned lost the claim to it and
+exited, leaving no daemon at all (2026-09-12)."
   (agent-repl-daemon--cancel-departure-wait)
   (setq agent-repl-daemon--departure-deadline
         (+ (float-time) agent-repl-daemon-boot-timeout-seconds)
@@ -1188,11 +1240,16 @@ disappearance IS its departure."
   (agent-repl-daemon--departure-tick))
 
 (defun agent-repl-daemon--departure-tick ()
-  "One poll of the departure wait: the timer's whole body.
+  "One poll of the departure wait: the timer\='s whole body.
 Named and argument-free so a test drives the wait by calling it, with no
-dependence on the scheduler and no sleep anywhere."
+dependence on the scheduler and no sleep anywhere.
+
+The DECISION is the boot claim; the address is carried alongside it as
+diagnosis only, so a timeout still names the address the departing
+daemon left standing."
   (setq agent-repl-daemon--departure-timer nil)
-  (let ((address (condition-case err
+  (let ((claim (agent-repl-daemon--boot-claim-state))
+        (address (condition-case err
                      (agent-repl-connect-read-daemon-addr)
                    (error
                     (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departure-addr-unreadable error=%S" err)
@@ -1200,19 +1257,19 @@ dependence on the scheduler and no sleep anywhere."
         (on-gone agent-repl-daemon--departure-continuation)
         (deadline (or agent-repl-daemon--departure-deadline 0)))
     (cond
-     ((null address)
-      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departed")
+     ((eq claim 'free)
+      (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departed address=%S" address)
       (agent-repl-daemon--cancel-departure-wait)
       (when on-gone (funcall on-gone t)))
      ((>= (float-time) deadline)
-      (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departure-timeout seconds=%.1f address=%S file=%S"
-                        agent-repl-daemon-boot-timeout-seconds address
+      (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departure-timeout seconds=%.1f claim=%S address=%S file=%S"
+                        agent-repl-daemon-boot-timeout-seconds claim address
                         (agent-repl-connect-daemon-addr-file))
       (agent-repl-daemon--cancel-departure-wait)
       (when on-gone (funcall on-gone nil)))
      (t
-      (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departure-waiting address=%S remaining=%.3f"
-                       address (- deadline (float-time)))
+      (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.departure-waiting claim=%S address=%S remaining=%.3f"
+                       claim address (- deadline (float-time)))
       (setq agent-repl-daemon--departure-timer
             (run-with-timer agent-repl-daemon-boot-poll-interval-seconds nil
                             #'agent-repl-daemon--departure-tick))))))

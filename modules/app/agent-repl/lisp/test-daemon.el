@@ -57,6 +57,25 @@
 (defvar agent-repl-test-daemon--existing-paths nil
   "Paths the stubbed artifact probe reports as present; t means every path.")
 
+(defvar agent-repl-test-daemon--boot-claim 'held
+  "What the stubbed boot-claim probe reports.
+`free\=', `held\=' or `undecided\=' name the daemon\='s three exit statuses; an
+integer is that exit status verbatim, and `error\=' makes the probe itself
+signal, which is a binary that could not be run at all.  The default is
+`held\=', because the harness\='s default world has a daemon serving.")
+
+(defvar agent-repl-test-daemon--boot-claim-probes nil
+  "Boot-claim probes, newest first: `(BINARY . STATE-DIR)\='.")
+
+(defun agent-repl-test-daemon--claim-status ()
+  "The exit status the stubbed boot-claim probe answers."
+  (pcase agent-repl-test-daemon--boot-claim
+    ('free agent-repl-daemon--claim-free-status)
+    ('held agent-repl-daemon--claim-held-status)
+    ('undecided 2)
+    ((and (pred integerp) status) status)
+    (other (error "Unknown stubbed boot-claim answer %S" other))))
+
 (defvar agent-repl-test-daemon--health-answer nil
   "What the stubbed DaemonHealth answers; see `agent-repl-test-daemon--answer'.")
 
@@ -136,6 +155,8 @@ a scenario names which pids are alive rather than depending on the host.")
          (agent-repl-test-daemon--idle-timers nil)
          (agent-repl-test-daemon--spawns nil)
          (agent-repl-test-daemon--existing-paths t)
+         (agent-repl-test-daemon--boot-claim 'held)
+         (agent-repl-test-daemon--boot-claim-probes nil)
          (agent-repl-test-daemon--health-answer
           (list :response (list :arm :success
                                 :value (list :arm :healthy :value nil))))
@@ -220,6 +241,13 @@ a scenario names which pids are alive rather than depending on the host.")
                 (lambda (argv environment)
                   (push (cons argv environment) agent-repl-test-daemon--spawns)
                   'the-daemon-process))
+               ((symbol-function 'agent-repl--frontend-probe-boot-claim)
+                (lambda (binary state-dir)
+                  (push (cons binary state-dir)
+                        agent-repl-test-daemon--boot-claim-probes)
+                  (if (eq agent-repl-test-daemon--boot-claim 'error)
+                      (error "the boot-claim probe could not run")
+                    (agent-repl-test-daemon--claim-status))))
                ((symbol-function 'agent-repl--frontend-artifact-exists-p)
                 (lambda (path)
                   (if (eq agent-repl-test-daemon--existing-paths t)
@@ -1273,7 +1301,9 @@ the spawn, called the daemon booted, and linked to a refused port."
 (ert-deftest agent-repl-test-daemon-restart-stops-then-ensures ()
   "Restart is the stop request followed by a fresh ensure."
   (agent-repl-test-daemon--with-harness
-    ;; Arrange / Act
+    ;; Arrange: the daemon's process is already gone, so its claim is free.
+    (setq agent-repl-test-daemon--boot-claim 'free)
+    ;; Act
     (agent-repl-frontend-daemon-restart)
     ;; Assert
     (should (and agent-repl-test-daemon--shutdown-requests
@@ -1282,24 +1312,103 @@ the spawn, called the daemon booted, and linked to a refused port."
 (ert-deftest agent-repl-test-daemon-restart-does-not-ensure-while-the-daemon-is-still-there ()
   "The ensure half waits: a daemon that still answers would be RE-ADOPTED."
   (agent-repl-test-daemon--with-harness
-    ;; Arrange: the departing daemon has not removed its address yet.
-    (setq agent-repl-test-daemon--address "127.0.0.1:9999")
+    ;; Arrange: the departing daemon still holds the boot claim.
+    (setq agent-repl-test-daemon--address "127.0.0.1:9999"
+          agent-repl-test-daemon--boot-claim 'held)
     ;; Act
     (agent-repl-frontend-daemon-restart)
     ;; Assert
     (should (null agent-repl-test-daemon--build-runs))))
 
-(ert-deftest agent-repl-test-daemon-restart-ensures-once-the-address-goes-away ()
-  "The address's disappearance IS the departure, and it releases the ensure."
+(ert-deftest agent-repl-test-daemon-restart-ensures-once-the-claim-is-released ()
+  "The BOOT CLAIM's release is the departure, and it releases the ensure."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address "127.0.0.1:9999")
     (agent-repl-frontend-daemon-restart)
-    ;; Act: the daemon exits and removes `daemon.addr'.
-    (setq agent-repl-test-daemon--address nil)
+    ;; Act: the daemon's process ends, which frees the claim.
+    (setq agent-repl-test-daemon--boot-claim 'free
+          agent-repl-test-daemon--address nil)
     (agent-repl-daemon--departure-tick)
     ;; Assert
     (should agent-repl-test-daemon--build-runs)))
+
+(ert-deftest agent-repl-test-daemon-restart-waits-while-the-claim-outlives-the-address ()
+  "THE 2026-09-12 RESTART.  The daemon withdraws `daemon.addr' at the start
+of its shutdown and holds the boot claim until its process ends; a
+replacement spawned into that window loses the claim and exits, and the
+restart destroys the daemon instead of replacing it."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9999")
+    (agent-repl-frontend-daemon-restart)
+    ;; Act: the address is gone but the outgoing daemon is still holding on.
+    (setq agent-repl-test-daemon--address nil
+          agent-repl-test-daemon--boot-claim 'held)
+    (agent-repl-daemon--departure-tick)
+    ;; Assert
+    (should (null agent-repl-test-daemon--build-runs))))
+
+(ert-deftest agent-repl-test-daemon-departure-probes-the-state-root-claim ()
+  "The claim asked about is THIS Emacs's state root, named on the probe."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-frontend-daemon-restart)
+    ;; Act
+    (agent-repl-daemon--departure-tick)
+    ;; Assert
+    (should (equal (cdar agent-repl-test-daemon--boot-claim-probes)
+                   (directory-file-name (agent-repl--global-state-dir))))))
+
+(ert-deftest agent-repl-test-daemon-departure-does-not-fire-on-an-undecidable-claim ()
+  "A claim that could not be decided is NOT a free one."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-frontend-daemon-restart)
+    ;; Act
+    (setq agent-repl-test-daemon--boot-claim 'undecided)
+    (agent-repl-daemon--departure-tick)
+    ;; Assert
+    (should (null agent-repl-test-daemon--build-runs))))
+
+(ert-deftest agent-repl-test-daemon-undecidable-claim-is-warned-about ()
+  "The undecidable claim is surfaced, never silently waited out."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-frontend-daemon-restart)
+    ;; Act
+    (setq agent-repl-test-daemon--boot-claim 'undecided)
+    (agent-repl-daemon--departure-tick)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :warn "elisp.daemon.claim-probe-undecided"))))
+
+(ert-deftest agent-repl-test-daemon-unrunnable-claim-probe-is-warned-about ()
+  "A probe that could not run at all is the same answer: undecided, warned."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-frontend-daemon-restart)
+    ;; Act
+    (setq agent-repl-test-daemon--boot-claim 'error)
+    (agent-repl-daemon--departure-tick)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :warn "elisp.daemon.claim-probe-undecided"))))
+
+(ert-deftest agent-repl-test-daemon-departure-fires-on-a-free-claim-with-a-stale-address ()
+  "A daemon that died without withdrawing has still departed: the claim is
+free, and the stale address it left behind is what the boot overwrites."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9999")
+    (agent-repl-frontend-daemon-restart)
+    ;; Act
+    (setq agent-repl-test-daemon--boot-claim 'free)
+    (agent-repl-daemon--departure-tick)
+    ;; Assert: the departure fired, and what the ensure then makes of the
+    ;; stale address is the boot's business, not the departure wait's.
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.restart-ensure"))))
 
 (ert-deftest agent-repl-test-daemon-restart-abandoned-when-the-stop-is-refused ()
   "A refused stop leaves the daemon serving, so no ensure may adopt it."
