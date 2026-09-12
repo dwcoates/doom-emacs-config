@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // THE SANDBOX SEAM.
@@ -271,20 +272,8 @@ func (s *localSandbox) Available() (bool, string) {
 	// and preflight talks to Docker (tens of seconds under load), so it runs
 	// ONCE; only the per-test instruction below is composed per test.
 	hostPreflightOnce.Do(func() {
-		script := filepath.Join(repoRoot(), sandboxScriptRel)
-		if _, err := os.Stat(script); err != nil {
-			hostPreflightReason = fmt.Sprintf("%s not found: %v", sandboxScriptRel, err)
-			return
-		}
-		out, err := exec.Command(script, "preflight").CombinedOutput()
-		if err != nil {
-			// Quoted VERBATIM: preflight's message is actionable (start
-			// Docker, build the image) and paraphrasing it would throw away
-			// the only instructions the reader needs.
-			hostPreflightReason = fmt.Sprintf(
-				"the sandbox is not usable, and this layer never falls back to an unsandboxed run.\n%s",
-				strings.TrimRight(string(out), "\n"))
-		}
+		hostPreflightReason = runHostPreflight(
+			filepath.Join(repoRoot(), sandboxScriptRel), hostPreflightTimeout)
 	})
 	if hostPreflightReason != "" {
 		return false, hostPreflightReason
@@ -295,6 +284,66 @@ func (s *localSandbox) Available() (bool, string) {
 			"This layer starts a real Emacs that spawns a real daemon, so it must run INSIDE the container. Run:\n"+
 			"    %s",
 		sandboxRunCommand(s.t.Name()))
+}
+
+// hostPreflightTimeout bounds the WHOLE preflight run, so a preflight either
+// answers or is reported as not answering. It never blocks a test process.
+//
+// Observed 2026-09-12: with Docker Desktop's backend alive but its socket
+// never answering, this exec held the sync.Once above for 9m34s, every
+// TestEmacs* queued behind it, and the package died on `go test`'s 10m
+// timeout with no verdict at all.
+//
+// The derivation: preflight makes two bounded runtime calls, each capped at
+// AGENT_REPL_SANDBOX_RUNTIME_TIMEOUT_SECONDS (default 10s, itself 3x the ~3s
+// a healthy loaded `docker info` costs -- it is sub-second on an idle box,
+// and this script's own callers describe preflight as "tens of seconds under
+// load"). Two calls plus the script's own startup is 20s worst case, so 30s
+// here EXCEEDS the script's internal bound on purpose: when the script can
+// diagnose the wedge itself, its own actionable message wins, and this bound
+// is only the backstop for a script that cannot return at all.
+const hostPreflightTimeout = 30 * time.Second
+
+// runHostPreflight runs the sandbox preflight under a deadline and returns the
+// skip reason, or "" when the sandbox image is usable.
+//
+// It is a free function rather than an inlined closure so a test can drive it
+// without racing the package-level sync.Once that guards the real probe.
+func runHostPreflight(script string, bound time.Duration) string {
+	if _, err := os.Stat(script); err != nil {
+		return fmt.Sprintf("%s not found: %v", sandboxScriptRel, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, script, "preflight").CombinedOutput()
+	partial := strings.TrimRight(string(out), "\n")
+
+	if ctx.Err() != nil {
+		// The bound fired. Say so, and carry whatever partial output there
+		// was: a preflight that got as far as naming its runtime tells the
+		// reader which engine is wedged.
+		reason := fmt.Sprintf(
+			"the sandbox preflight (%s preflight) did not answer within %s, so the sandbox is "+
+				"presumed unusable and this layer never falls back to an unsandboxed run. "+
+				"The container runtime's engine is likely wedged (Docker Desktop backend alive "+
+				"but the socket unresponsive): restart Docker Desktop, then re-run.",
+			sandboxScriptRel, bound)
+		if partial != "" {
+			return reason + "\nPartial preflight output before the bound expired:\n" + partial
+		}
+		return reason + "\nThe preflight produced no output before the bound expired."
+	}
+
+	if err != nil {
+		// Quoted VERBATIM: preflight's message is actionable (start
+		// Docker, build the image) and paraphrasing it would throw away
+		// the only instructions the reader needs.
+		return fmt.Sprintf(
+			"the sandbox is not usable, and this layer never falls back to an unsandboxed run.\n%s",
+			partial)
+	}
+	return ""
 }
 
 // sandboxRunCommand spells the module-aware invocation a host-side skip hands
