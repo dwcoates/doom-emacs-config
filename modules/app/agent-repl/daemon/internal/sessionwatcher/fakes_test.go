@@ -666,6 +666,17 @@ func newHarness(t *testing.T, session Session) *harness {
 	return h
 }
 
+// newHarnessAttachingPurely starts a watcher opened with NO session facts: the
+// adopting daemon's case. NO main agent watch is opened at start — there is no
+// main agent until a session announces itself — so the caller takes only the
+// session stream, and the agent open is taken after the re-announcement.
+func newHarnessAttachingPurely(t *testing.T) *harness {
+	t.Helper()
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+	return h
+}
+
 // newHarnessRefusingAgents starts a watcher whose every WatchAgent open the
 // shim refuses, which is the fresh-bring-up race: the store has not registered
 // the main agent's book yet. The MAIN watch is therefore never opened, so the
