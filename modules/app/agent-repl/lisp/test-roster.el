@@ -101,6 +101,7 @@ whose calls are the observation."
            (agent-repl-roster--status-by-id (make-hash-table :test 'equal))
            (agent-repl-roster-finish-functions nil)
            (agent-repl-roster-update-functions nil)
+           (agent-repl-roster-bringup-functions nil)
            (agent-repl-host-last-selected-id nil)
            (agent-repl-host-reselect-pending nil))
        (cl-letf (((symbol-function 'agent-repl--ws-create)
@@ -1332,3 +1333,118 @@ user's next sidebar click."
     (let ((got (agent-repl-roster-move-tab-to-back "nope")))
       ;; Assert
       (should (and (null got) (equal agent-repl-roster--tab-order '("a" "b")))))))
+
+
+;;;; ---- The bring-up publication (a startup paints nothing) ----
+
+(defmacro agent-repl-test-roster--recording-bringup (var &rest body)
+  "Run BODY with every bring-up publication appended to VAR, oldest first."
+  (declare (indent 1))
+  `(let ((agent-repl-roster-bringup-functions
+          (list (lambda (opened total finished)
+                  (setq ,var (append ,var (list (list opened total finished))))))))
+     ,@body))
+
+(ert-deftest agent-repl-test-roster-reconcile-publishes-a-step-per-tab-opened ()
+  "One publication per tab born, counting up to the number it set out to open.
+Panels park until focus, so a cold start paints nothing and the painted
+count never moves; the tabs opening is the only bring-up there is."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let (seen)
+      (agent-repl-test-roster--recording-bringup seen
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                        (agent-repl-test-roster--row "b" "two" :ready)))))))
+      ;; Assert
+      (should (equal (seq-remove (lambda (step) (nth 2 step)) seen)
+                     '((1 2 nil) (2 2 nil)))))))
+
+(ert-deftest agent-repl-test-roster-reconcile-closes-the-pass-when-it-opened-tabs ()
+  "The pass ends with one FINISHED publication naming what actually opened."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let (seen)
+      (agent-repl-test-roster--recording-bringup seen
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)))))))
+      ;; Assert
+      (should (equal (seq-filter (lambda (step) (nth 2 step)) seen)
+                     '((1 1 t)))))))
+
+(ert-deftest agent-repl-test-roster-a-steady-state-pass-publishes-nothing ()
+  "Every row already tabbed opens nothing, so it announces no bring-up."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "repo" (list (agent-repl-test-roster--row
+                                                  "a" "one" :ready))))))
+          seen)
+      (agent-repl-roster-apply roster)
+      (agent-repl-test-roster--recording-bringup seen
+        ;; Act
+        (agent-repl-roster-apply roster))
+      ;; Assert
+      (should (null seen)))))
+
+(ert-deftest agent-repl-test-roster-a-failed-row-is-not-counted-as-opened ()
+  "A row that could not open its tab is not a workspace that came up."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let (seen)
+      (cl-letf (((symbol-function 'agent-repl--ws-create)
+                 (lambda (ws &optional dir)
+                   (when (equal ws "one") (error "no such directory"))
+                   (agent-repl--ws-put ws :project-dir (or dir "/w/x"))
+                   ws))
+                ((symbol-function 'agent-repl--error) #'ignore))
+        (agent-repl-test-roster--recording-bringup seen
+          ;; Act
+          (agent-repl-roster-apply
+           (agent-repl-test-roster--roster
+            :sections (list (agent-repl-test-roster--section
+                             "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                          (agent-repl-test-roster--row "b" "two" :ready))))))))
+      ;; Assert
+      (should (equal seen '((1 2 nil) (1 2 t)))))))
+
+(ert-deftest agent-repl-test-roster-a-signalling-bringup-handler-is-contained ()
+  "A progress display must never take down the reconciliation it reports on."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-roster-bringup-functions
+           (list (lambda (&rest _) (error "display blew up")))))
+      (cl-letf (((symbol-function 'agent-repl--warn) #'ignore))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)))))))
+      ;; Assert
+      (should (equal (agent-repl-test-roster--tabs) '("one"))))))
+
+(ert-deftest agent-repl-test-roster-a-signalling-bringup-handler-is-recorded ()
+  "The containment is a WARNING, never a swallow: the handler is named."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-roster-bringup-functions
+           (list (lambda (&rest _) (error "display blew up"))))
+          (logs nil))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)))))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-search "elisp.roster.bringup-handler-failed" text))
+                        logs)))))
