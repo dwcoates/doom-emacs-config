@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -21,6 +24,23 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID) error {
 	record, log, err := v.owned(ctx, "OpenWorkspace", ws)
 	if err != nil {
 		return err
+	}
+
+	// A WORKSPACE WHOSE DIRECTORY IS GONE CANNOT BE OPENED. Boot already
+	// CLOSES such a row (internal/boot's closeMissingDirs) precisely because a
+	// registry row whose directory no longer exists names nothing a user can
+	// work in; re-opening it would spawn a shim with no working tree and put
+	// the unopenable tab straight back. So the re-open is REFUSED by name,
+	// with the missing directory as the refusal's evidence, instead of failing
+	// as an internal error the client cannot read.
+	//
+	// A STAT THAT DOES NOT SAY "NOT EXIST" IS NEVER READ AS GONE, the same
+	// discipline boot applies: "could not tell" is not an answer, and refusing
+	// the open on it would strand a workspace that is merely unreachable this
+	// instant.
+	if _, statErr := os.Stat(record.Dir); errors.Is(statErr, fs.ErrNotExist) {
+		return refuse(log, "OpenWorkspace", ArmSpawnFailed,
+			fmt.Sprintf("the workspace's directory no longer exists: %s", record.Dir), false)
 	}
 
 	if v.deps.Sessions.Live(ws) {
