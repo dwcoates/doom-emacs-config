@@ -139,6 +139,34 @@
       ;; Assert
       (should (eq agent-repl--webview-precreate-timer 'fake-timer)))))
 
+;;;; ---- The drain's quit deferral ----
+;;
+;; The tick runs off the desktop FOCUS EDGE, which is the same instant a
+;; keypress arrives, so it is one of the likeliest places for a real `C-g' to
+;; land while Emacs is busy rather than waiting in a read.
+
+(ert-deftest agent-repl-test-wr-the-drain-defers-a-quit-that-lands-in-it ()
+  "A C-g arriving inside a tick is held for the command loop, not taken here."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (cl-letf (((symbol-function 'agent-repl--webview-precreate-tick)
+               (lambda () (setq quit-flag t))))
+      ;; Act / Assert
+      (should (agent-repl-test--quit-deferred-p
+                (agent-repl--webview-precreate-drain))))))
+
+(ert-deftest agent-repl-test-wr-the-drain-mounts-despite-a-pending-quit ()
+  "A quit already requested does not stop the tick it landed on."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha")
+      (agent-repl--webview-precreate-schedule '("alpha"))
+      ;; Act
+      (agent-repl-test--with-pending-quit
+        (agent-repl--webview-precreate-drain))
+      ;; Assert
+      (should (equal agent-repl-test-wr--mounted '("alpha"))))))
+
 (ert-deftest agent-repl-test-wr-the-drain-stops-on-an-empty-queue ()
   "The last tick arms nothing."
   ;; Arrange

@@ -1162,6 +1162,40 @@ the spawn, called the daemon booted, and linked to a refused port."
     ;; Assert
     (should (file-exists-p agent-repl-test-daemon--addr-file))))
 
+;;;; ---- The sentinel's quit deferral ----
+;;
+;; The recording is a critical section: a `C-g' between retiring
+;; `daemon.addr' and forgetting the process leaves the address file naming a
+;; dead daemon that the next cold start reads back as readiness.
+
+(ert-deftest agent-repl-test-daemon-sentinel-defers-a-quit-that-lands-in-it ()
+  "A C-g arriving inside the exit recording is held for the command loop."
+  (agent-repl-test-daemon--with-harness
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'agent-repl-daemon--record-exit)
+               (lambda (&rest _) (setq quit-flag t))))
+      ;; Act / Assert
+      (should (agent-repl-test--quit-deferred-p
+                (agent-repl-daemon--sentinel 'the-daemon-process "killed\n"))))))
+
+(ert-deftest agent-repl-test-daemon-sentinel-records-the-exit-despite-a-pending-quit ()
+  "A quit already requested does not stop the address file being retired."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (agent-repl-daemon-ensure)
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001")
+    (agent-repl-daemon--boot-tick)
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl--frontend-daemon-process 'the-daemon-process)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 1)))
+      ;; Act
+      (agent-repl-test--with-pending-quit
+        (agent-repl-daemon--sentinel 'the-daemon-process "killed\n")))
+    ;; Assert
+    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+
 ;;;; ---- Idempotence ----
 
 (ert-deftest agent-repl-test-daemon-ensure-with-a-standing-link-does-nothing ()
