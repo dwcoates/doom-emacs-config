@@ -2370,32 +2370,54 @@ Affects the FILE only.  The per-workspace log buffers follow
 ;; canonical log so a quit that looks ignored is explainable from the log
 ;; alone.
 ;;
-;; ARMING THE FLAG IS NOT THE SAME AS DELIVERING THE QUIT, and that gap is a
-;; real defect the 2026-09-12 sweep caught: a real `C-g' pressed at a standing
-;; minibuffer prompt did nothing, twice, while the harness's own
-;; `abort-minibuffers' eval cleared the same prompt at once.
+;; WHAT THIS GUARD IS FOR, AND WHAT IT IS NOT FOR.  An earlier revision of this
+;; commentary blamed the 2026-09-12 sweep's "a real `C-g' did not dismiss the
+;; prompt" finding on this deferral, on the reasoning that `handle_interrupt'
+;; throws into `read_char' when Emacs is idle and can only arm `quit-flag' when
+;; it is busy, so a quit armed inside one of this module's callbacks is taken
+;; INSIDE that callback and never reaches the standing minibuffer.  That
+;; reasoning is wrong on this platform, and reading Emacs 30.2's own source is
+;; what settles it:
 ;;
-;; The reason is Emacs's own `handle_interrupt'.  A `C-g' is never dispatched
-;; through a keymap: the event is intercepted as the quit character and, when
-;; Emacs is WAITING in `read_char', thrown straight into the read, which is
-;; what aborts a minibuffer.  When Emacs is BUSY instead — running one of this
-;; module's timers or process callbacks, which is exactly what the desktop
-;; focus edge that precedes a keypress sets off here — there is nothing to
-;; throw into, so all `handle_interrupt' does is arm `quit-flag'.  The armed
-;; flag is then taken at the next quit checkpoint, which is INSIDE the work
-;; that was running.  That work sits inside the standing minibuffer's own
-;; recursive edit, so the quit unwinds to the minibuffer's command loop rather
-;; than out of it: the echo area says `Quit', the prompt stays up, and the
-;; user's `C-g' is spent for nothing.
+;;   - `handle_interrupt' (src/keyboard.c) guards its call to
+;;     `quit_throw_to_read_char' with `#ifndef HAVE_NS'.  On the macOS build
+;;     this module runs on it NEVER throws into the read.  Busy or idle, all a
+;;     `C-g' ever does at first is arm `quit-flag'.
 ;;
-;; So the deferral has a second half.  A guarded section that ends with a quit
-;; still armed HANDS IT to the command loop through a zero-delay timer
-;; (`agent-repl--deferred-quit-deliver'), which is the one context that
-;; reliably reaches a waiting `read_char': Emacs runs its timers from the very
-;; input wait a minibuffer read is blocked in.  The deliverer aborts a
-;; standing minibuffer and otherwise signals the quit, and it does nothing at
-;; all when the flag has already been honoured, so a quit is delivered exactly
-;; once and never twice.
+;;   - The flag is then taken by `kbd_buffer_get_event''s own wait loop, which
+;;     throws to `read_char', and `read_char' RETURNS the quit character as an
+;;     event and records it.  So on this build a `C-g' that reaches Emacs while
+;;     a prompt stands is dispatched as the `C-g' key and shows up in
+;;     `(recent-keys)'.
+;;
+;;   - Emacs already binds `inhibit-quit' to t around process filters
+;;     (`read_and_dispose_of_process_output'), process sentinels
+;;     (`exec_sentinel') and timer callbacks (`timer_check_2') — the three
+;;     contexts named above.  An armed flag is therefore not consumed inside
+;;     them, and the `error in process filter: Quit' line this section opens
+;;     with is not something a quit arriving during a filter can produce.
+;;
+;; The sweep's four failed dismissals were key DELIVERY: the harness posted a
+;; synthetic `C-g' that never entered Emacs's input at all, and the same runs
+;; lost other posted keys the same way (`(recent-keys)' came back missing a
+;; `<tab>' and several `<escape>'s).  Nothing in this run logged a single
+;; `deferred-quit' record, which is the module saying plainly that no quit was
+;; ever deferred out of a guarded section.  e2e/realtest/minibuffer.go carries
+;; the evidence and the harness now tells the two apart from Emacs's own marks.
+;;
+;; So this guard earns its place on ATOMICITY, not on quit delivery: a section
+;; that must not be left half-written runs whole, and the deferral is recorded
+;; so a quit that looks ignored is explainable from the log alone.
+;;
+;; THE DELIVERY HALF STAYS, and its justification is narrower than it was.  A
+;; guarded section that ends with a quit still armed hands it to a zero-delay
+;; timer (`agent-repl--deferred-quit-deliver').  Where Emacs is already waiting
+;; at a read it would have taken the flag itself and the deliverer finds nothing
+;; to do; where it is not, the deliverer is what turns an armed flag into the
+;; abort the user asked for instead of leaving it to whatever checkpoint comes
+;; next.  It is belt and braces, it never clears a flag without honouring it,
+;; and it does nothing at all when the flag is already down, so a quit is
+;; delivered exactly once and never twice.
 
 (defmacro agent-repl--with-deferred-quit (context &rest body)
   "Run BODY with quitting inhibited, deferring any `C-g' that arrives.
@@ -2404,10 +2426,10 @@ canonical log record written when a quit was in fact deferred.
 
 Returns BODY's value.  A quit requested while BODY ran stays pending in
 `quit-flag' when this returns -- this never clears it -- and a delivery
-is ARMED for the command loop so the quit actually lands somewhere the
-user can see, rather than being taken at whatever checkpoint the
-surrounding work reaches first.  See `agent-repl--deferred-quit-deliver'
-and the commentary above for why arming the flag alone was not enough.
+is ARMED for the command loop so the quit lands somewhere the user can
+see rather than at whatever checkpoint the surrounding work reaches
+first.  See `agent-repl--deferred-quit-deliver', and the commentary above
+for what this guard is and is not answerable for.
 
 Intended for process filters, process sentinels and timer callbacks,
 whose run moments the user cannot see and therefore cannot avoid quitting
@@ -2433,7 +2455,8 @@ context that can reach the `read_char' a minibuffer read is blocked in,
 and a timer is the only such context available from Lisp: Emacs runs its
 timers from that very input wait.  Calling the deliverer inline here
 would take the quit inside the caller -- the process filter or timer this
-guard exists to keep quits out of -- which is the failure being fixed.
+guard exists to keep quits out of -- which is the state the guard is
+there to prevent.
 
 `quit-flag' is deliberately left armed as this returns.  If the command
 loop honours it before the timer fires, the deliverer finds nothing to do
