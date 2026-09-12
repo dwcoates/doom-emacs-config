@@ -62,8 +62,22 @@ const DefaultAdoptBound = 10 * time.Second
 // Report is what one boot reconciled. It is returned rather than only logged
 // so the daemon can answer for its own startup.
 type Report struct {
-	// Adopted are the workspaces whose surviving shims were reconnected.
+	// Adopted are the workspaces whose surviving shims were reconnected —
+	// EVERY adopted process, inert ones included, because the count answers
+	// "how many shims did this boot take over".
 	Adopted []ids.WorkspaceID
+	// AdoptedSessions are the adopted shims that carry a SESSION: the ones
+	// whose workspace lock read HELD. They are what the bounce accounting
+	// judges, because they are the only adopted shims that had a session to
+	// lose.
+	AdoptedSessions []rollout.AdoptedSession
+	// AdoptedInert are the adopted shims that carry NO session: reached
+	// through a live listening socket while their workspace lock read FREE.
+	// A shim takes that lock at StartSession, so a free lock behind a live
+	// listener is the shim stating it has not started one. They are recorded
+	// separately because they are neither a survivor to account for nor a
+	// client-less workspace whose turns are orphans.
+	AdoptedInert []ids.WorkspaceID
 	// MissingDirClosed are the workspaces this boot CLOSED because their
 	// directory no longer exists. They are counted separately from Orphaned
 	// because closing a row is a registry decision about the workspace, while
