@@ -8,6 +8,7 @@ package tail
 import (
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -90,6 +91,27 @@ func TestRewindLeavesTheCursorWhenNoTurnStartIsInWindow(t *testing.T) {
 	// rewinding, so the store's cursor stands.
 	if rewound || tr.offset != int64(len(content)) {
 		t.Fatalf("offset = %d, want the store's cursor %d", tr.offset, int64(len(content)))
+	}
+}
+
+// TestNoTurnStartInWindowIsLoggedAtDebug pins the SEVERITY of the no-rewind
+// outcome. Resuming at the store's cursor is the deliberate, correct path — the
+// benign twin of the "already read from start" no-op above — so it is debug, not
+// warn. A rewind that actually moves the cursor stays info (it is a state
+// change); this fires once per file at boot and flooded a cold re-scan's strict
+// harvest at warn for a decision that was correct.
+func TestNoTurnStartInWindowIsLoggedAtDebug(t *testing.T) {
+	// Arrange: a window holding only assistant records.
+	content := assistantLine + "\n" + assistantLine + "\n"
+	tr, logs := rewindTailer(t, content, int64(len(content)))
+
+	// Act.
+	tr.RewindToTurnStart(DefaultRewindWindow, IsUserPromptRecord)
+
+	// Assert.
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "boot-rewind", "debug")
+	if !strings.Contains(rec.Message, "resuming at the store's cursor") {
+		t.Fatalf("the no-rewind record does not name the resume path: %q", rec.Message)
 	}
 }
 

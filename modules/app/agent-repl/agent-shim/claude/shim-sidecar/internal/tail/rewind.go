@@ -58,7 +58,14 @@ func (t *Tailer) RewindToTurnStart(window int64, isTurnStart func(map[string]any
 	}
 	target, ok := lastTurnStart(buf, start, start > 0, isTurnStart)
 	if !ok {
-		bound.With(logging.Context{Level: "warn"}).Log(
+		// BENIGN NORMAL RESUME — debug, not warn, matching the sibling no-rewind
+		// outcome above (already read from start). No turn start in the window is
+		// the deliberate, correct path: the store's cursor stands because reading
+		// from an arbitrary older position would be worse. A rewind that actually
+		// moves the cursor stays info below (it is a state change). This fires
+		// once per file at boot and flooded a cold re-scan's strict harvest at
+		// warn for a decision that was correct.
+		bound.LogVerbose(
 			"no rewind: no turn start within the %d-byte window ending at offset %d; resuming at the store's cursor", len(buf), t.offset)
 		return false
 	}
