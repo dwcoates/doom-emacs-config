@@ -161,3 +161,29 @@ func TestOptionalInt64ReadsOnlyAPresentNumber(t *testing.T) {
 
 func ptrUint32(v uint32) *uint32 { return &v }
 func ptrInt64(v int64) *int64    { return &v }
+
+// TestAnUnmodeledLineTypeIsStoredAsResidueAtDebug pins the reclassified
+// convert-line default arm. A line whose type is PRESENT but not yet modelled is
+// stored whole as residue — that residue is the coverage and re-converts once
+// the type is modelled — so a vendor adding a type is benign forward-compat, not
+// a gap, and the trace is debug rather than a warn that floods a cold re-scan.
+func TestAnUnmodeledLineTypeIsStoredAsResidueAtDebug(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, `{"type":"quantum_flux","uuid":"u1"}`)
+
+	// Assert: the residue is kept (the coverage is unchanged)...
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1 (the unmodeled line stored whole as residue)", len(entries))
+	}
+	unknown := entries[0].GetAgentUpdate().GetUnservedItem().GetUnknown()
+	if unknown == nil || unknown.GetDiscriminator() != "quantum_flux" {
+		t.Fatalf("residue = %v, want the unknown arm discriminated quantum_flux", entries[0])
+	}
+	// ...and only the severity drops.
+	if got := levelForMessage(t, sink, "is not modeled"); got != "debug" {
+		t.Fatalf("the unmodeled-line record was recorded at %q, want debug (benign forward-compat)", got)
+	}
+}
