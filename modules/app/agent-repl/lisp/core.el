@@ -3104,6 +3104,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-file-mtime
     agent-repl--frontend-source-files
     agent-repl--frontend-artifact-exists-p
+    agent-repl--frontend-probe-boot-claim
     agent-repl--frontend-spawn-daemon
     agent-repl--frontend-run-log-tail
     agent-repl--frontend-stdio-log-tail

@@ -17,6 +17,7 @@ package daemonaddr
 
 import (
 	"net"
+	"time"
 )
 
 // Claim is a bound loopback listener together with the advertisement file it
@@ -49,8 +50,24 @@ type Claim interface {
 // racing daemon a different free port and arbitrates nothing. A second daemon
 // loses there, before it has bound or written anything, and Bind returns
 // ErrClaimed.
+//
+// A HELD CLAIM IS WAITED ON FOR ClaimWaitBound BEFORE IT IS BELIEVED. An
+// outgoing daemon holds the claim until its process ends, and it withdraws
+// daemon.addr at the START of its shutdown, so a replacement is spawned into
+// a window where the address is already gone and the claim is not yet free.
+// Exiting on the first refusal there destroyed the daemon instead of
+// replacing it. Only a claim still held after the bound is a live incumbent.
 func Bind(addrPath string, port int) (Claim, error) {
-	return bind(addrPath, port)
+	return BindWithin(addrPath, port, ClaimWaitBound)
+}
+
+// BindWithin is Bind with the claim wait named explicitly, so a caller that
+// must not pay the production bound -- a test, or a boot whose caller already
+// knows the incumbent is gone -- can say so. A wait of zero or less refuses a
+// held claim on sight, which is the pre-2026-09-12 behavior and is correct
+// only where nothing can be departing.
+func BindWithin(addrPath string, port int, wait time.Duration) (Claim, error) {
+	return bind(addrPath, port, wait)
 }
 
 // BindJoining binds a SUCCESSOR's listener WITHOUT the boot claim. The
