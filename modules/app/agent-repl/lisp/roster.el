@@ -545,10 +545,19 @@ A row that fails to reconcile is contained rather than fatal; see
               name "elisp.roster.row-teardown-failed: ws=%s error=%s"
               name (error-message-string err)))))))
     (setq agent-repl-roster--tab-order (nreverse names))
-    (agent-repl--log '(:agent-repl-central "roster reconciliation spans every workspace")
-                     "elisp.roster.reconcile: tabs=%d order=%S"
-                     (length agent-repl-roster--tab-order)
-                     agent-repl-roster--tab-order)
+    ;; INFO, not DEBUG.  This is the record that says the roster push became
+    ;; a tab bar, and it is the end of the startup's first-roster phase --
+    ;; but the DEBUG rung does not clear the durable sink's default `info'
+    ;; level, so for the whole life of this line it reached no file at all:
+    ;; 23 accumulated realtest runs hold 108 `elisp.roster.tab-open' records
+    ;; written by this very walk and not one `elisp.roster.reconcile'.  An
+    ;; invisible action is a logging defect (AGENTS.md), and this is
+    ;; lifecycle a person asks about, at the level its siblings in this file
+    ;; already use.
+    (agent-repl--info '(:agent-repl-central "roster reconciliation spans every workspace")
+                      "elisp.roster.reconcile: tabs=%d order=%S"
+                      (length agent-repl-roster--tab-order)
+                      agent-repl-roster--tab-order)
     ;; LAST, after the order is set, so a handler that reads the tab bar
     ;; sees the one this pass produced rather than the previous pass's.
     (when (> opened 0)
