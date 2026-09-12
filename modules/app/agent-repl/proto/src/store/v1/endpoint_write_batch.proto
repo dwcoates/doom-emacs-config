@@ -31,7 +31,31 @@ message WriteBatchResponse {
 // transaction. A replayed batch whose write_ids all landed before is this
 // same arm: absorption is success, and the producer can retire the batch
 // from its retry buffer either way.
-message WriteBatchSuccess {}
+message WriteBatchSuccess {
+  // Entries the store left UNCHANGED because their upsert_key already names a
+  // row under a DIFFERENT book. RE-INGESTING ALREADY-STORED CONTENT IS
+  // IDEMPOTENT: a corrected converter re-reading the corpus writes the same
+  // cross-plane activity key under its now-right book, which disagrees with the
+  // legacy row an earlier ingest wrote — so the stored row is KEPT and this
+  // entry is skipped per entry, while the batch's genuinely-new entries still
+  // commit in the same transaction. A skip is NEVER a batch-fatal refusal, and
+  // it is reported here rather than swallowed so the producer can fold it into
+  // its own startup catch-up summary; a skip in steady state is unexpected and
+  // the producer warns. Empty on the ordinary path.
+  repeated WriteBatchSkippedEntry skipped = 1;
+}
+
+// One entry the store skipped as a legacy book-conflict (WriteBatchSuccess.
+// skipped). It carries what the producer needs to attribute the skip without
+// re-deriving it: the identity that already existed and the two books.
+message WriteBatchSkippedEntry {
+  // The upsert_key whose stored row was kept, unchanged.
+  string upsert_key = 1;
+  // The book the stored row KEEPS. "(none)" for a never-served row.
+  string from_book = 2;
+  // The book this skipped entry would have moved the row to.
+  string to_book = 3;
+}
 
 // Nothing was committed: the transaction failed whole, so the producer
 // holds the batch in its BOUNDED IN-MEMORY retry buffer and replays it.
