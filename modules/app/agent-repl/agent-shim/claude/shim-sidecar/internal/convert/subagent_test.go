@@ -204,3 +204,31 @@ func TestAsyncRunWithNoReportedTotalLeavesItUnset(t *testing.T) {
 		t.Fatal("an unreported total must stay UNSET rather than becoming zero")
 	}
 }
+
+// TestASubagentSpawnFailureIsRecordedAtDebug pins the reclassified spawn-failure
+// trace. The sidecar is a copier: a vendor-recorded Agent failure converts
+// FAITHFULLY into the Failure arm, which is the coverage a consumer renders. The
+// log line is a per-record trace of that correctly-converted historical content,
+// not a sidecar fault, so it is debug — left at warn, a cold re-scan of every
+// past subagent failure flooded the strict harvest.
+func TestASubagentSpawnFailureIsRecordedAtDebug(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+	result := `{"type":"user","uuid":"u1","isSidechain":false,"timestamp":"` + ts2 +
+		`","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_spawn","is_error":true,` +
+		`"content":[{"type":"text","text":"boom"}]}]},"toolUseResult":{"agentId":"abc"}}`
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert: the failure is preserved in the Failure arm (the coverage)...
+	failure := activityOf(entryByKey(t, entries, ActivityKey("toolu_spawn"))).GetSubagent().GetFailure()
+	if failure == nil {
+		t.Fatal("a recorded subagent failure must convert to the Failure arm, which is the coverage")
+	}
+	// ...and only the severity of its trace drops.
+	if got := levelForMessage(t, sink, "subagent spawn failed"); got != "debug" {
+		t.Fatalf("the subagent-spawn-failed record was recorded at %q, want debug (faithful conversion of recorded content)", got)
+	}
+}
