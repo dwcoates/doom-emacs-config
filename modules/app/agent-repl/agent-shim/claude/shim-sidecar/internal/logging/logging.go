@@ -55,6 +55,23 @@ var ErrForwardTargetNotThere = errors.New("sidecar logging: forward target daemo
 // PER-ADDRESS boot tolerance (see logging-contract.md).
 var ErrForwardTargetBooting = errors.New("sidecar logging: forward target daemon has never been seen accepting")
 
+// ErrForwardWorkspaceUnresolvable marks a forwarding failure whose record
+// named a workspace that a HEALTHY, FULLY-DELIVERED roster does not contain --
+// a macOS temp-root, or any path that is not a real workspace and so will
+// never appear in the roster. The roster stream CONNECTED and delivered its
+// current snapshot; the dir is simply absent from it. This is neither a
+// transport fault nor a booting daemon: retrying cannot make an absent dir
+// appear, and blocking the roster stream to its deadline waiting for a
+// workspace that will never register is exactly the stall this sentinel
+// forbids. A Forwarder returns it AT ONCE when the first delivered snapshot
+// lacks the dir (see daemonclient.Client.resolveWorkspace); forwardLoop, using
+// errors.Is, does NOT retry it, narrates it at DEBUG, and persists the record
+// UNATTRIBUTED in the global durable sink rather than manufacturing a WARN. It
+// is distinct from a roster stream that never connected or errored before
+// delivering a snapshot, which remains a transport transient handled by the
+// pid/boot sentinels above.
+var ErrForwardWorkspaceUnresolvable = errors.New("sidecar logging: forward record names a workspace absent from a healthy roster")
+
 // Context is the structured attribution attached to a log record. Every field
 // is optional presence: an empty string (or a nil pointer, for the numeric
 // keys) means the caller does not own that fact, and the key is omitted from
@@ -594,6 +611,17 @@ func (l *Logger) forwardLoop() {
 				WorkspaceID: rec.WorkspaceID, ClaudeSessionID: rec.ClaudeSessionID,
 			}
 			switch {
+			case errors.Is(err, ErrForwardWorkspaceUnresolvable):
+				// The record named a workspace that a healthy, fully-delivered
+				// roster does not contain -- a temp-root or an unknown path
+				// that is not a real workspace. It could not be ATTRIBUTED, but
+				// the daemon is serving fine, so this is neither an outage nor a
+				// boot transient. Narrate it at DEBUG and let writeUndelivered
+				// persist the record UNATTRIBUTED in the global sink; never a
+				// WARN, and never a deadline wait against a dir that will never
+				// appear.
+				l.reportForwardTransient(now, address, attempts, target, err,
+					"a file-scoped diagnostic named a workspace absent from the daemon's roster; it could not be attributed and was written to the global sink unattributed")
 			case errors.Is(err, ErrForwardTargetNotThere):
 				// The daemon THIS RECORD targeted is provably gone — its
 				// advertised pid died, or daemon.addr now names someone else —
@@ -677,6 +705,17 @@ func (l *Logger) forwardWithRetry(rec ForwardRecord) (address string, attempts i
 		address, err = l.forwarder.Forward(rec)
 		if err == nil {
 			return address, attempt, true, nil
+		}
+		if errors.Is(err, ErrForwardWorkspaceUnresolvable) {
+			// A HEALTHY roster that does not name this record's workspace is a
+			// permanent condition, not a transport transient: retrying cannot
+			// make a temp-root or unknown dir appear in the roster. Abandon the
+			// ladder at once so the caller forwards the record unattributed at
+			// DEBUG rather than climbing six rungs against a dir that will
+			// never resolve. seenServing is reported true because the daemon
+			// answered the roster lookup -- it is serving; the workspace, not
+			// the daemon, is what could not be resolved.
+			return address, attempt, true, err
 		}
 		if attempt == l.forwardAttempts {
 			return address, attempt, true, err
