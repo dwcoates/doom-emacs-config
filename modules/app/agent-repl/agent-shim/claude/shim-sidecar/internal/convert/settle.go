@@ -49,8 +49,15 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	if !resolved {
 		// The call was read before this reader's cursor. There is no unit to
 		// settle and none is invented.
-		c.log.With(at.ctxWarn("orphan-tool-result")).With(logging.Context{ActivityID: callID}).
-			Log("tool result names no call this reader observed; the settle is lost and the record is stored as vendor_specific residue")
+		//
+		// BENIGN ON A RE-SCAN — debug, not warn. A cursor-resumed reader (a cold
+		// restart, a boot rewind) legitimately observes a result whose call sits
+		// before its window; the call cannot be in-window and unresolved, since
+		// an in-window call is in openCalls. Storing it as residue is the correct
+		// forward path, so this must not flood the strict harvest. The residue
+		// record stays; only the severity drops.
+		c.log.With(at.ctxFor("orphan-tool-result")).With(logging.Context{ActivityID: callID}).
+			LogVerbose("tool result names no call this reader observed; the settle is lost and the record is stored as vendor_specific residue")
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "orphan_tool_result", record)}
 	}
 	delete(c.openCalls, callID)

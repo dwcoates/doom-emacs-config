@@ -41,7 +41,10 @@ func TestWriteBatchSkipsAnUpsertThatMovesTheRowToAnotherBook(t *testing.T) {
 	if got := scalar[string](t, d, `SELECT book_agent_id FROM entry WHERE upsert_key = 'u1'`); got != "agent-1" {
 		t.Fatalf("book = %q, want agent-1 — the stored row is kept unchanged", got)
 	}
-	s.assertLogged(t, "warn", "the stored row is kept")
+	// The store logs the per-entry skip at DEBUG — a benign idempotency outcome
+	// it cannot contextualize; the skip is still RETURNED in result.Skipped
+	// (asserted above) for the sidecar to summarize.
+	s.assertLogged(t, "debug", "the stored row is kept")
 }
 
 // TestABookConflictEntryDoesNotLoseItsLegitimateSiblings is the no-data-loss

@@ -224,8 +224,16 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 				LogVerbose("line type=%q withheld as vendor_specific", kind)
 			return []*storev1.StoreEntry{VendorSpecificEntry(at, kind, record)}
 		}
-		c.log.With(at.ctxWarn("convert-line")).
-			Log("transcript line type=%q is not modeled; stored as unknown residue", kind)
+		// BENIGN FORWARD-COMPAT — debug, not warn. A line whose type is present
+		// but not yet modelled is stored WHOLE as residue: that residue IS the
+		// coverage, and it re-converts the day the type is modelled. A vendor
+		// adding a new line type is expected, not a fault, so a cold re-scan
+		// must not flood the strict harvest with one warn per such line. The
+		// residue record is unchanged; only the severity drops. (A line missing
+		// its type discriminator entirely stays warn above — that is malformed,
+		// not merely unmodelled.)
+		c.log.With(at.ctxFor("convert-line")).
+			LogVerbose("transcript line type=%q is not modeled; stored as unknown residue", kind)
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
