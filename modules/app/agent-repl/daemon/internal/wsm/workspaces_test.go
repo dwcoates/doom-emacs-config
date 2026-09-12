@@ -628,7 +628,7 @@ func TestForgetDeletesEveryDependentRecord(t *testing.T) {
 	}
 
 	// Act
-	if err := s.Forget(context.Background(), ws.ID); err != nil {
+	if _, err := s.Forget(context.Background(), ws.ID); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}
 
@@ -649,7 +649,7 @@ func TestForgetRefusesAnUnknownWorkspace(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act
-	err := s.Forget(context.Background(), WorkspaceID("absent"))
+	_, err := s.Forget(context.Background(), WorkspaceID("absent"))
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
@@ -706,5 +706,190 @@ func TestRegisterWorkspaceKeepsAKnownDefaultBranchWhenNoneIsSupplied(t *testing.
 	}
 	if len(repos) != 1 || repos[0].DefaultBranch != "main" {
 		t.Fatalf("repositories = %+v, want the recorded default branch kept", repos)
+	}
+}
+
+// registerUnder registers one workspace at its own directory but under a NAMED
+// repository, which is the arrangement every repository-disposition case needs
+// and testWorkspace cannot make: it registers each workspace as its own
+// repository.
+func registerUnder(t *testing.T, s *store, repoDir string) Workspace {
+	t.Helper()
+	ws, created, err := s.RegisterWorkspace(context.Background(), t.TempDir(), RegisterFacts{
+		Name: "sample", Branch: "feature", ParentBranch: "master", RepoDir: repoDir,
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	if !created {
+		t.Fatalf("RegisterWorkspace reported an existing record for a fresh dir")
+	}
+	return ws
+}
+
+func TestForgetDisposesOfTheRepositoryOnlyWhenUnreferenced(t *testing.T) {
+	tests := []struct {
+		name string
+		// siblings is how many OTHER workspaces are registered under the same
+		// repository before the forget.
+		siblings int
+		// wantRepoRows is how many repository rows survive the forget.
+		wantRepoRows int
+		// wantReported is whether the report names the repository it removed.
+		wantReported bool
+	}{
+		{name: "the last workspace takes its repository with it", siblings: 0, wantRepoRows: 0, wantReported: true},
+		{name: "a sibling workspace keeps the repository", siblings: 1, wantRepoRows: 1, wantReported: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repoDir := t.TempDir()
+			ws := registerUnder(t, s, repoDir)
+			for i := 0; i < test.siblings; i++ {
+				registerUnder(t, s, repoDir)
+			}
+
+			// Act
+			report, err := s.Forget(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Forget: %v", err)
+			}
+			if n := scalar[int](t, s, `SELECT count(*) FROM repositories WHERE id = ?`, ws.Repo); n != test.wantRepoRows {
+				t.Fatalf("repository rows = %d, want %d", n, test.wantRepoRows)
+			}
+			reported := report.Repository != ""
+			if reported != test.wantReported {
+				t.Fatalf("report.Repository = %q, want reported = %v", report.Repository, test.wantReported)
+			}
+			if test.wantReported && report.Repository != ws.Repo {
+				t.Fatalf("report.Repository = %q, want %q", report.Repository, ws.Repo)
+			}
+		})
+	}
+}
+
+func TestForgetReportsTheForgottenRepositoryDir(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := t.TempDir()
+	ws := registerUnder(t, s, repoDir)
+	want := scalar[string](t, s, `SELECT dir FROM repositories WHERE id = ?`, ws.Repo)
+
+	// Act
+	report, err := s.Forget(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+	if report.RepositoryDir != want {
+		t.Fatalf("report.RepositoryDir = %q, want %q", report.RepositoryDir, want)
+	}
+}
+
+func TestForgetLeavesTheOtherWorkspacesAlone(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := t.TempDir()
+	ws := registerUnder(t, s, repoDir)
+	kept := registerUnder(t, s, repoDir)
+	elsewhere := testWorkspace(t, s)
+
+	// Act
+	if _, err := s.Forget(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Assert
+	for _, survivor := range []Workspace{kept, elsewhere} {
+		got, err := s.Workspace(context.Background(), survivor.ID)
+		if err != nil {
+			t.Fatalf("Workspace(%q): %v", survivor.ID, err)
+		}
+		if got.Dir != survivor.Dir || got.Repo != survivor.Repo {
+			t.Fatalf("workspace %q = %+v, want it unchanged from %+v", survivor.ID, got, survivor)
+		}
+	}
+}
+
+func TestForgetLeavesAnotherRepositoryAlone(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	other := testWorkspace(t, s)
+
+	// Act
+	if _, err := s.Forget(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Assert
+	if n := scalar[int](t, s, `SELECT count(*) FROM repositories WHERE id = ?`, other.Repo); n != 1 {
+		t.Fatalf("the other workspace's repository rows = %d, want 1", n)
+	}
+}
+
+func TestForgetDeletesTheRepositorysMergeQueuePauseRow(t *testing.T) {
+	// Arrange — the pause row is keyed by the repository's DIR, so no foreign
+	// key cascade can reach it when the repository record goes.
+	s, _ := testStore(t)
+	repoDir := t.TempDir()
+	ws := registerUnder(t, s, repoDir)
+	key := RepoKey(scalar[string](t, s, `SELECT dir FROM repositories WHERE id = ?`, ws.Repo))
+	if err := s.SetMergeQueuePaused(context.Background(), key, true); err != nil {
+		t.Fatalf("SetMergeQueuePaused: %v", err)
+	}
+
+	// Act
+	if _, err := s.Forget(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Assert
+	if n := scalar[int](t, s, `SELECT count(*) FROM merge_queue_repos WHERE repo_key = ?`, string(key)); n != 0 {
+		t.Fatalf("merge_queue_repos left %d rows, want none", n)
+	}
+}
+
+func TestForgetLeavesAReferencedRepositorysPauseRow(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := t.TempDir()
+	ws := registerUnder(t, s, repoDir)
+	registerUnder(t, s, repoDir)
+	key := RepoKey(scalar[string](t, s, `SELECT dir FROM repositories WHERE id = ?`, ws.Repo))
+	if err := s.SetMergeQueuePaused(context.Background(), key, true); err != nil {
+		t.Fatalf("SetMergeQueuePaused: %v", err)
+	}
+
+	// Act
+	if _, err := s.Forget(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Assert
+	if n := scalar[int](t, s, `SELECT count(*) FROM merge_queue_repos WHERE repo_key = ?`, string(key)); n != 1 {
+		t.Fatalf("merge_queue_repos rows = %d, want the referenced repository's row kept", n)
+	}
+}
+
+func TestForgetWritesNothingWhenTheWorkspaceIsUnknown(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	_, err := s.Forget(context.Background(), WorkspaceID("absent"))
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Forget = %v, want ErrNotFound", err)
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM repositories WHERE id = ?`, ws.Repo); n != 1 {
+		t.Fatalf("a refused Forget removed %d repository rows, want none removed", 1-n)
 	}
 }

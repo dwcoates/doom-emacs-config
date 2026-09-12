@@ -50,8 +50,11 @@ type DB interface {
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetMergedAt records that the workspace's merge landed.
 	SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time) error
-	// Forget deletes a workspace's every record — the nuke's durable half.
-	Forget(ctx context.Context, id WorkspaceID) error
+	// Forget deletes a workspace's every record — the nuke's durable half and
+	// the whole of the forget verb — and, when the workspace was the last one
+	// registered under its repository, that repository's record too. The
+	// report names the repository that went, empty when one stayed.
+	Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error)
 
 	// PutCreationJob records a workspace's merge geometry, configured actions
 	// and materialization state.
