@@ -115,17 +115,19 @@ func parked(session *wsm.Session) bool {
 // mirrors the footer's disconnected step, fact for fact, so the dot and the
 // strip cannot disagree about the same link.
 //
-// A ROUTE NOBODY HAS SEEN IS NOT A ROUTE THAT SERVES. `ready` means "live,
-// PROVEN USABLE, and idle" (sidebar.proto), and a workspace whose session
-// record exists while no link state has yet been observed has proven nothing:
-// the shim is being spawned and dialed. Falling through to `sessionArm` there
-// published `ready` for it, which is how the roster's arm walked
-// none -> ready -> init -> submitting -> thinking — `ready` BEFORE the `init`
-// it is supposed to follow, and `ready` for a workspace whose prompt the
-// daemon had already accepted (measured at ~340ms after SubmitPrompt answered
-// with its turn id). `init` — "starting up; the route is not yet proven" — is
-// what that state actually is, and saying so makes the published walk monotone
-// with the workspace's own lifecycle.
+// A ROUTE NOBODY HAS SEEN IS NOT A ROUTE THAT SERVES. A workspace whose
+// session record exists while no link state has yet been observed has proven
+// nothing: the shim is being spawned and dialed, and that window is `init`.
+// Reporting `ready` there published the leading `ready` the editor saw —
+// none -> ready -> init -> ... — `ready` before the `init` it is supposed to
+// follow, and `ready` for a workspace whose prompt the daemon had already
+// accepted. `init` is what that pre-link state actually is, and saying so
+// keeps the cold-start walk monotone with the workspace's own lifecycle.
+//
+// A CONNECTED route, on the other hand, is proven and is NOT a link fault, so
+// once the link connects the row leaves the `init`/link band even before a
+// SessionStarted lands — see the default arm in the switch. Blue is reserved
+// for a compromised route, and a connected route is not one.
 //
 // A session that ENDED is the one case that still falls through: its route is
 // not coming up, there is nothing to wait on, and the lifecycle arms below are
@@ -148,11 +150,28 @@ func linkArm(s *wsState, session *wsm.Session) string {
 		return "start_failed"
 	case s.degraded:
 		return "degraded"
-	case !s.started:
-		// The route is up but the session has not announced itself, so it is
-		// still coming up — which is exactly what `init` says.
-		return "init"
 	default:
+		// A CONNECTED route is proven, so the row is NOT a link fault. `init`
+		// belongs to a route still being established — dialing, or a session
+		// record with no link seen yet — and once the link connects the
+		// route is up whether or not a SessionStarted has landed on this
+		// resolver's view.
+		//
+		// The `init` window used to extend past the connect, held open by
+		// `!s.started`, on the theory that the route is not "proven usable"
+		// until the shim announces its session. That reported `init` — a
+		// BLUE, link-fault color — for a workspace whose route was up and
+		// whose webapp was idle, and it never cleared on a RESUME: a daemon
+		// reconnect replays the link (OnLink -> Connected) but not the
+		// one-shot SessionStarted, so `s.started` stayed false forever and
+		// the tab stayed blue on a healthy, idle session.
+		//
+		// Blue means the route is compromised, and a connected route is not.
+		// A connected-but-not-yet-announced session falls through to
+		// `sessionArm`, which reports the lifecycle it actually has
+		// (`ready` for an idle one). The published cold-start walk stays
+		// monotone because `init` is still what the pre-connect dialing
+		// phase reports.
 		return ""
 	}
 }
