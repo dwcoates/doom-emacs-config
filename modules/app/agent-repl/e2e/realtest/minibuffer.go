@@ -20,9 +20,12 @@ import (
 //     taken, and exited 0. AppKit dispatches a key event only to a key window,
 //     so a post to a process without one is dropped with no error: the harness
 //     could not tell "the C-g never reached Emacs" from "the C-g reached Emacs
-//     and the read did not abort". The helper now refuses to post and names the
-//     failure, so the chord channel reports its own failure instead of being
-//     waited out.
+//     and the read did not abort". Every press is now CONFIRMED against Emacs's
+//     own marks while the helper holds the target key (delivery.go), so the
+//     chord channel reports its own failure instead of being waited out. The
+//     confirmation is what settles it: the helper's own key-window reading is
+//     carried in the receipt as evidence and refuses the post only on a blind
+//     press, where nothing would read the editor back.
 //
 //  2. THERE WAS NO SECOND CHANNEL. A chord is the only way in, so a chord that
 //     does not land leaves the run with no way to put the editor back in a
