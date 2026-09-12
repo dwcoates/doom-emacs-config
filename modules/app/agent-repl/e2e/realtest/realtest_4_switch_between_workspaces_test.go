@@ -723,7 +723,7 @@ func rt4BuildKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir
 	if err != nil {
 		t.Fatalf("read the Emacs pid for the key driver: %v", err)
 	}
-	driver := &KeyDriver{Pid: pid, Scratch: runDir}
+	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client}
 	if err := driver.Build(ctx); err != nil {
 		note := fmt.Sprintf("KEY DRIVER UNAVAILABLE: %v", err)
 		manifest.Notes = append(manifest.Notes, note)
