@@ -179,9 +179,10 @@ func TestRealtestRestartWithTheDaemonUp(t *testing.T) {
 	// THE KEY DRIVER, PROVEN, and the first focus edge with it: Emacs is
 	// visible-but-unfocused up to here, and this is what activates it, which
 	// is what drains the parked pre-creation queue.
-	proveKeyDriver(ctx, t, client, runDir, &manifest)
+	driver := proveKeyDriver(ctx, t, client, runDir, &manifest)
 
-	shown := waitForShown(ctx, t, run, sources, snapshot, launch.SpawnedAt, openWorkspaces)
+	shown := showEmacsAndWaitForPaint(ctx, t, run, client, driver, sources, snapshot,
+		launch.SpawnedAt, openWorkspaces, &manifest)
 	shownMeasurements := shown.Measure()
 	manifest.Runs[len(manifest.Runs)-1].Measurements = shownMeasurements
 
