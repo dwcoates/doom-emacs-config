@@ -55,6 +55,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - elisp/notifications+session: the desktop-focus check names its scope -- the workspace that asked, or the central sink -- so it no longer earns `log-routing-error' at ERROR.
 - daemon/sidebar: roster order is priority then name then id, with the selection instant dropped as an ordering key, so the drawn bar no longer moves under the user and cycling right then left returns where it started.
 - realtest: a key window is a reading, not a gate — keydriver stops refusing a confirmed press on `NSRunningApplication.isActive` (the cached answer that refused 40 healthy presses in the 2026-09-12 16:12 sweep), reports the accessibility reading in the receipt instead, and keeps the hard refusal only on an unheld press, where nothing reads Emacs's marks back.
+- realtest: a requested activation is not a focus edge — the show phase now reads Emacs's own `frame-focus-state` inside the keydriver hold, and when no press ever produced real focus it names the cause (a locked screen, where the window server activates nobody, versus an activation declined on an unlocked session) in seconds instead of waiting out a two-minute paint ceiling; key delivery, the advisory readiness reading and the product's pre-creation hold are unchanged.
 
 ## Standing measurements to protect
 
