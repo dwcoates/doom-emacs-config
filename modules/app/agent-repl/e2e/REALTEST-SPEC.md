@@ -47,6 +47,22 @@ other    a realtest failed
 `77` is the autotools "skipped" convention, used rather than `0` so a run can
 never report a green realtest that did not execute.
 
+Two rules follow from the script running EVERY realtest in one `go test`, and
+they apply to every realtest after the first:
+
+- **Its own subdirectory of `AGENT_REPL_REALTEST_OUT`.** The script exports one
+  of those for the whole invocation, so two realtests writing `MANIFEST.md` to
+  the same path would leave only the second one's. Realtest 4 writes
+  `realtest-4/` beneath it; realtest 1 predates the rule and writes the run
+  directory itself, which is safe only because it is the first to run.
+- **It ADOPTS a standing editor rather than failing on one.** Each realtest
+  leaves the owner's editor running, so by the second realtest an Emacs is
+  always answering. Quitting it would be a takeover, and that decision belongs
+  to `bin/realtest.sh` and to nothing downstream of it. A realtest that adopts
+  says so in its manifest and asserts from LIVE STATE whatever it would
+  otherwise have read out of a startup it did not perform, because an adopted
+  editor's startup records are older than the run's own harvest window.
+
 It refuses three things, and each refusal is there because the alternative is
 worse than not running:
 
@@ -430,6 +446,7 @@ e2e/realtest/
   state.go                     what the state database holds, read-only
   manifest.go                  MANIFEST.md
   realtest_1_start_the_editor_test.go
+  realtest_4_switch_between_workspaces_test.go
 ```
 
 The unit tests run under the same build tag and need none of the above: they
