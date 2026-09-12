@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,8 +48,22 @@ type options struct {
 	baseWorkspaceIDs  repeatedFlag
 	baseWorkspaceDirs repeatedFlag
 	baseKinds         repeatedFlag
+	baseFormats       repeatedFlag
 	harvestFrom       string
 	harvestTo         string
+	sampleN           int
+	fields            string
+	width             int
+}
+
+// renderOptions carries only what emit and follow need to render a batch,
+// resolved once in run() so every emit call site agrees on mode, group
+// sample count, message width, and field projection.
+type renderOptions struct {
+	mode    string
+	sampleN int
+	width   int
+	fields  []string
 }
 
 type sink struct {
@@ -57,6 +72,12 @@ type sink struct {
 	workspaceID      string
 	workspaceDir     string
 	canonicalSymlink bool
+	// format is "jsonl" for the contract's structured records, "stderr" for
+	// unstructured emergency process output (shim-store.err.log and
+	// shim-claude-sidecar.err.log), or "messages" for a captured Emacs
+	// *Messages* text snapshot named with --messages. The latter two are
+	// synthesized into records rather than parsed as JSON.
+	format string
 }
 
 type sinkFinding struct {
@@ -122,6 +143,10 @@ func run() error {
 	flag.Var(&opts.baseWorkspaceIDs, "base-workspace-id", "workspace ID owning the corresponding base")
 	flag.Var(&opts.baseWorkspaceDirs, "base-workspace-dir", "workspace directory owning the corresponding base")
 	flag.Var(&opts.baseKinds, "base-kind", "base kind: file or symlink")
+	flag.Var(&opts.baseFormats, "base-format", "base content format: jsonl, stderr, or messages")
+	flag.IntVar(&opts.sampleN, "sample-n", 0, "representative records per group (0 disables sampling)")
+	flag.StringVar(&opts.fields, "fields", "", "comma-separated field projection")
+	flag.IntVar(&opts.width, "width", 120, "message truncation width for compact renderers")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional argument %q", flag.Arg(0))
@@ -133,12 +158,28 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if opts.mode != "human" && opts.mode != "json" && opts.mode != "harvest" {
+	switch opts.mode {
+	case "human", "json", "harvest", "tally", "sample", "timeline", "fields":
+	default:
 		return fmt.Errorf("unknown output mode %q", opts.mode)
 	}
-	if opts.follow && opts.mode == "harvest" {
-		return errors.New("harvest cannot follow")
+	if opts.follow && (opts.mode == "harvest" || opts.mode == "tally" || opts.mode == "sample") {
+		return fmt.Errorf("%s cannot follow", opts.mode)
 	}
+	if opts.width <= 0 {
+		return errors.New("width must be positive")
+	}
+	fieldNames, err := parseFieldsList(opts.fields)
+	if err != nil {
+		return err
+	}
+	if opts.mode == "fields" && len(fieldNames) == 0 {
+		return errors.New("fields mode requires --fields")
+	}
+	if opts.mode == "sample" && opts.sampleN <= 0 {
+		return errors.New("sample mode requires --sample-n greater than zero")
+	}
+	render := renderOptions{mode: opts.mode, sampleN: opts.sampleN, width: opts.width, fields: fieldNames}
 
 	now := time.Now()
 	if opts.mode == "harvest" {
@@ -156,7 +197,7 @@ func run() error {
 	}
 	fmt.Fprintf(os.Stderr, "logs-reader: included %d orphan generation(s) left by earlier daemon instances\n", orphanCount)
 	sortRecords(records)
-	if err := emit(records, findings, opts.mode); err != nil {
+	if err := emit(records, findings, render); err != nil {
 		return err
 	}
 	if readable == 0 {
@@ -165,7 +206,22 @@ func run() error {
 	if !opts.follow {
 		return nil
 	}
-	return follow(opts.mode, states, filter, sequence)
+	return follow(render, states, filter, sequence)
+}
+
+// parseFieldsList validates a comma-separated --fields value, matching the
+// style of the existing --runtime list.
+func parseFieldsList(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	for _, part := range parts {
+		if part == "" {
+			return nil, errors.New("fields list contains an empty value")
+		}
+	}
+	return parts, nil
 }
 
 func makeSinks(opts options) ([]sink, error) {
@@ -175,6 +231,7 @@ func makeSinks(opts options) ([]sink, error) {
 		"--base-workspace-id":  len(opts.baseWorkspaceIDs),
 		"--base-workspace-dir": len(opts.baseWorkspaceDirs),
 		"--base-kind":          len(opts.baseKinds),
+		"--base-format":        len(opts.baseFormats),
 	}
 	for name, count := range counts {
 		if count != len(opts.bases) {
@@ -191,6 +248,13 @@ func makeSinks(opts options) ([]sink, error) {
 		if kind != "file" && kind != "symlink" {
 			return nil, fmt.Errorf("base %q has unknown kind %q", base, kind)
 		}
+		format := opts.baseFormats[index]
+		if format != "jsonl" && format != "stderr" && format != "messages" {
+			return nil, fmt.Errorf("base %q has unknown format %q", base, format)
+		}
+		if kind == "symlink" && format != "jsonl" {
+			return nil, fmt.Errorf("workspace base %q has non-jsonl format %q", base, format)
+		}
 		workspaceID, workspaceDir := opts.baseWorkspaceIDs[index], opts.baseWorkspaceDirs[index]
 		if kind == "symlink" && workspaceDir == "" {
 			return nil, fmt.Errorf("workspace base %q has no workspace directory", base)
@@ -198,7 +262,14 @@ func makeSinks(opts options) ([]sink, error) {
 		if kind == "file" && (workspaceID != "" || workspaceDir != "") {
 			return nil, fmt.Errorf("central base %q carries workspace attribution", base)
 		}
-		sinks = append(sinks, sink{base, runtime, workspaceID, workspaceDir, kind == "symlink"})
+		sinks = append(sinks, sink{
+			base:             base,
+			runtime:          runtime,
+			workspaceID:      workspaceID,
+			workspaceDir:     workspaceDir,
+			canonicalSymlink: kind == "symlink",
+			format:           format,
+		})
 	}
 	return sinks, nil
 }
@@ -273,7 +344,7 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 				sinkReadable = true
 				continue
 			}
-			loaded, next, nextLine, err := readFile(path, sequence, filter)
+			loaded, next, nextLine, err := readFile(selectedSink, path, sequence, filter)
 			if err != nil {
 				if unreadable, ok := err.(*unreadableLogError); ok {
 					findings = append(findings, unreadableFinding(selectedSink, path, unreadable.err))
@@ -445,12 +516,25 @@ type unreadableLogError struct {
 func (e *unreadableLogError) Error() string { return e.err.Error() }
 func (e *unreadableLogError) Unwrap() error { return e.err }
 
-func readFile(path string, sequence int64, filter filters) ([]record, int64, int, error) {
+func readFile(selectedSink sink, path string, sequence int64, filter filters) ([]record, int64, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, sequence, 1, &unreadableLogError{fmt.Errorf("open log %q: %w", path, err)}
 	}
-	records, next, nextLine, scanErr := scanRecords(file, path, 1, sequence, filter)
+	var records []record
+	var next int64
+	var nextLine int
+	var scanErr error
+	if selectedSink.format == "jsonl" {
+		records, next, nextLine, scanErr = scanRecords(file, path, 1, sequence, filter)
+	} else {
+		info, statErr := file.Stat()
+		if statErr != nil {
+			scanErr = &unreadableLogError{fmt.Errorf("stat log %q: %w", path, statErr)}
+		} else {
+			records, next, nextLine, scanErr = scanTextRecords(file, path, selectedSink, info.ModTime(), 1, sequence, filter)
+		}
+	}
 	closeErr := file.Close()
 	if scanErr != nil {
 		if closeErr != nil {
@@ -489,6 +573,123 @@ func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, f
 		return nil, sequence, line, &unreadableLogError{fmt.Errorf("read log %q: %w", path, err)}
 	}
 	return records, sequence, line, nil
+}
+
+// scanTextRecords reads a non-JSONL sink (stderr or a captured Messages
+// snapshot) and synthesizes one record per interesting line, so the two text
+// sources the contract permits alongside structured JSONL are queryable
+// through the exact same tally/sample/timeline/fields/human/json renderers.
+// See AGENTS.md "Logs" for the synthetic fields this manufactures.
+func scanTextRecords(reader io.Reader, path string, selectedSink sink, mtime time.Time, firstLine int, sequence int64, filter filters) ([]record, int64, int, error) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	var records []record
+	line := firstLine
+	for scanner.Scan() {
+		text := scanner.Text()
+		var rec record
+		var ok bool
+		switch selectedSink.format {
+		case "stderr":
+			rec, ok = synthesizeStderrRecord(selectedSink, text, mtime, sequence)
+		case "messages":
+			rec, ok = synthesizeMessagesRecord(selectedSink, text, mtime, sequence)
+		default:
+			return nil, sequence, line, fmt.Errorf("%s:%d: unknown text sink format %q", path, line, selectedSink.format)
+		}
+		sequence++
+		line++
+		if ok && filter.accepts(rec) {
+			records = append(records, rec)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, sequence, line, &unreadableLogError{fmt.Errorf("read log %q: %w", path, err)}
+	}
+	return records, sequence, line, nil
+}
+
+// stderrErrorRe recognizes a line that plainly names an error, so a caller
+// filtering `--level error` sees the emergency lines that actually claim to
+// be one rather than every byte the process ever wrote to its stderr sink.
+var stderrErrorRe = regexp.MustCompile(`(?i)\berror\b`)
+
+// synthesizeStderrRecord treats every non-blank line of a service's
+// `.err.log` as a finding: the contract permits this output only when the
+// canonical structured sink could not record the process's own failure, so
+// presence here is itself notable and defaults to `warn`.
+func synthesizeStderrRecord(selectedSink sink, line string, mtime time.Time, seq int64) (record, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return record{}, false
+	}
+	level := "warn"
+	if stderrErrorRe.MatchString(trimmed) {
+		level = "error"
+	}
+	return buildSyntheticRecord(selectedSink, "stderr", level, trimmed, mtime, seq), true
+}
+
+// messageLinePattern is one severity shape recognized in a captured Emacs
+// *Messages* snapshot, mirroring e2e/realtest/messages.go's messagePatterns
+// so the two readers agree on what counts as an interesting line.
+type messageLinePattern struct {
+	re    *regexp.Regexp
+	level string
+}
+
+var messageLinePatterns = []messageLinePattern{
+	{regexp.MustCompile(`\bERROR:`), "error"},
+	{regexp.MustCompile(`\bWARNING:`), "warn"},
+	{regexp.MustCompile(`^Warning \(|^⛔ Warning \(`), "warn"},
+	{regexp.MustCompile(`error in process (filter|sentinel)|Error running timer|error during redisplay|Error in post-command-hook|Error in pre-command-hook`), "error"},
+	{regexp.MustCompile(`Wrong type argument|Symbol's (value as variable|function definition) is void|Args out of range|Invalid function|Wrong number of arguments|Attempt to modify a read-only|Selecting deleted buffer|Invalid face`), "error"},
+	{regexp.MustCompile(`^Debugger entered`), "error"},
+	{regexp.MustCompile(`Failed to load|failed to load|could not be loaded|Doom encountered an error`), "error"},
+}
+
+// synthesizeMessagesRecord returns a record only for a line matching one of
+// the known severity shapes; every other buffer line is prose and is
+// skipped, the same way e2e/realtest/messages.go's HarvestMessages does.
+func synthesizeMessagesRecord(selectedSink sink, line string, mtime time.Time, seq int64) (record, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return record{}, false
+	}
+	for _, pattern := range messageLinePatterns {
+		if pattern.re.MatchString(trimmed) {
+			return buildSyntheticRecord(selectedSink, "messages", pattern.level, trimmed, mtime, seq), true
+		}
+	}
+	return record{}, false
+}
+
+// buildSyntheticRecord manufactures a record for a text line that never
+// carried the contract's fields: `operation` is a stable synthetic tag
+// ("stderr" or "messages"), `runtime` names the emitting service or "emacs",
+// `timestamp` is the sink file's modification time (the best available
+// instant for a line with none of its own), and `context` stays an empty
+// object so every renderer that expects one keeps working unchanged.
+func buildSyntheticRecord(selectedSink sink, operation, level, message string, mtime time.Time, seq int64) record {
+	rec := record{
+		Timestamp:    mtime.UTC().Format(time.RFC3339Nano),
+		Runtime:      selectedSink.runtime,
+		Level:        level,
+		Verbosity:    "normal",
+		Operation:    operation,
+		Message:      message,
+		Context:      map[string]any{},
+		WorkspaceDir: selectedSink.workspaceDir,
+		WorkspaceID:  selectedSink.workspaceID,
+		instant:      mtime,
+		seq:          seq,
+	}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		raw = []byte("{}")
+	}
+	rec.raw = raw
+	return rec
 }
 
 func parseRecord(raw []byte, sequence int64) (record, error) {
@@ -561,8 +762,8 @@ func sortRecords(records []record) {
 	})
 }
 
-func emit(records []record, findings []sinkFinding, mode string) error {
-	switch mode {
+func emit(records []record, findings []sinkFinding, render renderOptions) error {
+	switch render.mode {
 	case "json":
 		for _, rec := range records {
 			if _, err := fmt.Fprintln(os.Stdout, string(rec.raw)); err != nil {
@@ -584,6 +785,22 @@ func emit(records []record, findings []sinkFinding, mode string) error {
 		}
 	case "harvest":
 		return emitHarvest(records, findings)
+	case "tally":
+		if err := emitTally(records, render.sampleN, render.width); err != nil {
+			return err
+		}
+	case "sample":
+		if err := emitSampleOnly(records, render.sampleN, render.width); err != nil {
+			return err
+		}
+	case "timeline":
+		if err := emitTimeline(records, render.width); err != nil {
+			return err
+		}
+	case "fields":
+		if err := emitFields(records, render.fields); err != nil {
+			return err
+		}
 	}
 	if len(findings) != 0 {
 		if _, err := fmt.Fprintf(os.Stderr, "logs-reader: %d sink finding(s)\n", len(findings)); err != nil {
@@ -686,7 +903,210 @@ func emitHarvest(records []record, findings []sinkFinding) error {
 	return writer.Flush()
 }
 
-func follow(mode string, states []followState, filter filters, sequence int64) error {
+// groupKey is how --tally and --sample group records: level, runtime, and
+// operation, with no workspace or message in the key, so the same three
+// questions ("what happened, of what severity, on what runtime") answer for
+// one workspace or for --all in a single small table.
+type groupKey struct {
+	level     string
+	runtime   string
+	operation string
+}
+
+func groupCounts(records []record) map[groupKey]int {
+	counts := make(map[groupKey]int)
+	for _, rec := range records {
+		counts[groupKey{rec.Level, rec.Runtime, rec.Operation}]++
+	}
+	return counts
+}
+
+// sortedGroupKeys orders groups by count descending — the cheapest way to
+// see "what happened most" — breaking ties deterministically so repeated
+// runs against the same window render identically.
+func sortedGroupKeys(counts map[groupKey]int) []groupKey {
+	keys := make([]groupKey, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := keys[i], keys[j]
+		if counts[a] != counts[b] {
+			return counts[a] > counts[b]
+		}
+		if a.level != b.level {
+			return a.level < b.level
+		}
+		if a.runtime != b.runtime {
+			return a.runtime < b.runtime
+		}
+		return a.operation < b.operation
+	})
+	return keys
+}
+
+// emitTally prints the count table and, when sampleN is positive, follows it
+// with up to sampleN representative records per group in the table's own
+// order.
+func emitTally(records []record, sampleN, width int) error {
+	counts := groupCounts(records)
+	keys := sortedGroupKeys(counts)
+	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(writer, "COUNT\tLEVEL\tRUNTIME\tOPERATION"); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if _, err := fmt.Fprintf(writer, "%d\t%s\t%s\t%s\n", counts[key], key.level, key.runtime, key.operation); err != nil {
+			return err
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		return err
+	}
+	if sampleN <= 0 {
+		return nil
+	}
+	if _, err := fmt.Println(); err != nil {
+		return err
+	}
+	return emitSamplesForGroups(records, keys, sampleN, width)
+}
+
+// emitSampleOnly is --sample used without --tally: the same per-group
+// representative lines, with no count table ahead of them.
+func emitSampleOnly(records []record, sampleN, width int) error {
+	counts := groupCounts(records)
+	keys := sortedGroupKeys(counts)
+	return emitSamplesForGroups(records, keys, sampleN, width)
+}
+
+// emitSamplesForGroups prints, for each group in order, the first sampleN
+// records belonging to it (records are already time-sorted by the caller),
+// so a reader sees the earliest representative occurrence of each kind of
+// event without scanning the whole window.
+func emitSamplesForGroups(records []record, order []groupKey, sampleN, width int) error {
+	for _, key := range order {
+		taken := 0
+		for _, rec := range records {
+			if rec.Level != key.level || rec.Runtime != key.runtime || rec.Operation != key.operation {
+				continue
+			}
+			if err := printSampleLine(rec, width); err != nil {
+				return err
+			}
+			taken++
+			if taken >= sampleN {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func printSampleLine(rec record, width int) error {
+	_, err := fmt.Printf("%s %-5s %-7s %s %s\n",
+		rec.instant.Local().Format("15:04:05.000000"),
+		strings.ToUpper(rec.Level), rec.Runtime, rec.Operation, truncate(rec.Message, width))
+	return err
+}
+
+// emitTimeline prints one line per record in time order: time, level,
+// operation, and the truncated message, for "what happened during this
+// window" without runtime or context noise.
+func emitTimeline(records []record, width int) error {
+	for _, rec := range records {
+		if _, err := fmt.Printf("%s %-5s %s %s\n",
+			rec.instant.Local().Format("15:04:05.000000"),
+			strings.ToUpper(rec.Level), rec.Operation, truncate(rec.Message, width)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// emitFields prints exactly the named fields, resolved from the record's top
+// level or, failing that, its context map, so a caller gets nothing else.
+func emitFields(records []record, fieldNames []string) error {
+	for _, rec := range records {
+		parts := make([]string, 0, len(fieldNames))
+		for _, name := range fieldNames {
+			parts = append(parts, name+"="+oneLine(fieldValue(rec, name)))
+		}
+		if _, err := fmt.Println(strings.Join(parts, " ")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fieldValue resolves one named field against a record's top-level columns
+// first, then its context map. An absent field renders as an empty value
+// rather than an error, since not every record in a selection carries every
+// context key.
+func fieldValue(rec record, name string) string {
+	switch name {
+	case "timestamp":
+		return rec.Timestamp
+	case "runtime":
+		return rec.Runtime
+	case "level":
+		return rec.Level
+	case "verbosity":
+		return rec.Verbosity
+	case "operation":
+		return rec.Operation
+	case "message":
+		return rec.Message
+	case "workspace_dir":
+		return rec.WorkspaceDir
+	case "workspace_id":
+		return rec.WorkspaceID
+	case "agent_repl_session_id":
+		return rec.AgentReplSessionID
+	case "claude_session_id":
+		return rec.ClaudeSessionID
+	case "request_id":
+		return rec.RequestID
+	case "connection_id":
+		return rec.ConnectionID
+	case "pid":
+		if rec.PID != nil {
+			return strconv.FormatInt(*rec.PID, 10)
+		}
+		return ""
+	}
+	if rec.Context == nil {
+		return ""
+	}
+	value, ok := rec.Context[name]
+	if !ok {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+	return string(encoded)
+}
+
+// truncate shortens a one-line message to width runes, marking the cut with
+// an ellipsis, so --width bounds every compact renderer's line length.
+func truncate(value string, width int) string {
+	value = oneLine(value)
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	if width <= 3 {
+		return string(runes[:width])
+	}
+	return string(runes[:width-3]) + "..."
+}
+
+func follow(render renderOptions, states []followState, filter filters, sequence int64) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -706,7 +1126,7 @@ func follow(mode string, states []followState, filter filters, sequence int64) e
 				batch = append(batch, loaded...)
 			}
 			sortRecords(batch)
-			if err := emit(batch, nil, mode); err != nil {
+			if err := emit(batch, nil, render); err != nil {
 				return err
 			}
 		}
@@ -761,7 +1181,14 @@ func readFollow(state *followState, sequence int64, filter filters) ([]record, i
 		return nil, sequence, nil
 	}
 	complete := data[:lastNewline+1]
-	records, next, nextLine, err := scanRecords(bytes.NewReader(complete), current, state.line, sequence, filter)
+	var records []record
+	var next int64
+	var nextLine int
+	if state.sink.format == "jsonl" {
+		records, next, nextLine, err = scanRecords(bytes.NewReader(complete), current, state.line, sequence, filter)
+	} else {
+		records, next, nextLine, err = scanTextRecords(bytes.NewReader(complete), current, state.sink, info.ModTime(), state.line, sequence, filter)
+	}
 	if err != nil {
 		return nil, sequence, err
 	}
