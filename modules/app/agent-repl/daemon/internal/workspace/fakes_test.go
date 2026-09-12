@@ -75,10 +75,12 @@ type fakeDB struct {
 	portedPrompts   map[ids.WorkspaceID][]wsm.PortedPrompt
 	putPortedErr    error
 	closedFlags     map[ids.WorkspaceID]bool
-	priorities      map[ids.WorkspaceID]*wsm.Priority
-	attention       map[ids.WorkspaceID]bool
-	currentAt       time.Time
-	forgotten       []ids.WorkspaceID
+	// setClosedErr makes the closed-flag write fail, which the map cannot.
+	setClosedErr error
+	priorities   map[ids.WorkspaceID]*wsm.Priority
+	attention    map[ids.WorkspaceID]bool
+	currentAt    time.Time
+	forgotten    []ids.WorkspaceID
 	// forgetReport is what Forget answers, and forgetErr makes it fail; the
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport
@@ -204,6 +206,9 @@ func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, ni
 func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) { return d.current, nil }
 
 func (d *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
+	if d.setClosedErr != nil {
+		return d.setClosedErr
+	}
 	d.closedFlags[id] = closed
 	return nil
 }
@@ -1167,7 +1172,10 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 	dir = normalized
 	ws := wsm.Workspace{ID: id, Dir: dir, Repo: "repo-1", Name: "sample", Branch: "DWC/sample"}
 	f.db.with(ws)
-	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: "/repo"})
+	// A REAL DIRECTORY, because the roster no longer publishes a repository
+	// whose main worktree is gone (`withoutGoneRepositories'). The workspace's
+	// own parent is one the caller's `t.TempDir()' already made.
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: filepath.Dir(dir)})
 	return ws
 }
 

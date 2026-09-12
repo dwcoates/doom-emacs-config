@@ -300,3 +300,76 @@ func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T
 		t.Fatalf("workspace A's attention marker was cleared by selecting B, want it left set: only A's own SelectWorkspace clears it")
 	}
 }
+
+// TestRegisteringAClosedWorkspaceReopensIt is the wire half of the register
+// that produced a workspace with NO TAB.
+//
+// Registration is idempotent by dir and answers the row that is already there.
+// A row a previous CLOSE had marked closed came back closed, and `closed` is
+// the editor's whole tab-membership rule (lisp/roster.el's
+// `agent-repl-roster-desired-tabs'): the tab was never drawn, the minted ref's
+// landing waited for a tab that was not coming, and nothing could resolve the
+// workspace by name to act on it.
+func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
+	t.Parallel()
+	// Arrange: a registered workspace, closed.
+	f := newRegistered(t, harness.Opts{})
+	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
+	}
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the closed row", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetClosed().GetClosed()
+	})
+
+	// Act: announce the same directory again.
+	again := harness.Register(t, f.d, f.repo.Dir)
+
+	// Assert: the same workspace, and its row is open again.
+	if again.GetId() != f.ws.GetId() {
+		t.Fatalf("re-registering %s minted %q, want the same workspace %q", f.repo.Dir, again.GetId(), f.ws.GetId())
+	}
+	awaitRoster(t, f.d, roster, "the re-registered row drawn open", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && !row.GetClosed().GetClosed()
+	})
+}
+
+// TestTheRosterDropsARepositoryWhoseDirectoryIsGone covers the create that
+// produced nothing at all.
+//
+// The roster's repository sections are `SPC TAB n”s CREATE TARGETS
+// (lisp/verbs.el's `agent-repl-verbs--read-repository'), and nothing ever
+// forgets a repository row. A repository whose tree has been deleted therefore
+// stayed in the picker, drawing the same label as a live repository of the
+// same base name, and the create that picked the dead one failed at git.
+func TestTheRosterDropsARepositoryWhoseDirectoryIsGone(t *testing.T) {
+	t.Parallel()
+	// Arrange: a registered workspace whose whole repository is then deleted.
+	f := newRegistered(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the registered row", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()) != nil
+	})
+	if err := os.RemoveAll(f.repo.Dir); err != nil {
+		t.Fatalf("remove the repository directory: %v", err)
+	}
+	// The boot reconciliation warns once about the directory it closed, and
+	// both daemons share this state root's log. That warning is the deleted
+	// tree being reported, which is the point of the arrange.
+	f.d.ExpectWarnings("daemon.boot.close_missing_dir")
+
+	// Act: the opening publish is the walk that stats what is there, so the
+	// roster is read from a daemon booting over the same state root.
+	f.d.Stop()
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
+	d2.ExpectWarnings("daemon.boot.close_missing_dir")
+
+	// Assert.
+	got := awaitRoster(t, d2, d2.WatchRoster(), "a roster with no section for the deleted repository",
+		func(r *frontendv1.WorkspaceRoster) bool { return len(r.GetRepository().GetSections()) == 0 })
+	if rosterRow(got, f.ws.GetId()) != nil {
+		t.Fatalf("the roster still carries a row for %q under a repository that is not on disk", f.ws.GetId())
+	}
+}
