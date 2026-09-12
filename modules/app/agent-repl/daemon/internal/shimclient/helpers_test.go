@@ -122,6 +122,8 @@ func (s testSurfaces) Global() dlog.Logger { return s.log }
 
 func (s testSurfaces) Workspace(string) (dlog.Logger, error) { return s.log, nil }
 
+func (s testSurfaces) WorkspaceOrCentral(string) dlog.Logger { return s.log }
+
 func (s testSurfaces) ShimSink(string) (dlog.Borrowed, error) {
 	return nil, errors.New("testSurfaces: ShimSink is not used by shimclient tests")
 }

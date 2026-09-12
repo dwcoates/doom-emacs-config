@@ -1198,6 +1198,36 @@ otherwise the record is a routing invariant violation.")
                      (t (format "%s [MISSING]" dir))))
        :error))))
 
+(defconst agent-repl--central-log-fallback-format
+  "elisp.core.log-central-fallback workspace=%S reason=%s"
+  "Format of the once-per-workspace record announcing a central fallback.")
+
+(defun agent-repl--claim-central-log-fallback (ws)
+  "Claim the ONE announcement that WS's records go to the central sink.
+
+Returns non-nil exactly once per WS, and raises the user-visible warning on
+that same one occasion.  A workspace that cannot host a durable sink of its
+own is an ORDINARY condition, and it belongs to the WORKSPACE rather than to
+the record that met it: announcing it per record is what turned a single tab
+render into a screenful of identical lines.
+
+The record itself is built and written by `agent-repl--emit-log-record', the
+one builder and writer of records, which is also the only place that can do
+so without re-entering the ladder it runs inside."
+  (unless (gethash ws agent-repl--unroutable-log-workspaces)
+    (puthash ws t agent-repl--unroutable-log-workspaces)
+    (let ((dir (and (fboundp 'agent-repl--ws-get)
+                    (agent-repl--ws-get ws :project-dir))))
+      (display-warning
+       'agent-repl
+       (format "workspace %S cannot host a durable log sink (registered-dir=%s); its records are written centrally"
+               ws
+               (cond ((not (stringp dir)) "unregistered")
+                     ((file-directory-p dir) dir)
+                     (t (format "%s [MISSING]" dir))))
+       :warning))
+    t))
+
 (defvar agent-repl--log-preregistration-workspace nil
   "Name of the workspace currently inside its own registration window.
 
@@ -1285,7 +1315,20 @@ reasoned central registry."
      (t
       (condition-case err
           (list :workspace (agent-repl--log-sink-workspace candidate))
-        (error (list :routing-error t :offender candidate
+        ;; A NAMED WORKSPACE THAT OWNS NO SINK IS NOT A ROUTING FAILURE.
+        ;; Resolving a workspace's sink is a TOTAL function: a workspace whose
+        ;; own directory cannot host one — a scratch or temporary path, a
+        ;; worktree that has been deleted, a directory that does not exist yet
+        ;; — resolves to the CENTRAL sink with the workspace preserved on the
+        ;; record as `unroutable_workspace'.  The condition is announced ONCE
+        ;; per workspace; announcing it per RECORD is what turned one tab
+        ;; render of one such workspace into 22 ERROR lines.
+        ;;
+        ;; A routing failure with NO offender is a different fact and keeps
+        ;; its ERROR: nothing named the workspace at all, which is missing
+        ;; attribution at the call site rather than an unavailable directory.
+        (error (list :central "the workspace owns no durable log sink"
+                     :unroutable candidate
                      :reason (error-message-string err))))))))
 
 (defun agent-repl--workspace-log-identity (ws)
@@ -1954,16 +1997,39 @@ A ROUTING FAILURE IS NOT THE CALLER'S ERROR TO HANDLE.  Logging is called
 from everywhere, including from the middle of loops whose remaining
 iterations matter; a rung that signalled into its caller turned one
 workspace with a deleted worktree into a whole roster push aborting on its
-first row and zero tabs drawn.  So an unroutable workspace still records
-the `log-routing-error' line at ERROR and still shouts through
-`agent-repl--note-unroutable-log-workspace', and then the ORIGINAL record
-is written to the global sink carrying `unroutable_workspace' — the
-diagnosis is louder than before, and the caller returns normally.  FATAL is
-the one exception: it is a control-flow act, not a rung, and still signals."
+first row and zero tabs drawn.  FATAL is the one exception: it is a
+control-flow act, not a rung, and still signals.
+
+TWO DIFFERENT FACTS REACH THIS FUNCTION UNROUTED, and they are recorded
+differently:
+
+  - A NAMED WORKSPACE THAT OWNS NO DURABLE SINK is an ordinary outcome —
+    its directory is a scratch path, or its worktree has been deleted.
+    The record is written to the global sink carrying
+    `unroutable_workspace', so the line still says which workspace it is
+    about, and the CONDITION is announced once per workspace by
+    `agent-repl--claim-central-log-fallback'.  Nothing that merely renders
+    or sweeps such a workspace may fail or spam because of it: a single
+    tab render used to write 22 ERROR lines this way.
+
+  - NO WORKSPACE AT ALL is missing attribution at the call site, which no
+    directory can supply.  It keeps its `log-routing-error' line at ERROR
+    beside the rerouted original."
   (let* ((routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
          (routing-error (plist-get routing :routing-error))
          (sink-ws (plist-get routing :workspace))
-         (pseudo-ws (plist-get routing :pseudo)))
+         (pseudo-ws (plist-get routing :pseudo))
+         (unroutable-ws (plist-get routing :unroutable)))
+    (when (and unroutable-ws
+               (agent-repl--claim-central-log-fallback unroutable-ws)
+               agent-repl-log-to-file
+               (agent-repl--log-record-persists-p "debug" "normal"))
+      (agent-repl--do-log-to-file
+       (agent-repl--log-record nil "debug" "normal"
+                               agent-repl--central-log-fallback-format
+                               (list unroutable-ws (plist-get routing :reason))
+                               nil nil unroutable-ws)
+       nil))
     (if routing-error
         (let* ((offender (plist-get routing :offender))
                (reason (plist-get routing :reason))
@@ -1992,7 +2058,7 @@ the one exception: it is a control-flow act, not a rung, and still signals."
             (error "%s" text))
           original)
       (let* ((record (agent-repl--log-record sink-ws level verbosity fmt args
-                                             pseudo-ws operation-fmt))
+                                             pseudo-ws operation-fmt unroutable-ws))
              (text (agent-repl--build-log-text sink-ws fmt args))
              (to-file (and agent-repl-log-to-file
                            (agent-repl--log-record-persists-p level verbosity)))

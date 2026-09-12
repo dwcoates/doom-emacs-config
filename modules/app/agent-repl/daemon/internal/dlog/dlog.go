@@ -59,6 +59,14 @@ type Surfaces interface {
 	// <dir>/.claude/emacs/daemon.log (via the canonical symlink). It fails
 	// rather than falling back to the global sink.
 	Workspace(dir string) (Logger, error)
+	// WorkspaceOrCentral answers a workspace's logger TOTALLY: the workspace's
+	// own durable sink when its directory can host one, and otherwise the
+	// central sink with `unroutable_workspace` naming the workspace the record
+	// is about. It exists for the callers whose work must not stop because one
+	// workspace's directory is a scratch path or has been deleted — the idle
+	// sweep, the request boundary — and the condition is recorded once per
+	// workspace rather than once per record.
+	WorkspaceOrCentral(dir string) Logger
 	// ShimSink borrows the already-open shim log sink for one workspace, to be
 	// passed as the spawned shim's fd 3. The handle is non-closeable by the
 	// borrower; the surfaces own its lifetime.

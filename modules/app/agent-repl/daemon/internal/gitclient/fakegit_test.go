@@ -411,6 +411,10 @@ func (s *testSurfaces) Workspace(string) (dlog.Logger, error) {
 	panic("gitclient must never resolve a workspace sink: it is a leaf with no workspace identity")
 }
 
+func (s *testSurfaces) WorkspaceOrCentral(string) dlog.Logger {
+	panic("gitclient must never resolve a workspace sink: it is a leaf with no workspace identity")
+}
+
 func (s *testSurfaces) ShimSink(string) (dlog.Borrowed, error) {
 	panic("gitclient must never borrow a shim sink")
 }

@@ -96,6 +96,16 @@ func (s *stubSurfaces) Workspace(dir string) (dlog.Logger, error) {
 	return s.logger.With(dlog.Context{"dir": dir}), nil
 }
 
+// WorkspaceOrCentral implements dlog.Surfaces: the workspace's logger when it
+// resolves, and the global one when it does not.
+func (s *stubSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
+	log, err := s.Workspace(dir)
+	if err != nil {
+		return s.Global()
+	}
+	return log
+}
+
 func (s *stubSurfaces) ShimSink(string) (dlog.Borrowed, error) { return nil, errStub }
 
 // BindWorkspaceIDs implements dlog.Surfaces. This double answers its own

@@ -218,7 +218,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      (equal
       (mapcar (lambda (call) (list (car call) (cadr call) (car (nth 2 call))))
               calls)
+      ;; The first pair is the once-per-workspace central-fallback record: a
+      ;; workspace that cannot host a durable sink is announced from inside
+      ;; the emitter precisely so the one builder and the one writer stay one.
       '(("core.el" agent-repl--do-log-to-file write-region)
+        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
+        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
         ("core.el" agent-repl--emit-log-record agent-repl--log-record)
         ("core.el" agent-repl--emit-log-record agent-repl--log-record)
         ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
@@ -1790,10 +1795,10 @@ pre-registration records and the rest of its records land in one file."
             (should (equal (alist-get 'message record) "timer tick"))))
       (delete-directory dir t))))
 
-(ert-deftest agent-repl-test-log-workspace-without-directory-records-routing-error ()
-  "An unroutable workspace writes a central routing error."
+(ert-deftest agent-repl-test-log-workspace-without-directory-records-a-central-fallback ()
+  "A workspace that owns no sink announces the fallback, not a routing error."
   (agent-repl-test--with-clean-state
-    (let* ((dir (make-temp-file "agent-repl-routing-error-" t))
+    (let* ((dir (make-temp-file "agent-repl-central-fallback-" t))
            (global (expand-file-name "global.log" dir))
            (agent-repl-log-to-file t)
            (agent-repl-log-file-name global)
@@ -1801,12 +1806,42 @@ pre-registration records and the rest of its records land in one file."
            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
       (unwind-protect
           (cl-letf (((symbol-function 'display-warning) #'ignore))
-            (agent-repl--log "missing-ws" "must not reroute")
+            (agent-repl--log "missing-ws" "routed centrally")
             (should (file-exists-p global))
             (with-temp-buffer
               (insert-file-contents global)
-              (should (string-match-p "log-routing-error" (buffer-string)))))
+              (should (string-match-p "log-central-fallback" (buffer-string)))))
         (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-log-workspace-without-directory-records-no-routing-error ()
+  "An unavailable directory is an ordinary outcome, never an error flood."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          (dotimes (_ 5)
+            (agent-repl--log "missing-ws" "routed centrally")))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should-not (string-match-p "log-routing-error" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-log-workspace-without-directory-announces-the-fallback-once ()
+  "The condition belongs to the workspace, so it is announced once."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          (dotimes (_ 5)
+            (agent-repl--log "missing-ws" "routed centrally")))
+        ;; Assert
+        (should (= 1 (seq-count
+                      (lambda (record)
+                        (string-match-p "log-central-fallback"
+                                        (or (alist-get 'operation record) "")))
+                      (agent-repl-test--log-records path))))))))
 
 
 (ert-deftest agent-repl-test-workspace-log-replaces-hostile-canonical-symlink ()
@@ -3320,8 +3355,8 @@ ladder made a debug line abort `doom-init-ui-hook'."
           ;; Act / Assert: a returned record, not a signal.
           (should (agent-repl--log "vanished-ws" "line after the worktree went away")))))))
 
-(ert-deftest agent-repl-test-deleted-worktree-still-records-the-routing-error ()
-  "Not signalling must not cost the routing-error record."
+(ert-deftest agent-repl-test-deleted-worktree-records-the-central-fallback-at-debug ()
+  "A deleted worktree is an ordinary condition, announced at DEBUG."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       (let ((project (make-temp-file "agent-repl-vanished-record-" t))
@@ -3332,8 +3367,24 @@ ladder made a debug line abort `doom-init-ui-hook'."
           ;; Act
           (agent-repl--log "vanished-record-ws" "line after the worktree went away"))
         ;; Assert
-        (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
-          (should (equal (alist-get 'level record) "error")))))))
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (equal (alist-get 'level record) "debug")))))))
+
+(ert-deftest agent-repl-test-deleted-worktree-fallback-names-the-workspace ()
+  "The announcement says WHICH workspace lost its sink."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((project (make-temp-file "agent-repl-vanished-named-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (agent-repl--ws-put "vanished-named-ws" :project-dir project)
+        (delete-directory project t)
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (agent-repl--log "vanished-named-ws" "line after the worktree went away"))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (equal (alist-get 'unroutable_workspace record)
+                         "vanished-named-ws")))))))
 
 (ert-deftest agent-repl-test-unroutable-workspace-original-reaches-the-global-sink ()
   "The workspace-owned record lands centrally rather than being dropped."
@@ -3390,8 +3441,8 @@ ladder made a debug line abort `doom-init-ui-hook'."
                    "original-operation=agent-repl.elisp-test-unattributed-value-s"
                    (alist-get 'message record))))))))
 
-(ert-deftest agent-repl-test-unroutable-workspace-error-keeps-the-request-id ()
-  "A routing failure remains correlated to the request edge that exposed it."
+(ert-deftest agent-repl-test-central-fallback-keeps-the-request-id ()
+  "The announcement remains correlated to the request edge that exposed it."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       ;; Arrange
@@ -3401,8 +3452,26 @@ ladder made a debug line abort `doom-init-ui-hook'."
           ;; Act
           (agent-repl--log "no-such-ws" "owned event"))
         ;; Assert
-        (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
           (should (equal (alist-get 'request_id record) "request-1")))))))
+
+(ert-deftest agent-repl-test-unattributed-record-still-records-the-routing-error ()
+  "A record naming NO workspace is missing attribution, and still says so.
+No directory can supply what the call site never named, so this fact keeps
+its ERROR while an unavailable directory does not."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--log-context-workspace nil)
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) nil))
+                  ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+                  ((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (agent-repl--log nil "elisp.test.unattributed-still-errors"))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
+          (should (equal (alist-get 'level record) "error")))))))
 
 (ert-deftest agent-repl-test-unroutable-workspace-is-named-in-a-user-warning ()
   "The routing failure is visible and names the workspace."
@@ -4675,8 +4744,10 @@ workspace name rather than to a second, unroutable spelling."
                             (file-name-as-directory project)))))
         (delete-directory project t)))))
 
-(ert-deftest agent-repl-test-unknown-directory-still-fails-as-unroutable ()
-  "Canonicalization must not accept a genuinely unknown directory."
+(ert-deftest agent-repl-test-unknown-directory-is-still-not-adopted-as-a-sink ()
+  "Canonicalization must not accept a genuinely unknown directory.
+It owns no sink, so its records go centrally under its own name rather than
+into some other workspace's log."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
@@ -4685,9 +4756,9 @@ workspace name rather than to a second, unroutable spelling."
         (cl-letf (((symbol-function 'display-warning) #'ignore))
           (agent-repl--log "/no/such/worktree/anywhere" "probe"))
         ;; Assert
-        (with-temp-buffer
-          (insert-file-contents path)
-          (should (string-match-p "log-routing-error" (buffer-string))))))))
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (equal (alist-get 'unroutable_workspace record)
+                         "/no/such/worktree/anywhere")))))))
 
 (ert-deftest agent-repl-test-tombstoned-workspace-dir-is-not-adopted ()
   "A dead workspace's preserved directory must not claim the record.
