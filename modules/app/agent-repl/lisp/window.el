@@ -52,6 +52,7 @@
 ;; so the byte-compiler binds and reads them dynamically rather than
 ;; lexically.
 (defvar agent-repl--eager-open-in-progress)
+(defvar agent-repl-input-height-fraction)
 
 (require 'cl-lib)
 
@@ -247,6 +248,107 @@ Each keyword is independent and may be omitted:
         (agent-repl--log-verbose resolved-ws
                                  "window--harden: fringes=unrecognized value=%S window=%S"
                                  fringes win))))))
+
+;;;; --- The composer's fixed height ----------------------------------------
+;;
+;; The composer (`*agent-panel-input-WS*') must be the SAME height in
+;; every workspace and stay that height for the life of the frame.  It
+;; used not to be: the mount split its host window by
+;; `agent-repl-input-height-fraction' of THAT WINDOW's height at THAT
+;; INSTANT, so the number of lines depended on what the frame happened
+;; to look like when the workspace was mounted — a second tab-bar row,
+;; a bottom window that had not been cleared yet, a frame still at its
+;; pre-fullscreen size during a hidden startup — and every remount
+;; (`agent-repl-window--ensure-layout' repairs the pair through the
+;; same display path) re-sampled that moving base.  Both of the
+;; owner-reported symptoms, workspaces disagreeing with each other and
+;; one workspace changing over time, are that one sampling bug.
+;;
+;; The height is therefore computed ONCE per frame geometry and cached
+;; in a frame parameter, so every mount on that frame — first mount,
+;; remount, repair, or a restored workspace — asks for the same number
+;; of lines.  The number itself is unchanged from what the healthy case
+;; always produced: the declared fraction of the frame's main area
+;; (`frame-root-window'), which is exactly what the host window measured
+;; when the mount found the frame in the state it expects.
+;;
+;; The cache key is the frame's TEXT height, so a genuine frame resize
+;; re-derives while a tab-bar row appearing or disappearing (which
+;; shrinks the main area without changing the frame's text height) does
+;; not.
+
+(defconst agent-repl-window--input-height-minimum 3
+  "Fewest total lines the composer may be given.
+A frame small enough to drive the declared fraction below this would
+produce a composer with no usable body; the floor keeps one typing line
+plus its mode line rather than letting the arithmetic decide.")
+
+(defconst agent-repl-window--input-height-parameter 'agent-repl-input-height
+  "Frame parameter caching the composer height for a frame.
+Value is a cons (FRAME-TEXT-HEIGHT . LINES): the geometry the height was
+derived from, and the height itself.  A mismatch on the car re-derives.")
+
+(defun agent-repl-window--input-height (&optional frame ws)
+  "Return the composer's fixed height in total lines for FRAME.
+
+FRAME defaults to the selected frame; WS names the workspace for
+diagnostics only.  The value is derived once per frame geometry from
+`agent-repl-input-height-fraction' of the frame's main area and cached
+in `agent-repl-window--input-height-parameter', so every mount on the
+frame — including a remount, a layout repair, and a restored workspace
+— receives the same number.  Never smaller than
+`agent-repl-window--input-height-minimum'."
+  (let* ((frame (or frame (selected-frame)))
+         (log-ws (agent-repl--ws-log-name (or ws (agent-repl--ws-current-name))))
+         (key (frame-height frame))
+         (cached (frame-parameter frame agent-repl-window--input-height-parameter)))
+    (if (and (consp cached) (eql (car cached) key) (integerp (cdr cached)))
+        (progn
+          (agent-repl--log log-ws
+                           "window--input-height: source=frame-cache frame=%S frame-height=%s lines=%s"
+                           frame key (cdr cached))
+          (cdr cached))
+      (let* ((base (window-total-height (frame-root-window frame)))
+             (lines (max agent-repl-window--input-height-minimum
+                         (round (* agent-repl-input-height-fraction base)))))
+        (set-frame-parameter frame agent-repl-window--input-height-parameter
+                             (cons key lines))
+        (agent-repl--log log-ws
+                         "window--input-height: source=computed frame=%S frame-height=%s main-area-height=%s fraction=%S floor=%s lines=%s"
+                         frame key base agent-repl-input-height-fraction
+                         agent-repl-window--input-height-minimum lines)
+        lines))))
+
+(defun agent-repl-window--apply-height (win lines &optional ws)
+  "Make WIN exactly LINES total lines tall, returning the height it ends at.
+
+The split that creates the composer already asks for LINES, so this is
+the check that the frame actually granted them: `split-window' clamps
+against `window-min-height' and the host's own size, and a clamped
+composer is the visible defect.  A refused resize is RECORDED with the
+error it refused with (at debug — a composer a line short is cosmetic
+and must not abort the mount that carries the user's session) and the
+height WIN really has is returned, so the caller's record is the truth
+and never the request."
+  (let ((log-ws (agent-repl--ws-log-name (or ws (agent-repl--ws-current-name)))))
+    (unless (window-live-p win)
+      (error "agent-repl-window--apply-height: window %S is not live" win))
+    (let ((actual (window-total-height win)))
+      (if (= actual lines)
+          (agent-repl--log log-ws
+                           "window--apply-height: outcome=already-exact window=%S lines=%s"
+                           win lines)
+        (condition-case err
+            (progn
+              (window-resize win (- lines actual) nil t)
+              (agent-repl--log log-ws
+                               "window--apply-height: outcome=resized window=%S from=%s to=%s actual=%s"
+                               win actual lines (window-total-height win)))
+          (error
+           (agent-repl--log log-ws
+                            "window--apply-height: outcome=refused window=%S from=%s requested=%s actual=%s err=%S"
+                            win actual lines (window-total-height win) err))))
+      (window-total-height win))))
 
 ;;;; --- Deletion, or its structural substitute -----------------------------
 ;;
