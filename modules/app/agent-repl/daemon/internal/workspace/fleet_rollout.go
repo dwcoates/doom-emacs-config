@@ -367,7 +367,12 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 	if err != nil {
 		return nil, fmt.Errorf("workspace: adopt %q: %w", ws, err)
 	}
-	client, err := f.deps.Supervisor.Adopt(ctx, ws, record.Dir, f.deps.SocketPath(ws))
+	log, logErr := f.deps.Log.Workspace(record.Dir)
+	if logErr != nil {
+		return nil, fmt.Errorf("workspace: adopt %q: resolve the workspace log sink: %w", ws, logErr)
+	}
+	log = log.With(dlog.Context{"workspace": string(ws)})
+	client, err := f.adoptBounded(ctx, log, ws, record.Dir, f.deps.SocketPath(ws), "handover")
 	if err != nil {
 		return nil, fmt.Errorf("workspace: adopt %q: dial the transferred shim: %w", ws, err)
 	}
