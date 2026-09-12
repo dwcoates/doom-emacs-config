@@ -132,6 +132,30 @@ let previous = workspace.frontmostApplication
 activate(target)
 spin(upTo: 2.0, until: { target.isActive })
 
+// AN ACTIVATION THAT DID NOT TAKE IS A FAILURE, NOT A REASON TO POST ANYWAY.
+//
+// A CGEvent addressed to a process AppKit has given no key window is dropped
+// with no error, which is the failure this whole file exists to avoid; posting
+// into that state and exiting 0 would report a key as delivered that the
+// keymap never saw, and the caller would then wait out a ceiling for an effect
+// that could never arrive. That is exactly how a `C-g` sent to dismiss a
+// standing minibuffer turned into a 30s timeout in the 2026-09-12 workspace
+// runs: the harness could not tell "the key never arrived" from "the key
+// arrived and the read did not abort".
+//
+// So the post is refused and the failure is named. `activate()` is best-effort
+// for a background command-line tool and macOS can decline it outright, so
+// this is a real state and not a theoretical one. Focus is handed back first,
+// so a refusal leaves the desktop exactly as it found it.
+if !target.isActive {
+    if let previous = previous, previous.processIdentifier != pid {
+        activate(previous)
+    }
+    fail("pid \(pid) did not become the active application within 2s, so the key event was NOT posted: "
+        + "AppKit dispatches a key event only to a key window, and a post to a process without one is dropped "
+        + "silently. Nothing was sent and the previously frontmost application was restored")
+}
+
 // Down then up, addressed to the process. There is no delay between them: a
 // keystroke is not a hold, and Emacs's own input queue serializes them.
 down.postToPid(pid)

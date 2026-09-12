@@ -246,7 +246,20 @@ its own output, with the ids, for the owner to rule on.
 keys, and where the plan names a binding the chord IS pressed as real key
 events — then the command's own first prompt is read back out of the minibuffer
 as the proof it arrived (`SPC TAB n` is the only thing that asks "Repository: "
-first), and a real `C-g` aborts it. The parameterized act that follows enters
+first), and a real `C-g` aborts it. **The abort has two channels since
+2026-09-12**, and the second one is always reported. The real `C-g` goes first,
+with a 3s bound; if the prompt still stands, an emacsclient eval schedules
+`abort-minibuffers` on a zero-delay timer instead — scheduled rather than
+called inline, so the throw unwinds the minibuffer's recursive edit rather than
+`server-process-filter` — for up to three attempts of 2s each. Taking the
+second channel is written into the manifest as a DEVIATION AND A FINDING and
+fails the test; it is not a fallback that quietly rescues a run. A prompt
+neither channel can clear stops the run immediately, because every assertion
+after it would be about an editor no owner would be in. The single-channel
+version waited the 30s chord ceiling out per failed dismissal and then carried
+on, which is how one run came back reporting that every act after the first had
+run against a standing minibuffer (docs/REALTEST-JUDGEMENT-CALLS.md, row 58).
+The parameterized act that follows enters
 the SAME user-facing command through `call-interactively` with only its
 minibuffer reads answered, because those reads are a `require-match`
 `completing-read` and a directory-name prompt, and typing into either with
