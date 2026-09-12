@@ -25,6 +25,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - daemon/elisp: departure means the boot claim is released, not the address file vanishing; fixes a restart that destroyed the daemon
 - daemon: the host session identity is minted at creation, refused empty at the store, and healed in the existing rows (S)
 - elisp: workspace switch and composer-landing records persist at info instead of being dropped at debug (U)
+- realtest: the failed `C-g` was key delivery, not quit handling — keydriver refuses to post without a focused window, and the dismissal finding now names harness or product from the marks Emacs itself leaves
 - realtest: phase budgets filled from 23 runs of manifest history; LOOSE at 3x and due for retightening (Q, V)
 - logs: compact query modes (tally, sample, fields, timeline) plus stderr and Messages sources
 - daemon/elisp: workspace log-sink resolution is total, and reopening a vanished directory is a named refusal (F, I, J)
