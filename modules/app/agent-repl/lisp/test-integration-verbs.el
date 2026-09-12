@@ -1918,13 +1918,20 @@ are stubbed."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
-      (ignore ref)
-      (agent-repl-itest-verbs--with-roster daemon nil
+      ;; The DYNAMIC creation modes take their repository from the roster
+      ;; section the CURRENT workspace's row sits in (owner ruling,
+      ;; 2026-09-12), so the row has to be on the roster for one to run at
+      ;; all -- and `completing-read' errors here because a dynamic create
+      ;; asks for no repository.
+      (agent-repl-itest-verbs--with-roster
+          daemon (list (agent-repl-itest-verbs--roster-row
+                        (plist-get ref :id) (plist-get ref :dir)
+                        :name agent-repl-itest-verbs--ws))
         (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                    (lambda () agent-repl-itest-verbs--ws))
                   ((symbol-function 'completing-read)
-                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
-                                                "itest-repo" "")))
+                   (lambda (&rest _)
+                     (error "a dynamic create must not ask for a repository")))
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _) (ignore prompt initial) "")))
           ;; Act.
@@ -1942,12 +1949,20 @@ fresh, not a resumed one."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
-      (agent-repl-itest-verbs--with-roster daemon nil
+      ;; The DYNAMIC creation modes take their repository from the roster
+      ;; section the CURRENT workspace's row sits in (owner ruling,
+      ;; 2026-09-12), so the row has to be on the roster for one to run at
+      ;; all -- and `completing-read' errors here because a dynamic create
+      ;; asks for no repository.
+      (agent-repl-itest-verbs--with-roster
+          daemon (list (agent-repl-itest-verbs--roster-row
+                        (plist-get ref :id) (plist-get ref :dir)
+                        :name agent-repl-itest-verbs--ws))
         (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                    (lambda () agent-repl-itest-verbs--ws))
                   ((symbol-function 'completing-read)
-                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
-                                                "itest-repo" "")))
+                   (lambda (&rest _)
+                     (error "a dynamic create must not ask for a repository")))
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _) (ignore prompt initial) "")))
           ;; Act.
@@ -1967,12 +1982,20 @@ command's whole contract is that BOTH facts ride together."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
-      (agent-repl-itest-verbs--with-roster daemon nil
+      ;; The DYNAMIC creation modes take their repository from the roster
+      ;; section the CURRENT workspace's row sits in (owner ruling,
+      ;; 2026-09-12), so the row has to be on the roster for one to run at
+      ;; all -- and `completing-read' errors here because a dynamic create
+      ;; asks for no repository.
+      (agent-repl-itest-verbs--with-roster
+          daemon (list (agent-repl-itest-verbs--roster-row
+                        (plist-get ref :id) (plist-get ref :dir)
+                        :name agent-repl-itest-verbs--ws))
         (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                    (lambda () agent-repl-itest-verbs--ws))
                   ((symbol-function 'completing-read)
-                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
-                                                "itest-repo" "")))
+                   (lambda (&rest _)
+                     (error "a dynamic create must not ask for a repository")))
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _)
                      (ignore prompt initial) "forked prompt")))
@@ -1994,12 +2017,19 @@ raw wire text can prove the daemon actually received `false' rather than
 an absence."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-primary daemon conn
-      (ignore conn)
-      (agent-repl-itest-verbs--with-roster daemon nil
-        (cl-letf (((symbol-function 'completing-read)
-                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
-                                                "itest-repo" "")))
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      ;; A one-shot is a DYNAMIC mode: it derives its repository from the
+      ;; roster section the current workspace's row sits in and asks for no
+      ;; repository at all, so the row is what makes it runnable here.
+      (agent-repl-itest-verbs--with-roster
+          daemon (list (agent-repl-itest-verbs--roster-row
+                        (plist-get ref :id) (plist-get ref :dir)
+                        :name agent-repl-itest-verbs--ws))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws))
+                  ((symbol-function 'completing-read)
+                   (lambda (&rest _)
+                     (error "a one-shot must not ask for a repository")))
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _)
                      (ignore prompt initial) "reviewed one-shot")))
@@ -2018,12 +2048,19 @@ The other half of the reviewed case: a command that always encoded
 `false' would pass the reviewed test on its own."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-primary daemon conn
-      (ignore conn)
-      (agent-repl-itest-verbs--with-roster daemon nil
-        (cl-letf (((symbol-function 'completing-read)
-                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
-                                                "itest-repo" "")))
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      ;; A one-shot is a DYNAMIC mode: it derives its repository from the
+      ;; roster section the current workspace's row sits in and asks for no
+      ;; repository at all, so the row is what makes it runnable here.
+      (agent-repl-itest-verbs--with-roster
+          daemon (list (agent-repl-itest-verbs--roster-row
+                        (plist-get ref :id) (plist-get ref :dir)
+                        :name agent-repl-itest-verbs--ws))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws))
+                  ((symbol-function 'completing-read)
+                   (lambda (&rest _)
+                     (error "a one-shot must not ask for a repository")))
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _)
                      (ignore prompt initial) "queued one-shot")))
@@ -2043,14 +2080,19 @@ prefix that asked for a model choice could silently create on the
 daemon's default instead."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-primary daemon conn
-      (ignore conn)
-      (agent-repl-itest-verbs--with-roster daemon nil
-        (cl-letf (((symbol-function 'completing-read)
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      ;; A one-shot derives its repository (owner ruling, 2026-09-12), so the
+      ;; only picker it may open is the model one this prefix asks for.
+      (agent-repl-itest-verbs--with-roster
+          daemon (list (agent-repl-itest-verbs--roster-row
+                        (plist-get ref :id) (plist-get ref :dir)
+                        :name agent-repl-itest-verbs--ws))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws))
+                  ((symbol-function 'completing-read)
                    (lambda (prompt &rest _)
-                     (cond ((string-prefix-p "Repository" prompt) "itest-repo")
-                           ((string-prefix-p "Model" prompt) "haiku")
-                           (t ""))))
+                     (if (string-prefix-p "Model" prompt) "haiku"
+                       (error "a one-shot must not ask for a repository"))))
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _)
                      (ignore prompt initial) "one-shot with a model")))
