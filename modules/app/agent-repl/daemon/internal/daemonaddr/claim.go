@@ -86,7 +86,9 @@ func ReadAdvertisement(addrPath string) (Advertisement, error) {
 // comes FIRST so a second daemon loses before it has bound anything: it never
 // creates a listener, never writes daemon.addr, and so cannot disturb the
 // incumbent on its way out.
-func bind(addrPath string, port int) (Claim, error) { return bindWith(addrPath, port, true) }
+func bind(addrPath string, port int, wait time.Duration) (Claim, error) {
+	return bindWith(addrPath, port, true, wait)
+}
 
 // bindJoining binds WITHOUT the boot claim, for a successor.
 //
@@ -95,9 +97,12 @@ func bind(addrPath string, port int) (Claim, error) { return bindWith(addrPath, 
 // it would lose to its own predecessor and exit -- which is exactly what
 // happened, so no handover ever completed. It takes the claim when it takes
 // over, at Publish, by which point the incumbent has stood down.
-func bindJoining(addrPath string, port int) (Claim, error) { return bindWith(addrPath, port, false) }
+func bindJoining(addrPath string, port int) (Claim, error) {
+	// A SUCCESSOR TAKES NO CLAIM HERE, so there is nothing for it to wait on.
+	return bindWith(addrPath, port, false, 0)
+}
 
-func bindWith(addrPath string, port int, claimBoot bool) (Claim, error) {
+func bindWith(addrPath string, port int, claimBoot bool, wait time.Duration) (Claim, error) {
 	if addrPath == "" {
 		return nil, fmt.Errorf("daemon.addr path is empty")
 	}
@@ -111,7 +116,10 @@ func bindWith(addrPath string, port int, claimBoot bool) (Claim, error) {
 	var lock *bootLock
 	if claimBoot {
 		var err error
-		if lock, err = acquireBootLock(LockPath(addrPath)); err != nil {
+		// THE HELD CLAIM IS WAITED ON, not read as a live incumbent on sight:
+		// an outgoing daemon holds it until its process ends, and its
+		// replacement is spawned into exactly that window. See ClaimWaitBound.
+		if lock, err = acquireBootLockWithin(LockPath(addrPath), wait, nil); err != nil {
 			return nil, err
 		}
 	}
