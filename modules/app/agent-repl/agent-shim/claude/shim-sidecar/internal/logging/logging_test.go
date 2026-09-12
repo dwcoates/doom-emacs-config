@@ -447,6 +447,50 @@ func TestATargetBootingIsTransientNotAWarn(t *testing.T) {
 	}
 }
 
+// AN UNRESOLVABLE WORKSPACE IS FORWARDED UNATTRIBUTED, NOT WARNED, NOT RETRIED.
+// The record named a workspace that a healthy, fully-delivered roster does not
+// contain -- a macOS temp-root -- so the daemon is serving fine but the dir
+// cannot be attributed. It must be narrated at DEBUG, kept in the global sink,
+// and attempted only ONCE: retrying cannot make an absent dir appear.
+func TestAnUnresolvableWorkspaceIsForwardedUnattributedAtDebug(t *testing.T) {
+	// Arrange: the daemon answers Ready (it is serving), but every Forward
+	// returns the unresolvable-workspace sentinel -- the roster delivered and
+	// this dir was absent from it.
+	forwarder := &recordingForwarder{
+		address: "127.0.0.1:8123",
+		err:     fmt.Errorf("workspace %q is absent from the delivered roster: %w", "/tmp", ErrForwardWorkspaceUnresolvable),
+	}
+	l, _, global := forwardingSinks(t, true, forwarder)
+
+	// Act.
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/tmp", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling")
+	l.Close()
+
+	// Assert: no WARN outage was manufactured, the transient is narrated at
+	// DEBUG, and the record itself is kept unattributed in the global sink.
+	if strings.Contains(global.String(), "forward-failure") {
+		t.Fatalf("an unresolvable-workspace forward was reported as a WARN outage: %q", global.String())
+	}
+	operations := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		operations[decode(t, line).Operation]++
+	}
+	want := map[string]int{"sidecar.logging.forward-deferred": 1, "poll": 1}
+	for operation, count := range want {
+		if operations[operation] != count {
+			t.Fatalf("global operations = %v, want %v", operations, want)
+		}
+	}
+	// The ladder is abandoned at once: exactly one Forward attempt, never the
+	// six-rung retry ladder that a transport transient would climb.
+	if attempts := len(forwarder.Records()); attempts != 1 {
+		t.Fatalf("forward attempts = %d, want a single attempt with no retry", attempts)
+	}
+}
+
 // The count is what separates "the daemon was slow to boot" from "the daemon is
 // not there", so the one failure record carries it.
 func TestTheForwardFailureRecordCarriesItsAttemptCount(t *testing.T) {
