@@ -37,7 +37,7 @@ skipped.
 
 ```
 bin/realtest.sh                                  every realtest
-bin/realtest.sh -run TestRealtestStartTheEditor  one, by name
+bin/realtest.sh -run TestRealtestStartTheEditor   one, by name
 
 exit 0   the realtests ran
 exit 77  DECLINED, and the message says why
@@ -209,8 +209,8 @@ unsaved work.
 
 ## The workspace-act realtests, and their scratch repository
 
-Realtests 5 and 6 are the first that ACT rather than observe: they create,
-register, close, re-open and delete workspaces. Three things about them are
+Realtests 5 through 8 ACT rather than observe: they create, fork, register,
+reorder, close, re-open, kill and delete workspaces. Three things about them are
 settled by the lead's standing decision of 2026-09-12 and are worth reading
 before a run.
 
@@ -266,6 +266,36 @@ claiming a clean harvest over a log it never opened.
 cold start refuses to run against an Emacs that is already answering, so two of
 them in one `go test` process would have the second refuse against the editor
 the first left standing.
+
+**Realtests 7 and 8 add two things and change none.** Realtest 7 asserts a
+fork's inherited conversation on `ported_prompts` in `wsm.db`, the daemon's own
+durable expression of it (`PutPortedPrompts` is written from the fork path and
+nowhere else), because Emacs holds no feed to read it out of and
+`workspaces.parent_id` cannot tell a fork from a plain child. Realtest 8 asserts
+that a kill left no orphan by asking three independent questions: is the
+recorded shim pid alive, is any process listening on a socket belonging to the
+workspace (including a relaunched `<id>.nN.sock` generation), and does a connect
+to any of those nodes get ANSWERED. It deliberately does not assert the socket
+file is gone: nothing unlinks it until the next spawn or boot, so only liveness
+separates a clean kill from an orphan. Both readers live in `rt78_shared.go`.
+
+**Two acts in realtest 8 need no minibuffer deviation at all.** `SPC j d`
+(close) and `SPC j x` (kill) run commands that ask nothing and act on the
+current workspace, so the keypress IS the act and nothing is stubbed. They also
+cannot be proven the way every other chord here is, since there is no first
+prompt to read back, so they are proven through Emacs's own `(recent-keys)` plus
+the assertion that no minibuffer was left standing, and a sequence that did not
+arrive is FATAL rather than a separate finding: the chord is the act, so nothing
+after it would be asserting the right thing.
+
+**Realtest 7 needs `AGENT_REPL_FAKE_SHIMS=1` on the Emacs process** and checks
+for it rather than working around it. It has to give a fork's parent a
+conversation before it can fork, and a submitted prompt reaches the shim's
+`createRealQuery`, where the vendor guard throws. The hook has to be stated with
+`--env` on the launch, in `openBackgroundArgs`, because `open` hands Emacs to
+launchd, which inherits nothing; that file is shared by every realtest, so the
+test names the remedy and leaves the decision to the lead
+(docs/REALTEST-PLAN.md, "Running realtest 7").
 
 ## The phases: hidden, then shown
 
@@ -553,6 +583,10 @@ e2e/realtest/
   realtest_1_start_the_editor_test.go
   realtest_5_create_work_delete_a_workspace_test.go
   realtest_6_register_and_reopen_test.go
+  rt78_shared.go               the wsm.db columns realtests 7 and 8 read that
+                               nothing else does, and the kill orphan scan
+  realtest_7_fork_a_workspace_test.go
+  realtest_8_priority_close_reopen_kill_test.go
 ```
 
 The unit tests run under the same build tag and need none of the above: they
