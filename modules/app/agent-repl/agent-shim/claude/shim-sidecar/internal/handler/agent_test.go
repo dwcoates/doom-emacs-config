@@ -64,7 +64,7 @@ func TestALostSubagentSettlesItsSpawnUnitNamingTheArm(t *testing.T) {
 			h.Handle(nil, agentSpoolContext("/private/tmp/a1.output", "a15b5267244c1360e", "toolu_spawn", "owner-agent"))
 
 			// Act.
-			entries := h.LostTerminal("a15b5267244c1360e", "toolu_spawn", "owner-agent", string(test.reason))
+			entries := h.LostTerminal("a15b5267244c1360e", "toolu_spawn", "owner-agent", string(test.reason), false)
 
 			// Assert.
 			if len(entries) != 1 {
@@ -90,7 +90,7 @@ func TestALostSubagentIsNeverBlamedOnAPerson(t *testing.T) {
 	h.Handle(nil, agentSpoolContext("/private/tmp/a2.output", "a2task", "toolu_spawn2", "owner-agent"))
 
 	// Act.
-	entries := h.LostTerminal("a2task", "toolu_spawn2", "owner-agent", string(convert.LostWentSilent))
+	entries := h.LostTerminal("a2task", "toolu_spawn2", "owner-agent", string(convert.LostWentSilent), false)
 
 	// Assert.
 	if activityOf(entries[0]).GetSubagent().GetFailure().GetStoppedByUser() != nil {
@@ -107,7 +107,7 @@ func TestALostSubagentSettleIsKeyedByTheSpawningCall(t *testing.T) {
 	h.Handle(nil, agentSpoolContext("/private/tmp/a3.output", "a3task", "toolu_spawn3", "owner-agent"))
 
 	// Act.
-	entries := h.LostTerminal("a3task", "toolu_spawn3", "owner-agent", string(convert.LostSweptUp))
+	entries := h.LostTerminal("a3task", "toolu_spawn3", "owner-agent", string(convert.LostSweptUp), false)
 
 	// Assert.
 	if got := entries[0].GetUpsertKey(); got != convert.ActivityKey("toolu_spawn3") {
@@ -123,7 +123,7 @@ func TestALostSubagentSettleIsALineInTheParentsBook(t *testing.T) {
 	h.Handle(nil, agentSpoolContext("/private/tmp/a4.output", "a4task", "toolu_spawn4", "owner-agent"))
 
 	// Act.
-	entries := h.LostTerminal("a4task", "toolu_spawn4", "owner-agent", string(convert.LostWentSilent))
+	entries := h.LostTerminal("a4task", "toolu_spawn4", "owner-agent", string(convert.LostWentSilent), false)
 
 	// Assert.
 	if got := pageLine(entries[0]).GetPageAgentId().GetValue(); got != "owner-agent" {
@@ -141,8 +141,8 @@ func TestTwoLostSubagentsMintDistinctWriteIdentitiesWithoutAFilePosition(t *test
 	second := NewAgentTranscriptHandler(testLogger(t))
 
 	// Act.
-	a := first.LostTerminal("a5task", "toolu_spawn5", "owner-agent", string(convert.LostSweptUp))
-	b := second.LostTerminal("a6task", "toolu_spawn6", "owner-agent", string(convert.LostSweptUp))
+	a := first.LostTerminal("a5task", "toolu_spawn5", "owner-agent", string(convert.LostSweptUp), false)
+	b := second.LostTerminal("a6task", "toolu_spawn6", "owner-agent", string(convert.LostSweptUp), false)
 
 	// Assert.
 	if a[0].GetWriteId() == b[0].GetWriteId() {
@@ -157,7 +157,7 @@ func TestALostSubagentIsRefusedWhenNothingNamesTheSpawningCall(t *testing.T) {
 	h := NewAgentTranscriptHandler(testLogger(t))
 
 	// Act.
-	entries := h.LostTerminal("a7task", "", "owner-agent", string(convert.LostWentSilent))
+	entries := h.LostTerminal("a7task", "", "owner-agent", string(convert.LostWentSilent), false)
 
 	// Assert.
 	if entries != nil {
@@ -173,7 +173,7 @@ func TestALostSubagentIsRefusedWhenNothingNamesTheOwningBook(t *testing.T) {
 	h := NewAgentTranscriptHandler(testLogger(t))
 
 	// Act.
-	entries := h.LostTerminal("a8task", "toolu_spawn8", "", string(convert.LostWentSilent))
+	entries := h.LostTerminal("a8task", "toolu_spawn8", "", string(convert.LostWentSilent), false)
 
 	// Assert.
 	if entries != nil {

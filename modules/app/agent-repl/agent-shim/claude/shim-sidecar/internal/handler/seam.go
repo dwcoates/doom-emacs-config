@@ -122,7 +122,7 @@ func (h *ShellOutputHandler) SetTerminalObserver(fn func(path, run string)) {
 // The reason is the reader's own vocabulary, and convert.DetachedLostArm
 // RAISES on one it does not know rather than leaving the oneof unset: a lost
 // run with no arm states nothing, which is worse than the conclusion itself.
-func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry {
+func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string, catchup bool) []*storev1.StoreEntry {
 	// THE RUN IS THE SPAWNING CALL AND NOTHING ELSE. Falling back to the vendor
 	// task id would key the terminal on a row no reader of the conversation can
 	// join to the call, which is worse than saying nothing: the run would appear
@@ -136,7 +136,7 @@ func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, r
 		return nil
 	}
 	at := h.terminalAttribution(taskID, ownerAgentID, run)
-	return []*storev1.StoreEntry{h.conv.BashLost(at, run, string(h.seen), h.omitted, convert.LostReason(reason), h.read)}
+	return []*storev1.StoreEntry{h.conv.BashLost(at, run, string(h.seen), h.omitted, convert.LostReason(reason), h.read, catchup)}
 }
 
 // terminalAttribution states WHERE a reader-concluded terminal is written from.
@@ -205,7 +205,7 @@ func (h *ShellOutputHandler) terminalAttribution(taskID, ownerAgentID, run strin
 //
 // The reason is the reader's own vocabulary and convert.DetachedLostArm RAISES
 // on one it does not know, rather than leaving the oneof unset.
-func (h *AgentTranscriptHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry {
+func (h *AgentTranscriptHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string, catchup bool) []*storev1.StoreEntry {
 	// THE RUN IS THE SPAWNING CALL AND NOTHING ELSE, for the same reason the
 	// shell terminal refuses without one: keying a settle on the vendor task id
 	// would name a row no reader of the conversation can join to the call.
@@ -223,7 +223,7 @@ func (h *AgentTranscriptHandler) LostTerminal(taskID, runActivityID, ownerAgentI
 		return nil
 	}
 	at := h.terminalAttribution(taskID, ownerAgentID, run)
-	return []*storev1.StoreEntry{h.conv.SubagentLost(at, run, ownerAgentID, convert.LostReason(reason))}
+	return []*storev1.StoreEntry{h.conv.SubagentLost(at, run, ownerAgentID, convert.LostReason(reason), catchup)}
 }
 
 // terminalAttribution states WHERE a reader-concluded subagent terminal is

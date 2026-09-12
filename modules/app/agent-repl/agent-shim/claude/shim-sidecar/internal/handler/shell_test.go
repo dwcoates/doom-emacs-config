@@ -155,7 +155,7 @@ func TestLostTerminalResolvesInterruptedWithNoCause(t *testing.T) {
 	h.Handle(spoolFrames("some output\n", 0), spoolContext("/private/tmp/b1.output", "b1", "toolu_run"))
 
 	// Act.
-	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostWentSilent))
+	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostWentSilent), false)
 
 	// Assert.
 	if len(entries) != 1 {
@@ -178,7 +178,7 @@ func TestLostTerminalIsRefusedWhenNothingNamesTheRun(t *testing.T) {
 	h := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	entries := h.LostTerminal("", "", "owner", "went_silent")
+	entries := h.LostTerminal("", "", "owner", "went_silent", false)
 
 	// Assert.
 	if entries != nil {
@@ -278,7 +278,7 @@ func TestALostTerminalCarriesTheOutputTheRunHadProduced(t *testing.T) {
 	h.Handle(spoolFrames("all it managed to say\n", 0), ctx)
 
 	// Act.
-	entries := h.LostTerminal("bbkq1", "toolu_run1", "owner-agent", "went_silent")
+	entries := h.LostTerminal("bbkq1", "toolu_run1", "owner-agent", "went_silent", false)
 
 	// Assert.
 	if len(entries) != 1 {
@@ -343,7 +343,7 @@ func TestATerminalForANeverReadSpoolIsStillMinted(t *testing.T) {
 	h := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostSweptUp))
+	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostSweptUp), false)
 
 	// Assert.
 	if len(entries) != 1 {
@@ -357,7 +357,7 @@ func TestATerminalForANeverReadSpoolStatesNotObserved(t *testing.T) {
 	h := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostSweptUp))
+	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostSweptUp), false)
 
 	// Assert.
 	output := entries[0].GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
@@ -374,8 +374,8 @@ func TestTwoNeverReadSpoolsMintDistinctTerminalWriteIds(t *testing.T) {
 	second := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	a := first.LostTerminal("b1", "toolu_run_one", "owner-agent", string(convert.LostSweptUp))
-	b := second.LostTerminal("b2", "toolu_run_two", "owner-agent", string(convert.LostSweptUp))
+	a := first.LostTerminal("b1", "toolu_run_one", "owner-agent", string(convert.LostSweptUp), false)
+	b := second.LostTerminal("b2", "toolu_run_two", "owner-agent", string(convert.LostSweptUp), false)
 
 	// Assert.
 	if a[0].GetWriteId() == b[0].GetWriteId() {
@@ -392,7 +392,7 @@ func TestATerminalForAReadSpoolIsIdentifiedByTheFileItWasReadFrom(t *testing.T) 
 	h.Handle(spoolFrames("some output\n", 0), ctx)
 
 	// Act.
-	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostWentSilent))
+	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostWentSilent), false)
 
 	// Assert.
 	want := convert.WriteID(convert.Attribution{

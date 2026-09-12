@@ -4,6 +4,7 @@ package convert
 // stability.
 
 import (
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -110,8 +111,8 @@ func TestLostVerdictIsStableSoAReEmissionIsANoOp(t *testing.T) {
 	at.TaskID = "b1"
 
 	// Act.
-	first := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true)
-	second := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true)
+	first := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true, false)
+	second := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true, false)
 
 	// Assert.
 	if first.GetWriteId() != second.GetWriteId() {
@@ -129,7 +130,7 @@ func TestLostAndExitedShareTheTerminalDiscriminator(t *testing.T) {
 
 	// Act.
 	exited := c.BashExited(at, "toolu_run", "out", 0, 0)
-	lost := c.BashLost(at, "toolu_run", "out", 0, LostSweptUp, true)
+	lost := c.BashLost(at, "toolu_run", "out", 0, LostSweptUp, true, false)
 
 	// Assert.
 	if exited.GetWriteId() != lost.GetWriteId() {
@@ -266,7 +267,7 @@ func TestALostRunStatesTheArmItConcludedOn(t *testing.T) {
 			at := testAttribution(0)
 
 			// Act.
-			entry := c.BashLost(at, "toolu_run", "so far", 0, test.reason, true)
+			entry := c.BashLost(at, "toolu_run", "so far", 0, test.reason, true, false)
 
 			// Assert.
 			cut := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
@@ -287,7 +288,7 @@ func TestALostRunIsNeverBlamedOnAPersonOrATimeout(t *testing.T) {
 	at := testAttribution(0)
 
 	// Act.
-	entry := c.BashLost(at, "toolu_run", "so far", 0, LostWentSilent, true)
+	entry := c.BashLost(at, "toolu_run", "so far", 0, LostWentSilent, true, false)
 
 	// Assert.
 	cut := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
@@ -347,7 +348,7 @@ func TestALostTerminalWithNoBytesObservedStatesNotObserved(t *testing.T) {
 	at := testAttribution(0)
 
 	// Act.
-	entry := c.BashLost(at, "toolu_run", "", 0, LostSweptUp, false)
+	entry := c.BashLost(at, "toolu_run", "", 0, LostSweptUp, false, false)
 
 	// Assert.
 	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
@@ -363,7 +364,7 @@ func TestALostTerminalWithNoBytesNeverClaimsTheCommandPrintedNothing(t *testing.
 	at := testAttribution(0)
 
 	// Act.
-	entry := c.BashLost(at, "toolu_run", "", 0, LostSweptUp, false)
+	entry := c.BashLost(at, "toolu_run", "", 0, LostSweptUp, false, false)
 
 	// Assert.
 	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
@@ -379,7 +380,7 @@ func TestALostTerminalThatDidObserveOutputStillCarriesIt(t *testing.T) {
 	at := testAttribution(0)
 
 	// Act.
-	entry := c.BashLost(at, "toolu_run", "what it managed to say", 0, LostWentSilent, true)
+	entry := c.BashLost(at, "toolu_run", "what it managed to say", 0, LostWentSilent, true, false)
 
 	// Assert.
 	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
@@ -413,7 +414,7 @@ func TestAnObservedButGenuinelySilentRunStatesEmptyTextNotNotObserved(t *testing
 	at := testAttribution(0)
 
 	// Act.
-	entry := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true)
+	entry := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true, false)
 
 	// Assert.
 	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
@@ -434,7 +435,7 @@ func TestALostSubagentSettleAssertsNoError(t *testing.T) {
 	at.TaskID = "a15b5267244c1360e"
 
 	// Act.
-	entry := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostWentSilent)
+	entry := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostWentSilent, false)
 
 	// Assert.
 	failure := entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().
@@ -453,8 +454,8 @@ func TestALostSubagentVerdictIsStableSoAReEmissionIsANoOp(t *testing.T) {
 	at.TaskID = "a15b5267244c1360e"
 
 	// Act.
-	first := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostSweptUp)
-	second := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostSweptUp)
+	first := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostSweptUp, false)
+	second := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostSweptUp, false)
 
 	// Assert.
 	if first.GetWriteId() != second.GetWriteId() {
@@ -482,7 +483,7 @@ func TestASpoolTerminalLeavesTheCommandUnsetRatherThanRestatingTheTaskID(t *test
 		{
 			name: "lost",
 			terminal: func(c *Converter, at Attribution) *storev1.StoreEntry {
-				return c.BashLost(at, "toolu_run", "out", 0, LostWentSilent, true)
+				return c.BashLost(at, "toolu_run", "out", 0, LostWentSilent, true, false)
 			},
 		},
 		{
@@ -508,5 +509,63 @@ func TestASpoolTerminalLeavesTheCommandUnsetRatherThanRestatingTheTaskID(t *test
 				t.Fatalf("command = %v; a spool terminal does not know the line and must leave it unset rather than restating the task id", command)
 			}
 		})
+	}
+}
+
+// TestABacklogLostVerdictIsNotAWarning is the 161-warning finding: realtest 5's
+// harvest was 475 records and 161 of them were `bash-lost`, every one a run that
+// had already been stale for hours before that sidecar started. The policy one
+// layer up already refuses to state those individually and rolls them into one
+// informational summary per class; this record must follow the same
+// classification, or the flood simply reappears under a different operation name.
+func TestABacklogLostVerdictIsNotAWarning(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "b1"
+
+	// Act.
+	c.BashLost(at, "toolu_run", "", 0, LostSweptUp, false, true)
+
+	// Assert.
+	if strings.Contains(sink.String(), `"level":"warn"`) {
+		t.Fatalf("a startup catch-up conclusion was recorded as a warning: %s", sink.String())
+	}
+}
+
+// TestALostVerdictReachedWhileWatchingIsAWarning is the other half: a run that
+// went quiet WHILE we were watching it is a newly-arising condition, and keeping
+// it loud is the whole reason the two cases are told apart.
+func TestALostVerdictReachedWhileWatchingIsAWarning(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "b1"
+
+	// Act.
+	c.BashLost(at, "toolu_run", "", 0, LostWentSilent, false, false)
+
+	// Assert.
+	if !strings.Contains(sink.String(), `"operation":"bash-lost"`) ||
+		!strings.Contains(sink.String(), `"level":"warn"`) {
+		t.Fatalf("a conclusion reached while watching must stay at warn: %s", sink.String())
+	}
+}
+
+// TestABacklogSubagentLostVerdictIsNotAWarning covers the other detached kind:
+// a backgrounded subagent's spool is re-derived from disk on every restart
+// exactly as a shell spool is, so its terminal owes the same classification.
+func TestABacklogSubagentLostVerdictIsNotAWarning(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "a1"
+
+	// Act.
+	c.SubagentLost(at, "toolu_spawn", "owner-agent", LostSweptUp, true)
+
+	// Assert.
+	if strings.Contains(sink.String(), `"level":"warn"`) {
+		t.Fatalf("a startup catch-up subagent conclusion was recorded as a warning: %s", sink.String())
 	}
 }
