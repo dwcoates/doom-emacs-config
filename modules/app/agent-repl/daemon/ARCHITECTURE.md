@@ -78,7 +78,8 @@ daemon/
     rollout/       self-reload trigger consumer: daemon handover, adopt rendezvous, shim relaunch engine,
                    build-staleness bounce, asset origin, intent manifest, reload_webapp push
     workspace/     workspace verbs (create standard + one-shot, register, open, close, kill, nuke,
-                   restart{force}, select, priority), task verbs, cold gate answer, SetModel/SetPermissionMode
+                   forget, restart{force}, select, priority), task verbs, cold gate answer,
+                   SetModel/SetPermissionMode
     health/        DaemonHealth / SessionHealth answers (unhealthy is an answer) + fault records
     commandfile/   the command-file ingress ($AGENT_REPL_STATE_DIR/output/workspace_commands_*.json)
                    mapped onto the same internal paths as the rpcs
@@ -168,7 +169,10 @@ type DB interface {
   ListWorkspaces() ([]Workspace, error); ListRepositories() ([]Repository, error)
   SetClosed(id WorkspaceID, closed bool) error; SetCurrent(id WorkspaceID, at time.Time) error; Current() (*WorkspaceID, error)
   SetPriority(id WorkspaceID, p *Priority) error; SetAttention(id WorkspaceID, on bool) error
-  SetMergedAt(id WorkspaceID, at time.Time) error; Forget(id WorkspaceID) error  // nuke
+  SetMergedAt(id WorkspaceID, at time.Time) error
+  // nuke's durable half AND the whole of forget: the workspace's rows, plus the repository's
+  // when no other workspace references it (nothing else ever deleted a repository record).
+  Forget(id WorkspaceID) (ForgetReport, error)
   // creation jobs (merge geometry + configured actions + materialization)
   PutCreationJob(CreationJob) error; CreationJob(id WorkspaceID) (CreationJob, bool, error)
   // session facts
@@ -420,7 +424,12 @@ registration only after materialization; consent check for ungated modes;
 fork = the daemon ports the parent's transcript into the child's config
 root project dir before StartSession(resume)), `Open` (spawn on mount
 semantics), `Close` (requires quiet: no turn, no live work, no held prompts,
-no queued merge; refusal manifests in the footer), `Kill`, `Nuke`, `Restart`
+no queued merge; refusal manifests in the footer), `Kill`, `Nuke`, `Forget`
+(registration's undo: the record goes, and its repository's record with it when
+nothing else references that repository; NO files are touched. Refuses an open
+workspace, a workspace that is not quiet, and one others were spawned from.
+Reachable today only through the command-file ingress -- the rpc is unlanded,
+see ERROR-ARMS.md), `Restart`
 (delegates to rollout.RelaunchShim; force = KillSession{force:true} first;
 owns the reload_webapp push when needed), `Select`, `SetPriority`, tasks,
 `AnswerColdGate`, `SetModel`/`SetPermissionMode` (through the queue's
