@@ -111,13 +111,11 @@ import (
 // rather than hidden, in wsActCleanupRegistered.
 //
 // A NOTE FOR THE LEAD ON THE VENDOR GUARD. Nothing here submits a prompt, so
-// nothing here should reach `createRealQuery`, where the guard throws. But
-// REOPEN brings a session up, and if a bring-up turns out to reach the vendor
-// on this machine the refusal will appear in this run's harvest rather than as
-// a test failure. The remedy would be the same one realtest 7 names:
-// AGENT_REPL_FAKE_SHIMS=1 stated on the launch beside the vendor guard
-// (rt78_shared.go). This test does not require it up front, because requiring a
-// hook a run may not need would decline runs that would have been clean.
+// nothing here should reach `createRealQuery`, where the guard throws. REOPEN
+// does bring a session up, and that bring-up spawns a shim -- which is safe
+// under the guard rather than refused by it, because a guarded daemon spawns
+// every shim with `--fake` (rt78_shared.go carries the account). No second
+// variable is needed on the launch.
 //
 // ALSO A PRECONDITION FOR THE LEAD: run this realtest in its own
 // `bin/realtest.sh -run` invocation. It performs a cold start, and a cold start
