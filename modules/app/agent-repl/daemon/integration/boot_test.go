@@ -1041,6 +1041,101 @@ func TestBootClosesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
 	}
 }
 
+// TestOpenWorkspaceRefusesAWorkspaceWhoseDirectoryIsGone is the re-open half of
+// the ruling above: boot CLOSES a workspace whose directory has vanished, so a
+// re-open of that row must be REFUSED BY NAME. Before this, the re-open failed
+// inside the request boundary's own logging and the client met HTTP 500
+// `internal` with the log sink's resolve error as its message.
+func TestOpenWorkspaceRefusesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	dir := worktreeOf(t, repo, "reopened")
+	ws := harness.Register(t, d, dir)
+	d.Stop()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
+	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+
+	// Act.
+	resp, err := nd.Client().OpenWorkspace(nd.Ctx(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenWorkspace on a vanished directory = transport error %v, want a typed refusal", err)
+	}
+	if resp.Msg.GetError().GetSpawnFailed() == nil {
+		t.Fatalf("OpenWorkspace on a vanished directory = %v, want OpenWorkspaceError.spawn_failed", resp.Msg)
+	}
+}
+
+// TestOpenWorkspaceNamesTheVanishedDirectoryInItsRefusal is the evidence half:
+// the arm's detail says WHICH directory is gone, so the refusal is readable
+// rather than merely typed.
+func TestOpenWorkspaceNamesTheVanishedDirectoryInItsRefusal(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	dir := worktreeOf(t, repo, "named")
+	ws := harness.Register(t, d, dir)
+	d.Stop()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
+	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+
+	// Act.
+	resp, err := nd.Client().OpenWorkspace(nd.Ctx(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenWorkspace: %v", err)
+	}
+
+	// Assert.
+	detail := resp.Msg.GetError().GetSpawnFailed().GetDetail()
+	if !strings.Contains(detail, ws.GetDir()) {
+		t.Fatalf("refusal detail = %q, want it to name %q", detail, ws.GetDir())
+	}
+}
+
+// TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally is the logging
+// half: the request still reaches its handler, and the records it produces
+// land on the central sink naming the workspace they are about, reported once
+// at DEBUG rather than as an ERROR beside every record.
+func TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	dir := worktreeOf(t, repo, "routed")
+	ws := harness.Register(t, d, dir)
+	d.Stop()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
+	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+
+	// Act.
+	if _, err := nd.Client().OpenWorkspace(nd.Ctx(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("OpenWorkspace: %v", err)
+	}
+
+	// Assert.
+	nd.AwaitLogRecord(nd.RunLogPath(), "the central-fallback notice", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.dlog.central_fallback" &&
+			strings.ToLower(r.Level) == "debug" &&
+			r.Context["unroutable_workspace"] == ws.GetDir()
+	})
+}
+
 // TestBootCountsTheMissingDirectoryCloseInItsReport is the report half: the
 // boot's own completion record answers for what it closed, so a reader does
 // not have to count WARN records to know.
