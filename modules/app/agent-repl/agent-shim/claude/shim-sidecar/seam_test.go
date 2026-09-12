@@ -17,7 +17,7 @@ type lostCapable struct {
 
 func (l *lostCapable) Handle([]tail.Frame, *tail.Context) []*storev1.StoreEntry { return nil }
 
-func (l *lostCapable) LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry {
+func (l *lostCapable) LostTerminal(taskID, runActivityID, ownerAgentID, reason string, catchup bool) []*storev1.StoreEntry {
 	l.calls = append(l.calls, taskID)
 	l.reason = reason
 	return []*storev1.StoreEntry{{WriteId: "lost:" + taskID, UpsertKey: "bash:" + runActivityID}}
