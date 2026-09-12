@@ -1143,7 +1143,7 @@ func TestTheLinkComingBackRaisesNoFault(t *testing.T) {
 // rather than from a durable record.
 func TestAPureAttachTakesTheSessionFactsFromTheReannouncement(t *testing.T) {
 	// Arrange: a pure attach — Session carries nothing.
-	h := newHarness(t, Session{})
+	h := newHarnessAttachingPurely(t)
 
 	// Act.
 	h.sendSessionStarted(t, sessionStarted("turn-7"))
@@ -1157,6 +1157,54 @@ func TestAPureAttachTakesTheSessionFactsFromTheReannouncement(t *testing.T) {
 	turn := h.w.TurnInFlight()
 	if turn == nil || *turn != ids.TurnID("turn-7") {
 		t.Fatalf("TurnInFlight() = %v, want the re-announced turn-7", turn)
+	}
+}
+
+// TestAPureAttachOpensNoAgentWatchBeforeTheReannouncement pins the refusal
+// this design removes: the shim resolves an unset WatchAgent target through
+// the session's identity, so a survivor with no session answers `not_found: no
+// session has been started on this shim`. That is not a race and cannot be
+// waited out, so the daemon must not ask before the session announces itself.
+func TestAPureAttachOpensNoAgentWatchBeforeTheReannouncement(t *testing.T) {
+	// Arrange, Act: a pure attach opens with no facts at all.
+	h := newHarnessAttachingPurely(t)
+
+	// Assert.
+	select {
+	case open := <-h.client.agentOpens:
+		t.Fatalf("a pure attach opened WatchAgent(%v) before any session announced itself", open.req.GetTarget())
+	default:
+	}
+}
+
+// TestAPureAttachOpensTheAgentWatchOnTheReannouncement is the other half: the
+// deferral is not an omission, and the facts are the occasion.
+func TestAPureAttachOpensTheAgentWatchOnTheReannouncement(t *testing.T) {
+	// Arrange.
+	h := newHarnessAttachingPurely(t)
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted(""))
+
+	// Assert.
+	open := h.client.nextAgentOpen(t)
+	if open.req.GetTarget() != nil {
+		t.Fatalf("WatchAgent target = %v, want the unset main target", open.req.GetTarget())
+	}
+}
+
+// TestAWatcherOpenedWithFactsStillOpensTheAgentWatchAtOnce pins that the
+// deferral is scoped to a PURE ATTACH: a fresh bring-up already holds the
+// session's identity, so nothing about its main watch waits.
+func TestAWatcherOpenedWithFactsStillOpensTheAgentWatchAtOnce(t *testing.T) {
+	// Arrange, Act.
+	h := startHarness(t, Session{Started: sessionStarted("")}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Assert.
+	open := h.client.nextAgentOpen(t)
+	if open.req.GetTarget() != nil {
+		t.Fatalf("WatchAgent target = %v, want the unset main target", open.req.GetTarget())
 	}
 }
 
