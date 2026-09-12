@@ -335,3 +335,41 @@ func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
 		return row != nil && !row.GetClosed().GetClosed()
 	})
 }
+
+// TestTheRosterDropsARepositoryWhoseDirectoryIsGone covers the create that
+// produced nothing at all.
+//
+// The roster's repository sections are `SPC TAB n”s CREATE TARGETS
+// (lisp/verbs.el's `agent-repl-verbs--read-repository'), and nothing ever
+// forgets a repository row. A repository whose tree has been deleted therefore
+// stayed in the picker, drawing the same label as a live repository of the
+// same base name, and the create that picked the dead one failed at git.
+func TestTheRosterDropsARepositoryWhoseDirectoryIsGone(t *testing.T) {
+	t.Parallel()
+	// Arrange: a registered workspace whose whole repository is then deleted.
+	f := newRegistered(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the registered row", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()) != nil
+	})
+	if err := os.RemoveAll(f.repo.Dir); err != nil {
+		t.Fatalf("remove the repository directory: %v", err)
+	}
+	// The boot reconciliation warns once about the directory it closed, and
+	// both daemons share this state root's log. That warning is the deleted
+	// tree being reported, which is the point of the arrange.
+	f.d.ExpectWarnings("daemon.boot.close_missing_dir")
+
+	// Act: the opening publish is the walk that stats what is there, so the
+	// roster is read from a daemon booting over the same state root.
+	f.d.Stop()
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
+	d2.ExpectWarnings("daemon.boot.close_missing_dir")
+
+	// Assert.
+	got := awaitRoster(t, d2, d2.WatchRoster(), "a roster with no section for the deleted repository",
+		func(r *frontendv1.WorkspaceRoster) bool { return len(r.GetRepository().GetSections()) == 0 })
+	if rosterRow(got, f.ws.GetId()) != nil {
+		t.Fatalf("the roster still carries a row for %q under a repository that is not on disk", f.ws.GetId())
+	}
+}
