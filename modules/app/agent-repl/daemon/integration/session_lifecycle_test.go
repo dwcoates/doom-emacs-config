@@ -791,10 +791,13 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.kill")
+	// A DELIBERATE TEARDOWN DECLARES NOTHING, and the sweep at cleanup is what
+	// proves it. A kill asks the shim for exactly what then happens: it ends
+	// its standing streams and exits, and every side that observes that reads
+	// the stand-down latch the ask set. What this list used to hold -- the two
+	// standing streams' ends, the severed link, the fault that followed it and
+	// the shim's own clean exit -- was this daemon recording its own act as
+	// five failures, and it is what put thirteen records in a realtest run.
 	f.shim.ExpectStartSession()
 	host := f.d.WatchHost(f.ws)
 	roster := f.d.WatchRoster()
@@ -1259,19 +1262,19 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawns {
 		t.Fatalf("shim spawns = %d after a second mount, want the %d already made: the stamp was already bounced for", got, spawns)
 	}
-	// The bounce's stand-down is loud by design and the fake makes it louder:
-	// the fake shim EXITS on accepting KillSession, so the call it was
-	// answering fails, the client records the death, and each of the shim's two
-	// standing streams ends without the session ending. The relaunch then waits
-	// out its window before forcing. Every one of these is the same
-	// stand-down, honestly recorded once per observer -- including the client's
-	// own redial, which notices the broken link and stops once the death is
-	// registered, and which only wins the race to record it under load.
-	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.rollout.relaunch", "daemon.shimclient.exit",
-		"daemon.shimclient.kill_session", "daemon.shimclient.redial",
-		"daemon.sessionwatcher.watch_session",
-		"daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
+	// THE STAND-DOWN ITSELF IS SILENT NOW. What this list held for the two
+	// standing streams, the severed link and the fault behind it was the
+	// daemon recording its own act once per observer; every observer reads the
+	// shim client's stand-down latch instead, so a bounce this daemon ordered
+	// is an ordinary event on every side that sees it.
+	//
+	// WHAT REMAINS IS THE FAKE'S OWN VIOLENCE, and it is left loud on purpose:
+	// the fake shim EXITS while answering KillSession, so the rpc it was
+	// answering genuinely fails, the relaunch genuinely waits its window out
+	// before forcing, and the client's redial genuinely races the death. Those
+	// are failures, not the teardown.
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.rollout.relaunch",
+		"daemon.shimclient.kill_session", "daemon.shimclient.redial")
 }
 
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
