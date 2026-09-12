@@ -42,7 +42,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - elisp: workspace switch and composer-landing records persist at info instead of being dropped at debug (U)
 - realtest: a posted key is not a delivered one — keydriver holds the target key window open until Emacs's own `(recent-keys)`/`quit-flag` marks account for the press, so a dropped key is reported (and, for `<escape>` and `C-g`, re-posted) instead of being waited out downstream
 - realtest: the failed `C-g` was key delivery, not quit handling — keydriver reads whether the target owns a key window before posting, and the dismissal finding now names harness or product from the marks Emacs itself leaves (the reading refused the post when this landed; it is advisory on a confirmed press since the entry below)
-- realtest: phase budgets filled from 23 runs of manifest history; LOOSE at 3x and due for retightening (Q, V)
+- realtest: phase budgets retightened from 43 runs of manifest history — the boot-chain rows drop from 3x to 2x (some to 1.75x/2.5x by per-row spread), the harness-only focus-edge row to 2.5x; two locked-screen runs excluded from every focus/paint row (Q, V)
 - logs: compact query modes (tally, sample, fields, timeline) plus stderr and Messages sources
 - daemon/elisp: workspace log-sink resolution is total, and reopening a vanished directory is a named refusal (F, I, J)
 - daemon/shim: the vendor guard forces a fake vendor instead of refusing the spawn (E, G, L)
@@ -59,6 +59,6 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Standing measurements to protect
 
-- Cold start 1.80-1.95s from spawn to usable, every phase measured.
-- Panels paint 216ms-1.5s after a single focus edge.
+- Cold start 1.826s-2.7s from spawn to usable across the current (2026-09-12) regime, historical high 3.479s from an early cold-cache run; every phase measured (n=26).
+- Panels paint 22ms-409ms after a single focus edge (n=24), tighter than the previously recorded 216ms-1.5s.
 - Full elisp suite 4152 tests, ~36s.
