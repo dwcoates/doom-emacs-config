@@ -374,6 +374,24 @@ and no narrative: the commit message holds the reasoning and
 It also carries a short "standing measurements to protect" section. Update those
 numbers when a measurement genuinely improves; never when it regresses.
 
+## Implementers do not judge proto design
+
+An implementation agent lands a proto shape that is already settled, or it lands
+nothing and describes the question. It never decides whether an addition belongs,
+what shape it should take, or which oneof it fits. Owner instruction, 2026-09-12.
+
+Contract shape is the owner's call, and this repo already holds that the proto's
+framing wins any dispute. A shape chosen mid-task buries a contract decision
+inside an implementation commit, where nobody reviews it as one.
+
+So a brief either carries the exact text to add, or marks the item
+description-only. When a modelling question surfaces mid-task, that item stops:
+leave it unlanded and write up the options.
+
+Deriving an arm from how the daemon already opens the fault, and matching the
+shape of the arms beside it, is reading settled behavior and is in bounds.
+Choosing between plausible shapes is not.
+
 ## No look-and-feel changes during bug remediation
 
 Standing owner instruction, 2026-09-12. Remediation fixes defects. It does not
