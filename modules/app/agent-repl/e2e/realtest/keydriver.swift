@@ -33,7 +33,10 @@
 //
 // It needs accessibility trust: an untrusted process's synthetic events are
 // dropped silently by the window server, so `--check` reports the trust state as
-// its own answer and the caller refuses to interpret a silent success.
+// its own answer and the caller refuses to interpret a silent success. The same
+// trust is what lets it read the target's focused window before posting, which
+// is the second half of "the event has somewhere to land" — see the refusal
+// below for why an active application is not yet enough.
 //
 // Usage:
 //   keydriver --check                      exit 0 trusted, 1 not trusted
@@ -154,6 +157,48 @@ if !target.isActive {
     fail("pid \(pid) did not become the active application within 2s, so the key event was NOT posted: "
         + "AppKit dispatches a key event only to a key window, and a post to a process without one is dropped "
         + "silently. Nothing was sent and the previously frontmost application was restored")
+}
+
+// AN ACTIVE APPLICATION IS NOT YET AN APPLICATION WITH A KEY WINDOW, and that
+// gap is where keys were being lost.
+//
+// `NSRunningApplication.isActive` answers about the APPLICATION. AppKit
+// dispatches a key event to the KEY WINDOW, and a window becomes key on its own
+// schedule after the activation — so between `isActive` turning true and a
+// window becoming key there is a window of time in which `[NSApp keyWindow]` is
+// still nil and `sendEvent:` has nowhere to send a keyDown. It drops it with no
+// error, which is the same silent loss the activation check above exists to
+// prevent, one step further along.
+//
+// It is not theoretical. The 2026-09-12 sweep's own `(recent-keys)` came back
+// missing keys this helper had posted and reported as delivered: the `<tab>` of
+// a `SPC TAB o` (which the run itself reported as a chord that did not reach its
+// command), the `<escape>`s pressed around it, and every `C-g` sent to dismiss a
+// standing prompt — which was then filed against the EDITOR as "a real C-g did
+// not dismiss the prompt" when Emacs had never been handed the key at all.
+//
+// So the focused window is a precondition, checked the same way the activation
+// is: through the accessibility API, whose trust this helper already requires
+// and refuses to run without. `AXFocusedWindow` on an application element is
+// that application's key window. No window, no post, and the failure is named.
+let axTarget = AXUIElementCreateApplication(pid)
+
+func targetHasFocusedWindow() -> Bool {
+    var focused: CFTypeRef?
+    let status = AXUIElementCopyAttributeValue(axTarget, kAXFocusedWindowAttribute as CFString, &focused)
+    return status == .success && focused != nil
+}
+
+spin(upTo: 2.0, until: targetHasFocusedWindow)
+
+if !targetHasFocusedWindow() {
+    if let previous = previous, previous.processIdentifier != pid {
+        activate(previous)
+    }
+    fail("pid \(pid) is the active application but has no focused window after 2s, so the key event was NOT "
+        + "posted: AppKit dispatches a key event only to a key window and drops a post to an application "
+        + "without one silently, which is how posted keys went missing from Emacs's own (recent-keys). "
+        + "Nothing was sent and the previously frontmost application was restored")
 }
 
 // Down then up, addressed to the process. There is no delay between them: a
