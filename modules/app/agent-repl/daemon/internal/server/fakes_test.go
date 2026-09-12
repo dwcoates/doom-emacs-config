@@ -90,6 +90,16 @@ func (f *fakeSurfaces) Workspace(string) (dlog.Logger, error) {
 	return fakeLogger{}, nil
 }
 
+// WorkspaceOrCentral implements dlog.Surfaces: the workspace's logger when it
+// resolves, and the global one — naming the workspace — when it does not.
+func (f *fakeSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
+	log, err := f.Workspace(dir)
+	if err != nil {
+		return f.Global().With(dlog.Context{dlog.KeyUnroutableWorkspace: dir})
+	}
+	return log
+}
+
 func (f *fakeSurfaces) ClientLog(_ string, rec dlog.ClientRecord) error {
 	f.clientRecords = append(f.clientRecords, rec)
 	return nil
@@ -173,6 +183,7 @@ type fakeVerbs struct {
 
 	selectErr error
 	closeErr  error
+	openErr   error
 
 	setModel    string
 	setModelErr error
@@ -187,6 +198,8 @@ func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string)
 	f.setModel = model
 	return f.setModelErr
 }
+
+func (f *fakeVerbs) Open(context.Context, ids.WorkspaceID) error { return f.openErr }
 
 func (f *fakeVerbs) SetPermissionMode(context.Context, ids.WorkspaceID, string) error {
 	return f.setPermissionModeErr
