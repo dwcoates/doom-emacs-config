@@ -1716,3 +1716,206 @@ panel, not a browser."
           ;; Assert
           (should (null (buffer-local-value 'header-line-format buf))))
       (kill-buffer buf))))
+
+;;;; ---- The composer mounts at a fixed height -------------------------------
+;;
+;; The owner's report: the composer is not a consistent height —
+;; different workspaces show different heights, and one workspace's
+;; height changes.  Both were the same bug: the mount split its host
+;; window by a fraction of THAT window's height at THAT instant.  The
+;; height now comes from `agent-repl-window--input-height', derived once
+;; per frame, so every mount asks for the same number of lines.
+
+(defmacro agent-repl-test-frontend--mounting (&rest body)
+  "Run BODY with the display path's non-window collaborators stubbed out."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+             ((symbol-function 'agent-repl-window--harden) (lambda (&rest _) nil)))
+     ,@body))
+
+(ert-deftest agent-repl-test-frontend-composer-mounts-at-the-declared-height ()
+  "The composer is created at the frame's declared composer height."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview-h1*"))
+          (input-buf (generate-new-buffer "*agent-panel-input-ws1*")))
+      (unwind-protect
+          (agent-repl-test-frontend--mounting
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input-buf)))
+              ;; Act
+              (agent-repl--frontend-display-webview "ws1" buf)
+              ;; Assert
+              (should (= (window-total-height (get-buffer-window input-buf))
+                         (agent-repl-window--input-height)))))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer input-buf)))))
+
+(ert-deftest agent-repl-test-frontend-composer-height-matches-across-workspaces ()
+  "Two workspaces mounted on the same frame get the SAME composer height."
+  (let ((buf1 (generate-new-buffer "*fake-webview-h2a*"))
+        (buf2 (generate-new-buffer "*fake-webview-h2b*"))
+        (input1 (generate-new-buffer "*agent-panel-input-ws1*"))
+        (input2 (generate-new-buffer "*agent-panel-input-ws2*"))
+        (first nil))
+    (unwind-protect
+        (agent-repl-test-frontend--mounting
+          ;; Arrange / Act — ws1 mounts, then ws2 over it.
+          (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input1)))
+              (agent-repl--frontend-display-webview "ws1" buf1)
+              (setq first (window-total-height (get-buffer-window input1)))))
+          (agent-repl-test--with-frontend-ws "ws2" '(:project-dir "/w2")
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input2)))
+              (agent-repl--frontend-display-webview "ws2" buf2)
+              ;; Assert
+              (should (= (window-total-height (get-buffer-window input2))
+                         first)))))
+      (delete-other-windows)
+      (dolist (b (list buf1 buf2 input1 input2))
+        (when (buffer-live-p b) (kill-buffer b))))))
+
+(ert-deftest agent-repl-test-frontend-composer-height-survives-a-remount ()
+  "A remount of the same workspace lands on the same composer height.
+`agent-repl-window--ensure-layout' repairs a broken pair by re-running
+this very display path, which is how one workspace's composer used to
+change height under the user."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview-h3*"))
+          (input-buf (generate-new-buffer "*agent-panel-input-ws1*")))
+      (unwind-protect
+          (agent-repl-test-frontend--mounting
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input-buf)))
+              ;; Arrange
+              (agent-repl--frontend-display-webview "ws1" buf)
+              (let ((before (window-total-height (get-buffer-window input-buf))))
+                ;; Act — the repair path's remount.
+                (agent-repl--frontend-display-webview "ws1" buf)
+                ;; Assert
+                (should (= (window-total-height (get-buffer-window input-buf))
+                           before)))))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer input-buf)))))
+
+(ert-deftest agent-repl-test-frontend-composer-height-ignores-a-shrunken-main-area ()
+  "A side window eating the frame's main area does not shrink the composer.
+The old fraction was taken from the host window, so a workspace mounted
+while a bottom side window stood came out shorter than its siblings."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview-h4*"))
+          (input-buf (generate-new-buffer "*agent-panel-input-ws1*"))
+          (side-buf (generate-new-buffer "*fake-side-h4*"))
+          (side nil))
+      (unwind-protect
+          (agent-repl-test-frontend--mounting
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input-buf)))
+              ;; Arrange — mount clean, then again under a side window.
+              (agent-repl--frontend-display-webview "ws1" buf)
+              (let ((clean (window-total-height (get-buffer-window input-buf))))
+                (setq side (display-buffer-in-side-window
+                            side-buf '((side . bottom) (slot . 0))))
+                ;; Act
+                (agent-repl--frontend-display-webview "ws1" buf)
+                ;; Assert
+                (should (= (window-total-height (get-buffer-window input-buf))
+                           clean)))))
+        (when (window-live-p side) (delete-window side))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer input-buf)
+        (kill-buffer side-buf)))))
+
+(ert-deftest agent-repl-test-frontend-composer-height-survives-a-restore ()
+  "A RESTORED workspace — composer buffer already alive and full of text —
+mounts at the same height as a freshly created one.  Nothing about the
+composer's content may reach its height."
+  (let ((buf1 (generate-new-buffer "*fake-webview-h5a*"))
+        (buf2 (generate-new-buffer "*fake-webview-h5b*"))
+        (fresh (generate-new-buffer "*agent-panel-input-ws1*"))
+        (restored (generate-new-buffer "*agent-panel-input-ws2*"))
+        (created nil))
+    (unwind-protect
+        (agent-repl-test-frontend--mounting
+          ;; Arrange — ws1 is created; ws2's composer pre-exists with content.
+          (with-current-buffer restored
+            (insert (mapconcat #'identity (make-list 40 "carried-over text") "\n")))
+          (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) fresh)))
+              (agent-repl--frontend-display-webview "ws1" buf1)
+              (setq created (window-total-height (get-buffer-window fresh)))))
+          (agent-repl-test--with-frontend-ws "ws2" '(:project-dir "/w2")
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) restored)))
+              ;; Act
+              (agent-repl--frontend-display-webview "ws2" buf2)
+              ;; Assert
+              (should (= (window-total-height (get-buffer-window restored))
+                         created)))))
+      (delete-other-windows)
+      (dolist (b (list buf1 buf2 fresh restored))
+        (when (buffer-live-p b) (kill-buffer b))))))
+
+(ert-deftest agent-repl-test-frontend-composer-mount-records-its-height ()
+  "The mount record carries the height the composer actually got."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview-h6*"))
+          (input-buf (generate-new-buffer "*agent-panel-input-ws1*"))
+          (records nil))
+      (unwind-protect
+          (agent-repl-test-frontend--mounting
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input-buf))
+                      ((symbol-function 'agent-repl--log)
+                       (lambda (_ws fmt &rest args)
+                         (push (apply #'format fmt args) records))))
+              ;; Act
+              (agent-repl--frontend-display-webview "ws1" buf)
+              ;; Assert
+              (should (cl-find-if
+                       (lambda (m)
+                         (string-match-p "display-webview: mounted .*input-height=[0-9]+ target-height=[0-9]+" m))
+                       records))))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer input-buf)))))
+
+(ert-deftest agent-repl-test-frontend-composer-height-matches-across-differing-frame-states ()
+  "Two workspaces mounted with DIFFERENT main areas still agree on the height.
+This is the owner's second symptom directly: one workspace built while
+the frame carried something extra came out a different height from its
+sibling built on a clean frame."
+  (let ((buf1 (generate-new-buffer "*fake-webview-h7a*"))
+        (buf2 (generate-new-buffer "*fake-webview-h7b*"))
+        (input1 (generate-new-buffer "*agent-panel-input-ws1*"))
+        (input2 (generate-new-buffer "*agent-panel-input-ws2*"))
+        (side-buf (generate-new-buffer "*fake-side-h7*"))
+        (side nil)
+        (clean nil))
+    (unwind-protect
+        (agent-repl-test-frontend--mounting
+          ;; Arrange — ws1 on a clean frame.
+          (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input1)))
+              (agent-repl--frontend-display-webview "ws1" buf1)
+              (setq clean (window-total-height (get-buffer-window input1)))))
+          ;; Act — ws2 while a side window holds part of the main area.
+          (setq side (display-buffer-in-side-window
+                      side-buf '((side . bottom) (slot . 0))))
+          (agent-repl-test--with-frontend-ws "ws2" '(:project-dir "/w2")
+            (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input2)))
+              (agent-repl--frontend-display-webview "ws2" buf2)
+              ;; Assert
+              (should (= (window-total-height (get-buffer-window input2))
+                         clean)))))
+      (when (window-live-p side) (delete-window side))
+      (delete-other-windows)
+      (dolist (b (list buf1 buf2 input1 input2 side-buf))
+        (when (buffer-live-p b) (kill-buffer b))))))
