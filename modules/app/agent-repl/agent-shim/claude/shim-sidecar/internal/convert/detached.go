@@ -101,11 +101,45 @@ func (c *Converter) BashExited(at Attribution, run, output string, omitted uint6
 // this reader's log. It is deliberately NOT `by_user` or `timed_out`: those name
 // decisions, and no decision was observed — which is exactly why `lost` draws as
 // its own word downstream and never as a cancel or a failure.
-func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64, reason LostReason, observed bool) *storev1.StoreEntry {
-	c.log.With(at.ctxWarn("bash-lost")).With(logging.Context{
+func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64, reason LostReason, observed, catchup bool) *storev1.StoreEntry {
+	bound := c.log.With(lostCtx(at, "bash-lost", catchup)).With(logging.Context{
 		ActivityID: run, UpsertKey: BashTerminalKey(run), Reason: string(reason),
-	}).Log("the detached run is LOST (%s); it resolves interrupted with cause=lost naming that arm, output_observed=%t", reason, observed)
+	})
+	line := "the detached run is LOST (%s); it resolves interrupted with cause=lost naming that arm, output_observed=%t"
+	if catchup {
+		bound.LogVerbose(line, reason, observed)
+	} else {
+		bound.Log(line, reason, observed)
+	}
 	return BashLostEntry(at, run, output, omitted, reason, observed)
+}
+
+// lostCtx picks the rung a LOST run's terminal is recorded on, and it is the
+// SAME classification the policy one layer up already made.
+//
+// A STARTUP CATCH-UP CONCLUSION IS NOT A NEW EVENT. A restarted sidecar
+// re-derives every historical run from the spools still on disk — 1,189 of them
+// sat unterminated under the temporary root on 2026-09-12 — and concludes each
+// one LOST again, with the store absorbing the re-emitted terminal on its stable
+// upsert key. stale.Tracker.state already refuses to state those one by one and
+// rolls them into ONE informational summary per class for exactly that reason;
+// this record used to be written at WARN regardless, so the flood came straight
+// back under a different operation name and realtest 5's harvest was 161
+// `bash-lost` warnings out of 475 records, every one of them backlog. A catch-up
+// item is therefore recorded on the DEBUG rung — the same rung the policy's own
+// per-item catch-up statement uses, and the totals still ride the INFO summary,
+// so nothing is silenced.
+//
+// A conclusion reached about a run that went stale WHILE WE WATCHED is a
+// newly-arising condition and stays at WARN, which is the whole point of keeping
+// the two apart.
+func lostCtx(at Attribution, operation string, catchup bool) logging.Context {
+	if catchup {
+		ctx := at.ctxFor(operation)
+		ctx.Level = "debug"
+		return ctx
+	}
+	return at.ctxWarn(operation)
 }
 
 // BashLostEntry is BashLost without a converter, for the staleness policy in the
@@ -308,10 +342,16 @@ func terminalOutput(output string, omitted uint64, observed bool) *conversationv
 //
 // The failure carries no `error`: we observed no error, only silence, and
 // inventing one would have this producer assert the run died.
-func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason LostReason) *storev1.StoreEntry {
-	c.log.With(at.ctxWarn("subagent-lost")).With(logging.Context{
+func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason LostReason, catchup bool) *storev1.StoreEntry {
+	bound := c.log.With(lostCtx(at, "subagent-lost", catchup)).With(logging.Context{
 		ActivityID: run, UpsertKey: ActivityKey(run), BookAgentID: ownerAgent, Reason: string(reason),
-	}).Log("the backgrounded subagent is LOST (%s); its spawn unit settles failed with cause=lost naming that arm", reason)
+	})
+	line := "the backgrounded subagent is LOST (%s); its spawn unit settles failed with cause=lost naming that arm"
+	if catchup {
+		bound.LogVerbose(line, reason)
+	} else {
+		bound.Log(line, reason)
+	}
 	return SubagentLostEntry(at, run, ownerAgent, reason)
 }
 

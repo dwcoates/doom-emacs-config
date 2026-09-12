@@ -35,8 +35,11 @@ type taskObserverSink interface {
 // lostTerminalSink is implemented by a handler that can mint a detached run's
 // terminal from the reader's LOST conclusion. The reader states HOW it stopped
 // seeing the run; spelling that as the run's terminal frame is conversion.
+// `catchup` says the conclusion is startup backlog the policy already rolled
+// into one summary, so the terminal's own record follows the same
+// classification instead of restating it as a fresh warning (convert.lostCtx).
 type lostTerminalSink interface {
-	LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry
+	LostTerminal(taskID, runActivityID, ownerAgentID, reason string, catchup bool) []*storev1.StoreEntry
 }
 
 // cancelTerminalSink is implemented by a handler that can spell a person's stop
@@ -224,7 +227,7 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 				lost.Kind, lost.Reason)
 			continue
 		}
-		entries := sink.LostTerminal(lost.TaskID, lost.RunActivityID, lost.OwnerAgentID, string(lost.Reason))
+		entries := sink.LostTerminal(lost.TaskID, lost.RunActivityID, lost.OwnerAgentID, string(lost.Reason), lost.Catchup)
 		// THE REASON RIDES A DEDICATED KEY. It is the arm now set on the wire,
 		// and a record that only interpolated it into a sentence could not be
 		// filtered or joined against the terminal it explains.

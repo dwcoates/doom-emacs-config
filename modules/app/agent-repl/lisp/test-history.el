@@ -521,6 +521,25 @@ to carry — the vendor conversation uuid — is deliberately gone."
     ;; No :project-dir set -- should not error
     (agent-repl--state-save "ws")))
 
+(ert-deftest agent-repl-test-state-save-does-not-remake-a-removed-project-dir ()
+  "A save for a workspace whose root is gone re-creates nothing on disk.
+The write's parent-directory creation passes `t', which would re-make the
+project root itself: a nuke removed the worktree and Emacs's own teardown
+save then minted `<root>/.claude/emacs/' back four milliseconds later, which
+realtest 5 read as an orphaned working tree the delete had left behind."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-gone-" t)))
+      (agent-repl--ws-put "ws" :project-dir tmpdir)
+      (agent-repl--ws-put "ws" :active-env :bare-metal)
+      (agent-repl--ws-put "ws" :bare-metal
+                          (make-agent-repl-instantiation :session-id "s1"))
+      ;; Arrange: the workspace's directory is destroyed under it.
+      (delete-directory tmpdir t)
+      ;; Act
+      (agent-repl--state-save "ws")
+      ;; Assert
+      (should-not (file-exists-p tmpdir)))))
+
 (ert-deftest agent-repl-test-state-save-omits-config-dir-override ()
   "state-save no longer serializes `:config-dir-override'.
 The account is a function of the workspace path, so there is nothing
