@@ -32,6 +32,7 @@
                  agent-repl-merge-workspace
                  agent-repl-restart-workspace
                  agent-repl-create-workspace
+                 agent-repl-create-workspace-static
                  agent-repl-fork-workspace
                  agent-repl-set-priority))
     (should (commandp cmd))))

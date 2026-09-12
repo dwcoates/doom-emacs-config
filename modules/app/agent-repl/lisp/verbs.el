@@ -942,8 +942,32 @@ Clearing is the absence of the field, which no level label can spell.")
   "Return the `UserSaid' carrying TEXT as its single text block."
   (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
 
+(defun agent-repl-verbs--dynamic-repository (command)
+  "Return the `RepositoryRef' a DYNAMIC create targets, refusing without one.
+Owner ruling, 2026-09-12: there are four creation modes, and each asks
+only its own questions.  The three DYNAMIC modes -- a one-shot, a normal
+workspace, and a fork -- ask for a prompt and nothing else: the repository
+is the repository the CURRENT workspace sits in, taken off that repo's
+MAIN (default) branch, and the daemon mints the name.  So the repository
+is READ from the roster section the current workspace's row sits in, and
+never picked.  Only the static mode asks for a repository.
+
+COMMAND names the mode in the refusal, which is raised when the current
+buffer has no workspace to derive from -- a dynamic create has nothing to
+derive from then, and the static command is where a repository is named
+by hand."
+  (let* ((section (agent-repl-verbs--section-of-ws (agent-repl--ws-current-name)))
+         (repository (and section (agent-repl-verbs--section-ref section))))
+    (unless repository
+      (user-error
+       "agent-repl: %s needs a current workspace to take its repository from; use `agent-repl-create-workspace-static' to name one"
+       command))
+    repository))
+
 (defun agent-repl-verbs--read-repository ()
-  "Read a repository from the roster's sections, defaulting to the current one."
+  "Read a repository from the roster's sections, defaulting to the current one.
+The STATIC create is the one mode that asks this; every dynamic mode
+derives its repository through `agent-repl-verbs--dynamic-repository'."
   (let* ((sections (agent-repl-verbs--repo-sections))
          (default (agent-repl-verbs--section-of-ws (agent-repl--ws-current-name)))
          (candidates (mapcar (lambda (s)
@@ -970,41 +994,56 @@ the obvious default rather than something to retype."
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
     (read-string prompt-text initial)))
 
-(defun agent-repl-verbs--optional-string (prompt)
-  "Read a string for PROMPT; return nil when it is left blank.
-Blank is ABSENCE, and absence is what the proto asks for -- an empty
-string would be a sentinel the daemon would have to re-interpret."
-  (let ((value (string-trim (read-string prompt))))
-    (unless (string-empty-p value) value)))
-
 (defun agent-repl-create-workspace (&optional child)
-  "Create a workspace (`SPC TAB n').
-The repository comes from the roster's sections, defaulting to the one the
-current workspace sits in.  The prompt defaults to the composer's text.  A
-prefix argument makes the new workspace a CHILD of the current one, whose
-merge target is then the parent's worktree and branch rather than the
-repo's main checkout.
+  "Create a DYNAMIC workspace (`SPC TAB n'): a prompt, and nothing else.
+Owner ruling, 2026-09-12.  This is the dynamic normal mode, so the only
+question it asks is the prompt, which defaults to the composer's text.
+The repository is the one the current workspace sits in, off that repo's
+MAIN (default) branch -- an absent base ref IS that resolution -- and the
+daemon mints the name.  A prefix argument makes the new workspace a CHILD
+of the current one, whose merge target is then the parent's worktree and
+branch rather than the repo's main checkout.
 
-The name and the base ref are both optional: an absent name means the
-daemon mints one from the prompt, and an absent base ref means the repo's
-default branch resolution.
+Naming a repository or a name by hand is the STATIC mode's business:
+`agent-repl-create-workspace-static'.
 
 THE NEW WORKSPACE IS SELECTED.  Creating one is a statement about where
 you intend to work next, so this stands on it the moment the daemon
 answers -- the same step registering a directory takes."
   (interactive "P")
-  (let* ((repository (agent-repl-verbs--read-repository))
+  (let* ((repository (agent-repl-verbs--dynamic-repository "a dynamic create"))
          (prompt (agent-repl-verbs--read-prompt "Initial prompt: "))
-         (name (agent-repl-verbs--optional-string "Name (blank = daemon mints one): "))
-         (base-ref (agent-repl-verbs--optional-string "Base ref (blank = default branch): "))
          (parent (when child
                    (agent-repl-verbs--ref (agent-repl--ws-current-name)))))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-standard child=%s named=%s based=%s"
-                      (and child t) (and name t) (and base-ref t))
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-standard mode=dynamic child=%s"
+                      (and child t))
     (agent-repl-verb-create
      repository :standard
      :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
-     :base-ref base-ref
+     :parent parent
+     :select t)))
+
+(defun agent-repl-create-workspace-static (&optional child)
+  "Create a STATIC workspace (`SPC TAB N'): a repository and a name, no prompt.
+Owner ruling, 2026-09-12.  This is the one creation mode that asks for a
+repository, and the one that REQUIRES a name; it sends no initial prompt
+at all, so the workspace comes up idle and waits for the user.  A prefix
+argument makes it a CHILD of the current workspace, exactly as the
+dynamic create's does.
+
+THE NEW WORKSPACE IS SELECTED, for the same reason the dynamic create's
+is."
+  (interactive "P")
+  (let* ((repository (agent-repl-verbs--read-repository))
+         (name (string-trim (read-string "Name: ")))
+         (parent (when child
+                   (agent-repl-verbs--ref (agent-repl--ws-current-name)))))
+    (when (string-empty-p name)
+      (user-error "agent-repl: a static workspace IS its name"))
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-standard mode=static child=%s"
+                      (and child t))
+    (agent-repl-verb-create
+     repository :standard
      :name name
      :parent parent
      :select t)))
@@ -1014,13 +1053,17 @@ answers -- the same step registering a directory takes."
 A fork without a parent is unrepresentable by construction, which is why
 this is its own command rather than a flag on the plain create.
 
+It is a DYNAMIC mode (owner ruling, 2026-09-12), so it asks for the
+prompt alone: the repository is the current workspace's, off that repo's
+main branch, and the daemon mints the name.
+
 THE FORK IS SELECTED, exactly as a plain create is: you forked in order
 to work in the fork."
   (interactive)
-  (let* ((repository (agent-repl-verbs--read-repository))
+  (let* ((repository (agent-repl-verbs--dynamic-repository "a fork"))
          (prompt (agent-repl-verbs--read-prompt "Initial prompt: "))
          (parent (agent-repl-verbs--ref (agent-repl--ws-current-name))))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-fork")
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-fork mode=dynamic")
     (agent-repl-verb-create
      repository :standard
      :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
@@ -1064,12 +1107,15 @@ which is what asks the daemon to choose.  A nil setting seeds nothing."
 
 (cl-defun agent-repl-verbs--create-oneshot (finish &key model
                                                    self-certified add-to-merge-queue)
-  "Create a one-shot whose FINISH arm says what happens when the work ends."
-  (let ((repository (agent-repl-verbs--read-repository))
+  "Create a one-shot whose FINISH arm says what happens when the work ends.
+A one-shot is a DYNAMIC mode (owner ruling, 2026-09-12): it asks for its
+commission and nothing else -- the repository is the current workspace\='s,
+off that repo\='s main branch, and the daemon mints the name."
+  (let ((repository (agent-repl-verbs--dynamic-repository "a one-shot"))
         (prompt (agent-repl-verbs--read-prompt "One-shot commission: ")))
     (when (string-empty-p (string-trim prompt))
       (user-error "agent-repl: a one-shot IS its prompt"))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-one-shot finish=%S model=%S" finish model)
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-one-shot mode=dynamic finish=%S model=%S" finish model)
     (agent-repl-verb-create
      repository :one-shot
      :prompt prompt :finish finish

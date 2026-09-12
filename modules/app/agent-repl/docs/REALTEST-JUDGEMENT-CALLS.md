@@ -195,3 +195,16 @@ Four creation modes, each asking only its own questions:
 Dynamic modes NEVER ask for a repository or a name. Only the static mode
 asks for a repository. Today `agent-repl-create-workspace` asks repository,
 prompt, name and base ref for every mode, which is the mismatch.
+
+## Static create bound to SPC TAB N (2026-09-12, lead)
+
+The owner's creation-modes ruling names four modes but no keys. The new
+static create needed a binding to be reachable at all, so the lead chose
+`SPC TAB N` — the shifted neighbour of `SPC TAB n`, the dynamic create it
+sits beside — with the description "New named workspace (no prompt; C-u =
+child)". No existing binding was moved, renamed, or reused.
+
+THIS ONE WAS MADE WITHOUT THE OWNER. To change it, edit the single `map!`
+entry in `lisp/keybindings.el` under the `SPC TAB` prefix; nothing else
+refers to the key, and `lisp/test-keybindings.el` only asserts that the
+command behind it is defined.
