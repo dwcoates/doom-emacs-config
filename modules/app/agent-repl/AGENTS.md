@@ -307,6 +307,41 @@ pays the 5s production ceiling, so a scenario that stops a daemon and waits
 for a successor spends its deadline on backoff that has nothing to do with
 what it asserts. Bind both, at every site that binds either.
 
+## The daemon is a RESIDENT SERVICE, and it outlives Emacs
+
+Emacs owns the daemon's cold start and nothing after it: a daemon that
+ANSWERS is adopted, never killed. That contract only holds if a daemon can
+still be answering after the editor that started it has gone, and for a
+long time it could not — the daemon was a plain `make-process' child, and
+Emacs SIGHUPs every child from `kill-emacs`, so quitting the editor took
+the daemon with it. The adopt-on-restart path was unreachable in practice
+and unmeasurable in a realtest: restarting Emacs always respawned.
+
+The spawn now goes through a detacher, `agent-repl-daemon--spawn-argv`
+(`lisp/daemon.el`): a `/bin/sh` that sets SIGHUP to ignore, redirects the
+child's stdout and stderr to `<state>/logs/daemon.stdio.log`, and then
+EXECs the daemon.
+
+- The ignored SIGHUP survives the exec, and Go leaves an
+  initially-ignored signal ignored — the daemon asks for SIGINT, SIGTERM
+  and SIGQUIT and no others.
+- The redirection matters just as much as the trap. On Emacs's own pipe,
+  the daemon's first log line after the editor exits would meet a closed
+  read end and die of SIGPIPE: a detach that only held until the daemon
+  next spoke. `agent-repl--frontend-stdio-log-tail` reads that file back,
+  and the boot wait's "exited before it published its address" record
+  carries both it and the run-log tail.
+- It is an `exec`, so the pid Emacs holds IS the daemon's. The sentinel,
+  the boot wait's exit branch and `agent-repl-daemon--spawned-here-p` all
+  keep watching the real process.
+
+STOPPING IT IS STILL DELIBERATE AND STILL EMACS'S TO DO. The stop verb is
+`UpdateShutdownSchedule{now}` over the link
+(`agent-repl-frontend-daemon-stop`), and the restart verb sequences that
+stop ahead of a fresh ensure. Neither ever signalled the process object,
+so neither lost anything to the detach. Only the implicit death-on-exit is
+gone.
+
 ## Runtime investigations go through one skill
 
 For any current or historical agent-repl behavior, use the complete controller
