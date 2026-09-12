@@ -1284,13 +1284,43 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 }
 
 // remember records a workspace's live session.
+//
+// A DISPLACED WATCHER IS CLOSED HERE, not left to the caller. The map entry is
+// the only handle a watcher has: overwriting it with a new session dropped the
+// old one on the floor with its streams still standing, and those streams then
+// ended on their own -- against a fleet nothing had told, which recorded the
+// end as a severing. Closing it in the one place a session is displaced is what
+// makes that unrepresentable rather than a rule each caller must remember.
+//
+// The close runs OFF the lock: it cancels the watcher's context, drains its
+// streams and joins its in-flight sink dispatch, none of which may hold the
+// fleet's lock.
 func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
 	f.mu.Lock()
-	_, stood := f.sessions[ws]
+	previous, stood := f.sessions[ws]
 	f.sessions[ws] = session
 	f.mu.Unlock()
+	if stood && previous != nil && previous.watcher != nil && previous.watcher != session.watcher {
+		f.closeDisplaced(ws, previous.watcher, "the workspace's session was replaced")
+	}
 	f.logTransition(ws, "session_live", stood, true,
 		dlog.Context{"shim_pid": session.client.PID(), "watcher_attached": session.watcher != nil})
+}
+
+// closeDisplaced closes a watcher no handle points at any more. A close is a
+// DELIBERATE teardown -- it bumps the fleet's generation before it cancels, so
+// every stream end it causes reads as the tear-down it is -- and a failure to
+// close is surfaced rather than swallowed: the streams and the sink dispatch it
+// owns outlive it.
+func (f *Fleet) closeDisplaced(ws ids.WorkspaceID, watcher sessionwatcher.Watcher, reason string) {
+	log := f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	if err := watcher.Close(); err != nil {
+		log.Error(opBringUp, "could not close the watcher a new session displaced", dlog.Context{
+			"reason": reason, "cause": err.Error(),
+		})
+		return
+	}
+	log.Debug(opBringUp, "closed the watcher a new session displaced", dlog.Context{"reason": reason})
 }
 
 // logTransition records one workspace fleet state edge with enough context to

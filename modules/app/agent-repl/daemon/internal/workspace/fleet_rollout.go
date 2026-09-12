@@ -418,11 +418,20 @@ func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimcl
 	}
 	f.mu.Lock()
 	attached := false
+	var displaced sessionwatcher.Watcher
 	if current, ok := f.sessions[ws]; ok && current.client == c {
 		attached = current.watcher != nil
+		displaced = current.watcher
 		current.watcher = watcher
 	}
 	f.mu.Unlock()
+	// THE WATCHER THIS ONE REPLACES IS CLOSED, for the reason `remember`
+	// states: the map entry is a watcher's only handle, and one overwritten
+	// in place keeps its streams standing until they end on their own -- an
+	// end nothing has been told about, which is recorded as a severing.
+	if displaced != nil && displaced != watcher {
+		f.closeDisplaced(ws, displaced, "the installed shim's watches replaced the previous fleet")
+	}
 	f.logTransition(ws, "watcher_attached", attached, true,
 		dlog.Context{"shim_pid": c.PID()})
 	log.Info(opFleetRollout, "opened the adopted session's watches", dlog.Context{
@@ -475,7 +484,17 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		return rollout.Resumed{Cold: cold}, nil
 	}
 
-	watcher, err := f.watch(ctx, ws, c, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
+	// THE WATCHER OUTLIVES THE CALL THAT OPENED IT. `ctx` here is the
+	// relaunch's own, and it is cancelled the moment the relaunch returns:
+	// handed straight to the watcher, it tore the freshly-opened fleet down
+	// within a millisecond of opening it, and the watcher read the daemon's own
+	// cancel back as `canceled: context canceled` on both standing streams --
+	// two ERRORs, a `link_severed` WARN and its health fault, plus two h2c
+	// CANCEL warnings on the shim, for a session that had just come up
+	// (realtest sweep 2026-09-12T15:23:03.338). Both other sites that open a
+	// fleet already detach the context for exactly this reason; this one did
+	// not.
+	watcher, err := f.watch(context.WithoutCancel(ctx), ws, c, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opFleetRollout, "could not re-open the session's watches after a resume", dlog.Context{
 			"cause": err.Error(),
