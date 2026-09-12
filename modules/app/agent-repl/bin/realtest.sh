@@ -283,9 +283,13 @@ PRUNED="$(realtest_prune_backups "$WSM_DB" "$BACKUP_KEEP")
 $(realtest_prune_backups "$EVENTS_DB" "$BACKUP_KEEP")"
 if [ -n "$(printf '%s' "$PRUNED" | tr -d '[:space:]')" ]; then
     printf '[realtest] backups pruned:\n'
+    # `[ -n "$path" ] && printf` leaves the loop's exit status at 1 whenever the
+    # last line read is empty (PRUNED carries a blank line between the two
+    # databases' output), which under `set -e` would abort the whole run right
+    # here. `|| true` keeps a cosmetic print from ending the run.
     printf '%s\n' "$PRUNED" | while IFS= read -r path; do
         [ -n "$path" ] && printf '  %s\n' "$path"
-    done
+    done || true
 else
     note "nothing to prune"
 fi
