@@ -128,11 +128,15 @@ func (s *sidecar) applyStop(taskID string) {
 		// CancelTerminal already stated why it refused.
 		return
 	}
-	if err := s.storeWrite("cancelled terminal", &storev1.EntryBatch{Entries: entries}); err != nil {
+	skips, err := s.storeWrite("cancelled terminal", &storev1.EntryBatch{Entries: entries})
+	if err != nil {
 		bound.With(logging.Context{Level: "error"}).Log(
 			"the cancelled terminal was not committed; the stop stays pending and is restated on the next cycle: %v", err)
 		return
 	}
+	// A cancelled terminal is an inferred record naming no file: a book-conflict
+	// skip here is unexpected and warned, never folded into a catch-up summary.
+	s.warnUnexpectedSkips("cancelled terminal", skips)
 	delete(s.stopped, taskID)
 	s.tracker.Settle(path)
 	bound.With(logging.Context{ActivityID: run}).Log("cancelled terminal minted and committed entries=%d", len(entries))
