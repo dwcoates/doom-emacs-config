@@ -42,8 +42,19 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 		if boolean(pick(result, "stoppedByUser", "stopped_by_user")) {
 			f.Cause = &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}}
 		}
-		c.log.With(at.ctxWarn("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
-			Log("subagent spawn failed")
+		// BENIGN CONVERSION OF A RECORDED FAILURE — debug, not warn. The sidecar
+		// is a copier: `failed` is the vendor's own is_error on a past Agent tool
+		// result, and this branch converts it FAITHFULLY into the Failure arm.
+		// That arm is the coverage the consumer renders — the subagent failure is
+		// preserved, not lost. This is conversation CONTENT, not a sidecar fault,
+		// and warn conflated "the transcript recorded a failure" with "the
+		// sidecar had a problem", so every historical subagent failure flooded a
+		// cold re-scan's strict harvest. The genuine conversion defects nearby
+		// keep their severity: an async launch with no spawning-call id is error
+		// (the spawn cannot be announced), and one with no vendor agent id is
+		// warn (its spool cannot be attributed).
+		c.log.With(at.ctxFor("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
+			LogVerbose("subagent spawn failed")
 		return item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: f},
 		}})

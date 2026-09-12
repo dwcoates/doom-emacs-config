@@ -6,11 +6,13 @@ package convert
 // names the conversion rather than the reader. Nothing touches a vendor.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -193,4 +195,32 @@ func apiKindName(failed *conversationv1.ApiRequestFailed) string {
 func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// levelForMessage returns the level of the ONE captured record whose message
+// contains substring, failing unless exactly one does. It reads a
+// loggedConverter's JSONL sink, so a test can pin the SEVERITY a conversion
+// recorded at — the subject of the benign-re-scan reclassifications — rather
+// than only the message text.
+func levelForMessage(t *testing.T, sink *bytes.Buffer, substring string) string {
+	t.Helper()
+	var level string
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("captured log line is not JSON: %v: %q", err, line)
+		}
+		if msg, _ := rec["message"].(string); strings.Contains(msg, substring) {
+			level, _ = rec["level"].(string)
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("message mentioning %q: got %d records, want exactly 1; log:\n%s", substring, count, sink.String())
+	}
+	return level
 }
