@@ -139,6 +139,12 @@ realtest_prune_backups() {
     done <<EOF
 $stamps
 EOF
+    # The loop's last command is the index test, which is false (returns 1)
+    # whenever the final stamp is within the keep window — i.e. whenever there
+    # are KEEP-or-fewer sets and nothing is pruned. Return success explicitly so
+    # a caller under `set -e` (bin/realtest.sh assigns this in a command
+    # substitution) is not aborted by a benign no-op prune.
+    return 0
 }
 
 # realtest_free_kib DIR — free space in KiB on the filesystem holding DIR, or
