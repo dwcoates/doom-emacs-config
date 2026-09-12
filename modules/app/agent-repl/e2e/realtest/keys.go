@@ -321,6 +321,15 @@ func (d *KeyDriver) confirm(ctx context.Context, before InputMark) (DeliveryVerd
 // Its own function so the spelling is testable without a window server: a
 // `--hold` that went missing would put the harness back on the fixed-span
 // handback that dropped keys, and nothing else would notice.
+//
+// AND `--hold` CARRIES A SECOND MEANING THE HELPER RELIES ON: it says this
+// side will read Emacs's marks back and report an undelivered key itself. That
+// is what lets keydriver.swift treat its key-window reading as advisory and
+// post anyway, instead of refusing a press on a prediction the editor is about
+// to answer for real. It is therefore passed exactly when `Client` is attached
+// — the same condition under which `confirm` runs — and never on a blind
+// press, where the helper's refusal is the only thing standing between a
+// dropped key and silence.
 func keyDriverArgs(pid int, chord Chord, hold bool) []string {
 	args := make([]string, 0, 4)
 	if hold {

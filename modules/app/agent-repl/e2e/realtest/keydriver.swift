@@ -34,9 +34,10 @@
 // It needs accessibility trust: an untrusted process's synthetic events are
 // dropped silently by the window server, so `--check` reports the trust state as
 // its own answer and the caller refuses to interpret a silent success. The same
-// trust is what lets it read the target's focused window before posting, which
-// is the second half of "the event has somewhere to land" — see the refusal
-// below for why an active application is not yet enough.
+// trust is what lets it READ whether the target has a key window before
+// posting — a reading it reports rather than a gate it refuses on, except on
+// the unheld path where nothing downstream will check; see "WHETHER THE TARGET
+// CAN RECEIVE A KEY IS A READING, NOT A GATE" below.
 //
 // WHY A KEY WINDOW AT THE INSTANT OF THE POST WAS NOT ENOUGH. The 2026-09-12
 // sweep still lost keys after the focused-window precondition landed — three
@@ -48,8 +49,8 @@
 // 0.3s after posting, so an Emacs that was busy for longer than that — and a
 // standing minibuffer with the panel drain running behind it is exactly that
 // Emacs — resigned key status with the event still in its queue and dropped it
-// when it finally looked. The precondition was necessary and about a quarter of
-// a second wide.
+// when it finally looked. The window in which the target had to hold key was
+// necessary and about a quarter of a second wide.
 //
 // So the helper can now HOLD the target key until the caller says the key was
 // consumed. `--hold` posts, prints `keydriver-posted`, and keeps the target
@@ -66,6 +67,11 @@
 //                                          activate pid, post keyDown/keyUp,
 //                                          hold the target key until released
 //                                          (with --hold), restore prior focus
+//
+// `--hold` also says the CALLER WILL CONFIRM the key against the editor, so the
+// key-window reading becomes advisory and the post goes ahead whatever it says.
+// Without it nothing downstream checks, and a target the window server says
+// cannot receive a key is refused instead of posted into.
 //
 // Modifiers are comma-separated: command, shift, option, control. They are
 // spelled as words rather than as a bitmask so a caller's intent is readable in
@@ -90,6 +96,12 @@ func activate(_ app: NSRunningApplication) {
         app.activate(options: [.activateIgnoringOtherApps])
     }
 }
+
+// axMessagingTimeout bounds ONE accessibility query, so one unresponsive target
+// cannot hang the helper past the caller's own ceiling; an expiry is an
+// unanswered query, handled as one. Float because that is what the
+// accessibility API takes.
+let axMessagingTimeout: Float = 1.0
 
 // spin runs the run loop for up to `seconds`, or until `done` returns true. It
 // is how this helper WAITS on a state change rather than sleeping blindly: the
@@ -175,88 +187,73 @@ guard let target = NSRunningApplication(processIdentifier: pid) else {
 let workspace = NSWorkspace.shared
 let previous = workspace.frontmostApplication
 
-// Make the target Emacs key so it has a window to receive the event, then wait
-// for the activation to actually take before posting.
-activate(target)
-spin(upTo: 2.0, until: { target.isActive })
-
-// AN ACTIVATION THAT DID NOT TAKE IS A FAILURE, NOT A REASON TO POST ANYWAY.
+// WHETHER THE TARGET CAN RECEIVE A KEY IS A READING, NOT A GATE — EXCEPT WHERE
+// NOBODY WILL CHECK.
 //
-// A CGEvent addressed to a process AppKit has given no key window is dropped
-// with no error, which is the failure this whole file exists to avoid; posting
-// into that state and exiting 0 would report a key as delivered that the
-// keymap never saw, and the caller would then wait out a ceiling for an effect
-// that could never arrive. That is exactly how a `C-g` sent to dismiss a
-// standing minibuffer turned into a 30s timeout in the 2026-09-12 workspace
-// runs: the harness could not tell "the key never arrived" from "the key
-// arrived and the read did not abort".
+// AppKit dispatches a key event to the KEY WINDOW, so a post to an application
+// that owns none is dropped with no error. That is the failure this file exists
+// to avoid, and it used to be guarded by PREDICTING it: the helper asked
+// whether the target was ready and refused to post when the answer was no.
 //
-// So the post is refused and the failure is named. `activate()` is best-effort
-// for a background command-line tool and macOS can decline it outright, so
-// this is a real state and not a theoretical one. Focus is handed back first,
-// so a refusal leaves the desktop exactly as it found it.
-if !target.isActive {
-    if let previous = previous, previous.processIdentifier != pid {
-        activate(previous)
-    }
-    fail("pid \(pid) did not become the active application within 2s, so the key event was NOT posted: "
-        + "AppKit dispatches a key event only to a key window, and a post to a process without one is dropped "
-        + "silently. Nothing was sent and the previously frontmost application was restored")
-}
-
-// AN ACTIVE APPLICATION IS NOT YET AN APPLICATION WITH A KEY WINDOW, and that
-// gap is where keys were being lost.
+// The prediction was worth what it cost only while a dropped key was
+// undetectable. It no longer is. The caller now holds the target key and reads
+// EMACS'S OWN MARKS — `(recent-keys)` and `quit-flag` — for every press
+// (delivery.go), so a key that did not arrive is named as a harness failure
+// after the fact, by the editor, rather than guessed at beforehand by the
+// window server. A precondition that refuses on a healthy editor trades a
+// solved problem for a new one, and that is exactly what happened: the
+// 2026-09-12 16:12 sweep refused FORTY presses, every one of them on
+// `NSRunningApplication.isActive` still reading false two seconds after
+// `activate()`. Not one refusal came from the accessibility questions below.
 //
-// `NSRunningApplication.isActive` answers about the APPLICATION. AppKit
-// dispatches a key event to the KEY WINDOW, and a window becomes key on its own
-// schedule after the activation — so between `isActive` turning true and a
-// window becoming key there is a window of time in which `[NSApp keyWindow]` is
-// still nil and `sendEvent:` has nowhere to send a keyDown. It drops it with no
-// error, which is the same silent loss the activation check above exists to
-// prevent, one step further along.
+// SO `isActive` IS NO LONGER ASKED AS A GATE. It is AppKit's cached, KVO-fed
+// view of which application is frontmost, maintained for this process out of
+// notifications a bundle-less command-line tool is a poor host for; the
+// accessibility answers below come from the window server and the target
+// itself, which is the same question asked of the authority instead of of a
+// cache. `isActive` is still READ and still REPORTED in the receipt — a
+// reading that disagrees with the window server is evidence, and dropping it
+// would lose the only trace of the failure above — it simply no longer decides
+// anything.
 //
-// It is not theoretical. The 2026-09-12 sweep's own `(recent-keys)` came back
-// missing keys this helper had posted and reported as delivered: the `<tab>` of
-// a `SPC TAB o` (which the run itself reported as a chord that did not reach its
-// command), the `<escape>`s pressed around it, and every `C-g` sent to dismiss a
-// standing prompt — which was then filed against the EDITOR as "a real C-g did
-// not dismiss the prompt" when Emacs had never been handed the key at all.
-//
-// So the focused window is a precondition, checked the same way the activation
-// is: through the accessibility API, whose trust this helper already requires
-// and refuses to run without. `AXFocusedWindow` on an application element is
-// that application's key window. No window, no post, and the failure is named.
-//
-// AND A FOCUSED WINDOW ALONE WAS STILL NOT ENOUGH. `AXFocusedWindow` on an
-// application element answers about THAT APPLICATION'S OWN notion of which of
-// its windows would be key — an inactive application in the background still
-// answers it — so it is satisfied by an Emacs that owns no key window at all.
-// That is why keys kept going missing after it landed. Three questions are
-// asked now, and all three must be answered YES:
+// THREE QUESTIONS ARE ASKED, AND THEY ARE ASKED OF THE AUTHORITY:
 //
 //   - the application element is `AXFrontmost`, which is the window server's
 //     answer rather than the application's;
 //   - the SYSTEM-WIDE accessibility element's `AXFocusedApplication` is this
 //     pid, which is the closest accessibility gets to "this app owns the key
 //     window";
-//   - the application still has an `AXFocusedWindow`, the original check, kept
-//     because a frontmost application between windows has none.
+//   - the application has an `AXFocusedWindow` — necessary but never
+//     sufficient on its own, because an inactive background application still
+//     answers it about the window that WOULD be key.
 //
 // A QUESTION THAT WENT UNANSWERED IS NOT A NO. Accessibility queries are
 // serviced by the target's own main run loop, so an Emacs busy in its command
 // loop — which is precisely the Emacs these presses go to — can leave a query
-// unanswered until it times out. Refusing on that would invent a new way to
-// lose a keypress, and it would be wrong: a busy Emacs with a key window
-// queues the event and dispatches it when it looks, which is exactly what the
-// hold below is for. So an unanswered query is reported as UNVERIFIED in the
-// receipt and the post goes ahead; only a definite NO refuses.
+// unanswered until it times out. A busy Emacs with a key window queues the
+// event and dispatches it when it looks, which is what the hold below is for.
+// So an unanswered query is reported as UNVERIFIED and never refuses.
+//
+// AND WHAT A DEFINITE NO DOES DEPENDS ON WHO IS WATCHING:
+//
+//   - WITH `--hold` the caller is reading the editor back and will report an
+//     undelivered key itself, so the reading is ADVISORY: the post goes ahead
+//     and the receipt carries what was seen. Confirmation is authoritative,
+//     and a key that really was dropped surfaces as `HARNESS KEY DELIVERY
+//     FAILED` from Emacs's own marks.
+//   - WITHOUT `--hold` there is no channel to the editor and NOBODY will
+//     check, so a post into a target the window server says cannot receive it
+//     would be exactly the silent loss this file forbids. It is refused and
+//     the failure is named, as before.
+//
+// Nothing is posted-and-forgotten in either mode. The difference is only which
+// system gets to say the key was lost, and the one that can actually see it
+// now does.
 let axTarget = AXUIElementCreateApplication(pid)
 let axSystem = AXUIElementCreateSystemWide()
 
-// Bounded so one unresponsive target cannot hang the helper past the caller's
-// own ceiling; an expiry is an unanswered query, handled as one.
-AXUIElementSetMessagingTimeout(axTarget, 1.0)
-AXUIElementSetMessagingTimeout(axSystem, 1.0)
+AXUIElementSetMessagingTimeout(axTarget, axMessagingTimeout)
+AXUIElementSetMessagingTimeout(axSystem, axMessagingTimeout)
 
 // axCopy answers three ways on purpose: the value, a definite absence, or "the
 // target did not answer". Collapsing the last two is what made the old check
@@ -327,6 +324,10 @@ struct KeyFocus {
     var frontmost: Bool?
     var focusedApplication: Bool?
     var focusedWindow: Bool?
+    // active is `NSRunningApplication.isActive`, carried for the receipt and
+    // deliberately absent from `ready` and `refused`: see the block above for
+    // why the cache does not get a vote.
+    var active: Bool
 
     // ready is "every question answered yes".
     var ready: Bool {
@@ -350,7 +351,7 @@ struct KeyFocus {
             return answer ? "yes" : "no"
         }
         return "frontmost=\(word(frontmost)) focusedApplication=\(word(focusedApplication)) "
-            + "focusedWindow=\(word(focusedWindow))"
+            + "focusedWindow=\(word(focusedWindow)) isActive=\(word(active)) ready=\(ready ? "yes" : "no")"
     }
 }
 
@@ -358,22 +359,69 @@ func readKeyFocus() -> KeyFocus {
     return KeyFocus(
         frontmost: axIsTrue(axTarget, kAXFrontmostAttribute as String),
         focusedApplication: axFocusedApplicationIsTarget(),
-        focusedWindow: axHasValue(axTarget, kAXFocusedWindowAttribute as String))
+        focusedWindow: axHasValue(axTarget, kAXFocusedWindowAttribute as String),
+        active: target.isActive)
 }
 
-spin(upTo: 2.0, until: { readKeyFocus().ready })
+// THE READINESS WAIT IS BOUNDED BY WHAT ASKING COSTS, NOT BY A GUESS.
+//
+// One full round of the three questions against a target that answers none of
+// them costs `axMessagingTimeout`, which is the bound already chosen above for
+// a single query. The wait is two such rounds: enough to re-ask an activation
+// that had not landed when it was first asked, and no more, because from the
+// post onwards the target is HELD key for the whole of the caller's
+// confirmation — a window that becomes key late is covered there rather than
+// here. The whole readiness wait is therefore HALF the four seconds the two
+// sequential two-second gates used to spend, and nothing was widened to make
+// this pass.
+let activationRound = TimeInterval(axMessagingTimeout)
+
+// TWO ACTIVATION REQUESTS, WHICH IS NOT THE SAME AS ONE LONGER WAIT.
+//
+// macOS 14 made activation COOPERATIVE: `activate()` asks, and the window
+// server may decline a request from a process that is not itself an active
+// application — which a bundle-less command-line tool spawned by `go test`
+// never is. The legacy `.activateIgnoringOtherApps` that used to override that
+// is documented as having NO EFFECT from macOS 14 on, so there is no forcing
+// form to fall back to and this helper does not pretend otherwise. What it can
+// do is ASK AGAIN: a request declined while the previous application still
+// held activation can be granted on the next one, and a second request is a
+// different request rather than more time spent waiting on the first.
+//
+// If both are declined the press is not abandoned. The event is posted anyway
+// and the caller's confirmation says whether it arrived, which is the whole
+// point of the reading above being a reading.
+let activationStarted = Date()
+activate(target)
+spin(upTo: activationRound, until: { readKeyFocus().ready })
+var reactivated = false
+if !readKeyFocus().ready {
+    reactivated = true
+    activate(target)
+    spin(upTo: activationRound, until: { readKeyFocus().ready })
+}
+let readyAfter = Date().timeIntervalSince(activationStarted)
 
 let focus = readKeyFocus()
-if let reason = focus.refused {
+
+// A DEFINITE NO REFUSES ONLY WHERE NOTHING WILL CHECK THE POST AFTERWARDS.
+if holdSeconds == nil, let reason = focus.refused {
     if let previous = previous, previous.processIdentifier != pid {
         activate(previous)
     }
-    fail("pid \(pid) is the active application but \(reason) after 2s, so the key event was NOT "
+    fail("pid \(pid) could not be made ready to receive a key — \(reason) — after \(String(format: "%.1f", readyAfter))s, so the key event was NOT "
         + "posted: AppKit dispatches a key event only to a key window and drops a post to an application "
-        + "without one silently, which is how posted keys went missing from Emacs's own (recent-keys). "
-        + "Nothing was sent and the previously frontmost application was restored. "
+        + "without one silently. This press was made without --hold, so nothing would read the editor back "
+        + "and a dropped key would go unnoticed; a held press posts anyway and lets Emacs's own marks "
+        + "settle it. Nothing was sent and the previously frontmost application was restored. "
         + "What accessibility said: \(focus.describe())")
 }
+
+// readiness is the phrase the receipt carries about the reading above, so a
+// finding can say whether the target looked able to receive the key without
+// having to re-read this file.
+let readiness = "readiness=\(focus.describe()) askedTwice=\(reactivated ? "yes" : "no") "
+    + "readyAfter=\(String(format: "%.2f", readyAfter))s"
 
 // Down then up, addressed to the process. There is no delay between them: a
 // keystroke is not a hold, and Emacs's own input queue serializes them.
@@ -424,14 +472,14 @@ if let holdSeconds = holdSeconds {
     stdin.readabilityHandler = nil
 
     if release.signalled {
-        print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=released \(focus.describe())")
+        print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=released \(readiness)")
     } else {
         // NOT a failure of the post — the event was posted and Emacs was key
         // for the whole ceiling — but the caller never saw it arrive, and that
         // is exactly the state the caller must be told about rather than left
         // to infer.
         print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=expired-after-\(holdSeconds)s "
-            + focus.describe())
+            + readiness)
     }
 } else {
     // Let Emacs's event loop consume the events while it is still key, so the
@@ -439,7 +487,7 @@ if let holdSeconds = holdSeconds {
     // path, kept for a caller with no channel to the editor: it cannot know
     // when the key was consumed, so it waits a fixed span and says so.
     spin(upTo: 0.3, until: { false })
-    print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=none \(focus.describe())")
+    print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=none \(readiness)")
 }
 
 // Restore whatever was frontmost before, so the owner is disturbed only for the
