@@ -13,6 +13,8 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- daemon/roster: a repository's default branch is no longer read as a family link, so a workspace cut from it draws at the top level and priority can reorder the tab bar (realtest 8)
+- daemon: every fleet adoption is dialed under the one adoption bound and records both its edges, so a revival can no longer hang forever with a prompt held and no turn recorded (realtest 7)
 - elisp: the composer mounts at a height derived once per frame instead of a fraction of whatever window the mount split, so every workspace's input window is the same fixed height and stays it across remounts
 - elisp/realtest: a quit arriving while a guarded section runs is delivered to the command loop afterwards, so C-g reaches the prompt the user aimed it at; a run clears pending input before it measures (DD, EE)
 - daemon/elisp: registering a directory re-opens the closed row it names, and the roster stops offering repositories whose worktree is gone (AA, BB, GG)

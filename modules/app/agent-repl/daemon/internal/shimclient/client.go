@@ -74,6 +74,36 @@ const EscalationBound = 250 * time.Millisecond
 // that reason.
 const GracefulKillBound = DefaultKillGrace + EscalationBound
 
+// DefaultAdoptBound is how long ONE adoption of an already-running shim may
+// take before the caller stops waiting on it.
+//
+// AN ADOPTION THAT IS NOT BOUNDED NEVER ENDS. `bringUp` is a dial ladder with
+// no attempt limit, and for an ADOPTED client the only two ways out besides
+// success are the caller's context and `witnessAdoptedDeath` -- which
+// concludes death only when the socket is gone AND the workspace lock reads
+// FREE. A lock that reads HELD for a shim whose socket path is gone satisfies
+// neither, so the ladder redials that forever, by design, in silence at DEBUG.
+//
+// Two runs of this have now been paid for. The boot sequence hit it first (a
+// daemon that listened for ten hours with its accept queue at 128/128 and
+// answered nothing) and bounded its own adoption. The fleet's did not, and the
+// same shape then stranded a prompt: realtest 7's parent workspace took a
+// prompt at 14:35:43, the queue held it under `session_starting` and started
+// the background revival, the revival called Adopt, and between
+// "adopting a running shim" and the three-minute give-up the workspace's log
+// carried nothing at all -- no "adopted a running shim", no "adoption failed".
+// A held prompt writes no `turns` row, so the harness polling `turns` saw
+// nothing, and the fork that needed the parent's conversation had none.
+//
+// Sized as a small multiple of a healthy adoption, which is a local AF_UNIX
+// connect plus the shim's first pushed diagnostics frame -- healthy or not,
+// because an unhealthy arm is an ANSWER and adopts (awaitDiagnostics);
+// milliseconds, and `shimsocket.DialTimeout` already bounds the connect at 2s.
+// 10s is ~5x that one bounded connect, so a shim that is merely busy is still
+// adopted and one that is unreachable costs a bounded wait and a loud refusal
+// instead of a caller that never returns.
+const DefaultAdoptBound = 10 * time.Second
+
 // client is one shim connection AND, when it spawned the process, its
 // supervisor. Adopted clients have no cmd: they supervise the LINK only, and
 // their death evidence is the socket plus the workspace lock.

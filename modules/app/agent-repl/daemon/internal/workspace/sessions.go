@@ -122,6 +122,11 @@ type FleetDeps struct {
 	Log dlog.Surfaces
 	// Now supplies the instants the fleet stamps; nil means time.Now.
 	Now func() time.Time
+	// AdoptBound bounds ONE adoption of an already-running shim. Zero means
+	// shimclient.DefaultAdoptBound, which is where the sizing is stated; it is
+	// a field for the same reason Probe is, so the give-up is exercised
+	// without waiting the real bound out.
+	AdoptBound time.Duration
 	// PublishHost recomposes and republishes one workspace's HOST view. The
 	// fleet owns the edges that move it and the server cannot see them: a
 	// session coming up, a session going away, a shim replaced. Nil means no
@@ -150,6 +155,8 @@ type Fleet struct {
 	socketProbe SocketProbeFunc
 	watch       WatcherStarter
 	now         func() time.Time
+	// adoptBound bounds ONE adoption; see FleetDeps.AdoptBound.
+	adoptBound time.Duration
 
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
@@ -198,12 +205,17 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	if now == nil {
 		now = time.Now
 	}
+	adoptBound := deps.AdoptBound
+	if adoptBound <= 0 {
+		adoptBound = shimclient.DefaultAdoptBound
+	}
 	return &Fleet{
 		deps:        deps,
 		probe:       probe,
 		socketProbe: socketProbe,
 		watch:       watch,
 		now:         now,
+		adoptBound:  adoptBound,
 		sessions:    map[ids.WorkspaceID]*live{},
 		coldGates:   map[ids.WorkspaceID]ServedColdGate{},
 		lastCold:    map[ids.WorkspaceID]*conversationv1.SessionCold{},
@@ -708,7 +720,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		return nil, false, fmt.Errorf("start session for %q: the shim socket at %q could not be probed: %w", ws, udsPath, socketErr)
 	}
 	if inert {
-		client, err := f.deps.Supervisor.Adopt(ctx, ws, dir, udsPath)
+		client, err := f.adoptBounded(ctx, log, ws, dir, udsPath, "inert_survivor")
 		if err != nil {
 			log.Error(opBringUp, "could not attach to the inert survivor", dlog.Context{"cause": err.Error()})
 			return nil, false, fmt.Errorf("start session for %q: adopt: %w", ws, err)
@@ -718,7 +730,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 	switch state {
 	case sessionlock.StateHeld:
 		log.Debug(opBringUp, "a surviving shim holds the workspace lock; adopting it", dlog.Context{"lock": lockPath})
-		client, err := f.deps.Supervisor.Adopt(ctx, ws, dir, udsPath)
+		client, err := f.adoptBounded(ctx, log, ws, dir, udsPath, "lock_held")
 		if err != nil {
 			log.Error(opBringUp, "could not adopt the surviving shim", dlog.Context{"cause": err.Error()})
 			return nil, false, fmt.Errorf("start session for %q: adopt: %w", ws, err)
@@ -1367,3 +1379,54 @@ var (
 	_ Sessions = (*Fleet)(nil)
 	_ Verbs    = (*verbs)(nil)
 )
+
+// adoptBounded dials an already-running shim under the ONE adoption bound
+// (`shimclient.DefaultAdoptBound`), and records the attempt on both sides of
+// the call.
+//
+// THE BOUND IS THE WHOLE POINT. `shimclient.bringUp` is a dial ladder with no
+// attempt limit, and an adopted client concludes death only when the socket is
+// gone AND the workspace lock reads FREE — so a lock that reads HELD for a
+// shim whose socket path is gone is redialed forever. The boot sequence has
+// bounded its own adoptions since that shape cost a daemon ten hours of
+// serving nothing; the fleet's were still unbounded, and the same shape then
+// stranded realtest 7's prompt: the queue held it under `session_starting`,
+// the background revival called Adopt, and nothing was ever heard from it
+// again, so no turn was ever recorded and the tray's own loud drop — which
+// exists for exactly this — could not fire.
+//
+// THE ATTEMPT IS VISIBLE EITHER WAY. Before the fix, the whole of an adoption
+// that never finished was one INFO record saying it had begun; a reader could
+// not tell "it never happened" from "it is still dialing a socket that is not
+// there". Both edges are recorded here, and an adoption that spent its whole
+// bound says so as its own cause.
+func (f *Fleet) adoptBounded(
+	ctx context.Context,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	dir, udsPath, why string,
+) (shimclient.Client, error) {
+	fields := dlog.Context{"socket": udsPath, "reason": why, "bound_ms": f.adoptBound.Milliseconds()}
+	log.Info(opBringUp, "adopting an already-running shim under the adoption bound", fields)
+
+	bounded, cancel := context.WithTimeout(ctx, f.adoptBound)
+	defer cancel()
+	started := f.now()
+	client, err := f.deps.Supervisor.Adopt(bounded, ws, dir, udsPath)
+	elapsed := f.now().Sub(started)
+	fields["elapsed_ms"] = elapsed.Milliseconds()
+	if err != nil {
+		// THE OVERRUN IS NAMED, not folded into the dial error. "the shim did
+		// not answer within the bound" and "the shim refused" send a reader to
+		// two different places, and only the caller's context can tell them
+		// apart.
+		if errors.Is(bounded.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			log.Error(opBringUp, "the adoption spent its whole bound without an answer", fields)
+			return nil, fmt.Errorf(
+				"adopt %q: the shim at %q did not answer within %s", ws, udsPath, f.adoptBound)
+		}
+		return nil, err
+	}
+	log.Info(opBringUp, "adopted the running shim", fields)
+	return client, nil
+}
