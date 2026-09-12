@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"claude-repld/internal/account"
+	"claude-repld/internal/dlog"
 )
 
 func TestEncodeCWD(t *testing.T) {
@@ -196,6 +197,42 @@ func TestFindTranscriptMissIsTyped(t *testing.T) {
 	}
 	if len(miss.Probed) != 2 {
 		t.Fatalf("Probed = %v, want both roots probed", miss.Probed)
+	}
+}
+
+func TestFindTranscriptRecordsAMissAtDebug(t *testing.T) {
+	// Arrange: a probe that comes up empty is an ANSWER, not a warning. This
+	// package cannot tell an id that never wrote a transcript from one whose
+	// file vanished, and a layer that cannot know must not choose the level:
+	// the typed miss goes back and the caller records it.
+	log := dlog.NewTestLogger()
+	base := t.TempDir()
+	ws := filepath.Join(base, "workspaces", "ws1")
+	if err := os.MkdirAll(ws, 0o700); err != nil {
+		t.Fatalf("MkdirAll() = %v", err)
+	}
+	r, err := account.New(account.Roots{
+		Default:       filepath.Join(base, "default-root"),
+		MultiRepo:     filepath.Join(base, "multi-root"),
+		MultiRepoRoot: filepath.Join(base, "multi-repos"),
+	}, log)
+	if err != nil {
+		t.Fatalf("account.New() = %v, want nil", err)
+	}
+
+	// Act.
+	if _, err := r.FindTranscript(context.Background(), ws, "uuid-gone"); err == nil {
+		t.Fatal("FindTranscript() = nil error, want the typed miss")
+	}
+
+	// Assert.
+	for _, rec := range log.Records() {
+		if rec.Operation != "daemon.account.find_transcript" {
+			continue
+		}
+		if rec.Level != "debug" {
+			t.Fatalf("record %+v, want every find_transcript record of a plain miss at debug", rec)
+		}
 	}
 }
 

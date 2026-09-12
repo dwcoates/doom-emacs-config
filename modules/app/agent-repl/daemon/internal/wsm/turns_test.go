@@ -215,6 +215,89 @@ func TestOpenTurnsFailsWholeOnAHalfWrittenClose(t *testing.T) {
 	}
 }
 
+func TestHasTurnsIsFalseForAWorkspaceThatNeverTookATurn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	has, err := s.HasTurns(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HasTurns: %v", err)
+	}
+	if has {
+		t.Fatalf("HasTurns = true, want false for a workspace with no turn rows")
+	}
+}
+
+func TestHasTurnsIsTrueForAnOpenTurn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutTurn(context.Background(), Turn{ID: NewTurnID(), Workspace: ws.ID, Origin: "emacs", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act
+	has, err := s.HasTurns(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HasTurns: %v", err)
+	}
+	if !has {
+		t.Fatalf("HasTurns = false, want true once a turn is recorded")
+	}
+}
+
+func TestHasTurnsIsTrueForAClosedTurn(t *testing.T) {
+	// Arrange: the question is whether the workspace was EVER engaged, so a
+	// turn that has since ended answers it exactly as an open one does.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	closed := instant.Add(time.Minute)
+	how := CloseCompleted
+	if err := s.PutTurn(context.Background(), Turn{
+		ID: NewTurnID(), Workspace: ws.ID, Origin: "emacs", StartedAt: instant, ClosedAt: &closed, Close: &how,
+	}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act
+	has, err := s.HasTurns(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HasTurns: %v", err)
+	}
+	if !has {
+		t.Fatalf("HasTurns = false, want true for a workspace whose only turn has closed")
+	}
+}
+
+func TestHasTurnsIsScopedPerWorkspace(t *testing.T) {
+	// Arrange: another workspace's turn is not this workspace's engagement.
+	s, _ := testStore(t)
+	engaged := testWorkspace(t, s)
+	quiet := testWorkspaceNamed(t, s, "quiet")
+	if err := s.PutTurn(context.Background(), Turn{ID: NewTurnID(), Workspace: engaged.ID, Origin: "emacs", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act
+	has, err := s.HasTurns(context.Background(), quiet.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HasTurns: %v", err)
+	}
+	if has {
+		t.Fatalf("HasTurns = true, want false for a workspace whose sibling took the turn")
+	}
+}
+
 func TestClaimIdempotencyKeyMintsOnFirstClaim(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
