@@ -519,6 +519,19 @@ message FooterStatusActivityQueryDied {
   string text = 1;
 }
 
+// The bring-up failure line.
+message FooterStatusActivityStartFailed {
+  // WHY the bring-up failed, in the shim's own words: the cause the
+  // `shim_start_failed` fault carries, composed by the daemon from the exit
+  // code and the last line of the stderr tail, or the adoption refusal's own
+  // text. Drawn verbatim.
+  string detail = 1;
+  // How many held prompts this bring-up failure dropped; ZERO when it dropped
+  // none. A session that never came up can never deliver a held prompt, so the
+  // hold is retired rather than left standing, and the count is what says so.
+  uint32 dropped_prompts = 2;
+}
+
 // The daemon's link to the session's shim is not serving.
 message FooterStatusDisconnected {
   // The link's step.
@@ -534,8 +547,9 @@ message FooterStatusDisconnected {
     // The shim failed to start.
     FooterSubStatusDisconnectedStartFailed start_failed = 5;
   }
-  // OPTIONAL BY EVIDENCE: no producer composes a standing line for a dead
-  // link; only a notification can accompany it.
+  // OPTIONAL BY EVIDENCE: only the `start_failed` step composes a standing
+  // line of its own; every other step draws nothing finer, and a notification
+  // is all that can accompany it.
   optional FooterStatusDisconnectedActivity activity = 6;
 }
 // The shim is starting.
@@ -554,6 +568,11 @@ message FooterStatusDisconnectedActivity {
   FooterStatusActivityAt at = 1;
   // The one standing line.
   oneof kind {
+    // WHY the session's bring-up failed, and what the failure cost. HIGHEST
+    // precedence: it OUTRANKS a notification while it stands, because it is
+    // the standing line the `start_failed` step exists to explain. It stands
+    // until the next successful link edge clears it.
+    FooterStatusActivityStartFailed start_failed = 5;
     // An agent notification, shown until the next activity replaces it.
     FooterStatusActivityNotification notification = 2;
     // A newsworthy rate-limit report; second-lowest precedence.
