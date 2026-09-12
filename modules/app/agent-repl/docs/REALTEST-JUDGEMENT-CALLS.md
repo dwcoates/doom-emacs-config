@@ -208,3 +208,10 @@ THIS ONE WAS MADE WITHOUT THE OWNER. To change it, edit the single `map!`
 entry in `lisp/keybindings.el` under the `SPC TAB` prefix; nothing else
 refers to the key, and `lisp/test-keybindings.el` only asserts that the
 command behind it is defined.
+
+## Owner ruling: a bring-up failure is footer-only (2026-09-12, owner)
+
+No feed row for a dropped held prompt whose bring-up failed. The footer
+alone carries it: status is the detached/disconnected arm (whatever that
+arm is named), and the substatus and the activity field after it are
+specific to the bring-up failure.
