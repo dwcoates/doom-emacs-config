@@ -75,10 +75,12 @@ type fakeDB struct {
 	portedPrompts   map[ids.WorkspaceID][]wsm.PortedPrompt
 	putPortedErr    error
 	closedFlags     map[ids.WorkspaceID]bool
-	priorities      map[ids.WorkspaceID]*wsm.Priority
-	attention       map[ids.WorkspaceID]bool
-	currentAt       time.Time
-	forgotten       []ids.WorkspaceID
+	// setClosedErr makes the closed-flag write fail, which the map cannot.
+	setClosedErr error
+	priorities   map[ids.WorkspaceID]*wsm.Priority
+	attention    map[ids.WorkspaceID]bool
+	currentAt    time.Time
+	forgotten    []ids.WorkspaceID
 	// forgetReport is what Forget answers, and forgetErr makes it fail; the
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport
@@ -204,6 +206,9 @@ func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, ni
 func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) { return d.current, nil }
 
 func (d *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
+	if d.setClosedErr != nil {
+		return d.setClosedErr
+	}
 	d.closedFlags[id] = closed
 	return nil
 }
