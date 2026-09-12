@@ -255,7 +255,16 @@ func (c *Client) resolveWorkspace(
 		stopStream()
 		_ = stream.Close()
 	}()
-	for stream.Receive() {
+	// The roster topic replays its current, COMPLETE snapshot to every fresh
+	// subscriber as the first streamed message (see the daemon's serveTopic).
+	// So the first delivered roster is authoritative for "which workspaces
+	// exist right now": if it does not name this dir, the dir is not a real
+	// workspace -- a temp-root, or an unknown path -- and it will never appear.
+	// Conclude UNRESOLVABLE at once rather than holding the standing stream open
+	// to the request deadline waiting for a workspace that will never register.
+	// This is distinct from the stream never delivering a snapshot at all (it
+	// errored or never connected), which stays a transport failure below.
+	if stream.Receive() {
 		ref, err := workspaceRefInRoster(stream.Msg().GetRoster(), wanted)
 		if err != nil {
 			return nil, fmt.Errorf("resolve workspace ref from roster at %s: %w", address, err)
@@ -264,11 +273,12 @@ func (c *Client) resolveWorkspace(
 			c.cacheWorkspace(address, wanted, ref)
 			return copyWorkspaceRef(ref), nil
 		}
+		return nil, fmt.Errorf("workspace %q is absent from the delivered roster at %s: %w", wanted, address, logging.ErrForwardWorkspaceUnresolvable)
 	}
 	if err := stream.Err(); err != nil {
-		return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before workspace %q appeared: %w", address, wanted, err)
+		return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before delivering a roster for workspace %q: %w", address, wanted, err)
 	}
-	return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before workspace %q appeared", address, wanted)
+	return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before delivering a roster for workspace %q", address, wanted)
 }
 
 // normalizeWorkspaceDir matches the daemon registry's spelling: absolute and

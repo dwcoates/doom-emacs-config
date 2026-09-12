@@ -223,6 +223,118 @@ func TestForwardInvalidatesTheRosterRefAfterClientLogRefusal(t *testing.T) {
 	}
 }
 
+// startFakeDaemon stands up a loopback AgentRepl whose roster stream runs the
+// supplied handler, publishes its address in daemon.addr, and records whether
+// ClientLog was ever reached. It is the seam for exercising resolveWorkspace's
+// "roster delivered, dir absent" vs "roster stream errored" fork without the
+// canned single-send handler serveClientLog uses.
+func startFakeDaemon(
+	t *testing.T,
+	roster func(ctx context.Context, stream *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error,
+) (client *Client, clientLogReached *bool) {
+	t.Helper()
+	stateDir := t.TempDir()
+	reached := new(bool)
+	mux := http.NewServeMux()
+	mux.Handle(agentreplv1connect.AgentReplWatchWorkspaceRosterProcedure,
+		connect.NewServerStreamHandler(agentreplv1connect.AgentReplWatchWorkspaceRosterProcedure,
+			func(ctx context.Context, _ *connect.Request[agentreplv1.WatchWorkspaceRosterRequest], stream *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error {
+				return roster(ctx, stream)
+			}))
+	mux.Handle(agentreplv1connect.AgentReplClientLogProcedure,
+		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure,
+			func(_ context.Context, _ *connect.Request[agentreplv1.ClientLogRequest]) (*connect.Response[agentreplv1.ClientLogResponse], error) {
+				*reached = true
+				return connect.NewResponse(&agentreplv1.ClientLogResponse{
+					Result: &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}},
+				}), nil
+			}))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for fake daemon: %v", err)
+	}
+	server := &http.Server{Handler: mux}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
+	writeAdvertisement(t, stateDir, listener.Addr().String(), os.Getpid())
+	return New(stateDir), reached
+}
+
+// A workspace absent from a HEALTHY, fully-delivered roster is UNRESOLVABLE,
+// concluded the instant the current snapshot arrives -- not waited out to the
+// request deadline. The roster handler delivers a snapshot naming a DIFFERENT
+// workspace and then holds the standing stream open (as the real watch does);
+// Forward must return promptly with ErrForwardWorkspaceUnresolvable and must
+// never reach ClientLog, because there is no ref to attribute the record to.
+func TestForwardConcludesUnresolvableWhenDirAbsentFromDeliveredRoster(t *testing.T) {
+	// Arrange: the roster names some other workspace, never the record's dir.
+	otherDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("normalize the roster's workspace: %v", err)
+	}
+	recordDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("normalize the record's workspace: %v", err)
+	}
+	client, clientLogReached := startFakeDaemon(t, func(ctx context.Context, stream *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error {
+		if err := stream.Send(rosterResponse(&workspacev1.WorkspaceRef{Id: "other-id", Dir: otherDir})); err != nil {
+			return err
+		}
+		// Hold the standing stream open exactly as the real watch does, so a
+		// resolver that failed to conclude on the delivered snapshot would
+		// block to its deadline rather than return promptly.
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	// Act.
+	_, err = client.Forward(logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", Message: "read",
+		WorkspaceDir: recordDir, WorkspaceID: "deadbeef",
+	})
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardWorkspaceUnresolvable) {
+		t.Fatalf("Forward against an absent-from-roster dir = %v, want ErrForwardWorkspaceUnresolvable", err)
+	}
+	if *clientLogReached {
+		t.Fatal("ClientLog was reached for an unresolvable workspace, want it never attempted")
+	}
+}
+
+// A roster stream that ERRORS before delivering any snapshot is a TRANSPORT
+// failure, not an unresolvable workspace: the daemon could be booting or gone,
+// and the pid/boot sentinels -- not the unresolvable one -- must classify it.
+func TestForwardTakesTransportPathWhenRosterStreamErrors(t *testing.T) {
+	// Arrange: the roster handler fails the stream with Unavailable before ever
+	// sending a snapshot, the connect-go shape of a dial/connection fault.
+	recordDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("normalize the record's workspace: %v", err)
+	}
+	client, clientLogReached := startFakeDaemon(t, func(_ context.Context, _ *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error {
+		return connect.NewError(connect.CodeUnavailable, errors.New("the roster topic is not ready"))
+	})
+
+	// Act.
+	_, err = client.Forward(logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", Message: "read",
+		WorkspaceDir: recordDir, WorkspaceID: "deadbeef",
+	})
+
+	// Assert: it is classified on the transport path (a never-served, live-pid
+	// address is a boot transient), never as an unresolvable workspace.
+	if errors.Is(err, logging.ErrForwardWorkspaceUnresolvable) {
+		t.Fatalf("a roster-stream transport error = %v, want it OFF the unresolvable path", err)
+	}
+	if !errors.Is(err, logging.ErrForwardTargetBooting) {
+		t.Fatalf("a roster-stream Unavailable against a never-served address = %v, want the transport boot transient", err)
+	}
+	if *clientLogReached {
+		t.Fatal("ClientLog was reached after the roster stream errored, want it never attempted")
+	}
+}
+
 func rosterResponse(ref *workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
 	return &agentreplv1.WatchWorkspaceRosterResponse{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
