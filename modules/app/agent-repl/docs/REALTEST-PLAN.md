@@ -35,17 +35,32 @@ realtest 1, row 24). A realtest starts Emacs once per test.
 
 ## The loop, for every realtest
 
-1. Run the realtest.
+COLLECT EVERYTHING BEFORE REMEDIATING ANYTHING. The owner's standing rule
+(2026-09-12) governs every realtest and every section, not one wave: run all
+the acts, and all the realtests of the section, gathering findings, and only
+then remediate them together. Fixing one finding before looking at the next
+costs a merge, a deploy and a rerun for each, and it hides the shared invariant
+that several findings usually have in common.
+
+A realtest therefore COLLECTS its assertion failures and keeps going
+(`t.Errorf`) rather than stopping at the first (`t.Fatalf`). A hard stop is
+reserved for a precondition whose absence makes everything after it
+meaningless.
+
+1. Run every realtest in the section. Each one collects, none of them stops
+   early, and a failing one does not stop the next from running.
 2. Determine issues and potential issues from the logs: every WARN and ERROR
    in Emacs `*Messages*`, the module log, every workspace's elisp sink,
    `daemon.run.log`, the store, the sidecar and the shim — whether or not it
    relates to the test's subject — plus anything that reads wrong (a slow
    phase, a workspace missing, unexpected modeline text).
-3. Surface them to the owner, with evidence, verbatim. Nothing is fixed here.
-4. The owner decides what is remediated and how.
-5. The lead remediates as ruled, then redeploys master.
+3. Surface the WHOLE set, with evidence, verbatim. Nothing is fixed here.
+4. The owner decides what is remediated and how (sections 1 and 2 are the
+   lead's to decide alone; see the autonomy note below).
+5. The lead remediates the whole set in one wave, grouped by invariant, then
+   redeploys master.
 6. The owner tests and confirms on their editor.
-7. The next realtest runs. Only then.
+7. The next section runs. Only then.
 
 A realtest is remediated if and only if ALL warnings and errors across ALL logs
 are resolved. There is no allowlist.
