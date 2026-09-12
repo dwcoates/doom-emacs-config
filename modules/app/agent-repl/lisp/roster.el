@@ -98,6 +98,28 @@ construction, so a new push REPLACES this value outright.")
 Runs AFTER reconciliation, so a handler observing the tabs sees the ones
 this push produced.")
 
+(defvar agent-repl-roster-bringup-functions nil
+  "Abnormal hook run with (OPENED TOTAL FINISHED) as a reconcile opens tabs.
+
+THE ONLY REPORT OF A WORKSPACE BRING-UP THAT DOES NOT DEPEND ON PAINT.
+The pending-open registry (`agent-repl-open-progress-opening-workspaces\=')
+answers \"which workspace is not PAINTED yet\", and that is the right
+answer for an open the user asked for by hand.  It is the wrong one for a
+STARTUP: panels park until a workspace is focused, so a cold start that
+brings up ten workspaces paints none of them and the painted count never
+moves.  The startup phase the user was promised — `loading workspaces
+\(n/m\)\' between \"linking\" and \"ready\" — then never appeared at all.
+
+This hook reports the other thing, the one that IS happening: the roster
+opening a tab per row it has and this Emacs does not.  OPENED counts the
+tabs this reconcile has opened so far, TOTAL the tabs it set out to open
+\(rows with no tab yet, counted before the walk\), and FINISHED is nil on
+each step and non-nil on the one call that closes the pass.
+
+It fires ONLY for tabs that are actually born, so a steady-state push —
+every row already tabbed — publishes nothing and no handler has to filter
+one out.")
+
 (defvar agent-repl-roster-finish-functions nil
   "Abnormal hook run with WS on the FINISH EDGE — RUNNING to SETTLED.
 Fires exactly ONCE per edge: a row already settled that is pushed again
@@ -467,6 +489,20 @@ and every other row is still opened and ordered."
         name id (error-message-string err))
        nil))))
 
+(defun agent-repl-roster--note-bringup (opened total finished)
+  "Publish OPENED of TOTAL tabs opened to `agent-repl-roster-bringup-functions\='.
+FINISHED marks the call that closes the reconcile pass.  A handler that
+signals is CONTAINED, exactly as a change handler is: a progress display
+must never take down the reconciliation it is reporting on."
+  (dolist (fn agent-repl-roster-bringup-functions)
+    (condition-case err
+        (funcall fn opened total finished)
+      (error
+       (agent-repl--warn
+        '(:agent-repl-central "roster reconciliation spans every workspace")
+        "elisp.roster.bringup-handler-failed fn=%s error=%s"
+        fn (error-message-string err))))))
+
 (defun agent-repl-roster-reconcile (roster)
   "Bring the tab bar in line with ROSTER and return the tab names in order.
 Opens a tab for each `closed = false' row that has none, renames the tab
@@ -477,10 +513,24 @@ A row that fails to reconcile is contained rather than fatal; see
 `agent-repl-roster--reconcile-row'."
   (let* ((desired (agent-repl-roster-desired-tabs roster))
          (wanted-ids (make-hash-table :test 'equal))
+         ;; Counted BEFORE the walk, because the walk is what makes rows
+         ;; stop being tabless: asking the same question afterwards would
+         ;; always answer zero.
+         (untabbed (cl-count-if
+                    (lambda (want)
+                      (null (agent-repl--ws-by-ref-id (plist-get want :id))))
+                    desired))
+         (opened 0)
          (names nil))
     (dolist (want desired)
-      (let ((name (agent-repl-roster--reconcile-row want wanted-ids)))
-        (when name (push name names))))
+      (let* ((fresh (null (agent-repl--ws-by-ref-id (plist-get want :id))))
+             (name (agent-repl-roster--reconcile-row want wanted-ids)))
+        (when name (push name names))
+        ;; A row that FAILED opened no tab, so it does not count towards
+        ;; the bring-up and the pass ends below `untabbed'.
+        (when (and fresh name)
+          (setq opened (1+ opened))
+          (agent-repl-roster--note-bringup opened untabbed nil))))
     (dolist (name (agent-repl-roster--roster-owned-names))
       (let ((id (plist-get (agent-repl--ws-get name :ref) :id)))
         (unless (gethash id wanted-ids)
@@ -499,6 +549,10 @@ A row that fails to reconcile is contained rather than fatal; see
                      "elisp.roster.reconcile: tabs=%d order=%S"
                      (length agent-repl-roster--tab-order)
                      agent-repl-roster--tab-order)
+    ;; LAST, after the order is set, so a handler that reads the tab bar
+    ;; sees the one this pass produced rather than the previous pass's.
+    (when (> opened 0)
+      (agent-repl-roster--note-bringup opened untabbed t))
     agent-repl-roster--tab-order))
 
 ;;;; ---- Lookups the renderers use ----------------------------------------
