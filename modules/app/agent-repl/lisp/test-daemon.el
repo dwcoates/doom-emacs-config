@@ -442,7 +442,8 @@ a root the daemon has never heard of."
     (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr) (lambda () nil))
               ((symbol-function 'agent-repl-daemon--exited-p) (lambda (proc) (eq proc 'dead)))
               ((symbol-function 'process-exit-status) (lambda (_proc) 2))
-              ((symbol-function 'agent-repl--frontend-run-log-tail) (lambda () "boom")))
+              ((symbol-function 'agent-repl--frontend-run-log-tail) (lambda () "boom"))
+              ((symbol-function 'agent-repl--frontend-stdio-log-tail) (lambda () "boom")))
       ;; Act
       (agent-repl-daemon--await-address (lambda (address) (push address outcomes)) 'dead)
       ;; Assert
@@ -460,7 +461,9 @@ a root the daemon has never heard of."
               ((symbol-function 'agent-repl-daemon--exited-p) (lambda (proc) (eq proc 'dead)))
               ((symbol-function 'process-exit-status) (lambda (_proc) 2))
               ((symbol-function 'agent-repl--frontend-run-log-tail)
-               (lambda () "Roots.Default is required")))
+               (lambda () "Roots.Default is required"))
+              ((symbol-function 'agent-repl--frontend-stdio-log-tail)
+               (lambda () "exit status 2")))
       ;; Act
       (agent-repl-daemon--await-address #'ignore 'dead)
       ;; Assert
@@ -490,7 +493,10 @@ a root the daemon has never heard of."
   (should-not (agent-repl-daemon--exited-p 'the-daemon-process)))
 
 (ert-deftest agent-repl-test-daemon-absent-address-starts-the-daemon ()
-  "After a clean build the daemon is started with the account-root argv."
+  "After a clean build the daemon is started with the detaching spawn argv.
+The daemon\='s OWN argv is `agent-repl-daemon--argv\=' and is asserted on its
+own below; what reaches `make-process\=' is that list behind the detacher,
+because a daemon that dies with this Emacs is not a resident service."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address nil)
@@ -498,7 +504,7 @@ a root the daemon has never heard of."
     (agent-repl-daemon-ensure)
     ;; Assert
     (should (equal (car (car agent-repl-test-daemon--spawns))
-                   (agent-repl-daemon--argv)))))
+                   (agent-repl-daemon--spawn-argv)))))
 
 (ert-deftest agent-repl-test-daemon-start-exports-the-state-root-explicitly ()
   "ONE state root is the cross-system contract, and it is STATED, not inherited."
@@ -1994,6 +2000,235 @@ the spawn, called the daemon booted, and linked to a refused port."
       (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
         ;; Act
         (agent-repl-daemon-on-open-progress-change))
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
+;;;; ---- The spawn is DETACHED: the daemon outlives this Emacs ----
+
+(ert-deftest agent-repl-test-daemon-spawn-argv-leads-with-the-detaching-shell ()
+  "What Emacs spawns is the detacher, never the daemon binary directly.
+A plain `make-process' child takes Emacs's exit-time SIGHUP and dies with
+the editor, which is what made the adopt-on-restart path unreachable."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--spawn-argv)))
+      ;; Assert
+      (should (equal (car argv) agent-repl-daemon--detach-shell)))))
+
+(ert-deftest agent-repl-test-daemon-spawn-argv-ignores-sighup ()
+  "SIGHUP is set to ignore BEFORE the exec, so Emacs's exit cannot end it.
+An ignored disposition survives `exec', and the daemon asks the kernel
+for SIGINT/SIGTERM/SIGQUIT and no others, so it stays ignored."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--spawn-argv)))
+      ;; Assert
+      (should (string-match-p "trap '' HUP" (nth 2 argv))))))
+
+(ert-deftest agent-repl-test-daemon-spawn-argv-execs-the-daemon ()
+  "The detacher EXECS, so the pid Emacs holds is the daemon's own.
+Without the exec the process object would name a shell that exits at
+once, and the boot wait would call every cold start a dead daemon."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--spawn-argv)))
+      ;; Assert
+      (should (string-match-p "exec \"\\$@\"" (nth 2 argv))))))
+
+(ert-deftest agent-repl-test-daemon-spawn-argv-carries-the-daemon-argv-verbatim ()
+  "The daemon's own argv rides behind the detacher, unchanged.
+It is what the daemon reads as its `argv' after the exec, so every flag
+the account resolver requires has to survive the wrapping."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b"))
+    ;; Act
+    (let* ((argv (agent-repl-daemon--spawn-argv))
+           (daemon-argv (agent-repl-daemon--argv)))
+      ;; Assert
+      (should (equal (last argv (length daemon-argv)) daemon-argv)))))
+
+(ert-deftest agent-repl-test-daemon-spawn-argv-redirects-stdio-to-a-file ()
+  "The daemon's output goes to a FILE, not to a pipe that dies with Emacs.
+Left on Emacs's pipe, the daemon's first line after the editor exits
+would meet a closed read end and take it down with SIGPIPE — a detach
+that only held until the daemon next spoke."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--spawn-argv)))
+      ;; Assert
+      (should (equal (nth 3 argv) (agent-repl-daemon--stdio-log-path))))))
+
+(ert-deftest agent-repl-test-daemon-spawn-argv-makes-the-log-directory ()
+  "A first-ever cold start has no `logs/' yet, and a redirection into a
+missing directory would fail the spawn outright."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--spawn-argv)))
+      ;; Assert
+      (should (equal (nth 4 argv)
+                     (directory-file-name
+                      (file-name-directory (agent-repl-daemon--stdio-log-path))))))))
+
+(ert-deftest agent-repl-test-daemon-the-stdio-log-is-not-the-run-log ()
+  "Raw stderr never lands in the contract JSONL every reader parses."
+  ;; Arrange / Act / Assert
+  (should-not (equal (agent-repl-daemon--stdio-log-path)
+                     (agent-repl--global-state-file "logs/daemon.run.log"))))
+
+(ert-deftest agent-repl-test-daemon-the-detached-spawn-is-really-detached ()
+  "END TO END over the real shell: the wrapper survives a SIGHUP and execs.
+Drives `agent-repl-daemon--spawn-argv' against a stub `daemon' that
+records its own pid and sleeps, then SIGHUPs that pid — the detacher's
+whole promise is that the process is still there afterwards."
+  ;; Arrange
+  (let* ((dir (make-temp-file "agent-repl-test-detach-" t))
+         (stub (expand-file-name "stub.sh" dir))
+         (pidfile (expand-file-name "pid" dir))
+         (agent-repl-daemon-command (list stub))
+         (agent-repl-daemon-default-config-dir "/a")
+         (agent-repl-daemon-multi-repo-config-dir "/b"))
+    (unwind-protect
+        (progn
+          (with-temp-file stub
+            (insert "#!/bin/sh\necho $$ > " pidfile "\nsleep 30\n"))
+          (set-file-modes stub #o755)
+          ;; Act
+          (let ((proc (make-process :name "agent-repl-test-detach"
+                                    :command (agent-repl-daemon--spawn-argv)
+                                    :noquery t)))
+            (unwind-protect
+                (progn
+                  (while (not (file-exists-p pidfile))
+                    (accept-process-output nil 0.002))
+                  ;; The pid the stub reported must be the process Emacs
+                  ;; holds: that is the `exec', not a shell in between.
+                  (let ((pid (string-to-number
+                              (with-temp-buffer
+                                (insert-file-contents pidfile)
+                                (string-trim (buffer-string))))))
+                    (should (equal pid (process-id proc)))
+                    ;; Act: the signal Emacs sends every child on exit.
+                    (signal-process pid 'SIGHUP)
+                    ;; Assert: still there.
+                    (accept-process-output nil 0.05)
+                    (should (process-attributes pid))))
+              (when (process-live-p proc)
+                (signal-process (process-id proc) 'SIGKILL)))))
+      (delete-directory dir t))))
+
+(ert-deftest agent-repl-test-daemon-the-deliberate-stop-still-stops-it ()
+  "Detaching costs the stop verb nothing: it was never a signal.
+`agent-repl-frontend-daemon-stop' asks the daemon to shut itself down
+over the link, so the one thing that ends a resident daemon on purpose
+works exactly as it did."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange / Act
+    (agent-repl-frontend-daemon-stop)
+    ;; Assert
+    (should (equal (plist-get (plist-get (car agent-repl-test-daemon--shutdown-requests)
+                                         :action)
+                              :arm)
+                   :now))))
+
+(ert-deftest agent-repl-test-daemon-the-deliberate-stop-signals-no-process ()
+  "The stop NEVER kills the process object, before or after the detach.
+A kill would strand the daemon's in-flight writes, which is exactly what
+the shutdown schedule exists to avoid."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (let ((signalled nil))
+      (cl-letf (((symbol-function 'signal-process)
+                 (lambda (&rest args) (push args signalled) nil))
+                ((symbol-function 'delete-process)
+                 (lambda (&rest args) (push args signalled) nil)))
+        ;; Act
+        (agent-repl-frontend-daemon-stop))
+      ;; Assert
+      (should (null signalled)))))
+
+;;;; ---- The roster's own bring-up echo (a startup paints nothing) ----
+
+(ert-deftest agent-repl-test-daemon-a-hidden-startup-still-echoes-loading-workspaces ()
+  "Panels park until focus, so a cold start paints nothing at all.
+The painted-count feed cannot move on such a startup, and the phase the
+user was promised went missing entirely; the roster opening the tabs is
+what reports it."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 1 3 nil)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: loading workspaces (1/3)…"))))))
+
+(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-counts-up ()
+  "One line per tab the reconcile opens, naming how far along it is."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 1 2 nil)
+      (agent-repl-daemon-on-roster-bringup 2 2 nil)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: loading workspaces (1/2)…"
+                       "agent-repl: loading workspaces (2/2)…"))))))
+
+(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-dedupes ()
+  "A pair already said is not said twice, whichever feed repeats it."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon-on-roster-bringup 1 2 nil)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 1 2 nil)
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-ends-with-the-ready-line ()
+  "The pass closes with the same closing line the painted feed ends on."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon-on-roster-bringup 2 2 nil)
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 2 2 t)
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: 2 workspaces ready"))))))
+
+(ert-deftest agent-repl-test-daemon-a-roster-pass-that-opened-nothing-says-nothing ()
+  "A steady-state push opens no tab, so it announces no bring-up."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon-on-roster-bringup 0 0 t)
+      ;; Assert
+      (should (null agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-is-quiet-while-typing ()
+  "The minibuffer guard covers this feed exactly as it covers the other."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
+        ;; Act
+        (agent-repl-daemon-on-roster-bringup 1 2 nil))
       ;; Assert
       (should (null agent-repl-test-daemon--echoes)))))
 
