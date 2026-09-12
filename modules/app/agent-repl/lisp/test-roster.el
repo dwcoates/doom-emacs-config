@@ -1337,6 +1337,43 @@ user's next sidebar click."
 
 ;;;; ---- The bring-up publication (a startup paints nothing) ----
 
+(ert-deftest agent-repl-test-roster-reconcile-records-the-pass-at-info ()
+  "The reconcile record goes out on the INFO rung, which the durable sink keeps.
+It is the end of the startup's first-roster phase, and the DEBUG rung it
+used to use does not clear the default `info' log-file level, so the
+record reached no file at all."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)))))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-search "elisp.roster.reconcile: tabs=1" text))
+                        logs)))))
+
+(ert-deftest agent-repl-test-roster-reconcile-is-not-recorded-at-debug ()
+  "The reconcile record must not fall back to the rung the durable sink drops."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)))))))
+      ;; Assert
+      (should-not (seq-some (lambda (text)
+                              (string-search "elisp.roster.reconcile:" text))
+                            logs)))))
+
 (defmacro agent-repl-test-roster--recording-bringup (var &rest body)
   "Run BODY with every bring-up publication appended to VAR, oldest first."
   (declare (indent 1))
