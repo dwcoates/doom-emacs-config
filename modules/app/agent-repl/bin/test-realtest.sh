@@ -326,6 +326,22 @@ test_prune_defaults_to_keeping_three() {
     pass "$name"
 }
 
+test_prune_returns_success_when_nothing_to_prune() {
+    local name="pruning with KEEP-or-fewer sets returns success under set -e"
+    local dir="$SCRATCH/prune-noop"
+    mkdir -p "$dir"
+    printf 'db' > "$dir/wsm.db"
+    realtest_backup_database "$dir/wsm.db" 20260911-000001 >/dev/null
+    # A single set with keep=3 prunes nothing; the loop's final command is the
+    # index test (false). Run under `set -e` in a subshell exactly as
+    # bin/realtest.sh does, and assert the caller is not aborted.
+    if ( set -e; realtest_prune_backups "$dir/wsm.db" 3 >/dev/null; ); then
+        pass "$name"
+    else
+        fail "$name" "realtest_prune_backups returned non-zero on a no-op prune, which aborts realtest.sh under set -e"
+    fi
+}
+
 # ---- the script's refusals ------------------------------------------------
 
 # scratch_bin CASE — a copy of realtest.sh beside stub siblings, so THIS_DIR
@@ -749,6 +765,7 @@ test_total_copy_failure_fails_the_backup
 test_prune_keeps_n_most_recent
 test_prune_deletes_wal_and_shm_siblings
 test_prune_defaults_to_keeping_three
+test_prune_returns_success_when_nothing_to_prune
 test_declines_when_a_system_is_not_deployed
 test_declines_when_emacs_is_running_without_a_takeover
 test_backs_up_before_refusing_the_takeover
