@@ -72,6 +72,20 @@ type Context struct {
 	// session transcript, the vendor `agentId` for a subagent transcript.
 	// Empty when the file's agent is only knowable from its records.
 	AgentID string
+	// AgentType is the resolved subagent type this file's agent IS
+	// ("general-purpose", a plugin name, "fork", "workflow-subagent"), read from
+	// the companion meta file. It is EMPTY for a session transcript, which has
+	// no meta.
+	//
+	// IT IS HOW A QUOTED MESSAGE IS TOLD FROM A PRODUCED ONE. A fork transcript
+	// COPIES the parent's conversation ahead of its own work, and each copied
+	// assistant record keeps its true producer's type in `attributionAgent`
+	// while the fork stamps its OWN records `attributionAgent == AgentType`. A
+	// record whose `attributionAgent` names a different type is quoted, not
+	// produced here, and must not be re-booked under this agent (convert
+	// assistant.go). A session transcript never carries `attributionAgent` at
+	// all, so an empty AgentType simply never triggers the check.
+	AgentType string
 	// SpawnBackgrounded reports that the spawning Agent call ran in the
 	// background (run_in_background, or an a* spool exists for it), which is
 	// what makes a subagent its own top_level rather than the owning session's
