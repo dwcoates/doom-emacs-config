@@ -92,6 +92,25 @@ cat >"$emacs_global" <<'EOF'
 {"timestamp":"2026-09-10T10:00:15.000000Z","runtime":"emacs","pid":50,"level":"info","verbosity":"normal","operation":"emacs.ready","message":"emacs central","context":{}}
 EOF
 
+# The store's emergency stderr sink: unstructured text, not JSONL. One line
+# names an error plainly; the other does not, so --level exercises the
+# inferred default of warn against the inferred error.
+cat >"$cache/agent-repl/log/shim-store.err.log" <<'EOF'
+unexpected error: disk write failed
+heartbeat skipped this cycle
+EOF
+
+# A captured Emacs *Messages* snapshot, read the same way
+# e2e/realtest/messages.go scrapes it: only lines matching a known severity
+# shape become records, everything else is prose and is skipped.
+messages_file="$runtime_tmp/Messages.txt"
+cat >"$messages_file" <<'EOF'
+Loading personal-bindings...done
+WARNING: the module warned about a fixture condition
+just an ordinary echo line nobody cares about
+Wrong type argument: stringp, nil
+EOF
+
 run_logs() {
     PATH="$bin:$PATH" \
         HOME="$home" \
@@ -467,6 +486,174 @@ test_orphan_generations_absent_when_none_minted() {
     fi
 }
 
+test_tally_counts_and_ordering() {
+    local out
+    out="$(run_logs --workspace "$workspace_a" --tally)"
+    if printf '%s\n' "$out" | grep -Eq '^2\s+warn\s+daemon\s+daemon.warning$' &&
+        printf '%s\n' "$out" | grep -Eq '^1\s+info\s+daemon\s+daemon.third$' &&
+        [ "$(printf '%s\n' "$out" | sed -n '2p' | awk '{print $1}')" = 2 ]; then
+        pass "--tally counts groups and sorts by count descending"
+    else
+        fail "--tally counts groups and sorts by count descending"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_sample_respects_n_and_width() {
+    local out lines
+    out="$(run_logs --workspace "$workspace_a" --runtime daemon --tally --sample 1 --width 10)"
+    lines="$(printf '%s\n' "$out" | grep -c 'daemon.warning' || true)"
+    if [ "$lines" -eq 2 ] &&
+        printf '%s\n' "$out" | grep -Eq 'daemon\.warning re.*\.\.\.$'; then
+        pass "--sample N caps representative records per group and --width truncates the message"
+    else
+        fail "--sample N caps representative records per group and --width truncates the message"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_sample_alone_without_tally() {
+    local out
+    out="$(run_logs --workspace "$workspace_a" --runtime daemon --sample 1)"
+    if ! printf '%s\n' "$out" | grep -q '^COUNT' &&
+        printf '%s\n' "$out" | grep -q 'daemon.warning' &&
+        printf '%s\n' "$out" | grep -q 'daemon.third'; then
+        pass "--sample alone prints representative lines without a count table"
+    else
+        fail "--sample alone prints representative lines without a count table"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_fields_projects_only_requested_including_context() {
+    local out
+    out="$(run_logs --workspace "$workspace_a" --runtime daemon --level warn --fields operation,order)"
+    if printf '%s\n' "$out" | grep -q '^operation=daemon.warning order=1$' &&
+        ! printf '%s\n' "$out" | grep -q 'message=' &&
+        ! printf '%s\n' "$out" | grep -q 'level='; then
+        pass "--fields projects only the named top-level and context fields"
+    else
+        fail "--fields projects only the named top-level and context fields"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_timeline_time_ordered() {
+    local out first second third
+    out="$(run_logs --workspace "$workspace_a" --runtime daemon --level info --timeline)"
+    first="$(sed -n '1p' <<<"$out" | awk '{print $3}')"
+    second="$(sed -n '2p' <<<"$out" | awk '{print $3}')"
+    third="$(sed -n '3p' <<<"$out" | awk '{print $3}')"
+    if [ "$first" = daemon.warning ] && [ "$second" = daemon.warning ] && [ "$third" = daemon.third ] &&
+        ! printf '%s\n' "$out" | grep -q '^COUNT'; then
+        pass "--timeline prints one time-ordered line per record"
+    else
+        fail "--timeline prints one time-ordered line per record"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_compact_modes_compose_with_level_and_runtime() {
+    local tally_out timeline_out
+    tally_out="$(run_logs --all --level error --runtime daemon,store --tally)"
+    timeline_out="$(run_logs --all --level error --runtime daemon,store --timeline)"
+    if printf '%s\n' "$tally_out" | grep -q 'error.*store.*store.failure' &&
+        ! printf '%s\n' "$tally_out" | grep -q 'daemon.warning' &&
+        printf '%s\n' "$timeline_out" | grep -q 'store.failure' &&
+        ! printf '%s\n' "$timeline_out" | grep -q 'webapp.ready'; then
+        pass "--tally and --timeline compose with --level and --runtime"
+    else
+        fail "--tally and --timeline compose with --level and --runtime"
+        printf '%s\n' "$tally_out" >&2
+        printf '%s\n' "$timeline_out" >&2
+    fi
+}
+
+test_json_still_emits_raw_records() {
+    local out
+    out="$(run_logs --workspace "$workspace_a" --runtime daemon --json)"
+    if printf '%s\n' "$out" | grep -q '"operation":"daemon.third"' &&
+        ! printf '%s\n' "$out" | grep -Eq 'COUNT|context='; then
+        pass "--json is unaffected by the compact query modes and still emits raw JSONL"
+    else
+        fail "--json is unaffected by the compact query modes and still emits raw JSONL"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_stderr_source_in_tally() {
+    local out
+    out="$(run_logs --central --runtime store --tally)"
+    if printf '%s\n' "$out" | grep -Eq '^1\s+error\s+store\s+stderr$' &&
+        printf '%s\n' "$out" | grep -Eq '^1\s+warn\s+store\s+stderr$'; then
+        pass "a stderr fixture line is inferred error or warn and appears in --tally"
+    else
+        fail "a stderr fixture line is inferred error or warn and appears in --tally"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_stderr_source_in_timeline() {
+    local out
+    out="$(run_logs --central --runtime store --timeline)"
+    if printf '%s\n' "$out" | grep -q 'stderr unexpected error: disk write failed' &&
+        printf '%s\n' "$out" | grep -q 'stderr heartbeat skipped this cycle'; then
+        pass "a stderr fixture line appears in --timeline with a synthetic stderr operation"
+    else
+        fail "a stderr fixture line appears in --timeline with a synthetic stderr operation"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_stderr_source_fields_and_level() {
+    local out
+    out="$(run_logs --central --runtime store --level error --fields operation,level,message)"
+    if printf '%s\n' "$out" | grep -q '^operation=stderr level=error message=unexpected error: disk write failed$' &&
+        ! printf '%s\n' "$out" | grep -q 'heartbeat skipped'; then
+        pass "--fields and --level honor a stderr source's synthesized fields"
+    else
+        fail "--fields and --level honor a stderr source's synthesized fields"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_messages_source_in_tally() {
+    local out
+    out="$(run_logs --central --runtime emacs --messages "$messages_file" --tally)"
+    if printf '%s\n' "$out" | grep -Eq '^1\s+warn\s+emacs\s+messages$' &&
+        printf '%s\n' "$out" | grep -Eq '^1\s+error\s+emacs\s+messages$'; then
+        pass "a Messages fixture line is scraped and appears in --tally"
+    else
+        fail "a Messages fixture line is scraped and appears in --tally"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_messages_source_in_timeline() {
+    local out
+    out="$(run_logs --central --runtime emacs --messages "$messages_file" --timeline)"
+    if printf '%s\n' "$out" | grep -q 'messages WARNING: the module warned about a fixture condition' &&
+        printf '%s\n' "$out" | grep -q "messages Wrong type argument: stringp, nil" &&
+        ! printf '%s\n' "$out" | grep -q 'ordinary echo line'; then
+        pass "a Messages fixture line appears in --timeline and prose lines are skipped"
+    else
+        fail "a Messages fixture line appears in --timeline and prose lines are skipped"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_messages_source_fields_and_level() {
+    local out
+    out="$(run_logs --central --messages "$messages_file" --level error --fields operation,level,message)"
+    if printf '%s\n' "$out" | grep -q '^operation=messages level=error message=Wrong type argument: stringp, nil$' &&
+        ! printf '%s\n' "$out" | grep -q 'WARNING: the module warned'; then
+        pass "--fields and --level honor a Messages source's synthesized fields"
+    else
+        fail "--fields and --level honor a Messages source's synthesized fields"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
 wait_for_pattern() {
     local pattern="$1" path="$2" pid="$3" started=$SECONDS
     while ! grep -q "$pattern" "$path" 2>/dev/null; do
@@ -535,6 +722,19 @@ test_malformed_line
 test_sink_findings
 test_orphan_generations
 test_orphan_generations_absent_when_none_minted
+test_tally_counts_and_ordering
+test_sample_respects_n_and_width
+test_sample_alone_without_tally
+test_fields_projects_only_requested_including_context
+test_timeline_time_ordered
+test_compact_modes_compose_with_level_and_runtime
+test_json_still_emits_raw_records
+test_stderr_source_in_tally
+test_stderr_source_in_timeline
+test_stderr_source_fields_and_level
+test_messages_source_in_tally
+test_messages_source_in_timeline
+test_messages_source_fields_and_level
 test_follow
 
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
