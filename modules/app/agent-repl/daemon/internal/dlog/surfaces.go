@@ -47,6 +47,12 @@ type surfaces struct {
 	// dropWarnOnce guards the ONE stderr warning that says workspace records
 	// arriving after Close are being dropped.
 	dropWarnOnce sync.Once
+	// centralFallbacks are the workspace directories already reported as
+	// unable to host a durable sink of their own. The report is made ONCE per
+	// directory: the condition is a property of the workspace, not of the
+	// record that met it, and a per-record report is the error flood this set
+	// exists to prevent.
+	centralFallbacks map[string]struct{}
 
 	scanEvery time.Duration
 	stop      chan struct{}
@@ -177,6 +183,57 @@ func (s *surfaces) Workspace(dir string) (Logger, error) {
 		runtime: RuntimeDaemon,
 		base:    Context{KeyWorkspaceDir: ws.dir, KeyWorkspaceID: ws.id, KeyWorkspaceDirHash: ws.dirHash},
 	}, nil
+}
+
+// WorkspaceOrCentral answers the logger for a workspace's records and is
+// TOTAL: it always returns a logger.
+//
+// Workspace REFUSES when the directory cannot host a sink, and that refusal
+// stays: a caller that must not proceed without the workspace's own durable
+// sink still gets told. This surface is for the callers that merely RENDER,
+// SWEEP or BOUND a workspace — work whose whole point is to keep running over
+// every workspace the registry holds. For them a workspace whose directory is
+// a scratch path, has been deleted, or does not exist yet is an ORDINARY
+// outcome: the record goes to the central sink with `unroutable_workspace`
+// naming the workspace it is about, and the condition is reported ONCE per
+// directory at DEBUG rather than as an error beside every record.
+func (s *surfaces) WorkspaceOrCentral(dir string) Logger {
+	log, err := s.Workspace(dir)
+	if err == nil {
+		return log
+	}
+	s.noteCentralFallback(dir, err)
+	return s.Global().With(Context{
+		KeyWorkspaceDir:        dir,
+		KeyUnroutableWorkspace: dir,
+	})
+}
+
+// noteCentralFallback reports one workspace's move to the central sink, the
+// first time that workspace moves there. The lock is released before the
+// record is written so the write cannot re-enter the surfaces' own mutex.
+func (s *surfaces) noteCentralFallback(dir string, cause error) {
+	key := dir
+	if clean, err := cleanDir(dir); err == nil {
+		key = clean
+	}
+	s.mu.Lock()
+	if s.centralFallbacks == nil {
+		s.centralFallbacks = make(map[string]struct{})
+	}
+	_, reported := s.centralFallbacks[key]
+	s.centralFallbacks[key] = struct{}{}
+	s.mu.Unlock()
+	if reported {
+		return
+	}
+	s.Global().Debug("daemon.dlog.central_fallback",
+		"the workspace cannot host a durable sink; its records go to the central sink",
+		Context{
+			KeyWorkspaceDir:        dir,
+			KeyUnroutableWorkspace: dir,
+			"cause":                cause.Error(),
+		})
 }
 
 // ShimSink borrows the already-open shim log sink for one workspace, to be

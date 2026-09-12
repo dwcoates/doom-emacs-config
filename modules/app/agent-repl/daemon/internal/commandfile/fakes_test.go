@@ -188,6 +188,11 @@ func (s *fakeSurfaces) Workspace(dir string) (dlog.Logger, error) {
 	return s.logger.With(dlog.Context{"dir": dir}), nil
 }
 
+// WorkspaceOrCentral implements dlog.Surfaces. This double always resolves.
+func (s *fakeSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
+	return s.logger.With(dlog.Context{"dir": dir})
+}
+
 func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error) { return nil, errFake }
 
 // BindWorkspaceIDs implements dlog.Surfaces. This double answers its own

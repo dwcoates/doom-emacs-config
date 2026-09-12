@@ -45,6 +45,15 @@ const (
 	KeyRequestID          = "request_id"
 )
 
+// KeyUnroutableWorkspace is an ORDINARY context key naming the workspace a
+// record is ABOUT when that workspace could not host a durable sink of its own
+// and the record therefore landed on the central sink. It is never the
+// workspace's identity — `workspace_dir` still carries that — it is the reason
+// the record is where it is, so a reader harvesting the central sink can tell
+// a genuinely workspace-less record from a rerouted one. The Emacs runtime
+// stamps the same field for the same condition.
+const KeyUnroutableWorkspace = "unroutable_workspace"
+
 // KeyWorkspaceDirHash is an ORDINARY context key, not a reserved one: the
 // workspace directory hash is evidence about the workspace's kernel lock file
 // name, never the workspace's identity. It stays inside `context` so nothing

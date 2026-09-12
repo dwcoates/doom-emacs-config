@@ -379,13 +379,13 @@ func (s *server) resolveRefLogging(
 		})
 		return resolved{}, &r, nil
 	}
-	log, err := s.deps.Log.Workspace(record.Dir)
-	if err != nil {
-		s.log.Error(rpc, "could not resolve the workspace log sink",
-			dlog.Context{"dir": record.Dir, "cause": err.Error()})
-		return resolved{}, nil, fmt.Errorf("%s: resolve log sink %q: %w", rpc, record.Dir, err)
-	}
-	log = log.With(dlog.Context{"workspace": string(id)})
+	// A REGISTERED WORKSPACE ALWAYS RESOLVES TO A SINK. When its directory
+	// cannot host one — a scratch path, a worktree that has been deleted — the
+	// records go centrally with the workspace named on them, and the rpc still
+	// reaches its handler: refusing here turned every per-workspace verb on
+	// such a workspace into an internal error raised by logging, in place of
+	// the handler's own typed answer.
+	log := s.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(id)})
 	return resolved{Record: record, Log: log}, nil, nil
 }
 
