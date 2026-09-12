@@ -124,3 +124,91 @@ func TestStaleSocketSwept(t *testing.T) {
 		t.Fatalf("the dead shim's socket %q survived the boot (stat err %v)", socket, statErr)
 	}
 }
+
+// TestASurvivorTheSocketReachesIsReportedInert pins WHICH survivor it is: the
+// shim takes the workspace lock at StartSession, never at process start, so a
+// live listener behind a FREE lock has no session on it. It is adopted as a
+// process and recorded as inert.
+func TestASurvivorTheSocketReachesIsReportedInert(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.socketProbes[h.deps.Layout.ShimSocket(string(ws.ID))] = shimsocket.StateLive
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.AdoptedInert) != 1 || report.AdoptedInert[0] != ws.ID {
+		t.Fatalf("report.AdoptedInert = %v, want [%v]", report.AdoptedInert, ws.ID)
+	}
+}
+
+// TestAnInertSurvivorIsNotAnAdoptedSession pins the bounce accounting's input:
+// an inert shim never started a session, so there is no session whose survival
+// a bounce could have decided and none is handed to Reconcile.
+func TestAnInertSurvivorIsNotAnAdoptedSession(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.socketProbes[h.deps.Layout.ShimSocket(string(ws.ID))] = shimsocket.StateLive
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.AdoptedSessions) != 0 {
+		t.Fatalf("report.AdoptedSessions = %+v, want none: an inert shim carries no session", report.AdoptedSessions)
+	}
+}
+
+// TestAnInertSurvivorIsNotWarnedAbout pins the level: free-lock-and-listening
+// is what an inert shim looks like BY CONTRACT, so recording it as a
+// disagreement between two kernel facts states something untrue.
+func TestAnInertSurvivorIsNotWarnedAbout(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.socketProbes[h.deps.Layout.ShimSocket(string(ws.ID))] = shimsocket.StateLive
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.boot.adopt") {
+		t.Fatal("an inert survivor's adoption was warned about; it is the ordinary state of a shim with no session")
+	}
+}
+
+// TestALockHeldSurvivorIsAnAdoptedSessionNamingItsPID pins the other arm: a
+// HELD lock means a session was started on that process, so it reaches the
+// bounce accounting, and it names the pid rather than the zero value an empty
+// manifest entry used to supply.
+func TestALockHeldSurvivorIsAnAdoptedSessionNamingItsPID(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.AdoptedSessions) != 1 {
+		t.Fatalf("report.AdoptedSessions = %+v, want one", report.AdoptedSessions)
+	}
+	got := report.AdoptedSessions[0]
+	if got.Workspace != ws.ID || got.ShimPID != adoptedShimPID {
+		t.Fatalf("adopted session = %+v, want workspace %v and pid %d", got, ws.ID, adoptedShimPID)
+	}
+}

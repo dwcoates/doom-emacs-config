@@ -300,7 +300,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	w.publishLinkLocked()
 
 	w.openSessionLocked()
-	w.openMainLocked()
+	w.openMainAfterFactsLocked()
 	if session.Started != nil {
 		w.adoptLiveWorkLocked(session.Started)
 	}
@@ -814,7 +814,7 @@ func (w *watcher) reopenLocked(reason string) {
 	})
 
 	w.openSessionLocked()
-	w.openMainLocked()
+	w.openMainAfterFactsLocked()
 	for _, a := range w.agents {
 		w.openAgentStreamLocked(a)
 	}
@@ -836,6 +836,32 @@ func (w *watcher) openSessionLocked() {
 	w.sessionStream = stream
 	w.log.Debug("daemon.sessionwatcher.watch_session", "session watch opened", nil)
 	go w.runSession(gen, stream)
+}
+
+// openMainAfterFactsLocked opens the main agent's watch ONLY ONCE THE SESSION
+// HAS ANNOUNCED ITSELF.
+//
+// THERE IS NO MAIN AGENT UNTIL THERE IS A SESSION. The shim resolves an unset
+// WatchAgent target through the session's identity, so a shim that has not had
+// StartSession run on it answers `not_found: no session has been started on
+// this shim` — a refusal that is not a race and cannot be waited out, because
+// nothing about the passage of time starts a session.
+//
+// A PURE ATTACH IS EXACTLY THAT CASE. An adopting daemon (crash boot,
+// handover) opens with NO facts and learns them from the shim's own
+// SessionStarted re-announcement, which rides every new WatchSession right
+// after the opening diagnostics (landing 7). Opening the agent watch before
+// that frame arrives asked a sessionless survivor for an agent it does not
+// have and collected a refusal per attempt; the daemon simply must not ask
+// yet. reannouncedLocked opens it the instant the facts land, and a shim that
+// never announces one never had an agent to watch.
+func (w *watcher) openMainAfterFactsLocked() {
+	if !w.started {
+		w.log.Debug("daemon.sessionwatcher.watch_agent",
+			"no session has announced itself yet; the main agent's watch waits for the re-announcement", nil)
+		return
+	}
+	w.openMainLocked()
 }
 
 // openMainLocked opens the main agent's watch: an UNSET target, which the shim
@@ -1041,6 +1067,12 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted) {
 			"live_work":         len(started.GetLiveWork()),
 		})
 	w.applySessionStartedLocked(started)
+	// THE FACTS ARE THE OCCASION FOR THE AGENT WATCH. A pure attach deferred
+	// it precisely until now: the shim has just named the session, so the main
+	// agent it resolves an unset target to exists.
+	if w.main == nil || w.main.stream == nil {
+		w.openMainLocked()
+	}
 	w.adoptLiveWorkLocked(started)
 	w.publishLiveWorkLocked()
 }

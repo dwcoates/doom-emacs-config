@@ -107,13 +107,22 @@ type Controller interface {
 	// held and answers one disposition PER SESSION. PRESERVED, ROLLED, DIED
 	// and UNKNOWN are never collapsed and never counted.
 	//
-	// adopted is the workspaces whose surviving shim this boot adopted. With NO
-	// MANIFEST — a crash or a force-kill, where the outgoing daemon never stood
-	// down — each of them is a session whose bounce nobody accounted for, and
-	// BOUNCE ACCOUNTABILITY says which sessions were left unaccounted is
-	// surfaced per workspace rather than passed over, so each gets an OPEN
-	// bounce_unknown fault.
-	Reconcile(ctx context.Context, adopted []ids.WorkspaceID) ([]Disposition, error)
+	// adopted is the SESSIONS whose surviving shim this boot adopted — never an
+	// inert survivor. A shim takes the workspace lock at StartSession and not
+	// at process start (agent-shim/claude/shim/src/engine/session.ts, "it lands
+	// HERE rather than at process start because an inert shim owns no
+	// conversation"), so a live shim whose lock reads FREE carries NO SESSION:
+	// there is no process whose survival could be judged, exactly as for a
+	// manifest entry that reads IntentNoSession. The boot passes only the
+	// lock-held survivors, and passing an inert one would raise a fault over a
+	// workspace that never had a session to lose.
+	//
+	// With NO MANIFEST — a crash or a force-kill, where the outgoing daemon
+	// never stood down — each adopted SESSION is one whose bounce nobody
+	// accounted for, and BOUNCE ACCOUNTABILITY says which sessions were left
+	// unaccounted is surfaced per workspace rather than passed over, so each
+	// gets an OPEN bounce_unknown fault.
+	Reconcile(ctx context.Context, adopted []AdoptedSession) ([]Disposition, error)
 }
 
 // Deps are the controller's collaborators.
