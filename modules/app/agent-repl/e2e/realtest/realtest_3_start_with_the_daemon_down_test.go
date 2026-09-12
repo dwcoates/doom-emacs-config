@@ -194,9 +194,10 @@ func TestRealtestStartWithTheDaemonDown(t *testing.T) {
 	assertDaemonNowServing(ctx, t)
 	verifyVendorGuard(ctx, t, client, run)
 
-	proveKeyDriver(ctx, t, client, runDir, &manifest)
+	driver := proveKeyDriver(ctx, t, client, runDir, &manifest)
 
-	shown := waitForShown(ctx, t, run, sources, snapshot, launch.SpawnedAt, openWorkspaces)
+	shown := showEmacsAndWaitForPaint(ctx, t, run, client, driver, sources, snapshot,
+		launch.SpawnedAt, openWorkspaces, &manifest)
 	shownMeasurements := shown.Measure()
 	manifest.Runs[len(manifest.Runs)-1].Measurements = shownMeasurements
 

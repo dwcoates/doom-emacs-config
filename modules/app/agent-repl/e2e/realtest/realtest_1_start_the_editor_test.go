@@ -248,15 +248,17 @@ func TestRealtestStartTheEditor(t *testing.T) {
 	// THE KEY DRIVER, PROVEN. It also delivers the first focus edge: Emacs is
 	// visible-but-unfocused up to here, and proveKeyDriver is what activates
 	// it for the key self-test.
-	proveKeyDriver(ctx, t, client, runDir, &manifest)
+	driver := proveKeyDriver(ctx, t, client, runDir, &manifest)
 
-	// THE SHOW PHASE. The parked pre-creation queue drains on the focus edge
-	// proveKeyDriver just produced, so a painted panel is assertable only
-	// from here. Re-reading folds in everything waitForUsable already saw
-	// (nothing there un-happens) plus whatever the show made happen, so the
-	// measurements and budget check below replace the hidden-phase ones
-	// rather than duplicate them.
-	shown := waitForShown(ctx, t, run, sources, snapshot, launch.SpawnedAt, openWorkspaces)
+	// THE SHOW PHASE. The parked pre-creation queue drains on a focus edge and
+	// on nothing else, so a painted panel is assertable only from here.
+	// Re-reading folds in everything waitForUsable already saw (nothing there
+	// un-happens) plus whatever the show made happen, so the measurements and
+	// budget check below replace the hidden-phase ones rather than duplicate
+	// them. It is the one shared show helper, the same one realtests 2 through
+	// 8 call.
+	shown := showEmacsAndWaitForPaint(ctx, t, run, client, driver, sources, snapshot,
+		launch.SpawnedAt, openWorkspaces, &manifest)
 	shownMeasurements := shown.Measure()
 	manifest.Runs[len(manifest.Runs)-1].Measurements = shownMeasurements
 
@@ -405,39 +407,127 @@ func waitForUsable(ctx context.Context, t *testing.T, run int, sources []Source,
 	return phases
 }
 
-// waitForShown polls the Emacs log sinks, AFTER Emacs has been brought
-// forward for the key self-test, until every open workspace's panel has
-// painted, or showCeiling expires.
+// showEmacsAndWaitForPaint is THE show phase, shared by every realtest that
+// asserts a painted panel.
 //
-// This is the phase the hidden window (waitForUsable) deliberately does not
-// wait for: the parked pre-creation queue drains only on the first focus
-// edge, and proveKeyDriver's activation of Emacs for the key-proof IS that
-// edge. So this is called after proveKeyDriver, never before, and it reads
-// the SAME sources and the SAME spawnedAt as waitForUsable — the elapsed
-// times PhasePanelPainted and PhaseTotal report are still "since the process
-// was spawned", which is what the user experienced, not "since Emacs was
-// shown".
-func waitForShown(ctx context.Context, t *testing.T, run int, sources []Source, snap Snapshot, spawnedAt time.Time, expected []Workspace) Phases {
+// It brings Emacs forward, waits for every open workspace's panel to paint,
+// re-issues the focus edge while it waits, restores the focus it found, and
+// reports how many edges the paint needed. showphase.go carries the reasoning,
+// including the 2026-09-12 finding that produced it: realtest 8 waited two
+// minutes on panels that realtest 1 paints in tens of milliseconds, and the
+// difference was never the wait — both call this same marker — but how long
+// Emacs held focus, against a pre-creation drain that re-parks the rest of its
+// queue the instant Emacs is visible-but-unfocused again.
+//
+// EVERY REALTEST THAT ASSERTS A PAINT CALLS THIS, realtest 1 included. The show
+// phase used to be spelled twice — realtest 1, 2 and 3 produced their edge
+// inside proveKeyDriver and realtests 5 through 8 through a separate
+// wsActShowEmacs — and two spellings of one phase is how two runs start
+// disagreeing about what a shown editor is.
+//
+// THE FOCUS CHECK IS A NET CHECK. It fails only when focus was left somewhere
+// other than where it started, which is a failure to restore, not the momentary
+// activation the driver deliberately performs.
+func showEmacsAndWaitForPaint(ctx context.Context, t *testing.T, run int, client *Client, driver *KeyDriver,
+	sources []Source, snap Snapshot, spawnedAt time.Time, expected []Workspace, manifest *Manifest) Phases {
+	t.Helper()
+
+	before, err := FrontmostApp(ctx)
+	if err != nil {
+		t.Fatalf("cold start %d: read which application is frontmost before Emacs is shown: %v", run, err)
+	}
+
+	started := time.Now()
+	var phases Phases
+	edges := 0
+	painted := false
+	for edge := 1; edge <= showMaxFocusEdges; edge++ {
+		if driver != nil {
+			if pressErr := driver.Press(ctx, wsActEscape); pressErr != nil {
+				note := fmt.Sprintf("SHOWING EMACS FAILED on focus edge %d: pressing %s (%s) answered %v. "+
+					"The parked pre-creation queue drains on a focus edge and on nothing else, so no panel can "+
+					"paint until one is produced", edge, wsActEscape.Emacs, wsActEscape.Why, pressErr)
+				manifest.Notes = append(manifest.Notes, note)
+				t.Errorf("%s", note)
+			} else {
+				edges++
+			}
+		}
+		phases = waitForPainted(ctx, t, run, sources, snap, spawnedAt, expected,
+			showPhaseEdgeCeiling(edge, time.Since(started)))
+		if everyWorkspacePainted(phases, expected) {
+			painted = true
+			break
+		}
+	}
+
+	after, err := FrontmostApp(ctx)
+	if err != nil {
+		t.Fatalf("cold start %d: read which application is frontmost after Emacs was shown: %v", run, err)
+	}
+	if before != after {
+		note := fmt.Sprintf("showing Emacs left focus on %q, not on %q where it started: the driver activates "+
+			"Emacs for each keypress and must restore the prior frontmost app, and here it did not", after, before)
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
+	} else if driver != nil {
+		manifest.Notes = append(manifest.Notes,
+			fmt.Sprintf("Emacs was brought forward for the show phase and focus was restored to %q", after))
+	}
+
+	// The verdict on the paint itself belongs to assertEveryWorkspacePainted,
+	// which every caller runs on the phases returned here; this note says what
+	// the show phase had to DO to get them, which no assertion on the phases
+	// can see.
+	note := showPhaseNote(edges, painted, time.Since(started), len(expected))
+	manifest.Notes = append(manifest.Notes, note)
+	t.Logf("%s", note)
+
+	if driver == nil {
+		note := "NO FOCUS EDGE WAS PRODUCED: the key driver is unavailable, so Emacs was never brought " +
+			"forward and the parked pre-creation queue could not drain. Any unpainted panel below is that, " +
+			"not the product"
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
+	}
+	return phases
+}
+
+// waitForPainted polls the Emacs log sinks until every expected workspace's
+// panel has painted, or `ceiling` expires.
+//
+// It reads the SAME sources and the SAME spawnedAt as waitForUsable — the
+// elapsed times it reports are still measured from real log edges, which is
+// what latency must always come from (docs/REALTEST-JUDGEMENT-CALLS.md, the
+// 2026-09-11 ruling on harness overhead).
+func waitForPainted(ctx context.Context, t *testing.T, run int, sources []Source, snap Snapshot,
+	spawnedAt time.Time, expected []Workspace, ceiling time.Duration) Phases {
 	t.Helper()
 	var phases Phases
 	waitUntil(ctx, t,
 		fmt.Sprintf("cold start %d: every workspace's panel painted, now that Emacs is shown", run),
-		showCeiling,
+		ceiling,
 		func() bool {
 			read, err := ReadPhases(sources, snap, spawnedAt)
 			if err != nil {
 				t.Fatalf("cold start %d: read the show-phase startup phases: %v", run, err)
 			}
 			phases = read
-			painted := setOf(read.PaintedWorkspaces())
-			for _, ws := range expected {
-				if !matchedInPainted(painted, ws) {
-					return false
-				}
-			}
-			return true
+			return everyWorkspacePainted(read, expected)
 		})
 	return phases
+}
+
+// everyWorkspacePainted reports whether the phases hold a painted panel for
+// every expected workspace.
+func everyWorkspacePainted(phases Phases, expected []Workspace) bool {
+	painted := setOf(phases.PaintedWorkspaces())
+	for _, ws := range expected {
+		if !matchedInPainted(painted, ws) {
+			return false
+		}
+	}
+	return true
 }
 
 // coldStart launches the editor once and waits for it to become usable.
@@ -653,7 +743,7 @@ func pgrepOne(ctx context.Context, pattern string) (int, error) {
 // below is a NET check: it fails only if focus was left on something other than
 // where it started, which is a failure to restore, not the momentary activation
 // itself. This is the one phase that touches focus at all; startup never does.
-func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir string, manifest *Manifest) {
+func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir string, manifest *Manifest) *KeyDriver {
 	t.Helper()
 
 	pid, err := client.ReadInt(ctx, `(emacs-pid)`)
@@ -671,7 +761,7 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 		t.Logf("the second mechanism, System Events `key code`, is implemented (keys.go) but delivers to the " +
 			"FRONTMOST application, so using it would require bringing Emacs forward and disturbing the owner. " +
 			"It was NOT attempted. No elisp fallback was taken.")
-		return
+		return nil
 	}
 	manifest.Notes = append(manifest.Notes,
 		fmt.Sprintf("key driver: %s; accessibility trust held", driver.Method))
@@ -725,6 +815,7 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 		manifest.Notes = append(manifest.Notes,
 			fmt.Sprintf("the key self-test restored focus to %q after momentarily activating Emacs for each keypress", after))
 	}
+	return driver
 }
 
 // waitUntil polls a predicate to a ceiling.

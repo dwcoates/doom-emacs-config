@@ -696,34 +696,98 @@ func wsActProveChord(ctx context.Context, t *testing.T, client *Client, driver *
 	return reached
 }
 
-// wsActAbortMinibuffer presses a real `C-g` and waits for the minibuffer to go
-// away, so nothing the chord opened is left standing over the acts that
-// follow.
+// wsActAbortMinibuffer clears whatever minibuffer read is standing, so nothing
+// a chord opened is left over the acts that follow.
+//
+// TWO CHANNELS, IN ORDER, AND THE SECOND ONE IS ALWAYS REPORTED. The real `C-g`
+// goes first, because dismissing the prompt with the key the owner would press
+// is part of what proves the chord. If it has not closed the prompt inside
+// wsActChordDismissCeiling, the read channel aborts it instead — and that is a
+// FINDING, not a fallback that quietly rescues the run. minibuffer.go carries
+// the whole reasoning, including why the previous single-channel version turned
+// a failed C-g into a 30s stall per prompt on 2026-09-12.
+//
+// NEITHER CHANNEL WORKING IS FATAL HERE. The old version reported it and
+// carried on, which is how a run came back with "every act after this one ran
+// with a minibuffer still up": every assertion downstream was then about an
+// editor in a state no owner would be in. A run that cannot clear the
+// minibuffer has nothing left to say, so it stops immediately and says why.
 func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver, manifest *Manifest) {
 	t.Helper()
-	if driver == nil {
+
+	prompt, err := wsActMinibufferPrompt(ctx, client)
+	if err != nil {
+		t.Fatalf("read whether a minibuffer is standing before dismissing it: %v", err)
+	}
+	if prompt == "" {
+		t.Logf("%s", wsActDismissNote(wsActDismissNothingStanding, "", 0))
 		return
 	}
-	if err := driver.Press(ctx, wsActQuit); err != nil {
-		note := fmt.Sprintf("C-g could not be delivered, so a minibuffer read may still be standing: %v", err)
-		manifest.Notes = append(manifest.Notes, note)
-		t.Errorf("%s", note)
-		return
+
+	// CHANNEL ONE: the real chord.
+	reported := false
+	if driver != nil {
+		if pressErr := driver.Press(ctx, wsActQuit); pressErr != nil {
+			note := fmt.Sprintf("C-g COULD NOT BE DELIVERED while %q was standing: %v. keydriver.swift refuses "+
+				"to post a key event to an Emacs it could not make the active application, because AppKit "+
+				"dispatches a key event only to a key window and drops such a post silently; the read channel "+
+				"is used below and this delivery failure is the finding", prompt, pressErr)
+			manifest.Notes = append(manifest.Notes, note)
+			t.Errorf("%s", note)
+			reported = true
+		} else if wsActMinibufferGone(ctx, client, wsActChordDismissCeiling) {
+			note := wsActDismissNote(wsActDismissByChord, prompt, 0)
+			manifest.Notes = append(manifest.Notes, note)
+			t.Logf("%s", note)
+			return
+		}
 	}
-	var prompt string
-	waitUntil(ctx, t, "the minibuffer to close after C-g", wsActChordCeiling, func() bool {
-		read, err := wsActMinibufferPrompt(ctx, client)
-		if err != nil {
+
+	// CHANNEL TWO: the read channel, entered only after the chord had its turn.
+	for attempt := 1; attempt <= wsActEvalDismissAttempts; attempt++ {
+		if _, evalErr := client.Read(ctx, wsActAbortMinibufferForm()); evalErr != nil {
+			t.Logf("eval abort %d of the standing minibuffer %q did not answer: %v", attempt, prompt, evalErr)
+		}
+		if wsActMinibufferGone(ctx, client, wsActEvalDismissCeiling) {
+			note := wsActDismissNote(wsActDismissByEval, prompt, attempt)
+			manifest.Notes = append(manifest.Notes, note)
+			if reported {
+				t.Logf("%s", note)
+			} else {
+				t.Errorf("%s", note)
+			}
+			return
+		}
+	}
+
+	note := wsActDismissNote(wsActDismissFailed, prompt, wsActEvalDismissAttempts)
+	manifest.Notes = append(manifest.Notes, note)
+	t.Fatalf("%s", note)
+}
+
+// wsActMinibufferGone polls until no minibuffer is standing, and answers
+// whether it went away inside `ceiling`.
+//
+// Its own tight poll rather than waitUntil: waitUntil polls once a second and
+// logs a line when its ceiling expires, and this is called up to four times in
+// a row on a path whose whole point is to reach a verdict in seconds. A probe
+// that errors counts as "still standing" — an editor that cannot answer is not
+// an editor with a clear minibuffer.
+func wsActMinibufferGone(ctx context.Context, client *Client, ceiling time.Duration) bool {
+	deadline := time.Now().Add(ceiling)
+	for {
+		prompt, err := wsActMinibufferPrompt(ctx, client)
+		if err == nil && prompt == "" {
+			return true
+		}
+		if time.Now().After(deadline) {
 			return false
 		}
-		prompt = read
-		return prompt == ""
-	})
-	if prompt != "" {
-		note := fmt.Sprintf("C-g did not close the minibuffer: %q is still up, so every act after this one "+
-			"ran with a minibuffer standing", prompt)
-		manifest.Notes = append(manifest.Notes, note)
-		t.Errorf("%s", note)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(wsActDismissPollInterval):
+		}
 	}
 }
 
@@ -769,46 +833,6 @@ func wsActKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	manifest.Notes = append(manifest.Notes,
 		fmt.Sprintf("key driver: %s; accessibility trust held", driver.Method))
 	return driver
-}
-
-// wsActShowEmacs brings Emacs forward once, before the acts, and restores the
-// application that was frontmost.
-//
-// It presses the harmless `<escape>`, which is the key driver's own way of
-// activating the target for the instant of a keypress (keydriver.swift says
-// why a no-activation post reaches no key window). That activation is the
-// focus edge; the escape itself does nothing in evil's normal state.
-//
-// The focus check is a NET check, exactly as realtest 1's is: it fails only
-// when focus was left somewhere other than where it started, which is a
-// failure to restore rather than the momentary activation the driver
-// deliberately performs.
-func wsActShowEmacs(ctx context.Context, t *testing.T, driver *KeyDriver, manifest *Manifest) {
-	t.Helper()
-	if driver == nil {
-		return
-	}
-	before, err := FrontmostApp(ctx)
-	if err != nil {
-		t.Fatalf("read which application is frontmost before Emacs is shown: %v", err)
-	}
-	if err := driver.Press(ctx, wsActEscape); err != nil {
-		t.Errorf("bring Emacs forward for the acts by pressing %s: %v", wsActEscape.Emacs, err)
-		return
-	}
-	after, err := FrontmostApp(ctx)
-	if err != nil {
-		t.Fatalf("read which application is frontmost after Emacs is shown: %v", err)
-	}
-	if before != after {
-		note := fmt.Sprintf("showing Emacs left focus on %q, not on %q where it started: the driver activates "+
-			"Emacs for each keypress and must restore the prior frontmost app, and here it did not", after, before)
-		manifest.Notes = append(manifest.Notes, note)
-		t.Errorf("%s", note)
-		return
-	}
-	manifest.Notes = append(manifest.Notes,
-		fmt.Sprintf("Emacs was brought forward for the acts and focus was restored to %q", after))
 }
 
 // ---- The state database, polled ---------------------------------------
