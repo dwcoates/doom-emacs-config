@@ -44,12 +44,18 @@ type Spec struct {
 	NodeBin string
 	// MainJS is agent-shim/claude/shim/dist/main.js.
 	MainJS string
-	// Fake adds --fake.
+	// Fake adds --fake. The spawn is ALSO forced fake when ForbidVendor is
+	// set or when this daemon's own contracts forbid vendor calls: under the
+	// guard a real-vendor shim is not something the daemon may start, and
+	// forcing the fake is how a guarded run still creates and forks
+	// workspaces instead of being refused (see `fakeMode`).
 	Fake bool
 	// LogSink is the already-open shim log sink passed as fd 3. It is NEVER a
 	// pipe to the daemon's stderr.
 	LogSink *os.File
-	// ForbidVendor sets AGENT_REPL_FORBID_VENDOR_CALLS=1 (tests).
+	// ForbidVendor sets AGENT_REPL_FORBID_VENDOR_CALLS=1 (tests). It also
+	// forces the spawn into fake mode, because a child told the vendor is
+	// forbidden must not be asked to reach it.
 	ForbidVendor bool
 	// StateDir is AGENT_REPL_STATE_DIR for the child: the ONE state root the
 	// daemon, Emacs and the skills must all resolve. Empty inherits this

@@ -168,6 +168,17 @@ type Opts struct {
 	// guard's refusal sites; the fake shim is unaffected, since `--node`
 	// still names it.
 	NoFake bool
+	// WithoutFakeShimsHook withholds AGENT_REPL_FAKE_SHIMS from a NoFake
+	// daemon, leaving the VENDOR GUARD as the only thing that can make a shim
+	// spawn fake.
+	//
+	// It exists for exactly one subject: the rule that the guard IMPLIES fake
+	// shims. A daemon started this way asks its supervisor for a real-vendor
+	// shim, and the run proves the supervisor forces the fake instead of
+	// refusing the spawn -- which is what once made a workspace impossible to
+	// create under the guard. Meaningless without NoFake, since a `--fake`
+	// daemon asks for a fake shim on its own.
+	WithoutFakeShimsHook bool
 	// JSONCodec dials the daemon with the JSON codec instead of binary.
 	JSONCodec bool
 	// KeepStaleAddr leaves a predecessor's daemon.addr in place instead of
@@ -508,12 +519,13 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// NoFake therefore withholds it deliberately.
 	if !opts.NoFake {
 		env = append(env, "AGENT_REPL_CLAUDE_BIN="+fakeClaude)
-	} else {
+	} else if !opts.WithoutFakeShimsHook {
 		// The SHIMS stay fake even with the whole stack's fake mode off:
-		// --node names the fake shim, but the daemon cannot know that and its
-		// vendor guard refuses a non-fake spawn before any session exists.
-		// Without this, NoFake could never reach a REAL vendor call site that
-		// needs a live session — which is the only thing NoFake is for.
+		// --node names the fake shim, but the daemon cannot know that. The
+		// vendor guard would force the fake by itself; the hook is stated
+		// anyway so the ordinary NoFake test does not depend on that rule
+		// while exercising something else. WithoutFakeShimsHook withholds it
+		// for the one test whose subject IS that rule.
 		env = append(env, "AGENT_REPL_FAKE_SHIMS=1")
 	}
 	// COVERAGE, WHEN THE RUN ASKED FOR IT. GOCOVERDIR is this daemon's own
@@ -1090,6 +1102,18 @@ func (d *Daemon) SocketPath(ws *workspacev1.WorkspaceRef) string {
 func (d *Daemon) WriteShimProfile(dir string, profile any) {
 	d.t.Helper()
 	writeJSON(d.t, filepath.Join(d.ProfileDir, profileFileName(dir)), profile)
+}
+
+// WriteDefaultShimProfile scripts EVERY fake shim this daemon spawns, whatever
+// workspace it serves (fakeshim's `default.json` fallback).
+//
+// It exists for the workspace whose dir the test does not know in advance: a
+// CREATE mints the dir, so there is no key to write a per-workspace profile
+// under until the verb whose behavior is under test has already run. A
+// per-workspace profile still wins over this one.
+func (d *Daemon) WriteDefaultShimProfile(profile any) {
+	d.t.Helper()
+	writeJSON(d.t, filepath.Join(d.ProfileDir, "default.json"), profile)
 }
 
 // ExpectFileUnchanged asserts a file still holds exactly `want` after the

@@ -44,6 +44,29 @@ func TestOpenBackgroundArgsStateTheVendorGuardOnTheCommandLine(t *testing.T) {
 	}
 }
 
+func TestOpenBackgroundArgsStateTheGuardAsTheONLYSubstitution(t *testing.T) {
+	// Arrange/Act: the vendor guard is the single variable a realtest states,
+	// and it now IMPLIES fake shims -- a guarded daemon spawns every shim with
+	// `--fake` rather than refusing the spawn
+	// (daemon/internal/shimclient/supervisor.go, `fakeMode`). A second knob
+	// stated here would be a second contract for one rule, and the pair could
+	// then disagree: an Emacs carrying the fake hook but not the guard would
+	// look guarded to this harness while the vendor was one prompt away.
+	args := openBackgroundArgs()
+
+	// Assert.
+	var stated []string
+	for i, arg := range args {
+		if arg == "--env" && i+1 < len(args) {
+			stated = append(stated, args[i+1])
+		}
+	}
+	if len(stated) != 1 || stated[0] != vendorGuardEnv+"=1" {
+		t.Errorf("the argv states the environment %v, want exactly [%s=1]: the guard implies fake shims, "+
+			"so no second variable belongs on the launch", stated, vendorGuardEnv)
+	}
+}
+
 func TestMethodOpenBackgroundNamesTheHiddenLaunch(t *testing.T) {
 	// Arrange/Act/Assert: the method string is what the manifest's focus line
 	// reports, so it must name the launch the run actually performed.
