@@ -76,6 +76,11 @@
 (declare-function agent-repl-wire-decode-session-fault-bounce-unknown "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-classifier-failed "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-shim-reported "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-conversation-abandoned "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-session-absent "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-watch-open-refused "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-daemon-state-unreadable "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "agent-repl-wire-common" (json))
 
 ;; core.el's canonical logging ladder.
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -497,6 +502,16 @@ Creating the worktree failed."
     (list :detail (agent-repl-wire-verbs--decode-string
                        message 'detail json))))
 
+(defun agent-repl-wire-decode-create-workspace-spawn-failed (json)
+  "Decode CreateWorkspaceSpawnFailed from JSON into a plist (`:detail\').
+The created workspace's bring-up could not start a shim.  The SAME daemon
+refusal `OpenWorkspaceSpawnFailed\' carries, and deliberately the same
+shape: a create and an open raise it from one site."
+  (let ((message "CreateWorkspaceSpawnFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string
+                       message 'detail json))))
+
 (defun agent-repl-wire-decode-create-workspace-error-ungated-without-consent (json)
   "Decode CreateWorkspaceError's `ungated_without_consent' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-ungated-without-consent json))
@@ -539,12 +554,16 @@ from JSON."
 JSON."
   (agent-repl-wire-decode-create-workspace-worktree-creation-failed json))
 
+(defun agent-repl-wire-decode-create-workspace-error-spawn-failed (json)
+  "Decode CreateWorkspaceError's `spawn_failed' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-spawn-failed json))
+
 (defun agent-repl-wire-decode-create-workspace-error (json)
   "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug finishRequired finishNotOneShot forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug finishRequired finishNotOneShot forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -557,7 +576,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-create-workspace-error-unknown-repository)
          (list 'unknownParent :unknown-parent #'agent-repl-wire-decode-create-workspace-error-unknown-parent)
          (list 'baseRefUnresolved :base-ref-unresolved #'agent-repl-wire-decode-create-workspace-error-base-ref-unresolved)
-         (list 'worktreeCreationFailed :worktree-creation-failed #'agent-repl-wire-decode-create-workspace-error-worktree-creation-failed))))))
+         (list 'worktreeCreationFailed :worktree-creation-failed #'agent-repl-wire-decode-create-workspace-error-worktree-creation-failed)
+         (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-create-workspace-error-spawn-failed))))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."
@@ -1991,6 +2011,18 @@ The path that is not there."
   "Decode DaemonFaultWsmReadOnly from JSON.  Empty: the arm is the whole fact."
   (agent-repl-wire-verbs--decode-empty "DaemonFaultWsmReadOnly" json))
 
+(defun agent-repl-wire-decode-daemon-fault-daemon-state-unreadable (json)
+  "Decode DaemonFaultDaemonStateUnreadable from JSON into (:cause).
+The self-check's OWN fault: the state client would not answer, so the
+daemon's standing faults could not be read at all.  It is the one fault the
+daemon can always detect about itself, and it says THE ANSWER IS INCOMPLETE
+rather than naming a condition the daemon is in.  Before this arm existed the
+self-check was the one site that put a fault on the wire with the `kind'
+oneof unset, which every consumer reads as a contract breach."
+  (let ((message "DaemonFaultDaemonStateUnreadable"))
+    (agent-repl-wire-verbs--check-keys message json '(cause))
+    (list :cause (agent-repl-wire-verbs--decode-string message 'cause json))))
+
 (defun agent-repl-wire-decode-daemon-fault-kind-adoption-window-expired (json)
   "Decode DaemonFault's `adoption_window_expired' kind arm from JSON as a
 `DaemonFaultAdoptionWindowExpired'."
@@ -2021,6 +2053,11 @@ The path that is not there."
 `DaemonFaultWsmReadOnly'."
   (agent-repl-wire-decode-daemon-fault-wsm-read-only json))
 
+(defun agent-repl-wire-decode-daemon-fault-kind-daemon-state-unreadable (json)
+  "Decode DaemonFault's `daemon_state_unreadable' kind arm from JSON as a
+`DaemonFaultDaemonStateUnreadable'."
+  (agent-repl-wire-decode-daemon-fault-daemon-state-unreadable json))
+
 (defun agent-repl-wire-decode-daemon-fault-kind (json)
   "Decode DaemonFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE KIND IS A TYPED ARM: `detail' carries only what prose must, so a
@@ -2032,12 +2069,13 @@ fault with no kind is a contract breach."
                  (list 'deployScriptFailed :deploy-script-failed #'agent-repl-wire-decode-daemon-fault-kind-deploy-script-failed)
                  (list 'successorSpawnFailed :successor-spawn-failed #'agent-repl-wire-decode-daemon-fault-kind-successor-spawn-failed)
                  (list 'promptsDirMissing :prompts-dir-missing #'agent-repl-wire-decode-daemon-fault-kind-prompts-dir-missing)
-                 (list 'wsmReadOnly :wsm-read-only #'agent-repl-wire-decode-daemon-fault-kind-wsm-read-only))))
+                 (list 'wsmReadOnly :wsm-read-only #'agent-repl-wire-decode-daemon-fault-kind-wsm-read-only)
+                 (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-daemon-fault-kind-daemon-state-unreadable))))
 
 (defun agent-repl-wire-decode-daemon-fault (json)
   "Decode DaemonFault from JSON into (:detail STRING :kind ONEOF)."
   (let ((message "DaemonFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned deployScriptFailed successorSpawnFailed promptsDirMissing wsmReadOnly))
+    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned deployScriptFailed successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-daemon-fault-kind json))))
 
@@ -2171,6 +2209,31 @@ ANSWERED at all."
 `SessionFaultShimReported'."
   (agent-repl-wire-decode-session-fault-shim-reported json))
 
+(defun agent-repl-wire-decode-session-fault-kind-conversation-abandoned (json)
+  "Decode SessionFault's `conversation_abandoned' kind arm from JSON as a
+`SessionFaultConversationAbandoned'."
+  (agent-repl-wire-decode-session-fault-conversation-abandoned json))
+
+(defun agent-repl-wire-decode-session-fault-kind-session-absent (json)
+  "Decode SessionFault's `session_absent' kind arm from JSON as a
+`SessionFaultSessionAbsent'."
+  (agent-repl-wire-decode-session-fault-session-absent json))
+
+(defun agent-repl-wire-decode-session-fault-kind-watch-open-refused (json)
+  "Decode SessionFault's `watch_open_refused' kind arm from JSON as a
+`SessionFaultWatchOpenRefused'."
+  (agent-repl-wire-decode-session-fault-watch-open-refused json))
+
+(defun agent-repl-wire-decode-session-fault-kind-daemon-state-unreadable (json)
+  "Decode SessionFault's `daemon_state_unreadable' kind arm from JSON as a
+`SessionFaultDaemonStateUnreadable'."
+  (agent-repl-wire-decode-session-fault-daemon-state-unreadable json))
+
+(defun agent-repl-wire-decode-session-fault-kind-adoption-window-expired (json)
+  "Decode SessionFault's `adoption_window_expired' kind arm from JSON as a
+`SessionFaultAdoptionWindowExpired'."
+  (agent-repl-wire-decode-session-fault-adoption-window-expired json))
+
 (defun agent-repl-wire-decode-session-fault-kind (json)
   "Decode SessionFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -2184,15 +2247,20 @@ it, so a fault with no kind is a contract breach."
                  (list 'bounceDied :bounce-died #'agent-repl-wire-decode-session-fault-kind-bounce-died)
                  (list 'bounceUnknown :bounce-unknown #'agent-repl-wire-decode-session-fault-kind-bounce-unknown)
                  (list 'classifierFailed :classifier-failed #'agent-repl-wire-decode-session-fault-kind-classifier-failed)
-                 (list 'shimReported :shim-reported #'agent-repl-wire-decode-session-fault-kind-shim-reported))))
+                 (list 'shimReported :shim-reported #'agent-repl-wire-decode-session-fault-kind-shim-reported)
+                 (list 'conversationAbandoned :conversation-abandoned #'agent-repl-wire-decode-session-fault-kind-conversation-abandoned)
+                 (list 'sessionAbsent :session-absent #'agent-repl-wire-decode-session-fault-kind-session-absent)
+                 (list 'watchOpenRefused :watch-open-refused #'agent-repl-wire-decode-session-fault-kind-watch-open-refused)
+                 (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-session-fault-kind-daemon-state-unreadable)
+                 (list 'adoptionWindowExpired :adoption-window-expired #'agent-repl-wire-decode-session-fault-kind-adoption-window-expired))))
 
 (defun agent-repl-wire-decode-session-fault (json)
   "Decode SessionFault from JSON into (:detail STRING :kind ONEOF).
 Deliberately NOT DaemonFault: a session's fault classes are the session
-controller's own vocabulary — the same eight the host stream's HostFault
+controller's own vocabulary — the same thirteen the host stream's HostFault
 carries, decoded through the same shared arm messages."
   (let ((message "SessionFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported))
+    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-session-fault-kind json))))
 

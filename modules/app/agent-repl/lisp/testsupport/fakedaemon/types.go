@@ -22,6 +22,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"CloseWorkspace":         func() proto.Message { return &v1.CloseWorkspaceResponse{} },
 	"KillWorkspace":          func() proto.Message { return &v1.KillWorkspaceResponse{} },
 	"NukeWorkspace":          func() proto.Message { return &v1.NukeWorkspaceResponse{} },
+	"ForgetWorkspace":        func() proto.Message { return &v1.ForgetWorkspaceResponse{} },
 	"MergeWorkspace":         func() proto.Message { return &v1.MergeWorkspaceResponse{} },
 	"RestartWorkspace":       func() proto.Message { return &v1.RestartWorkspaceResponse{} },
 	"SetWorkspacePriority":   func() proto.Message { return &v1.SetWorkspacePriorityResponse{} },

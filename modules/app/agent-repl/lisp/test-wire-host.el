@@ -920,6 +920,49 @@ declares."
                  '(:detail "d" :opened-at-ms 5
                    :kind (:arm :shim-reported :value (:component "stdout" :kind "parse"))))))
 
+(ert-deftest agent-repl-test-wire-host-fault-conversation-abandoned-kind ()
+  "HostFault's `conversation_abandoned' kind decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"conversationAbandoned\":{\"vendorSessionId\":\"vs-9\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :conversation-abandoned :value (:vendor-session-id "vs-9"))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-session-absent-kind ()
+  "HostFault's `session_absent' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"sessionAbsent\":{}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :session-absent :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-fault-watch-open-refused-kind ()
+  "HostFault's `watch_open_refused' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"watchOpenRefused\":{\"operation\":\"WatchTranscript\",\"handle\":\"h-3\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :watch-open-refused :value (:operation "WatchTranscript" :handle "h-3"))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-daemon-state-unreadable-kind ()
+  "HostFault's `daemon_state_unreadable' kind decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"daemonStateUnreadable\":{\"cause\":\"store closed\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :daemon-state-unreadable :value (:cause "store closed"))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-adoption-window-expired-kind ()
+  "HostFault's `adoption_window_expired' kind decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"adoptionWindowExpired\":{\"adoptionWindow\":\"30s\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :adoption-window-expired :value (:adoption-window "30s"))))))
+
 (ert-deftest agent-repl-test-wire-host-fault-unset-kind-is-a-breach ()
   "A fault with no kind is a breach: `detail' supplements the class, never
 replaces it."
@@ -935,12 +978,12 @@ replaces it."
                  '("HostFault" shimDead "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-fault-kind-arms-pinned ()
-  "HostFault's kind oneof has exactly the eight arms decoded here."
+  "HostFault's kind oneof has exactly the thirteen arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                         "HostFault")
                        #'string<)
-                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported")
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired")
                        #'string<))))
 
 (provide 'test-wire-host)

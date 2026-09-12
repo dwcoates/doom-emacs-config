@@ -41,12 +41,17 @@
 (declare-function agent-repl-wire-decode-drain-reason "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-unknown "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-classifier-failed "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-conversation-abandoned "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-daemon-state-unreadable "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-link-severed "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-resume-failed "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-session-absent "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-shim-died "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-shim-reported "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-shim-start-failed "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-watch-open-refused "wire-common")
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
 (declare-function agent-repl-wire-encode-workspace-ref "wire-common")
 
@@ -127,6 +132,31 @@ Rotates on restart within one session; fault windows scope to it."
 `SessionFaultShimReported'."
   (agent-repl-wire-decode-session-fault-shim-reported value))
 
+(defun agent-repl-wire-decode-host-fault-conversation-abandoned (value)
+  "Decode HostFault's `conversation_abandoned' kind arm from VALUE as a
+`SessionFaultConversationAbandoned'."
+  (agent-repl-wire-decode-session-fault-conversation-abandoned value))
+
+(defun agent-repl-wire-decode-host-fault-session-absent (value)
+  "Decode HostFault's `session_absent' kind arm from VALUE as a
+`SessionFaultSessionAbsent'."
+  (agent-repl-wire-decode-session-fault-session-absent value))
+
+(defun agent-repl-wire-decode-host-fault-watch-open-refused (value)
+  "Decode HostFault's `watch_open_refused' kind arm from VALUE as a
+`SessionFaultWatchOpenRefused'."
+  (agent-repl-wire-decode-session-fault-watch-open-refused value))
+
+(defun agent-repl-wire-decode-host-fault-daemon-state-unreadable (value)
+  "Decode HostFault's `daemon_state_unreadable' kind arm from VALUE as a
+`SessionFaultDaemonStateUnreadable'."
+  (agent-repl-wire-decode-session-fault-daemon-state-unreadable value))
+
+(defun agent-repl-wire-decode-host-fault-adoption-window-expired (value)
+  "Decode HostFault's `adoption_window_expired' kind arm from VALUE as a
+`SessionFaultAdoptionWindowExpired'."
+  (agent-repl-wire-decode-session-fault-adoption-window-expired value))
+
 (defun agent-repl-wire-decode-host-fault-kind (value)
   "Decode HostFault's `kind' oneof from the object VALUE.
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -142,16 +172,21 @@ fault the consumer would have to parse."
        (bounceDied :bounce-died agent-repl-wire-decode-host-fault-bounce-died)
        (bounceUnknown :bounce-unknown agent-repl-wire-decode-host-fault-bounce-unknown)
        (classifierFailed :classifier-failed agent-repl-wire-decode-host-fault-classifier-failed)
-       (shimReported :shim-reported agent-repl-wire-decode-host-fault-shim-reported)))))
+       (shimReported :shim-reported agent-repl-wire-decode-host-fault-shim-reported)
+       (conversationAbandoned :conversation-abandoned agent-repl-wire-decode-host-fault-conversation-abandoned)
+       (sessionAbsent :session-absent agent-repl-wire-decode-host-fault-session-absent)
+       (watchOpenRefused :watch-open-refused agent-repl-wire-decode-host-fault-watch-open-refused)
+       (daemonStateUnreadable :daemon-state-unreadable agent-repl-wire-decode-host-fault-daemon-state-unreadable)
+       (adoptionWindowExpired :adoption-window-expired agent-repl-wire-decode-host-fault-adoption-window-expired)))))
 
 (defun agent-repl-wire-decode-host-fault (value)
   "Decode VALUE as `HostFault', a plist `(:detail :opened-at-ms :kind)'.
-The eight kinds are the session controller's own fault vocabulary, shared
+The thirteen kinds are the session controller's own fault vocabulary, shared
 verbatim with SessionHealth's `SessionFault' — the stream reporting a
 fault never changes its class."
   (let ((object (agent-repl-wire--object "HostFault" value)))
     (agent-repl-wire--check-keys
-     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported))
+     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired))
     (agent-repl-wire--decoded
      "HostFault"
      (list :detail (agent-repl-wire--decode-string "HostFault" 'detail object)
