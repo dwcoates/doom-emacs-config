@@ -93,6 +93,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function agent-repl--with-deferred-quit "core")
+(declare-function agent-repl--deferred-quit-arm-delivery "core" (context))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
@@ -1280,13 +1282,29 @@ daemon left standing."
   "Record the daemon PROC's EVENT.  Emacs supervises, it does not restart.
 Everything after boot is the daemon's own blue-green rollout, so a daemon
 that exits is a fact to record — daemon-link.el's reconnect is what
-notices and recovers."
+notices and recovers.
+
+Runs under `agent-repl--with-deferred-quit\', which this sentinel had
+before the overhaul refactor dropped it.  A `C-g\' between retiring
+`daemon.addr\' and forgetting the process leaves the address file naming
+a dead daemon while Emacs still believes it owns a live one, which is the
+stale address the next cold start reads back as readiness.  The guard
+also delivers the quit afterwards, so a `C-g\' the user pressed at a
+standing prompt is not spent here."
   (unless (process-live-p proc)
-    (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.exited status=%S event=%s"
-                      (process-exit-status proc) (string-trim (or event "")))
-    (when (eq proc agent-repl--frontend-daemon-process)
-      (agent-repl-daemon--retire-own-addr)
-      (setq agent-repl--frontend-daemon-process nil))))
+    (agent-repl--with-deferred-quit "daemon-sentinel"
+      (agent-repl-daemon--record-exit proc event))))
+
+(defun agent-repl-daemon--record-exit (proc event)
+  "Record PROC's EVENT and release the daemon this Emacs spawned.
+The quit-guarded critical section of `agent-repl-daemon--sentinel\',
+named separately so the guard has a body to wrap and a test can drive the
+recording without a process death."
+  (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.exited status=%S event=%s"
+                    (process-exit-status proc) (string-trim (or event "")))
+  (when (eq proc agent-repl--frontend-daemon-process)
+    (agent-repl-daemon--retire-own-addr)
+    (setq agent-repl--frontend-daemon-process nil)))
 
 (defun agent-repl-daemon--retire-own-addr ()
   "Remove `daemon.addr' when it still names the daemon THIS Emacs spawned.
