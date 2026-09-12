@@ -30,6 +30,8 @@
      (let ((agent-repl--webview-precreate-queue nil)
            (agent-repl--webview-precreate-timer nil)
            (agent-repl--webview-precreate-parked nil)
+           (agent-repl--webview-precreate-pass-open nil)
+           (agent-repl--webview-precreate-pass-mounted 0)
            (agent-repl-test-wr--mounted nil))
        (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
                   (lambda (ws) (push ws agent-repl-test-wr--mounted) :created))
@@ -450,6 +452,209 @@ what matters is that a real focus change reaches the resume."
           (funcall after-focus-change-function)))
       ;; Assert
       (should (null agent-repl--webview-precreate-parked)))))
+
+
+;;;; ---- The hold admits a PASS, not an item ----
+;;
+;; Re-asking the hold before every queue item is what stranded realtest 5's
+;; cold start for twenty seconds: mounting a WKWebView hands key-window
+;; status around, so an Emacs that was focused when the drain resumed reads
+;; back as visible-but-unfocused a moment later and the remainder re-parks.
+;; Two open workspaces painted on two separate focus edges -- one panel per
+;; edge -- while the healthy shape paints both on one edge in under two
+;; seconds.  The hold now gates the START of a pass; the pass then drains
+;; the queue it can reach without re-asking, and the hold is asked in full
+;; again for the next pass.
+
+(defun agent-repl-test-wr--drain-until-quiet (&optional ticks)
+  "Drive the drain chain until it arms no further timer.
+The suites replace `run-at-time' with a token, so nothing fires on its
+own; this stands in for the timer chain a live Emacs would run.  TICKS
+bounds the loop so a chain that never settles fails as a hang would."
+  (let ((budget (or ticks 20)))
+    (agent-repl--webview-precreate-drain)
+    (while (and agent-repl--webview-precreate-timer (> budget 0))
+      (setq budget (1- budget))
+      (agent-repl--webview-precreate-drain))
+    (should (> budget 0))))
+
+(ert-deftest agent-repl-test-wr-one-focus-edge-drains-the-whole-queue ()
+  "The healthy shape: every owed panel paints on the first look, not one per look."
+  ;; Arrange — parked with two workspaces owed.
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta")
+      (agent-repl--webview-precreate-schedule '("alpha" "beta"))
+      (agent-repl-test-wr--visible-unfocused
+        (agent-repl--webview-precreate-drain))
+      ;; Act — one focus edge, and the chain it arms runs to quiet.
+      (agent-repl-test-wr--focused
+        (agent-repl--webview-precreate-on-focus-change)
+        (agent-repl-test-wr--drain-until-quiet))
+      ;; Assert
+      (should (equal (reverse agent-repl-test-wr--mounted) '("alpha" "beta"))))))
+
+(ert-deftest agent-repl-test-wr-losing-focus-mid-pass-still-mounts-the-remainder ()
+  "The interrupted queue: focus gone after the first mount must not strand the rest."
+  ;; Arrange — the pass opens focused, so the hold is already satisfied.
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta")
+      (agent-repl--webview-precreate-schedule '("alpha" "beta"))
+      (agent-repl-test-wr--focused
+        (agent-repl--webview-precreate-drain))
+      ;; Act — focus is lost before the second item's tick.
+      (agent-repl-test-wr--visible-unfocused
+        (agent-repl--webview-precreate-drain))
+      ;; Assert
+      (should (equal (reverse agent-repl-test-wr--mounted) '("alpha" "beta"))))))
+
+(ert-deftest agent-repl-test-wr-losing-focus-mid-pass-does-not-re-park ()
+  "An open pass has nothing to wake, so no second focus edge is owed."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta")
+      (agent-repl--webview-precreate-schedule '("alpha" "beta"))
+      (agent-repl-test-wr--focused
+        (agent-repl--webview-precreate-drain))
+      ;; Act
+      (agent-repl-test-wr--visible-unfocused
+        (agent-repl--webview-precreate-drain))
+      ;; Assert
+      (should (null agent-repl--webview-precreate-parked)))))
+
+(ert-deftest agent-repl-test-wr-a-focus-edge-opens-exactly-one-pass ()
+  "One look buys one pass, however many items that pass mounts."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (let ((opened 0))
+      (agent-repl-test-wr--eligible '("alpha" "beta")
+        (agent-repl--webview-precreate-schedule '("alpha" "beta"))
+        (agent-repl-test-wr--visible-unfocused
+          (agent-repl--webview-precreate-drain))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args)
+                     (when (string-search "precreate-pass-opened"
+                                          (apply #'format fmt args))
+                       (setq opened (1+ opened))))))
+          ;; Act
+          (agent-repl-test-wr--focused
+            (agent-repl--webview-precreate-on-focus-change)
+            (agent-repl-test-wr--drain-until-quiet))))
+      ;; Assert
+      (should (= opened 1)))))
+
+(ert-deftest agent-repl-test-wr-the-pass-closes-when-the-queue-empties ()
+  "A closed pass is what makes the hold apply in full to the next one."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha")
+      (agent-repl--webview-precreate-schedule '("alpha"))
+      ;; Act
+      (agent-repl-test-wr--focused
+        (agent-repl-test-wr--drain-until-quiet))
+      ;; Assert
+      (should (null agent-repl--webview-precreate-pass-open)))))
+
+(ert-deftest agent-repl-test-wr-a-later-schedule-is-held-again-after-a-pass-closed ()
+  "The relaxation is per pass, never a permanent licence to mount unfocused."
+  ;; Arrange — a first pass drains to completion while focused.
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta")
+      (agent-repl--webview-precreate-schedule '("alpha"))
+      (agent-repl-test-wr--focused
+        (agent-repl-test-wr--drain-until-quiet))
+      (setq agent-repl-test-wr--mounted nil)
+      ;; Act — a later workspace arrives while Emacs sits unfocused.
+      (agent-repl--webview-precreate-schedule '("beta"))
+      (agent-repl-test-wr--visible-unfocused
+        (agent-repl--webview-precreate-drain))
+      ;; Assert
+      (should (null agent-repl-test-wr--mounted)))))
+
+(ert-deftest agent-repl-test-wr-a-later-schedule-parks-again-after-a-pass-closed ()
+  "The held workspace is parked, so the next focus edge is what wakes it."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (agent-repl-test-wr--eligible '("alpha" "beta")
+      (agent-repl--webview-precreate-schedule '("alpha"))
+      (agent-repl-test-wr--focused
+        (agent-repl-test-wr--drain-until-quiet))
+      ;; Act
+      (agent-repl--webview-precreate-schedule '("beta"))
+      (agent-repl-test-wr--visible-unfocused
+        (agent-repl--webview-precreate-drain))
+      ;; Assert
+      (should agent-repl--webview-precreate-parked))))
+
+;;;; ---- The pass is readable afterwards ----
+
+(ert-deftest agent-repl-test-wr-an-opened-pass-is-recorded ()
+  "A drain that started has to say so, and how much it was owed."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (let ((logged nil))
+      (agent-repl-test-wr--eligible '("alpha" "beta")
+        (agent-repl--webview-precreate-schedule '("alpha" "beta"))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act
+          (agent-repl-test-wr--focused
+            (agent-repl--webview-precreate-drain))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (and (string-search "precreate-pass-opened" text)
+                               (string-search "queued=2" text)))
+                        logged)))))
+
+(ert-deftest agent-repl-test-wr-a-completed-pass-is-recorded ()
+  "A drain that finished has to say so, and how many pages it mounted."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (let ((logged nil))
+      (agent-repl-test-wr--eligible '("alpha" "beta")
+        (agent-repl--webview-precreate-schedule '("alpha" "beta"))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act
+          (agent-repl-test-wr--focused
+            (agent-repl-test-wr--drain-until-quiet))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (and (string-search "precreate-pass-completed" text)
+                               (string-search "mounted=2" text)))
+                        logged)))))
+
+(ert-deftest agent-repl-test-wr-a-resumed-drain-is-recorded ()
+  "A queue that came back to life has to be readable as such, not inferred."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (let ((logged nil))
+      (agent-repl-test-wr--eligible '("alpha")
+        (agent-repl--webview-precreate-schedule '("alpha"))
+        (agent-repl-test-wr--visible-unfocused
+          (agent-repl--webview-precreate-drain))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act
+          (agent-repl-test-wr--focused
+            (agent-repl--webview-precreate-on-focus-change))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (and (string-search "precreate-drained-on-focus" text)
+                               (string-search "reason=focus-edge" text)))
+                        logged)))))
+
+(ert-deftest agent-repl-test-wr-an-empty-queue-tick-records-no-pass ()
+  "Nothing owed is not a pass; a tick on an empty queue must stay silent."
+  ;; Arrange
+  (agent-repl-test-wr--with-queue
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-test-wr--focused
+          (agent-repl--webview-precreate-drain)))
+      ;; Assert
+      (should (null logged)))))
 
 ;;;; ---- The link-up edge ----
 
