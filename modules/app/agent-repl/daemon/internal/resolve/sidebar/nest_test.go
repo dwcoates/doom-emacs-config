@@ -261,3 +261,98 @@ func TestRecentlyMergedIsFlat(t *testing.T) {
 		t.Fatalf("the merged section drew %d rows, want both flat", len(rows))
 	}
 }
+
+// TestRosterDrawsACutFromTheDefaultBranchAtTheTopLevelEvenWhenAWorkspaceOccupiesIt
+// pins the one case that made every ordinary workspace a child: a repository's
+// own main worktree is a registered workspace sitting ON the default branch,
+// and every workspace created in that repository is cut from it.
+func TestRosterDrawsACutFromTheDefaultBranchAtTheTopLevelEvenWhenAWorkspaceOccupiesIt(t *testing.T) {
+	// Arrange: the repository's main worktree, on the default branch, beside a
+	// workspace cut from that same branch.
+	r, _ := newResolver(t)
+	main := workspace("w-main", "alpha")
+	main.Branch = repo.DefaultBranch
+	cut := workspace("w-cut", "second")
+	cut.ParentBranch = repo.DefaultBranch
+
+	// Act.
+	r.SetRegistry(registry(main, cut))
+
+	// Assert.
+	rows := repoRows(t, latest(t, r))
+	if got := rowNames(rows); len(got) != 2 {
+		t.Fatalf("the section drew %d top-level rows (%v), want both at the top level", len(got), got)
+	}
+}
+
+// TestRosterLetsPriorityReorderTwoWorkspacesCutFromTheDefaultBranch is
+// realtest 8's shape: the repository row and a workspace created inside it,
+// given priorities that contradict the order they were drawn in.
+func TestRosterLetsPriorityReorderTwoWorkspacesCutFromTheDefaultBranch(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	main := workspace("w-main", "alpha")
+	main.Branch = repo.DefaultBranch
+	second := workspace("w-second", "second")
+	second.ParentBranch = repo.DefaultBranch
+
+	// Act.
+	r.SetRegistry(registry(
+		prioritized(main, wsm.PriorityP3),
+		prioritized(second, wsm.PriorityP1),
+	))
+
+	// Assert.
+	want := []string{"second", "alpha"}
+	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, want) {
+		t.Fatalf("order = %v, want %v: priority orders the roster and nesting must not outrank it", got, want)
+	}
+}
+
+// TestRosterStillNestsARecordedChildCutFromTheDefaultBranch pins that the
+// exemption is about the DERIVATION only: a fork records its parent, and a
+// recorded parent is the fact itself.
+func TestRosterStillNestsARecordedChildCutFromTheDefaultBranch(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	main := workspace("w-main", "alpha")
+	main.Branch = repo.DefaultBranch
+	fork := workspace("w-fork", "fork")
+	fork.ParentBranch = repo.DefaultBranch
+	fork.Parent = &main.ID
+
+	// Act.
+	r.SetRegistry(registry(main, fork))
+
+	// Assert.
+	rows := repoRows(t, latest(t, r))
+	if len(rows) != 1 {
+		t.Fatalf("the section drew %d top-level rows, want only the recorded parent", len(rows))
+	}
+	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"fork"}) {
+		t.Fatalf("children = %v, want the recorded child", got)
+	}
+}
+
+// TestRosterNestsUnderANonDefaultBranchOccupiedByAnotherWorkspace pins that a
+// genuine branch lineage — a workspace cut from another workspace's feature
+// branch — still nests.
+func TestRosterNestsUnderANonDefaultBranchOccupiedByAnotherWorkspace(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	feature := workspace("w-feature", "feature")
+	child := workspace("w-child", "child")
+	child.ParentBranch = feature.Branch
+
+	// Act.
+	r.SetRegistry(registry(feature, child))
+
+	// Assert.
+	rows := repoRows(t, latest(t, r))
+	if len(rows) != 1 {
+		t.Fatalf("the section drew %d top-level rows, want only the branch's owner", len(rows))
+	}
+	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"child"}) {
+		t.Fatalf("children = %v, want the workspace cut from the feature branch", got)
+	}
+}

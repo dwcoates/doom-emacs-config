@@ -21,6 +21,17 @@ import (
 // A workspace with no recorded parent, cut from the repository's default
 // branch (or from any branch no workspace occupies), has no parent among the
 // rows and renders at the top level, which is the ordinary case.
+//
+// THE DEFAULT BRANCH IS NOT A FAMILY LINK, and stating that is what makes the
+// paragraph above true. A repository's own main worktree is itself a
+// registered workspace and it sits ON the default branch, so matching
+// ParentBranch against Branch made EVERY ordinary workspace in that repository
+// a child of the repository's own row. The tab bar flattens the forest
+// depth-first with a parent always ahead of its children, so a priority given
+// to such a "child" could never move it past its "parent": realtest 8 gave
+// `realtest-8-second` P1 and the repository row P3 and the drawn bar did not
+// move. A recorded parent still nests, because that is the fact itself; a
+// branch cut from the default branch is not a lineage, it is the default.
 
 // forest arranges one section's workspaces into parent/child order and answers
 // the roots, each carrying its children in roster order.
@@ -36,10 +47,15 @@ type forest struct {
 // the section's top level, because a row can only nest under a row that is
 // drawn beside it.
 //
+// defaultBranches names each repository's default branch, which the branch
+// lineage refuses to derive a family from; a repository it does not carry has
+// no default branch to exempt and every branch is read as lineage, exactly as
+// before.
+//
 // Every branch logs, and the two ways the lineage can be ill-formed — two
 // workspaces claiming the same branch, and a cycle — are recorded loudly and
 // resolved by leaving the row at the top level rather than dropping it.
-func nest(in []wsm.Workspace, log dlog.Logger) forest {
+func nest(in []wsm.Workspace, defaultBranches map[ids.RepoID]string, log dlog.Logger) forest {
 	ordered := sortWorkspaces(in)
 
 	byBranch := map[string]wsm.Workspace{}
@@ -77,6 +93,13 @@ func nest(in []wsm.Workspace, log dlog.Logger) forest {
 			continue
 		}
 		if ws.ParentBranch == "" {
+			continue
+		}
+		if base, known := defaultBranches[ws.Repo]; known && base != "" && ws.ParentBranch == base {
+			log.Debug("daemon.sidebar.nest",
+				"a workspace cut from its repository's default branch derives no family from it",
+				dlog.Context{"workspace_id": string(ws.ID), "repo_id": string(ws.Repo),
+					"default_branch": base})
 			continue
 		}
 		p, ok := byBranch[ws.ParentBranch]
