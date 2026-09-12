@@ -350,12 +350,10 @@ environment's instantiation struct to a plist."
 Written to the per-project data dir (`<root>/.claude/emacs/state.el');
 the input history goes alongside as `history.el'.
 
-Also rewrites the workspace roster snapshot
-(`agent-repl-workspace-snapshot-file') so the snapshot reflects the
-current `:project-dir' / `:priority' for this and all live workspaces.
-The snapshot used to save only at Emacs quit, which lost the roster on
-crash; pairing it with `state-save' makes the roster crash-safe at the
-same granularity as per-project state.
+This is a PER-PROJECT write and nothing more.  It once also rewrote a
+local workspace roster snapshot; that subsystem was retired when the
+daemon became the source of which workspaces exist, and the roster is
+now durable on the daemon's side rather than in a file Emacs mints.
 
 `:created-at' is set once — preferring the value already on the ws plist,
 then the value persisted in the existing on-disk state file, then
@@ -473,18 +471,7 @@ workspace's records route centrally on their own."
                              (agent-repl--collect-env-state ws))))
           (agent-repl--with-error-logging "state-save"
             (agent-repl--write-sexp-file file state)
-            (agent-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))))
-    ;; Roster write goes through the DEBOUNCED request, not a direct save:
-    ;; state-save fires on every state mutation, and a burst of mutations
-    ;; previously meant a burst of full-roster serializations on the main
-    ;; thread.  `--snapshot-save-request' coalesces them onto one idle timer
-    ;; (and writes synchronously when the delay is configured to 0).
-    (agent-repl--with-error-logging "state-save: snapshot"
-      (if (fboundp 'agent-repl--snapshot-save-request)
-          (progn
-            (agent-repl--snapshot-save-request)
-            (agent-repl--log ws "state-save: snapshot requested ws=%s" ws))
-        (agent-repl--warn ws "state-save: snapshot skipped ws=%s reason=function-unavailable" ws)))))
+            (agent-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))))))
 
 (defun agent-repl--validate-ws-env (ws)
   "Validate that workspace WS has well-formed environment state.
