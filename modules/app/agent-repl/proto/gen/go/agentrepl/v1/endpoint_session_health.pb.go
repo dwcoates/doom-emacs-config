@@ -337,6 +337,11 @@ type SessionFault struct {
 	//	*SessionFault_BounceUnknown
 	//	*SessionFault_ClassifierFailed
 	//	*SessionFault_ShimReported
+	//	*SessionFault_ConversationAbandoned
+	//	*SessionFault_SessionAbsent
+	//	*SessionFault_WatchOpenRefused
+	//	*SessionFault_DaemonStateUnreadable
+	//	*SessionFault_AdoptionWindowExpired
 	Kind          isSessionFault_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -458,6 +463,51 @@ func (x *SessionFault) GetShimReported() *SessionFaultShimReported {
 	return nil
 }
 
+func (x *SessionFault) GetConversationAbandoned() *SessionFaultConversationAbandoned {
+	if x != nil {
+		if x, ok := x.Kind.(*SessionFault_ConversationAbandoned); ok {
+			return x.ConversationAbandoned
+		}
+	}
+	return nil
+}
+
+func (x *SessionFault) GetSessionAbsent() *SessionFaultSessionAbsent {
+	if x != nil {
+		if x, ok := x.Kind.(*SessionFault_SessionAbsent); ok {
+			return x.SessionAbsent
+		}
+	}
+	return nil
+}
+
+func (x *SessionFault) GetWatchOpenRefused() *SessionFaultWatchOpenRefused {
+	if x != nil {
+		if x, ok := x.Kind.(*SessionFault_WatchOpenRefused); ok {
+			return x.WatchOpenRefused
+		}
+	}
+	return nil
+}
+
+func (x *SessionFault) GetDaemonStateUnreadable() *SessionFaultDaemonStateUnreadable {
+	if x != nil {
+		if x, ok := x.Kind.(*SessionFault_DaemonStateUnreadable); ok {
+			return x.DaemonStateUnreadable
+		}
+	}
+	return nil
+}
+
+func (x *SessionFault) GetAdoptionWindowExpired() *SessionFaultAdoptionWindowExpired {
+	if x != nil {
+		if x, ok := x.Kind.(*SessionFault_AdoptionWindowExpired); ok {
+			return x.AdoptionWindowExpired
+		}
+	}
+	return nil
+}
+
 type isSessionFault_Kind interface {
 	isSessionFault_Kind()
 }
@@ -502,6 +552,31 @@ type SessionFault_ShimReported struct {
 	ShimReported *SessionFaultShimReported `protobuf:"bytes,9,opt,name=shim_reported,json=shimReported,proto3,oneof"`
 }
 
+type SessionFault_ConversationAbandoned struct {
+	// A recorded conversation whose transcript was gone at bring-up.
+	ConversationAbandoned *SessionFaultConversationAbandoned `protobuf:"bytes,10,opt,name=conversation_abandoned,json=conversationAbandoned,proto3,oneof"`
+}
+
+type SessionFault_SessionAbsent struct {
+	// The liveness probe's own answer: there is no session here at all.
+	SessionAbsent *SessionFaultSessionAbsent `protobuf:"bytes,11,opt,name=session_absent,json=sessionAbsent,proto3,oneof"`
+}
+
+type SessionFault_WatchOpenRefused struct {
+	// The shim refused a watch open for a handle nothing announced.
+	WatchOpenRefused *SessionFaultWatchOpenRefused `protobuf:"bytes,12,opt,name=watch_open_refused,json=watchOpenRefused,proto3,oneof"`
+}
+
+type SessionFault_DaemonStateUnreadable struct {
+	// The daemon's own state client would not answer the fault read.
+	DaemonStateUnreadable *SessionFaultDaemonStateUnreadable `protobuf:"bytes,13,opt,name=daemon_state_unreadable,json=daemonStateUnreadable,proto3,oneof"`
+}
+
+type SessionFault_AdoptionWindowExpired struct {
+	// A handover whose adoption window ran out with this workspace unclaimed.
+	AdoptionWindowExpired *SessionFaultAdoptionWindowExpired `protobuf:"bytes,14,opt,name=adoption_window_expired,json=adoptionWindowExpired,proto3,oneof"`
+}
+
 func (*SessionFault_ShimStartFailed) isSessionFault_Kind() {}
 
 func (*SessionFault_ShimDied) isSessionFault_Kind() {}
@@ -517,6 +592,16 @@ func (*SessionFault_BounceUnknown) isSessionFault_Kind() {}
 func (*SessionFault_ClassifierFailed) isSessionFault_Kind() {}
 
 func (*SessionFault_ShimReported) isSessionFault_Kind() {}
+
+func (*SessionFault_ConversationAbandoned) isSessionFault_Kind() {}
+
+func (*SessionFault_SessionAbsent) isSessionFault_Kind() {}
+
+func (*SessionFault_WatchOpenRefused) isSessionFault_Kind() {}
+
+func (*SessionFault_DaemonStateUnreadable) isSessionFault_Kind() {}
+
+func (*SessionFault_AdoptionWindowExpired) isSessionFault_Kind() {}
 
 type SessionFaultShimStartFailed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -869,6 +954,252 @@ func (x *SessionFaultShimReported) GetKind() string {
 	return ""
 }
 
+// A recorded conversation whose transcript was gone at bring-up: the session
+// came up FRESH and the old vendor session id was left behind. NOT a failure
+// to serve — the workspace has a live session — it is the record of what was
+// abandoned, which is why it is its own arm and not a resume failure.
+type SessionFaultConversationAbandoned struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The vendor session id the bring-up abandoned.
+	VendorSessionId string `protobuf:"bytes,1,opt,name=vendor_session_id,json=vendorSessionId,proto3" json:"vendor_session_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SessionFaultConversationAbandoned) Reset() {
+	*x = SessionFaultConversationAbandoned{}
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionFaultConversationAbandoned) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionFaultConversationAbandoned) ProtoMessage() {}
+
+func (x *SessionFaultConversationAbandoned) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionFaultConversationAbandoned.ProtoReflect.Descriptor instead.
+func (*SessionFaultConversationAbandoned) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *SessionFaultConversationAbandoned) GetVendorSessionId() string {
+	if x != nil {
+		return x.VendorSessionId
+	}
+	return ""
+}
+
+// The LIVENESS PROBE'S OWN observation: this workspace has no live session at
+// all. Nothing RAISED it — no shim reported it and no controller opened it, so
+// it is never a recorded fault — it is what the probe answers when there is
+// nothing there to answer for itself. Empty: the arm is the whole fact.
+type SessionFaultSessionAbsent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionFaultSessionAbsent) Reset() {
+	*x = SessionFaultSessionAbsent{}
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionFaultSessionAbsent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionFaultSessionAbsent) ProtoMessage() {}
+
+func (x *SessionFaultSessionAbsent) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionFaultSessionAbsent.ProtoReflect.Descriptor instead.
+func (*SessionFaultSessionAbsent) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{15}
+}
+
+// A shim watch OPEN the shim REFUSED for a handle nothing announced: the
+// daemon and the shim disagree about what exists. NOT a severed link — the
+// shim answered the open, so the hop is serving and a redial would change
+// nothing, which is why it is its own arm beside link_severed.
+type SessionFaultWatchOpenRefused struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The watch operation whose open was refused.
+	Operation string `protobuf:"bytes,1,opt,name=operation,proto3" json:"operation,omitempty"`
+	// The handle the refused open named.
+	Handle        string `protobuf:"bytes,2,opt,name=handle,proto3" json:"handle,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionFaultWatchOpenRefused) Reset() {
+	*x = SessionFaultWatchOpenRefused{}
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionFaultWatchOpenRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionFaultWatchOpenRefused) ProtoMessage() {}
+
+func (x *SessionFaultWatchOpenRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionFaultWatchOpenRefused.ProtoReflect.Descriptor instead.
+func (*SessionFaultWatchOpenRefused) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SessionFaultWatchOpenRefused) GetOperation() string {
+	if x != nil {
+		return x.Operation
+	}
+	return ""
+}
+
+func (x *SessionFaultWatchOpenRefused) GetHandle() string {
+	if x != nil {
+		return x.Handle
+	}
+	return ""
+}
+
+// The health reporter's own fault: the daemon's state client would not answer,
+// so the workspace's recorded faults could not be read at all. It says THE
+// ANSWER IS INCOMPLETE, not that the session is broken — every other arm here
+// is a condition of the session, and this one is a condition of the reporting.
+type SessionFaultDaemonStateUnreadable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The state client's own account of the refusal.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionFaultDaemonStateUnreadable) Reset() {
+	*x = SessionFaultDaemonStateUnreadable{}
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionFaultDaemonStateUnreadable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionFaultDaemonStateUnreadable) ProtoMessage() {}
+
+func (x *SessionFaultDaemonStateUnreadable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionFaultDaemonStateUnreadable.ProtoReflect.Descriptor instead.
+func (*SessionFaultDaemonStateUnreadable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *SessionFaultDaemonStateUnreadable) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// A handover whose adoption window ran out with this workspace unclaimed: the
+// successor never took it. DaemonFault spells the DAEMON-scoped arm; this is
+// the WORKSPACE's own, because the rollout controller records the expiry
+// against the workspace it was handing over and the daemon-health filter
+// (workspace-bound faults are SessionHealth's answer) passes it here.
+type SessionFaultAdoptionWindowExpired struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How long the window was, as the controller rendered it ("30s").
+	AdoptionWindow string `protobuf:"bytes,1,opt,name=adoption_window,json=adoptionWindow,proto3" json:"adoption_window,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SessionFaultAdoptionWindowExpired) Reset() {
+	*x = SessionFaultAdoptionWindowExpired{}
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionFaultAdoptionWindowExpired) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionFaultAdoptionWindowExpired) ProtoMessage() {}
+
+func (x *SessionFaultAdoptionWindowExpired) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionFaultAdoptionWindowExpired.ProtoReflect.Descriptor instead.
+func (*SessionFaultAdoptionWindowExpired) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SessionFaultAdoptionWindowExpired) GetAdoptionWindow() string {
+	if x != nil {
+		return x.AdoptionWindow
+	}
+	return ""
+}
+
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type SessionHealthError struct {
@@ -886,7 +1217,7 @@ type SessionHealthError struct {
 
 func (x *SessionHealthError) Reset() {
 	*x = SessionHealthError{}
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -898,7 +1229,7 @@ func (x *SessionHealthError) String() string {
 func (*SessionHealthError) ProtoMessage() {}
 
 func (x *SessionHealthError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -911,7 +1242,7 @@ func (x *SessionHealthError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthError.ProtoReflect.Descriptor instead.
 func (*SessionHealthError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SessionHealthError) GetCause() isSessionHealthError_Cause {
@@ -997,7 +1328,7 @@ type SessionHealthUnknownWorkspace struct {
 
 func (x *SessionHealthUnknownWorkspace) Reset() {
 	*x = SessionHealthUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1009,7 +1340,7 @@ func (x *SessionHealthUnknownWorkspace) String() string {
 func (*SessionHealthUnknownWorkspace) ProtoMessage() {}
 
 func (x *SessionHealthUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1022,7 +1353,7 @@ func (x *SessionHealthUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*SessionHealthUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{20}
 }
 
 type SessionHealthWorkspaceRefMismatch struct {
@@ -1035,7 +1366,7 @@ type SessionHealthWorkspaceRefMismatch struct {
 
 func (x *SessionHealthWorkspaceRefMismatch) Reset() {
 	*x = SessionHealthWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1047,7 +1378,7 @@ func (x *SessionHealthWorkspaceRefMismatch) String() string {
 func (*SessionHealthWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *SessionHealthWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1060,7 +1391,7 @@ func (x *SessionHealthWorkspaceRefMismatch) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SessionHealthWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*SessionHealthWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SessionHealthWorkspaceRefMismatch) GetRegistryDir() string {
@@ -1080,7 +1411,7 @@ type SessionHealthTransferringAway struct {
 
 func (x *SessionHealthTransferringAway) Reset() {
 	*x = SessionHealthTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1092,7 +1423,7 @@ func (x *SessionHealthTransferringAway) String() string {
 func (*SessionHealthTransferringAway) ProtoMessage() {}
 
 func (x *SessionHealthTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1105,7 +1436,7 @@ func (x *SessionHealthTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthTransferringAway.ProtoReflect.Descriptor instead.
 func (*SessionHealthTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SessionHealthTransferringAway) GetAddress() string {
@@ -1123,7 +1454,7 @@ type SessionHealthNotYetAdopted struct {
 
 func (x *SessionHealthNotYetAdopted) Reset() {
 	*x = SessionHealthNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1135,7 +1466,7 @@ func (x *SessionHealthNotYetAdopted) String() string {
 func (*SessionHealthNotYetAdopted) ProtoMessage() {}
 
 func (x *SessionHealthNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1148,7 +1479,7 @@ func (x *SessionHealthNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SessionHealthNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{23}
 }
 
 var File_agentrepl_v1_endpoint_session_health_proto protoreflect.FileDescriptor
@@ -1168,7 +1499,7 @@ const file_agentrepl_v1_endpoint_session_health_proto_rawDesc = "" +
 	"\x06health\"\x10\n" +
 	"\x0eSessionHealthy\"F\n" +
 	"\x10SessionUnhealthy\x122\n" +
-	"\x06faults\x18\x01 \x03(\v2\x1a.agentrepl.v1.SessionFaultR\x06faults\"\xaa\x05\n" +
+	"\x06faults\x18\x01 \x03(\v2\x1a.agentrepl.v1.SessionFaultR\x06faults\"\x98\t\n" +
 	"\fSessionFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12W\n" +
 	"\x11shim_start_failed\x18\x02 \x01(\v2).agentrepl.v1.SessionFaultShimStartFailedH\x00R\x0fshimStartFailed\x12A\n" +
@@ -1179,7 +1510,13 @@ const file_agentrepl_v1_endpoint_session_health_proto_rawDesc = "" +
 	"bounceDied\x12P\n" +
 	"\x0ebounce_unknown\x18\a \x01(\v2'.agentrepl.v1.SessionFaultBounceUnknownH\x00R\rbounceUnknown\x12Y\n" +
 	"\x11classifier_failed\x18\b \x01(\v2*.agentrepl.v1.SessionFaultClassifierFailedH\x00R\x10classifierFailed\x12M\n" +
-	"\rshim_reported\x18\t \x01(\v2&.agentrepl.v1.SessionFaultShimReportedH\x00R\fshimReportedB\x06\n" +
+	"\rshim_reported\x18\t \x01(\v2&.agentrepl.v1.SessionFaultShimReportedH\x00R\fshimReported\x12h\n" +
+	"\x16conversation_abandoned\x18\n" +
+	" \x01(\v2/.agentrepl.v1.SessionFaultConversationAbandonedH\x00R\x15conversationAbandoned\x12P\n" +
+	"\x0esession_absent\x18\v \x01(\v2'.agentrepl.v1.SessionFaultSessionAbsentH\x00R\rsessionAbsent\x12Z\n" +
+	"\x12watch_open_refused\x18\f \x01(\v2*.agentrepl.v1.SessionFaultWatchOpenRefusedH\x00R\x10watchOpenRefused\x12i\n" +
+	"\x17daemon_state_unreadable\x18\r \x01(\v2/.agentrepl.v1.SessionFaultDaemonStateUnreadableH\x00R\x15daemonStateUnreadable\x12i\n" +
+	"\x17adoption_window_expired\x18\x0e \x01(\v2/.agentrepl.v1.SessionFaultAdoptionWindowExpiredH\x00R\x15adoptionWindowExpiredB\x06\n" +
 	"\x04kind\"[\n" +
 	"\x1bSessionFaultShimStartFailed\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x1f\n" +
@@ -1196,7 +1533,17 @@ const file_agentrepl_v1_endpoint_session_health_proto_rawDesc = "" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"L\n" +
 	"\x18SessionFaultShimReported\x12\x1c\n" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x12\n" +
-	"\x04kind\x18\x02 \x01(\tR\x04kind\"\x92\x03\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\"O\n" +
+	"!SessionFaultConversationAbandoned\x12*\n" +
+	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\"\x1b\n" +
+	"\x19SessionFaultSessionAbsent\"T\n" +
+	"\x1cSessionFaultWatchOpenRefused\x12\x1c\n" +
+	"\toperation\x18\x01 \x01(\tR\toperation\x12\x16\n" +
+	"\x06handle\x18\x02 \x01(\tR\x06handle\"9\n" +
+	"!SessionFaultDaemonStateUnreadable\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"L\n" +
+	"!SessionFaultAdoptionWindowExpired\x12'\n" +
+	"\x0fadoption_window\x18\x01 \x01(\tR\x0eadoptionWindow\"\x92\x03\n" +
 	"\x12SessionHealthError\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.SessionHealthUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.SessionHealthWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
@@ -1222,7 +1569,7 @@ func file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_session_health_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_session_health_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_agentrepl_v1_endpoint_session_health_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_agentrepl_v1_endpoint_session_health_proto_goTypes = []any{
 	(*SessionHealthRequest)(nil),              // 0: agentrepl.v1.SessionHealthRequest
 	(*SessionHealthResponse)(nil),             // 1: agentrepl.v1.SessionHealthResponse
@@ -1238,17 +1585,22 @@ var file_agentrepl_v1_endpoint_session_health_proto_goTypes = []any{
 	(*SessionFaultBounceUnknown)(nil),         // 11: agentrepl.v1.SessionFaultBounceUnknown
 	(*SessionFaultClassifierFailed)(nil),      // 12: agentrepl.v1.SessionFaultClassifierFailed
 	(*SessionFaultShimReported)(nil),          // 13: agentrepl.v1.SessionFaultShimReported
-	(*SessionHealthError)(nil),                // 14: agentrepl.v1.SessionHealthError
-	(*SessionHealthUnknownWorkspace)(nil),     // 15: agentrepl.v1.SessionHealthUnknownWorkspace
-	(*SessionHealthWorkspaceRefMismatch)(nil), // 16: agentrepl.v1.SessionHealthWorkspaceRefMismatch
-	(*SessionHealthTransferringAway)(nil),     // 17: agentrepl.v1.SessionHealthTransferringAway
-	(*SessionHealthNotYetAdopted)(nil),        // 18: agentrepl.v1.SessionHealthNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                   // 19: workspace.v1.WorkspaceRef
+	(*SessionFaultConversationAbandoned)(nil), // 14: agentrepl.v1.SessionFaultConversationAbandoned
+	(*SessionFaultSessionAbsent)(nil),         // 15: agentrepl.v1.SessionFaultSessionAbsent
+	(*SessionFaultWatchOpenRefused)(nil),      // 16: agentrepl.v1.SessionFaultWatchOpenRefused
+	(*SessionFaultDaemonStateUnreadable)(nil), // 17: agentrepl.v1.SessionFaultDaemonStateUnreadable
+	(*SessionFaultAdoptionWindowExpired)(nil), // 18: agentrepl.v1.SessionFaultAdoptionWindowExpired
+	(*SessionHealthError)(nil),                // 19: agentrepl.v1.SessionHealthError
+	(*SessionHealthUnknownWorkspace)(nil),     // 20: agentrepl.v1.SessionHealthUnknownWorkspace
+	(*SessionHealthWorkspaceRefMismatch)(nil), // 21: agentrepl.v1.SessionHealthWorkspaceRefMismatch
+	(*SessionHealthTransferringAway)(nil),     // 22: agentrepl.v1.SessionHealthTransferringAway
+	(*SessionHealthNotYetAdopted)(nil),        // 23: agentrepl.v1.SessionHealthNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                   // 24: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_session_health_proto_depIdxs = []int32{
-	19, // 0: agentrepl.v1.SessionHealthRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	24, // 0: agentrepl.v1.SessionHealthRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.SessionHealthResponse.success:type_name -> agentrepl.v1.SessionHealthSuccess
-	14, // 2: agentrepl.v1.SessionHealthResponse.error:type_name -> agentrepl.v1.SessionHealthError
+	19, // 2: agentrepl.v1.SessionHealthResponse.error:type_name -> agentrepl.v1.SessionHealthError
 	3,  // 3: agentrepl.v1.SessionHealthSuccess.healthy:type_name -> agentrepl.v1.SessionHealthy
 	4,  // 4: agentrepl.v1.SessionHealthSuccess.unhealthy:type_name -> agentrepl.v1.SessionUnhealthy
 	5,  // 5: agentrepl.v1.SessionUnhealthy.faults:type_name -> agentrepl.v1.SessionFault
@@ -1260,15 +1612,20 @@ var file_agentrepl_v1_endpoint_session_health_proto_depIdxs = []int32{
 	11, // 11: agentrepl.v1.SessionFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
 	12, // 12: agentrepl.v1.SessionFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
 	13, // 13: agentrepl.v1.SessionFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
-	15, // 14: agentrepl.v1.SessionHealthError.unknown_workspace:type_name -> agentrepl.v1.SessionHealthUnknownWorkspace
-	16, // 15: agentrepl.v1.SessionHealthError.workspace_ref_mismatch:type_name -> agentrepl.v1.SessionHealthWorkspaceRefMismatch
-	17, // 16: agentrepl.v1.SessionHealthError.transferring_away:type_name -> agentrepl.v1.SessionHealthTransferringAway
-	18, // 17: agentrepl.v1.SessionHealthError.not_yet_adopted:type_name -> agentrepl.v1.SessionHealthNotYetAdopted
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	14, // 14: agentrepl.v1.SessionFault.conversation_abandoned:type_name -> agentrepl.v1.SessionFaultConversationAbandoned
+	15, // 15: agentrepl.v1.SessionFault.session_absent:type_name -> agentrepl.v1.SessionFaultSessionAbsent
+	16, // 16: agentrepl.v1.SessionFault.watch_open_refused:type_name -> agentrepl.v1.SessionFaultWatchOpenRefused
+	17, // 17: agentrepl.v1.SessionFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
+	18, // 18: agentrepl.v1.SessionFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
+	20, // 19: agentrepl.v1.SessionHealthError.unknown_workspace:type_name -> agentrepl.v1.SessionHealthUnknownWorkspace
+	21, // 20: agentrepl.v1.SessionHealthError.workspace_ref_mismatch:type_name -> agentrepl.v1.SessionHealthWorkspaceRefMismatch
+	22, // 21: agentrepl.v1.SessionHealthError.transferring_away:type_name -> agentrepl.v1.SessionHealthTransferringAway
+	23, // 22: agentrepl.v1.SessionHealthError.not_yet_adopted:type_name -> agentrepl.v1.SessionHealthNotYetAdopted
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_session_health_proto_init() }
@@ -1293,8 +1650,13 @@ func file_agentrepl_v1_endpoint_session_health_proto_init() {
 		(*SessionFault_BounceUnknown)(nil),
 		(*SessionFault_ClassifierFailed)(nil),
 		(*SessionFault_ShimReported)(nil),
+		(*SessionFault_ConversationAbandoned)(nil),
+		(*SessionFault_SessionAbsent)(nil),
+		(*SessionFault_WatchOpenRefused)(nil),
+		(*SessionFault_DaemonStateUnreadable)(nil),
+		(*SessionFault_AdoptionWindowExpired)(nil),
 	}
-	file_agentrepl_v1_endpoint_session_health_proto_msgTypes[14].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_session_health_proto_msgTypes[19].OneofWrappers = []any{
 		(*SessionHealthError_UnknownWorkspace)(nil),
 		(*SessionHealthError_WorkspaceRefMismatch)(nil),
 		(*SessionHealthError_TransferringAway)(nil),
@@ -1306,7 +1668,7 @@ func file_agentrepl_v1_endpoint_session_health_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_session_health_proto_rawDesc), len(file_agentrepl_v1_endpoint_session_health_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_session_health.proto.
  */
 export const file_agentrepl_v1_endpoint_session_health: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2Vzc2lvbl9oZWFsdGgucHJvdG8SDGFnZW50cmVwbC52MSJFChRTZXNzaW9uSGVhbHRoUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVTZXNzaW9uSGVhbHRoUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhFcnJvckgAQggKBnJlc3VsdCKGAQoUU2Vzc2lvbkhlYWx0aFN1Y2Nlc3MSLwoHaGVhbHRoeRgBIAEoCzIcLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoeUgAEjMKCXVuaGVhbHRoeRgCIAEoCzIeLmFnZW50cmVwbC52MS5TZXNzaW9uVW5oZWFsdGh5SABCCAoGaGVhbHRoIhAKDlNlc3Npb25IZWFsdGh5Ij4KEFNlc3Npb25VbmhlYWx0aHkSKgoGZmF1bHRzGAEgAygLMhouYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdCKxBAoMU2Vzc2lvbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJGChFzaGltX3N0YXJ0X2ZhaWxlZBgCIAEoCzIpLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltU3RhcnRGYWlsZWRIABI3CglzaGltX2RpZWQYAyABKAsyIi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0U2hpbURpZWRIABI9CgxsaW5rX3NldmVyZWQYBCABKAsyJS5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0TGlua1NldmVyZWRIABI/Cg1yZXN1bWVfZmFpbGVkGAUgASgLMiYuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFJlc3VtZUZhaWxlZEgAEjsKC2JvdW5jZV9kaWVkGAYgASgLMiQuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZURpZWRIABJBCg5ib3VuY2VfdW5rbm93bhgHIAEoCzInLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRCb3VuY2VVbmtub3duSAASRwoRY2xhc3NpZmllcl9mYWlsZWQYCCABKAsyKi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Q2xhc3NpZmllckZhaWxlZEgAEj8KDXNoaW1fcmVwb3J0ZWQYCSABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0U2hpbVJlcG9ydGVkSABCBgoEa2luZCJFChtTZXNzaW9uRmF1bHRTaGltU3RhcnRGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEhMKC3N0ZGVycl90YWlsGAIgASgJIikKFFNlc3Npb25GYXVsdFNoaW1EaWVkEhEKCWV4aXRfY29kZRgBIAEoBSIZChdTZXNzaW9uRmF1bHRMaW5rU2V2ZXJlZCIpChhTZXNzaW9uRmF1bHRSZXN1bWVGYWlsZWQSDQoFY2F1c2UYASABKAkiGAoWU2Vzc2lvbkZhdWx0Qm91bmNlRGllZCIbChlTZXNzaW9uRmF1bHRCb3VuY2VVbmtub3duIi4KHFNlc3Npb25GYXVsdENsYXNzaWZpZXJGYWlsZWQSDgoGZGV0YWlsGAEgASgJIjsKGFNlc3Npb25GYXVsdFNoaW1SZXBvcnRlZBIRCgljb21wb25lbnQYASABKAkSDAoEa2luZBgCIAEoCSLJAgoSU2Vzc2lvbkhlYWx0aEVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIh8KHVNlc3Npb25IZWFsdGhVbmtub3duV29ya3NwYWNlIjkKIVNlc3Npb25IZWFsdGhXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodU2Vzc2lvbkhlYWx0aFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpTZXNzaW9uSGVhbHRoTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2Vzc2lvbl9oZWFsdGgucHJvdG8SDGFnZW50cmVwbC52MSJFChRTZXNzaW9uSGVhbHRoUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVTZXNzaW9uSGVhbHRoUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhFcnJvckgAQggKBnJlc3VsdCKGAQoUU2Vzc2lvbkhlYWx0aFN1Y2Nlc3MSLwoHaGVhbHRoeRgBIAEoCzIcLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoeUgAEjMKCXVuaGVhbHRoeRgCIAEoCzIeLmFnZW50cmVwbC52MS5TZXNzaW9uVW5oZWFsdGh5SABCCAoGaGVhbHRoIhAKDlNlc3Npb25IZWFsdGh5Ij4KEFNlc3Npb25VbmhlYWx0aHkSKgoGZmF1bHRzGAEgAygLMhouYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdCK5BwoMU2Vzc2lvbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJGChFzaGltX3N0YXJ0X2ZhaWxlZBgCIAEoCzIpLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltU3RhcnRGYWlsZWRIABI3CglzaGltX2RpZWQYAyABKAsyIi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0U2hpbURpZWRIABI9CgxsaW5rX3NldmVyZWQYBCABKAsyJS5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0TGlua1NldmVyZWRIABI/Cg1yZXN1bWVfZmFpbGVkGAUgASgLMiYuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFJlc3VtZUZhaWxlZEgAEjsKC2JvdW5jZV9kaWVkGAYgASgLMiQuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZURpZWRIABJBCg5ib3VuY2VfdW5rbm93bhgHIAEoCzInLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRCb3VuY2VVbmtub3duSAASRwoRY2xhc3NpZmllcl9mYWlsZWQYCCABKAsyKi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Q2xhc3NpZmllckZhaWxlZEgAEj8KDXNoaW1fcmVwb3J0ZWQYCSABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0U2hpbVJlcG9ydGVkSAASUQoWY29udmVyc2F0aW9uX2FiYW5kb25lZBgKIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRDb252ZXJzYXRpb25BYmFuZG9uZWRIABJBCg5zZXNzaW9uX2Fic2VudBgLIAEoCzInLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTZXNzaW9uQWJzZW50SAASSAoSd2F0Y2hfb3Blbl9yZWZ1c2VkGAwgASgLMiouYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFdhdGNoT3BlblJlZnVzZWRIABJSChdkYWVtb25fc3RhdGVfdW5yZWFkYWJsZRgNIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGVIABJSChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgOIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWRIAEIGCgRraW5kIkUKG1Nlc3Npb25GYXVsdFNoaW1TdGFydEZhaWxlZBIRCglleGl0X2NvZGUYASABKAUSEwoLc3RkZXJyX3RhaWwYAiABKAkiKQoUU2Vzc2lvbkZhdWx0U2hpbURpZWQSEQoJZXhpdF9jb2RlGAEgASgFIhkKF1Nlc3Npb25GYXVsdExpbmtTZXZlcmVkIikKGFNlc3Npb25GYXVsdFJlc3VtZUZhaWxlZBINCgVjYXVzZRgBIAEoCSIYChZTZXNzaW9uRmF1bHRCb3VuY2VEaWVkIhsKGVNlc3Npb25GYXVsdEJvdW5jZVVua25vd24iLgocU2Vzc2lvbkZhdWx0Q2xhc3NpZmllckZhaWxlZBIOCgZkZXRhaWwYASABKAkiOwoYU2Vzc2lvbkZhdWx0U2hpbVJlcG9ydGVkEhEKCWNvbXBvbmVudBgBIAEoCRIMCgRraW5kGAIgASgJIj4KIVNlc3Npb25GYXVsdENvbnZlcnNhdGlvbkFiYW5kb25lZBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCSIbChlTZXNzaW9uRmF1bHRTZXNzaW9uQWJzZW50IkEKHFNlc3Npb25GYXVsdFdhdGNoT3BlblJlZnVzZWQSEQoJb3BlcmF0aW9uGAEgASgJEg4KBmhhbmRsZRgCIAEoCSIyCiFTZXNzaW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGUSDQoFY2F1c2UYASABKAkiPAohU2Vzc2lvbkZhdWx0QWRvcHRpb25XaW5kb3dFeHBpcmVkEhcKD2Fkb3B0aW9uX3dpbmRvdxgBIAEoCSLJAgoSU2Vzc2lvbkhlYWx0aEVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIh8KHVNlc3Npb25IZWFsdGhVbmtub3duV29ya3NwYWNlIjkKIVNlc3Npb25IZWFsdGhXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodU2Vzc2lvbkhlYWx0aFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpTZXNzaW9uSGVhbHRoTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SessionHealthRequest
@@ -214,6 +214,46 @@ export type SessionFault = Message<"agentrepl.v1.SessionFault"> & {
      */
     value: SessionFaultShimReported;
     case: "shimReported";
+  } | {
+    /**
+     * A recorded conversation whose transcript was gone at bring-up.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultConversationAbandoned conversation_abandoned = 10;
+     */
+    value: SessionFaultConversationAbandoned;
+    case: "conversationAbandoned";
+  } | {
+    /**
+     * The liveness probe's own answer: there is no session here at all.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultSessionAbsent session_absent = 11;
+     */
+    value: SessionFaultSessionAbsent;
+    case: "sessionAbsent";
+  } | {
+    /**
+     * The shim refused a watch open for a handle nothing announced.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultWatchOpenRefused watch_open_refused = 12;
+     */
+    value: SessionFaultWatchOpenRefused;
+    case: "watchOpenRefused";
+  } | {
+    /**
+     * The daemon's own state client would not answer the fault read.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultDaemonStateUnreadable daemon_state_unreadable = 13;
+     */
+    value: SessionFaultDaemonStateUnreadable;
+    case: "daemonStateUnreadable";
+  } | {
+    /**
+     * A handover whose adoption window ran out with this workspace unclaimed.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultAdoptionWindowExpired adoption_window_expired = 14;
+     */
+    value: SessionFaultAdoptionWindowExpired;
+    case: "adoptionWindowExpired";
   } | { case: undefined; value?: undefined };
 };
 
@@ -373,6 +413,128 @@ export const SessionFaultShimReportedSchema: GenMessage<SessionFaultShimReported
   messageDesc(file_agentrepl_v1_endpoint_session_health, 13);
 
 /**
+ * A recorded conversation whose transcript was gone at bring-up: the session
+ * came up FRESH and the old vendor session id was left behind. NOT a failure
+ * to serve — the workspace has a live session — it is the record of what was
+ * abandoned, which is why it is its own arm and not a resume failure.
+ *
+ * @generated from message agentrepl.v1.SessionFaultConversationAbandoned
+ */
+export type SessionFaultConversationAbandoned = Message<"agentrepl.v1.SessionFaultConversationAbandoned"> & {
+  /**
+   * The vendor session id the bring-up abandoned.
+   *
+   * @generated from field: string vendor_session_id = 1;
+   */
+  vendorSessionId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SessionFaultConversationAbandoned.
+ * Use `create(SessionFaultConversationAbandonedSchema)` to create a new message.
+ */
+export const SessionFaultConversationAbandonedSchema: GenMessage<SessionFaultConversationAbandoned> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 14);
+
+/**
+ * The LIVENESS PROBE'S OWN observation: this workspace has no live session at
+ * all. Nothing RAISED it — no shim reported it and no controller opened it, so
+ * it is never a recorded fault — it is what the probe answers when there is
+ * nothing there to answer for itself. Empty: the arm is the whole fact.
+ *
+ * @generated from message agentrepl.v1.SessionFaultSessionAbsent
+ */
+export type SessionFaultSessionAbsent = Message<"agentrepl.v1.SessionFaultSessionAbsent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SessionFaultSessionAbsent.
+ * Use `create(SessionFaultSessionAbsentSchema)` to create a new message.
+ */
+export const SessionFaultSessionAbsentSchema: GenMessage<SessionFaultSessionAbsent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 15);
+
+/**
+ * A shim watch OPEN the shim REFUSED for a handle nothing announced: the
+ * daemon and the shim disagree about what exists. NOT a severed link — the
+ * shim answered the open, so the hop is serving and a redial would change
+ * nothing, which is why it is its own arm beside link_severed.
+ *
+ * @generated from message agentrepl.v1.SessionFaultWatchOpenRefused
+ */
+export type SessionFaultWatchOpenRefused = Message<"agentrepl.v1.SessionFaultWatchOpenRefused"> & {
+  /**
+   * The watch operation whose open was refused.
+   *
+   * @generated from field: string operation = 1;
+   */
+  operation: string;
+
+  /**
+   * The handle the refused open named.
+   *
+   * @generated from field: string handle = 2;
+   */
+  handle: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SessionFaultWatchOpenRefused.
+ * Use `create(SessionFaultWatchOpenRefusedSchema)` to create a new message.
+ */
+export const SessionFaultWatchOpenRefusedSchema: GenMessage<SessionFaultWatchOpenRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 16);
+
+/**
+ * The health reporter's own fault: the daemon's state client would not answer,
+ * so the workspace's recorded faults could not be read at all. It says THE
+ * ANSWER IS INCOMPLETE, not that the session is broken — every other arm here
+ * is a condition of the session, and this one is a condition of the reporting.
+ *
+ * @generated from message agentrepl.v1.SessionFaultDaemonStateUnreadable
+ */
+export type SessionFaultDaemonStateUnreadable = Message<"agentrepl.v1.SessionFaultDaemonStateUnreadable"> & {
+  /**
+   * The state client's own account of the refusal.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SessionFaultDaemonStateUnreadable.
+ * Use `create(SessionFaultDaemonStateUnreadableSchema)` to create a new message.
+ */
+export const SessionFaultDaemonStateUnreadableSchema: GenMessage<SessionFaultDaemonStateUnreadable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 17);
+
+/**
+ * A handover whose adoption window ran out with this workspace unclaimed: the
+ * successor never took it. DaemonFault spells the DAEMON-scoped arm; this is
+ * the WORKSPACE's own, because the rollout controller records the expiry
+ * against the workspace it was handing over and the daemon-health filter
+ * (workspace-bound faults are SessionHealth's answer) passes it here.
+ *
+ * @generated from message agentrepl.v1.SessionFaultAdoptionWindowExpired
+ */
+export type SessionFaultAdoptionWindowExpired = Message<"agentrepl.v1.SessionFaultAdoptionWindowExpired"> & {
+  /**
+   * How long the window was, as the controller rendered it ("30s").
+   *
+   * @generated from field: string adoption_window = 1;
+   */
+  adoptionWindow: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SessionFaultAdoptionWindowExpired.
+ * Use `create(SessionFaultAdoptionWindowExpiredSchema)` to create a new message.
+ */
+export const SessionFaultAdoptionWindowExpiredSchema: GenMessage<SessionFaultAdoptionWindowExpired> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 18);
+
+/**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
  * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
@@ -422,7 +584,7 @@ export type SessionHealthError = Message<"agentrepl.v1.SessionHealthError"> & {
  * Use `create(SessionHealthErrorSchema)` to create a new message.
  */
 export const SessionHealthErrorSchema: GenMessage<SessionHealthError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_session_health, 14);
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 19);
 
 /**
  * @generated from message agentrepl.v1.SessionHealthUnknownWorkspace
@@ -435,7 +597,7 @@ export type SessionHealthUnknownWorkspace = Message<"agentrepl.v1.SessionHealthU
  * Use `create(SessionHealthUnknownWorkspaceSchema)` to create a new message.
  */
 export const SessionHealthUnknownWorkspaceSchema: GenMessage<SessionHealthUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_session_health, 15);
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 20);
 
 /**
  * @generated from message agentrepl.v1.SessionHealthWorkspaceRefMismatch
@@ -454,7 +616,7 @@ export type SessionHealthWorkspaceRefMismatch = Message<"agentrepl.v1.SessionHea
  * Use `create(SessionHealthWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const SessionHealthWorkspaceRefMismatchSchema: GenMessage<SessionHealthWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_session_health, 16);
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 21);
 
 /**
  * @generated from message agentrepl.v1.SessionHealthTransferringAway
@@ -473,7 +635,7 @@ export type SessionHealthTransferringAway = Message<"agentrepl.v1.SessionHealthT
  * Use `create(SessionHealthTransferringAwaySchema)` to create a new message.
  */
 export const SessionHealthTransferringAwaySchema: GenMessage<SessionHealthTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_session_health, 17);
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 22);
 
 /**
  * @generated from message agentrepl.v1.SessionHealthNotYetAdopted
@@ -486,5 +648,5 @@ export type SessionHealthNotYetAdopted = Message<"agentrepl.v1.SessionHealthNotY
  * Use `create(SessionHealthNotYetAdoptedSchema)` to create a new message.
  */
 export const SessionHealthNotYetAdoptedSchema: GenMessage<SessionHealthNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_session_health, 18);
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 23);
 

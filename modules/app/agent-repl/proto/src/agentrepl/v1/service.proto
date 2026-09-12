@@ -24,6 +24,7 @@ import "agentrepl/v1/endpoint_create_workspace.proto";
 import "agentrepl/v1/endpoint_open_workspace.proto";
 import "agentrepl/v1/endpoint_close_workspace.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
+import "agentrepl/v1/endpoint_forget_workspace.proto";
 import "agentrepl/v1/endpoint_nuke_workspace.proto";
 import "agentrepl/v1/endpoint_merge_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
@@ -115,6 +116,9 @@ service AgentRepl {
   rpc KillWorkspace(KillWorkspaceRequest) returns (KillWorkspaceResponse);
   // Data destruction: kill if live, then delete worktree and branch.
   rpc NukeWorkspace(NukeWorkspaceRequest) returns (NukeWorkspaceResponse);
+  // Remove a CLOSED workspace's registry record; every file survives. The
+  // undo for a registration. See endpoint_forget_workspace.proto.
+  rpc ForgetWorkspace(ForgetWorkspaceRequest) returns (ForgetWorkspaceResponse);
 
   // Enqueue this workspace's merge; its life from there is the feed's bubble.
   rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
