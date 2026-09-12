@@ -96,7 +96,9 @@ identical banners for one turn is a defect the user would blame on the
 agent."
   (let ((last (agent-repl--ws-get ws :last-notify-time))
         (now (float-time))
-        (focused (agent-repl--emacs-focused-p)))
+        ;; WS, not nil: the focus check is made ON THIS WORKSPACE'S behalf and
+        ;; its record belongs on this workspace's sink.
+        (focused (agent-repl--emacs-focused-p ws)))
     (cond
      (focused
       (agent-repl--log ws "elisp.session.notify-finished: skipped ws=%s reason=emacs-focused" ws))

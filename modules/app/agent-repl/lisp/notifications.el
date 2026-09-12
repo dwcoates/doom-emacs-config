@@ -10,6 +10,7 @@
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--do-log "core" (ws fmt args &optional error-p))
 (declare-function agent-repl--fatal "core" (ws fmt &rest args))
+(defvar agent-repl--global-log-scope)
 
 (defcustom agent-repl-terminal-notifier-executable "terminal-notifier"
   "Name or path of the terminal-notifier binary."
@@ -463,16 +464,24 @@ Emacs is frontmost.  A frame whose focus is `unknown' counts as focused
 too, matching the conservative \"suppress when possibly focused\" stance
 the desktop-notification gate relies on (see `agent-repl--notify').
 Returns nil under `noninteractive' (batch/ERT), where no window-system
-frame can hold focus."
-  (if noninteractive
-      (progn
-        (agent-repl--log-verbose ws "emacs-focused-p noninteractive=t focused=nil")
-        nil)
-    (let* ((frames (frame-list))
-           (focused (seq-some #'frame-focus-state frames)))
-      (agent-repl--log-verbose ws "emacs-focused-p noninteractive=nil frame-count=%s focused=%s"
-                               (length frames) focused)
-      focused)))
+frame can hold focus.
+
+WS attributes the observation to the workspace that asked for it.  DESKTOP
+FOCUS IS A GLOBAL FACT, so a caller with no workspace to name gets the
+CENTRAL sink explicitly rather than an unattributed workspace-owned
+record: the routing rung records the latter as `log-routing-error' at
+ERROR, and rightly -- missing attribution at the call site is a defect no
+directory can supply.  Here there is nothing missing to supply."
+  (let ((scope (or ws agent-repl--global-log-scope)))
+    (if noninteractive
+        (progn
+          (agent-repl--log-verbose scope "emacs-focused-p noninteractive=t focused=nil")
+          nil)
+      (let* ((frames (frame-list))
+             (focused (seq-some #'frame-focus-state frames)))
+        (agent-repl--log-verbose scope "emacs-focused-p noninteractive=nil frame-count=%s focused=%s"
+                                 (length frames) focused)
+        focused))))
 
 (defun agent-repl--notify (ws title message &optional activate)
   "Send a desktop notification with TITLE and MESSAGE.
