@@ -76,7 +76,9 @@ say_wedged() {
   say "agent-repl e2e sandbox UNAVAILABLE: '$runtime' did not answer within ${RUNTIME_CALL_TIMEOUT_SECONDS}s."
   say "  '$1' was still running when the bound expired; the engine is likely wedged"
   say "  (Docker Desktop backend alive but the socket unresponsive)."
-  if [[ $runtime == docker ]]; then
+  # Compared by BASENAME: AGENT_REPL_SANDBOX_RUNTIME may name an absolute
+  # path, and the remedy still depends on which engine it is.
+  if [[ $(basename -- "$runtime") == docker ]]; then
     say "  Restart Docker Desktop, then re-run."
   else
     say "  Run 'podman machine stop && podman machine start', then re-run."
