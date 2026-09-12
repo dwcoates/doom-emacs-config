@@ -33,9 +33,16 @@ func testStore(t *testing.T) (*store, *dlog.TestLogger) {
 // almost every table's test needs before it can write a dependent row.
 func testWorkspace(t *testing.T, s *store) Workspace {
 	t.Helper()
+	return testWorkspaceNamed(t, s, "sample")
+}
+
+// testWorkspaceNamed registers a SECOND workspace beside the first, for the
+// tables whose subject is that one workspace's rows are not another's.
+func testWorkspaceNamed(t *testing.T, s *store, name string) Workspace {
+	t.Helper()
 	dir := t.TempDir()
 	ws, created, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{
-		Name: "sample", Branch: "feature", ParentBranch: "master", RepoDir: dir,
+		Name: name, Branch: "feature", ParentBranch: "master", RepoDir: dir,
 	})
 	if err != nil {
 		t.Fatalf("RegisterWorkspace: %v", err)

@@ -289,8 +289,10 @@ func TestResumingAMissingVendorTranscriptComesUpFresh(t *testing.T) {
 
 func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
 	t.Parallel()
-	// Arrange: as above. The fresh start is loud — the abandoned vendor
-	// session id is the workspace's own record of what was left behind.
+	// Arrange: as above, and THE WORKSPACE TAKES A TURN FIRST. That turn is
+	// what makes the vanished transcript an abandonment of real history rather
+	// than the ordinary state of an id bounced before it ever spoke, and it is
+	// the whole reason this bring-up is loud.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the missing transcript the test stages, the abandoned conversation the classifier records, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.account.find_transcript", "daemon.health.open_fault",
@@ -298,6 +300,11 @@ func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
 		"daemon.sessionwatcher.watch_session", "daemon.shimclient.exit",
 		"daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.kill",
 		"daemon.workspace.open", "daemon.workspace.bring_up")
+	f.submit("say something", "k-engaged-before-the-transcript-vanishes", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	// The turn row is written BEFORE StartTurn is forwarded (promptqueue's
+	// deliver), so the shim's own log of the call is the happens-after that
+	// says the workspace is durably engaged.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartTurn, &shimv1.StartTurnRequest{})
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
@@ -314,6 +321,41 @@ func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the abandoned conversation stated loudly", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.workspace.bring_up" &&
 			r.Message == "the recorded conversation has no transcript on disk; the session comes up FRESH"
+	})
+}
+
+func TestAMissingTranscriptForAConversationThatNeverSpokeIsOrdinary(t *testing.T) {
+	t.Parallel()
+	// Arrange: the SAME staging with NO turn ever taken. A vendor id minted at
+	// spawn and stood down before its first turn writes no transcript, so
+	// coming up fresh loses nothing — this is the ordinary state of a
+	// stale-build relaunch bounce, and it must be recorded as such rather than
+	// warned about.
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs. daemon.workspace.bring_up is DELIBERATELY ABSENT: this bring-up must produce no warning of its own.
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault",
+		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
+		"daemon.sessionwatcher.watch_session", "daemon.shimclient.exit",
+		"daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.kill",
+		"daemon.workspace.open")
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.RemoveTranscripts(f.repo.Dir)
+
+	// Act
+	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a fresh session", err)
+	}
+
+	// Assert: the ordinary notice lands at INFO, and the cleanup sweep — which
+	// this test did NOT let off daemon.workspace.bring_up — proves no warning
+	// or fault-bearing record was written beside it.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the ordinary never-engaged notice", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.workspace.bring_up" && r.Level == "info" &&
+			r.Message == "the recorded conversation never took a turn and wrote no transcript; the session comes up FRESH"
 	})
 }
 
