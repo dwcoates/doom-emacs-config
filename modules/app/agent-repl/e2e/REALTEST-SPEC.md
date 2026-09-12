@@ -275,6 +275,16 @@ Realtest 5 captures those targets while the workspace still stands and appends
 them to the harvest as ordinary sources, so the remediation bar is not quietly
 claiming a clean harvest over a log it never opened.
 
+**Realtest 4 brings its own third workspace.** It needs three open workspaces,
+because with two tabs `s-}` and `s-{` land on the same tab and a reversed
+direction cannot be told from a correct one. It used to refuse when the registry
+held fewer; it now registers `rt4-bootstrap-N` scratch repositories under its
+run directory through the same substrate realtests 5 through 8 use, waits for
+each registry row and drawn tab, and closes and deletes them on the way out
+including on failure. A bootstrap that mints no workspace names the vendor guard
+and `AGENT_REPL_FAKE_SHIMS=1` as the first suspect in its failure message
+(docs/REALTEST-JUDGEMENT-CALLS.md, row 60).
+
 **One `-run` invocation per act realtest.** Each performs a cold start, and a
 cold start refuses to run against an Emacs that is already answering, so two of
 them in one `go test` process would have the second refuse against the editor
