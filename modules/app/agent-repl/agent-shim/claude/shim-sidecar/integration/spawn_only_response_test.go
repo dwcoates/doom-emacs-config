@@ -40,6 +40,9 @@ func TestARealSpawnOnlyResponseConvertsAndNamesTheDeferredAnnounce(t *testing.T)
 	slug := cwdSlug(cwd)
 	session := "9b9b9b9b-9b9b-49b9-89b9-9b9b9b9b9b9b"
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// The zero-unit record is BENIGN and now debug (a spawn announces at its
+	// result, not its call), so the reader must run at debug to persist it.
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 
 	// The captured record is a SIDECHAIN line; the shape under test is the
 	// block list, so it is retargeted onto a main-agent transcript rather than
@@ -58,7 +61,7 @@ func TestARealSpawnOnlyResponseConvertsAndNamesTheDeferredAnnounce(t *testing.T)
 
 	// Assert: the reader got past the record, and said the true thing about it.
 	rec := awaitLog(ctx, t, opts.LogPath, "the zero-unit record for the spawn-only response", func(r logRecord) bool {
-		return r.Operation == "assistant-line" && r.Level == "warn" && strings.Contains(r.Message, "produced no units")
+		return r.Operation == "assistant-line" && r.Level == "debug" && strings.Contains(r.Message, "produced no units")
 	})
 	if !strings.Contains(rec.Message, "announces at its result") {
 		t.Errorf("the zero-unit record does not name the deferred announce: %q", rec.Message)

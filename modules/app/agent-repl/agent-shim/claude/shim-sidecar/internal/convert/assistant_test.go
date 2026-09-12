@@ -526,3 +526,21 @@ func TestQuotesInheritedContextDistinguishesQuotedFromProduced(t *testing.T) {
 		})
 	}
 }
+
+// TestASpawnOnlyResponseRecordsItsZeroUnitsAtDebug pins the SEVERITY of the
+// zero-units record, not only its text. A spawn announcing at its result is the
+// modelled, correct outcome, so the trace is benign and debug — left at warn it
+// fired once per such response and flooded a cold re-scan's strict harvest.
+func TestASpawnOnlyResponseRecordsItsZeroUnitsAtDebug(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+
+	// Act.
+	convertLines(t, c, assistantWith("a1", "msg_1", ts1,
+		toolCall("toolu_spawn", "Agent", `{"subagent_type":"Explore","prompt":"look"}`)))
+
+	// Assert.
+	if got := levelForMessage(t, sink, "produced no units"); got != "debug" {
+		t.Fatalf("the zero-units record was recorded at %q, want debug (a spawn announces at its result — benign)", got)
+	}
+}

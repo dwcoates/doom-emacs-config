@@ -620,3 +620,51 @@ func TestQuotedToolResultIsResidueNotReSettledUnderThisAgent(t *testing.T) {
 		t.Fatalf("the result kind = %q, want tool_result/quoted_context (not orphan_tool_result and not a settle)", got)
 	}
 }
+
+// TestAnOrphanToolResultIsRecordedAtDebug pins the reclassified orphan record. A
+// cursor-resumed reader (a cold restart, a boot rewind) legitimately sees a
+// result whose call sits before its window; the record is stored whole as
+// residue, which is correct, so the trace is debug rather than a warn that
+// floods a cold re-scan.
+func TestAnOrphanToolResultIsRecordedAtDebug(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+	result := toolResultLine("u1", "toolu_missing", ts2, `[{"type":"text","text":"c"}]`, `{"stdout":"x"}`)
+
+	// Act.
+	entries := convertLines(t, c, result)
+
+	// Assert: the residue is kept...
+	if len(entries) != 1 || vendorKindOf(entries[0]) != "orphan_tool_result" {
+		t.Fatalf("entries = %v, want exactly one orphan_tool_result residue", allKeys(entries))
+	}
+	// ...and only the severity drops.
+	if got := levelForMessage(t, sink, "names no call this reader observed"); got != "debug" {
+		t.Fatalf("the orphan record was recorded at %q, want debug (benign on a re-scan)", got)
+	}
+}
+
+// TestATaskStopNamingNoTaskIsRecordedAtDebug pins the reclassified unattributable
+// TaskStop. A stop naming no task carries nothing to attribute it to; it is
+// stored whole as residue, which is correct, not data loss, so the trace is
+// debug. (An agent stop whose LAUNCH this stream never opened stays warn — see
+// TestAnAgentStopForATaskNoLaunchOpenedIsStoredRatherThanKeyedOnAGuess.)
+func TestATaskStopNamingNoTaskIsRecordedAtDebug(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{}`))
+	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+		`{"command":"stop","task_type":"agent","message":"stopped"}`)
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert: the residue is kept...
+	if len(entries) != 1 || vendorKindOf(entries[0]) != "task_stop/unattributed" {
+		t.Fatalf("entries = %v, want exactly one task_stop/unattributed residue", allKeys(entries))
+	}
+	// ...and only the severity drops.
+	if got := levelForMessage(t, sink, "names no task"); got != "debug" {
+		t.Fatalf("the unattributable TaskStop was recorded at %q, want debug (benign)", got)
+	}
+}

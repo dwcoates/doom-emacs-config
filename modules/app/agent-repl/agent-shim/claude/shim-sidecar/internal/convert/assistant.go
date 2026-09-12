@@ -108,8 +108,15 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 		// found a sentence about a decision that was never taken. The
 		// accounting still has nowhere to land either way, so the record
 		// stands — it just says which.
-		c.log.With(at.ctxWarn("assistant-line")).
-			Log("assistant record produced no units (%s), so this response's usage is not carried", describeNoUnits(reasons))
+		//
+		// BENIGN, AND THE COMMON SHAPE — debug, not warn. The dominant cause is
+		// a response whose only block is a tool call that announces at its
+		// RESULT rather than its call (a subagent spawn): the modelled, correct
+		// outcome, not a gap. Left at warn it emitted once per such response and
+		// flooded a cold re-scan's strict harvest with a false alarm. The record
+		// still stands and names the real cause; only its severity drops.
+		c.log.With(at.ctxFor("assistant-line")).
+			LogVerbose("assistant record produced no units (%s), so this response's usage is not carried", describeNoUnits(reasons))
 	}
 	return out
 }
