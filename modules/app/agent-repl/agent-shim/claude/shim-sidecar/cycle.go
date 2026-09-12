@@ -783,6 +783,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 		Path:              target.Path,
 		Kind:              target.Kind,
 		AgentID:           s.bookFor(target),
+		AgentType:         target.Meta.AgentType,
 		MainAgentID:       s.mainAgentFor(target),
 		SpawnBackgrounded: s.owners.backgroundedFor(target),
 		MetaPath:          target.MetaPath,
