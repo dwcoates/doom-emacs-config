@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -151,5 +152,54 @@ func TestRepresentativeRPCHandlersRecordRequestBoundaries(t *testing.T) {
 				t.Fatalf("completion = %+v, want duration_ms", completion)
 			}
 		})
+	}
+}
+
+// TestRequestBoundaryReachesTheHandlerWhenTheWorkspaceSinkCannotBeResolved
+// pins the boundary's totality: a workspace whose directory is a scratch path
+// or has been deleted cannot host a durable sink, and that must cost the
+// record's PLACEMENT, never the request's answer. Refusing here answered every
+// per-workspace rpc on such a workspace with an internal error raised by
+// logging, in place of the handler's own answer.
+func TestRequestBoundaryReachesTheHandlerWhenTheWorkspaceSinkCannotBeResolved(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(d *Deps) {
+		d.Log = &fakeSurfaces{workspaceErr: errors.New("the workspace directory is gone")}
+	})
+
+	// Act.
+	resp, err := h.Client.OpenWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenWorkspace = %v, want the handler's own answer", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace answered %v, want success", resp.Msg.GetResult())
+	}
+}
+
+// TestRequestBoundaryRecordsNoErrorWhenTheWorkspaceSinkCannotBeResolved pins
+// that the fallback is an ORDINARY outcome: it is not reported as a fault
+// beside every request.
+func TestRequestBoundaryRecordsNoErrorWhenTheWorkspaceSinkCannotBeResolved(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(d *Deps) {
+		d.Log = &fakeSurfaces{global: log, workspaceErr: errors.New("the workspace directory is gone")}
+	})
+
+	// Act.
+	if _, err := h.Client.OpenWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("OpenWorkspace: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range log.at("ERROR") {
+		if rec.Operation == "daemon.server.request_boundary" {
+			t.Fatalf("the boundary recorded an error for an unsinkable workspace: %+v", rec)
+		}
 	}
 }
