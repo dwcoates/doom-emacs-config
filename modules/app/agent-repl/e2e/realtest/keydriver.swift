@@ -61,8 +61,21 @@
 // guess. Nothing here decides delivery: the helper reports what it saw and the
 // caller reads the editor.
 //
+// AND THERE IS ONE STATE IN WHICH NO ACTIVATION CAN SUCCEED AT ALL: A LOCKED
+// SCREEN. While the login window stands in front of the session the window
+// server grants activation to nobody, so `activate()` is accepted and changes
+// nothing, the target never becomes frontmost, and the editor never sees a
+// focus edge — while a pid-addressed CGEvent still reaches the process, so keys
+// keep arriving and keep confirming. That pair is exactly the shape of the
+// 2026-09-12 evening sweeps: zero key-delivery failures and a pre-creation
+// queue that parked forever. It is REPORTED rather than worked around — there
+// is no way to focus an application behind a locked screen — and `--session`
+// exists so the caller can name it instead of waiting out a ceiling for a focus
+// edge that cannot happen.
+//
 // Usage:
 //   keydriver --check                      exit 0 trusted, 1 not trusted
+//   keydriver --session                    print screenLocked=yes|no|unknown
 //   keydriver [--hold[=SECONDS]] <pid> <keycode> [modifiers]
 //                                          activate pid, post keyDown/keyUp,
 //                                          hold the target key until released
@@ -114,7 +127,34 @@ func spin(upTo seconds: TimeInterval, until done: () -> Bool) {
     }
 }
 
+// screenLockWord reads whether the login window stands in front of this
+// session, which is the one state in which no application can be activated.
+//
+// Three answers, and the third is not folded into the second: an unlocked
+// session simply has no `CGSSessionScreenIsLocked` key, so an ABSENT key is a
+// definite no, while a session dictionary that could not be read at all is
+// UNKNOWN and must never be reported as unlocked — a harness that asserts an
+// unlocked screen it did not read would send the next reader looking in the
+// wrong place.
+func screenLockWord() -> String {
+    guard let session = CGSessionCopyCurrentDictionary() as? [String: Any], !session.isEmpty else {
+        return "unknown"
+    }
+    guard let locked = session["CGSSessionScreenIsLocked"] as? NSNumber else {
+        return "no"
+    }
+    return locked.boolValue ? "yes" : "no"
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
+
+if arguments.first == "--session" {
+    // Exit 0 whatever the answer: a locked screen is a reading the caller acts
+    // on, not a failure of this helper, and an exit code would make the two
+    // indistinguishable from a helper that could not run.
+    print("screenLocked=\(screenLockWord())")
+    exit(0)
+}
 
 if arguments.first == "--check" {
     // AXIsProcessTrusted answers for THIS process, which is the one posting the
@@ -404,6 +444,12 @@ let readyAfter = Date().timeIntervalSince(activationStarted)
 
 let focus = readKeyFocus()
 
+// Read once, here, and carry it into both messages below: the lock can change
+// under a run, and a receipt that says which side of it this press fell on is
+// the difference between "the activation was declined" and "there was nobody to
+// decline it".
+let sessionLock = screenLockWord()
+
 // A DEFINITE NO REFUSES ONLY WHERE NOTHING WILL CHECK THE POST AFTERWARDS.
 if holdSeconds == nil, let reason = focus.refused {
     if let previous = previous, previous.processIdentifier != pid {
@@ -414,14 +460,14 @@ if holdSeconds == nil, let reason = focus.refused {
         + "without one silently. This press was made without --hold, so nothing would read the editor back "
         + "and a dropped key would go unnoticed; a held press posts anyway and lets Emacs's own marks "
         + "settle it. Nothing was sent and the previously frontmost application was restored. "
-        + "What accessibility said: \(focus.describe())")
+        + "What accessibility said: \(focus.describe()) screenLocked=\(sessionLock)")
 }
 
 // readiness is the phrase the receipt carries about the reading above, so a
 // finding can say whether the target looked able to receive the key without
 // having to re-read this file.
 let readiness = "readiness=\(focus.describe()) askedTwice=\(reactivated ? "yes" : "no") "
-    + "readyAfter=\(String(format: "%.2f", readyAfter))s"
+    + "readyAfter=\(String(format: "%.2f", readyAfter))s screenLocked=\(sessionLock)"
 
 // Down then up, addressed to the process. There is no delay between them: a
 // keystroke is not a hold, and Emacs's own input queue serializes them.

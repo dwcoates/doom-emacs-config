@@ -440,10 +440,14 @@ func showEmacsAndWaitForPaint(ctx context.Context, t *testing.T, run int, client
 	started := time.Now()
 	var phases Phases
 	edges := 0
+	realEdges := 0
+	var lastFocus FocusReading
 	painted := false
 	for edge := 1; edge <= showMaxFocusEdges; edge++ {
+		ceiling := showPhaseEdgeCeiling(edge, time.Since(started))
 		if driver != nil {
-			if pressErr := driver.Press(ctx, wsActEscape); pressErr != nil {
+			receipt, pressErr := driver.PressWithReceipt(ctx, wsActEscape)
+			if pressErr != nil {
 				note := fmt.Sprintf("SHOWING EMACS FAILED on focus edge %d: pressing %s (%s) answered %v. "+
 					"The parked pre-creation queue drains on a focus edge and on nothing else, so no panel can "+
 					"paint until one is produced", edge, wsActEscape.Emacs, wsActEscape.Why, pressErr)
@@ -451,14 +455,34 @@ func showEmacsAndWaitForPaint(ctx context.Context, t *testing.T, run int, client
 				t.Errorf("%s", note)
 			} else {
 				edges++
+				lastFocus = receipt.Focus
+				if receipt.Focus.State == FocusFocused {
+					realEdges++
+				} else {
+					// THE EDITOR SAID IT NEVER TOOK FOCUS, so the drain is
+					// still held and this ceiling would be spent waiting for a
+					// paint that cannot happen. The state is still READ once —
+					// a zero ceiling is one poll, not none, so the phases this
+					// helper returns are never left empty — and then the next
+					// activation is requested immediately: a declined request
+					// can be granted on the next one. If none of them is, the
+					// note after the loop says why, rather than the run
+					// reporting an unpainted panel two minutes later.
+					ceiling = 0
+				}
 			}
 		}
-		phases = waitForPainted(ctx, t, run, sources, snap, spawnedAt, expected,
-			showPhaseEdgeCeiling(edge, time.Since(started)))
+		phases = waitForPainted(ctx, t, run, sources, snap, spawnedAt, expected, ceiling)
 		if everyWorkspacePainted(phases, expected) {
 			painted = true
 			break
 		}
+	}
+	if driver != nil && edges > 0 && realEdges == 0 {
+		lock, lockErr := driver.ScreenLock(ctx)
+		note := noFocusEdgeNote(edges, lock, lockErr, lastFocus)
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
 	}
 
 	after, err := FrontmostApp(ctx)

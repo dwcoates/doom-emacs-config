@@ -109,3 +109,15 @@ func TestShowPhaseTotalBoundMatchesTheShowCeiling(t *testing.T) {
 			showMaxFocusEdges, showEdgeCeiling, showCeiling)
 	}
 }
+
+func TestShowPhaseNoteDoesNotClaimTheEdgeWasReal(t *testing.T) {
+	// Arrange / Act
+	note := showPhaseNote(3, false, 2*time.Minute, 2)
+
+	// Assert
+	if !strings.Contains(note, "REQUESTED activation") {
+		t.Errorf("the harness can only say it ASKED for activation — whether the editor took focus is a "+
+			"separate reading, and the 2026-09-12 evening sweeps claimed an edge that never happened; "+
+			"it said %q", note)
+	}
+}

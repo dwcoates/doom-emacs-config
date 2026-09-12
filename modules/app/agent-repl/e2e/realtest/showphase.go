@@ -84,9 +84,10 @@ func showPhaseNote(edges int, painted bool, elapsed time.Duration, expected int)
 			expected, edges, elapsed.Round(time.Millisecond))
 	default:
 		return fmt.Sprintf("PANELS DID NOT PAINT: after %d focus edge(s) over %s, not all %d open workspace(s) "+
-			"had painted. Each edge activated Emacs, held it for the keypress and handed focus back, which is what "+
-			"the owner's own first look at the editor does; if no edge paints them, the paint is not waiting on a "+
-			"longer ceiling", edges, elapsed.Round(time.Millisecond), expected)
+			"had painted. Each edge REQUESTED activation, held the target for the keypress and handed focus "+
+			"back; whether the editor actually took focus is a separate reading and, when it did not, the "+
+			"NO REAL FOCUS EDGE note says so and this verdict is not the product's. If the edges were real, "+
+			"the paint is not waiting on a longer ceiling", edges, elapsed.Round(time.Millisecond), expected)
 	}
 }
 
