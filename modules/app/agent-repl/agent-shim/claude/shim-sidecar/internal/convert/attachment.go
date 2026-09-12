@@ -118,8 +118,20 @@ func (c *Converter) diagnosticsAttachment(attachment map[string]any, at Attribut
 		// Nothing to attach them to: the change was read before this reader's
 		// cursor. The findings are kept whole rather than pinned onto a unit
 		// this reader guessed at.
-		c.log.With(at.ctxWarn("diagnostics")).
-			Log("IDE diagnostics follow no write or edit this reader observed; stored as vendor_specific rather than attached by guess")
+		//
+		// BENIGN ON A RE-SCAN — debug, not warn. An in-window write or edit
+		// ALWAYS sets lastChangeUnit, so an empty lastChangeUnit means no such
+		// change was observed in this reader's window: a cursor-resumed reader
+		// (a cold restart, a boot rewind) legitimately sees the report after its
+		// causing change scrolled past the cursor. Storing it whole as residue
+		// is the correct forward path — the residue record IS the coverage — so
+		// this must not flood the strict all-logs harvest. A diagnostics report
+		// whose change IS in-window cannot reach this branch (lastChangeUnit is
+		// set and the report attaches below); were that attachment ever to fail
+		// it would be a real defect deserving a warn, which is why the
+		// distinction lives in lastChangeUnit and not in the severity here.
+		c.log.With(at.ctxFor("diagnostics")).
+			LogVerbose("IDE diagnostics follow no write or edit this reader observed; stored as vendor_specific rather than attached by guess")
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/diagnostics", attachment)}
 	}
 
