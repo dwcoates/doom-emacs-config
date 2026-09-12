@@ -76,6 +76,12 @@ type hooks struct {
 	// reconciliation that never finishes, and a test must not wait out a
 	// production last resort to observe it.
 	BootStall time.Duration
+	// ClaimWait is how long the boot waits for a HELD boot claim before it
+	// believes a live incumbent holds it. Production supplies
+	// daemonaddr.ClaimWaitBound; zero -- what a test hooks value leaves it --
+	// refuses a held claim on sight, so a suite proving the exclusivity ruling
+	// does not wait out an incumbent that is never going to depart.
+	ClaimWait time.Duration
 }
 
 // productionHooks are the real seams.
@@ -85,6 +91,7 @@ func productionHooks() hooks {
 		Server:    server.New,
 		Serve:     serve,
 		BootStall: bootStallBound,
+		ClaimWait: daemonaddr.ClaimWaitBound,
 	}
 }
 
@@ -169,7 +176,15 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// the claim here: the incumbent that spawned it still holds it, and a
 	// successor racing for it would lose to its own predecessor and exit. It
 	// takes the claim when it advertises, which is when it has taken over.
-	bindClaim := daemonaddr.Bind
+	//
+	// A HELD CLAIM IS WAITED ON, NOT BELIEVED ON SIGHT. daemon.addr is
+	// withdrawn at the start of the outgoing daemon's shutdown while its claim
+	// is held until its process ends, so a replacement is spawned into a window
+	// where the address is gone and the claim is not yet free; exiting on the
+	// first refusal there destroyed the daemon instead of replacing it.
+	bindClaim := func(addrPath string, port int) (daemonaddr.Claim, error) {
+		return daemonaddr.BindWithin(addrPath, port, h.ClaimWait)
+	}
 	if joining {
 		bindClaim = daemonaddr.BindJoining
 	}
@@ -177,7 +192,8 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if err != nil {
 		if errors.Is(err, daemonaddr.ErrClaimed) {
 			log.Warn("daemon.cmd.claim", "another daemon holds the boot claim; exiting without disturbing it", dlog.Context{
-				"addr_path": layout.DaemonAddr(),
+				"addr_path":  layout.DaemonAddr(),
+				"claim_wait": h.ClaimWait.String(),
 			})
 			return err
 		}
