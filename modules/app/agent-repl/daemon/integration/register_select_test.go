@@ -300,3 +300,38 @@ func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T
 		t.Fatalf("workspace A's attention marker was cleared by selecting B, want it left set: only A's own SelectWorkspace clears it")
 	}
 }
+
+// TestRegisteringAClosedWorkspaceReopensIt is the wire half of the register
+// that produced a workspace with NO TAB.
+//
+// Registration is idempotent by dir and answers the row that is already there.
+// A row a previous CLOSE had marked closed came back closed, and `closed` is
+// the editor's whole tab-membership rule (lisp/roster.el's
+// `agent-repl-roster-desired-tabs'): the tab was never drawn, the minted ref's
+// landing waited for a tab that was not coming, and nothing could resolve the
+// workspace by name to act on it.
+func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
+	t.Parallel()
+	// Arrange: a registered workspace, closed.
+	f := newRegistered(t, harness.Opts{})
+	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
+	}
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the closed row", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetClosed().GetClosed()
+	})
+
+	// Act: announce the same directory again.
+	again := harness.Register(t, f.d, f.repo.Dir)
+
+	// Assert: the same workspace, and its row is open again.
+	if again.GetId() != f.ws.GetId() {
+		t.Fatalf("re-registering %s minted %q, want the same workspace %q", f.repo.Dir, again.GetId(), f.ws.GetId())
+	}
+	awaitRoster(t, f.d, roster, "the re-registered row drawn open", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && !row.GetClosed().GetClosed()
+	})
+}
