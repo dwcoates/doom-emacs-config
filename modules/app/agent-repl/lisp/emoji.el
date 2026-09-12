@@ -12,6 +12,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
