@@ -38,10 +38,34 @@
 // is the second half of "the event has somewhere to land" — see the refusal
 // below for why an active application is not yet enough.
 //
+// WHY A KEY WINDOW AT THE INSTANT OF THE POST WAS NOT ENOUGH. The 2026-09-12
+// sweep still lost keys after the focused-window precondition landed — three
+// `C-g`s posted while a prompt stood, and the `<tab>` of a `SPC TAB o`. A
+// posted CGEvent is not consumed at the moment it is posted: it is queued on
+// the target process and dispatched by `-[NSApplication sendEvent:]` when that
+// process next turns its run loop, and `sendEvent:` routes a key event to
+// `[NSApp keyWindow]` AT DISPATCH TIME. This helper used to hand focus back
+// 0.3s after posting, so an Emacs that was busy for longer than that — and a
+// standing minibuffer with the panel drain running behind it is exactly that
+// Emacs — resigned key status with the event still in its queue and dropped it
+// when it finally looked. The precondition was necessary and about a quarter of
+// a second wide.
+//
+// So the helper can now HOLD the target key until the caller says the key was
+// consumed. `--hold` posts, prints `keydriver-posted`, and keeps the target
+// active until a line arrives on stdin or the hold ceiling expires, then
+// restores focus. The caller (keys.go) reads Emacs's own account of its input
+// in that window and releases as soon as Emacs says the key arrived, so the
+// key-ness of the window covers the whole life of the event instead of a fixed
+// guess. Nothing here decides delivery: the helper reports what it saw and the
+// caller reads the editor.
+//
 // Usage:
 //   keydriver --check                      exit 0 trusted, 1 not trusted
-//   keydriver <pid> <keycode> [modifiers]  activate pid, post keyDown/keyUp,
-//                                          restore the prior frontmost app
+//   keydriver [--hold[=SECONDS]] <pid> <keycode> [modifiers]
+//                                          activate pid, post keyDown/keyUp,
+//                                          hold the target key until released
+//                                          (with --hold), restore prior focus
 //
 // Modifiers are comma-separated: command, shift, option, control. They are
 // spelled as words rather than as a bitmask so a caller's intent is readable in
@@ -90,13 +114,34 @@ if arguments.first == "--check" {
     exit(trusted ? 0 : 1)
 }
 
-guard arguments.count >= 2, let pid = Int32(arguments[0]), let keycode = UInt16(arguments[1]) else {
-    fail("usage: keydriver --check | keydriver <pid> <keycode> [command,shift,option,control]")
+// THE HOLD IS OPT-IN AND ALWAYS BOUNDED. A caller that never releases must not
+// be able to leave the owner's focus parked on Emacs, so the ceiling applies
+// whatever the caller does — including a caller that dies mid-press.
+let holdDefaultSeconds = 5.0
+var holdSeconds: TimeInterval? = nil
+var positional: [String] = []
+for argument in arguments {
+    if argument == "--hold" {
+        holdSeconds = holdDefaultSeconds
+    } else if argument.hasPrefix("--hold=") {
+        guard let parsed = TimeInterval(argument.dropFirst("--hold=".count)), parsed > 0 else {
+            fail("--hold takes a positive number of seconds, got \"\(argument)\"")
+        }
+        holdSeconds = parsed
+    } else if argument.hasPrefix("--") {
+        fail("unknown flag \"\(argument)\"")
+    } else {
+        positional.append(argument)
+    }
+}
+
+guard positional.count >= 2, let pid = Int32(positional[0]), let keycode = UInt16(positional[1]) else {
+    fail("usage: keydriver --check | keydriver [--hold[=SECONDS]] <pid> <keycode> [command,shift,option,control]")
 }
 
 var flags = CGEventFlags()
-if arguments.count >= 3 && !arguments[2].isEmpty {
-    for name in arguments[2].split(separator: ",") {
+if positional.count >= 3 && !positional[2].isEmpty {
+    for name in positional[2].split(separator: ",") {
         switch name.trimmingCharacters(in: .whitespaces) {
         case "command": flags.insert(.maskCommand)
         case "shift": flags.insert(.maskShift)
@@ -181,24 +226,153 @@ if !target.isActive {
 // is: through the accessibility API, whose trust this helper already requires
 // and refuses to run without. `AXFocusedWindow` on an application element is
 // that application's key window. No window, no post, and the failure is named.
+//
+// AND A FOCUSED WINDOW ALONE WAS STILL NOT ENOUGH. `AXFocusedWindow` on an
+// application element answers about THAT APPLICATION'S OWN notion of which of
+// its windows would be key — an inactive application in the background still
+// answers it — so it is satisfied by an Emacs that owns no key window at all.
+// That is why keys kept going missing after it landed. Three questions are
+// asked now, and all three must be answered YES:
+//
+//   - the application element is `AXFrontmost`, which is the window server's
+//     answer rather than the application's;
+//   - the SYSTEM-WIDE accessibility element's `AXFocusedApplication` is this
+//     pid, which is the closest accessibility gets to "this app owns the key
+//     window";
+//   - the application still has an `AXFocusedWindow`, the original check, kept
+//     because a frontmost application between windows has none.
+//
+// A QUESTION THAT WENT UNANSWERED IS NOT A NO. Accessibility queries are
+// serviced by the target's own main run loop, so an Emacs busy in its command
+// loop — which is precisely the Emacs these presses go to — can leave a query
+// unanswered until it times out. Refusing on that would invent a new way to
+// lose a keypress, and it would be wrong: a busy Emacs with a key window
+// queues the event and dispatches it when it looks, which is exactly what the
+// hold below is for. So an unanswered query is reported as UNVERIFIED in the
+// receipt and the post goes ahead; only a definite NO refuses.
 let axTarget = AXUIElementCreateApplication(pid)
+let axSystem = AXUIElementCreateSystemWide()
 
-func targetHasFocusedWindow() -> Bool {
-    var focused: CFTypeRef?
-    let status = AXUIElementCopyAttributeValue(axTarget, kAXFocusedWindowAttribute as CFString, &focused)
-    return status == .success && focused != nil
+// Bounded so one unresponsive target cannot hang the helper past the caller's
+// own ceiling; an expiry is an unanswered query, handled as one.
+AXUIElementSetMessagingTimeout(axTarget, 1.0)
+AXUIElementSetMessagingTimeout(axSystem, 1.0)
+
+// axCopy answers three ways on purpose: the value, a definite absence, or "the
+// target did not answer". Collapsing the last two is what made the old check
+// weaker than it read.
+enum AXAnswer {
+    case value(CFTypeRef)
+    case absent
+    case unanswered(AXError)
 }
 
-spin(upTo: 2.0, until: targetHasFocusedWindow)
+func axCopy(_ element: AXUIElement, _ attribute: String) -> AXAnswer {
+    var value: CFTypeRef?
+    let status = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+    switch status {
+    case .success:
+        if let value = value { return .value(value) }
+        return .absent
+    case .noValue, .attributeUnsupported:
+        return .absent
+    default:
+        return .unanswered(status)
+    }
+}
 
-if !targetHasFocusedWindow() {
+// Tri-state: true, false, or nil for "nobody answered".
+func axIsTrue(_ element: AXUIElement, _ attribute: String) -> Bool? {
+    switch axCopy(element, attribute) {
+    case .value(let value):
+        guard let number = value as? NSNumber else { return nil }
+        return number.boolValue
+    case .absent:
+        return false
+    case .unanswered:
+        return nil
+    }
+}
+
+func axHasValue(_ element: AXUIElement, _ attribute: String) -> Bool? {
+    switch axCopy(element, attribute) {
+    case .value:
+        return true
+    case .absent:
+        return false
+    case .unanswered:
+        return nil
+    }
+}
+
+func axFocusedApplicationIsTarget() -> Bool? {
+    switch axCopy(axSystem, kAXFocusedApplicationAttribute as String) {
+    case .value(let value):
+        guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        let element = value as! AXUIElement
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(element, &owner) == .success else { return nil }
+        return owner == pid
+    case .absent:
+        return false
+    case .unanswered:
+        return nil
+    }
+}
+
+// KeyFocus is one reading of the three questions, kept together so the receipt
+// can say which of them answered what rather than only that the post was
+// refused.
+struct KeyFocus {
+    var frontmost: Bool?
+    var focusedApplication: Bool?
+    var focusedWindow: Bool?
+
+    // ready is "every question answered yes".
+    var ready: Bool {
+        return frontmost == true && focusedApplication == true && focusedWindow == true
+    }
+
+    // refused names the first question answered a definite NO, or nil when
+    // none was: an unanswered question never refuses.
+    var refused: String? {
+        if frontmost == false { return "the window server does not consider it frontmost (AXFrontmost is false)" }
+        if focusedApplication == false {
+            return "the system-wide accessibility focus is on another application (AXFocusedApplication is not this pid)"
+        }
+        if focusedWindow == false { return "it has no focused window (AXFocusedWindow is absent)" }
+        return nil
+    }
+
+    func describe() -> String {
+        func word(_ answer: Bool?) -> String {
+            guard let answer = answer else { return "unverified" }
+            return answer ? "yes" : "no"
+        }
+        return "frontmost=\(word(frontmost)) focusedApplication=\(word(focusedApplication)) "
+            + "focusedWindow=\(word(focusedWindow))"
+    }
+}
+
+func readKeyFocus() -> KeyFocus {
+    return KeyFocus(
+        frontmost: axIsTrue(axTarget, kAXFrontmostAttribute as String),
+        focusedApplication: axFocusedApplicationIsTarget(),
+        focusedWindow: axHasValue(axTarget, kAXFocusedWindowAttribute as String))
+}
+
+spin(upTo: 2.0, until: { readKeyFocus().ready })
+
+let focus = readKeyFocus()
+if let reason = focus.refused {
     if let previous = previous, previous.processIdentifier != pid {
         activate(previous)
     }
-    fail("pid \(pid) is the active application but has no focused window after 2s, so the key event was NOT "
+    fail("pid \(pid) is the active application but \(reason) after 2s, so the key event was NOT "
         + "posted: AppKit dispatches a key event only to a key window and drops a post to an application "
         + "without one silently, which is how posted keys went missing from Emacs's own (recent-keys). "
-        + "Nothing was sent and the previously frontmost application was restored")
+        + "Nothing was sent and the previously frontmost application was restored. "
+        + "What accessibility said: \(focus.describe())")
 }
 
 // Down then up, addressed to the process. There is no delay between them: a
@@ -206,9 +380,67 @@ if !targetHasFocusedWindow() {
 down.postToPid(pid)
 up.postToPid(pid)
 
-// Let Emacs's event loop consume the events while it is still key, so the keymap
-// resolves them before focus is handed back.
-spin(upTo: 0.3, until: { false })
+// release is the caller's signal that Emacs has accounted for the key. It is
+// set from the stdin readability handler, which runs on a dispatch queue, so
+// it is behind a lock rather than read raw from the run loop.
+final class Release {
+    private let lock = NSLock()
+    private var value = false
+    func signal() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+    var signalled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
+if let holdSeconds = holdSeconds {
+    // HOLD THE TARGET KEY UNTIL THE CALLER SAYS THE KEY WAS CONSUMED.
+    //
+    // The post above only queued the event; `sendEvent:` routes it to whatever
+    // is the key window WHEN EMACS NEXT LOOKS, so handing focus back before
+    // then is what dropped keys on a busy Emacs. The caller reads the editor's
+    // own account of its input and writes a line here the moment the key shows
+    // up, so the ordinary press still restores focus in milliseconds and only
+    // a slow one holds.
+    let release = Release()
+    let stdin = FileHandle.standardInput
+    stdin.readabilityHandler = { handle in
+        // Any bytes are the release, including EOF (an empty read), which is
+        // what a caller that died looks like: holding focus for a caller that
+        // is gone would be worse than releasing early.
+        _ = handle.availableData
+        release.signal()
+    }
+
+    print("keydriver-posted")
+    fflush(stdout)
+
+    spin(upTo: holdSeconds, until: { release.signalled })
+    stdin.readabilityHandler = nil
+
+    if release.signalled {
+        print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=released \(focus.describe())")
+    } else {
+        // NOT a failure of the post — the event was posted and Emacs was key
+        // for the whole ceiling — but the caller never saw it arrive, and that
+        // is exactly the state the caller must be told about rather than left
+        // to infer.
+        print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=expired-after-\(holdSeconds)s "
+            + focus.describe())
+    }
+} else {
+    // Let Emacs's event loop consume the events while it is still key, so the
+    // keymap resolves them before focus is handed back. This is the unheld
+    // path, kept for a caller with no channel to the editor: it cannot know
+    // when the key was consumed, so it waits a fixed span and says so.
+    spin(upTo: 0.3, until: { false })
+    print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=none \(focus.describe())")
+}
 
 // Restore whatever was frontmost before, so the owner is disturbed only for the
 // instant of the keypress. Nothing to restore when Emacs already was frontmost.
