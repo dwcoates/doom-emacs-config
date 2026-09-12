@@ -742,7 +742,22 @@ func (w *watcher) setLinkLocked(state LinkState) {
 // raiseLinkFaultLocked reports a LOST link at the lifecycle sink, which records
 // it as the session's own fault. A link coming back is not a fault, so only the
 // two losing transitions are raised.
+//
+// A LINK THIS DAEMON TOOK DOWN IS NOT LOST. When the session is deliberately
+// ending -- announced through `SessionEnding`, or latched on the shim client by
+// the `KillSession` the daemon asked for -- the link going redialing and then
+// dead is the teardown arriving, and a fault raised against it would leave a
+// standing `link_severed` on the health surface for a workspace the user just
+// closed. The transition is still PUBLISHED to the footer, topbar and sidebar
+// by the caller, so the views draw the loss exactly as before; only the fault
+// and its warning are withheld, and only for a teardown the daemon ordered.
 func (w *watcher) raiseLinkFaultLocked(state LinkState) {
+	if w.endingLocked() && (state == shimclient.LinkRedialing || state == shimclient.LinkDead) {
+		w.log.Debug("daemon.sessionwatcher.link_fault",
+			"the link went down inside a teardown this daemon ordered; no fault is raised",
+			dlog.Context{"link": int(state), "stand_down_asked": w.client.StandingDown()})
+		return
+	}
 	switch state {
 	case shimclient.LinkRedialing:
 		w.log.Warn("daemon.sessionwatcher.link_fault", "the shim link was severed", nil)
@@ -1187,6 +1202,32 @@ func (w *watcher) flushTurnEndsAsync() {
 // means its stream was torn down deliberately.
 func (w *watcher) stale(gen uint64) bool { return w.closed || gen != w.gen }
 
+// endingLocked reports whether the session this watcher serves is on its way
+// out BY THIS DAEMON'S OWN DOING, so a standing stream ending is the answer to
+// an act rather than a fault.
+//
+// THERE ARE TWO WAYS THE DAEMON SAYS SO AND BOTH ARE READ HERE. `SessionEnding`
+// is the announcement one caller makes out of band (`Fleet.KillSession`), and
+// the shim client's stand-down latch is the shim's OWN record that a
+// `KillSession` was asked of it. The latch is the one that cannot be bypassed:
+// every route to ending a session goes through the rpc that sets it, while the
+// announcement depends on each caller remembering to make it -- and the callers
+// that do not remember are what put this record in the log.
+//
+// MEASURED. A relaunch bounce stands the old shim down through
+// `rollout.controller.standDown`, which calls `KillSession` on the client
+// directly and announces nothing. The shim ended its streams and exited 0; the
+// watcher read both EOFs as severings and recorded two ERRORs, a `link_severed`
+// WARN and the health fault that follows it, against a teardown this daemon had
+// just ordered (realtest sweep 2026-09-12T15:23:03).
+//
+// AN UNEXPECTED END STAYS EXACTLY AS LOUD. Neither condition holds for a shim
+// nobody asked to stand down, so a stream that ends under a live session still
+// severs, still degrades the fleet and still raises its fault.
+func (w *watcher) endingLocked() bool {
+	return w.sessionEnded || w.client.StandingDown()
+}
+
 // streamEnded decides what a stream's end MEANT. Only the consumer can: a
 // producer-side end is legal when the fleet tore the stream down or the
 // session is over, and is a transport failure otherwise.
@@ -1200,9 +1241,9 @@ func (w *watcher) streamEnded(gen uint64, kind, operation, key string, reaped fu
 		})
 		return
 	}
-	if w.sessionEnded {
+	if w.endingLocked() {
 		w.log.Debug("daemon.sessionwatcher.stream_closed", "a stream ended with its session", dlog.Context{
-			"stream": kind, "key": key,
+			"stream": kind, "key": key, "stand_down_asked": w.client.StandingDown(),
 		})
 		return
 	}
@@ -1226,9 +1267,9 @@ func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
 		})
 		return
 	}
-	if w.sessionEnded {
+	if w.endingLocked() {
 		w.log.Debug("daemon.sessionwatcher.stream_closed", "a stream ended with its session", dlog.Context{
-			"stream": "shell", "key": key,
+			"stream": "shell", "key": key, "stand_down_asked": w.client.StandingDown(),
 		})
 		return
 	}

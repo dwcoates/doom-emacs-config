@@ -105,6 +105,54 @@ func (c refusalClass) armName() string {
 	}
 }
 
+// logLevel is the SEVERITY the one normal-level record of a refusal of this
+// class is written at.
+//
+// THE LEVEL IS A PROPERTY OF THE CLASS, never of the call site and never of the
+// message text. A refusal's severity is a claim about whether something is
+// WRONG, and only the class knows: switching on a site would give one arm two
+// severities depending on which check happened to fire, and switching on the
+// detail string would make the log level depend on prose.
+//
+// EVERY CLASS IS LOUD EXCEPT classUnknownAgent, and that one is not an
+// exemption granted to make a log quiet — it is the one class whose refusal is
+// the verb's ORDINARY ANSWER rather than a report of a fault:
+//
+//   - classInvalid is a caller that sent something illegal, classStalePointer a
+//     caller that must repaint, classStorage the database failing,
+//     classNotImplemented a verb this wave cannot answer. Each is a warn (the
+//     storage failure's own error record is written by internal/db) because
+//     each says something is wrong somewhere.
+//   - classUnknownAgent answers an EXISTENCE QUESTION with "no". OpenAgentSession
+//     is the only verb that asks it, and both of the populations that reach it —
+//     a consumer opening a page against an agent whose first row has not landed
+//     yet, and a consumer holding a stale or mistyped target — send byte-identical
+//     requests. The store cannot tell them apart, because the expectation lives
+//     in the CALLER: only the caller knows whether it vouches for the agent. The
+//     caller is also where the distinction is already acted on and recorded —
+//     the shim serves an empty page and traces it when it vouches, and surfaces
+//     the refusal as a typed error to the engine when it does not. A warn here
+//     asserted "something is wrong" on every cold bring-up, which is a severity
+//     the store is not in a position to claim.
+//
+// It is `info` and not verbose: the record is still written at the default
+// threshold, carrying `refusal_site` and `refusal_kind` like every other, so an
+// operator counting refusals loses nothing. Only the severity claim changes.
+//
+// A class with no level would be a refusal recorded at the logger's default
+// rather than at a level anybody chose, so the default is deliberately
+// unreachable rather than an empty string quietly filled in.
+func (c refusalClass) logLevel() string {
+	switch c {
+	case classUnknownAgent:
+		return "info"
+	case classInvalid, classStalePointer, classStorage, classNotImplemented:
+		return "warn"
+	default:
+		panic(fmt.Sprintf("shim-store server: refusal class %d has no log level", int(c)))
+	}
+}
+
 // refusal is one typed refusal: the site the server logs, the store's own name
 // for the field at fault, the class that selects the wire arm, and the human
 // detail. `detail` is for humans and logs and is NEVER switched on by a caller;
