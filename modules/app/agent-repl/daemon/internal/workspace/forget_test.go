@@ -269,3 +269,64 @@ func TestForgetRefusesAnUnknownWorkspace(t *testing.T) {
 		t.Fatalf("Forget = %v, want the unknown_workspace refusal", err)
 	}
 }
+
+// TestForgetStandsDownTheWorkspacesLiveSession pins the fix for the phantom
+// shim: Close is view-level and leaves the session alone, so a closed
+// workspace routinely still has a live shim, and the forget is the LAST verb
+// that can address it — the row it resolves through is about to go.
+func TestForgetStandsDownTheWorkspacesLiveSession(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	closedWorkspace(t, f, "w1")
+	f.fleet.live["w1"] = true
+
+	// Act.
+	if err := f.verbs.Forget(context.Background(), "w1"); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.stopped) != 1 || f.fleet.stopped[0].WS != "w1" || !f.fleet.stopped[0].Force {
+		t.Fatalf("session stops = %+v, want one forced stop of w1 before the record goes", f.fleet.stopped)
+	}
+}
+
+// TestForgetStopsNoSessionWhenNoneIsLive pins the other edge: a workspace with
+// no live session is forgotten without a stand-down.
+func TestForgetStopsNoSessionWhenNoneIsLive(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	closedWorkspace(t, f, "w1")
+
+	// Act.
+	if err := f.verbs.Forget(context.Background(), "w1"); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.stopped) != 0 {
+		t.Fatalf("session stops = %+v, want none when no session is live", f.fleet.stopped)
+	}
+}
+
+// TestForgetKeepsTheRecordWhenTheSessionWillNotStandDown pins that the
+// stand-down's failure refuses the forget: forgetting the row anyway would
+// orphan the very shim this step exists to reclaim.
+func TestForgetKeepsTheRecordWhenTheSessionWillNotStandDown(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	closedWorkspace(t, f, "w1")
+	f.fleet.live["w1"] = true
+	f.fleet.stopErr = errors.New("the shim would not die")
+
+	// Act.
+	err := f.verbs.Forget(context.Background(), "w1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Forget = nil, want the stand-down's failure")
+	}
+	if len(f.db.forgotten) != 0 {
+		t.Fatalf("forgotten = %v, want none: the shim is still running", f.db.forgotten)
+	}
+}
