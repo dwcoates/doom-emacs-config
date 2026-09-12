@@ -288,13 +288,13 @@ the assertion that no minibuffer was left standing, and a sequence that did not
 arrive is FATAL rather than a separate finding: the chord is the act, so nothing
 after it would be asserting the right thing.
 
-**Realtest 7 needs `AGENT_REPL_FAKE_SHIMS=1` on the Emacs process** and checks
-for it rather than working around it. It has to give a fork's parent a
-conversation before it can fork, and a submitted prompt reaches the shim's
-`createRealQuery`, where the vendor guard throws. The hook has to be stated with
-`--env` on the launch, in `openBackgroundArgs`, because `open` hands Emacs to
-launchd, which inherits nothing; that file is shared by every realtest, so the
-test names the remedy and leaves the decision to the lead
+**Realtest 7 needs a prompt ANSWERED, and the vendor guard alone provides it.**
+It has to give a fork's parent a conversation before it can fork, and a
+submitted prompt would reach the shim's `createRealQuery`, where the guard
+throws. It never gets there: a daemon under the guard spawns every shim with
+`--fake` (`daemon/internal/shimclient/supervisor.go`, `fakeMode`), so the turn
+is answered from the offline scripted SDK. The launch therefore states the ONE
+variable it always did, and no second knob
 (docs/REALTEST-PLAN.md, "Running realtest 7").
 
 ## The phases: hidden, then shown
