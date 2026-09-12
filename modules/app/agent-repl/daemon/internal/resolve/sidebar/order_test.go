@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/wsm"
 )
 
@@ -45,39 +47,120 @@ func TestRosterOrdersEveryPriorityBeforeTheUnprioritized(t *testing.T) {
 	}
 }
 
-func TestRosterBreaksAPriorityTieOnLastSelectedDescending(t *testing.T) {
-	// Arrange.
+func TestRosterOrderDoesNotMoveWhenAWorkspaceIsSelected(t *testing.T) {
+	// Arrange: three workspaces alike in priority, none selected yet.
 	r, _ := newResolver(t)
-	older := workspace("w-older", "aaa")
-	older.LastSelectedAt = at(0)
-	newer := workspace("w-newer", "zzz")
-	newer.LastSelectedAt = at(time.Hour)
+	reg := registry(workspace("w-a", "alpha"), workspace("w-b", "bravo"),
+		workspace("w-c", "charlie"))
+	r.SetRegistry(reg)
+	before := rowNames(repoRows(t, latest(t, r)))
 
-	// Act.
-	r.SetRegistry(registry(older, newer))
+	// Act: the user selects the middle tab, which stamps its selection instant
+	// and re-pushes the registry exactly as WSM does.
+	r.SetRegistry(selectIn(reg, "w-b", at(time.Hour)))
+	r.SetSelected("w-b")
 
-	// Assert: the name would order these the other way round.
-	want := []string{"zzz", "aaa"}
-	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, want) {
-		t.Fatalf("order = %v, want the most recently selected first", got)
+	// Assert: selection changes what is underlined, never what is where.
+	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, before) {
+		t.Fatalf("order after selecting = %v, want the order before it, %v", got, before)
 	}
 }
 
-func TestRosterOrdersANeverSelectedWorkspaceLast(t *testing.T) {
-	// Arrange.
+func TestRosterOrderDoesNotMoveWhenAPrioritizedWorkspaceIsSelected(t *testing.T) {
+	// Arrange: a selection instant must not reorder within a priority band either.
 	r, _ := newResolver(t)
-	never := workspace("w-never", "aaa")
-	selected := workspace("w-selected", "zzz")
-	selected.LastSelectedAt = at(0)
+	reg := registry(
+		prioritized(workspace("w-a", "alpha"), wsm.PriorityP1),
+		prioritized(workspace("w-b", "bravo"), wsm.PriorityP1),
+	)
+	r.SetRegistry(reg)
+	before := rowNames(repoRows(t, latest(t, r)))
 
 	// Act.
-	r.SetRegistry(registry(never, selected))
+	r.SetRegistry(selectIn(reg, "w-b", at(time.Hour)))
+	r.SetSelected("w-b")
 
-	// Assert: "not yet visited" is not "visited long ago".
-	want := []string{"zzz", "aaa"}
-	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, want) {
-		t.Fatalf("order = %v, want the never-selected workspace last", got)
+	// Assert.
+	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, before) {
+		t.Fatalf("order after selecting = %v, want %v", got, before)
 	}
+}
+
+func TestCyclingRightThenLeftReturnsToTheStartingTab(t *testing.T) {
+	// Arrange: the bar realtest 4 drew, in the order it drew it.
+	r, _ := newResolver(t)
+	reg := registry(
+		workspace("w-ee", "explanation-engine"),
+		workspace("w-dwc", "DWC/chess960-review-failures-enm"),
+		workspace("w-rt4", "rt4-bootstrap-1"),
+	)
+	r.SetRegistry(reg)
+	start := rowNames(repoRows(t, latest(t, r)))[0]
+
+	// Act: cycle RIGHT off the first tab and select what it landed on, exactly
+	// as a switch does, then cycle LEFT off that tab reading the bar as it is
+	// drawn at that moment.
+	right := cycle(t, r, start, 1)
+	selected := selectNamed(t, reg, right, at(time.Hour))
+	r.SetRegistry(selected.reg)
+	r.SetSelected(selected.id)
+	back := cycle(t, r, right, -1)
+
+	// Assert: right then left is the identity.
+	if back != start {
+		t.Fatalf("cycling right to %q then left landed on %q, want the starting tab %q",
+			right, back, start)
+	}
+}
+
+// cycle answers the tab n steps from `from` in the DRAWN order, which is what
+// the Emacs tab bar walks.
+func cycle(t *testing.T, r sidebar.Resolver, from string, n int) string {
+	t.Helper()
+	names := rowNames(repoRows(t, latest(t, r)))
+	for i, name := range names {
+		if name == from {
+			return names[((i+n)%len(names)+len(names))%len(names)]
+		}
+	}
+	t.Fatalf("%q is not on the bar %v", from, names)
+	return ""
+}
+
+// selectIn answers a copy of reg with one workspace selected: its selection
+// instant stamped and the registry pointed at it, which is what WSM's
+// SetCurrent re-pushes.
+func selectIn(reg sidebar.Registry, id ids.WorkspaceID, when *time.Time) sidebar.Registry {
+	out := reg
+	out.Workspaces = make([]wsm.Workspace, len(reg.Workspaces))
+	copy(out.Workspaces, reg.Workspaces)
+	for i := range out.Workspaces {
+		if out.Workspaces[i].ID == id {
+			out.Workspaces[i].LastSelectedAt = when
+		}
+	}
+	out.Current = &id
+	return out
+}
+
+// selection is one selected workspace: the registry WSM would re-push and the
+// id the resolver is told about.
+type selection struct {
+	reg sidebar.Registry
+	id  ids.WorkspaceID
+}
+
+// selectNamed selects the workspace drawn under name, which is what a client
+// hands back after cycling: the bar names tabs, the daemon addresses ids.
+func selectNamed(t *testing.T, reg sidebar.Registry, name string, when *time.Time) selection {
+	t.Helper()
+	for _, ws := range reg.Workspaces {
+		if ws.Name == name {
+			return selection{reg: selectIn(reg, ws.ID, when), id: ws.ID}
+		}
+	}
+	t.Fatalf("no workspace is named %q", name)
+	return selection{}
 }
 
 func TestRosterBreaksASelectionTieOnTheName(t *testing.T) {
