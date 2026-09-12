@@ -828,13 +828,20 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 	}
 
 	// CHANNEL ONE: the real chord.
+	//
+	// The editor's account of the press is taken AROUND it, not after it:
+	// `(recent-keys)` only answers "did the quit character arrive" against a
+	// reading from before the key was posted.
 	reported := false
+	evidence := wsActQuitEvidence{}
 	if driver != nil {
+		evidence = wsActReadQuitEvidenceBefore(ctx, client)
 		if pressErr := driver.Press(ctx, wsActQuit); pressErr != nil {
 			note := fmt.Sprintf("C-g COULD NOT BE DELIVERED while %q was standing: %v. keydriver.swift refuses "+
-				"to post a key event to an Emacs it could not make the active application, because AppKit "+
-				"dispatches a key event only to a key window and drops such a post silently; the read channel "+
-				"is used below and this delivery failure is the finding", prompt, pressErr)
+				"to post a key event to an Emacs it could not make the active application with a focused "+
+				"window, because AppKit dispatches a key event only to a key window and drops such a post "+
+				"silently; the read channel is used below and this delivery failure is the finding",
+				prompt, pressErr)
 			manifest.Notes = append(manifest.Notes, note)
 			t.Errorf("%s", note)
 			reported = true
@@ -843,6 +850,8 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 			manifest.Notes = append(manifest.Notes, note)
 			t.Logf("%s", note)
 			return
+		} else {
+			evidence = wsActReadQuitEvidenceAfter(ctx, client, evidence)
 		}
 	}
 
@@ -852,7 +861,14 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 			t.Logf("eval abort %d of the standing minibuffer %q did not answer: %v", attempt, prompt, evalErr)
 		}
 		if wsActMinibufferGone(ctx, client, wsActEvalDismissCeiling) {
-			note := wsActDismissNote(wsActDismissByEval, prompt, attempt)
+			stage := wsActDismissByEval
+			if driver != nil && !reported && !evidence.Arrived() {
+				stage = wsActDismissChordNeverArrived
+			}
+			note := wsActDismissNote(stage, prompt, attempt)
+			if driver != nil && !reported {
+				note += ". " + wsActQuitEvidenceNote(evidence)
+			}
 			manifest.Notes = append(manifest.Notes, note)
 			if reported {
 				t.Logf("%s", note)
@@ -892,6 +908,42 @@ func wsActMinibufferGone(ctx context.Context, client *Client, ceiling time.Durat
 		case <-time.After(wsActDismissPollInterval):
 		}
 	}
+}
+
+// wsActReadQuitEvidenceBefore takes the reading a `C-g` press is judged against.
+//
+// A probe that will not answer is recorded as a probe failure rather than as an
+// empty reading: an editor that said nothing must not be able to make a press
+// look like it never arrived.
+func wsActReadQuitEvidenceBefore(ctx context.Context, client *Client) wsActQuitEvidence {
+	keys, err := RecentKeys(ctx, client)
+	if err != nil {
+		return wsActQuitEvidence{ProbeFailure: fmt.Sprintf("(recent-keys) before the press: %v", err)}
+	}
+	return wsActQuitEvidence{KeysBefore: keys}
+}
+
+// wsActReadQuitEvidenceAfter completes the account once the chord has had its
+// chance, and never overwrites a probe failure already recorded.
+func wsActReadQuitEvidenceAfter(ctx context.Context, client *Client, before wsActQuitEvidence) wsActQuitEvidence {
+	after := before
+	keys, err := RecentKeys(ctx, client)
+	if err != nil {
+		if after.ProbeFailure == "" {
+			after.ProbeFailure = fmt.Sprintf("(recent-keys) after the press: %v", err)
+		}
+	} else {
+		after.KeysAfter = keys
+	}
+	flag, flagErr := client.ReadString(ctx, wsActQuitFlagForm())
+	if flagErr != nil {
+		if after.ProbeFailure == "" {
+			after.ProbeFailure = fmt.Sprintf("quit-flag after the press: %v", flagErr)
+		}
+	} else {
+		after.QuitFlagArmed = flag == "armed"
+	}
+	return after
 }
 
 // wsActSpell renders a chord sequence the way a reader would type it.
