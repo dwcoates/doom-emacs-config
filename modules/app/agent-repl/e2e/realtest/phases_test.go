@@ -90,7 +90,7 @@ func TestPhasesReportDoomBootAsNotObservedWhenTheModuleWroteNothing(t *testing.T
 func TestPhasesReadTheDaemonAdoptionPath(t *testing.T) {
 	// Arrange.
 	src, snap, spawned := phaseFixture(t,
-		elisp("2026-09-10T12:00:03.000000-04:00", "info", "elisp.daemon.ensure-command", ""),
+		elisp("2026-09-10T12:00:03.000000-04:00", "info", "elisp.daemon.ensure-scheduled idle=0", ""),
 		elisp("2026-09-10T12:00:03.400000-04:00", "info", `elisp.daemon.adopted address="127.0.0.1:1234" health=healthy`, ""))
 
 	// Act.
@@ -569,6 +569,75 @@ func TestPhasesSkipALineThatIsNotARecord(t *testing.T) {
 	// Assert.
 	if _, ok := measurementFor(phases.Measure(), PhaseLinkUp, GlobalWorkspace); !ok {
 		t.Errorf("a malformed line ahead of the marker lost the marker")
+	}
+}
+
+func TestPhasesMeasureModuleLoadedFromTheScheduledEnsure(t *testing.T) {
+	// Arrange: `elisp.daemon.ensure-scheduled` is what the startup path
+	// actually writes — config.el registers agent-repl-daemon-schedule-ensure
+	// on emacs-startup-hook — so it is what ends this phase.
+	src, snap, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:02.900000-04:00", "info", "elisp.daemon.ensure-scheduled idle=0", ""))
+
+	// Act.
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	got, ok := measurementFor(phases.Measure(), PhaseModuleLoaded, GlobalWorkspace)
+	if !ok || got.Elapsed != 2900*time.Millisecond {
+		t.Errorf("%s measured %+v, want 2.9s from the scheduled ensure", PhaseModuleLoaded, got)
+	}
+}
+
+func TestPhasesIgnoreTheInteractiveEnsureCommand(t *testing.T) {
+	// Arrange: `elisp.daemon.ensure-command` is the record the INTERACTIVE
+	// retry writes, never the startup. Crediting it to module-loaded would
+	// report a person's keypress as module-load latency.
+	src, snap, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:41.000000-04:00", "info", "elisp.daemon.ensure-command", ""))
+
+	// Act.
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	if got, ok := measurementFor(phases.Measure(), PhaseModuleLoaded, GlobalWorkspace); ok {
+		t.Errorf("the interactive ensure was credited to %s as %+v", PhaseModuleLoaded, got)
+	}
+}
+
+func TestPhasesMeasureFirstRosterFromTheReconcileRecord(t *testing.T) {
+	// Arrange: the reconcile record is the end of the first-roster phase, and
+	// it is emitted at INFO by roster.el so it reaches the durable sink at the
+	// default log level.
+	src, snap, spawned := phaseFixture(t,
+		elisp("2026-09-10T12:00:03.250000-04:00", "info", `elisp.roster.reconcile: tabs=2 order=("one" "two")`, ""))
+
+	// Act.
+	phases, err := ReadPhases([]Source{src}, snap, spawned)
+	if err != nil {
+		t.Fatalf("read the phases: %v", err)
+	}
+
+	// Assert.
+	got, ok := measurementFor(phases.Measure(), PhaseFirstRoster, GlobalWorkspace)
+	if !ok || got.Elapsed != 3250*time.Millisecond {
+		t.Errorf("%s measured %+v, want 3.25s from the reconcile record", PhaseFirstRoster, got)
+	}
+}
+
+func TestBudgetsCarryNoUnmeasuredRow(t *testing.T) {
+	// Arrange/Act: a run refuses to start while any row still carries the
+	// sentinel, so an unmeasured row blocks the whole realtest section.
+
+	// Assert.
+	if left := UnmeasuredBudgets(); len(left) > 0 {
+		t.Errorf("these phases still have no measured budget and will block every run: %v", left)
 	}
 }
 

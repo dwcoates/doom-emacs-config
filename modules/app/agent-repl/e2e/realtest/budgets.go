@@ -59,11 +59,29 @@ var budgets = []Budget{
 	// standing wait/timeout rule.
 	{Phase: PhaseDoomBoot, Limit: 7881 * time.Millisecond,
 		Basis: "healthy max 2.627s, realtest-20260911-154945 (n=25); 3x ~= 7.881s"},
-	// module-loaded: no MANIFEST.md anywhere under ~/.claude-emacs/realtest/
-	// has ever recorded this phase (n=0) — its marker
-	// (elisp.daemon.ensure-command) has apparently never fired in an
-	// authorized run. Left unmeasured rather than guessed.
-	{Phase: PhaseModuleLoaded, Limit: unmeasured},
+	// module-loaded: healthy max 2.967s, realtest-20260911-154945 (n=21).
+	//
+	// THIS ROW WAS `unmeasured` UNTIL THE MARKER WAS CORRECTED, and it read
+	// n=0 for a reason that had nothing to do with the phase: the reader
+	// matched `elisp.daemon.ensure-command`, a record only the interactive
+	// retry writes, while the startup path writes
+	// `elisp.daemon.ensure-scheduled` (phases.go says why). The phase had
+	// been happening, and being logged, in every run all along.
+	//
+	// The maximum above is measured, not derived. `ensure-scheduled` appears
+	// in the Messages.txt of 22 of the 23 MANIFEST.md runs under
+	// ~/.claude-emacs/realtest/; 21 of those are single-cold-start runs whose
+	// manifest `spawned at` is the spawn that produced the record, and the
+	// slowest of the 21 is realtest-20260911-154945 at 2.967s from spawn.
+	// (realtest-20260911-121357 is excluded: it is a three-cold-start run
+	// from the old regime, so its single Messages.txt belongs to a later
+	// spawn than its first manifest entry and the difference is not a
+	// latency.) The measurement is corroborated intra-process: across all 22,
+	// `ensure-scheduled` lands 0.204s-0.340s after the module's first record,
+	// and 2.627s (that run's doom-boot max) + 0.340s is the same 2.967s.
+	// 3x per AGENTS.md's standing wait/timeout rule.
+	{Phase: PhaseModuleLoaded, Limit: 8901 * time.Millisecond,
+		Basis: "healthy max 2.967s, realtest-20260911-154945 (n=21); 3x ~= 8.901s"},
 	// daemon-spawned: healthy max 3.201s, realtest-20260911-154945 (n=21).
 	{Phase: PhaseDaemonSpawned, Limit: 9603 * time.Millisecond,
 		Basis: "healthy max 3.201s, realtest-20260911-154945 (n=21); 3x ~= 9.603s"},
@@ -80,10 +98,30 @@ var budgets = []Budget{
 	// roster-subscribed: healthy max 3.474s, realtest-20260911-154945 (n=21).
 	{Phase: PhaseRosterSubscribed, Limit: 10422 * time.Millisecond,
 		Basis: "healthy max 3.474s, realtest-20260911-154945 (n=21); 3x ~= 10.422s"},
-	// first-roster: no MANIFEST.md has ever recorded this phase (n=0) — its
-	// marker (elisp.roster.reconcile:) has apparently never fired in an
-	// authorized run. Left unmeasured rather than guessed.
-	{Phase: PhaseFirstRoster, Limit: unmeasured},
+	// first-roster: DERIVED from tab-drawn, not measured, because this
+	// phase's marker has genuinely never been written to a file: roster.el
+	// emitted `elisp.roster.reconcile:` at DEBUG, below the durable sink's
+	// default level, so the run history holds no observation of it to size a
+	// bound from (phases.go says why, and roster.el now emits it at INFO).
+	//
+	// THE DERIVATION. The reconcile record is written by
+	// `agent-repl-roster-reconcile` immediately after the tab walk, in the
+	// same synchronous call, from the same roster push that produces every
+	// `elisp.roster.tab-open` record. So first-roster lands after the LAST
+	// tab-open of the first push and before anything else that push triggers:
+	// it is tab-drawn's healthy maximum plus the walk's tail, which is the
+	// teardown pass and one `setq` over an already-built list. That tail is
+	// far below the millisecond the timestamps resolve to — in the
+	// realtest-20260911-154945 log the whole walk, both tab-opens included,
+	// spans 3ms — so tab-drawn's healthy maximum is taken as this phase's,
+	// unrounded: 3.479s, realtest-20260911-154945 (n=40). 3x ~= 10.437s.
+	//
+	// A derived bound is a stand-in for a measured one. The first authorized
+	// run after this change observes the phase directly; replace this row's
+	// Basis with that measurement, and if the observation exceeds 3.479s the
+	// derivation was wrong rather than the product being slow.
+	{Phase: PhaseFirstRoster, Limit: 10437 * time.Millisecond,
+		Basis: "derived from tab-drawn healthy max 3.479s, realtest-20260911-154945 (n=40); the reconcile record is written in the same call immediately after the tab walk; 3x ~= 10.437s"},
 	// tab-drawn: healthy max 3.479s, realtest-20260911-154945, workspace
 	// 2b81f45a724642ef (n=40 — two workspaces per cold start across 20
 	// runs that had any open workspace to draw a tab for).
