@@ -24,8 +24,16 @@ Filters:
   --until RFC3339    inclusive RFC3339 instant
   --level LEVEL      minimum debug, info, warn, or error level
   --runtime A,B      comma-separated runtimes
-  --follow           keep reading current generations after the merged history
-  --json             emit the original JSONL instead of the compact human format
+  --follow           keep reading current generations after the merged history (not with --tally/--sample)
+  --json             emit the original JSONL instead of the compact human format; the escape hatch, not the default
+  --messages FILE    include a captured Emacs *Messages* text snapshot, scraped for warn/error-shaped lines
+
+Compact query modes (--sample composes with --tally; the rest are exclusive of each other and of --json):
+  --tally            print one count/level/runtime/operation line per group, sorted by count descending
+  --sample N         print up to N representative records per group, one per line; with --tally, follows the table
+  --fields a,b,c     project only the named top-level or context fields, one line per record, nothing else
+  --timeline         print one compact time/level/operation/message line per record, in time order
+  --width N          truncate the message shown by --sample/--timeline (default 120)
 
 Harvest:
   --harvest FROM TO  count every warn/error and sink finding across --all in the inclusive RFC3339 window
@@ -35,6 +43,11 @@ Malformed JSONL is an error naming the file and line; it is never skipped.
 Absent or unreadable sinks and workspace sinks that are not symlinks are findings.
 Harvest prints attributed finding rows; other modes summarize findings on stderr.
 Sink findings do not fail a read unless none of the selected sinks can be read.
+A service's `.err.log` (raw stderr) and a --messages snapshot (raw *Messages*
+text) are not JSONL; every compact mode and --json synthesizes an operation
+("stderr" or "messages"), a runtime, and an inferred level for their lines so
+they appear in the same tally, sample, timeline, or field projection as
+structured records. See AGENTS.md "Logs" for the synthetic field names.
 EOF
 }
 
@@ -61,6 +74,14 @@ format=human
 harvest=0
 harvest_from=""
 harvest_to=""
+tally=0
+sample_set=0
+sample_n=0
+fields=""
+timeline=0
+width=120
+width_set=0
+messages_path=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -124,6 +145,50 @@ while [ "$#" -gt 0 ]; do
             harvest_to="$3"
             shift 3
             ;;
+        --tally)
+            [ "$tally" -eq 0 ] || fail '--tally may be specified once'
+            tally=1
+            shift
+            ;;
+        --sample)
+            require_values 1 "$1" "$@"
+            [ "$sample_set" -eq 0 ] || fail '--sample may be specified once'
+            case "$2" in
+                *[!0-9]*|'') fail '--sample requires a positive integer' ;;
+            esac
+            [ "$2" -gt 0 ] || fail '--sample requires a positive integer'
+            sample_n="$2"
+            sample_set=1
+            shift 2
+            ;;
+        --fields)
+            require_values 1 "$1" "$@"
+            [ -z "$fields" ] || fail '--fields may be specified once'
+            fields="$2"
+            shift 2
+            ;;
+        --timeline)
+            [ "$timeline" -eq 0 ] || fail '--timeline may be specified once'
+            timeline=1
+            shift
+            ;;
+        --width)
+            require_values 1 "$1" "$@"
+            [ "$width_set" -eq 0 ] || fail '--width may be specified once'
+            case "$2" in
+                *[!0-9]*|'') fail '--width requires a positive integer' ;;
+            esac
+            [ "$2" -gt 0 ] || fail '--width requires a positive integer'
+            width="$2"
+            width_set=1
+            shift 2
+            ;;
+        --messages)
+            require_values 1 "$1" "$@"
+            [ -z "$messages_path" ] || fail '--messages may be specified once'
+            messages_path="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -131,6 +196,15 @@ while [ "$#" -gt 0 ]; do
         *) fail "unknown argument: $1" ;;
     esac
 done
+
+if [ "$tally" -eq 1 ] && [ "$timeline" -eq 1 ]; then fail '--tally and --timeline may not be combined'; fi
+if [ "$tally" -eq 1 ] && [ -n "$fields" ]; then fail '--tally and --fields may not be combined'; fi
+if [ "$timeline" -eq 1 ] && [ -n "$fields" ]; then fail '--timeline and --fields may not be combined'; fi
+if [ "$sample_set" -eq 1 ] && [ "$timeline" -eq 1 ]; then fail '--sample and --timeline may not be combined'; fi
+if [ "$sample_set" -eq 1 ] && [ -n "$fields" ]; then fail '--sample and --fields may not be combined'; fi
+if [ "$format" = json ] && { [ "$tally" -eq 1 ] || [ "$sample_set" -eq 1 ] || [ -n "$fields" ] || [ "$timeline" -eq 1 ]; }; then
+    fail '--json may not be combined with --tally, --sample, --fields, or --timeline'
+fi
 
 if [ "$harvest" -eq 1 ]; then
     [ -z "$scope" ] || fail '--harvest selects all workspace and central logs itself'
@@ -140,10 +214,27 @@ if [ "$harvest" -eq 1 ]; then
     [ -z "$runtimes" ] || fail '--harvest cannot be combined with --runtime'
     [ "$follow" -eq 0 ] || fail '--harvest cannot be combined with --follow'
     [ "$format" = human ] || fail '--harvest cannot be combined with --json'
+    [ "$tally" -eq 0 ] || fail '--harvest cannot be combined with --tally'
+    [ "$sample_set" -eq 0 ] || fail '--harvest cannot be combined with --sample'
+    [ -z "$fields" ] || fail '--harvest cannot be combined with --fields'
+    [ "$timeline" -eq 0 ] || fail '--harvest cannot be combined with --timeline'
+    [ -z "$messages_path" ] || fail '--harvest cannot be combined with --messages'
     scope=all
     format=harvest
 else
-    [ -n "$scope" ] || fail 'choose --workspace, --central, --all, or --harvest'
+    [ -n "$scope" ] || [ -n "$messages_path" ] || fail 'choose --workspace, --central, --all, or --harvest'
+fi
+
+if [ "$format" = human ]; then
+    if [ "$tally" -eq 1 ]; then
+        format=tally
+    elif [ "$sample_set" -eq 1 ]; then
+        format=sample
+    elif [ "$timeline" -eq 1 ]; then
+        format=timeline
+    elif [ -n "$fields" ]; then
+        format=fields
+    fi
 fi
 
 state_root="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}"
@@ -256,6 +347,7 @@ base_runtimes=()
 base_workspace_ids=()
 base_workspace_dirs=()
 base_kinds=()
+base_formats=()
 
 add_base() {
     bases+=("$1")
@@ -263,24 +355,38 @@ add_base() {
     base_workspace_ids+=("$3")
     base_workspace_dirs+=("$4")
     base_kinds+=("$5")
+    base_formats+=("$6")
 }
 
 if [ "$scope" = central ] || [ "$scope" = all ]; then
-    runtime_requested emacs && add_base "$emacs_global_log" emacs "" "" file
-    runtime_requested daemon && add_base "$state_root/logs/daemon.run.log" daemon "" "" file
-    runtime_requested store && add_base "$cache_root/log/shim-store.log" store "" "" file
-    runtime_requested sidecar && add_base "$cache_root/log/shim-claude-sidecar.log" sidecar "" "" file
+    runtime_requested emacs && add_base "$emacs_global_log" emacs "" "" file jsonl
+    runtime_requested daemon && add_base "$state_root/logs/daemon.run.log" daemon "" "" file jsonl
+    runtime_requested store && add_base "$cache_root/log/shim-store.log" store "" "" file jsonl
+    runtime_requested sidecar && add_base "$cache_root/log/shim-claude-sidecar.log" sidecar "" "" file jsonl
+    # The two launchd services' emergency stderr sinks: unstructured text the
+    # contract permits only when the canonical JSONL sink could not record
+    # the process's own failure. Harvest keeps its own established scope and
+    # does not gain these; every other mode does.
+    if [ "$harvest" -eq 0 ]; then
+        runtime_requested store && add_base "$cache_root/log/shim-store.err.log" store "" "" file stderr
+        runtime_requested sidecar && add_base "$cache_root/log/shim-claude-sidecar.err.log" sidecar "" "" file stderr
+    fi
 fi
 if [ "$scope" = workspace ] || [ "$scope" = all ]; then
     for workspace_index in "${!workspace_dirs[@]}"; do
         workspace_dir="${workspace_dirs[$workspace_index]}"
         workspace_id="${workspace_ids[$workspace_index]}"
-        runtime_requested emacs && add_base "$workspace_dir/.claude/emacs/emacs.log" emacs "$workspace_id" "$workspace_dir" symlink
-        runtime_requested daemon && add_base "$workspace_dir/.claude/emacs/daemon.log" daemon "$workspace_id" "$workspace_dir" symlink
-        runtime_requested shim && add_base "$workspace_dir/.claude/emacs/shim.log" shim "$workspace_id" "$workspace_dir" symlink
-        runtime_requested webapp && add_base "$workspace_dir/.claude/emacs/webapp.log" webapp "$workspace_id" "$workspace_dir" symlink
-        runtime_requested sidecar && add_base "$workspace_dir/.claude/emacs/sidecar.log" sidecar "$workspace_id" "$workspace_dir" symlink
+        runtime_requested emacs && add_base "$workspace_dir/.claude/emacs/emacs.log" emacs "$workspace_id" "$workspace_dir" symlink jsonl
+        runtime_requested daemon && add_base "$workspace_dir/.claude/emacs/daemon.log" daemon "$workspace_id" "$workspace_dir" symlink jsonl
+        runtime_requested shim && add_base "$workspace_dir/.claude/emacs/shim.log" shim "$workspace_id" "$workspace_dir" symlink jsonl
+        runtime_requested webapp && add_base "$workspace_dir/.claude/emacs/webapp.log" webapp "$workspace_id" "$workspace_dir" symlink jsonl
+        runtime_requested sidecar && add_base "$workspace_dir/.claude/emacs/sidecar.log" sidecar "$workspace_id" "$workspace_dir" symlink jsonl
     done
+fi
+if [ "$harvest" -eq 0 ] && [ -n "$messages_path" ]; then
+    # A captured Emacs *Messages* text snapshot: also not JSONL, scraped for
+    # the same warn/error-shaped lines e2e/realtest/messages.go looks for.
+    runtime_requested emacs && add_base "$messages_path" emacs "" "" file messages
 fi
 
 command -v go >/dev/null 2>&1 || fail 'go is required to build the structured-log reader'
@@ -308,11 +414,12 @@ if [ ! -x "$binary" ]; then
     fi
 fi
 
-helper_args=(--mode "$format" --level "$level")
+helper_args=(--mode "$format" --level "$level" --width "$width" --sample-n "$sample_n")
 [ -z "$since" ] || helper_args+=(--since "$since")
 [ -z "$until" ] || helper_args+=(--until "$until")
 [ -z "$runtimes" ] || helper_args+=(--runtime "$runtimes")
 [ "$follow" -eq 0 ] || helper_args+=(--follow)
+[ -z "$fields" ] || helper_args+=(--fields "$fields")
 if [ "$harvest" -eq 1 ]; then
     helper_args+=(--harvest-from "$harvest_from" --harvest-to "$harvest_to")
 fi
@@ -323,6 +430,7 @@ for base_index in "${!bases[@]}"; do
         --base-workspace-id "${base_workspace_ids[$base_index]}"
         --base-workspace-dir "${base_workspace_dirs[$base_index]}"
         --base-kind "${base_kinds[$base_index]}"
+        --base-format "${base_formats[$base_index]}"
     )
 done
 
