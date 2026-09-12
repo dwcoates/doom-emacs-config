@@ -39,6 +39,7 @@ import {
   type CliArgs,
   type ShimEnvironment,
 } from "../src/main.js";
+import { VendorCallsForbiddenError } from "../src/vendor-guard.js";
 import type { Engine } from "../src/engine/engine.js";
 import type { QuerySpec } from "../src/engine/session.js";
 
@@ -856,6 +857,29 @@ describe("queryFactory", () => {
     // worktree; constructing the real-query factory never touches the vendor,
     // only CALLING it does, which is exactly what is pinned here.
     await expect(create(spec())).rejects.toThrow();
+  });
+
+  it("without --fake, refuses with the guard's OWN error naming createRealQuery", async () => {
+    // Arrange. The daemon now forces --fake on every spawn it makes under the
+    // guard, so nothing should ever reach this path in a guarded run. That is
+    // exactly why the refusal has to stay typed and named: if the daemon's
+    // rule ever regresses, the shim must say WHICH vendor entry was tripped
+    // rather than dying with an anonymous throw.
+    const create = queryFactory(false, env, cwd);
+
+    // Act.
+    let raised: unknown;
+    try {
+      await create(spec());
+    } catch (err) {
+      raised = err;
+    }
+
+    // Assert.
+    expect({
+      typed: raised instanceof VendorCallsForbiddenError,
+      site: raised instanceof Error && /blocked at: createRealQuery/.test(raised.message),
+    }).toEqual({ typed: true, site: true });
   });
 });
 
