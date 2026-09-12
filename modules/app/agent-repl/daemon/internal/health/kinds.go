@@ -70,7 +70,47 @@ const (
 	// KindStateUnreadable is the liveness self-check's own fault when the
 	// state client will not answer. It likewise has no typed arm.
 	KindStateUnreadable = "daemon_state_unreadable"
+	// KindRelaunchResumeFailed is the LEGACY spelling the rollout controller
+	// used for a relaunch whose resume failed. It names the same class as
+	// KindResumeFailed and renders through the same arm; only records written
+	// before the spelling was unified still carry it.
+	KindRelaunchResumeFailed = "relaunch_resume_failed"
 )
+
+// armlessSessionKinds are the recorded fault kinds the SessionFault / HostFault
+// oneof does not spell an arm for. THE ARM IS THE FAULT CLASS -- both surfaces
+// refuse a fault whose oneof is unset -- so a fault of one of these kinds is
+// kept off the wire entirely rather than sent as a prose-only line that would
+// break the whole push. The fault itself is recorded, loudly, at the site that
+// opened it; this set only governs what the two RENDERERS can carry.
+//
+// Every kind here is one the surfaces are OWED an arm for. Until they have one
+// the honest answer is silence on the wire, not a malformed message.
+var armlessSessionKinds = map[string]struct{}{
+	// The liveness probe's own answer, not a fault anything raised.
+	KindSessionAbsent: {},
+	// The record of a conversation abandoned at bring-up; the session is live.
+	KindConversationAbandoned: {},
+	// A watch OPEN the shim refused for a handle nothing announced.
+	KindWatchOpenRefused: {},
+	// The self-check's fault when the state client will not answer.
+	KindStateUnreadable: {},
+	// A handover whose adoption window expired. DaemonFault spells an arm for
+	// it; the session surfaces do not, and the rollout controller records it
+	// against the workspace it was handing over.
+	KindAdoptionWindowExpired: {},
+	// An ordinary reconciled bounce disposition, opened and closed in one
+	// breath. It needs no arm: it is per-session accounting, never a standing
+	// condition a host view should draw.
+	"bounce_disposition": {},
+}
+
+// ArmlessSessionKind reports whether kind is one the SessionFault / HostFault
+// oneof has no arm for, and so cannot be carried on either surface.
+func ArmlessSessionKind(kind string) bool {
+	_, ok := armlessSessionKinds[kind]
+	return ok
+}
 
 // daemonFault renders one recorded fault as the typed DaemonFault the wire
 // carries. A kind with no typed arm answers with the detail line alone rather
@@ -106,9 +146,15 @@ func daemonFault(f wsm.Fault) *agentreplv1.DaemonFault {
 	return out
 }
 
-// sessionFault renders one recorded fault as the typed SessionFault. The same
-// rule holds: a kind with no typed arm keeps its detail line.
-func sessionFault(f wsm.Fault) *agentreplv1.SessionFault {
+// sessionFault renders one recorded fault as the typed SessionFault, reporting
+// false when the fault's kind has no arm to render it through.
+//
+// THE ARM IS THE FAULT CLASS. `SessionFault.kind' is a oneof the consumer
+// refuses when it is unset, so a prose-only fault is not a lesser answer, it is
+// a malformed message that costs the consumer the WHOLE response. A kind with
+// no arm is therefore withheld from the wire and answered false; it stays
+// recorded, and loud, at the site that opened it.
+func sessionFault(f wsm.Fault) (*agentreplv1.SessionFault, bool) {
 	out := &agentreplv1.SessionFault{Detail: faultDetail(f)}
 	switch f.Kind {
 	case KindShimStartFailed:
@@ -124,7 +170,7 @@ func sessionFault(f wsm.Fault) *agentreplv1.SessionFault {
 		}
 	case KindLinkSevered:
 		out.Kind = &agentreplv1.SessionFault_LinkSevered{LinkSevered: &agentreplv1.SessionFaultLinkSevered{}}
-	case KindResumeFailed:
+	case KindResumeFailed, KindRelaunchResumeFailed:
 		out.Kind = &agentreplv1.SessionFault_ResumeFailed{
 			ResumeFailed: &agentreplv1.SessionFaultResumeFailed{Cause: evidenceCause(f)},
 		}
@@ -143,8 +189,10 @@ func sessionFault(f wsm.Fault) *agentreplv1.SessionFault {
 				Kind:      f.Evidence["kind"],
 			},
 		}
+	default:
+		return nil, false
 	}
-	return out
+	return out, true
 }
 
 // EvidenceExitCode is exitCode, exported for the HOST stream's HostFault,
