@@ -311,7 +311,7 @@ func TestHarvestCountsInfoWithoutFailing(t *testing.T) {
 	lines := []string{
 		rec("2026-09-10T12:00:11.000000-04:00", "emacs", "info", "elisp.link.up", "elisp.link.up address=x", ""),
 		rec("2026-09-10T12:00:12.000000-04:00", "emacs", "info", "elisp.link.up", "elisp.link.up address=x", ""),
-		rec("2026-09-10T12:00:13.000000-04:00", "emacs", "debug", "elisp.roster.reconcile", "elisp.roster.reconcile: tabs=2", ""),
+		rec("2026-09-10T12:00:13.000000-04:00", "emacs", "debug", "elisp.roster.push", "elisp.roster.push: applied rows=2 tabs=2", ""),
 	}
 
 	// Act.
@@ -324,7 +324,7 @@ func TestHarvestCountsInfoWithoutFailing(t *testing.T) {
 	if got := harvest.InfoCounts["emacs.global"]["elisp.link.up"]; got != 2 {
 		t.Errorf("counted %d `elisp.link.up` info record(s), want 2", got)
 	}
-	if _, counted := harvest.InfoCounts["emacs.global"]["elisp.roster.reconcile"]; counted {
+	if _, counted := harvest.InfoCounts["emacs.global"]["elisp.roster.push"]; counted {
 		t.Errorf("a debug record was counted as info")
 	}
 }
