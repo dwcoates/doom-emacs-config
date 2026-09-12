@@ -229,14 +229,15 @@ func TestSessionAbsentSessionIsAnUnhealthyAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
-	// The session-absent kind has no `SessionFault.kind' arm, so it is withheld
-	// from the wire rather than sent with an unset oneof; the VERDICT still
-	// comes from the records, so the answer is unhealthy all the same.
+	// The session-absent kind has its OWN `SessionFault.kind' arm as of
+	// 2026-09-12, so the probe's answer now reaches the caller instead of
+	// being withheld for want of one.
 	if got.GetSuccess().GetUnhealthy() == nil {
 		t.Fatalf("Session() = %v, want the unhealthy arm", got.GetSuccess().GetHealth())
 	}
-	if faults := got.GetSuccess().GetUnhealthy().GetFaults(); len(faults) != 0 {
-		t.Fatalf("Session() faults = %v, want the armless fault withheld", faults)
+	faults := got.GetSuccess().GetUnhealthy().GetFaults()
+	if len(faults) != 1 || faults[0].GetSessionAbsent() == nil {
+		t.Fatalf("Session() faults = %v, want the session_absent fault", faults)
 	}
 }
 
