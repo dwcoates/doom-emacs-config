@@ -28,13 +28,37 @@ type LineWritten struct {
 	WriteSeq uint64
 }
 
+// SkippedEntry is one batch entry the store left UNCHANGED because its
+// upsert_key already names a row under a DIFFERENT book.
+//
+// RE-INGESTING ALREADY-STORED CONTENT IS IDEMPOTENT. A corrected converter
+// re-reading the corpus writes the same cross-plane activity key under its
+// now-right book, which disagrees with the legacy row an earlier ingest wrote;
+// moving the row would teleport every pointer already handed out for it, so the
+// stored row is kept and this entry is skipped. The skip is REPORTED rather
+// than swallowed so the producer can fold it into its own catch-up summary, and
+// it is a per-entry skip rather than a batch-fatal refusal, so the batch's
+// genuinely-new entries still commit.
+type SkippedEntry struct {
+	UpsertKey string
+	// FromBook is the book the stored row keeps, rendered for a human: "(none)"
+	// for a never-served row, the agent id otherwise.
+	FromBook string
+	// ToBook is the book this skipped entry would have moved the row to.
+	ToBook string
+}
+
 // WriteResult reports what one batch did. Absorbed is not a lesser success:
 // a replayed batch whose write_ids all landed before is the SAME durable
 // answer, and the producer retires it from its retry buffer either way.
 type WriteResult struct {
 	Written  int
 	Absorbed int
-	Lines    []LineWritten
+	// Skipped is the entries left unchanged as legacy book-conflicts (see
+	// SkippedEntry). A skip commits nothing for that entry and keeps the stored
+	// row, but the batch still commits every other entry.
+	Skipped []SkippedEntry
+	Lines   []LineWritten
 	// BashRows is the bash rows this write produced, ready for the WatchBashRun
 	// fan-out. A run's rows are published exactly as a book's lines are.
 	BashRows []BashRowWritten
@@ -123,8 +147,22 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			continue
 		}
 
-		if err := d.requireStableIdentity(ctx, tx, r); err != nil {
+		skip, err := d.applyIdentityPolicy(ctx, tx, r)
+		if err != nil {
 			return WriteResult{}, d.refuse(fields, err)
+		}
+		if skip != nil {
+			// A LEGACY BOOK-CONFLICT IS A SKIP, NOT A BATCH-FATAL REFUSAL. The
+			// stored row is kept, this entry lands nothing (no upsert, no ledger
+			// row, so a later replay skips it again — idempotent), and the
+			// batch's other entries still commit. The warn keeps the skip
+			// visible; it does not abort the transaction.
+			result.Skipped = append(result.Skipped, *skip)
+			warn := fields
+			warn.Level = "warn"
+			d.log.Log(warn, "entry skipped: upsert_key already names a row under book %q; the stored row is kept and this entry (book %q) is not applied — re-ingesting already-stored content is idempotent entries_index=%d",
+				skip.FromBook, skip.ToBook, i)
+			continue
 		}
 
 		if r.workflowNotImplemented {
@@ -178,8 +216,8 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
-	}, "transaction committed written=%d absorbed=%d lines=%d cursor_advance=%t",
-		result.Written, result.Absorbed, len(result.Lines), cursor != nil)
+	}, "transaction committed written=%d absorbed=%d skipped=%d lines=%d cursor_advance=%t",
+		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), cursor != nil)
 	return result, nil
 }
 
@@ -265,42 +303,51 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, writeSeq u
 	return nil
 }
 
-// requireStableIdentity refuses an upsert that would move an existing row into
-// another book or turn it into another kind of thing.
+// applyIdentityPolicy decides what the batch does with an entry whose
+// upsert_key already names a stored row. `upsert_key` names one thing, and an
+// upsert supersedes that thing's CONTENT, never its identity — so a write that
+// would give the row a different identity is not a supersession. There are two
+// kinds of identity change, and they are NOT the same fault:
 //
-// AN UPSERT SUPERSEDES A ROW'S CONTENT, NOT ITS IDENTITY. `upsert_key` names one
-// thing, and the whole page model rests on that: a pointer stays valid across
-// every write of the row it names, so a caller holding one must still be holding
-// a line of the book it read it from. Letting a write change `book_agent_id`
-// would silently teleport a served line out of one agent's page and into
-// another's — every pointer already handed out for it now naming a row in a book
-// the caller never asked about — and changing `kind` would make a served page
-// line become an unservable residue row under a pointer that still exists.
-// Neither is a supersession; both are a different thing wearing the same key.
-func (d *DB) requireStableIdentity(ctx context.Context, tx *sql.Tx, r routed) error {
+//   - A KIND CHANGE is a corruption with no legitimate cause: a served page
+//     line becoming an unservable residue row (or the reverse) under a pointer
+//     that still exists. Nothing ever re-ingests a row as a different KIND of
+//     thing, so this stays a batch-fatal refusal, exactly as before. The
+//     returned error is the strict SiteUpsertChangesIdentity refusal, still
+//     available for any caller that wants the strict verdict.
+//   - A BOOK MOVE is what a corrected re-ingest of ALREADY-STORED content looks
+//     like: an earlier ingest booked the row under book A and the converter now
+//     books the same key under its corrected book B. Moving the row would
+//     teleport every pointer already handed out for it out of the book the
+//     caller read it from, so the stored row is KEPT and the entry is SKIPPED —
+//     reported to the caller (never swallowed), but not fatal to the batch. A
+//     first insert has no identity to change, and a same-book supersede keeps
+//     it, so both return (nil, nil) and the caller applies the upsert.
+func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, r routed) (*SkippedEntry, error) {
 	var book sql.NullString
 	var kind string
 	switch err := tx.QueryRowContext(ctx,
 		`SELECT book_agent_id, kind FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&book, &kind); {
 	case errors.Is(err, sql.ErrNoRows):
 		// A first insert has no identity to change.
-		return nil
+		return nil, nil
 	case err != nil:
-		return storagef(err, "reading the identity of row %q", r.upsertKey)
-	}
-	if book.Valid != r.book.Valid || book.String != r.book.String {
-		return invalidSitef(SiteUpsertChangesIdentity,
-			entryField(r.index, "agent_update.serveable_frame.page_agent_id"),
-			"entries[%d] (upsert_key=%q) would move the row from book %q to %q — an upsert supersedes a row's content, never its identity",
-			r.index, r.upsertKey, nullableBook(book), nullableBook(r.book))
+		return nil, storagef(err, "reading the identity of row %q", r.upsertKey)
 	}
 	if kind != r.kind {
-		return invalidSitef(SiteUpsertChangesIdentity,
+		return nil, invalidSitef(SiteUpsertChangesIdentity,
 			entryField(r.index, "agent_update"),
 			"entries[%d] (upsert_key=%q) would change the row's kind from %q to %q — an upsert supersedes a row's content, never its identity",
 			r.index, r.upsertKey, kind, r.kind)
 	}
-	return nil
+	if book.Valid != r.book.Valid || book.String != r.book.String {
+		return &SkippedEntry{
+			UpsertKey: r.upsertKey,
+			FromBook:  nullableBook(book),
+			ToBook:    nullableBook(r.book),
+		}, nil
+	}
+	return nil, nil
 }
 
 // nullableBook renders a book column for a human, distinguishing the never-served

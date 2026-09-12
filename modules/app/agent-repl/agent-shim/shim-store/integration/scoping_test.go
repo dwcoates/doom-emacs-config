@@ -108,7 +108,10 @@ func TestRotationDoesNotSplitTheWatchedTail(t *testing.T) {
 // table: a replay is absorbed because the LEDGER remembers the write, which
 // would still hold if the entry row itself had been lost. What cannot happen
 // unless the row survived is an identity refusal — the store can only object
-// that this upsert_key would change kind if it still holds a row under that key.
+// that this upsert_key would change KIND if it still holds a row under that key.
+// A keepalive becoming a page line is a KIND change (keepalive → page_line), and
+// a kind change stays a batch-fatal refusal even though a mere book move is now a
+// per-entry skip: nothing legitimate ever re-ingests a row as a different kind.
 func TestAKeepAlivesRowItselfSurvivesARestart(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
@@ -128,9 +131,10 @@ func TestAKeepAlivesRowItselfSurvivesARestart(t *testing.T) {
 			frameLine(agentID("main"), responseFrame("main", "act-1", "would overwrite the keep-alive"))))
 
 	// Assert: the refusal can only exist because the row is still there. It is
-	// the BOOK half of the identity check that fires — a never-served row's book
-	// is NULL, and a page line's is the agent.
-	assertWriteInvalidRequest(t, failure, "entries[0].agent_update.serveable_frame.page_agent_id")
+	// the KIND half of the identity check that fires — the stored row is a
+	// keepalive and this write claims the key for a page line, which is checked
+	// before the book move (never-served NULL → the agent) that also holds here.
+	assertWriteInvalidRequest(t, failure, "entries[0].agent_update")
 	// A keep-alive is never an agent's first sight, so the refused page line
 	// left the store with no agent row for "main" at all.
 	openUnknownAgent(after, t, store.client(), "main")

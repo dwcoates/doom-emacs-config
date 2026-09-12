@@ -1,7 +1,6 @@
 package db
 
 import (
-	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -10,75 +9,106 @@ import (
 
 // ---- R-A5: an upsert supersedes content, never identity ----
 
-func TestWriteBatchRefusesAnUpsertThatMovesTheRowToAnotherBook(t *testing.T) {
+// TestWriteBatchSkipsAnUpsertThatMovesTheRowToAnotherBook is the re-ingest
+// idempotency boundary (ledger row 52, superseding row 51): a corrected
+// converter re-reading the corpus writes an already-stored key under its
+// now-right book. Moving the row would teleport every pointer already handed out
+// for it, so the store KEEPS the stored row and SKIPS this entry — reported in
+// the WriteResult, never a batch-fatal refusal.
+func TestWriteBatchSkipsAnUpsertThatMovesTheRowToAnotherBook(t *testing.T) {
 	// Arrange: every pointer already served for this row names a line of
-	// agent-1's page. Moving the row would leave those pointers naming a row in
-	// a book the caller never asked about.
-	d, _ := newStore(t)
+	// agent-1's page.
+	d, s := newStore(t)
 	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(
+	result, err := d.WriteBatch(ctx(), "producer", batch(
 		pageEntry("w2", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose())))))
 
-	// Assert
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("error = %v, want ErrInvalid", err)
+	// Assert: no refusal, the entry is skipped and reported, nothing was written.
+	if err != nil {
+		t.Fatalf("error = %v, want nil — a legacy book-conflict is skipped, not refused", err)
 	}
-	if got := RefusalSite(err); got != SiteUpsertChangesIdentity {
-		t.Fatalf("site = %q, want %q", got, SiteUpsertChangesIdentity)
+	if result.Written != 0 {
+		t.Fatalf("written = %d, want 0 — the conflicting entry was skipped", result.Written)
 	}
+	if len(result.Skipped) != 1 {
+		t.Fatalf("skipped = %d, want 1", len(result.Skipped))
+	}
+	if got := result.Skipped[0]; got.UpsertKey != "u1" || got.FromBook != "agent-1" || got.ToBook != "agent-2" {
+		t.Fatalf("skipped[0] = %+v, want {u1 agent-1 agent-2}", got)
+	}
+	if got := scalar[string](t, d, `SELECT book_agent_id FROM entry WHERE upsert_key = 'u1'`); got != "agent-1" {
+		t.Fatalf("book = %q, want agent-1 — the stored row is kept unchanged", got)
+	}
+	s.assertLogged(t, "warn", "the stored row is kept")
 }
 
-// TestABookMoveEntryRollsBackEveryLegitimateSiblingInItsBatch is the
-// data-loss boundary the sidecar's quoted-context fix rests on (ledger row 51):
-// a WriteBatch is atomic, so ONE refused entry rolls back the WHOLE transaction
-// and every LEGITIMATE new entry beside it is lost too. This is why a producer
-// must never PUT a book-moving entry in a batch — "log the refusal softer" would
-// still discard the batch's good rows — and why the fix removes the bad entry at
-// the producer instead.
-func TestABookMoveEntryRollsBackEveryLegitimateSiblingInItsBatch(t *testing.T) {
-	// Arrange: an existing row under agent-1, so a later move to agent-2 is a
-	// genuine identity change.
+// TestABookConflictEntryDoesNotLoseItsLegitimateSiblings is the no-data-loss
+// boundary (ledger row 52, superseding the row-51 boundary this replaces): a
+// batch mixing one legacy book-conflict entry with genuinely-new entries now
+// COMMITS the new entries — previously the atomic batch rolled them all back.
+func TestABookConflictEntryDoesNotLoseItsLegitimateSiblings(t *testing.T) {
+	// Arrange: an existing row under agent-1, so a later move to agent-2 is the
+	// legacy book-conflict.
 	d, _ := newStore(t)
 	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
 
 	// Act: one batch carries a brand-new, perfectly legitimate line AND the
-	// offending book-move entry.
-	_, err := d.WriteBatch(ctx(), "producer", batch(
+	// legacy book-conflict entry.
+	result, err := d.WriteBatch(ctx(), "producer", batch(
 		pageEntry("w2", "u2", "agent-1", frameItem(activityFrame("agent-1", "act-2", prose()))),
 		pageEntry("w3", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose())))))
 
-	// Assert: the batch was refused, and the legitimate sibling committed
-	// NOTHING — the whole transaction rolled back.
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("error = %v, want ErrInvalid", err)
+	// Assert: the batch committed the sibling and only skipped the conflict.
+	if err != nil {
+		t.Fatalf("error = %v, want nil", err)
 	}
-	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = 'u2'`); got != 0 {
-		t.Fatalf("the legitimate sibling produced %d rows, want 0 — a refused batch commits nothing", got)
+	if result.Written != 1 || len(result.Skipped) != 1 {
+		t.Fatalf("written=%d skipped=%d, want written=1 skipped=1", result.Written, len(result.Skipped))
 	}
-	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger WHERE write_id IN ('w2','w3')`); got != 0 {
-		t.Fatalf("ledger rows for the refused batch = %d, want 0", got)
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = 'u2'`); got != 1 {
+		t.Fatalf("the legitimate sibling produced %d rows, want 1 — a skipped conflict must not lose it", got)
+	}
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger WHERE write_id = 'w2'`); got != 1 {
+		t.Fatalf("ledger rows for the committed sibling = %d, want 1", got)
+	}
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger WHERE write_id = 'w3'`); got != 0 {
+		t.Fatalf("ledger rows for the skipped conflict = %d, want 0 — a skip records no applied write", got)
 	}
 }
 
-func TestAnIdentityChangingUpsertCommitsNothing(t *testing.T) {
+// TestReIngestingTheSameCorpusTwiceIsANoOp asserts idempotency: re-writing the
+// exact same entry under its already-stored book absorbs (its write_id landed
+// before), and re-writing it under a DIFFERENT book skips — either way the
+// stored row is untouched and no refusal occurs.
+func TestReIngestingTheSameCorpusTwiceIsANoOp(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
 	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+	before := scalar[int](t, d, `SELECT write_seq FROM entry WHERE upsert_key = 'u1'`)
 
-	// Act
-	if _, err := d.WriteBatch(ctx(), "producer", batch(
-		pageEntry("w2", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose()))))); err == nil {
-		t.Fatal("WriteBatch accepted a write that changes a row's book")
+	// Act: the same write_id replays (absorbed), and a re-booked re-ingest skips.
+	absorb, err := d.WriteBatch(ctx(), "producer", batch(
+		pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))))
+	if err != nil {
+		t.Fatalf("replay error = %v, want nil", err)
+	}
+	skip, err := d.WriteBatch(ctx(), "producer", batch(
+		pageEntry("w2", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose())))))
+	if err != nil {
+		t.Fatalf("re-book error = %v, want nil", err)
 	}
 
-	// Assert
-	if got := scalar[string](t, d, `SELECT book_agent_id FROM entry WHERE upsert_key = 'u1'`); got != "agent-1" {
-		t.Fatalf("book = %q, want agent-1 — nothing may have been committed", got)
+	// Assert: nothing changed on the stored row.
+	if absorb.Absorbed != 1 || absorb.Written != 0 {
+		t.Fatalf("replay result = %+v, want absorbed=1 written=0", absorb)
 	}
-	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger WHERE write_id = 'w2'`); got != 0 {
-		t.Fatalf("ledger rows for the refused write = %d, want 0", got)
+	if skip.Written != 0 || len(skip.Skipped) != 1 {
+		t.Fatalf("re-book result = %+v, want written=0 skipped=1", skip)
+	}
+	if got := scalar[int](t, d, `SELECT write_seq FROM entry WHERE upsert_key = 'u1'`); got != before {
+		t.Fatalf("write_seq moved from %d to %d — a no-op re-ingest must not touch the row", before, got)
 	}
 }
 
