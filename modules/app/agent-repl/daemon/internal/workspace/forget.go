@@ -26,6 +26,17 @@ import (
 // behind, naming a path that may no longer exist, and a row naming a deleted
 // path breaks workspace and sink resolution elsewhere.
 //
+// A FORGET STANDS THE SESSION DOWN FIRST, the way Nuke does. Close is
+// VIEW-LEVEL and deliberately leaves the session alone, so a closed workspace
+// routinely still has a live shim — and this is the LAST verb that can address
+// it, because the row it resolves through is about to be deleted. A forget that
+// skipped this orphaned a running shim, and the orphan is not merely a leak:
+// the shim's workspace lock is keyed by the DIRECTORY while its socket is keyed
+// by the workspace ID, so the next registration of that same directory minted a
+// fresh id, probed the directory's lock, found it HELD by the orphan, chose the
+// adopt path, and dialed a socket for an id no process had ever bound. Every
+// prompt to that workspace then spent the whole adoption bound and was dropped.
+//
 // A FORGET REQUIRES A CLOSED WORKSPACE. It cannot close one for the user: a
 // close is the verb that owns the quiet requirement (no turn in flight, no live
 // work, NO HELD PROMPTS, no queued merge), and a close-then-forget would either
@@ -88,6 +99,23 @@ func (v *verbs) Forget(ctx context.Context, ws ids.WorkspaceID) error {
 		return refuseWith(log, "ForgetWorkspace", ArmHasChildren,
 			fmt.Sprintf("%d workspaces were spawned from %q; forget them first", len(children), ws),
 			false, map[string]any{"children": childIDs(children)})
+	}
+
+	// THE SESSION GOES BEFORE THE ROW. `kill` is the same stand-down Nuke
+	// takes before it destroys, and for the same reason: once the row is gone
+	// no verb can name this workspace's shim again.
+	if v.deps.Sessions.Live(ws) {
+		log.Info(opForget, "standing the workspace's live session down before the record goes", dlog.Context{
+			"dir": record.Dir,
+		})
+		if err := v.kill(ctx, log, ws); err != nil {
+			log.Error(opForget, "the workspace's session could not be stood down", dlog.Context{
+				"cause": err.Error(),
+			})
+			return fmt.Errorf("forget %q: %w", ws, err)
+		}
+	} else {
+		log.Debug(opForget, "no live session to stand down before the forget", nil)
 	}
 
 	// THE FORGET IS RECORDED BEFORE THE ROW GOES, and through the workspace's
