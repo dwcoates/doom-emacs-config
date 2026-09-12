@@ -23,7 +23,13 @@ import (
 	"time"
 
 	"claude-repld/internal/daemonaddr"
+	"claude-repld/internal/envc"
+	"claude-repld/internal/stateroot"
 )
+
+// exitSuccess is the status of a run that ended with nothing wrong -- and of a
+// -probe-boot-claim run that found the claim FREE.
+const exitSuccess = 0
 
 // exitFailure is the status a daemon that could not start returns.
 const exitFailure = 2
@@ -33,6 +39,20 @@ const exitFailure = 2
 // is distinct from a failure because nothing went wrong — a daemon was already
 // serving, which is what the claim exists to establish.
 const exitClaimLost = 3
+
+// probeBootClaim answers whether this state root's boot claim is held.
+//
+// It resolves the state root exactly as the boot does -- the same flag, the
+// same environment contract -- so the claim it asks about is the claim a
+// daemon booting here would race for, and never a different directory's.
+func probeBootClaim(opts options) error {
+	contracts := envc.Load().WithStateDir(opts.stateDir)
+	layout, err := stateroot.Root(opts.stateDir, contracts.StateDir())
+	if err != nil {
+		return fmt.Errorf("claude-repld: resolve the state root: %w", err)
+	}
+	return daemonaddr.ProbeBootClaim(layout.DaemonAddr())
+}
 
 // options is the parsed command line. Every field is an override of an
 // environment contract or of a path the daemon would otherwise derive.
@@ -91,6 +111,12 @@ type options struct {
 	// HOOK: the merge orchestrator keys its two methods on whether a target is
 	// the same repository as this, and a test needs to say so explicitly.
 	selfRepo string
+	// probeBootClaim asks ONE question and starts no daemon: is the boot claim
+	// of this state root held right now? It is how Emacs watches a daemon
+	// depart -- the claim, not daemon.addr, is what "the previous daemon is
+	// gone" means, because the address is withdrawn at the start of a shutdown
+	// and the claim is released only when the process ends.
+	probeBootClaim bool
 }
 
 // envStoreSocket is the store socket's environment contract, which the
@@ -106,6 +132,23 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(exitFailure)
+	}
+	if opts.probeBootClaim {
+		// THE PROBE STARTS NOTHING. No log surfaces, no state root creation, no
+		// signal handling: it opens the lock file, asks the kernel, and answers
+		// in its exit status.
+		switch err := probeBootClaim(opts); {
+		case err == nil:
+			os.Exit(exitSuccess)
+		case errors.Is(err, daemonaddr.ErrClaimed):
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(exitClaimLost)
+		default:
+			// AN UNDECIDED CLAIM IS NOT A FREE ONE, and it must not be read as
+			// one. exitFailure is the answer, and the reason is on stderr.
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(exitFailure)
+		}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -141,6 +184,7 @@ func parseFlags(program string, args []string) (options, error) {
 	fs.DurationVar(&opts.footerMomentaryDwell, "footer-momentary-dwell", 0, "how long a momentary footer status stands before its successor push retires it (0 uses the built-in default)")
 	fs.BoolVar(&opts.noBrowser, "no-browser", false, "this daemon has no external browser: OpenExternal answers no_browser_configured")
 	fs.StringVar(&opts.selfRepo, "self-repo", "", "override the daemon's own checkout identity (test hook)")
+	fs.BoolVar(&opts.probeBootClaim, "probe-boot-claim", false, "report whether this state root's boot claim is held and exit: 0 free, 3 held, 2 undecided")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
