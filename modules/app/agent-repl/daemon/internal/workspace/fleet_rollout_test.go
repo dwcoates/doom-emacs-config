@@ -9,7 +9,10 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -486,5 +489,100 @@ func TestClientAnswersALiveShimOnlyWhileItsProcessLives(t *testing.T) {
 				t.Fatalf("Client() answered not live with client %v", client)
 			}
 		})
+	}
+}
+
+// ---- a displaced watcher is closed, and a resume's watcher outlives its call ----
+
+// TestResumeOpensItsWatchesOnAContextItsCallerCannotCancel is the defect the
+// realtest sweep caught. `Resume` handed the watcher the RELAUNCH's own
+// context, and a relaunch returns the moment the session is up: the freshly
+// opened fleet was torn down by the daemon's own cancel within a millisecond,
+// which the watcher then read back as `canceled: context canceled` on both
+// standing streams -- two ERRORs, a `link_severed` WARN and its health fault --
+// and the shim reported as two h2c CANCELs (2026-09-12T15:23:03.338).
+func TestResumeOpensItsWatchesOnAContextItsCallerCannotCancel(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	var opened context.Context
+	f.fleet.watch = func(ctx context.Context, _ ids.WorkspaceID, _ shimclient.Client, _ sessionwatcher.Session, _ sessionwatcher.Sinks, _ dlog.Logger) (sessionwatcher.Watcher, error) {
+		opened = ctx
+		return &fakeWatcher{}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act.
+	if _, err := f.fleet.Resume(ctx, ws.ID, f.client); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	cancel()
+
+	// Assert.
+	if opened == nil {
+		t.Fatal("the resume opened no watch fleet")
+	}
+	if err := opened.Err(); err != nil {
+		t.Fatalf("the resumed fleet's context = %v, want it still live: a watcher outlives the call that opened it", err)
+	}
+}
+
+// TestRememberClosesTheWatcherItDisplaces pins the leak the same bounce left
+// behind. The fleet's map entry is a watcher's ONLY handle: overwriting it with
+// a new session dropped the previous watcher with its streams still standing,
+// and those streams then ended against a fleet nothing had told -- which is
+// recorded as a severing.
+func TestRememberClosesTheWatcherItDisplaces(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	displaced := &fakeWatcher{}
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: displaced})
+
+	// Act.
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: &fakeWatcher{}})
+
+	// Assert.
+	if !displaced.closed {
+		t.Fatal("the watcher a new session displaced was left open with its streams standing")
+	}
+}
+
+// TestRememberLeavesAWatcherItDidNotDisplaceOpen is the guard against closing
+// the very watcher being installed: a fleet that re-records the SAME watcher
+// under a rotated client must not tear down the watches it just kept.
+func TestRememberLeavesAWatcherItDidNotDisplaceOpen(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	kept := &fakeWatcher{}
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: kept})
+
+	// Act.
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: kept})
+
+	// Assert.
+	if kept.closed {
+		t.Fatal("a watcher carried across into the new session was closed")
+	}
+}
+
+// TestRememberOverAWatcherlessSessionClosesNothing covers the cold-attach case:
+// a session recorded with no watcher has nothing to displace, and reaching for
+// one would be a nil dereference on every first bring-up.
+func TestRememberOverAWatcherlessSessionClosesNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.remember(ws.ID, &live{client: f.client})
+	installed := &fakeWatcher{}
+
+	// Act.
+	f.fleet.remember(ws.ID, &live{client: f.client, watcher: installed})
+
+	// Assert.
+	if installed.closed {
+		t.Fatal("the newly installed watcher was closed")
 	}
 }

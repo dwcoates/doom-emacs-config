@@ -391,12 +391,29 @@ arms are derived from, and each one is logged once with `refusal_site`.
   `warn` for degraded-but-handled, `error` for failures. **Every error is
   logged exactly once, by its owning layer — and WHO OWNS IT DEPENDS ON WHOSE
   FAULT IT IS.**
-  - A REFUSED REQUEST (`ErrInvalid`, `ErrStalePointer`) belongs to the CALL.
-    `internal/db` traces it at VERBOSE — its statement and table are context, and
-    it can name neither the rpc nor the request id nor the producer — and
-    `internal/server` writes the single normal-level record, at `warn`. Emitting
-    both put two normal-level records on one refusal and made the rule false
-    wherever anyone counted.
+  - A REFUSED REQUEST (`ErrInvalid`, `ErrStalePointer`, `ErrUnknownAgent`)
+    belongs to the CALL. `internal/db` traces it at VERBOSE — its statement and
+    table are context, and it can name neither the rpc nor the request id nor
+    the producer — and `internal/server` writes the single normal-level record.
+    Emitting both put two normal-level records on one refusal and made the rule
+    false wherever anyone counted.
+  - **THE LEVEL OF THAT RECORD IS A PROPERTY OF THE REFUSAL CLASS**, read from
+    `refusalClass.logLevel` beside `armName`, never written at a call site and
+    never switched on a site or a message string. Every class is `warn` —
+    something is wrong somewhere — except `unknown_agent`, which is `info`.
+  - **`unknown_agent` IS AN ANSWER, NOT A FAULT.** `OpenAgentSession` is the one
+    verb that asks whether a book exists, and the two populations that reach the
+    refusal — a consumer opening against an agent whose first row has not landed,
+    and a consumer holding a stale or mistyped target — send byte-identical
+    requests. The store cannot tell them apart because the expectation lives in
+    the CALLER: the shim serves an empty page and traces it at debug when it
+    vouches for the agent (`store/reader.ts`'s `openBook` /
+    `readFirstPageOnce`), and surfaces the typed arm as a real error when it does
+    not. A `warn` claimed a fault the store is not in a position to claim, and it
+    fired on every cold bring-up. The record is still written, at normal
+    verbosity, with `refusal_site` and `refusal_kind`, so nothing an operator
+    counts is lost. If a future caller must be told apart AT THE STORE, that is a
+    new request field stating the caller's expectation, not a level change.
   - **A STALE POINTER IS NOT AN ERROR.** It is an ordinary race — the caller
     walked a book that moved — and its recovery is a repaint. It is a `warn` and
     never an `error`, because a healthy store writing error records during normal
@@ -441,7 +458,8 @@ arms are derived from, and each one is logged once with `refusal_site`.
 - Request boundaries, state decisions, and per-record/per-batch success
   diagnostics go through `logging.Logger.LogVerbose`, which emits
   `level=debug`, `verbosity=verbose`. Service lifecycle edges are `info`;
-  invariant violations and refusals are `warn`; owned failures are `error`.
+  invariant violations and refusals are `warn`, except the `unknown_agent`
+  class, which is the `info` above; owned failures are `error`.
   Slow queries are the
   one deliberate exception: a statement past its budget emits a normal-verbosity
   `warn` at `store.db.slow-query` with `statement`, `duration_ms`, `rows` and
@@ -494,9 +512,11 @@ make coverage                         # ../../bin/report-nonlisp-coverage.sh sto
   Nothing here ever calls a vendor.
 - **`integration/` asserts on record KIND AND FIELD SET, never on detail prose.**
   A refusal subject scopes to the operation that owns it (`recordsAtOperation`),
-  counts it (`assertExactlyOneNormalRecord` — every error is logged exactly once
-  by its owning layer), and asserts the correlation keys the refusal is looked up
-  by (`refusal_site` AND `refusal_kind` together, `watch_token_hash`, `rpc`,
+  counts it (`assertExactlyOneNormalRecord`, or
+  `assertExactlyOneNormalRecordAtLevel` for a class recorded at neither `warn`
+  nor `error` — every error is logged exactly once by its owning layer, whatever
+  severity its class carries), and asserts the correlation keys the refusal is
+  looked up by (`refusal_site` AND `refusal_kind` together, `watch_token_hash`, `rpc`,
   `write_id`, `task_id`) — `assertRefusalKeys` is the helper for the first pair. A level
   filter alone is not an assertion: "some warn was logged" passes for a reclaimed
   socket or a slow query as readily as for the thing under test.

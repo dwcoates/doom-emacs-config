@@ -68,6 +68,9 @@ type fakeDB struct {
 	putJobErr   error
 	putSessions []wsm.Session
 	putTurns    []wsm.Turn
+	// hasTurnsErr makes the turns existence read fail, which the fake's own
+	// slice cannot.
+	hasTurnsErr error
 	// conversations is what ConversationPrompts answers per workspace, and
 	// portedPrompts is what PutPortedPrompts recorded.
 	conversations   map[ids.WorkspaceID][]wsm.PortedPrompt
@@ -273,6 +276,22 @@ func (d *fakeDB) SetSessionTerminal(_ context.Context, id ids.WorkspaceID, t wsm
 func (d *fakeDB) PutTurn(_ context.Context, t wsm.Turn) error {
 	d.putTurns = append(d.putTurns, t)
 	return nil
+}
+
+// HasTurns answers off the same recorded turns PutTurn collects, so a test
+// that arranges an engaged workspace does it by recording a turn rather than
+// by setting a flag the production store does not have. hasTurnsErr is the
+// only way to reach the read-failure branch: the fake's own slice cannot fail.
+func (d *fakeDB) HasTurns(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.hasTurnsErr != nil {
+		return false, d.hasTurnsErr
+	}
+	for _, t := range d.putTurns {
+		if t.Workspace == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ConversationPrompts answers what a fork of this workspace inherits. The

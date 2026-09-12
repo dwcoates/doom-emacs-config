@@ -150,8 +150,18 @@ func (r *resolver) FindTranscript(ctx context.Context, workspaceDir, vendorSessi
 		return found, nil
 	}
 
+	// A PROBE THAT COMES UP EMPTY IS AN ANSWER, NOT A WARNING. This package
+	// cannot know whether the id it was handed ever wrote a transcript: an id
+	// minted at spawn and bounced before its first turn has none and never
+	// should have, while a conversation whose file vanished is a real loss.
+	// Only the caller knows which, and each of them already records the miss
+	// at the level its own case warrants — Fleet.classifySource at INFO or
+	// WARN by whether the workspace was ever engaged, Fleet.portAcrossAccounts
+	// at WARN, verbs.forkTranscript at ERROR. So the miss is stated here at
+	// DEBUG, the same level as the per-root probe misses above it, and the
+	// NotFoundError carrying every probed path is what the caller classifies.
 	miss := &NotFoundError{VendorSessionID: vendorSessionID, WorkspaceDir: workspaceDir, Probed: probed}
-	r.log.Warn("daemon.account.find_transcript", "no transcript under either account root", dlog.Context{
+	r.log.Debug("daemon.account.find_transcript", "no transcript under either account root", dlog.Context{
 		"vendor_session_id": vendorSessionID,
 		"workspace_dir":     workspaceDir,
 		"probed":            probed,

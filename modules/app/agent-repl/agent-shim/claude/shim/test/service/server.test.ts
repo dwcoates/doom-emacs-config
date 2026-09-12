@@ -1114,7 +1114,9 @@ describe("an h2c stream this server resets", () => {
   // THE PEER'S OWN CANCEL IS NOT THIS SERVER'S DEFECT. Every daemon that gave
   // up an adoption dropped its standing WatchSession, and every one of those
   // departures was reported as an unexplained transport error -- which is
-  // exactly the noise that hides a reset something really did break.
+  // exactly the noise that hides a reset something really did break. It is not
+  // a warning either: a peer that cancels has decided, and every workspace the
+  // daemon closes cancels its two standing watches on the way out.
   it("records a peer cancel as a cancel rather than as an error", async () => {
     // Arrange: a standing stream the client then cancels.
     const sock = socketPath();
@@ -1134,7 +1136,7 @@ describe("an h2c stream this server resets", () => {
       const reset = mirroredRecords(written).find(
         (record) => record.context.rst_code !== undefined,
       );
-      expect(reset?.level).toBe("warn");
+      expect(reset?.level).toBe("info");
       expect(reset?.context.reason).toBe(
         "the peer cancelled the stream; it stopped consuming what this server was serving",
       );
@@ -1216,14 +1218,35 @@ describe("classifying how an h2c stream ended", () => {
     expect(mirroredRecords(written)).toEqual([]);
   });
 
-  it("reports a cancel at warn, naming the peer as the reason", () => {
+  it("reports a cancel at info, naming the peer as the reason", () => {
     // Arrange, Act.
     recordStreamReset(8, 3, "/shim.v1.Shim/WatchSession");
 
     // Assert.
     const record = mirroredRecords(written)[0];
-    expect(record?.level).toBe("warn");
+    expect(record?.level).toBe("info");
     expect(record?.context.rst_code).toBe(8);
+  });
+
+  it("does not report a cancel loudly: a deliberate departure is not an anomaly", () => {
+    // Arrange, Act: every workspace the daemon closes cancels its two standing
+    // watches on the way out, so a warning here would fire on every close.
+    recordStreamReset(8, 3, "/shim.v1.Shim/WatchSession");
+
+    // Assert.
+    const levels = mirroredRecords(written).map((record) => record.level);
+    expect(levels).not.toContain("warn");
+    expect(levels).not.toContain("error");
+  });
+
+  it("still names the cancelled stream and its path, so the departure is learnable", () => {
+    // Arrange, Act.
+    recordStreamReset(8, 7, "/shim.v1.Shim/WatchAgent");
+
+    // Assert.
+    const record = mirroredRecords(written)[0];
+    expect(record?.context.stream_id).toBe(7);
+    expect(record?.context.path).toBe("/shim.v1.Shim/WatchAgent");
   });
 
   it("reports a reset this server cannot account for at error", () => {
