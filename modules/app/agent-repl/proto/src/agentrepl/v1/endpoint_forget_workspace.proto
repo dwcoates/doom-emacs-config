@@ -1,0 +1,107 @@
+// endpoint_forget_workspace.proto — ForgetWorkspace: remove a workspace's
+// REGISTRY RECORD and touch nothing else. SIDEBAR section. It is the undo for
+// a registration, and it is a THIRD thing beside the two verbs it is easily
+// confused with:
+//
+//   - Close is reversible and keeps the record: the workspace leaves the tab
+//     bar and Open brings it back.
+//   - Nuke DESTROYS the worktree and the branch and then forgets the record.
+//   - Forget deletes the record and leaves every file alone. The directory
+//     survives, and re-registering it mints a fresh record.
+//
+// It exists because nothing else ever removed a registry record for a
+// directory the user registered by hand, so the register-then-clean-up cycle
+// left a workspace row (and its repository row) naming a path that may no
+// longer be there.
+//
+// A FORGET STANDS THE SESSION DOWN FIRST, the way Nuke does: the row it
+// resolves through is about to go, so this is the LAST verb that can address
+// the workspace's shim.
+//
+// A FORGET REQUIRES A CLOSED WORKSPACE, and it cannot close one for the
+// caller: the close verb owns the quiet requirement, and a close-then-forget
+// would either duplicate that gate or bypass it — and bypassing it silently
+// discards undelivered user intent. The refusal says so by name.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ForgetWorkspaceRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ForgetWorkspaceResponse {
+  oneof result {
+    // Forgotten — the registry record is gone, every file survives; the
+    // roster's new state arrives on its stream.
+    ForgetWorkspaceSuccess success = 1;
+    ForgetWorkspaceError error = 2;
+  }
+}
+message ForgetWorkspaceSuccess {}
+
+// THE ARM IS THE REFUSAL.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message ForgetWorkspaceError {
+  oneof cause {
+    // The workspace is still OPEN. Forget is a registry act with no way to
+    // tear editor state down; the user closes it first.
+    ForgetWorkspaceNotClosed not_closed = 1;
+    // The workspace is not quiet. The close verb's own quiet check, re-run
+    // here: a hold outlives a close when the close raced it, and the forget
+    // would destroy it with the row.
+    ForgetWorkspaceBlocked blocked = 2;
+    // Other workspaces were spawned FROM this one.
+    ForgetWorkspaceHasChildren has_children = 3;
+    // The workspace id is not in the daemon's registry.
+    ForgetWorkspaceUnknownWorkspace unknown_workspace = 4;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ForgetWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 5;
+    // This daemon released the workspace to a successor; dial `address`.
+    ForgetWorkspaceTransferringAway transferring_away = 6;
+    // A joining daemon has not finished adopting this workspace yet.
+    ForgetWorkspaceNotYetAdopted not_yet_adopted = 7;
+  }
+}
+message ForgetWorkspaceNotClosed {}
+
+// WHY the forget is blocked — the SAME five fields CloseWorkspaceBlocked
+// carries, filled by the same composer, because it is literally the same quiet
+// check. Spelled here rather than shared so this rpc's error message names its
+// own arm types, as every other endpoint's does.
+message ForgetWorkspaceBlocked {
+  // The main thread has a turn in flight.
+  bool turn_in_flight = 1;
+  // Detached items live now (subagents, runs, tasks).
+  uint32 live_work = 2;
+  // Held prompts in the tray — undelivered user intent.
+  uint32 held_prompts = 3;
+  // The workspace is queued for, or inside, a merge.
+  bool merge_queued = 4;
+  // The daemon's composed sentence over the fields above.
+  string summary = 5;
+}
+
+// The children are NAMED rather than counted: the schema's `parent_id` is
+// ON DELETE SET NULL, so a forget would silently flatten the fork's lineage,
+// and the caller is owed the ids it must deal with first.
+message ForgetWorkspaceHasChildren {
+  // The ids of the workspaces spawned from this one.
+  repeated string children = 1;
+}
+message ForgetWorkspaceUnknownWorkspace {}
+message ForgetWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message ForgetWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message ForgetWorkspaceNotYetAdopted {}

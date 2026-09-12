@@ -2192,7 +2192,7 @@ regression on any of the other five would go uncaught."
 ;; audit-3 #55
 (ert-deftest agent-repl-itest-verbs-session-health-every-fault-kind-renders ()
   "Every `SessionFault' kind, with its own payload, renders its detail.
-`SessionFault' declares EIGHT typed, payload-bearing kind arms -- its own
+`SessionFault' declares THIRTEEN typed kind arms -- its own
 vocabulary, deliberately separate from `DaemonFault''s -- and the
 pre-existing suite scripts only `linkSevered'."
   ;; Arrange.
@@ -2208,7 +2208,12 @@ pre-existing suite scripts only `linkSevered'."
                (bounceDied . ())
                (bounceUnknown . ())
                (classifierFailed . ((detail . "classifier timed out")))
-               (shimReported . ((component . "hooks") (kind . "permission-denied")))))
+               (shimReported . ((component . "hooks") (kind . "permission-denied")))
+               (conversationAbandoned . ((vendorSessionId . "vs-9")))
+               (sessionAbsent . ())
+               (watchOpenRefused . ((operation . "WatchTranscript") (handle . "h-3")))
+               (daemonStateUnreadable . ((cause . "store closed")))
+               (adoptionWindowExpired . ((adoptionWindow . "30s")))))
             (n 0))
         (dolist (kind kinds)
           (setq n (1+ n))

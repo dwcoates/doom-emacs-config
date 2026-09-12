@@ -106,6 +106,11 @@ func TestSessionFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "bounce unknown", kind: KindBounceUnknown},
 		{name: "classifier failed", kind: KindClassifierFailed},
 		{name: "shim reported", kind: KindShimReported},
+		{name: "conversation abandoned", kind: KindConversationAbandoned},
+		{name: "session absent", kind: KindSessionAbsent},
+		{name: "watch open refused", kind: KindWatchOpenRefused},
+		{name: "daemon state unreadable", kind: KindStateUnreadable},
+		{name: "adoption window expired", kind: KindAdoptionWindowExpired},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -212,43 +217,83 @@ func TestExitCodeOfAnUnparsableRecordIsZero(t *testing.T) {
 }
 
 // TestSessionAbsentIsWithheldFromTheWire pins that the liveness probe's own
-// answer, which no `SessionFault.kind' arm spells, is kept OFF the wire.
-//
-// This test previously pinned the opposite -- a prose-only SessionFault with
-// the oneof left unset. That rendering is a CONTRACT BREACH the consumer
-// refuses, taking the whole message with it, so the invariant supersedes it:
-// a fault the wire cannot carry is withheld, never malformed.
-func TestSessionAbsentIsWithheldFromTheWire(t *testing.T) {
+// answer, and it now has its OWN arm to say so with. It was withheld from the
+// wire until 2026-09-12, because the oneof had no arm for it and an unset
+// oneof is a contract breach the consumer refuses.
+func TestSessionAbsentRendersItsOwnArm(t *testing.T) {
 	// Arrange: it is the liveness probe's answer, not a fault anyone raised.
 	// Act.
 	got, ok := sessionFault(wsm.Fault{Kind: KindSessionAbsent, Detail: "no live session"})
 
 	// Assert.
-	if ok || got != nil {
-		t.Fatalf("sessionFault(%q) = (%v, %v), want it withheld", KindSessionAbsent, got, ok)
+	if !ok || got.GetSessionAbsent() == nil {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want the session_absent arm", KindSessionAbsent, got, ok)
 	}
 }
 
-// TestSessionAbsentIsArmlessByDesign pins that the withholding above is a
-// DECLARED gap in the vocabulary, not an unrecognized kind.
-func TestSessionAbsentIsArmlessByDesign(t *testing.T) {
+// TestSessionAbsentIsNoLongerArmless pins that the kind left the armless set
+// in the same change that gave it an arm: the two must never disagree, or a
+// rendered fault would still be reported as one the wire cannot carry.
+func TestSessionAbsentIsNoLongerArmless(t *testing.T) {
 	// Arrange. Act. Assert.
-	if !ArmlessSessionKind(KindSessionAbsent) {
-		t.Fatalf("ArmlessSessionKind(%q) = false, want the kind declared armless", KindSessionAbsent)
+	if ArmlessSessionKind(KindSessionAbsent) {
+		t.Fatalf("ArmlessSessionKind(%q) = true, want the kind no longer declared armless", KindSessionAbsent)
 	}
 }
 
-// TestConversationAbandonedIsWithheldFromTheWire pins the fault that actually
-// broke a live WatchHostWorkspace push: it stands open for the life of a
-// workspace that came up fresh, and rendered with an unset oneof it cost the
-// editor every host view of that workspace.
-func TestConversationAbandonedIsWithheldFromTheWire(t *testing.T) {
-	// Arrange. Act.
-	got, ok := sessionFault(wsm.Fault{Kind: KindConversationAbandoned, Detail: "no transcript"})
+// TestConversationAbandonedCarriesTheAbandonedVendorId pins the fault that
+// actually broke a live WatchHostWorkspace push: it stands open for the life of
+// a workspace that came up fresh, so the id it abandoned is the whole evidence.
+func TestConversationAbandonedCarriesTheAbandonedVendorId(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{
+		Kind:     KindConversationAbandoned,
+		Detail:   "no transcript",
+		Evidence: map[string]string{"vendor_session_id": "sess-abc"},
+	}
+
+	// Act.
+	got, ok := sessionFault(fault)
 
 	// Assert.
-	if ok || got != nil {
-		t.Fatalf("sessionFault(%q) = (%v, %v), want it withheld", KindConversationAbandoned, got, ok)
+	if !ok || got.GetConversationAbandoned().GetVendorSessionId() != "sess-abc" {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want the abandoned vendor id", KindConversationAbandoned, got, ok)
+	}
+}
+
+// TestTheWorkspaceScopedAdoptionExpiryCarriesItsWindow pins the arm the ROLLOUT
+// controller's record needs: it opens the expiry against the WORKSPACE, where
+// the daemon-health filter drops it, so the session surfaces are the only ones
+// that can spell it.
+func TestTheWorkspaceScopedAdoptionExpiryCarriesItsWindow(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{
+		Kind:     KindAdoptionWindowExpired,
+		Evidence: map[string]string{"adoption_window": "30s"},
+	}
+
+	// Act.
+	got, ok := sessionFault(fault)
+
+	// Assert.
+	if !ok || got.GetAdoptionWindowExpired().GetAdoptionWindow() != "30s" {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want the recorded window", KindAdoptionWindowExpired, got, ok)
+	}
+}
+
+// TestTheSessionScopedUnreadableStateCarriesItsCause pins that the reporter's
+// own fault says WHY the state client refused, rather than only that the
+// answer is incomplete.
+func TestTheSessionScopedUnreadableStateCarriesItsCause(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{Kind: KindStateUnreadable, Detail: "database is locked"}
+
+	// Act.
+	got, ok := sessionFault(fault)
+
+	// Assert.
+	if !ok || got.GetDaemonStateUnreadable().GetCause() != "database is locked" {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want the refusal's cause", KindStateUnreadable, got, ok)
 	}
 }
 
@@ -295,11 +340,29 @@ func TestWatchOpenRefusedIsNotASeveredLink(t *testing.T) {
 	// Act.
 	got, ok := sessionFault(fault)
 
-	// Assert: it has no arm at all, so in particular it is not the severed one.
-	// (This test previously pinned a prose-only SessionFault; the unset-oneof
-	// rendering it asserted is a contract breach the invariant supersedes.)
-	if ok || got.GetLinkSevered() != nil {
-		t.Fatalf("sessionFault(%q) = (%v, %v), want no severed-link arm", KindWatchOpenRefused, got, ok)
+	// Assert: it renders its OWN arm, so in particular it is not the severed one.
+	if !ok || got.GetLinkSevered() != nil || got.GetWatchOpenRefused() == nil {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want the watch_open_refused arm and no severed-link arm",
+			KindWatchOpenRefused, got, ok)
+	}
+}
+
+// TestWatchOpenRefusedCarriesTheRefusedHandle pins the evidence that tells one
+// refused open from another: which operation asked, and for what handle.
+func TestWatchOpenRefusedCarriesTheRefusedHandle(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{
+		Kind:     KindWatchOpenRefused,
+		Evidence: map[string]string{"operation": "watch_agent", "handle": "sub-1"},
+	}
+
+	// Act.
+	got, ok := sessionFault(fault)
+
+	// Assert.
+	arm := got.GetWatchOpenRefused()
+	if !ok || arm.GetOperation() != "watch_agent" || arm.GetHandle() != "sub-1" {
+		t.Fatalf("sessionFault(%q) = (%v, %v), want the refused operation and handle", KindWatchOpenRefused, got, ok)
 	}
 }
 
@@ -310,6 +373,35 @@ func TestSelfCheckFaultNamesTheUnreadableState(t *testing.T) {
 	// Assert.
 	if !strings.HasPrefix(got.GetDetail(), KindStateUnreadable) {
 		t.Fatalf("detail = %q, want it to lead with %s", got.GetDetail(), KindStateUnreadable)
+	}
+}
+
+// TestSelfCheckFaultCarriesItsTypedArm pins the end of the last site that put
+// a fault on the wire with the `kind' oneof unset. The one fault the daemon
+// can always detect about itself was the one no consumer would accept.
+func TestSelfCheckFaultCarriesItsTypedArm(t *testing.T) {
+	// Arrange. Act.
+	got := selfCheckFault(errors.New("database is locked"))
+
+	// Assert.
+	if got.GetDaemonStateUnreadable().GetCause() != "database is locked" {
+		t.Fatalf("kind = %v, want the daemon_state_unreadable arm carrying the cause", got.GetKind())
+	}
+}
+
+// TestDaemonFaultRendersTheUnreadableStateArm pins that a RECORDED fault of the
+// same kind reaches the same arm as the synthetic self-check one, so the two
+// paths cannot spell one condition two ways.
+func TestDaemonFaultRendersTheUnreadableStateArm(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{Kind: KindStateUnreadable, Detail: "database is locked"}
+
+	// Act.
+	got := daemonFault(fault)
+
+	// Assert.
+	if got.GetDaemonStateUnreadable().GetCause() != "database is locked" {
+		t.Fatalf("kind = %v, want the daemon_state_unreadable arm carrying the cause", got.GetKind())
 	}
 }
 
