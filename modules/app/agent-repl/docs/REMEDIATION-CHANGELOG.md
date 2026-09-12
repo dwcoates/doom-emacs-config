@@ -41,7 +41,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - daemon: the host session identity is minted at creation, refused empty at the store, and healed in the existing rows (S)
 - elisp: workspace switch and composer-landing records persist at info instead of being dropped at debug (U)
 - realtest: a posted key is not a delivered one — keydriver holds the target key window open until Emacs's own `(recent-keys)`/`quit-flag` marks account for the press, so a dropped key is reported (and, for `<escape>` and `C-g`, re-posted) instead of being waited out downstream
-- realtest: the failed `C-g` was key delivery, not quit handling — keydriver refuses to post without a focused window, and the dismissal finding now names harness or product from the marks Emacs itself leaves
+- realtest: the failed `C-g` was key delivery, not quit handling — keydriver reads whether the target owns a key window before posting, and the dismissal finding now names harness or product from the marks Emacs itself leaves (the reading refused the post when this landed; it is advisory on a confirmed press since the entry below)
 - realtest: phase budgets filled from 23 runs of manifest history; LOOSE at 3x and due for retightening (Q, V)
 - logs: compact query modes (tally, sample, fields, timeline) plus stderr and Messages sources
 - daemon/elisp: workspace log-sink resolution is total, and reopening a vanished directory is a named refusal (F, I, J)
@@ -54,6 +54,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - daemon/server+promptqueue+prompthandler+health: resolving a named workspace's log sink is total at the last four sites, so a prompt is never lost, and a host view never withheld, over where its narration is written.
 - elisp/notifications+session: the desktop-focus check names its scope -- the workspace that asked, or the central sink -- so it no longer earns `log-routing-error' at ERROR.
 - daemon/sidebar: roster order is priority then name then id, with the selection instant dropped as an ordering key, so the drawn bar no longer moves under the user and cycling right then left returns where it started.
+- realtest: a key window is a reading, not a gate — keydriver stops refusing a confirmed press on `NSRunningApplication.isActive` (the cached answer that refused 40 healthy presses in the 2026-09-12 16:12 sweep), reports the accessibility reading in the receipt instead, and keeps the hard refusal only on an unheld press, where nothing reads Emacs's marks back.
 
 ## Standing measurements to protect
 
