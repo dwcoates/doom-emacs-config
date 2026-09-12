@@ -18,6 +18,7 @@ import (
 // The operation names this package's records carry, one per verb.
 const (
 	opResolve        = "daemon.workspace.resolve"
+	opRoster         = "daemon.workspace.roster"
 	opRegister       = "daemon.workspace.register"
 	opCreate         = "daemon.workspace.create"
 	opCommandSupport = "daemon.workspace.request_command_support"
@@ -126,7 +127,7 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 		log.Error(operation, "could not read the session records for the roster", dlog.Context{"cause": err.Error()})
 		return
 	}
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(workspaces, repositories, tasks, sessions, current))
+	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current))
 	log.Debug(operation, "republished the roster registry", dlog.Context{
 		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
 		"sessions": len(sessions),

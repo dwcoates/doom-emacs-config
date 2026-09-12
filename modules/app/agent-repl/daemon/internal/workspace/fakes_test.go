@@ -1172,7 +1172,10 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 	dir = normalized
 	ws := wsm.Workspace{ID: id, Dir: dir, Repo: "repo-1", Name: "sample", Branch: "DWC/sample"}
 	f.db.with(ws)
-	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: "/repo"})
+	// A REAL DIRECTORY, because the roster no longer publishes a repository
+	// whose main worktree is gone (`withoutGoneRepositories'). The workspace's
+	// own parent is one the caller's `t.TempDir()' already made.
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: filepath.Dir(dir)})
 	return ws
 }
 
