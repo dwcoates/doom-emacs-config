@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -395,4 +396,77 @@ func recordFor(log *dlog.TestLogger, operation, level, message string) (dlog.Rec
 		}
 	}
 	return dlog.Record{}, false
+}
+
+// THE DURABLE RESIDUE. A build before the creation path minted the host
+// identity filed session rows with an empty one, and the host view is withheld
+// for such a row forever. The layout-5 step is the one-shot catch-up over that
+// backlog.
+
+func TestTheMigrationMintsAnIdentityForASessionRowThatCarriesNone(t *testing.T) {
+	// Arrange — the residue: a session row filed with no host identity.
+	path := layout3Fixture(t)
+	seedIdentitylessSession(t, path)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[string](t, s, `SELECT host_session_id FROM sessions WHERE workspace_id = 'ws-layout3'`)
+	if got == "" {
+		t.Fatalf("the healed session still carries no host session id")
+	}
+}
+
+func TestTheMintedIdentityHasTheShapeTheDaemonMints(t *testing.T) {
+	// Arrange
+	path := layout3Fixture(t)
+	seedIdentitylessSession(t, path)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert — sixteen lowercase hex characters, exactly NewHostSessionID's shape.
+	s := handle.(*store)
+	got := scalar[string](t, s, `SELECT host_session_id FROM sessions WHERE workspace_id = 'ws-layout3'`)
+	if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(got) {
+		t.Fatalf("the minted identity = %q, want sixteen lowercase hex characters", got)
+	}
+}
+
+func TestTheMigrationLeavesAnIdentityItAlreadyCarriesAlone(t *testing.T) {
+	// Arrange — a session row that already names its identity.
+	path := layout3Fixture(t)
+	execRaw(t, path, `INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at)
+		VALUES ('ws-layout3', 'kept-identity', 'vendor-1', '/root/.claude', 'opus', 'default', 1, 1)`)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	if got := scalar[string](t, s, `SELECT host_session_id FROM sessions WHERE workspace_id = 'ws-layout3'`); got != "kept-identity" {
+		t.Fatalf("host_session_id after the migration = %q, want it left alone", got)
+	}
+}
+
+// seedIdentitylessSession files the residue row directly, because PutSession
+// refuses to produce one.
+func seedIdentitylessSession(t *testing.T, path string) {
+	t.Helper()
+	execRaw(t, path, `INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at)
+		VALUES ('ws-layout3', '', '', '/root/.claude', 'opus', 'default', 1, 1)`)
 }
