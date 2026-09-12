@@ -164,11 +164,18 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		return nil, err
 	}
 	contracts := envc.Load()
-	if !spec.Fake {
-		if err := envc.NewVendorGuard(contracts).Check("shim-spawn"); err != nil {
-			return nil, err
-		}
-	}
+	// THE GUARD MEANS "NEVER TOUCH THE REAL VENDOR", NOT "NEVER SPAWN A SHIM".
+	// A shim is not itself a vendor call: it is our own process, and it has a
+	// fake mode in which the whole real shim runs over a scripted SDK. So a
+	// guarded daemon does not refuse the spawn -- refusing made a workspace
+	// impossible to create under the guard, which is a bigger hole than the
+	// one it closed, because it left every guarded run unable to exercise the
+	// verbs at all. It FORCES fake mode instead, which is strictly stronger
+	// than the refusal was: the process that comes up cannot reach the vendor
+	// no matter what the caller asked for, and the shim's own guard
+	// (agent-shim/claude/shim/src/vendor-guard.ts) still throws if anything in
+	// it ever tries.
+	spec.Fake = fakeMode(spec, contracts)
 
 	log, err := s.surfaces.Workspace(spec.WorkspaceDir)
 	if err != nil {
@@ -337,6 +344,16 @@ func (c *client) abandonBringUp(ctx context.Context, cause error) {
 		})
 	}
 	c.cancelMonitor()
+}
+
+// fakeMode is whether the spawned shim runs over the scripted SDK: because the
+// caller asked for it, or because THIS daemon is under the vendor guard and a
+// real-vendor shim is therefore not a thing it is allowed to start.
+//
+// It can only turn fake ON. Nothing here can make a spawn less fake than the
+// caller asked for.
+func fakeMode(spec Spec, contracts envc.Contracts) bool {
+	return spec.Fake || spec.ForbidVendor || contracts.ForbidVendorCalls()
 }
 
 // shimArgs is the shim's argv after the node binary, per the common spawn

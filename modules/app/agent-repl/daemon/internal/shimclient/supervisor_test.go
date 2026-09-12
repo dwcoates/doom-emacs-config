@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -359,27 +360,84 @@ func TestSpawnDeathDuringBringUpSurfacesExitAndStderr(t *testing.T) {
 	}
 }
 
-// TestSpawnRefusedWhenVendorCallsForbidden asserts the shim spawn is a guarded
-// vendor exec site: without --fake it is refused, naming the site.
-func TestSpawnRefusedWhenVendorCallsForbidden(t *testing.T) {
+// TestSpawnUnderTheVendorGuardIsForcedFake asserts a guarded daemon spawns the
+// shim in FAKE mode rather than refusing the spawn.
+//
+// This replaces the refusal this site used to raise. The refusal made a
+// workspace impossible to create under the guard at all -- the create verb's
+// bring-up spawns a shim -- while the guard only ever meant "never touch the
+// real vendor". A forced fake honors that meaning and is strictly stronger
+// than the refusal: the child cannot reach the vendor whatever the caller
+// asked for.
+func TestSpawnUnderTheVendorGuardIsForcedFake(t *testing.T) {
+	// Arrange: the caller asks for a REAL shim while the guard is set.
+	t.Setenv(envc.EnvForbidVendorCalls, "1")
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	spec.Fake = false
+
+	// Act.
+	_ = spawnReady(t, f, spec)
+	record := sink.record(t)
+
+	// Assert.
+	if !slices.Contains(record.Argv, "--fake") {
+		t.Fatalf("argv = %v, want --fake forced by the vendor guard", record.Argv)
+	}
+}
+
+// TestSpawnUnderTheVendorGuardStillStatesTheGuardOnTheChild asserts forcing the
+// fake does not withdraw the child's own guard: the shim's vendor-guard module
+// must still be armed, so a fake shim that somehow reached `createRealQuery`
+// throws instead of calling out.
+func TestSpawnUnderTheVendorGuardStillStatesTheGuardOnTheChild(t *testing.T) {
 	// Arrange.
 	t.Setenv(envc.EnvForbidVendorCalls, "1")
 	dir := shortDir(t)
-	_, uds := startFakeShim(t, dir)
-	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
 	spec.Fake = false
-	sup := newSupervisor(t)
 
 	// Act.
-	_, err := sup.Spawn(context.Background(), spec)
+	_ = spawnReady(t, f, spec)
+	record := sink.record(t)
 
 	// Assert.
-	var forbidden *envc.ForbiddenError
-	if !errors.As(err, &forbidden) {
-		t.Fatalf("Spawn() error = %v, want *envc.ForbiddenError", err)
+	if got := record.Env[envc.EnvForbidVendorCalls]; got != "1" {
+		t.Fatalf("child %s = %q, want %q", envc.EnvForbidVendorCalls, got, "1")
 	}
-	if forbidden.Site != "shim-spawn" {
-		t.Fatalf("site = %q, want \"shim-spawn\"", forbidden.Site)
+}
+
+// TestFakeMode asserts every way a spawn becomes fake, and the one way it
+// stays real.
+func TestFakeMode(t *testing.T) {
+	tests := []struct {
+		name   string
+		spec   Spec
+		forbid string
+		want   bool
+	}{
+		{name: "nothing asks for it", want: false},
+		{name: "the caller asks", spec: Spec{Fake: true}, want: true},
+		{name: "the caller forbids the vendor for this spawn", spec: Spec{ForbidVendor: true}, want: true},
+		{name: "the daemon is under the guard", forbid: "1", want: true},
+		{name: "the guard is set to a falsey value", forbid: "0", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			t.Setenv(envc.EnvForbidVendorCalls, tc.forbid)
+			contracts := envc.Load()
+
+			// Act.
+			got := fakeMode(tc.spec, contracts)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("fakeMode() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
