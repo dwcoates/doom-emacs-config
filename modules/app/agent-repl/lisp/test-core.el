@@ -4757,11 +4757,8 @@ entry per tick for the whole bring-up."
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
               ((symbol-function 'abort-minibuffers) (lambda () (setq aborted t))))
       ;; Act
-      (let ((quit-flag nil))
-        (let ((inhibit-quit t))
-          (setq quit-flag t)
-          (agent-repl--deferred-quit-deliver "uds-filter")
-          (setq quit-flag nil))))
+      (agent-repl-test--with-pending-quit
+        (agent-repl--deferred-quit-deliver "uds-filter")))
     ;; Assert
     (should aborted)))
 
@@ -4773,11 +4770,8 @@ entry per tick for the whole bring-up."
               ((symbol-function 'abort-minibuffers) (lambda () (push 'all called)))
               ((symbol-function 'abort-recursive-edit) (lambda () (push 'one called))))
       ;; Act
-      (let ((quit-flag nil))
-        (let ((inhibit-quit t))
-          (setq quit-flag t)
-          (agent-repl--deferred-quit-deliver "uds-filter")
-          (setq quit-flag nil))))
+      (agent-repl-test--with-pending-quit
+        (agent-repl--deferred-quit-deliver "uds-filter")))
     ;; Assert
     (should (equal called '(all)))))
 
@@ -4789,11 +4783,8 @@ entry per tick for the whole bring-up."
               ((symbol-function 'abort-minibuffers) nil)
               ((symbol-function 'abort-recursive-edit) (lambda () (push 'one called))))
       ;; Act
-      (let ((quit-flag nil))
-        (let ((inhibit-quit t))
-          (setq quit-flag t)
-          (agent-repl--deferred-quit-deliver "uds-filter")
-          (setq quit-flag nil))))
+      (agent-repl-test--with-pending-quit
+        (agent-repl--deferred-quit-deliver "uds-filter")))
     ;; Assert
     (should (equal called '(one)))))
 
@@ -4802,14 +4793,13 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((signalled nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () nil)))
-      ;; Act
-      (let ((quit-flag nil))
-        (let ((inhibit-quit t))
-          (setq quit-flag t)
-          (setq signalled (condition-case nil
-                              (progn (agent-repl--deferred-quit-deliver "uds-filter") nil)
-                            (quit t)))
-          (setq quit-flag nil))))
+      ;; Act -- the `condition-case' sits OUTSIDE the shared recipe, which
+      ;; contains errors and deliberately not quits.
+      (setq signalled (condition-case nil
+                          (progn (agent-repl-test--with-pending-quit
+                                   (agent-repl--deferred-quit-deliver "uds-filter"))
+                                 nil)
+                        (quit t))))
     ;; Assert
     (should signalled)))
 
@@ -4820,12 +4810,9 @@ entry per tick for the whole bring-up."
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
               ((symbol-function 'abort-minibuffers) #'ignore))
       ;; Act
-      (let ((quit-flag nil))
-        (let ((inhibit-quit t))
-          (setq quit-flag t)
-          (agent-repl--deferred-quit-deliver "uds-filter")
-          (setq observed quit-flag)
-          (setq quit-flag nil))))
+      (agent-repl-test--with-pending-quit
+        (agent-repl--deferred-quit-deliver "uds-filter")
+        (setq observed quit-flag)))
     ;; Assert
     (should (eq observed nil))))
 
@@ -4838,11 +4825,8 @@ entry per tick for the whole bring-up."
               ((symbol-function 'active-minibuffer-window) (lambda () 'window))
               ((symbol-function 'abort-minibuffers) #'ignore))
       ;; Act
-      (let ((quit-flag nil))
-        (let ((inhibit-quit t))
-          (setq quit-flag t)
-          (agent-repl--deferred-quit-deliver "uds-filter")
-          (setq quit-flag nil))))
+      (agent-repl-test--with-pending-quit
+        (agent-repl--deferred-quit-deliver "uds-filter")))
     ;; Assert
     (should (seq-find (lambda (line)
                         (and (string-match-p "deferred-quit" line)
