@@ -179,3 +179,19 @@ AGENTS.md's standing rule exists to prevent. If a later regression is caught
 too eagerly (a flake, not a real slowdown) on a specific phase, that phase's
 multiple is the first thing to revisit — not a blanket return to 3x, which
 would silently re-loosen every row this pass tightened.
+
+## Owner ruling: workspace creation modes (2026-09-12, owner)
+
+Four creation modes, each asking only its own questions:
+
+- Dynamic one-shot: prompt only. Repository is the MAIN branch of the
+  repository the current workspace sits in. Daemon mints the name.
+- Dynamic normal workspace: prompt only. Same repository rule. Daemon
+  mints the name.
+- Dynamic fork: prompt only, forks the current workspace's conversation.
+  Same repository rule. Daemon mints the name.
+- Static workspace: repository and name; NO initial prompt.
+
+Dynamic modes NEVER ask for a repository or a name. Only the static mode
+asks for a repository. Today `agent-repl-create-workspace` asks repository,
+prompt, name and base ref for every mode, which is the mismatch.
