@@ -104,7 +104,7 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 				})
 			return
 		}
-		s.log.Error(op, "could not resolve the workspace's log sink", dlog.Context{
+		s.log.Error(op, "could not resolve the workspace", dlog.Context{
 			"workspace": string(ws), "cause": err.Error(),
 		})
 		return
@@ -429,8 +429,21 @@ func (s *server) hostFaults(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		return nil
 	}
 	out := make([]*agentreplv1.HostFault, 0, len(open))
+	var withheld []string
 	for _, f := range open {
-		out = append(out, hostFault(f))
+		rendered, ok := hostFault(f)
+		if !ok {
+			withheld = append(withheld, f.Kind)
+			continue
+		}
+		out = append(out, rendered)
+	}
+	if len(withheld) > 0 {
+		// DEBUG, not an error: the fault is already recorded once by the layer
+		// that opened it, and this line would otherwise repeat on every render
+		// of a standing fault. What it says is that the WIRE cannot carry it.
+		log.Debug(op, "standing faults have no HostFault arm; they are withheld from the view",
+			dlog.Context{"kinds": withheld})
 	}
 	if len(out) == 0 {
 		return nil
@@ -438,11 +451,19 @@ func (s *server) hostFaults(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	return out
 }
 
-// hostFault renders one recorded fault as the host stream's own HostFault. The
-// kinds are SessionHealth's kinds and the arm messages are the same messages:
-// a session's fault classes do not change because the host stream is what
-// reports them.
-func hostFault(f wsm.Fault) *agentreplv1.HostFault {
+// hostFault renders one recorded fault as the host stream's own HostFault,
+// reporting false when the fault's kind has no arm to render it through.
+//
+// THE ARM IS THE FAULT CLASS. `HostFault.kind' is a oneof Emacs REFUSES when it
+// is unset, and it refuses the WHOLE WatchHostWorkspace push with it -- one
+// unrenderable fault used to cost the editor the entire host view of the
+// workspace. A kind with no arm is withheld from the wire rather than sent as a
+// prose-only line; it stays recorded, and loud, at the site that opened it.
+//
+// The kinds are SessionHealth's kinds and the arm messages are the same
+// messages: a session's fault classes do not change because the host stream is
+// what reports them.
+func hostFault(f wsm.Fault) (*agentreplv1.HostFault, bool) {
 	out := &agentreplv1.HostFault{Detail: f.Detail, OpenedAtMs: f.OpenedAt.UnixMilli()}
 	if out.Detail == "" {
 		out.Detail = f.Kind
@@ -462,7 +483,7 @@ func hostFault(f wsm.Fault) *agentreplv1.HostFault {
 	case health.KindLinkSevered:
 		out.Kind = &agentreplv1.HostFault_LinkSevered{
 			LinkSevered: &agentreplv1.SessionFaultLinkSevered{}}
-	case health.KindResumeFailed:
+	case health.KindResumeFailed, health.KindRelaunchResumeFailed:
 		out.Kind = &agentreplv1.HostFault_ResumeFailed{
 			ResumeFailed: &agentreplv1.SessionFaultResumeFailed{Cause: faultEvidence(f, "cause")},
 		}
@@ -483,10 +504,10 @@ func hostFault(f wsm.Fault) *agentreplv1.HostFault {
 				Kind:      f.Evidence["kind"],
 			},
 		}
+	default:
+		return nil, false
 	}
-	// A kind with no typed arm keeps its detail line: an unreportable fault is
-	// still a fault, exactly as the health reporter treats one.
-	return out
+	return out, true
 }
 
 // faultExitCode reads a recorded exit code, answering zero when the record
