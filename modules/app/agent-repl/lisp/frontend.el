@@ -75,6 +75,8 @@
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
 (declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
+(declare-function agent-repl-window--input-height "agent-repl-window" (&optional frame ws))
+(declare-function agent-repl-window--apply-height "agent-repl-window" (win lines &optional ws))
 (declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
 (declare-function agent-repl--call-in-background-workspace "workspace" (ws fn))
 (declare-function agent-repl--hide-panels "agent-repl-panels" ())
@@ -90,7 +92,6 @@
 (declare-function agent-repl--ws-choose-frontend "agent-repl-frontends" (ws name))
 (declare-function agent-repl-register-frontend "agent-repl-frontends" (frontend))
 (declare-function agent-repl-frontend-create "agent-repl-frontends")
-(defvar agent-repl-input-height-fraction)
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-goto-uri "xwidget.c" (xwidget uri))
@@ -567,20 +568,29 @@ panels — the extra-windows-on-first-switch bug."
       ;; hardened with the standard panel recipe (dedicated,
       ;; height-locked, delete-protected, mini-window-shrink-proof).
       ;; Focus lands there — typing is the whole point of the panel.
-      (let ((input-win (split-window
-                        win
-                        (round (* (- agent-repl-input-height-fraction)
-                                  (window-total-height win)))
-                        'below)))
+      ;;
+      ;; The composer's height is the frame's, not this window's: it
+      ;; comes from `agent-repl-window--input-height', which derives it
+      ;; once per frame geometry.  Splitting by a fraction of WIN — what
+      ;; this did — made the height depend on what the frame looked like
+      ;; at the instant of the mount, so workspaces disagreed with each
+      ;; other and a remount changed one workspace's composer under the
+      ;; user.  The resize after the split is the check that the frame
+      ;; granted the lines the split asked for, and it runs BEFORE the
+      ;; hardening that locks the height.
+      (let* ((target-height (agent-repl-window--input-height (window-frame win) ws))
+             (input-win (split-window win (- target-height) 'below))
+             (actual-height nil))
         (set-window-buffer input-win input-buf)
+        (setq actual-height (agent-repl-window--apply-height input-win target-height ws))
         (agent-repl-window--harden input-win
                                    :dedicate       t
                                    :size-fix       'height
                                    :delete-protect t
                                    :preserve-size  'height)
         (select-window input-win)
-        (agent-repl--log ws "display-webview: mounted webview-window=%s input-window=%s"
-                         win input-win))))
+        (agent-repl--log ws "display-webview: mounted webview-window=%s input-window=%s input-height=%s target-height=%s"
+                         win input-win actual-height target-height))))
   buf)
 
 ;;;; ---- Entry point ----------------------------------------------------------------
