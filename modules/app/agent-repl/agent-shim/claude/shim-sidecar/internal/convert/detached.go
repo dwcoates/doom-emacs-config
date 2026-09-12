@@ -189,8 +189,15 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 	taskID := str(pick(result, "task_id", "taskId"))
 	taskType := str(pick(result, "task_type", "taskType"))
 	if taskID == "" {
-		c.log.With(at.ctxWarn("task-stop")).
-			Log("TaskStop result names no task; the stop cannot be attributed and the record is stored as vendor_specific")
+		// BENIGN UNATTRIBUTABLE — debug, not warn. A TaskStop that names no task
+		// carries nothing to attribute the stop to; it is stored whole as
+		// residue, which is the correct outcome, not data loss. It recurs across
+		// history and would flood a cold re-scan's strict harvest at warn. The
+		// residue record stays; only the severity drops. (An agent TaskStop that
+		// DOES name a task but whose launch this stream never opened stays warn
+		// below — that is a pointier "expected-but-absent launch" signal.)
+		c.log.With(at.ctxFor("task-stop")).
+			LogVerbose("TaskStop result names no task; the stop cannot be attributed and the record is stored as vendor_specific")
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unattributed", result)}
 	}
 
