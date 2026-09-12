@@ -93,6 +93,53 @@ agent panel it is, with no special-casing left to carve out."
 
 ;;;; ---- ensure-webview-buffer ------------------------------------------------
 
+;;;; The mount's quit deferral.
+;;
+;; The mount runs from the paced pre-creation drain, which the desktop focus
+;; edge sets off — the same instant a keypress arrives — so a real `C-g' lands
+;; in it often enough to have been observed.  Two claims: the quit does not
+;; break the mount, and it is not lost either.
+
+(ert-deftest agent-repl-test-frontend-ensure-webview-defers-a-quit-that-lands-in-it ()
+  "A C-g arriving mid-mount is held for the command loop, not taken here."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                     (lambda (_url) (setq quit-flag t) buf))
+                    ((symbol-function 'agent-repl--frontend-adopt-webview-buffer)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--frontend-watch-load)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--align-buffer-to-ws-dir)
+                     (lambda (&rest _) nil)))
+            ;; Act / Assert
+            (should (agent-repl-test--quit-deferred-p
+                      (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/"))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-webview-binds-the-buffer-despite-a-pending-quit ()
+  "A quit already requested leaves no webview the registry does not name."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                     (lambda (_url) buf))
+                    ((symbol-function 'agent-repl--frontend-adopt-webview-buffer)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--frontend-watch-load)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--align-buffer-to-ws-dir)
+                     (lambda (&rest _) nil)))
+            ;; Act
+            (agent-repl-test--with-pending-quit
+              (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/"))
+            ;; Assert
+            (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 ;;;; ---- webview URL ------------------------------------------------------------
 
 ;;;; ---- remount-webview (bundle reload) ----------------------------------------
