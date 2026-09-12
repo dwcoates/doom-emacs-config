@@ -211,13 +211,13 @@ neither adopted nor orphan-closed, and the boot report names it.
 | --- | --- | --- |
 | `AGENT_REPL_STATE_DIR` | contract | the one state root shared with Emacs, skills and tests |
 | `AGENT_REPL_FAKE` | contract | the whole stack's fake mode: shims spawn with `--fake` and the classifier is scripted. `--fake` overrides it; the flag can only turn it ON |
-| `AGENT_REPL_FORBID_VENDOR_CALLS` | contract | every vendor exec site refuses (classifier, login pty with the default binary, shim spawn without `--fake`) |
+| `AGENT_REPL_FORBID_VENDOR_CALLS` | contract | every REAL vendor exec site refuses (classifier, login pty with the default binary). A SHIM SPAWN IS NOT REFUSED: the shim is our own process and has a fake mode, so the guard FORCES `--fake` on every spawn instead (`shimclient.fakeMode`) and a guarded daemon still creates, forks and prompts workspaces against the scripted SDK |
 | `AGENT_REPL_OWNED=1` | contract | propagated into every shim so vendor hooks recognize our processes |
 | (shim spawn env) | contract | the daemon's OWN environment passed through, with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED, AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_SESSION_ID (the HostSessionId, log correlation only) set/overridden; the store socket rides argv — never a curated allowlist |
 | `AGENT_REPL_STORE_SOCKET` | contract | the store socket (a flag beats it) |
 | `MULTI_REPO_ROOT` | contract | a workspace whose main repo is under it uses the multi-repo account root |
 | `AGENT_REPL_SELF_REPO_DIR` | test only | overrides the daemon's own-checkout identity for the merge-method split; the self-reload trigger stays ON (test safety comes from `AGENT_REPL_DEPLOY_SCRIPT` naming a fake deploy script, so landed range → rollout trigger → deploy is assertable end to end) |
-| `AGENT_REPL_FAKE_SHIMS` | test only | forces every shim spawn into the shim's offline scripted SDK WITHOUT putting the whole stack in fake mode, so a suite can exercise a REAL vendor call site (the classifier's headless run) against a live session. It can only turn fake ON |
+| `AGENT_REPL_FAKE_SHIMS` | test only | forces every shim spawn into the shim's offline scripted SDK WITHOUT putting the whole stack in fake mode, so a suite can exercise a REAL vendor call site (the classifier's headless run) against a live session. It can only turn fake ON. It is NOT needed merely to get fake shims under the vendor guard -- the guard implies them |
 | `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff |
 | `AGENT_REPL_FEED_TAIL_RETENTION` | test only | compresses the feed's tail retention (a whole number of rows). It BEATS `--feed-tail-retention`. A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
 | `AGENT_REPL_HOLDOUT_WARN_EVERY` | test only | compresses the rollout's never-free holdout warning cadence (a Go duration; the default is ten minutes). A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
