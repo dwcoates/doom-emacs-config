@@ -259,8 +259,36 @@ func TestAnUnknownAgentIsRefusedInExactlyOneRecordNamingBothKeys(t *testing.T) {
 	}))
 
 	// Assert.
-	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "an unknown agent")
+	rec := assertExactlyOneNormalRecordAtLevel(t, store.logRecordsAfter(mark), "an unknown agent", "info")
 	assertRefusalKeys(t, rec, "unknown_agent", "unknown_agent")
+}
+
+// TestAnUnknownAgentOpenIsNotRecordedLoudly: an open against an agent whose
+// first row has not landed yet is what every consumer does on a cold bring-up,
+// and the store cannot tell it from an open against a stale target — the
+// expectation lives in the caller, which acts on the typed arm and records the
+// anomalous case itself. A warning here claimed a fault the store is not in a
+// position to claim, on a run going exactly as the contract says it should.
+func TestAnUnknownAgentOpenIsNotRecordedLoudly(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	mark := store.logMark()
+
+	// Act.
+	assertOpenUnknownAgent(t, openSessionExpectingFailure(ctx, t, store.client(), &storev1.OpenAgentSessionRequest{
+		Agent:    agentID("agent-never-existed"),
+		PageSize: 10,
+	}))
+
+	// Assert.
+	window := store.logRecordsAfter(mark)
+	for _, level := range []string{"warn", "error"} {
+		if loud := recordsAtOperation(recordsAtLevel(window, level), "store.rpc.open-agent-session"); len(loud) != 0 {
+			t.Fatalf("an unknown agent produced %d %s records: %v", len(loud), level, loud)
+		}
+	}
 }
 
 // TestAnUnknownAgentIsRefusedBeforeThePointerIsJudged is the ordering: a
