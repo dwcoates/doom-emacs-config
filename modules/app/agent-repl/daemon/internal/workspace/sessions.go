@@ -694,7 +694,24 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 	// shim onto a path the survivor still held — the newcomer could not bind
 	// and died, this daemon dialed the path and reached the SURVIVOR, and the
 	// answer was StartSession{already_started} over a turn already running.
-	socket, socketErr := f.socketProbe(udsPath)
+	//
+	// THE PATH IS THE SHIM'S CURRENT GENERATION, not the layout's base name,
+	// for the reason boot's adopt states: a relaunch moves the workspace's
+	// shim onto `<base>.nN.sock` and the counter that minted N lives in the
+	// fleet's MEMORY, so a bring-up after a daemon restart dialed a path the
+	// survivor has not held since the relaunch while its lock still read HELD.
+	// Boot resolved this with shimsocket.NewestLive and the fleet did not,
+	// which is one probe disagreeing with the other about the same shim.
+	socketPath, socket, socketErr := shimsocket.NewestLive(f.socketProbe, udsPath)
+	// THE BRANCH CHOICE IS RECORDED WITH BOTH KERNEL FACTS ON IT. Which path a
+	// bring-up took, and why, was reconstructible only from DEBUG records that
+	// never reach a deployed log — so an adoption that dialed a socket nobody
+	// was listening on read, on disk, as an unexplained ten-second failure.
+	log.Info(opBringUp, "probed the two kernel facts the bring-up branches on", dlog.Context{
+		"lock_dir": lockPath, "lock_state": state.String(),
+		"socket": socketPath, "socket_state": socket.String(),
+		"socket_base": udsPath,
+	})
 	// A LISTENER IS NOT A SESSION. The shim takes its two conversation locks
 	// INSIDE StartSession (shim.md), so an INERT shim — spawned, serving, no
 	// session — is listening while holding NEITHER lock. That is exactly the
@@ -708,31 +725,63 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 	inert := false
 	if state == sessionlock.StateFree && socket == shimsocket.StateLive {
 		log.Warn(opBringUp, "the workspace lock reads free but a shim is listening; attaching to the inert survivor and starting its session",
-			dlog.Context{"lock": lockPath, "socket": udsPath, "lock_state": state.String()})
+			dlog.Context{"lock": lockPath, "socket": socketPath, "lock_state": state.String()})
 		inert = true
 	}
 	// A SOCKET THAT COULD NOT BE PROBED IS NEVER SPAWNED ONTO, for the same
 	// reason an unreadable lock is never read as free.
 	if state == sessionlock.StateFree && socket == shimsocket.StateUndetermined {
 		log.Error(opBringUp, "the shim socket probe could not tell", dlog.Context{
-			"socket": udsPath, "cause": errText(socketErr),
+			"socket": socketPath, "cause": errText(socketErr),
 		})
-		return nil, false, fmt.Errorf("start session for %q: the shim socket at %q could not be probed: %w", ws, udsPath, socketErr)
+		return nil, false, fmt.Errorf("start session for %q: the shim socket at %q could not be probed: %w", ws, socketPath, socketErr)
 	}
 	if inert {
-		client, err := f.adoptBounded(ctx, log, ws, dir, udsPath, "inert_survivor")
+		client, err := f.adoptBounded(ctx, log, ws, dir, socketPath, "inert_survivor")
 		if err != nil {
 			log.Error(opBringUp, "could not attach to the inert survivor", dlog.Context{"cause": err.Error()})
+			f.noteStartFailed(ctx, log, ws, err)
 			return nil, false, fmt.Errorf("start session for %q: adopt: %w", ws, err)
 		}
 		return client, false, nil
 	}
 	switch state {
 	case sessionlock.StateHeld:
-		log.Debug(opBringUp, "a surviving shim holds the workspace lock; adopting it", dlog.Context{"lock": lockPath})
-		client, err := f.adoptBounded(ctx, log, ws, dir, udsPath, "lock_held")
+		// A HELD LOCK WITH NO LISTENER IS NOT AN ADOPTABLE SHIM. The lock is
+		// keyed by the workspace DIRECTORY and the socket by the workspace ID,
+		// so a shim left running for a registry row that has since been
+		// forgotten keeps holding the directory's lock while the id's socket
+		// never existed — and the daemon then spent the whole adoption bound
+		// dialing a path nothing was ever bound to, once per prompt. Every
+		// generation on disk has already been probed above, so "none is live"
+		// is the whole kernel truth: the owner is UNREACHABLE, which is a
+		// different sentence from "the shim refused", and dialing it cannot
+		// make it true. Spawning is not the alternative — the lock is what
+		// forbids a second shim on one conversation, and the survivor's own
+		// StartSession would answer `conversation_owned` — so this refuses,
+		// loudly and at once, naming both facts.
+		if socket == shimsocket.StateAbsent || socket == shimsocket.StateStale {
+			unreachable := fmt.Errorf(
+				"start session for %q: the workspace lock at %q reads held but no shim is listening at %q (socket %s): the lock's owner is unreachable",
+				ws, lockPath, socketPath, socket.String())
+			log.Error(opBringUp, "the workspace lock is held but no shim is listening; there is nothing to adopt", dlog.Context{
+				"lock_dir": lockPath, "lock_state": state.String(),
+				"socket": socketPath, "socket_state": socket.String(),
+			})
+			f.noteStartFailed(ctx, log, ws, unreachable)
+			return nil, false, unreachable
+		}
+		log.Info(opBringUp, "a surviving shim holds the workspace lock; adopting it", dlog.Context{
+			"lock_dir": lockPath, "socket": socketPath, "socket_state": socket.String(),
+		})
+		client, err := f.adoptBounded(ctx, log, ws, dir, socketPath, "lock_held")
 		if err != nil {
 			log.Error(opBringUp, "could not adopt the surviving shim", dlog.Context{"cause": err.Error()})
+			// A FAILED ADOPTION IS A WORKSPACE FAULT, exactly as a failed spawn
+			// is. It was not: an adoption that never landed opened no fault and
+			// stated no dead link, so the footer showed nothing at all while
+			// the queue dropped the prompt that was waiting on it.
+			f.noteStartFailed(ctx, log, ws, err)
 			return nil, false, fmt.Errorf("start session for %q: adopt: %w", ws, err)
 		}
 		return client, true, nil
@@ -742,7 +791,9 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		// transcript that was found, and a recorded conversation with none
 		// comes up FRESH with its own fault rather than being refused. There
 		// is nothing left for a spawn-side guard to test.
-		log.Debug(opBringUp, "the workspace lock is free; spawning a shim", dlog.Context{"lock": lockPath})
+		log.Info(opBringUp, "the workspace lock is free; spawning a shim", dlog.Context{
+			"lock_dir": lockPath, "socket": udsPath, "socket_state": socket.String(),
+		})
 		// A DEAD SHIM'S SOCKET FILE OUTLIVES IT: an AF_UNIX path is not
 		// reclaimed on process death the way a flock is, so the spawn's bind
 		// would fail for a reason that no longer exists. Clearing re-probes

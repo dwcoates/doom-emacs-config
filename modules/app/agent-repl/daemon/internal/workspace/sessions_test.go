@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +188,14 @@ type fleetFixture struct {
 	// decides adopt-versus-spawn beside the lock.
 	socketState shimsocket.State
 	socketErr   error
+	// socketDir relocates the fixture's socket paths onto a real directory,
+	// which is what a scenario about the shim's socket GENERATION needs: the
+	// `<base>.nN.sock` candidates are found by reading that directory.
+	socketDir string
+	// socketStates overrides socketState per path, so one scenario can say
+	// "the base is gone and generation 1 is live" — the shape a relaunched
+	// shim leaves behind for the next daemon.
+	socketStates map[string]shimsocket.State
 	// adoptBound is the fixture's adoption bound, generous by default so no
 	// ordinary scenario can trip it; a scenario about the give-up shortens it.
 	adoptBound time.Duration
@@ -267,10 +276,18 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			Topbar:  topbarLinkSink{rec: f.links},
 			Sidebar: sidebarLinkSink{rec: f.links},
 		},
-		SocketPath: func(ws ids.WorkspaceID) string { return "/sock/" + string(ws) + ".sock" },
-		LockDir:    t.TempDir(),
-		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
-		SocketProbe: func(string) (shimsocket.State, error) {
+		SocketPath: func(ws ids.WorkspaceID) string {
+			if f.socketDir != "" {
+				return filepath.Join(f.socketDir, string(ws)+".sock")
+			}
+			return "/sock/" + string(ws) + ".sock"
+		},
+		LockDir: t.TempDir(),
+		Probe:   func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
+		SocketProbe: func(path string) (shimsocket.State, error) {
+			if state, ok := f.socketStates[path]; ok {
+				return state, nil
+			}
 			return f.socketState, f.socketErr
 		},
 		StartWatcher: func(context.Context, ids.WorkspaceID, shimclient.Client, sessionwatcher.Session, sessionwatcher.Sinks, dlog.Logger) (sessionwatcher.Watcher, error) {
@@ -559,6 +576,7 @@ func TestStartAdoptsWhenASurvivingShimHoldsTheLock(t *testing.T) {
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
 
 	// Act.
 	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
@@ -1275,6 +1293,7 @@ func TestStartSendsNoStartSessionToAnAdoptedShim(t *testing.T) {
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
 	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
 	f.client.response = alreadyStartedResponse()
 
 	// Act.
@@ -1296,6 +1315,7 @@ func TestStartRemembersTheAdoptedShimAsLive(t *testing.T) {
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
 	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
 
 	// Act.
 	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
@@ -1315,6 +1335,7 @@ func TestStartOpensTheAdoptedSessionsWatches(t *testing.T) {
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
 	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
 
 	// Act.
 	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
@@ -1726,6 +1747,7 @@ func TestStartDialsAnAdoptionUnderTheAdoptionBound(t *testing.T) {
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
 	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
 
 	// Act: the caller's context carries no deadline of its own.
 	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
@@ -1747,6 +1769,7 @@ func TestStartBoundsAnAdoptionAtTheStatedBound(t *testing.T) {
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
 	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
 
 	// Act.
 	before := time.Now()
@@ -1775,6 +1798,7 @@ func TestStartNamesAnAdoptionThatSpentItsWholeBound(t *testing.T) {
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
 	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
 	f.supervisor.adoptBlocks = true
 
 	// Act.
@@ -1798,6 +1822,7 @@ func TestStartReportsACancelledAdoptionAsItsOwnCause(t *testing.T) {
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
 	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
 	f.supervisor.adoptBlocks = true
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
