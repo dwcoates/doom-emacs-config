@@ -354,6 +354,28 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## No look-and-feel changes during bug remediation
+
+Standing owner instruction, 2026-09-12. Remediation fixes defects. It does not
+restyle the editor.
+
+Do not change colors, faces, fonts, spacing, borders, padding, icons, glyphs,
+window or panel proportions, tab-bar appearance, or the wording and phrasing of
+anything the owner reads on screen, unless the change IS the bug being fixed or
+the owner asked for it by name.
+
+What remains in bounds:
+- Behavior a defect report names, such as a panel that should open and does not,
+  or a command that needs two presses instead of one.
+- A visual rule the owner specified, implemented exactly as specified and no
+  further.
+- Logging, which the owner does not see on screen.
+
+When a fix seems to call for a look-and-feel change, do the narrowest thing that
+resolves the defect, then say what you would have changed and why, and leave it
+for the owner to rule on. Restyling that arrives attached to a bug fix is hard
+to review and hard to reverse, which is why it waits.
+
 ## An invisible action is a logging defect, not a test problem
 
 When a test, an investigation, or a person cannot tell from the logs what the
