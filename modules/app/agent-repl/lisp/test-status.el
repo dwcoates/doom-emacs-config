@@ -77,22 +77,43 @@ that set it would paint a two-color entry."
     ;; Act / Assert
     (should-not (plist-member (plist-get row :unselected) :bracket-bg))))
 
-(ert-deftest agent-repl-test-tab-palette-row-selected-brackets-the-state-color ()
-  "The selected look puts the state color on the [N] bracket.
-Selection dims the name to the shared grey, so the bracket there is the
-only place the state color can still be read."
+(ert-deftest agent-repl-test-tab-palette-row-selected-keeps-the-state-color ()
+  "The selected look keeps the STATE color on its background, not a grey.
+Color is connection state and is orthogonal to selection, so a selected
+tab carries the same background color an unselected one does."
   ;; Arrange
   (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
     ;; Act / Assert
-    (should (equal "#123456" (plist-get (plist-get row :selected) :bracket-bg)))))
+    (should (equal "#123456" (plist-get (plist-get row :selected) :bg)))))
 
-(ert-deftest agent-repl-test-tab-palette-row-selected-takes-the-shared-grey ()
-  "The selected look\='s background is the shared grey for every state."
+(ert-deftest agent-repl-test-tab-palette-row-selected-carries-the-underline ()
+  "The selected look\='s only difference from the unselected one is the
+`:underline\=' marker — the subtle, distinct selection indicator that does
+not reuse a background."
   ;; Arrange
   (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
     ;; Act / Assert
-    (should (equal agent-repl--color-selected-bg
-                   (plist-get (plist-get row :selected) :bg)))))
+    (should (eq t (plist-get (plist-get row :selected) :underline)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-unselected-has-no-underline ()
+  "The unselected look carries NO underline, so the marker is the selected
+tab\='s alone."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+    ;; Act / Assert
+    (should-not (plist-member (plist-get row :unselected) :underline))))
+
+(ert-deftest agent-repl-test-tab-palette-row-selection-does-not-reuse-a-background ()
+  "The selection marker is distinct from the panels-open background: the
+selected look adds an underline but leaves its background equal to the
+unselected one, never a grey or any other second ground."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+    ;; Act / Assert
+    (should (equal (plist-get (plist-get row :unselected) :bg)
+                   (plist-get (plist-get row :selected) :bg)))
+    (should-not (equal agent-repl--color-selected-bg
+                       (plist-get (plist-get row :selected) :bg)))))
 
 (ert-deftest agent-repl-test-tab-palette-row-weight-is-the-shared-one ()
   "Both looks take `agent-repl--tab-weight\=', which no row has ever varied."
@@ -105,15 +126,16 @@ only place the state color can still be read."
                    (plist-get (plist-get row :selected) :weight)))))
 
 (ert-deftest agent-repl-test-tab-palette-every-row-has-the-builder-shape ()
-  "Every palette row carries its state color on BOTH looks.
-The selected bracket repeats the unselected background for all twenty
-rows, which is the shape the builder guarantees and the thing a
-hand-written row could silently drop."
+  "Every palette row carries the SAME state color on both looks.
+Selection changes nothing but the underline, so the selected background
+equals the unselected one on every row — the shape the builder
+guarantees and the thing a hand-written row could silently drop."
   ;; Act / Assert
   (dolist (entry agent-repl--tab-palette)
     (let ((row (cdr entry)))
       (should (equal (plist-get (plist-get row :unselected) :bg)
-                     (plist-get (plist-get row :selected) :bracket-bg))))))
+                     (plist-get (plist-get row :selected) :bg)))
+      (should (eq t (plist-get (plist-get row :selected) :underline))))))
 
 (ert-deftest agent-repl-test-tab-palette-no-row-splits-its-entry ()
   "No palette row paints its [N] bracket differently from its name region.
@@ -176,15 +198,14 @@ purple region rather than a two-color entry."
   ;; Act / Assert
   (should-not (plist-get (agent-repl--tab-spec :merging nil) :bracket-bg)))
 
-(ert-deftest agent-repl-test-tab-spec-merging-selected-brackets-purple ()
-  "A SELECTED merging tab keeps purple on the [N] bracket.
-Selection dims the name region to the shared grey for every state, so the
-bracket is the only place the merge can still be read."
+(ert-deftest agent-repl-test-tab-spec-merging-selected-stays-purple-plus-underline ()
+  "A SELECTED merging tab keeps its purple background and adds the
+underline marker — selection does not dim the color to a grey."
   ;; Arrange
   (let ((spec (agent-repl--tab-spec :merging t)))
     ;; Act / Assert
-    (should (equal agent-repl--color-selected-bg (plist-get spec :bg)))
-    (should (equal agent-repl--color-merging-purple (plist-get spec :bracket-bg)))))
+    (should (equal agent-repl--color-merging-purple (plist-get spec :bg)))
+    (should (eq t (plist-get spec :underline)))))
 
 (ert-deftest agent-repl-test-tab-spec-bracket-only-merging-is-purple ()
   "A merging tab whose panels are dismissed keeps purple on the bracket.
@@ -385,11 +406,20 @@ reads distinctly from :idle orange and :thinking red."
     (should (equal agent-repl--color-default-bracket (plist-get spec :bracket-fg)))))
 
 (ert-deftest agent-repl-test-tab-spec-bracket-only-selected-thinking ()
-  "Bracket-only spec for :thinking selected pulls bracket-bg from selected row."
+  "Bracket-only spec for :thinking selected keeps the state color on the
+bracket and carries the selection underline through: a selected
+panels-closed tab shows EXTENT (bracket-only), COLOR (thinking-red) and
+the selection marker all at once."
   (let ((spec (agent-repl--tab-spec-bracket-only :thinking t)))
     (should (eq 'unspecified (plist-get spec :bg)))
     (should (eq 'unspecified (plist-get spec :fg)))
-    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))
+    (should (eq t (plist-get spec :underline)))))
+
+(ert-deftest agent-repl-test-tab-spec-bracket-only-unselected-has-no-underline ()
+  "An UNSELECTED bracket-only spec carries no underline marker."
+  (let ((spec (agent-repl--tab-spec-bracket-only :thinking nil)))
+    (should-not (plist-member spec :underline))))
 
 ;;;; ---- Tests: tabline renders bracket-only spec when panels closed ----
 
@@ -469,21 +499,23 @@ reads distinctly from :idle orange and :thinking red."
     (should (equal (plist-get spec :fg) "white"))))
 
 (ert-deftest agent-repl-test-tab-spec-selected-known-state ()
-  "tab-spec returns the :selected plist from the palette for a known state."
+  "tab-spec returns the :selected plist from the palette for a known state:
+the state color on the whole entry plus the selection underline."
   (let ((spec (agent-repl--tab-spec :done t)))
-    (should (equal (plist-get spec :bracket-fg) "white"))
-    (should (equal (plist-get spec :bracket-bg) "#1a7a1a"))))
+    (should (equal (plist-get spec :bg) "#1a7a1a"))
+    (should (eq t (plist-get spec :underline)))))
 
 (ert-deftest agent-repl-test-tab-spec-unknown-state-falls-back-to-default ()
   "tab-spec returns the default spec for states absent from the palette.
-The unselected numeral takes the foreground chosen against the BAR (the
-ground it is drawn on now) rather than a fixed white, which is what it
-was when it was drawn over an inherited background."
+The numeral takes the foreground chosen against the BAR (the ground it is
+drawn on now) rather than a fixed white, and the SELECTED default sits on
+the bar too — no grey — with the underline as its only selection mark."
   (let ((unsel (agent-repl--tab-spec :bogus nil))
         (sel   (agent-repl--tab-spec :bogus t)))
     (should (equal (plist-get unsel :bracket-fg)
                    (agent-repl--tab-bar-legible-fg)))
-    (should (equal (plist-get sel :bg) "#c0c0c0"))))
+    (should (equal (plist-get sel :bg) (agent-repl--tab-bar-background)))
+    (should (eq t (plist-get sel :underline)))))
 
 (ert-deftest agent-repl-test-tab-spec-nil-state-uses-default ()
   "tab-spec with nil state returns the default spec."
@@ -491,49 +523,57 @@ was when it was drawn over an inherited background."
                  (agent-repl--tab-bar-legible-fg))))
 
 (ert-deftest agent-repl-test-tab-spec-permission-selected-no-face-override ()
-  "The :permission :selected spec carries no :face-override so the
-selected tab dims to the normal selected face like other states."
+  "The :permission :selected spec carries no :face-override: the selected
+tab keeps its arm color and gains only the underline, no face swap."
   (let ((spec (agent-repl--tab-spec :permission t)))
     (should-not (plist-get spec :face-override))))
 
-(ert-deftest agent-repl-test-tab-spec-dead-falls-back-to-default ()
-  "The :dead state has no appearance spec; tab-spec returns the default."
+(ert-deftest agent-repl-test-tab-spec-dead-has-a-blue-palette-row ()
+  "The :dead state is BLUE on the tab bar: it borrows init's palette row,
+so its selected look is blue plus the underline, not the default."
   (let ((unsel (agent-repl--tab-spec :dead nil))
         (sel   (agent-repl--tab-spec :dead t)))
-    (should (equal (plist-get unsel :bracket-fg) "white"))
-    (should (equal (plist-get sel :bg) "#c0c0c0"))))
+    (should (equal (plist-get unsel :bg) agent-repl--color-init-blue))
+    (should (equal (plist-get sel :bg) agent-repl--color-init-blue))
+    (should (eq t (plist-get sel :underline)))))
 
-;;;; ---- Tests: bracket-bg on selected tabs ----
+;;;; ---- Tests: selected tabs keep their state color end to end ----
+;;
+;; Selection is an underline, not a background, so a selected tab carries
+;; its whole state color exactly as an unselected one does — the [N]
+;; bracket inherits `:bg' since the entry is one color end to end.
 
-(ert-deftest agent-repl-test-tab-spec-selected-init-bracket-bg ()
-  "Selected :init bracket-bg should be the init blue color."
+(ert-deftest agent-repl-test-tab-spec-selected-init-keeps-blue ()
+  "Selected :init keeps the init blue across the whole entry, plus underline."
   (let ((spec (agent-repl--tab-spec :init t)))
-    (should (equal (plist-get spec :bracket-bg) "#3366cc"))
-    (should (equal (plist-get spec :bracket-fg) "white"))))
+    (should (equal (plist-get spec :bg) "#3366cc"))
+    (should-not (plist-member spec :bracket-bg))
+    (should (eq t (plist-get spec :underline)))))
 
-(ert-deftest agent-repl-test-tab-spec-selected-thinking-bracket-bg ()
-  "Selected :thinking bracket-bg should be the thinking red color."
+(ert-deftest agent-repl-test-tab-spec-selected-thinking-keeps-red ()
+  "Selected :thinking keeps the thinking red across the whole entry."
   (let ((spec (agent-repl--tab-spec :thinking t)))
-    (should (equal (plist-get spec :bracket-bg) "#cc3333"))
-    (should (equal (plist-get spec :bracket-fg) "white"))))
+    (should (equal (plist-get spec :bg) "#cc3333"))
+    (should (eq t (plist-get spec :underline)))))
 
-(ert-deftest agent-repl-test-tab-spec-selected-ready-bracket-bg ()
-  "Selected :ready bracket-bg is the green every ready state wears."
+(ert-deftest agent-repl-test-tab-spec-selected-ready-keeps-green ()
+  "Selected :ready keeps the green every ready state wears."
   (let ((spec (agent-repl--tab-spec :ready t)))
-    (should (equal (plist-get spec :bracket-bg) agent-repl--color-done-green))
-    (should (equal (plist-get spec :bracket-fg) "white"))))
+    (should (equal (plist-get spec :bg) agent-repl--color-done-green))
+    (should (eq t (plist-get spec :underline)))))
 
-(ert-deftest agent-repl-test-tab-spec-selected-permission-bracket-bg ()
-  "Selected :permission bracket-bg should be the done green color."
+(ert-deftest agent-repl-test-tab-spec-selected-permission-keeps-green ()
+  "Selected :permission keeps the done green across the whole entry."
   (let ((spec (agent-repl--tab-spec :permission t)))
-    (should (equal (plist-get spec :bracket-bg) "#1a7a1a"))
-    (should (equal (plist-get spec :bracket-fg) "white"))))
+    (should (equal (plist-get spec :bg) "#1a7a1a"))
+    (should (eq t (plist-get spec :underline)))))
 
-(ert-deftest agent-repl-test-tab-spec-unselected-has-no-bracket-bg ()
-  "Unselected specs should not have :bracket-bg (falls back to :bg in renderer)."
-  (dolist (state '(:init :thinking :done :permission :idle))
-    (let ((spec (agent-repl--tab-spec state nil)))
-      (should-not (plist-get spec :bracket-bg)))))
+(ert-deftest agent-repl-test-tab-spec-no-look-carries-bracket-bg ()
+  "Neither look carries :bracket-bg: the entry is ONE color end to end, so
+the bracket inherits :bg in the renderer for selected and unselected alike."
+  (dolist (state '(:init :thinking :done :permission :ready))
+    (should-not (plist-get (agent-repl--tab-spec state nil) :bracket-bg))
+    (should-not (plist-get (agent-repl--tab-spec state t) :bracket-bg))))
 
 (ert-deftest agent-repl-test-render-tab-bracket-bg-applied ()
   "render-tab should use :bracket-bg for the bracket background when present."
@@ -628,8 +668,10 @@ appended *after* the faced padding, not merged into it."
 ;;;; ---- Tests: tab-face direct tests ----
 
 (ert-deftest agent-repl-test-tab-face-nil-state-selected ()
-  "tab-face with nil state and selected should return +workspace-tab-selected-face."
-  (should (eq (agent-repl--tab-face nil t) '+workspace-tab-selected-face)))
+  "tab-face with nil state names this module\='s un-armed face whether the
+tab is selected or not: selection no longer swaps the name face — the
+underline is what marks the selected tab."
+  (should (memq 'agent-repl-tab-unarmed (agent-repl--tab-face nil t))))
 
 (ert-deftest agent-repl-test-tab-face-nil-state-unselected ()
   "tab-face with nil state and unselected names this module\='s OWN un-armed
@@ -638,32 +680,30 @@ from the frame, which is why an un-armed tab drew black glyphs on
 `#14141a\=' — the one appearance in the palette with no pairing at all."
   (should (memq 'agent-repl-tab-unarmed (agent-repl--tab-face nil nil))))
 
-;;;; ---- Tests: the selection face belongs to the selected tab alone ----
+;;;; ---- Tests: the face is the arm's, whether or not the tab is selected ----
 
-(ert-deftest agent-repl-test-tab-face-selected-takes-the-selection-face ()
-  "A SELECTED tab's name takes Doom's selection face whatever its arm, so
-the highlight says which workspace the user is standing in and nothing
-else does."
+(ert-deftest agent-repl-test-tab-face-selected-keeps-the-arm-face ()
+  "A SELECTED armed tab keeps its ARM's face, not a selection face: color
+is connection state and is orthogonal to selection, so the name stays the
+arm's color and the underline (added by the renderer) is the marker."
   ;; Arrange / Act / Assert
-  (should (eq (agent-repl--tab-face :ready t) (agent-repl--ws-tab-selected-face))))
+  (should (eq (agent-repl--tab-face :ready t) 'agent-repl-tab-ready)))
 
 (ert-deftest agent-repl-test-tab-face-unselected-armed-takes-the-arm-face ()
-  "An UNSELECTED tab with an arm takes that arm's own face, never the
-selection face: the arm is what it reports, and the selection is not its
-to claim."
+  "An UNSELECTED tab with an arm takes that arm's own face."
   ;; Arrange / Act / Assert
-  (should-not (eq (agent-repl--tab-face :ready nil) (agent-repl--ws-tab-selected-face)))
   (should (eq (agent-repl--tab-face :ready nil) 'agent-repl-tab-ready)))
 
-(ert-deftest agent-repl-test-tab-face-selection-does-not-depend-on-the-arm ()
-  "EVERY arm gives the same selected face.  A tab bar whose highlight
-followed the arm rather than the selection would be reporting the wrong
-thing about which workspace is current, and this is the shape that would
-have to break for that to happen."
+(ert-deftest agent-repl-test-tab-face-does-not-depend-on-selection ()
+  "EVERY arm gives the SAME face selected or unselected.  Selection is an
+underline the renderer layers on, never a different face, so the two must
+match for every arm — the shape that would break if selection ever
+hijacked the color again."
   ;; Arrange
   (dolist (arm (cons nil (mapcar #'car agent-repl--tab-palette)))
     ;; Act / Assert
-    (should (eq (agent-repl--tab-face arm t) (agent-repl--ws-tab-selected-face)))))
+    (should (equal (agent-repl--tab-face arm t)
+                   (agent-repl--tab-face arm nil)))))
 
 ;;;; ---- Tests: the un-armed tab's ground and its legibility ----
 ;;
@@ -733,14 +773,16 @@ the bar, so the only thing separating the two is the text."
     (should (equal (plist-get spec :bg)
                    (face-background 'tab-bar nil t)))))
 
-(ert-deftest agent-repl-test-selected-ground-is-still-the-selection-grey ()
-  "The SELECTED tab\='s background did not move: it is still the shared grey.
-Only the unselected half went flush with the bar; a selection that also
-took the bar\='s color would stop saying which workspace the user is in."
+(ert-deftest agent-repl-test-selected-default-ground-sits-flush-with-underline ()
+  "The SELECTED default tab sits flush on the bar like the unselected one
+and is told apart by the underline, not a grey ground: a selection that
+took a second background would collide with the panels-open extent."
   ;; Arrange
   (let ((spec (plist-get (agent-repl--tab-default) :selected)))
     ;; Act / Assert
-    (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))))
+    (should (equal (plist-get spec :bg) (agent-repl--tab-bar-background)))
+    (should-not (equal (plist-get spec :bg) agent-repl--color-selected-bg))
+    (should (eq t (plist-get spec :underline)))))
 
 (ert-deftest agent-repl-test-unselected-foreground-clears-the-floor-on-a-dark-bar ()
   "On a DARK themed bar the chosen foreground still clears the floor.
@@ -1564,11 +1606,11 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
     (should (equal (plist-get spec :fg) agent-repl--color-light))))
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-selected ()
-  "tab-spec for :vendor-blocked selected keeps the blue on the bracket."
+  "tab-spec for :vendor-blocked selected keeps the blue across the entry,
+adding only the underline — selection does not dim the color to a grey."
   (let ((spec (agent-repl--tab-spec :vendor-blocked t)))
-    (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))
-    (should (equal (plist-get spec :bracket-bg)
-                   agent-repl--color-init-blue))))
+    (should (equal (plist-get spec :bg) agent-repl--color-init-blue))
+    (should (eq t (plist-get spec :underline)))))
 
 ;;;; ---- Tests: tabline first-fit packing primitive ----
 
@@ -3012,6 +3054,175 @@ bracket-only paint, which is the blessed treatment."
         (agent-repl--on-frame-focus)
         ;; Assert
         (should (equal repainted 0))))))
+
+;;;; ---- Tests: the two orthogonal axes — EXTENT (panels) and COLOR (link) ----
+;;
+;; BACKGROUND EXTENT encodes panels open/closed and NOTHING else: panels
+;; open paints the whole tab, panels closed paints only the [N] bracket.
+;; COLOR encodes connection state regardless of extent: blue is
+;; disconnected/bad, green is a live idle session.  All four combinations
+;; are valid, which is what these four tests pin.
+
+(defmacro agent-repl-test--with-tab-axes (state panels-open &rest body)
+  "Run BODY with WS \"ws1\" reporting render-state STATE and PANELS-OPEN.
+Stubs the two inputs the tab renderer reads — `agent-repl--ws-render-status'
+\(the roster arm) and `agent-repl--ws-agent-open-p' (panel visibility) — so
+a test drives the EXTENT and COLOR axes independently."
+  (declare (indent 2))
+  `(agent-repl-test--with-clean-state
+     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+     (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+                (lambda (_ws) ,state))
+               ((symbol-function 'agent-repl--ws-agent-open-p)
+                (lambda (_ws) ,panels-open)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-axes-full-and-green ()
+  "Panels OPEN + connected(:ready): FULL green background."
+  (agent-repl-test--with-tab-axes :ready t
+    (let* ((display (agent-repl--ws-display-state "ws1"))
+           (spec    (agent-repl--tab-spec display nil)))
+      ;; Extent: full — display-state is non-nil, so the whole tab is colored.
+      (should (eq display :ready))
+      ;; Color: green on the whole entry.
+      (should (equal (plist-get spec :bg) agent-repl--color-done-green)))))
+
+(ert-deftest agent-repl-test-axes-partial-and-green ()
+  "Panels CLOSED + connected(:ready): [N]-only green, name blends into bar."
+  (agent-repl-test--with-tab-axes :ready nil
+    (let* ((display (agent-repl--ws-display-state "ws1"))
+           (bracket (agent-repl--ws-bracket-state "ws1"))
+           (spec    (agent-repl--tab-spec-bracket-only bracket nil)))
+      ;; Extent: partial — display-state suppressed, bracket-state still armed.
+      (should-not display)
+      (should (eq bracket :ready))
+      (should (eq (plist-get spec :bg) 'unspecified))
+      ;; Color: green survives on the bracket alone.
+      (should (equal (plist-get spec :bracket-bg) agent-repl--color-done-green)))))
+
+(ert-deftest agent-repl-test-axes-full-and-blue ()
+  "Panels OPEN + disconnected(:severed): FULL blue background."
+  (agent-repl-test--with-tab-axes :severed t
+    (let* ((display (agent-repl--ws-display-state "ws1"))
+           (spec    (agent-repl--tab-spec display nil)))
+      (should (eq display :severed))
+      (should (equal (plist-get spec :bg) agent-repl--color-init-blue)))))
+
+(ert-deftest agent-repl-test-axes-partial-and-blue ()
+  "Panels CLOSED + disconnected(:severed): [N]-only blue."
+  (agent-repl-test--with-tab-axes :severed nil
+    (let* ((display (agent-repl--ws-display-state "ws1"))
+           (bracket (agent-repl--ws-bracket-state "ws1"))
+           (spec    (agent-repl--tab-spec-bracket-only bracket nil)))
+      (should-not display)
+      (should (eq bracket :severed))
+      (should (eq (plist-get spec :bg) 'unspecified))
+      (should (equal (plist-get spec :bracket-bg) agent-repl--color-init-blue)))))
+
+(ert-deftest agent-repl-test-axes-extent-is-driven-by-panels-not-color ()
+  "One state, two panel states: OPEN is full, CLOSED is bracket-only.
+The EXTENT axis follows panel visibility alone."
+  ;; Panels open -> full.
+  (agent-repl-test--with-tab-axes :ready t
+    (should (agent-repl--ws-display-state "ws1")))
+  ;; Same state, panels closed -> bracket-only (display-state suppressed).
+  (agent-repl-test--with-tab-axes :ready nil
+    (should-not (agent-repl--ws-display-state "ws1"))
+    (should (agent-repl--ws-bracket-state "ws1"))))
+
+(ert-deftest agent-repl-test-axes-color-is-independent-of-extent ()
+  "The COLOR axis is the same whether the tab is full or bracket-only:
+green stays green and blue stays blue across the extent change."
+  ;; Green: full and partial both resolve to the done-green.
+  (should (equal (plist-get (agent-repl--tab-spec :ready nil) :bg)
+                 agent-repl--color-done-green))
+  (should (equal (plist-get (agent-repl--tab-spec-bracket-only :ready nil) :bracket-bg)
+                 agent-repl--color-done-green))
+  ;; Blue: full and partial both resolve to the init-blue.
+  (should (equal (plist-get (agent-repl--tab-spec :severed nil) :bg)
+                 agent-repl--color-init-blue))
+  (should (equal (plist-get (agent-repl--tab-spec-bracket-only :severed nil) :bracket-bg)
+                 agent-repl--color-init-blue)))
+
+;;;; ---- Tests: blue means disconnected/bad ONLY (the idle-blue bug) ----
+;;
+;; A connected, idle session resolves to `:ready' on the wire (idle and
+;; ready share the `RosterRowStatusReady' arm), and this surface paints
+;; `:ready' GREEN.  Blue is reserved for the link-fault arms.  The daemon
+;; half of this fix — a connected route no longer stuck at `:init' — has
+;; its own Go test; these pin the Emacs half: the arm an idle session
+;; carries is colored green, never blue.
+
+(ert-deftest agent-repl-test-idle-ready-arm-is-green-not-blue ()
+  "The arm a connected/idle session carries (:ready) is GREEN on the tab bar."
+  (should (equal (agent-repl-status-tab-color :ready) "green"))
+  (should-not (equal (agent-repl-status-tab-color :ready) "blue")))
+
+(ert-deftest agent-repl-test-idle-ready-spec-is-green-not-blue ()
+  "A `:ready' tab paints green end to end, never the init blue."
+  (let ((spec (agent-repl--tab-spec :ready nil)))
+    (should (equal (plist-get spec :bg) agent-repl--color-done-green))
+    (should-not (equal (plist-get spec :bg) agent-repl--color-init-blue))))
+
+(ert-deftest agent-repl-test-blue-is-reserved-for-link-faults ()
+  "Only the link-fault arms take blue; a live session's arms never do."
+  ;; Link faults are blue.
+  (dolist (arm '(:init :severed :dead :degraded :start-failed))
+    (should (equal (agent-repl-status-tab-color arm) "blue")))
+  ;; A live idle/ready session is not.
+  (dolist (arm '(:ready :done :interrupted :permission))
+    (should-not (equal (agent-repl-status-tab-color arm) "blue"))))
+
+;;;; ---- Tests: the selection indicator (underline), distinct from extent ----
+;;
+;; Selection is a subtle underline layered by the renderer, NOT a
+;; background: it never touches the panels-open (full) background or the
+;; connection color, so all three axes stay independent.
+
+(ert-deftest agent-repl-test-render-tab-selected-underlines-the-bracket ()
+  "A selected spec draws the [N] bracket `:underline t' while keeping its color."
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (pos (string-match "\\[" result))
+         (face (get-text-property pos 'face result)))
+    (should (eq t (plist-get face :underline)))
+    ;; The bracket still carries the state color, so the underline did not
+    ;; replace the color — it was layered on top.
+    (should (equal (plist-get face :background) "#1a7a1a"))))
+
+(ert-deftest agent-repl-test-render-tab-selected-underlines-the-name ()
+  "A selected spec layers `:underline t' over the name face."
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (pos (string-match "ws1" result))
+         (face (get-text-property pos 'face result)))
+    ;; The name face is a list whose first element carries the underline
+    ;; and whose remainder is the original arm face.
+    (should (member '(:underline t) face))
+    (should (member 'agent-repl-tab-ready face))))
+
+(ert-deftest agent-repl-test-render-tab-unselected-has-no-underline ()
+  "An unselected spec draws no underline anywhere: the marker is the
+selected tab's alone."
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (bpos (string-match "\\[" result))
+         (npos (string-match "ws1" result)))
+    (should-not (plist-get (get-text-property bpos 'face result) :underline))
+    ;; The name face is the plain arm symbol, not a list carrying an underline.
+    (should (eq (get-text-property npos 'face result) 'agent-repl-tab-ready))))
+
+(ert-deftest agent-repl-test-selection-does-not-reuse-the-panels-open-background ()
+  "The selection marker never touches the background: a selected FULL tab
+keeps its panels-open color and gains only the underline, so extent
+\(full background) and selection (underline) stay distinguishable."
+  (let ((sel   (agent-repl--tab-spec :ready t))
+        (unsel (agent-repl--tab-spec :ready nil)))
+    ;; Same background — selection added nothing to it.
+    (should (equal (plist-get sel :bg) (plist-get unsel :bg)))
+    ;; The only difference is the underline.
+    (should (eq t (plist-get sel :underline)))
+    (should-not (plist-get unsel :underline))))
 
 (provide 'test-status)
 
