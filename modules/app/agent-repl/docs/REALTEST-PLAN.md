@@ -159,6 +159,8 @@ Scale
 | 2 | authored, not yet run | `TestRealtestRestartWithTheDaemonUp` |
 | 3 | authored, not yet run | `TestRealtestStartWithTheDaemonDown` |
 | 4 | authored, not yet run (`TestRealtestSwitchBetweenWorkspaces`) | needs a bar drawing at least THREE tabs: with two, `s-{` and `s-}` reach the same tab and a reversed direction cannot be told from a correct one |
+| 5 | authored, not yet run | `TestRealtestCreateWorkDeleteAWorkspace`; acts against a dedicated scratch repo under the run directory |
+| 6 | authored, not yet run | `TestRealtestRegisterAndReopen`; same scratch-repo rule |
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
