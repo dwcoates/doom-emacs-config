@@ -990,6 +990,37 @@ re-encodings the daemon built from conversation records.
 `conversation.v1.MessageEntry` at all, so today the re-encoding is forced by
 the schema rather than chosen.
 
+## Residue shape catalog
+
+The sidecar persists NO residue — `vendor_specific` of any kind, `unknown`, and
+`unparsed` bytes are classified and withheld. That takes the bytes out of the
+store and, with them, the only evidence the vendor emits that line at all, so
+the SHAPE is catalogued in their place (owner ruling 2026-09-13,
+`docs/REALTEST-JUDGEMENT-CALLS.md`, "the unmodelled-line shape catalog").
+
+WHAT IT IS: one row per distinct recursive key structure, in the store's
+`residue_shapes` table — the hash, the canonical rendering, the residue kind,
+the first example verbatim, first/last seen, and a count. Key names and scalar
+TYPES only; values never reach it, except the one example per shape that makes
+the row readable.
+
+WHY IT IS BOUNDED: the row count grows with the number of shapes a vendor emits,
+not with traffic. Object keys that look like generated ids collapse to a single
+wildcard `*` so an id-keyed map cannot mint a shape per line — the exact rule,
+clause by clause, is in `agent-shim/claude/shim-sidecar/AGENTS.md` under "the
+residue shape catalog".
+
+HOW TO QUERY IT:
+
+```
+make -C agent-shim/shim-store shapes
+make -C agent-shim/shim-store shapes ARGS="--kind unparsed --example --limit 20"
+```
+
+It calls the store's `ListResidueShapes` rpc over the running store's socket.
+Nothing in the running system reads the catalog; it exists so a human can ask
+what the vendor is emitting that this system does not model.
+
 ## The shim-store database is nuked, not migrated
 
 `shim-store`'s SQLite database is DISPOSABLE and is to be regarded as EMPTY. A

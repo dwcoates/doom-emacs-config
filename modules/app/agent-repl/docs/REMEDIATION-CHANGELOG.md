@@ -16,6 +16,11 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - store schema: a database stamped BELOW this binary's `SchemaVersion` is recreated at INFO naming both versions (the deploy-time bump is the store's documented convention), while a stamp at or above it, a file with no `schema_meta`, an unreadable file and a failed recreate are ERROR (gap scan `store.db.schema` warn "found version=5 ... want version=6", 2026-09-13 16:03)
 - sidecar run output: passing the 1 MiB remembered-output bound is stated at INFO with the bound and the omitted byte count, because the terminal itself reports the omission (gap scan `run-output-bound` warn x3, 2026-09-13 16:10)
 - deploy-all store restart: the sidecar is booted out through launchd BEFORE the store is kickstarted and bootstrapped back once store.sock is up (bin/store-reset.sh's recorded order), so no sidecar write meets a missing socket, and a store that never comes up leaves the sidecar stopped and says so (gap scan `storeclient-write-batch` dial failures, 2026-09-13 16:19)
+- proto store.v1: `WriteBatchRequest.shapes` (`ShapeObservation`) and the unary `ListResidueShapes` carry and serve the unmodelled-line shape catalog (owner ruling, 2026-09-13)
+- store: new `residue_shapes` table (SchemaVersion 7) upserted inside the batch's own transaction — first insert owns the example, later ones raise `count` and take a MAXIMUM of `last_seen_ms` — read back by `ListResidueShapes` and `make -C agent-shim/shim-store shapes` (owner ruling, 2026-09-13)
+- sidecar: every withheld residue line contributes its canonical key-structure shape at `withholdResidue`, deduped per batch, generated-id keys collapsed to `*`, and the per-file catch-up summary states `new_shapes` (owner ruling, 2026-09-13)
+- sidecar: a residue-only batch is now SENT carrying only its shape observations, where it was previously skipped as empty (shape catalog, 2026-09-13)
+
 - daemon/drain: the drain loop's schedule read cancelled by the serving lifetime's end records at debug as the exit withdrawing the loop, and a read that fails while serving keeps its error (`daemon.drain.run` `context canceled` during an ordinary shutdown, integration suite under load 2026-09-13)
 - webapp footer: the expanded section draws UNDER the strip (strip, one full-width `--border-strong` divider, then the panel) instead of over it (owner ruling, 2026-09-13)
 
