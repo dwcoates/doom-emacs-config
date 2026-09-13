@@ -167,7 +167,7 @@ func TestARefusedWriteNamesBothTheRefusalsKindAndItsSite(t *testing.T) {
 	}})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	if err == nil {
@@ -229,7 +229,7 @@ func TestAWithdrawnWriteIsNotStatedAsATransportFailure(t *testing.T) {
 			client, logs := serveLogged(t, &fakeStore{})
 
 			// Act.
-			_, err := client.WriteBatch(tc.callCtx(t), &storev1.EntryBatch{})
+			_, err := client.WriteBatch(tc.callCtx(t), &storev1.EntryBatch{}, nil)
 
 			// Assert: the caller is told either way.
 			if err == nil {

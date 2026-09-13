@@ -58,6 +58,10 @@ type fakeStore struct {
 	// cursorsEntered is closed on the first such call.
 	cursorsWedged  bool
 	cursorsEntered chan struct{}
+	// shapes is the residue shape catalog observations each write carried, one
+	// entry per WriteBatch call, so a test can assert what a withheld line left
+	// behind.
+	shapes [][]*storev1.ShapeObservation
 }
 
 func (f *fakeStore) GetSidecarCursors(ctx context.Context, _ *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {
@@ -87,6 +91,7 @@ func (f *fakeStore) GetSidecarCursors(ctx context.Context, _ *connect.Request[st
 func (f *fakeStore) WriteBatch(ctx context.Context, request *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {
 	f.writeCalls++
 	f.writes = append(f.writes, request.Msg.GetBatch())
+	f.shapes = append(f.shapes, request.Msg.GetShapes())
 	if f.writeWedged {
 		if f.entered != nil {
 			close(f.entered)
