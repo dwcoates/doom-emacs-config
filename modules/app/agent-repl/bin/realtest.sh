@@ -18,17 +18,22 @@
 # modules/app/agent-repl/docs/REALTEST-PLAN.md is the CONTRACT — which realtests
 # exist, what each measures, and the remediation loop they feed. e2e/REALTEST-SPEC.md
 # documents these mechanics. This script is the only supported entry point,
-# because the three refusals below are not optional.
+# because the four refusals below are not optional.
 #
 #   bin/realtest.sh                              every realtest
 #   bin/realtest.sh -run TestRealtestStartTheEditor    one, by name
 #   bin/realtest.sh 2 3 4                        a sweep, by number, in that order
+#   bin/realtest.sh --clean-leftovers            remove the workspace registry
+#                                                rows an earlier sweep left
+#                                                behind, and run nothing
 #
-#   exit 0   every realtest that was asked for ran and passed
+#   exit 0   every realtest that was asked for ran and passed, the run left no
+#            registry row behind, and nothing was written between the sweeps
 #   exit 77  DECLINED, and the message says why; NOTHING ran
 #   exit 78  INCOMPLETE: what ran passed, but at least one realtest was SKIPPED
 #            because the world its precondition demands could not be established
-#   other    a realtest failed
+#   other    a realtest failed, or the sweep left a registry row standing, or
+#            the gap since the previous sweep held warnings or errors
 #
 # 77 is the autotools "skipped" convention, used rather than 0 so a run can
 # never report a green realtest that did not execute — the same convention every
@@ -54,7 +59,7 @@
 # tests would overwrite that with state the run itself produced (and cost
 # another clone of a multi-gigabyte database each time).
 #
-# THREE REFUSALS, and each one is here because the alternative is worse than not
+# FOUR REFUSALS, and each one is here because the alternative is worse than not
 # running:
 #
 #   1. NOT DEPLOYED. Every system must be at the checkout's revision, judged by
@@ -96,6 +101,15 @@
 #      where a day-old shim submitted a keepalive prompt to the real vendor
 #      every four minutes. Nothing is killed either way; this declines and names
 #      every process to stop.
+#
+#   4. A PREVIOUS SWEEP'S REGISTRY ROWS ARE STILL STANDING. A realtest that
+#      registers or creates a workspace puts a row in the owner's registry
+#      naming a directory under the run directory; the directory goes away and
+#      the row does not unless something forgets it, and the owner's editor
+#      then reports a stale registry row for as long as it stands (owner
+#      complaint, 2026-09-13). A sweep that added its own rows on top of one
+#      would bury the evidence of which run made it, so this declines and names
+#      the remedy: bin/realtest.sh --clean-leftovers.
 
 set -euo pipefail
 
@@ -193,8 +207,13 @@ known_selectors() {
 SELECTORS=()
 GO_ARGS=()
 RUN_REGEX=""
+CLEAN_LEFTOVERS=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --clean-leftovers)
+            CLEAN_LEFTOVERS=1
+            shift
+            ;;
         -run)
             [ "$#" -ge 2 ] || decline "-run was given with no test pattern after it"
             RUN_REGEX="$2"
@@ -217,6 +236,72 @@ done
 
 if [ -n "$RUN_REGEX" ] && [ "${#SELECTORS[@]}" -gt 0 ]; then
     decline "-run and a realtest selector were both given; use one or the other"
+fi
+
+# ---- the leftover registry rows a previous sweep left behind --------------
+#
+# A realtest that registers or creates a workspace puts a row in the OWNER'S
+# registry naming a directory under the run directory. The run directory goes
+# away; the row does not, unless something removes it. What the owner then sees
+# is their editor reporting a stale registry row for as long as it stands:
+#
+#   workspace "workspace-c22fed997b234b27" cannot host a durable log sink
+#   (registered-dir=... [MISSING]); its records are written centrally
+#
+# That is the module telling the truth about a mess a realtest made (owner
+# complaint, 2026-09-13). So the sweep now owns three moments:
+#
+#   START — decline if any row names a directory under the realtest root.
+#           A leftover must never go unnoticed, and a sweep that piled its own
+#           rows on top of one would bury the evidence of which run made it.
+#   END   — close and forget every row under THIS run's directory, through the
+#           daemon, however the sweep ended; then fail the sweep for any that
+#           survived.
+#   --clean-leftovers — the operator's own way to clear what an older sweep
+#           left, without running a realtest at all.
+#
+# Every one of them goes through the SAME implementation
+# (e2e/realtest/leftovers.go, driven by TestCleanRealtestLeftovers), because a
+# second spelling of "which rows are a run's" in bash is how the two would come
+# to disagree about the owner's registry.
+
+readonly REALTEST_ROOT="$HOME/.claude-emacs/realtest"
+
+# run_harness_check NAME ENV... — one non-realtest check in the realtest
+# package.
+#
+# NOT UNDER bin/suite-slot.sh, and that is deliberate rather than an omission.
+# The slot exists because every SUITE here is sized to fill the machine; these
+# are single-process reads — a snapshot of wsm.db, a walk of the log files, two
+# read-only emacsclient probes — that start no editor, spawn no daemon and run
+# nothing in parallel. Holding a machine-wide slot for one would make a sweep
+# wait on somebody else's vitest run to find out whether the owner's registry
+# is clean.
+run_harness_check() {
+    local name="$1"
+    shift
+    env "$@" go -C "$MODULE_ROOT/e2e" test -tags realtest ./realtest/ \
+        -run "^${name}\$" -count=1 -v -timeout 10m
+}
+
+if [ "$CLEAN_LEFTOVERS" = "1" ]; then
+    if [ -n "$RUN_REGEX" ] || [ "${#SELECTORS[@]}" -gt 0 ]; then
+        decline "--clean-leftovers removes registry rows and runs no realtest; asking for one as well is two different requests"
+    fi
+    command -v go >/dev/null 2>&1 || decline "go is not on PATH, and the leftover clean is a Go check in e2e/realtest"
+    command -v sqlite3 >/dev/null 2>&1 || decline "sqlite3 is not on PATH; the clean cannot read which rows the state database holds"
+    note "clearing workspace registry rows that name a directory under $REALTEST_ROOT"
+    note "each is closed and then forgotten through the daemon's command-file ingress; a daemon must be serving"
+    CLEAN_STATUS=0
+    run_harness_check TestCleanRealtestLeftovers \
+        AGENT_REPL_REALTEST_LEFTOVERS=clean \
+        AGENT_REPL_REALTEST_LEFTOVER_PREFIX="$REALTEST_ROOT" || CLEAN_STATUS=$?
+    if [ "$CLEAN_STATUS" -ne 0 ]; then
+        printf '[realtest] rows are still standing (output above). If no daemon is serving, start Emacs and run this again.\n' >&2
+        exit "$CLEAN_STATUS"
+    fi
+    note "the registry holds no row under $REALTEST_ROOT"
+    exit 0
 fi
 
 PLAN=""
@@ -306,6 +391,24 @@ if [ -n "$NOT_READY" ]; then
     exit "$EXIT_DECLINED"
 fi
 note "every deployed system is at this checkout's revision"
+
+# ---- refusal 4: a previous sweep's registry rows --------------------------
+#
+# Before the run directory is even created, so a decline here leaves nothing
+# behind of its own. The rows it finds belong to an EARLIER sweep by
+# construction: this one has registered nothing yet.
+note "looking for workspace rows a previous sweep left in the registry"
+LEFTOVER_STATUS=0
+run_harness_check TestCleanRealtestLeftovers \
+    AGENT_REPL_REALTEST_LEFTOVERS=report \
+    AGENT_REPL_REALTEST_LEFTOVER_PREFIX="$REALTEST_ROOT" || LEFTOVER_STATUS=$?
+if [ "$LEFTOVER_STATUS" -ne 0 ]; then
+    printf '[realtest] DECLINED: a previous sweep left workspace rows in the owner'"'"'s registry (listed above).\n' >&2
+    printf '[realtest] Each one makes the editor report a durable log sink it cannot host, naming a MISSING directory.\n' >&2
+    printf '[realtest] Remedy: bin/realtest.sh --clean-leftovers\n' >&2
+    exit "$EXIT_DECLINED"
+fi
+note "no workspace row from a previous sweep is standing under $REALTEST_ROOT"
 
 # Record the stamps this run exercised. They are what a report says the run was
 # MEASURING; without them a finding cannot be tied to a build.
@@ -658,6 +761,100 @@ establish_no_daemon() {
     return 0
 }
 
+# ---- the pre-sweep gap scan -----------------------------------------------
+#
+# THE HOURS BETWEEN SWEEPS ARE WHERE THE OWNER LIVES, and until now nothing
+# read them. Each realtest harvests its own window, so a warning written while
+# no realtest was running — a deploy restart, a boot catch-up, the owner's own
+# use of the editor — was never read by anything, and every sweep went on
+# reporting a clean harvest over it (owner complaint, 2026-09-13).
+#
+# So the sweep opens by reading from the previous sweep's end to now, across
+# every source the in-window harvest knows plus the live editor's *Messages*
+# and *Warnings* buffers. Findings go verbatim into the run's own
+# `between-sweeps/MANIFEST.md` under "## Between sweeps" and make the sweep
+# exit non-zero, exactly like an in-window finding. There is no allowlist.
+#
+# IT RUNS BEFORE ANY EDITOR IS QUIT. The buffers it reads belong to the editor
+# the owner has been using, and the first cold-start realtest kills it.
+GAP_SCAN_RAN=0
+GAP_SCAN_STATUS=0
+note "reading the gap since the previous sweep ended (nothing else covers it)"
+run_harness_check TestBetweenSweepsGapScan \
+    AGENT_REPL_REALTEST_GAP_SCAN=1 \
+    AGENT_REPL_REALTEST_OUT="$RUN_DIR" \
+    AGENT_REPL_REALTEST_EMACS_SOCKET="$EMACS_SOCKET" \
+    AGENT_REPL_REALTEST_EMACSCLIENT="$EMACSCLIENT" || GAP_SCAN_STATUS=$?
+GAP_SCAN_RAN=1
+if [ "$GAP_SCAN_STATUS" -ne 0 ]; then
+    printf '[realtest] BETWEEN-SWEEPS FINDINGS: the module wrote warnings or errors while no realtest was\n' >&2
+    printf '[realtest] running (listed above, verbatim in %s/between-sweeps/MANIFEST.md). The sweep still runs;\n' "$RUN_DIR" >&2
+    printf '[realtest] its exit status carries this.\n' >&2
+else
+    note "nothing was written between the sweeps that the harvest bar rejects"
+fi
+
+# ---- the end of the sweep, however it ends --------------------------------
+#
+# A TRAP, because "the run left the owner's registry as it found it" must hold
+# when a realtest FAILED, when one panicked, and when the operator interrupted
+# the sweep — not only on the happy path. The alternative, a block after the
+# loop, is exactly the code that does not run on the paths where the cleanup
+# matters most.
+REALTEST_MAIN_PID="${BASHPID:-$$}"
+SWEEP_STARTED=0
+SWEEP_ENDED=0
+
+# shellcheck disable=SC2329
+# Invoked indirectly, by the EXIT trap installed below it.
+sweep_end() {
+    local status=$?
+    # Bash runs an EXIT trap in some subshells; a cleanup that ran there would
+    # clean the registry from inside a command substitution and report into a
+    # pipe nobody reads.
+    [ "${BASHPID:-$$}" = "$REALTEST_MAIN_PID" ] || return 0
+    [ "$SWEEP_STARTED" = "1" ] || return 0
+    [ "$SWEEP_ENDED" = "0" ] || return 0
+    SWEEP_ENDED=1
+    trap - EXIT
+
+    printf '\n[realtest] leaving the owner'"'"'s state as this run found it\n'
+    local leftover_status=0
+    run_harness_check TestCleanRealtestLeftovers \
+        AGENT_REPL_REALTEST_LEFTOVERS=clean \
+        AGENT_REPL_REALTEST_LEFTOVER_PREFIX="$RUN_DIR" || leftover_status=$?
+    if [ "$leftover_status" -ne 0 ]; then
+        printf '[realtest] REALTEST LEFTOVER WORKSPACES: rows this run created are still in the registry\n' >&2
+        printf '[realtest] (listed above). Each one makes the editor report a durable log sink it cannot host,\n' >&2
+        printf '[realtest] naming a MISSING directory, until it is removed.\n' >&2
+        printf '[realtest] Remedy: bin/realtest.sh --clean-leftovers\n' >&2
+        [ "$status" -eq 0 ] && status="$leftover_status"
+    fi
+
+    # THE MARK IS ONLY MOVED BY A SWEEP THAT READ THE GAP. Advancing it after a
+    # run that never scanned would discard the window nobody looked at, which
+    # is the whole defect the scan exists for.
+    if [ "$GAP_SCAN_RAN" = "1" ]; then
+        local mark_status=0
+        run_harness_check TestBetweenSweepsMarkTheSweepEnd \
+            AGENT_REPL_REALTEST_SWEEP_MARK=1 \
+            AGENT_REPL_REALTEST_OUT="$RUN_DIR" \
+            AGENT_REPL_REALTEST_EMACS_SOCKET="$EMACS_SOCKET" \
+            AGENT_REPL_REALTEST_EMACSCLIENT="$EMACSCLIENT" || mark_status=$?
+        if [ "$mark_status" -ne 0 ]; then
+            printf '[realtest] the sweep mark could not be written; the next sweep falls back to the newest\n' >&2
+            printf '[realtest] MANIFEST.md and reads a wider window rather than a wrong one.\n' >&2
+        fi
+    fi
+
+    if [ "$GAP_SCAN_STATUS" -ne 0 ] && [ "$status" -eq 0 ]; then
+        printf '[realtest] the sweep exits non-zero for its between-sweeps findings alone.\n' >&2
+        status="$GAP_SCAN_STATUS"
+    fi
+    exit "$status"
+}
+trap sweep_end EXIT
+
 # ---- the run --------------------------------------------------------------
 #
 # THE SUITE SLOT. Every suite here is sized to fill the machine, and a realtest
@@ -691,6 +888,9 @@ SKIPPED=0
 FAILED=0
 FIRST_FAILURE=0
 OUTCOMES=""
+# From here on the sweep owns the registry rows its realtests create, and
+# `sweep_end` runs however this ends.
+SWEEP_STARTED=1
 
 while IFS= read -r row; do
     [ -n "$row" ] || continue

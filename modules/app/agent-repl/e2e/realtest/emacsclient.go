@@ -197,6 +197,29 @@ func (c *Client) MessagesSize(ctx context.Context) (int, error) {
 	return c.ReadInt(ctx, `(with-current-buffer "*Messages*" (buffer-size))`)
 }
 
+// Warnings reads Emacs's whole *Warnings* buffer — the one the owner actually
+// sees, because `display-warning` pops it up.
+//
+// A BUFFER THAT DOES NOT EXIST IS AN EMPTY STRING, not an error. Emacs creates
+// *Warnings* lazily, on the first warning, so its absence is the healthiest
+// possible answer and reporting it as a failed probe would turn a clean editor
+// into a scan that could not run.
+func (c *Client) Warnings(ctx context.Context) (string, error) {
+	return c.ReadString(ctx, `(let ((buffer (get-buffer "*Warnings*")))
+    (if buffer
+        (with-current-buffer buffer
+          (buffer-substring-no-properties (point-min) (point-max)))
+      ""))`)
+}
+
+// WarningsSize is the *Warnings* buffer's size, for a scan that must read only
+// what was added after a recorded point. A buffer that does not exist yet is
+// zero, for the reason Warnings gives.
+func (c *Client) WarningsSize(ctx context.Context) (int, error) {
+	return c.ReadInt(ctx, `(let ((buffer (get-buffer "*Warnings*")))
+    (if buffer (with-current-buffer buffer (buffer-size)) 0))`)
+}
+
 // IdleSeconds is how long Emacs has been idle, which is the closest thing to
 // "is a human using this editor" that the editor itself can answer.
 //
