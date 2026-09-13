@@ -439,6 +439,27 @@ leveled, arriving through three more paths.
   reset; the LOST tracker summarizes the backlog subset of each sweep inside
   `state`. An empty backlog states nothing.
 
+## Shutdown is bounded
+
+A stop that is asked for is a stop that happens.
+
+- THE LOG DRAIN IS THE ONE UNBOUNDED WAIT, AND IT IS NOW BOUNDED.
+  `logging.Logger.Close` waits for the forwarding queue to drain, and the
+  closing forward loop probes and dials the daemon ONCE PER QUEUED RECORD. With
+  the daemon gone and a boot's backlog queued (42,044 undelivered records in one
+  generation) that wait ran past three minutes while launchd waited on a service
+  it had already asked to stop. Production calls `CloseWithin`
+  (`logging.DefaultShutdownDrain`, 5s) — a large multiple of every healthy
+  teardown observed here, which is sub-millisecond from the `shutdown` record to
+  the `exit` record.
+- A BOUND THAT FIRES IS STATED. `CloseWithin` writes one INFO `shutdown-drain`
+  record naming how many records were still queued and the daemon address it was
+  forwarding to, through the durable sink, then exits.
+- LAUNCHD HAS ITS OWN CEILING. Both plists state `ExitTimeOut` (20s)
+  explicitly rather than leaving it to a default. The service's own bound sits
+  well inside it, so reaching launchd's timeout means the process is stuck
+  somewhere it has no bound of its own and SIGKILL is the right answer.
+
 ## The LOST policy
 
 `internal/stale`. LOST IS ITS OWN WORD: it means "we stopped seeing it", never

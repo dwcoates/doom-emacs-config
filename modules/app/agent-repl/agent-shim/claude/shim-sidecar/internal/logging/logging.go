@@ -381,22 +381,77 @@ func (b *Bound) With(ctx Context) *Bound {
 	return &Bound{logger: b.logger, context: mergeContext(b.context, ctx)}
 }
 
-// Close drains the forwarding queue and stops its worker. Ordinary log calls
-// never wait for ClientLog; shutdown is the one boundary that waits so a
-// process exit cannot strand diagnostics which were already accepted.
+// DefaultShutdownDrain bounds how long a process exit waits for the forwarding
+// queue to drain.
+//
+// WHY IT IS BOUNDED. A healthy teardown is sub-millisecond — the owner's log
+// puts 90µs between the `shutdown` record and the `exit` record, and the
+// replacement process starting 34ms later. An UNHEALTHY one is not slow, it is
+// STUCK: with the daemon gone, the closing forward loop still probes and dials
+// once per queued record, and one boot had 42,044 undelivered records queued.
+// That teardown ran past three minutes on the owner's machine while launchd
+// waited on a service it had already asked to stop. Five seconds is a large
+// multiple of every healthy teardown ever observed here and a small fraction of
+// launchd's exit timeout, so a stuck drain costs the operator a bounded pause
+// instead of a hung service.
+const DefaultShutdownDrain = 5 * time.Second
+
+// Close drains the forwarding queue and stops its worker, waiting as long as it
+// takes. Ordinary log calls never wait for ClientLog; shutdown is the one
+// boundary that waits so a process exit cannot strand diagnostics which were
+// already accepted.
+//
+// PRODUCTION USES CloseWithin. An unbounded wait is right for a test that owns
+// both ends of the forwarder and wrong for a service launchd is waiting on.
 func (l *Logger) Close() {
 	if l == nil || l.forwarder == nil {
 		return
 	}
+	done := l.beginClose()
+	<-done
+}
+
+// CloseWithin drains the forwarding queue and stops its worker, ABANDONING the
+// wait after d. It answers how many records were still queued when the bound
+// fired, and whether the queue drained.
+//
+// A bound that fires is STATED, never silent: the record names the count still
+// queued and the daemon address the loop was forwarding to, at INFO, through
+// the durable sink — the queue is closed by then, so nothing about this record
+// can re-enter it.
+func (l *Logger) CloseWithin(d time.Duration) (pending int, drained bool) {
+	if l == nil || l.forwarder == nil {
+		return 0, true
+	}
+	done := l.beginClose()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return 0, true
+	case <-timer.C:
+	}
 	l.forwardMu.Lock()
+	pending = len(l.forwardQueue)
+	l.forwardMu.Unlock()
+	address, _ := l.forwarder.Ready()
+	l.write(false, Context{Operation: "shutdown-drain"},
+		"the log forwarding queue did not drain within %s; abandoning it with %d record(s) still queued for the daemon at %s and exiting",
+		d, pending, addrOrUnresolved(address))
+	return pending, false
+}
+
+// beginClose latches the closing state exactly once and answers the channel the
+// forward loop closes when it stops.
+func (l *Logger) beginClose() chan struct{} {
+	l.forwardMu.Lock()
+	defer l.forwardMu.Unlock()
 	if !l.forwardClosing {
 		l.forwardClosing = true
 		close(l.forwardStop)
 		l.forwardReady.Broadcast()
 	}
-	done := l.forwardDone
-	l.forwardMu.Unlock()
-	<-done
+	return l.forwardDone
 }
 
 // Close drains the root logger's forwarding queue.
@@ -405,6 +460,14 @@ func (b *Bound) Close() {
 		panic("sidecar logging: Close called on nil Bound logger")
 	}
 	b.logger.Close()
+}
+
+// CloseWithin drains the root logger's forwarding queue under a bound.
+func (b *Bound) CloseWithin(d time.Duration) (int, bool) {
+	if b == nil {
+		panic("sidecar logging: CloseWithin called on nil Bound logger")
+	}
+	return b.logger.CloseWithin(d)
 }
 
 // RegisterFile binds proven workspace/session attribution to one normalized

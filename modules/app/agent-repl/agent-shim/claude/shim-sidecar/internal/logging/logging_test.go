@@ -999,3 +999,62 @@ func TestAServingDaemonThatBecomesUnreachableIsWarned(t *testing.T) {
 		t.Fatalf("forward attempts = %d, want the whole ladder against a serving daemon", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The bounded shutdown drain.
+// ---------------------------------------------------------------------------
+
+// A drain that cannot finish is ABANDONED AND STATED. This is the teardown that
+// held a launchd stop past three minutes: the daemon is gone, the queue is
+// deep, and the closing forward loop dials once per record forever.
+func TestCloseWithinAbandonsAStuckDrainAndStatesWhatItWaitedOn(t *testing.T) {
+	// Arrange: a forwarder that blocks inside Forward, and two queued records —
+	// the first wedges the loop, the second is what is still pending.
+	forwarder := &blockingForwarder{started: make(chan struct{}), release: make(chan struct{})}
+	l, _, global := forwardingSinks(t, false, forwarder)
+	scoped := Context{Operation: "tail-pickup", WorkspaceDir: "/w", WorkspaceID: "w1"}
+	l.With(scoped).Log("first")
+	<-forwarder.started
+	l.With(scoped).Log("second")
+	global.Reset()
+
+	// Act.
+	pending, drained := l.CloseWithin(20 * time.Millisecond)
+	defer close(forwarder.release)
+
+	// Assert.
+	if drained {
+		t.Fatal("CloseWithin reported a drained queue while the forward loop was wedged")
+	}
+	if pending != 1 {
+		t.Fatalf("pending = %d, want the one record still queued", pending)
+	}
+	got := decode(t, global.String())
+	if got.Operation != "shutdown-drain" || got.Level != "info" {
+		t.Fatalf("abandonment record = operation %q level %q, want shutdown-drain at info", got.Operation, got.Level)
+	}
+	if !strings.Contains(got.Message, "1 record(s) still queued") {
+		t.Fatalf("abandonment record does not name what it waited on: %q", got.Message)
+	}
+}
+
+// The healthy teardown is unaffected: the queue drains, the bound never fires,
+// and nothing is stated about it.
+func TestCloseWithinDrainsAHealthyQueueSilently(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123"}
+	l, _, global := forwardingSinks(t, false, forwarder)
+	l.With(Context{Operation: "tail-pickup", WorkspaceDir: "/w", WorkspaceID: "w1"}).Log("first")
+	global.Reset()
+
+	// Act.
+	pending, drained := l.CloseWithin(DefaultShutdownDrain)
+
+	// Assert.
+	if !drained || pending != 0 {
+		t.Fatalf("CloseWithin(healthy) = (%d, %t), want (0, true)", pending, drained)
+	}
+	if global.Len() != 0 {
+		t.Fatalf("a healthy drain stated %q, want silence", global.String())
+	}
+}
