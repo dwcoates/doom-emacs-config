@@ -1255,6 +1255,45 @@ the spawn, called the daemon booted, and linked to a refused port."
     ;; Act / Assert
     (should-not agent-repl-daemon--exit-requested)))
 
+(ert-deftest agent-repl-test-daemon-a-restarts-exit-is-recorded-at-info ()
+  "THE 2026-09-13 DEPLOY.  The restart's ensure spawns the successor before
+the predecessor's sentinel runs -- the departure wait keys on the boot
+claim, which the kernel frees the instant the process ends -- so the order
+has to survive the spawn to excuse the exit it was given for."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: a daemon this Emacs spawned, and a claim already free.
+    (setq agent-repl--frontend-daemon-process 'the-predecessor-process
+          agent-repl-test-daemon--boot-claim 'free)
+    (cl-letf (((symbol-function 'agent-repl--frontend-spawn-daemon)
+               (lambda (argv environment)
+                 (push (cons argv environment) agent-repl-test-daemon--spawns)
+                 'the-successor-process))
+              ((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      (agent-repl-frontend-daemon-restart)
+      ;; Act: the predecessor's sentinel fires after the successor is up.
+      (agent-repl-daemon--sentinel 'the-predecessor-process "finished\n"))
+    ;; Assert: the successor really was spawned first, so the order survived it.
+    (should agent-repl-test-daemon--spawns)
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.exited status=0 event=finished requested=t"))))
+
+(ert-deftest agent-repl-test-daemon-a-refused-restart-withdraws-the-order ()
+  "A restart the daemon refused is no order, and its later exit is unasked."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl--frontend-daemon-process 'the-predecessor-process
+          agent-repl-test-daemon--shutdown-answer
+          (list :response (list :arm :error :value nil)))
+    (agent-repl-frontend-daemon-restart)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-predecessor-process "finished\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :warn "elisp.daemon.exited status=0 event=finished requested=nil"))))
+
 (ert-deftest agent-repl-test-daemon-a-foreign-daemons-exit-removes-no-address-file ()
   "Emacs retires only the address of the daemon it started itself."
   (agent-repl-test-daemon--with-harness
