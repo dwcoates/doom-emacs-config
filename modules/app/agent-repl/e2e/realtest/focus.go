@@ -213,3 +213,53 @@ func noFocusEdgeNote(presses int, lock ScreenLock, lockErr error, focus FocusRea
 			"so this cannot yet be attributed to the lock or to a declined activation"
 	}
 }
+
+// WHERE FOCUS IS SUPPOSED TO BE WHEN A PHASE OF PRESSES ENDS, WHICH DEPENDS ON
+// WHO OWNS IT (owner ruling, 2026-09-13).
+//
+// Under the old policy every press restored the previously frontmost
+// application, so the only correct reading at the end of a phase was "focus is
+// exactly where it started" and anything else was a failure to restore. Under
+// the sweep's policy focus was taken ONCE before the first realtest and goes
+// back ONCE from bin/realtest.sh's EXIT trap, so the correct reading at the end
+// of a phase is that EMACS still has it — and a phase that handed focus back
+// would be the defect, because the next realtest's presses would each have to
+// steal it again.
+//
+// The two readings are asked by the same helper so a run can never assert one
+// policy's expectation while running under the other.
+
+// emacsApplicationName is what `System Events` calls the editor, which is what
+// FrontmostApp answers with.
+const emacsApplicationName = "Emacs"
+
+// focusAfterPressesNote judges where focus ended up after a phase that pressed
+// keys, and answers whether that is a finding.
+//
+// Pure, for the same reason noFocusEdgeNote is: the wording of a finding must
+// be testable without a window server, and this one decides whether a run
+// disturbed the owner's desktop.
+//
+// A SWEEP THAT ENDS WITH FOCUS SOMEWHERE ELSE IS NOT A FAILURE. The owner may
+// click away at any moment, and the policy's answer to that is the next press
+// re-taking focus and saying so (refocusNote), not a red run. It is REPORTED so
+// a reader of the manifest can see it happened.
+func focusAfterPressesNote(what string, sweepHolds bool, before, after string) (string, bool) {
+	if !sweepHolds {
+		if before != after {
+			return fmt.Sprintf("%s left focus on %q, not on %q where it started: with no sweep holding "+
+				"focus the driver activates Emacs for each keypress and must restore the prior frontmost "+
+				"app, and here it did not", what, after, before), true
+		}
+		return fmt.Sprintf("%s restored focus to %q after momentarily activating Emacs for each keypress",
+			what, after), false
+	}
+	if after == emacsApplicationName {
+		return fmt.Sprintf("%s left Emacs frontmost, which is the sweep's policy: focus was taken once "+
+			"before the first realtest and goes back to %q once, from bin/realtest.sh's EXIT trap, however "+
+			"the sweep ends", what, before), false
+	}
+	return fmt.Sprintf("%s ended with %q frontmost rather than Emacs, so something took focus back during "+
+		"the run — most likely the owner clicking away. Not a finding against either system: the next press "+
+		"re-takes focus and says so, and the sweep still hands focus to %q at its end", what, after, before), false
+}

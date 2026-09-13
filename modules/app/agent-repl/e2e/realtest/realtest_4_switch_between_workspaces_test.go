@@ -463,15 +463,10 @@ func TestRealtestSwitchBetweenWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read which application is frontmost after the acts: %v", err)
 	}
-	if focusBefore != focusAfter {
-		note := fmt.Sprintf("the chords left focus on %q, not on %q where it started: the driver activates "+
-			"Emacs for each keypress and must restore the prior frontmost app, and here it did not",
-			focusAfter, focusBefore)
-		manifest.Notes = append(manifest.Notes, note)
-		t.Errorf("%s", note)
-	} else {
-		manifest.Notes = append(manifest.Notes,
-			fmt.Sprintf("focus was restored to %q after every keypress momentarily activated Emacs", focusAfter))
+	focusNote, focusFinding := focusAfterPressesNote("the chords", driver.KeepFocus, focusBefore, focusAfter)
+	manifest.Notes = append(manifest.Notes, focusNote)
+	if focusFinding {
+		t.Errorf("%s", focusNote)
 	}
 
 	// THE HARVEST. Identical to realtest 1: the window closes here and the
@@ -723,7 +718,7 @@ func rt4BuildKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir
 	if err != nil {
 		t.Fatalf("read the Emacs pid for the key driver: %v", err)
 	}
-	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client}
+	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client, KeepFocus: sweepHoldsFocus()}
 	if err := driver.Build(ctx); err != nil {
 		note := fmt.Sprintf("KEY DRIVER UNAVAILABLE: %v", err)
 		manifest.Notes = append(manifest.Notes, note)

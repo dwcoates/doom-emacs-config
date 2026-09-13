@@ -251,6 +251,15 @@ type KeyDriver struct {
 	Method string
 	// Trusted is whether this process holds accessibility trust.
 	Trusted bool
+	// KeepFocus says THE SWEEP OWNS THE DESKTOP, so a press activates the
+	// target and LEAVES it frontmost instead of restoring whatever was there
+	// before (owner ruling, 2026-09-13; sweepfocus.go carries it).
+	//
+	// It is set from the environment bin/realtest.sh exports once its own
+	// focus take has run, and never guessed: a press that kept focus while
+	// nobody held the handback would leave the owner's desktop on Emacs after
+	// the run, which is the one outcome this whole policy exists to avoid.
+	KeepFocus bool
 }
 
 // keyDriverSource is where keydriver.swift lives relative to this package.
@@ -298,7 +307,7 @@ func (d *KeyDriver) Build(ctx context.Context) error {
 				"No elisp fallback is taken: the owner rules on the alternative",
 			strings.TrimSpace(string(checkOut)), checkErr)
 	}
-	d.Method = "CGEventPostToPid via keydriver.swift (activates Emacs for the keypress, restores prior focus)"
+	d.Method = "CGEventPostToPid via keydriver.swift (activates Emacs for the keypress; " + d.focusPolicy() + ")"
 	return nil
 }
 
@@ -360,6 +369,7 @@ func (d *KeyDriver) press(ctx context.Context, chord Chord, effect *DeliveryEffe
 
 	if d.Client == nil {
 		out, err := d.post(ctx, chord, nil)
+		d.noteRefocus(chord, out)
 		receipt := DeliveryReceipt{
 			Chord:    chord,
 			Verdict:  DeliveryUndetermined,
@@ -395,6 +405,7 @@ func (d *KeyDriver) press(ctx context.Context, chord Chord, effect *DeliveryEffe
 			verdict, reason, after, observed = d.confirm(ctx, chord, before, effect)
 			focus = ReadEmacsFocus(ctx, d.Client)
 		})
+		d.noteRefocus(chord, out)
 
 		receipt = DeliveryReceipt{
 			Chord:          chord,
@@ -511,10 +522,19 @@ func (d *KeyDriver) confirm(ctx context.Context, chord Chord, before InputMark,
 // — the same condition under which `confirm` runs — and never on a blind
 // press, where the helper's refusal is the only thing standing between a
 // dropped key and silence.
-func keyDriverArgs(pid int, chord Chord, hold bool) []string {
-	args := make([]string, 0, 4)
+//
+// `--keep-focus` IS THE SWEEP'S POLICY, NOT THE PRESS'S. It says the sweep took
+// focus before its first realtest and will hand it back from its EXIT trap, so
+// this press must not undo the steal one keystroke at a time. Its own function
+// for the same reason the hold is: a flag that went missing would silently put
+// the per-press flicker back, and only a test of the spelling would notice.
+func keyDriverArgs(pid int, chord Chord, hold bool, keepFocus bool) []string {
+	args := make([]string, 0, 5)
 	if hold {
 		args = append(args, fmt.Sprintf("--hold=%g", keyDeliveryHoldCeiling.Seconds()))
+	}
+	if keepFocus {
+		args = append(args, keyDriverKeepFocusFlag)
 	}
 	return append(args, fmt.Sprint(pid), fmt.Sprint(chord.Keycode), strings.Join(chord.Modifiers, ","))
 }
@@ -532,7 +552,7 @@ func (d *KeyDriver) post(ctx context.Context, chord Chord, held func()) (string,
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	command := exec.CommandContext(callCtx, d.helper, keyDriverArgs(d.Pid, chord, held != nil)...)
+	command := exec.CommandContext(callCtx, d.helper, keyDriverArgs(d.Pid, chord, held != nil, d.KeepFocus)...)
 	var errors bytes.Buffer
 	command.Stderr = &errors
 
@@ -585,6 +605,42 @@ func (d *KeyDriver) post(ctx context.Context, chord Chord, held func()) (string,
 			chord.Emacs, chord.Keycode, strings.Join(chord.Modifiers, "+"), d.Pid, waitErr, report)
 	}
 	return report, nil
+}
+
+// keyDriverKeepFocusFlag is what tells the helper the sweep is holding focus.
+const keyDriverKeepFocusFlag = "--keep-focus"
+
+// keyDriverRefocusedMarker is what the helper's receipt says when it found the
+// target NOT frontmost and had to take focus for this press.
+const keyDriverRefocusedMarker = "refocused=yes"
+
+// focusPolicy names, in the manifest's words, who hands focus back.
+func (d *KeyDriver) focusPolicy() string {
+	if d.KeepFocus {
+		return "the SWEEP holds focus from its first press to its last and hands it back once at the end"
+	}
+	return "restores the previously frontmost application after each press"
+}
+
+// refocusNote is what a press says when it found Emacs not frontmost.
+//
+// A pure function of the chord and the helper's line, for the same reason every
+// other note here is: the wording of a finding must be testable without a
+// window server. It is a NOTE and never an error — re-taking focus is what the
+// press is supposed to do, and the two reasons it happens (the owner clicked
+// away, a realtest just relaunched Emacs) are both expected.
+func refocusNote(chord Chord, helper string) string {
+	return fmt.Sprintf("EMACS WAS NOT FRONTMOST WHEN %s WAS PRESSED, so the driver took focus for it again "+
+		"and did NOT hand it back: the sweep holds focus from its first press to its last. Either the owner "+
+		"clicked away mid-run, or this is the first press against an Emacs a realtest has just cold-started. "+
+		"The helper said: %s", chord.Emacs, helper)
+}
+
+// noteRefocus records a re-take when the helper reported one.
+func (d *KeyDriver) noteRefocus(chord Chord, helper string) {
+	if strings.Contains(helper, keyDriverRefocusedMarker) {
+		d.Notes = append(d.Notes, refocusNote(chord, helper))
+	}
 }
 
 // PressViaSystemEvents is the second mechanism, and it is NOT equivalent.
