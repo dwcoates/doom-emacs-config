@@ -68,8 +68,9 @@ func TestBootStampsTheMigratedLayoutOnTheStateDatabase(t *testing.T) {
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
 // undoing exactly what every migration since layout 3 does: the 3 -> 4 step's
-// table and index go, and the column the 5 -> 6 step drops comes back. The
-// daemon must be stopped: it holds the sole writing handle while it runs.
+// table and index go, the column the 5 -> 6 step drops comes back, and the
+// column the 6 -> 7 step adds goes. The daemon must be stopped: it holds the
+// sole writing handle while it runs.
 func demoteToLayout3(t *testing.T, d *harness.Daemon) {
 	t.Helper()
 	d.WithDB(func(db *sql.DB) {
@@ -77,6 +78,7 @@ func demoteToLayout3(t *testing.T, d *harness.Daemon) {
 			`DROP INDEX ported_prompts_by_workspace`,
 			`DROP TABLE ported_prompts`,
 			`ALTER TABLE creation_jobs ADD COLUMN one_shot_finish TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE sessions DROP COLUMN selected_config_dir`,
 			`UPDATE layout SET version = 3 WHERE id = 1`,
 		} {
 			if _, err := db.Exec(stmt); err != nil {
