@@ -908,7 +908,30 @@ export class TurnEngine {
           "record holds no rows under it",
       );
     }
-    const watcherEnded = this.session.watcherOpened(target, opened);
+    // THE CONCLUSION IS OBSERVED, BECAUSE ONLY IT MAKES AN ENDING LEGITIMATE.
+    // The teardown concludes a watcher through the session's registry, so what
+    // it holds is what learns of it; this handler otherwise cannot tell a tail
+    // the teardown ended from a tail that ended under it, and those are the two
+    // facts the record below exists to separate.
+    let concluded = false;
+    const watched: AgentPageSession = {
+      page: opened.page,
+      tail: opened.tail,
+      concludeThrough: (through) => {
+        concluded = true;
+        opened.concludeThrough(through);
+      },
+      close: () => {
+        opened.close();
+      },
+    };
+    const watcherEnded = this.session.watcherOpened(target, watched);
+    /**
+     * How this stream ended. `consumer` until something else happens: a
+     * generator abandoned at a `yield` runs its `finally` and nothing else, so
+     * the case that writes no verdict of its own IS the consumer's departure.
+     */
+    let ending: "consumer" | "concluded" | "unasked" | "failed" = "consumer";
     try {
       yield create(shimv1.WatchAgentResponseSchema, {
         frame: { case: "page", value: opened.page },
@@ -916,9 +939,40 @@ export class TurnEngine {
       for await (const entry of opened.tail) {
         yield create(shimv1.WatchAgentResponseSchema, { frame: { case: "entry", value: entry } });
       }
+      ending = concluded ? "concluded" : "unasked";
+    } catch (error) {
+      // The route's own boundary records this one, with its detail and stack;
+      // a second error record here would be the same defect counted twice.
+      ending = "failed";
+      throw error;
     } finally {
       watcherEnded();
       opened.close();
+      // EVERY ENDING OF A STANDING STREAM IS NAMED. A `WatchAgent` that ends
+      // while the session lives is what the daemon reports as a severed link,
+      // and it went unrecorded here at every level the shim runs at: the tail
+      // fell out, this generator returned, and the route logged `completed` at
+      // debug. Only a CONCLUDED tail may end on its own; anything else is the
+      // stream ending under a consumer that was still owed frames.
+      if (ending === "consumer" || ending === "failed") {
+        LOGGER.debug(
+          { agent_id: target.value, ending },
+          `the WatchAgent stream ended: ${ending === "failed" ? "it raised, and the route recorded why" : "its consumer stopped consuming it"}`,
+        );
+      } else if (ending === "concluded") {
+        LOGGER.info(
+          { agent_id: target.value, ending },
+          "the WatchAgent tail served everything its conclusion named and ended",
+        );
+      } else {
+        LOGGER.error(
+          {
+            agent_id: target.value,
+            detail: "the tail ran out with no conclusion and no close from this side",
+          },
+          "the WatchAgent tail ended without anything asking it to; the daemon will see a standing stream end while the session lives",
+        );
+      }
     }
   }
 

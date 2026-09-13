@@ -15,6 +15,16 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The shim's WatchAgent stream that ended in silence, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The store's `WatchAgentSession` ends CLEANLY when the store shuts down, and the shim's tail read that as "the store closed, so stop". Report the ending, or recover from it? | Recover, and report | The refused-token path beside it already re-opens from the last served pointer losslessly, and a store restart under a live shim otherwise severs every consumer's `WatchAgent` on a deploy nobody meant to break; reporting alone would leave the sever in place | Restore the bare `return` after the `for await` in `openBookNow`'s tail (`src/store/reader.ts`) |
+| 2026-09-13 | An unbounded re-open would spin against a store that accepts a token and ends the stream again. What bounds it? | Three consecutive ends that delivered nothing, then `store_unavailable` | A restarting store ends each watch ONCE; a second and third are the retry schedule's attempts landing mid-restart, and a fourth is no longer a restart. It is a count of events, not a clock, so it cannot be lost to a slow box | Raise or drop `UNASKED_END_BUDGET` in `src/store/reader.ts` |
+| 2026-09-13 | At what level does the shim record the store ending a standing watch? | `warn` for one it recovers from, `error` for giving up | It is the same class of event as the refused token beside it, which is already a `warn: a defect`; silence is what cost this finding a whole investigation, and a `debug` would have been silence at the level the fleet runs at | Lower the two records in the `else` arm of the tail's re-open in `src/store/reader.ts` |
+| 2026-09-13 | `WatchAgent` cannot tell a tail the teardown concluded from a tail that ended under it. Thread a flag through the session, or observe the conclusion? | Observe it, by registering a wrapper whose `concludeThrough` records | The teardown already concludes through exactly the registration the session holds, so the fact is there to be observed; a second channel for it would be two sources for one fact | Register `opened` directly again in `TurnEngine.watchAgent` (`src/engine/turn.ts`) |
+| 2026-09-13 | `test/fake/registry.test.ts` was already failing on master: the `!tokens-reminder` row in the shim's AGENTS.md had drifted from the registry's own rendering. Fix it here, or leave it to its owner? | Fix it here | The table is GENERATED and the test prints the exact expected row, so the fix is a mechanical regeneration of one line with no judgement in it, and a red suite is not a state to hand on | Revert the `!tokens-reminder` row in `agent-shim/claude/shim/AGENTS.md` |
+
 ## The deploy's own store outage, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
