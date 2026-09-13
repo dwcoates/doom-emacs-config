@@ -32,13 +32,16 @@ import {
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { Handle } from "../failure/overlay.js";
+import { frameUndecodable } from "../failure/sink.js";
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
+import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
+import { isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { drawFooterExpanded, FOOTER_PANELS, type FooterPanel } from "./expanded.js";
-import { drawFooterStrip, footerStatusActivity } from "./strip.js";
+import { drawClientDisconnectedStrip, drawFooterStrip, footerStatusActivity } from "./strip.js";
 import { createStopControls } from "./stop.js";
 
 /** Where the open panel is remembered, per workspace. */
@@ -82,6 +85,32 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   let statusCase: string | null = null;
   let disposed = false;
 
+  // THE CLIENT'S OWN VERDICT OVERLAYS THE DAEMON'S (owner ruling, 2026-09-13).
+  // Subscribing here rather than polling in `draw` is what makes a verdict
+  // REACH the screen: nothing else redraws this component between pushes, and
+  // a link that is down produces no pushes by definition.
+  // ONLY THE DRAWING. The status ARM published to R7's composer gate stays the
+  // daemon's -- see `publishStatus` for why a client verdict must not close a
+  // composer.
+  const unsubscribeFromVerdict = onClientVerdict(() => {
+    if (disposed) return;
+    // A REDRAW OF AN UNREADABLE LAST VIEW IS ONE UNREADABLE FRAME, and it gets
+    // the treatment `watchStream` gives one: logged, filed, and skipped. It
+    // cannot be allowed to throw, because the caller here is whatever reported
+    // or cleared the verdict -- an rpc, whose own answer would then be
+    // mislabelled a transport failure by its call site.
+    try {
+      draw();
+    } catch (err) {
+      if (!isMalformedView(err)) throw err;
+      log.error(`the footer's last view could not be redrawn: ${err.detail}`, {
+        operation: "footer.verdict-redraw-undecodable",
+        context: { path: err.path, cause: err.detail },
+      });
+      ctx.failures.report(frameUndecodable(err.detail, `FooterView at ${err.path}`));
+    }
+  });
+
   const watch: StreamHandle = watchStream<WatchFooterResponse>(ctx, {
     name: "WatchFooter",
     schema: WatchFooterResponseSchema,
@@ -106,6 +135,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       if (disposed) return;
       disposed = true;
       log.info("disposing the footer", { operation: "footer.dispose", context: {} });
+      unsubscribeFromVerdict();
       watch.cancel();
       // Every clock this component started hangs off the host's subtree.
       stopTicking(host);
@@ -127,7 +157,27 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
    * or every push would leave one ticking against a detached element.
    */
   function draw(): void {
-    if (disposed || view === null) return;
+    if (disposed) return;
+    // WHILE A CLIENT VERDICT STANDS IT WINS, and the daemon's last pushed view
+    // is not drawn at all. A push landing under a standing verdict is not
+    // evidence the link is up -- the footer stream and the verb that failed are
+    // different calls -- so the verdict is lifted by `clearClientFailures`,
+    // never by a redraw. See `src/rpc/link.ts`.
+    const verdict = standingClientFailure();
+    if (view === null) {
+      // NOTHING PUSHED YET. With a verdict standing the strip is the client's
+      // three cells alone; without one there is nothing to draw at all.
+      if (verdict === null) return;
+      const bare = document.createElement("div");
+      bare.className = "pfooter";
+      bare.setAttribute("role", "status");
+      bare.setAttribute("aria-live", "polite");
+      bare.setAttribute("data-client-verdict", verdict.kind);
+      bare.appendChild(drawClientDisconnectedStrip(verdict.substatus, verdict.activity));
+      stopTicking(host);
+      host.replaceChildren(bare);
+      return;
+    }
     const strip = requireMessage(view.strip, "FooterView.strip");
     const expanded = requireMessage(view.expanded, "FooterView.expanded");
 
@@ -145,7 +195,16 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       revealRow: deps.revealRow,
       activity: footerStatusActivity(requireMessage(strip.status, `FooterStrip.status`)),
     });
-    dock.appendChild(drawFooterStrip(strip, { ctx, selection, onSelect: select, stops }));
+    const stripDeps = { ctx, selection, onSelect: select, stops };
+    dock.appendChild(
+      verdict === null
+        ? drawFooterStrip(strip, stripDeps)
+        : drawClientDisconnectedStrip(verdict.substatus, verdict.activity, {
+            strip,
+            deps: stripDeps,
+          }),
+    );
+    if (verdict !== null) dock.setAttribute("data-client-verdict", verdict.kind);
     if (panel !== null) {
       dock.appendChild(drawFooterDivider());
       dock.appendChild(panel);
@@ -173,6 +232,12 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
 
   /** Tell every subscriber which status arm this push carried. */
   function publishStatus(): void {
+    // THE CLIENT'S VERDICT IS NOT PUBLISHED TO THE COMPOSER GATE, and that is
+    // deliberate. R7 closes the composer on a PUSHED `disconnected` because
+    // the daemon says the session is gone; a client verdict says the last
+    // thing this page sent did not arrive -- and the only thing that lifts it
+    // is the user sending something that does. Closing the composer over it
+    // would take away the retry the strip's own line invites.
     if (view === null) return;
     const strip = requireMessage(view.strip, "FooterView.strip");
     const status = requireMessage(strip.status, "FooterStrip.status");

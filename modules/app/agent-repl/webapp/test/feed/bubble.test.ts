@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { clearClientFailures, onClientVerdict } from "../../src/rpc/link.js";
 import { mountBubble } from "../../src/feed/bubble.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { installStylesheet } from "../stylesheet.js";
@@ -473,6 +474,25 @@ describe("mountBubble: re-opening the tail", () => {
     await settle();
     // Assert
     expect(bubble.element.querySelector(".refusal")).toBeNull();
+  });
+
+  it("reports a refused reopen, the sub-feed having silently stopped tailing", async () => {
+    // Arrange: the expanding open succeeds, every reopen after it is refused.
+    const { h, channel } = reopening([[responseRow("r1")]], 1);
+    const published: Array<string | null> = [];
+    const stop = onClientVerdict((verdict) => published.push(verdict?.activity ?? null));
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    stop();
+    clearClientFailures();
+    // Assert: reported. The tail's own ending verdict follows it in the same
+    // tick -- see the judgement row on the superseding ending.
+    expect(published).toContain("the daemon refused to re-open a sub-feed after its tail died");
   });
 
   it("keeps the rows the last good page painted when a reopen is refused", async () => {

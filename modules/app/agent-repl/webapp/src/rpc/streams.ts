@@ -40,6 +40,7 @@ import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
 import { log } from "../log.js";
 import { daemonUnreachable, frameUndecodable, type FailureSink } from "../failure/sink.js";
+import { clearClientFailure, clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView, isMalformedView } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
 import type { AgentReplClient } from "./client.js";
@@ -169,6 +170,10 @@ export function watchStream<Res extends Message>(
       reportUndecodable(err);
       return;
     }
+    // A FRAME DECODED, which is the one thing that disproves the undecodable
+    // verdict and nothing else: the stream that could not read the last frame
+    // has just read this one. A verb that never arrived is untouched by it.
+    clearClientFailure("frame_undecodable_card");
     // A frame arrived and was drawn, so the link is up. Retract the window and
     // re-arm the backoff, or a link that flaps every few minutes would creep
     // to the ceiling and stay there.
@@ -178,6 +183,9 @@ export function watchStream<Res extends Message>(
         context: { rpc: opts.name },
       });
       ctx.failures.retract("daemonUnreachable");
+      // The link is reading again, which disproves every client verdict; the
+      // footer goes back to whatever the daemon is pushing.
+      clearClientFailures();
       unreachableFiled = false;
       opts.onReconnected?.();
     }
@@ -201,6 +209,9 @@ export function watchStream<Res extends Message>(
       context: { rpc: opts.name, end: end.kind, close_code: closeCode, close_reason: closeReason, backoff_ms: backoffMs },
     });
     ctx.failures.report(daemonUnreachable(closeCode, closeReason));
+    // AFTER the card, so the footer's line names this stream rather than the
+    // card's generic account of the same ending.
+    reportClientFailure("stream_ended", `${opts.name} stream ended (${end.kind})`);
     unreachableFiled = true;
   };
 

@@ -5,6 +5,7 @@ import {
   resetLoggingForTests,
   setLogger,
 } from "../src/log.js";
+import { clearClientFailures } from "../src/rpc/link.js";
 import { installResizeObserver } from "./resize-observer.js";
 
 /**
@@ -28,4 +29,10 @@ beforeEach(() => {
   resetLoggingForTests();
   setLogger(new ForwardingLogger(async () => "accepted", () => {}));
   bindLogContext({ connection_id: "test-connection" });
+  // THE CLIENT'S LINK VERDICT IS PAGE-WIDE STATE, and the unit suite runs
+  // un-isolated: a file that reported a transport failure would otherwise
+  // leave the next file's footer drawing the client's disconnected strip.
+  // Production has one page and one verdict; each test gets the same fresh
+  // start. AFTER the logger, because clearing a standing verdict logs.
+  clearClientFailures();
 });

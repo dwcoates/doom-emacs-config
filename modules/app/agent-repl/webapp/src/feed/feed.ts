@@ -13,6 +13,7 @@
  */
 import { log } from "../log.js";
 import { create } from "@bufbuild/protobuf";
+import { reportClientFailure } from "../rpc/link.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -198,6 +199,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
           operation: "feed.root-open-refused",
           context: { arm: requireCase(result.value.cause ?? {}, "OpenFeedError.cause").case },
         });
+        // THE DAEMON ANSWERED AND REFUSED, so the loop's own card would name a
+        // daemon that is plainly reachable (the audit's N3 row 14). The footer
+        // says what actually stopped: this feed is no longer tailing.
+        reportClientFailure(
+          "feed_not_tailing",
+          "the daemon refused to open the workspace's root feed",
+        );
         return;
       default:
         unreachableArm("OpenFeedResponse.result", armName(result));
@@ -305,6 +313,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
         OpenFeedResponseSchema,
       );
     } catch {
+      // The probe never reached the daemon. Reported as a TRANSPORT failure
+      // rather than as a refused feed, because that is what it was, and the
+      // line names the probe so the footer does not have to guess.
+      reportClientFailure(
+        "unary_transport",
+        "OpenFeed (the feed's reveal probe) could not reach the daemon",
+      );
       return false;
     }
     const result = requireCase(response.result, "OpenFeedResponse.result");
@@ -316,6 +331,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
         operation: "feed.reveal-refused",
         context: { row: id.value },
       });
+      reportClientFailure("feed_not_tailing", "the daemon refused the feed's reveal probe");
       return false;
     }
     if (result.case !== "success") return unreachableArm("OpenFeedResponse.result", armName(result));
