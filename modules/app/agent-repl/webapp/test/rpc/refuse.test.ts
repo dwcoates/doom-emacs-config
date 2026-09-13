@@ -4,7 +4,9 @@ import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { registerWorkspaceMoved } from "../../src/rpc/moved.js";
+import { Code, ConnectError } from "@connectrpc/connect";
 import {
+  callFailure,
   clearRefusals,
   drawMalformedRefusal,
   drawTransportRefusal,
@@ -213,5 +215,65 @@ describe("drawMalformedRefusal", () => {
     // unreadable frame rather than a wordless refusal: inventing a sentence
     // here would state a refusal the daemon never made.
     expect(host.querySelector(".refusal")).toBeNull();
+  });
+});
+
+describe("callFailure", () => {
+  it("says the daemon could not be reached when the call never landed", () => {
+    const said = callFailure(new ConnectError("connection refused", Code.Unavailable));
+
+    expect(said).toEqual({ arm: "transport", text: "the daemon could not be reached" });
+  });
+
+  it("says the same for a deadline the call spent without landing", () => {
+    const said = callFailure(new ConnectError("too slow", Code.DeadlineExceeded));
+
+    expect(said.arm).toBe("transport");
+  });
+
+  it("says the same for a call this end cancelled", () => {
+    const said = callFailure(new ConnectError("gone", Code.Canceled));
+
+    expect(said.arm).toBe("transport");
+  });
+
+  it("carries the daemon's OWN sentence when the daemon answered a failure", () => {
+    // GROUNDED 2026-09-13: this exact message reached the cold-gate card, which
+    // drew "the daemon could not be reached" over it.
+    const said = callFailure(
+      new ConnectError("shim.v1.StartSession: the producer has already written rows", Code.Internal),
+    );
+
+    expect(said.text).toBe("shim.v1.StartSession: the producer has already written rows");
+  });
+
+  it("does not wear the transport arm for a daemon that answered", () => {
+    const said = callFailure(new ConnectError("boom", Code.Internal));
+
+    expect(said.arm).toBe("failed");
+  });
+
+  it("says so plainly when the answered failure carried no sentence", () => {
+    const said = callFailure(new ConnectError("", Code.Internal));
+
+    expect(said.text).toBe("the daemon refused the call and said nothing");
+  });
+});
+
+describe("drawTransportRefusal", () => {
+  it("words a failure it was handed through the same rule", () => {
+    const host = document.createElement("div");
+
+    drawTransportRefusal(host, new ConnectError("the shim refused the start", Code.Internal));
+
+    expect(host.querySelector(".refusal")?.textContent).toBe("the shim refused the start");
+  });
+
+  it("keeps the unreachable line for a caller that hands it nothing", () => {
+    const host = document.createElement("div");
+
+    drawTransportRefusal(host);
+
+    expect(host.querySelector(".refusal")?.textContent).toBe("the daemon could not be reached");
   });
 });
