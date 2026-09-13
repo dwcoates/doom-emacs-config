@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -916,6 +917,240 @@ func TestPublishExitRecordsAnAskedForSignalledExitAsADeath(t *testing.T) {
 func hasRecordAt(log *dlog.TestLogger, level, operation string) bool {
 	for _, r := range log.Records() {
 		if r.Level == level && r.Operation == operation {
+			return true
+		}
+	}
+	return false
+}
+
+// TestKillArmsTheStandDownLatchBeforeTheProcessIsEnded pins the invariant the
+// forget path needed: a kill is a teardown THIS DAEMON ordered, so the latch
+// every consumer reads is armed by the process kill and not only by the
+// KillSession rpc. Forget stands a live session down through `Fleet.Stop`,
+// which calls Kill, and an adopted workspace forgotten that way recorded an
+// `daemon.shimclient.exit` ERROR for a departure the daemon itself asked for.
+//
+// Every shape Kill can meet is a row, because each of them is still an ask.
+func TestKillArmsTheStandDownLatchBeforeTheProcessIsEnded(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func(t *testing.T) *client
+	}{
+		{
+			name: "a spawned client whose process is already gone",
+			build: func(t *testing.T) *client {
+				c := newBareClient()
+				c.mu.Lock()
+				c.exited = true
+				c.mu.Unlock()
+				return c
+			},
+		},
+		{
+			name: "a spawned client with no process group to signal",
+			build: func(t *testing.T) *client {
+				c := newBareClient()
+				c.cmd = &exec.Cmd{}
+				return c
+			},
+		},
+		{
+			name: "an adopted client whose socket is already gone",
+			build: func(t *testing.T) *client {
+				return newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"),
+					filepath.Join(shortDir(t), "absent.sock"), defaultBackoff, nil)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := tc.build(t)
+
+			// Act.
+			_ = c.Kill(context.Background(), KillAttribution{
+				Actor: "workspace.stop", Reason: "the workspace was forgotten", Force: true,
+			})
+
+			// Assert.
+			if !c.StandingDown() {
+				t.Fatal("Kill left the stand-down latch unarmed; the departure it ordered will read as unasked")
+			}
+		})
+	}
+}
+
+// TestKillOfADetachedClientArmsNoStandDown is the one shape that is NOT an ask.
+// A handover left the process running and this client no longer supervises it,
+// so the kill is refused and nothing about that process was ordered by us.
+func TestKillOfADetachedClientArmsNoStandDown(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.Detach()
+
+	// Act.
+	err := c.Kill(context.Background(), KillAttribution{Actor: "workspace.stop", Reason: "forgotten"})
+
+	// Assert.
+	if !errors.Is(err, ErrDetached) {
+		t.Fatalf("Kill() error = %v, want ErrDetached", err)
+	}
+	if c.StandingDown() {
+		t.Fatal("a refused kill of a detached client armed the stand-down latch")
+	}
+}
+
+// TestAnAdoptedShimsDepartureIsLoudOnlyWhenNobodyAskedForIt covers the record
+// the realtest harvest failed on: forgetting a live ADOPTED workspace ends the
+// very socket the redial ladder is dialing, and the witness recorded that as a
+// shim that went missing. An unasked disappearance is unchanged.
+func TestAnAdoptedShimsDepartureIsLoudOnlyWhenNobodyAskedForIt(t *testing.T) {
+	tests := []struct {
+		name      string
+		standDown bool
+		wantError bool
+	}{
+		{name: "the daemon asked this shim to go", standDown: true, wantError: false},
+		{name: "nobody asked this shim to go", standDown: false, wantError: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff,
+				func(ids.WorkspaceID) (bool, error) { return true, nil })
+			c.standDown.Store(tc.standDown)
+
+			// Act.
+			witnessed := c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+			// Assert.
+			if !witnessed {
+				t.Fatal("witnessAdoptedDeath() = false with the socket gone and the lock free")
+			}
+			if got := hasRecordAt(log, "error", "daemon.shimclient.exit"); got != tc.wantError {
+				t.Fatalf("an error record at daemon.shimclient.exit = %v, want %v", got, tc.wantError)
+			}
+		})
+	}
+}
+
+// TestPublishExitRecordsAnInferredDepartureInsideAStandDownAsOrderly pins the
+// half of that record that lives in publishExit. An adopted shim is not this
+// daemon's child, so its exit carries the -1 SENTINEL rather than a wait
+// status; read as a status it says "signalled death" about a shim that left
+// exactly as asked.
+func TestPublishExitRecordsAnInferredDepartureInsideAStandDownAsOrderly(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c.standDown.Store(true)
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: -1, Inferred: true})
+
+	// Assert.
+	if hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("an inferred departure inside an asked-for stand-down was recorded as a death")
+	}
+}
+
+// TestPublishExitRecordsAnUnaskedInferredDepartureAsADeath is that rule's other
+// half: a shim that vanished with nobody having asked it to is gone for a
+// reason this daemon does not know, and no absence of a wait status quiets it.
+func TestPublishExitRecordsAnUnaskedInferredDepartureAsADeath(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: -1, Inferred: true})
+
+	// Assert.
+	if !hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("an inferred departure nobody asked for was not recorded as a death")
+	}
+}
+
+// TestTheRedialLadderEndsLoudlyOnlyWhenNobodyAskedForTheTeardown covers the
+// other pair of records the harvest carried: two `daemon.shimclient.redial`
+// WARNs for a stand-down the daemon ordered.
+//
+// THE LATCH IS RE-READ WHERE THE LADDER STOPS, and that is a different read
+// from the gate at the top of the monitor loop. The break came first and the
+// ask came after it, which is the ordering a forget produces: the shim link
+// had already broken, the ladder was climbing against a held workspace lock,
+// and the forget then stood the session down and freed that lock.
+func TestTheRedialLadderEndsLoudlyOnlyWhenNobodyAskedForTheTeardown(t *testing.T) {
+	tests := []struct {
+		name      string
+		standDown bool
+		wantWarn  bool
+	}{
+		{name: "the daemon asked while the ladder was climbing", standDown: true, wantWarn: false},
+		{name: "nobody asked at all", standDown: false, wantWarn: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the stream is already broken, and the lock probe is the
+			// seam at which the teardown arrives — AFTER the top gate has been
+			// passed, and freeing the very lock the ladder was waiting on.
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"),
+				backoff{Initial: time.Millisecond, Max: 2 * time.Millisecond, Factor: 1}, nil)
+			c.lockProbe = func(ids.WorkspaceID) (bool, error) {
+				c.standDown.Store(tc.standDown)
+				return true, nil
+			}
+			frames := make(chan *shimv1.WatchSessionResponse)
+			errs := make(chan error, 1)
+			errs <- io.ErrUnexpectedEOF
+
+			// Act.
+			runMonitorToCompletion(t, c, frames, errs)
+
+			// Assert.
+			if got := hasRecordSaying(log, "warn", "daemon.shimclient.redial", "redial stopped"); got != tc.wantWarn {
+				t.Fatalf("a warn record saying the redial stopped = %v, want %v", got, tc.wantWarn)
+			}
+		})
+	}
+}
+
+// runMonitorToCompletion drives the liveness monitor until it returns, bounded
+// so a monitor that never stops fails the test instead of hanging the package.
+// The bound is a wide multiple of a run that costs two capped 2ms backoffs and
+// one refused dial to a socket that does not exist.
+func runMonitorToCompletion(t *testing.T, c *client, frames chan *shimv1.WatchSessionResponse, errs chan error) {
+	t.Helper()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.monitor(&inertSessionStream{}, frames, errs)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the liveness monitor never returned")
+	}
+}
+
+// inertSessionStream is a broken session stream: the monitor only ever closes
+// it, because the break is delivered on the error channel beside it.
+type inertSessionStream struct{}
+
+func (s *inertSessionStream) Recv() (*shimv1.WatchSessionResponse, error) { return nil, io.EOF }
+func (s *inertSessionStream) Close()                                      {}
+
+// hasRecordSaying answers whether the test logger holds a record at one level
+// for one operation whose message is exactly the one named.
+func hasRecordSaying(log *dlog.TestLogger, level, operation, message string) bool {
+	for _, r := range log.Records() {
+		if r.Level == level && r.Operation == operation && r.Message == message {
 			return true
 		}
 	}
