@@ -202,6 +202,16 @@ type sidecar struct {
 	// key. It is process-scoped, like the withholding itself: the reader states
 	// it as one summary per file at the end of the startup catch-up window.
 	residueWithheld map[string]map[string]int
+	// shapeCatalogued is every residue SHAPE HASH this process has already
+	// contributed an observation for. It is what makes `new_shapes` mean "first
+	// seen by this process" rather than "seen again", and it is process-scoped
+	// for the same reason the tally is: a cycle that dropped its tailers did not
+	// make the vendor stop emitting the shape.
+	shapeCatalogued map[string]bool
+	// newShapes counts, per tailed file's `dev:inode` identity, the shapes this
+	// process saw for the FIRST time. Inferred batches name no file and count
+	// under the empty key, exactly as the withheld tally does.
+	newShapes map[string]int
 	// defects counts how many times each file's OWN defect has now been
 	// observed, keyed by the file's `dev:inode` identity so a rename does not
 	// buy the same defect a fresh count.
@@ -304,6 +314,8 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		stopped:            map[string]int64{},
 		parked:             map[string]bool{},
 		residueWithheld:    map[string]map[string]int{},
+		shapeCatalogued:    map[string]bool{},
+		newShapes:          map[string]int{},
 		defects:            map[string]*fileDefect{},
 		rewound:            map[string]bool{},
 		workspaceBySession: map[string]workspaceAttribution{},
@@ -1278,13 +1290,13 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 // states nothing for an operation that demoted nothing.
 func (s *sidecar) summarizeWithheldResidue() {
 	for _, w := range s.watchers {
-		s.stateWithheld(w.target.Path, w.target.TaskID, s.residueWithheld[w.tailer.FileID()])
+		s.stateWithheld(w.target.Path, w.target.TaskID, s.residueWithheld[w.tailer.FileID()], s.newShapes[w.tailer.FileID()])
 	}
-	s.stateWithheld("", "", s.residueWithheld[""])
+	s.stateWithheld("", "", s.residueWithheld[""], s.newShapes[""])
 }
 
 // stateWithheld writes one summary for one tally, and nothing for an empty one.
-func (s *sidecar) stateWithheld(path, taskID string, tally map[string]int) {
+func (s *sidecar) stateWithheld(path, taskID string, tally map[string]int, newShapes int) {
 	if len(tally) == 0 {
 		return
 	}
@@ -1299,8 +1311,8 @@ func (s *sidecar) stateWithheld(path, taskID string, tally map[string]int) {
 	s.log.With(logging.Context{
 		Operation: "residue-drop-summary", Path: path, TaskID: taskID,
 		Repeat: logging.Repeat(total),
-	}).Log("startup catch-up read and classified %d residue record(s) %s and stored none of them: %s",
-		total, where, residueCounts(tally))
+	}).Log("startup catch-up read and classified %d residue record(s) %s and stored none of them, cataloguing %d shape(s) this process had not seen before: %s",
+		total, where, newShapes, residueCounts(tally))
 }
 
 // residueCounts renders a tally in label order, so two summaries of the same
@@ -1538,22 +1550,40 @@ func (s *sidecar) interrupted(err error) bool {
 // THE CURSOR STILL ADVANCES. It rides the batch, not the entries, so a batch
 // whose every record was residue still commits the reader's position — the bytes
 // were read, and re-reading them would produce the same nothing.
-func (s *sidecar) withholdResidue(batch *storev1.EntryBatch) []*storev1.StoreEntry {
+func (s *sidecar) withholdResidue(batch *storev1.EntryBatch) ([]*storev1.StoreEntry, []*storev1.ShapeObservation) {
 	entries := batch.GetEntries()
+	fileID := batch.GetCursorAdvance().GetFileId()
 	kept := entries[:0]
+	var shapes []*storev1.ShapeObservation
+	// inBatch dedupes the observations WITHIN this batch: a boot walk reads
+	// thousands of lines of one shape, and one observation per line would send
+	// the catalog the very volume the catalog exists to avoid storing. The
+	// store's own count still rises once per batch, which is the honest thing
+	// the wire can carry.
+	inBatch := map[string]bool{}
 	for _, e := range entries {
 		if !convert.IsResidue(e) {
 			kept = append(kept, e)
 			continue
 		}
 		label := convert.ResidueLabel(e)
-		fileID := batch.GetCursorAdvance().GetFileId()
 		tally := s.residueWithheld[fileID]
 		if tally == nil {
 			tally = map[string]int{}
 			s.residueWithheld[fileID] = tally
 		}
 		tally[label]++
+		// THE SHAPE IS WHAT SURVIVES THE WITHHOLDING. The bytes are not stored,
+		// so the key structure is the only thing left that says the vendor emits
+		// this line at all (shape.go, owner ruling 2026-09-13).
+		if shape, ok := convert.ResidueShape(e, s.now().UnixMilli()); ok && !inBatch[shape.GetShapeHash()] {
+			inBatch[shape.GetShapeHash()] = true
+			shapes = append(shapes, shape)
+			if !s.shapeCatalogued[shape.GetShapeHash()] {
+				s.shapeCatalogued[shape.GetShapeHash()] = true
+				s.newShapes[fileID]++
+			}
+		}
 		// IT ANNOUNCES NO ROW, so it carries no upsert_key: the whole point is
 		// that nothing was stored, and a record naming a key nobody can look up
 		// is the untraceable announcement the field-set contract forbids.
@@ -1561,22 +1591,25 @@ func (s *sidecar) withholdResidue(batch *storev1.EntryBatch) []*storev1.StoreEnt
 			Operation: "residue-drop", FileID: fileID, Reason: label,
 		}).LogVerbose("residue %s is never persisted; the record was read and classified and is not stored", label)
 	}
-	return kept
+	return kept, shapes
 }
 
 // storeWrite is the sidecar's ONLY path to the store. Routing every write
 // through here is what makes an unreachable store impossible to miss.
 func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) ([]storeclient.SkippedEntry, error) {
-	batch.Entries = s.withholdResidue(batch)
-	if len(batch.GetEntries()) == 0 && batch.GetCursorAdvance() == nil {
-		// Nothing to store and no position to advance. A batch that was ONLY
-		// residue is not an empty write to make: the store has nothing to do
-		// with it, and asking anyway would spend an rpc per residue line.
+	kept, shapes := s.withholdResidue(batch)
+	batch.Entries = kept
+	if len(batch.GetEntries()) == 0 && batch.GetCursorAdvance() == nil && len(shapes) == 0 {
+		// Nothing to store, no position to advance and no shape to catalogue. A
+		// batch that was ONLY residue is not an empty write to make: the store
+		// has nothing to do with it, and asking anyway would spend an rpc per
+		// residue line. A batch carrying a SHAPE still goes: the observation is
+		// the one durable thing the withheld line leaves behind.
 		return nil, nil
 	}
 	ctx, cancel := s.rpcContext()
 	defer cancel()
-	skipped, err := s.store.WriteBatch(ctx, batch)
+	skipped, err := s.store.WriteBatch(ctx, batch, shapes)
 	if s.interrupted(err) {
 		// NOT AN OUTAGE AND NOT SWALLOWED: the error still returns, but the
 		// store was fine. What it did with the batch is unknown — it may have

@@ -1007,6 +1007,10 @@ func (p *proxyStore) GetLiveWork(context.Context, *connect.Request[storev1.GetLi
 	return nil, p.unexpected("GetLiveWork")
 }
 
+func (p *proxyStore) ListResidueShapes(context.Context, *connect.Request[storev1.ListResidueShapesRequest]) (*connect.Response[storev1.ListResidueShapesResponse], error) {
+	return nil, p.unexpected("ListResidueShapes")
+}
+
 // Batches answers every batch the sidecar wrote, in write order.
 func (p *proxyStore) Batches() []*storev1.WriteBatchRequest {
 	p.mu.Lock()

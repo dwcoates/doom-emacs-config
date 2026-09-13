@@ -146,7 +146,7 @@ func TestWriteBatchSuccessIsDurable(t *testing.T) {
 	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{{WriteId: "w1", UpsertKey: "activity:a1"}},
 		CursorAdvance: cursor("1:2", "/tmp/session.jsonl", 128),
-	})
+	}, nil)
 
 	// Assert.
 	if err != nil {
@@ -166,7 +166,7 @@ func TestWriteBatchCarriesCursorAdvance(t *testing.T) {
 	want := cursor("1:2", "/tmp/session.jsonl", 512)
 
 	// Act.
-	if _, err := client.WriteBatch(ctx(), &storev1.EntryBatch{CursorAdvance: want}); err != nil {
+	if _, err := client.WriteBatch(ctx(), &storev1.EntryBatch{CursorAdvance: want}, nil); err != nil {
 		t.Fatalf("WriteBatch returned %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestWriteBatchFailureArmIsRefusal(t *testing.T) {
 	}})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	var refusal *RefusalError
@@ -202,7 +202,7 @@ func TestWriteBatchUnsetResultIsAnError(t *testing.T) {
 	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{}})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	if err == nil {
@@ -215,7 +215,7 @@ func TestWriteBatchConnectErrorIsNotARefusal(t *testing.T) {
 	client := serve(t, &fakeStore{writeErr: connect.NewError(connect.CodeInternal, errors.New("boom"))})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	if err == nil {
@@ -231,7 +231,7 @@ func TestWriteBatchRejectsNilBatch(t *testing.T) {
 	client := serve(t, &fakeStore{})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), nil)
+	_, err := client.WriteBatch(ctx(), nil, nil)
 
 	// Assert.
 	if err == nil {
@@ -244,7 +244,7 @@ func TestWriteBatchUnreachableStoreFails(t *testing.T) {
 	client := clientTo(t, filepath.Join(os.TempDir(), "ar-absent.sock"))
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	if err == nil {
@@ -267,7 +267,7 @@ func TestAStorageFailureRefusalCarriesItsKind(t *testing.T) {
 	}})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	var refusal *RefusalError
@@ -295,7 +295,7 @@ func TestAnInvalidRequestRefusalNamesTheOffendingField(t *testing.T) {
 	}})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	field, invalid := InvalidRequest(err)
@@ -321,7 +321,7 @@ func TestAStorageFailureIsNotAnInvalidRequest(t *testing.T) {
 	}})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	if _, invalid := InvalidRequest(err); invalid {
@@ -342,7 +342,7 @@ func TestAKindLessFailureIsTreatedAsAStorageFailure(t *testing.T) {
 	}})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	var refusal *RefusalError
@@ -364,7 +364,7 @@ func TestAKindLessFailureIsNeverAnInvalidRequest(t *testing.T) {
 	}})
 
 	// Act.
-	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+	_, err := client.WriteBatch(ctx(), &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	if _, invalid := InvalidRequest(err); invalid {
@@ -387,7 +387,7 @@ func TestWriteBatchReturnsTheSkippedLegacyBookConflicts(t *testing.T) {
 	// Act.
 	skipped, err := client.WriteBatch(ctx(), &storev1.EntryBatch{
 		Entries: []*storev1.StoreEntry{{WriteId: "w1", UpsertKey: "activity:msg_1:0"}},
-	})
+	}, nil)
 
 	// Assert.
 	if err != nil {
@@ -411,7 +411,7 @@ func TestWriteBatchReturnsNoSkipsOnTheOrdinaryPath(t *testing.T) {
 	// Act.
 	skipped, err := client.WriteBatch(ctx(), &storev1.EntryBatch{
 		Entries: []*storev1.StoreEntry{{WriteId: "w1", UpsertKey: "activity:a1"}},
-	})
+	}, nil)
 
 	// Assert.
 	if err != nil {
