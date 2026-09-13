@@ -601,23 +601,17 @@ the bracket inherits :bg in the renderer for selected and unselected alike."
     (should (string-match-p "IMG" result))
     (should (string-match-p "ws1" result))))
 
-(ert-deftest agent-repl-test-render-tab-img-str-trailing-space-unfaced ()
-  "render-tab should place a single un-faced space between img-str and the name segment."
+(ert-deftest agent-repl-test-render-tab-img-str-one-space-before-the-name ()
+  "render-tab places EXACTLY ONE space between the badge run and the name.
+The badge run used to be wrapped in a space on each side and then met the
+name padding\='s own leading space, so a badged tab drew two."
   (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
          (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG"))
          (img-pos (string-match "IMG" result))
-         (gap-pos (+ img-pos 3))
          (name-pos (string-match "ws1" result)))
     (should img-pos)
-    (should name-pos)
-    ;; Exactly one un-faced space between IMG and the name-face padding's
-    ;; leading space (which is part of " ws1 ").
-    (should (equal (substring result gap-pos (1+ gap-pos)) " "))
-    (should-not (get-text-property gap-pos 'face result))
-    ;; The next character is the name-face's leading padding space.
-    (should (equal (substring result (1+ gap-pos) (+ gap-pos 2)) " "))
-    (should (eq (get-text-property (1+ gap-pos) 'face result)
-                '+workspace-tab-face))))
+    (should (= name-pos (+ img-pos 4)))
+    (should (equal (substring result (+ img-pos 3) name-pos) " "))))
 
 (ert-deftest agent-repl-test-render-tab-empty-name ()
   "render-tab should handle an empty name string."
@@ -652,16 +646,122 @@ right edge via `extend_face_to_end_of_line'."
     (should (equal (substring result last-idx) " "))
     (should-not (get-text-property last-idx 'face result))))
 
-(ert-deftest agent-repl-test-render-tab-penultimate-is-faced-name-padding ()
+(ert-deftest agent-repl-test-render-tab-penultimate-is-faced-name-fill ()
   "The character immediately before the unfaced terminator is the
-name-face's trailing padding space — confirms the terminator was
-appended *after* the faced padding, not merged into it."
+name-face's trailing padding fill — confirms the terminator was
+appended *after* the faced fill, not merged into it."
   (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
          (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
          (penultimate (- (length result) 2)))
     (should (equal (substring result penultimate (1+ penultimate)) " "))
     (should (eq (get-text-property penultimate 'face result)
                 '+workspace-tab-face))))
+
+;;;; ---- Tests: exactly one space between [N] and the name (owner ruling, 2026-09-13) ----
+;;
+;; One edge case per test.  The gap is measured off the rendered string
+;; itself: everything between the bracket's closing `]' and the first
+;; character of the name must be a single space.
+
+(defun agent-repl-test--tab-gap (rendered name)
+  "Return the substring of RENDERED between the bracket and NAME."
+  (let ((close (1+ (string-match "\\]" rendered)))
+        (name-pos (string-match (regexp-quote name) rendered)))
+    (substring rendered close name-pos)))
+
+(ert-deftest agent-repl-test-render-tab-plain-name-gap-is-one-space ()
+  "A plain name is separated from [N] by exactly one space."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3" '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
+
+(ert-deftest agent-repl-test-render-tab-leading-space-in-name-is-trimmed ()
+  "A name the daemon hands over with leading whitespace still draws one space."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "   ws1" spec "3" '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
+
+(ert-deftest agent-repl-test-render-tab-selected-gap-is-one-space ()
+  "A SELECTED tab (spec carrying :underline) draws the same single space."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold
+                :underline t)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3" '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
+
+(ert-deftest agent-repl-test-render-tab-unselected-gap-is-one-space ()
+  "An UNSELECTED tab draws the same single space as a selected one."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3" '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
+
+(ert-deftest agent-repl-test-render-tab-name-longer-than-the-fill-width ()
+  "A name wider than the padding format's fill still draws one space."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+        (agent-repl-tab-name-padding " %-8s "))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab
+                     "a-very-long-workspace-name" spec "3"
+                     '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "a-very-long-workspace-name")
+                     " ")))))
+
+(ert-deftest agent-repl-test-render-tab-name-shorter-than-the-fill-width ()
+  "A name NARROWER than the fill keeps the fill, and still one space before it."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+        (agent-repl-tab-name-padding " %-8s "))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3"
+                                            '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " "))
+      (should (equal (substring-no-properties rendered) " [3] ws1       ")))))
+
+(ert-deftest agent-repl-test-tab-badge-str-drops-a-blank-priority-label ()
+  "A roster row whose priority label is blank contributes no badge run.
+A blank label used to join into a run of nothing but spaces, which the
+renderer then padded on both sides — the extra gap the owner saw."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+             (lambda (_ws) '(:priority (:label "  "))))
+            ((symbol-function 'agent-repl-status-tab-glyph)
+             (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--tab-badge-str "ws1" :ready))))
+
+(ert-deftest agent-repl-test-tab-badge-str-keeps-a-real-priority-label ()
+  "A non-blank priority label is still drawn."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+             (lambda (_ws) '(:priority (:label "p1"))))
+            ((symbol-function 'agent-repl-status-tab-glyph)
+             (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should (equal (agent-repl--tab-badge-str "ws1" :ready) "p1"))))
+
+(ert-deftest agent-repl-test-render-tab-blank-badge-run-draws-one-space ()
+  "A blank badge run reaching the renderer is treated as no badge at all."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3"
+                                            '+workspace-tab-face "  ")))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
 
 ;;;; ---- Tests: bracket label is the index alone ----
 
