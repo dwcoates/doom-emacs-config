@@ -358,7 +358,89 @@ func wsActScratchRepo(t *testing.T, parent, name string) string {
 		t.Fatalf("canonicalize the scratch repository %s: %v", dir, err)
 	}
 	t.Logf("scratch repository: %s (git init, one commit on master)", canonical)
+	wsActGuardLeftovers(t, parent)
 	return canonical
+}
+
+// wsActLeftoverGuards remembers which (test, run directory) pairs already hold
+// the end-of-test leftover assertion, so realtest 4 — which builds a scratch
+// repository per bootstrap workspace — registers it once rather than three
+// times.
+//
+// A plain map with no lock because these realtests are not parallel: each runs
+// in its own `go test` invocation (bin/realtest.sh, run_one) and none of them
+// calls t.Parallel, since each performs a cold start of the one editor on the
+// machine.
+var wsActLeftoverGuards = map[string]bool{}
+
+// wsActGuardLeftovers registers the LAST thing an act realtest does: assert
+// that the registry holds no row naming a directory under the run directory.
+//
+// IT IS REGISTERED FROM THE SCRATCH REPOSITORY rather than from each test,
+// because that is the one call every act realtest makes before it creates
+// anything, and `t.Cleanup` is LIFO — so a cleanup registered here runs after
+// every per-workspace nuke, close and forget that the test registers later,
+// which is exactly the order the assertion needs. It also runs on the failure
+// path, since that is what t.Cleanup is.
+//
+// WHY IT EXISTS AT ALL, when every act already has its own cleanup: because on
+// 2026-09-13 one did not take. Realtest 8's run of the 11:10 sweep left
+// `workspace-c22fed997b234b27` registered against a directory under the run
+// directory; the run directory went away and the row did not, and the owner's
+// editor reported the stale row for hours. Per-act cleanups are best-effort by
+// design — they run after the verdict and must not fail a judged test — so
+// nothing was checking the ONE thing the owner cares about, which is the state
+// of their registry when the run is over.
+func wsActGuardLeftovers(t *testing.T, runDir string) {
+	t.Helper()
+	if runDir == "" {
+		return
+	}
+	key := t.Name() + "\x00" + runDir
+	if wsActLeftoverGuards[key] {
+		return
+	}
+	wsActLeftoverGuards[key] = true
+	t.Cleanup(func() { wsActAssertNoLeftovers(t, runDir) })
+}
+
+// wsActAssertNoLeftovers removes whatever the per-act cleanups did not, THROUGH
+// THE DAEMON, and then fails the test for anything still standing.
+//
+// The removal comes first and the assertion second on purpose. The owner's
+// registry being clean is the requirement; the test failing is how they find
+// out it was not clean by itself. Doing only the second would leave the row
+// behind after telling them about it, and doing only the first would hide a
+// product path that is not undoing what it does.
+//
+// THIS ONE FAILS THE TEST, unlike every other cleanup in this file. The rule
+// those follow — a cleanup runs after the verdict and must not change it — is
+// about residues the PRODUCT cannot remove (a repository record no verb
+// forgets, wsActCleanupRegistered). A registry row this run created and could
+// have removed is not that: it is the run breaking its own contract with the
+// owner, and a green run that left one is a green run that lied.
+func wsActAssertNoLeftovers(t *testing.T, runDir string) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Errorf("cleanup: resolve the owner's home directory to check for leftover registry rows: %v", err)
+		return
+	}
+	stateDir := filepath.Join(home, ".claude-emacs")
+	dbPath := StateDBPath(stateDir)
+	ctx := context.Background()
+
+	remaining, err := CleanLeftovers(ctx, dbPath, stateDir, runDir, func(line string) { t.Log(line) })
+	if err != nil {
+		t.Errorf("cleanup: check %s for registry rows naming a directory under %s: %v", dbPath, runDir, err)
+		return
+	}
+	if len(remaining) == 0 {
+		t.Logf("cleanup: the registry holds no row naming a directory under %s; the owner's state is as this "+
+			"run found it", runDir)
+		return
+	}
+	t.Errorf("%s", leftoverAssertionMessage(runDir, remaining))
 }
 
 // wsActRemoveScratchRepo deletes the scratch repository.
@@ -1332,30 +1414,14 @@ const (
 // real production ingress (the same one `agent-repl workspace-dispatch`
 // scripts write through), not a side channel invented for this test, which is
 // why driving it is faithful to "forget the way an owner shell script would".
+//
+// IT IS `WriteWorkspaceCommand` WITH THE VERB FIXED. The writer moved to
+// leftovers.go when the sweep's own leftover clean needed the same door for
+// `close` as well as for `forget`, and two spellings of one ingress is exactly
+// the drift a shared implementation prevents. This wrapper stays because the
+// call sites here read better naming the verb once.
 func wsActForgetCommandFile(stateDir, id string) (string, error) {
-	dir := filepath.Join(stateDir, "output")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create the command-file ingress directory %s: %w", dir, err)
-	}
-	path := filepath.Join(dir, fmt.Sprintf("%s%d%s", wsActCommandFileGlobPrefix, time.Now().UnixNano(), wsActCommandFileGlobSuffix))
-	body := fmt.Sprintf(`[{"type":"forget","workspace":%s}]`, jsonString(id))
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return "", fmt.Errorf("write the command file %s: %w", path, err)
-	}
-	return path, nil
-}
-
-// jsonString renders s as a JSON string literal, so a workspace id can never
-// be interpolated into the command file unescaped.
-func jsonString(s string) string {
-	encoded, err := json.Marshal(s)
-	if err != nil {
-		// json.Marshal of a string cannot fail; this exists only so a caller
-		// never has to check an error that can't occur, per the JSON stdlib's
-		// own contract for string values.
-		return `""`
-	}
-	return string(encoded)
+	return WriteWorkspaceCommand(stateDir, "forget", id)
 }
 
 // wsActForgetReasonRe matches the daemon's own account of a refused verb,
