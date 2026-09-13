@@ -1,10 +1,14 @@
 /**
  * The topbar: one thin strip, redrawn whole on every push.
  *
- * LEFT TIGHT, CENTER FLEXING, RIGHT TIGHT — account and connectivity at the
- * left, the title taking all the free width, then the model selector, the
- * permission-mode picker, the context chip and the warning chip at the far
- * edge. The flank groups never spread; only the title does.
+ * LEFT TIGHT, CENTER CONTENT-CENTERED, RIGHT TIGHT — the account cell (its
+ * connectivity glyph, then its label) at the left edge, then the model
+ * selector, the permission-mode picker, the context chip and the warning chip
+ * at the right edge. The flank groups never spread, and the title between them
+ * is centered on its OWN content against the whole strip rather than on what
+ * the two groups leave over: the row is a three-track grid whose outer tracks
+ * are equal, so a wide right group does not push the title left (styles.css,
+ * owner ruling 2).
  *
  * EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE, so reading `drawTopbarView`
  * enumerates the topbar's subcomponents and each one's props are its own
