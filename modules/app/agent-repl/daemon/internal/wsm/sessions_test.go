@@ -332,3 +332,56 @@ func TestPutSessionWritesNothingWhenItRefusesAnIdentitylessRow(t *testing.T) {
 		t.Fatalf("a refused identityless session was persisted anyway")
 	}
 }
+
+func TestPutSessionRoundTripsTheSelectedAccountRoot(t *testing.T) {
+	// Arrange — a workspace whose user CHOSE a root that is not the one the
+	// session last came up under.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	session := Session{
+		Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-1",
+		ConfigDir: "/root/.claude", SelectedConfigDir: "/root/.claude-chesscom",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}
+
+	// Act
+	if err := s.PutSession(context.Background(), session); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	got, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if got.SelectedConfigDir != "/root/.claude-chesscom" {
+		t.Fatalf("selected config dir = %q, want %q", got.SelectedConfigDir, "/root/.claude-chesscom")
+	}
+	if got.ConfigDir != "/root/.claude" {
+		t.Fatalf("config dir = %q, want the root the session came up under", got.ConfigDir)
+	}
+}
+
+func TestPutSessionRecordsNoSelectedRootWhenNobodyChoseOne(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	session := Session{
+		Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}
+
+	// Act
+	if err := s.PutSession(context.Background(), session); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	got, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if got.SelectedConfigDir != "" {
+		t.Fatalf("selected config dir = %q with no choice recorded, want empty", got.SelectedConfigDir)
+	}
+}
