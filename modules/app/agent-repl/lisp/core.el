@@ -2555,33 +2555,56 @@ Affects the FILE only.  The per-workspace log buffers follow
 ;; focus edge that precedes every keypress ran the guarded drain tick.
 ;;
 ;; THE INVARIANT, stated once and enforced in one place: A QUIT THE USER
-;; PRESSED DURING A DEFERRED-QUIT SECTION IS DEFERRED, NEVER DROPPED.  The
-;; guard therefore does exactly one thing with a quit and never anything
-;; else: IT LEAVES `quit-flag' ARMED.  Emacs's own input wait takes it from
-;; there, `read_char' returns `C-g' as an event and records it, and the
-;; minibuffer's own binding aborts the prompt -- the native path, which is
-;; what a quit posted to an UNGUARDED read has always done, and which is why
-;; a hand-posted `C-g' to a bare `read-string' dismissed it in the same
-;; session these four prompts refused.
+;; PRESSED DURING A DEFERRED-QUIT SECTION IS DEFERRED, NEVER DROPPED.  It is
+;; the hand-off at the END of the section that has to honour it, and the
+;; right hand-off depends on whether a prompt is standing.
 ;;
-;; What a deferral arms now is an AUDIT and nothing more: a zero-delay timer
-;; that READS the flag and records at debug whether the quit was still owed
-;; or had already been honoured.  It touches no state, so it cannot repeat
-;; the drop, and it keeps the property the delivery half was really earning
-;; -- a quit that looks ignored is answerable from the log alone.
+;; LEAVING THE FLAG ARMED IS NOT ENOUGH WHEN A MINIBUFFER IS UP, and the
+;; 2026-09-13 sweep after the delivery half came out is what proves it.  Three
+;; of the four prompts still lost the chord; the one that did NOT -- "Open
+;; workspace: ", pressed right after a close, with no pre-creation pending and
+;; therefore no guarded section on the focus edge -- arrived and was recorded.
+;; The reason is that a guarded section on the focus-in path does not return
+;; to `read_char'.  It returns into MORE LISP: the rest of the focus hook
+;; runner, the timer that follows, whatever else the edge set off.  The first
+;; QUIT check in any of that takes the armed flag and signals `quit' THERE.
+;; Inside a standing minibuffer's recursive command loop that quit is caught
+;; and printed as a plain `Quit' -- the prompt stays up, and no `C-g' EVENT is
+;; ever recorded, because the flag never survived to `read_char''s idle wait.
+;;
+;; SO A QUIT OWED TO A STANDING PROMPT IS REQUEUED AS THE KEY IT WAS.  The
+;; flag comes down and the terminal's quit character (read from
+;; `current-input-mode', never hardcoded) goes onto `unread-command-events'.
+;; The minibuffer's own binding then reads it as an ordinary key: it is
+;; recorded in `(recent-keys)', `abort-minibuffers' runs from the minibuffer
+;; itself where its `this_minibuffer_depth' check passes, and the prompt is
+;; dismissed exactly as a natively read `C-g' dismisses it.  This is a
+;; TRANSLATION of the quit, not a delivery of it: the same user intent, put
+;; back into the input stream at the one place that can act on it.
+;;
+;; WITH NO MINIBUFFER STANDING the flag stays armed, unchanged.  There is no
+;; recursive command loop to swallow it, the ordinary command loop is exactly
+;; who should take it, and `unread-command-events' would only guess at which
+;; keymap ought to see a `C-g' the user aimed at nothing in particular.
+;;
+;; A deferral also arms an AUDIT: a zero-delay timer that re-reads the flag.
+;; It records which hand-off was taken, and if it finds a quit STILL owed with
+;; a prompt standing -- a prompt that went up between the section ending and
+;; the timer firing -- it requeues it on the same terms.  It never drops one.
 
 (defmacro agent-repl--with-deferred-quit (context &rest body)
   "Run BODY with quitting inhibited, deferring any `C-g' that arrives.
 CONTEXT is a string naming the critical section, used only for the
 canonical log records written when a quit was in fact deferred.
 
-Returns BODY's value.  A quit requested while BODY ran stays pending in
-`quit-flag' when this returns -- NOTHING here clears it, and nothing this
-arms clears it either -- so the command loop takes it at its next
-checkpoint and a standing minibuffer read aborts exactly as it would have
-had the section never run.  An audit is armed so the deferral and its
-outcome are both on the record; see `agent-repl--deferred-quit-audit' and
-the commentary above.
+Returns BODY's value.  A quit requested while BODY ran is handed off as
+BODY returns, by `agent-repl--deferred-quit-hand-off': REQUEUED as the
+quit character on `unread-command-events' when a minibuffer is standing,
+so the prompt's own binding dismisses it and records the key; left armed
+in `quit-flag' for the command loop when none is.  Either way the quit is
+honoured somewhere the user can see, and an audit is armed so the
+deferral and its outcome are both on the record.  See the commentary
+above for why the armed flag alone is not enough at a prompt.
 
 Intended for process filters, process sentinels and timer callbacks,
 whose run moments the user cannot see and therefore cannot avoid quitting
@@ -2594,42 +2617,86 @@ propagates exactly as it did before."
          (when quit-flag
            (agent-repl--log
             '(:agent-repl-central "process-wide logging and utility state")
-            "deferred-quit: C-g arrived inside %s — deferred to the command loop (quit-flag left armed)"
+            "deferred-quit: C-g arrived inside %s — deferred, handing it off"
             ,context)
+           (agent-repl--deferred-quit-hand-off ,context)
            (agent-repl--deferred-quit-arm-audit ,context))
          ,result))))
+
+(defun agent-repl--deferred-quit-char ()
+  "Return the terminal's quit character, as `read-event' would yield it.
+Read from `current-input-mode' rather than hardcoded: a user who moved
+their quit character away from `C-g' must get the key they actually
+pressed put back, not the one this module assumed."
+  (or (nth 3 (current-input-mode)) ?\C-g))
+
+(defun agent-repl--deferred-quit-hand-off (context)
+  "Honour the quit deferred out of CONTEXT, returning the path taken.
+
+`requeued' -- A MINIBUFFER IS STANDING, so `quit-flag' comes down and the
+quit character goes onto `unread-command-events'.  The prompt's own
+binding reads it as the key it was: recorded in `(recent-keys)', and
+`abort-minibuffers' runs from inside the minibuffer where its
+`this_minibuffer_depth' check passes.  Leaving the flag armed instead is
+what lost three of four prompts on 2026-09-13 -- the focus-in path this
+guard runs on returns into more lisp, not into `read_char', and the first
+QUIT check there signals a `quit' the recursive command loop prints as
+`Quit' with the prompt still up.
+
+`armed' -- NO MINIBUFFER, so the flag is left exactly as it was and the
+command loop takes it.  Nothing is queued: there is no prompt whose
+keymap a requeued `C-g' belongs to.
+
+Called with `inhibit-quit' bound -- by the guard, and by
+`timer-event-handler' for the audit -- so taking the flag down here
+cannot itself be interrupted.  It never signals."
+  (if (active-minibuffer-window)
+      (let ((quit-char (agent-repl--deferred-quit-char)))
+        (setq quit-flag nil)
+        (push quit-char unread-command-events)
+        (agent-repl--log
+         '(:agent-repl-central "process-wide logging and utility state")
+         "deferred-quit: requeued the quit deferred out of %s as key %s for the standing minibuffer"
+         context (single-key-description quit-char))
+        'requeued)
+    (agent-repl--log
+     '(:agent-repl-central "process-wide logging and utility state")
+     "deferred-quit: the quit deferred out of %s is still armed for the command loop (minibuffer=none)"
+     context)
+    'armed))
 
 (defun agent-repl--deferred-quit-arm-audit (context)
   "Arm the audit of a quit deferred out of CONTEXT.
 
-A ZERO-DELAY TIMER, because the question the audit answers is what the
-COMMAND LOOP did with the flag, and a timer is the earliest Lisp context
-that runs after control leaves the guarded section: Emacs runs its timers
-from the very input wait a deferred quit is owed to.
+A ZERO-DELAY TIMER, because the audit's question is what happened to the
+quit after control left the guarded section, and a timer is the earliest
+Lisp context that runs after it: Emacs runs its timers from the very
+input wait a deferred quit is owed to.
 
-`quit-flag' is left exactly as the guard left it, here and in the audit
-this arms.  Arming an audit is not a delivery and must never become one:
-the only thing that may take a deferred quit down is the code that
-honours it."
+This function itself touches nothing -- `quit-flag' and
+`unread-command-events' are exactly as the hand-off left them when it
+returns.  The audit it arms may hand a still-owed quit off again, which
+is honouring it, never dropping it."
   (run-at-time 0 nil #'agent-repl--deferred-quit-audit context))
 
 (defun agent-repl--deferred-quit-audit (context)
-  "Record what became of the quit deferred out of CONTEXT.
+  "Settle what became of the quit deferred out of CONTEXT.
 
-THIS NEVER WRITES `quit-flag', AND THAT IS THE WHOLE POINT.  It reads the
-flag and logs, so a quit still owed stays owed and reaches the read the
-user aimed it at, and a quit already honoured is not signalled a second
-time at an innocent moment.
+A quit ALREADY HONOURED is recorded and left alone: re-signalling it here
+would abort a second, innocent thing.  A quit STILL OWED goes through
+`agent-repl--deferred-quit-hand-off' again, on the same terms as at the
+end of the section, because a prompt can go up in the moment between the
+section ending and this timer firing -- and a quit owed to a prompt that
+now stands must be requeued as a key rather than left for a checkpoint
+that will print `Quit' and leave the prompt up.
 
-IT ALSO NEVER SIGNALS.  It runs from a timer, and `timer-event-handler'
-reduces a signalled `error' to a *Messages* line -- which is how the
-previous revision's failure to abort went unseen -- so the audit reports
-through the canonical log and leaves the quit itself to the command loop."
+IT NEVER SIGNALS.  It runs from a timer, and `timer-event-handler'
+reduces a signalled `error' to a *Messages* line -- which is how an
+earlier revision's failure to abort went unseen -- so it reports through
+the canonical log and honours the quit by handing it off, never by
+raising it here."
   (if quit-flag
-      (agent-repl--log
-       '(:agent-repl-central "process-wide logging and utility state")
-       "deferred-quit: the quit deferred out of %s is still armed for the command loop (minibuffer=%s)"
-       context (if (active-minibuffer-window) "standing" "none"))
+      (agent-repl--deferred-quit-hand-off context)
     (agent-repl--log
      '(:agent-repl-central "process-wide logging and utility state")
      "deferred-quit: the quit deferred out of %s was honoured before the audit ran"
