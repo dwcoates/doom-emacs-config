@@ -158,6 +158,17 @@ var (
 		Keycode:   5,
 		Modifiers: []string{"control"},
 		Why:       "aborts the minibuffer read the chord under test opened, leaving no half-finished command",
+		// IT IS THE QUIT CHARACTER, so what it means depends on what Emacs is
+		// doing when it lands, and the harness is the thing most likely to be
+		// keeping Emacs busy. `Chord.Interrupting` buys the editor a quiet
+		// window after the post in which no probe of ours is running, which is
+		// the difference between the 2026-09-13 manual press that was recorded
+		// and dismissed its prompt and the six presses in the 12:13 sweep that
+		// were not.
+		Interrupting: true,
+		InterruptingWhy: "a `quit_char` that lands while Emacs is executing lisp is handed to " +
+			"`handle_interrupt` instead of being stored as an event, so it never reaches " +
+			"`read_key_sequence`, never dismisses the prompt, and is never recorded",
 		// IT IS RECORDED, BECAUSE IT IS ONLY EVER PRESSED AT A STANDING
 		// MINIBUFFER READ. The `handle_interrupt` path that swallows a quit
 		// character before `record_char` is the BUSY-EMACS path: with a read
@@ -1058,31 +1069,42 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 	// CHANNEL ONE: the real chord, judged by the effect it is pressed for.
 	//
 	// THE PROMPT CLOSING IS THE PRESS'S OWN CONFIRMATION, polled inside the
-	// helper's hold (DeliveryEffect). It has to be: the quit character leaves
-	// no input mark on this build — delivery.go carries the `keyboard.c`
-	// derivation — so the marks that confirm every other key say nothing about
-	// this one, and the harness that judged it by them printed a harness
-	// finding and a product finding for the same press, six times in the
-	// 2026-09-13 sweep. One observation, one verdict.
+	// helper's hold (DeliveryEffect), alongside the marks rather than instead
+	// of them: at a standing read the quit character IS recorded, and the two
+	// accounts together are what keep one press to one verdict. The harness
+	// that judged it by the marks alone printed a harness finding and a product
+	// finding for the same press, six times in the 2026-09-13 sweep.
+	//
+	// AND THE EDITOR IS LEFT ALONE FIRST (Chord.Interrupting). The probe this
+	// very effect is read through is lisp running in Emacs, and a `quit_char`
+	// that lands while Emacs is running lisp is handed to `handle_interrupt`
+	// instead of being read as a key — so the confirmation used to be the thing
+	// that swallowed the press it was confirming.
 	reported := false
 	arrived := false
 	if driver != nil {
 		receipt, pressErr := driver.PressWithEffect(ctx, wsActQuit, &DeliveryEffect{
 			What: fmt.Sprintf("the standing minibuffer %q closed", prompt),
-			Observed: func(ctx context.Context) bool {
+			Observed: func(ctx context.Context) (bool, error) {
 				read, err := wsActMinibufferPrompt(ctx, client)
-				return err == nil && read == ""
+				if err != nil {
+					return false, err
+				}
+				return read == "", nil
 			},
 		})
 		arrived = receipt.Verdict == DeliveryArrived
 		switch {
 		case pressErr != nil:
-			note := fmt.Sprintf("C-g DID NOT REACH EMACS while %q was standing: %v. Either keydriver.swift "+
-				"refused the post — it will not post to an Emacs the window server does not report as "+
-				"frontmost with a focused window, because AppKit dispatches a key event only to a key window "+
-				"and drops such a post silently — or it posted and Emacs's own `(recent-keys)` never gained "+
-				"the key, which at a standing minibuffer read is an absence because the read records what it "+
-				"reads. The read channel is used below and this delivery failure is the finding",
+			note := fmt.Sprintf("C-g DID NOT REACH EMACS while %q was standing: %v. There are three ways "+
+				"that happens and the press's own error above says which: keydriver.swift refused the post — "+
+				"it will not post to an Emacs the window server does not report as frontmost with a focused "+
+				"window, because AppKit dispatches a key event only to a key window and drops such a post "+
+				"silently; or it posted and Emacs's own `(recent-keys)` never gained the key, which at a "+
+				"standing minibuffer read is an absence because the read records what it reads; or it posted "+
+				"into an Emacs that was executing lisp, where a `quit_char` goes to `handle_interrupt` rather "+
+				"than to `read_key_sequence` and so leaves no mark and closes no prompt. The read channel is "+
+				"used below and this delivery failure is the finding",
 				prompt, pressErr)
 			manifest.Notes = append(manifest.Notes, note)
 			t.Errorf("%s", note)
