@@ -15,6 +15,15 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The sidecar's three gap-scan groups, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Five `task-stop` warns landed AFTER the join-offset split, on a transcript read from byte 0. Widen the carve-out by guesswork, or find what the vendor states? | Read the launching session off the run's spool path | The vendor writes every background agent's spool under the LAUNCHING session's directory and names it in the task-notifications it records; all five stops named spools under `37dc1374-…` while the file was `6a1b0e3a-…`, which is a background agent surviving a `/clear` | Delete `internal/convert/foreignspawn.go` and the `case foreign:` arm in `taskStopTerminal` |
+| 2026-09-13 | Is a detached run's LIVENESS knowable from the file plane, so `went_silent` could be concluded only for a run that is silent AND gone? | No, and it was looked for | The launch result carries `backgroundTaskId` and a cwd hint and NO pid; the spool is a plain file with no heartbeat and nothing written beside it; a terminator (`EXIT=`, `[exited with code N]`, `[killed]`) is the only end the vendor writes. The package's own "it has no view of process liveness" is a fact, not a shortcut | Nothing to reverse — the finding is that the fact is unavailable |
+| 2026-09-13 | Given that, at what level does a `went_silent` conclusion belong? | INFO, in the policy and in the terminal alike | The record's own sentence is the argument ("not a claim that it failed"), and the owner's polling background shells produce it while perfectly healthy. `file_vanished` under a standing directory stays WARN: that is an unlink under the reader, an anomaly about the file plane rather than an inference about a process. `swept_up` is untouched — nothing ruled on it | Restore the single warn arm at the end of `stale.Tracker.state` and drop the `reason` parameter from `convert.lostCtx` |
+| 2026-09-13 | Is a `[killed]` spool a lifecycle outcome to model, or noise? | A terminator, on the `killed` termination arm | 121 of one machine's `b*` spools end on it, and each was left for a silence window to conclude LOST; `AgentBashTermination` already draws a kill apart from an exit because only one of them has a number, so no proto question arises | Drop `wrapperKilledLine` from `internal/handler/shell.go` |
+
 ## The shim's WatchAgent stream that ended in silence, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
