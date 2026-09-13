@@ -1691,3 +1691,81 @@ func TestTheEndOfCatchupIsStated(t *testing.T) {
 		t.Fatalf("the end of catch-up was not stated: %s", h.logText())
 	}
 }
+
+// hookSuccessTranscriptLine is a transcript copy of a clean hook firing: the
+// residue kind the owner ruled is never persisted (convert/neverpersist.go).
+func hookSuccessTranscriptLine(uuid string) string {
+	return `{"type":"attachment","uuid":"` + uuid + `","isSidechain":false,` +
+		`"timestamp":"2026-08-29T12:00:00.000Z","attachment":{"type":"hook_success",` +
+		`"hookName":"PreToolUse:Read","toolUseID":"toolu_gated","hookEvent":"PreToolUse","command":"/h.sh"}}`
+}
+
+// tokensReminderTranscriptLine is the vendor's per-turn budget line, the other
+// never-persisted kind.
+func tokensReminderTranscriptLine(uuid string) string {
+	return `{"type":"attachment","uuid":"` + uuid + `","isSidechain":false,` +
+		`"timestamp":"2026-08-29T12:00:00.000Z","attachment":{"type":"total_tokens_reminder",` +
+		`"text":"<total_tokens>18000 tokens left</total_tokens>"}}`
+}
+
+// readAndDropACatchupCorpus walks one transcript of never-persisted residue to
+// completion and closes the catch-up window off that drained pass.
+func readAndDropACatchupCorpus(t *testing.T, lines ...string) *harness {
+	t.Helper()
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-1", lines...)
+	h.sc.log.BeginCatchup(catchupOperations...)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+	h.sc.drainedPass = true
+	h.sc.endCatchupOnFirstDrainedPass()
+	return h
+}
+
+// THE BOOT WALK'S DROPS ARE STATED ONCE PER FILE, with the counts by kind. The
+// per-line records are DEBUG and always will be, so without this nothing at INFO
+// would say the walk read a quarter-million hook attachments and stored none.
+func TestTheCatchupSummaryCarriesTheDroppedResidueCountsByKind(t *testing.T) {
+	// Arrange, Act.
+	h := readAndDropACatchupCorpus(t,
+		promptLine,
+		hookSuccessTranscriptLine("h1"),
+		hookSuccessTranscriptLine("h2"),
+		tokensReminderTranscriptLine("r1"),
+	)
+
+	// Assert.
+	text := h.logText()
+	if !strings.Contains(text, `"operation":"residue-drop-summary"`) {
+		t.Fatalf("no per-file residue-drop summary was stated: %s", text)
+	}
+	if !strings.Contains(text, "attachment/hook_success=2, attachment/total_tokens_reminder=1") {
+		t.Fatalf("the summary does not carry the counts by kind: %s", text)
+	}
+}
+
+// A file that dropped nothing states nothing, exactly as EndCatchup states
+// nothing for an operation that demoted nothing.
+func TestAFileThatDroppedNoResidueStatesNoSummary(t *testing.T) {
+	// Arrange, Act.
+	h := readAndDropACatchupCorpus(t, promptLine, assistantLine)
+
+	// Assert.
+	if strings.Contains(h.logText(), `"operation":"residue-drop-summary"`) {
+		t.Fatalf("a file that dropped nothing stated a summary: %s", h.logText())
+	}
+}
+
+// The summary is INFO: it is the one record at normal verbosity that reports the
+// volume the never-persisted list removed.
+func TestTheResidueDropSummaryIsStatedAtInfo(t *testing.T) {
+	// Arrange, Act.
+	h := readAndDropACatchupCorpus(t, promptLine, hookSuccessTranscriptLine("h1"))
+
+	// Assert.
+	if got := len(h.opsAt(t, "residue-drop-summary", "info")); got != 1 {
+		t.Fatalf("residue-drop-summary INFO records = %d, want exactly 1: %s", got, h.logText())
+	}
+}
