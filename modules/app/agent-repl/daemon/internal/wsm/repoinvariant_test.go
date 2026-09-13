@@ -198,3 +198,52 @@ func findRecord(log *dlog.TestLogger, level, message string) (dlog.Record, bool)
 	}
 	return dlog.Record{}, false
 }
+
+// THE CONSTRAINT SURVIVES THE MIGRATION. `workspaces.repo_id` has carried
+// `REFERENCES repositories(id)` since the layout landed -- the frozen layout-3
+// fixture declares it too -- so no step in the chain has to add it, and this
+// pins that a file carried FORWARD is held to it exactly as a fresh one is. A
+// migration that rebuilt the table and dropped the reference would fail here
+// rather than in the field.
+func TestAMigratedFileStillRefusesAWorkspaceNamingAnUnregisteredRepository(t *testing.T) {
+	// Arrange — a layout-3 file carried forward to this build's layout.
+	handle, err := Open(context.Background(), layout3Fixture(t))
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+	s := handle.(*store)
+
+	// Act.
+	_, err = s.db().ExecContext(context.Background(),
+		`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
+		 VALUES ('ws-late', 'repo-nobody-registered', '/tmp/ws-late', 'ws', 'feature', 'master', 0, 0, 0, 2)`)
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("the migrated file accepted the insert; want the foreign key to refuse it")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+		t.Fatalf("insert refusal = %v, want a foreign-key refusal", err)
+	}
+}
+
+func TestOpenReportsAViolationAlreadyInAMigratedFile(t *testing.T) {
+	// Arrange — a layout-3 file whose workspace's repository was removed by a
+	// handle that did not enforce foreign keys.
+	path := layout3Fixture(t)
+	execRaw(t, path, `DELETE FROM repositories`)
+	log := dlog.NewTestLogger()
+
+	// Act.
+	handle, err := Open(context.Background(), path, WithLogger(log))
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert.
+	if _, ok := findRecord(log, "error", "workspaces name a repository the registry does not carry"); !ok {
+		t.Fatalf("the migrating open recorded no violation; records = %+v", log.Records())
+	}
+}
