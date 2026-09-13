@@ -245,3 +245,10 @@ this itself.
   (the same prompt the name is generated from) as:
   "when you're all done, please do the following postprocessing directive:
   <repo-specific-specification>". Doom's directive is the module corpus.
+
+## Judgement call: findings D and A of the 2026-09-12 sweep are the ruled mandate, not defects (2026-09-12, lead)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-12 | Whether to narrow the sidecar's discovery root, require a claim before ingest, or drop an unclaimed spool after the hold, so that `hold-expired` stops warning about `/private/tmp/claude-501/.../tasks/b*.output` | None of the three; no behavior change | All three are explicitly forbidden by `agent-shim/claude/shim-sidecar/AGENTS.md` ("Dropping the file from discovery ... is the one outcome the mandate forbids"; "AN AGED UNOWNED SPOOL IS NEVER DROPPED"), and the evidence contradicts the premise: those paths ARE the documented task-spool layout, under an accepted spool root, with a legitimate `b*` prefix, in a project whose transcript the sidecar tails and workspace-attributes successfully. The warn fired because no launch line naming those task ids was EVER written to any transcript, which is precisely the "the mapping is genuinely missing" condition the warn is for | The owner rules that total ingestion is scoped to agent-repl sessions; the mandate in that AGENTS.md is then rewritten first and the code follows it |
+| 2026-09-12 | Whether the store's `write_batch` slow-query warnings are caused by unclaimed-spool residue | No; reported as a distinct finding | `events.db` is 1.63 GB over 606k rows; unclaimed-spool residue is 339 rows / 22 MB of it, while 383k rows / 446 MB are `residue:<uuid>` transcript residue from the age-bound-free historical corpus. Latency does not track row count (6 rows took 3822 ms; 64 rows took 1801 ms), so it is database size, not batch size | Owner rules on store retention; nothing here to revert |
