@@ -46,6 +46,8 @@ Honored environment:
   AGENT_REPL_STORE_RESET   must be exactly 1, or the script refuses
   XDG_CACHE_HOME           locates the store directory (default ~/.cache)
   AGENT_REPL_LAUNCHCTL     launchctl to drive (default: the one on PATH)
+  AGENT_REPL_LAUNCH_AGENTS_DIR  where the installed plists live
+                           (default ~/Library/LaunchAgents)
   AGENT_REPL_STORE_SOCK_MAX  seconds to wait for the socket (default 180)
 EOF
 }
@@ -75,6 +77,14 @@ STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 SOCK_MAX="${AGENT_REPL_STORE_SOCK_MAX:-180}"
 
+# WHERE THE PLISTS LIVE. The same directory `.claude/install.sh`
+# (install_agent_shim_services) copies each rewritten template into, and the
+# same `$LABEL.plist` naming, because a bootstrap needs the file the service
+# was bootstrapped from originally. Overridable for the hermetic harness, for
+# the same reason AGENT_REPL_LAUNCHCTL is.
+LAUNCH_AGENTS_DIR="${AGENT_REPL_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+service_plist() { printf '%s/%s.plist' "$LAUNCH_AGENTS_DIR" "$1"; }
+
 # Overridable so the hermetic harness can substitute its PATH stub, for the
 # same reason deploy-all.sh overrides emacsclient: reaching the LIVE launchd
 # from a test run is exactly what must never happen.
@@ -91,20 +101,30 @@ service_pid() { # LABEL -> pid, or empty when launchd reports none
         awk '/^[[:space:]]*pid = /{ gsub(/[^0-9]/, "", $3); print $3; exit }'
 }
 
-# STOP MEANS STOPPED, NOT SIGNALLED. `launchctl kill` returns as soon as the
-# signal is delivered, and unlinking the database out from under a store that
-# is still draining a transaction is the race this whole script exists to
-# avoid. So the stop polls launchd until it reports no pid.
+# STOP MEANS STOPPED, AND A KEPT-ALIVE SERVICE ONLY STOPS BY LEAVING THE
+# DOMAIN. Both plists set `KeepAlive`, so launchd relaunches the process the
+# instant it exits: a `launchctl kill` -- even SIGKILL -- is answered by a new
+# pid within a second, and a poll for "launchd reports no pid" can never
+# succeed. That is not a hypothetical; it is what this script did three times
+# on 2026-09-13, timing out at 180s per service having stopped nothing. So the
+# stop is `bootout`, which removes the service from the user domain: the
+# process is signalled AND the relaunch is taken away with it. The poll then
+# asks the question bootout can actually answer -- does launchd still KNOW this
+# label -- and `bootstrap` puts it back afterwards.
+service_known() { # LABEL -> 0 when launchd still has the service loaded
+    "$LAUNCHCTL" print "gui/$uid/$1" >/dev/null 2>&1
+}
+
 stop_service() { # LABEL
     local label="$1" waited=0 pid
-    pid="$(service_pid "$label")"
-    if [ -z "$pid" ]; then
+    if ! service_known "$label"; then
         log "$label: already stopped"
         return 0
     fi
-    log "$label: stopping (pid $pid)..."
-    "$LAUNCHCTL" kill SIGTERM "gui/$uid/$label" >/dev/null 2>&1 || true
-    while [ -n "$(service_pid "$label")" ]; do
+    pid="$(service_pid "$label")"
+    log "$label: booting out (pid ${pid:-none})..."
+    "$LAUNCHCTL" bootout "gui/$uid/$label" >/dev/null 2>&1 || true
+    while service_known "$label"; do
         if [ "$waited" -ge "$SOCK_MAX" ]; then
             die "$label did not exit within ${SOCK_MAX}s; nothing was removed and no service was restarted"
         fi
@@ -114,9 +134,14 @@ stop_service() { # LABEL
     log "$label: stopped"
 }
 
+# A BOOTED-OUT SERVICE COMES BACK BY BOOTSTRAPPING ITS PLIST, not by starting a
+# label the domain no longer holds. `RunAtLoad` is set in both plists, so
+# bootstrap runs the process itself and nothing further is needed.
 start_service() { # LABEL
-    log "$1: starting..."
-    "$LAUNCHCTL" kickstart "gui/$uid/$1" >/dev/null
+    local plist
+    plist="$(service_plist "$1")"
+    log "$1: bootstrapping $plist..."
+    "$LAUNCHCTL" bootstrap "gui/$uid" "$plist" >/dev/null
 }
 
 wait_for_store_sock() {
@@ -141,6 +166,17 @@ wait_for_store_sock() {
 # "no database here", and it already holds.
 if [ -e "$STORE_DB" ] && [ ! -f "$STORE_DB" ]; then
     die "$STORE_DB exists and is not a regular file; refusing to remove it"
+fi
+
+# THE PLISTS ARE CHECKED BEFORE ANYTHING IS STOPPED. A bootout with no plist to
+# bootstrap back from would leave the host with no store and no sidecar and no
+# way for this script to return them, so a missing file is a refusal taken
+# while everything is still running and nothing has been removed.
+if [ "$KEEP_DOWN" -eq 0 ]; then
+    for label in "$STORE_LABEL" "$SIDECAR_LABEL"; do
+        plist="$(service_plist "$label")"
+        [ -f "$plist" ] || die "$plist is missing; this reset boots the services out and needs their plists to bring them back. Nothing was stopped and nothing was removed. Re-run .claude/install.sh --with-agent-shim-services to reinstall them."
+    done
 fi
 
 # The sidecar goes down first (its cursors live in the file), then the store.
