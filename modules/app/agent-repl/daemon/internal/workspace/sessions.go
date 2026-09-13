@@ -1168,6 +1168,18 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 
 	response, err := client.StartSession(ctx, req)
 	if err != nil {
+		// A START THAT DIED IN A TEARDOWN THIS DAEMON ORDERED IS NOT A FAILED
+		// START. The shim client latches the KillSession or Kill the daemon
+		// asked for, and a StartSession still in flight to that shim then
+		// comes back `unavailable: unexpected EOF` -- not because the session
+		// would not come up, but because the daemon killed the shim it was
+		// asking. The error is still returned and the bring-up still stops;
+		// only the record says which of the two happened.
+		if errors.Is(err, shimclient.ErrStandDownOrdered) {
+			log.Info(opBringUp, "the StartSession call ended in a stand-down this daemon ordered",
+				dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("start session for %q: %w", ws, err)
+		}
 		log.Error(opBringUp, "the StartSession call failed", dlog.Context{"cause": err.Error()})
 		return nil, fmt.Errorf("start session for %q: %w", ws, err)
 	}

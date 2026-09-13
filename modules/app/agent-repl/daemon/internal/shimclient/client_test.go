@@ -1156,3 +1156,76 @@ func hasRecordSaying(log *dlog.TestLogger, level, operation, message string) boo
 	}
 	return false
 }
+
+// ---- a call that died in a teardown this daemon ordered ----
+
+// TestAUnaryCallInsideAnOrderedStandDownIsNotAFault covers every unary verb at
+// once, because `unary` is the one body they all share. The latch is the
+// shim's own record that this daemon asked it to end, so a call still in
+// flight to that shim comes back unavailable for the plainest of reasons: the
+// caller killed the peer. The call still FAILS -- the error is returned and
+// wrapped so the caller can tell the two apart -- and only the record's level
+// says which of the two happened.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34. A deploy's SIGTERM landed inside
+// the boot's own bring-up on three consecutive daemon generations; the drain
+// force-stopped the workspace's shim and the in-flight StartSession answered
+// `unavailable: unexpected EOF`, recorded as `daemon.shimclient.start_session:
+// shim call failed` at ERROR nine milliseconds after the same process recorded
+// its own `daemon.shimclient.standdown` at info.
+func TestAUnaryCallInsideAnOrderedStandDownIsNotAFault(t *testing.T) {
+	tests := []struct {
+		name      string
+		standDown bool
+		wantLevel string
+		wantWrap  bool
+	}{
+		{
+			name:      "the daemon stood the shim down",
+			standDown: true,
+			wantLevel: "info",
+			wantWrap:  true,
+		},
+		{
+			name:      "nobody asked the shim to stand down",
+			standDown: false,
+			wantLevel: "error",
+			wantWrap:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a client whose socket nothing is listening on, so the
+			// call fails at the transport exactly as a killed shim's does.
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"),
+				filepath.Join(t.TempDir(), "absent.sock"), defaultBackoff, nil)
+			if tt.standDown {
+				c.standDown.Store(true)
+			}
+			req := &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+				Fresh: &shimv1.StartSessionFresh{PermissionMode: &conversationv1.AgentPermissionMode{
+					Mode: &conversationv1.AgentPermissionMode_Plan{Plan: &conversationv1.AgentPermissionModePlan{}},
+				}},
+			}}
+
+			// Act.
+			_, err := c.StartSession(context.Background(), req)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("the call answered success against a socket nothing is listening on")
+			}
+			if got := errors.Is(err, ErrStandDownOrdered); got != tt.wantWrap {
+				t.Fatalf("errors.Is(err, ErrStandDownOrdered) = %v, want %v: %v", got, tt.wantWrap, err)
+			}
+			if !hasRecordAt(log, tt.wantLevel, "daemon.shimclient.start_session") {
+				t.Fatalf("no %q record for the failed call: %+v", tt.wantLevel, log.Records())
+			}
+			other := map[bool]string{true: "error", false: "info"}[tt.standDown]
+			if hasRecordAt(log, other, "daemon.shimclient.start_session") {
+				t.Fatalf("the failed call was ALSO recorded at %q: %+v", other, log.Records())
+			}
+		})
+	}
+}

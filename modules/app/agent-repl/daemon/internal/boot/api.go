@@ -121,6 +121,13 @@ type BringUpReport struct {
 	// the same fault an open's failed start raises, so the failure is on every
 	// surface and not only in this count.
 	BringUpFailed []ids.WorkspaceID
+	// StoodDown are the workspaces whose start ended because THIS DAEMON stood
+	// their shim down under it -- the exit's drain force-stopping every
+	// session while the bring-up was still running. It is counted apart from
+	// BringUpFailed so `failed` still means a session that would not come up:
+	// nothing about these workspaces is broken, and the next boot brings them
+	// up again.
+	StoodDown []ids.WorkspaceID
 }
 
 // Sequence runs the boot.
