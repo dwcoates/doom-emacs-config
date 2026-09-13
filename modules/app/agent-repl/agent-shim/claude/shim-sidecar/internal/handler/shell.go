@@ -23,36 +23,22 @@ import (
 // when the wrapped command exits: `EXIT=<code>` on its own line.
 var exitMarkerPrefix = []byte("EXIT=")
 
-// maxRememberedOutput bounds what one spool handler holds of its run's output.
-// A terminal has to carry the run's output, so SOMETHING must be held; this is
-// how much, and everything past it is reported as omitted rather than silently
-// dropped or unboundedly accumulated.
-const maxRememberedOutput = 1 << 20
-
 // maxExitMarkerDigits bounds the digits accepted after `EXIT=`. A shell exit code
 // is 0-255, so anything longer is not the harness's marker.
 const maxExitMarkerDigits = 3
 
 // ShellOutputHandler tracks a background shell spool.
 type ShellOutputHandler struct {
-	conv *convert.Converter
-	log  *logging.Bound
-	// seen is what this run has said SO FAR, bounded by maxRememberedOutput, and
-	// omitted counts the bytes past that bound.
-	//
-	// A TERMINAL STATES THE RUN'S OUTPUT, and the only place the whole of it
-	// exists is the spool this handler is the sole reader of. The deltas the
-	// consumer accumulates are not available to a terminal minted from a
-	// staleness conclusion, so without this a LOST or EXITed run settled with an
-	// EMPTY output claiming to be `whole` — which erases what the run actually
-	// said. The bound is what keeps the cost constant; past it the extent is
-	// stated as partial rather than misreported as whole.
-	seen    []byte
-	omitted uint64
-	// read reports that this handler has already converted a batch of this
-	// spool, and endedOnNewline whether that batch's last byte was one. Together
-	// they answer the only question the EXIT-marker parser cannot answer from
-	// one batch: whether the batch BEGINS a line.
+	// RunOutput is the run's accumulated output, its file coordinates, and the
+	// two terminals the reader can conclude. It is EMBEDDED rather than
+	// reimplemented so this handler and every other one that can be asked for a
+	// seam-minted terminal spell the identical frame from the identical bytes.
+	*RunOutput
+	log *logging.Bound
+	// endedOnNewline reports whether the last batch this handler read ended on a
+	// newline. Together with RunOutput.Read it answers the only question the
+	// EXIT-marker parser cannot answer from one batch: whether the batch BEGINS
+	// a line.
 	//
 	// THE RAW CODEC CARRIES NOTHING (a spool has no record structure to carry
 	// on), so a batch may start mid-line — which is why a marker at the very
@@ -61,39 +47,17 @@ type ShellOutputHandler struct {
 	// that. Without it a spool whose `EXIT=` line simply arrived on its own poll
 	// -- the ordinary case for a command that finishes between two polls --
 	// never settled on evidence at all and waited out a staleness window.
-	read           bool
 	endedOnNewline bool
-	// coords are the FILE COORDINATES of the last batch this handler read, kept
-	// so a terminal minted from the READER'S conclusion — a LOST sweep, a
-	// person's stop — is stated at a real position in a real file.
-	//
-	// WITHOUT THEM THE WRITE IDENTITY COLLAPSES. A seam-minted terminal built
-	// from an attribution carrying no file id and no offset digests
-	// "producer||0|terminal" for EVERY run in the process, so the second spool
-	// concluded LOST mints the write id the first one already used and the store
-	// — whose absorption is write_id equality — swallows it as a replay. One of
-	// the two runs then has no terminal at all and stays open in every reader
-	// downstream. They are set on every Handle and are the same coordinates the
-	// cursor is stated in.
-	coords fileCoords
 	// onTerminal reports that this handler READ the run's own terminal off the
 	// file. The reader owns what that means for the LOST policy; all this side
 	// states is that the run ended on evidence rather than on silence.
 	onTerminal func(path, run string)
 }
 
-// fileCoords is where a handler last read: the cursor's own identity for the
-// file, and how far into it the handler has seen.
-type fileCoords struct {
-	Path   string
-	FileID string
-	Offset int64
-}
-
 // NewShellOutputHandler builds a handler.
 func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
 	log.With(logging.Context{Operation: "shell-handler-new"}).LogVerbose("constructing shell output handler")
-	return &ShellOutputHandler{conv: convert.New(log), log: log}
+	return &ShellOutputHandler{RunOutput: NewRunOutput(log), log: log}
 }
 
 // Handle implements tail.Handler.
@@ -119,7 +83,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 		h.log.With(handleErr("shell-handle", ctx)).
 			Log("shell spool reached the handler with no spawning-call identity; its bytes have no run to append to and are stored as residue")
 		at := attribute(ctx, frames[0].Offset)
-		h.rememberCoords(ctx)
+		h.RememberCoords(ctx)
 		var raw bytes.Buffer
 		for _, frame := range frames {
 			raw.Write(frame.Raw)
@@ -132,7 +96,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	}
 
 	at := attribute(ctx, frames[0].Offset)
-	h.rememberCoords(ctx)
+	h.RememberCoords(ctx)
 
 	var output bytes.Buffer
 	for _, frame := range frames {
@@ -140,10 +104,10 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	}
 	atLineStart := h.atLineStart(frames[0].Offset)
 	h.observe(output.Bytes())
-	h.remember(ctx, output.Bytes())
+	h.Remember(ctx, output.Bytes())
 	// The delta's from_offset is the file position these bytes START at, which is
 	// exactly the count the consumer must already hold for this run.
-	entries := []*storev1.StoreEntry{h.conv.BashDelta(at, run, output.String(), frames[0].Offset)}
+	entries := []*storev1.StoreEntry{h.Conv().BashDelta(at, run, output.String(), frames[0].Offset)}
 
 	code, ok := trailingExitCode(frames[0].Raw, atLineStart)
 	if !ok {
@@ -154,7 +118,8 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	// The terminal states the RUN's output, not this batch's: a spool whose
 	// marker arrives on a later poll than its output would otherwise settle
 	// carrying only the last chunk while claiming to carry the whole.
-	entries = append(entries, h.conv.BashExited(at, run, string(h.seen), h.omitted, code))
+	seen, omitted := h.Seen()
+	entries = append(entries, h.Conv().BashExited(at, run, seen, omitted, code))
 	if h.onTerminal != nil {
 		// A RUN THAT ENDED ON ITS OWN MARKER CAN NEVER BE LOST. Telling the
 		// reader here is what stops the staleness policy restating a finished
@@ -164,16 +129,9 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	return entries
 }
 
-// rememberCoords records where this handler has read to, so a terminal the
-// READER concludes can be stated at a real file position rather than at the
-// zero value every such terminal would otherwise share.
-func (h *ShellOutputHandler) rememberCoords(ctx *Context) {
-	h.coords = fileCoords{Path: ctx.Path, FileID: ctx.FileID, Offset: ctx.BytesObserved}
-}
-
 // atLineStart answers whether a batch beginning at offset starts a line.
 func (h *ShellOutputHandler) atLineStart(offset int64) bool {
-	if !h.read {
+	if !h.Read() {
 		// A first batch at the file's start begins a line by construction; one
 		// that begins mid-file is a resumed cursor, and nothing here knows what
 		// preceded it.
@@ -183,27 +141,10 @@ func (h *ShellOutputHandler) atLineStart(offset int64) bool {
 }
 
 // observe records what the batch says about the NEXT batch's line alignment.
+// It is read BEFORE RunOutput.Remember marks the run as read, which is why the
+// two are separate calls rather than one.
 func (h *ShellOutputHandler) observe(raw []byte) {
-	h.read = true
 	h.endedOnNewline = len(raw) > 0 && raw[len(raw)-1] == '\n'
-}
-
-// remember accumulates the run's output up to the bound, counting the rest.
-func (h *ShellOutputHandler) remember(ctx *Context, raw []byte) {
-	room := maxRememberedOutput - len(h.seen)
-	if room <= 0 {
-		h.omitted += uint64(len(raw))
-		return
-	}
-	if len(raw) <= room {
-		h.seen = append(h.seen, raw...)
-		return
-	}
-	h.seen = append(h.seen, raw[:room]...)
-	h.omitted += uint64(len(raw) - room)
-	h.log.With(handleWarn("shell-output-bound", ctx)).Log(
-		"the run has said more than %d bytes; its terminal will state the first %d and report %d omitted rather than claiming to carry the whole",
-		maxRememberedOutput, maxRememberedOutput, h.omitted)
 }
 
 // trailingExitCode reads the `EXIT=<code>` terminator off the END of a raw spool

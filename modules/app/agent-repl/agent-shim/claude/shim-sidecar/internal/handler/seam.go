@@ -89,14 +89,10 @@ func (h *AgentTranscriptHandler) SetTaskStopObserver(fn func(taskID string)) {
 // IT IS THE SAME SEAM AS LostTerminal, for the same reason: the reader learns
 // the fact (from another file's records, or from its own staleness policy) and
 // only this side can spell it, because only this side holds the run's bytes.
+// The frame itself is RunOutput's, so it is the identical frame every other
+// handler asked for a cancelled terminal spells.
 func (h *ShellOutputHandler) CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry {
-	if run == "" {
-		h.log.With(logging.Context{Operation: "cancel-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
-			Log("no terminal minted for a stopped run: no spawning-call activity id was supplied, so the frame would name no unit")
-		return nil
-	}
-	at := h.terminalAttribution(taskID, ownerAgentID, run)
-	return []*storev1.StoreEntry{h.conv.BashCancelled(at, run, string(h.seen), h.omitted, settledAtMs, h.read)}
+	return h.RunOutput.Cancelled(taskID, run, ownerAgentID, settledAtMs)
 }
 
 // SetTerminalObserver adopts the reader's terminal-read sink.
@@ -109,82 +105,10 @@ func (h *ShellOutputHandler) SetTerminalObserver(fn func(path, run string)) {
 	h.onTerminal = fn
 }
 
-// LostTerminal spells the reader's LOST conclusion as the detached run's terminal.
-//
-// LOST IS ITS OWN WORD — "we stopped seeing it", not "known failed" — and the
-// wire says exactly that: the run resolves as AgentBash.success.interrupted
-// with cause = `lost`, whose DetachedLost arm names HOW we concluded it
-// (file_vanished | went_silent | swept_up). Setting `by_user` or `timed_out`
-// would be an accusation with no evidence; `lost` is the arm that is honest,
-// and it is on the wire rather than only in this process's log, so a reader can
-// draw the distinction.
-//
-// The reason is the reader's own vocabulary, and convert.DetachedLostArm
-// RAISES on one it does not know rather than leaving the oneof unset: a lost
-// run with no arm states nothing, which is worse than the conclusion itself.
+// LostTerminal spells the reader's LOST conclusion as the detached run's
+// terminal. The frame is RunOutput's, for the reason CancelTerminal's is.
 func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string, catchup bool) []*storev1.StoreEntry {
-	// THE RUN IS THE SPAWNING CALL AND NOTHING ELSE. Falling back to the vendor
-	// task id would key the terminal on a row no reader of the conversation can
-	// join to the call, which is worse than saying nothing: the run would appear
-	// settled while the call it belongs to stayed open forever.
-	run := runActivityID
-	if run == "" {
-		// Nothing to name the run by: the terminal would upsert no row. Refused
-		// loudly rather than emitted against an invented key.
-		h.log.With(logging.Context{Operation: "lost-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
-			Log("no terminal minted for a LOST run: no spawning-call activity id was supplied, so the frame would name no unit (reason=%s)", reason)
-		return nil
-	}
-	at := h.terminalAttribution(taskID, ownerAgentID, run)
-	return []*storev1.StoreEntry{h.conv.BashLost(at, run, string(h.seen), h.omitted, convert.LostReason(reason), h.read, catchup)}
-}
-
-// terminalAttribution states WHERE a reader-concluded terminal is written from.
-//
-// THE WRITE IDENTITY MUST BE UNIQUE PER RUN, and that is the whole job here.
-// The identity is the digest of "producer|file_id|offset|discriminator" (R-S1),
-// so a terminal built with neither would digest the SAME id for every run in
-// the process and the store — whose absorption IS write_id equality — would
-// swallow the second one as a replay of the first, leaving a run with no
-// terminal at all and open in every reader downstream.
-//
-// THERE ARE TWO HONEST CASES, and each gets a real identity:
-//
-//   - THE SPOOL WAS READ. Its coordinates are the ones this handler last read
-//     at, which are the same ones the cursor is stated in.
-//   - THE SPOOL WAS NEVER READ — a run swept up at boot, or one whose file was
-//     never readable. There is no file position, and inventing offset 0 would
-//     claim a byte we never saw; the identity is scoped to the RUN instead,
-//     which is unique by construction and is already what the terminal's upsert
-//     key names. The terminal itself then states `not_observed` for its output,
-//     because we do not know what the command printed.
-//
-// It NEVER refuses. A refused terminal is a run left open forever in every
-// reader, which is strictly worse than a terminal that honestly says it saw
-// nothing — and refusing was what made the swept-up conclusion unstatable.
-func (h *ShellOutputHandler) terminalAttribution(taskID, ownerAgentID, run string) convert.Attribution {
-	if h.coords.FileID == "" {
-		h.log.With(logging.Context{
-			Operation: "terminal-attribution", TaskID: taskID,
-			AgentID: ownerAgentID, ActivityID: run, Path: h.coords.Path,
-		}).LogVerbose("this handler read no batch of the run's spool, so its terminal is identified by the run and states not_observed for its output")
-		return convert.Attribution{
-			VendorSessionID: ownerAgentID,
-			MainAgentID:     ownerAgentID,
-			AgentID:         ownerAgentID,
-			TaskID:          taskID,
-			WriteScope:      convert.RunScope(run),
-		}
-	}
-	return convert.Attribution{
-		VendorSessionID: ownerAgentID,
-		MainAgentID:     ownerAgentID,
-		AgentID:         ownerAgentID,
-		TaskID:          taskID,
-		Path:            h.coords.Path,
-		FileID:          h.coords.FileID,
-		Offset:          h.coords.Offset,
-	}
+	return h.RunOutput.Lost(taskID, runActivityID, ownerAgentID, reason, catchup)
 }
 
 // LostTerminal spells the reader's LOST conclusion as the BACKGROUNDED

@@ -10,6 +10,7 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
 func ownerIndexFor(t *testing.T) (*ownerIndex, *[]string) {
@@ -264,6 +265,81 @@ func TestAStopForAnUnclaimedSpoolIsHeldAndAppliedOnClaim(t *testing.T) {
 	if cut.GetByUser() == nil {
 		t.Fatalf("the applied stop must still state by_user: %v", cut.GetCause())
 	}
+}
+
+// residueSpoolWithAStoppedRun arranges the shape realtest 3 produced: a spool
+// whose hold expired before the transcript backlog delivered the launch line,
+// so it is being read as residue, and whose spawning call and stop are only
+// then read off that transcript. It answers the harness and the run's id.
+func residueSpoolWithAStoppedRun(t *testing.T, store *fakeStore, task, run, output string) *harness {
+	t.Helper()
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, task, output)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	// The hold lapses with no owner in sight: the spool is demoted and tailed as
+	// residue, and its bytes are read under that handler.
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+	if got := h.sc.watchers[spool].target.Kind; got != tail.KindResidueSpool {
+		t.Fatalf("kind = %s, want the spool demoted to residue before the stop arrives", got)
+	}
+	h.sc.pollAll()
+	// Only now does the transcript catch up and state who owned it and that a
+	// person stopped it.
+	h.sc.TaskSpawned(task, run, "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskStopped(task)
+	return h
+}
+
+func TestAStopMintsTheCancelledTerminalForASpoolBeingReadAsResidue(t *testing.T) {
+	// Arrange. Ingesting a spool as residue says what could be made of its
+	// BYTES; it never says the run is unknown. The launch line naming the run
+	// arrives after the hold lapsed, which is the ordinary shape of a restart
+	// with a transcript backlog, and the stop that follows must still settle it.
+	store := &fakeStore{}
+
+	// Act.
+	residueSpoolWithAStoppedRun(t, store, "b1residuestop", "toolu_residue_run", "partial work\n")
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_residue_run")
+	if cut == nil {
+		t.Fatal("no cancelled terminal was written for a run stopped while its spool was residue")
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("a stop is a person's decision and must state by_user: %v", cut.GetCause())
+	}
+}
+
+func TestTheResidueSpoolsCancelledTerminalCarriesTheOutputItRead(t *testing.T) {
+	// Arrange. A terminal owes the run's output, and a residue handler IS the
+	// spool's sole reader — so it must carry what it read rather than settling
+	// the run as though nothing had been observed.
+	store := &fakeStore{}
+
+	// Act.
+	residueSpoolWithAStoppedRun(t, store, "b1residuebytes", "toolu_residue_bytes", "partial work\n")
+
+	// Assert.
+	got := interruptedFor(store.writes, "toolu_residue_bytes").GetOutput().GetText().GetStdout()
+	if got != "partial work\n" {
+		t.Fatalf("cancelled stdout = %q, want the output the residue spool held", got)
+	}
+}
+
+func TestAStopForASpoolBeingReadAsResidueStatesNoConverterGap(t *testing.T) {
+	// Arrange. The reader states a converter that could not be asked for a
+	// terminal at error level. A residue spool CAN be asked for one, so that
+	// record is now a false alarm and must not be written.
+	store := &fakeStore{}
+
+	// Act.
+	h := residueSpoolWithAStoppedRun(t, store, "b1residuequiet", "toolu_residue_quiet", "partial work\n")
+
+	// Assert.
+	h.requireNone(t, "cancel-terminal", "error")
 }
 
 func TestAStopWithNoTaskIsRefusedLoudly(t *testing.T) {
