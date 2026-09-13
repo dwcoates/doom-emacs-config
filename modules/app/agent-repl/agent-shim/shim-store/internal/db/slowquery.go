@@ -180,6 +180,83 @@ func (d *DB) traceStatement(ctx context.Context, statement, table string, fields
 	d.log.LogVerbose(fields, "statement ran statement=%s rows=%d", statement, rows)
 }
 
+// BudgetWindow is how many observations of one statement family the store keeps
+// to decide whether being over budget is a DEFECT or a spike, and
+// BudgetWarnAt is how many of that window must be over budget before the
+// family is reported at `warn`.
+//
+// WHY A WINDOW AT ALL. `duration_ms` is WALL CLOCK, and wall clock on a shared
+// host measures the host as much as the statement. Measured on the owner's box
+// on 2026-09-13: fifteen `store.db.slow-query` warnings in one hour, every one
+// of them `lock_wait_ms=0` — so not queued — and the largest of them
+// `duration_ms=2543 rows=25`. The same batch shape, run against a byte-for-byte
+// COPY of that same 1.65 GB database with the same driver and the same DSN,
+// takes 1-2ms: 400 consecutive 7-row batches with six concurrent page readers
+// and the WAL grown to 113 MB under a pinned reader had a WORST case of 15ms,
+// and begin, MAX(write_seq), the probes and the commit were each sub-
+// millisecond throughout. Nothing about the statements, the indexes, the
+// database size or the WAL explains 1595ms; a loaded host does, and the store
+// cannot measure that apart from its own work because modernc's SQLite runs
+// in-process, on the calling goroutine, so a descheduled goroutine and a slow
+// statement are the same wall clock.
+//
+// WHAT THE WINDOW DOES MEASURE is the shape of the two causes, which differ
+// completely. The defects this budget exists to catch — a lost index, a
+// reintroduced O(n) scan — are PROPERTIES OF THE STATEMENT, so they make every
+// statement of that family slow and fill the window. Host contention is a tail:
+// it takes whichever statement was unlucky. So a family that is persistently
+// over budget is reported at `warn` exactly as before, and an isolated sample
+// is reported at `info` — recorded, at normal verbosity, with the window state
+// that says why it was not called a defect. The observation is never dropped.
+const (
+	BudgetWindow = 16
+	BudgetWarnAt = 8
+)
+
+// budgetWindow is one statement family's last BudgetWindow verdicts, as a ring.
+type budgetWindow struct {
+	verdicts [BudgetWindow]bool
+	next     int
+	filled   int
+	over     int
+}
+
+// record adds one verdict and reports how many of the retained window are over
+// budget, alongside how many observations that window holds.
+func (w *budgetWindow) record(over bool) (int, int) {
+	if w.filled == BudgetWindow && w.verdicts[w.next] {
+		w.over--
+	}
+	w.verdicts[w.next] = over
+	if over {
+		w.over++
+	}
+	w.next = (w.next + 1) % BudgetWindow
+	if w.filled < BudgetWindow {
+		w.filled++
+	}
+	return w.over, w.filled
+}
+
+// observeBudget records one family's verdict and reports the window.
+//
+// It is the ONE place the per-family state is touched, and it is touched under
+// the mutex because every producer's rpc runs on its own goroutine against one
+// shared DB.
+func (d *DB) observeBudget(statement string, over bool) (int, int) {
+	d.budgetMu.Lock()
+	defer d.budgetMu.Unlock()
+	if d.budgets == nil {
+		d.budgets = map[string]*budgetWindow{}
+	}
+	w := d.budgets[statement]
+	if w == nil {
+		w = &budgetWindow{}
+		d.budgets[statement] = w
+	}
+	return w.record(over)
+}
+
 // observeQuery reports one completed statement that took longer than the
 // threshold, and says nothing at all about one that did not.
 //
@@ -201,16 +278,25 @@ func (d *DB) observeQuery(statement, table string, fields logging.Fields, starte
 		return
 	}
 	elapsed := time.Since(started)
+	over, window := d.observeBudget(statement, elapsed >= threshold)
 	if elapsed < threshold {
 		return
 	}
 	fields.Operation = SlowQueryOperation
-	fields.Level = "warn"
 	fields.Table = table
 	fields.Statement = statement
 	fields.Duration = elapsed
 	fields.Rows = rows
 	fields.Threshold = threshold
-	d.log.Log(fields, "SQLite statement exceeded the slow-query threshold statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d",
-		statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds())
+	fields.OverBudget = over
+	fields.BudgetWindow = window
+	if over >= BudgetWarnAt {
+		fields.Level = "warn"
+		d.log.Log(fields, "SQLite statement family is persistently over its budget statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d over_budget_recent=%d/%d",
+			statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds(), over, window)
+		return
+	}
+	fields.Level = "info"
+	d.log.Log(fields, "SQLite statement exceeded its budget on an isolated sample — the family's recent statements are within budget statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d over_budget_recent=%d/%d",
+		statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds(), over, window)
 }

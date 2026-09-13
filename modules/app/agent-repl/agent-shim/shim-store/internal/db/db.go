@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"agentrepl/shim-store/internal/logging"
@@ -63,6 +64,11 @@ type DB struct {
 	// now is the clock every written timestamp is taken from. Injectable so a
 	// test can assert an exact instant without sleeping for one.
 	now func() int64
+	// budgetMu guards budgets, which holds one rolling window of over-budget
+	// verdicts per statement family. Every producer's rpc runs on its own
+	// goroutine against this one DB, so the windows are shared state.
+	budgetMu sync.Mutex
+	budgets  map[string]*budgetWindow
 }
 
 // Options are the injectable knobs Open resolves from the environment.

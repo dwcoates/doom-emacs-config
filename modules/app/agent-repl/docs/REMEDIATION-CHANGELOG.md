@@ -13,6 +13,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- store: `store.db.slow-query` warns only when a statement FAMILY is persistently over budget (8 of its last 16), and an isolated over-budget sample is info carrying `over_budget_recent`/`over_budget_window` (log sweep, 15 warns in an hour for batches measured at 1-2ms on a copy of the same database)
 - store: `OpenPage`, `ReadPage` and `BashRun` open through `db.beginRead` (`ReadOnly: true`, a plain `BEGIN`), so a page repaint takes only its WAL snapshot instead of queueing for — and being refused by — the write lock (log sweep, two `store.db.open-page` errors "begin read transaction: database is locked (5) (SQLITE_BUSY)")
 - store: a statement whose context was canceled by its own caller is recorded at info as an abandoned call rather than at error as a storage failure, and the error still reaches the server unchanged (log sweep, `store.db.live-work` error "scanning live agents: context canceled")
 - store/realtest harness: `bin/store-reset.sh` boots the kept-alive services out and bootstraps them back from their installed plists instead of killing them and waiting for a pid launchd immediately replaces, and a realtest run no longer copies `events.db` aside (store growth investigation, three 180s reset timeouts and 4.6GB of `realtest-bak` clones)
