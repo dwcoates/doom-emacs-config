@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -84,6 +85,13 @@ func (s *lifecycleSink) OnLinkFault(ws ids.WorkspaceID, fault sessionwatcher.Lin
 		record.Evidence["exit_code"] = strconv.FormatInt(int64(*fault.ExitCode), 10)
 	}
 	if _, err := reporter.OpenFault(ctx, record); err != nil {
+		if errors.Is(err, wsm.ErrNotFound) {
+			// The workspace was forgotten while its shim was still dying. There
+			// is no surface left to carry the fault and nothing to remediate.
+			s.log.Debug("daemon.cmd.lifecycle", "the link fault names a workspace that is no longer registered",
+				dlog.Context{"workspace": string(ws), "kind": kind})
+			return
+		}
 		s.log.Error("daemon.cmd.lifecycle", "the link fault could not be recorded", dlog.Context{
 			"workspace": string(ws), "kind": kind, "cause": err.Error(),
 		})
@@ -144,6 +152,11 @@ func (s *lifecycleSink) recordSessionFault(ws ids.WorkspaceID, record wsm.Fault)
 		return
 	}
 	if _, err := reporter.OpenFault(ctx, record); err != nil {
+		if errors.Is(err, wsm.ErrNotFound) {
+			s.log.Debug("daemon.cmd.lifecycle", "the session fault names a workspace that is no longer registered",
+				dlog.Context{"workspace": string(ws), "kind": record.Kind})
+			return
+		}
 		s.log.Error("daemon.cmd.lifecycle", "the session fault could not be recorded", dlog.Context{
 			"workspace": string(ws), "kind": record.Kind, "cause": err.Error(),
 		})

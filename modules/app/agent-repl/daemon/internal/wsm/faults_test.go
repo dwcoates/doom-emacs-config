@@ -286,3 +286,60 @@ func TestOpenFaultsRefusesTheWholeReadOnCorruptEvidence(t *testing.T) {
 		t.Fatal("OpenFaults() = nil error, want the corrupt row to fail the read")
 	}
 }
+
+// TestOpenFaultRefusesAForgottenWorkspaceAsNotFound is the shim-death
+// cascade's root: the link watcher, the health reporter and the lifecycle sink
+// all outlive a registry row, so a shim that dies after its workspace has been
+// forgotten opens a fault about a workspace that is gone. The foreign key
+// always refused it; what it refused WITH was `FOREIGN KEY constraint failed
+// (787)` at ERROR, in three layers at once.
+func TestOpenFaultRefusesAForgottenWorkspaceAsNotFound(t *testing.T) {
+	tests := []struct {
+		name        string
+		registered  bool
+		wantErr     error
+		wantLevel   string
+		wantSuccess bool
+	}{
+		{
+			name:        "a workspace the registry still holds",
+			registered:  true,
+			wantLevel:   "debug",
+			wantSuccess: true,
+		},
+		{
+			name:       "a workspace forgotten while its shim was dying",
+			registered: false,
+			wantErr:    ErrNotFound,
+			wantLevel:  "debug",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, log := testStore(t)
+			id := WorkspaceID("0000000000000000")
+			if tt.registered {
+				id = testWorkspace(t, s).ID
+			}
+
+			// Act.
+			_, err := s.OpenFault(context.Background(), Fault{
+				Workspace: &id, Kind: "shim_died", Detail: "the shim process is gone", OpenedAt: instant,
+			})
+
+			// Assert.
+			if tt.wantSuccess {
+				if err != nil {
+					t.Fatalf("OpenFault: %v", err)
+				}
+			} else if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("OpenFault error = %v, want %v", err, tt.wantErr)
+			}
+			if loggedOperation(log, "daemon.wsm.open_fault", "error") {
+				t.Fatalf("the write was reported at error: %v", log.Records())
+			}
+		})
+	}
+}
