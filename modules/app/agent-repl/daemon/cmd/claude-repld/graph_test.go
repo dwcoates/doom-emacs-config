@@ -5,6 +5,7 @@ import (
 
 	"claude-repld/internal/boot"
 	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/workspace"
 	"os"
 	"path/filepath"
 	"strings"
@@ -267,5 +268,59 @@ func TestResolveAdoptBoundReadsADuration(t *testing.T) {
 	}
 	if got != 250*time.Millisecond {
 		t.Fatalf("resolveAdoptBound(\"250ms\") = %v, want 250ms", got)
+	}
+}
+
+// TestResolveStartBoundDefaultsToTheProductionWindow pins that an unset knob
+// leaves the production window in force.
+func TestResolveStartBoundDefaultsToTheProductionWindow(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveStartBound("")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveStartBound(\"\") = error %v", err)
+	}
+	if got != workspace.DefaultStartSessionBound {
+		t.Fatalf("resolveStartBound(\"\") = %v, want %v", got, workspace.DefaultStartSessionBound)
+	}
+}
+
+// TestResolveStartBoundRefusesAMalformedValue pins the same refusal the
+// adoption bound makes: a knob that silently did nothing would make the run it
+// was set for report a bound it never used.
+func TestResolveStartBoundRefusesAMalformedValue(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveStartBound("presently")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("resolveStartBound(\"presently\") = nil error, want a refusal")
+	}
+}
+
+// TestResolveStartBoundRefusesANonPositiveValue pins the other refusal: a zero
+// bound would expire every start before the shim was asked.
+func TestResolveStartBoundRefusesANonPositiveValue(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveStartBound("0s")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("resolveStartBound(\"0s\") = nil error, want a refusal")
+	}
+}
+
+// TestResolveStartBoundReadsADuration pins the ordinary case.
+func TestResolveStartBoundReadsADuration(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveStartBound("250ms")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveStartBound(\"250ms\") = error %v", err)
+	}
+	if got != 250*time.Millisecond {
+		t.Fatalf("resolveStartBound(\"250ms\") = %v, want 250ms", got)
 	}
 }
