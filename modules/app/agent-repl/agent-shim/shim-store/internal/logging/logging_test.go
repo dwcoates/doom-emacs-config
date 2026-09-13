@@ -563,3 +563,47 @@ func TestDurableOnlyStillNarratesASinkFailureToTheTerminal(t *testing.T) {
 		t.Fatalf("emergency stderr record = %#v, want the sink-failure narration", emergency)
 	}
 }
+
+// TestTheWindowIsEmittedOnlyWhenItWasMeasured pins that the over-budget window
+// is absent rather than zero on a record that never measured one — the
+// statement TRACE carries a statement family too, and "0 of 0" there would read
+// as a family with a clean window.
+func TestTheWindowIsEmittedOnlyWhenItWasMeasured(t *testing.T) {
+	tests := []struct {
+		name       string
+		fields     Fields
+		wantWindow bool
+	}{
+		{
+			name:       "a measured window is reported with its count",
+			fields:     Fields{Operation: "store.db.slow-query", Statement: "write_batch", OverBudget: 9, BudgetWindow: 16},
+			wantWindow: true,
+		},
+		{
+			name:       "a statement that measured no window omits both keys",
+			fields:     Fields{Operation: "store.db.statement", Statement: "write_batch"},
+			wantWindow: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			var file, stderr bytes.Buffer
+			log := New(&file, &stderr, false)
+
+			// Act
+			log.Log(test.fields, "a record")
+
+			// Assert
+			var got record
+			if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			_, gotRecent := got.Context["over_budget_recent"]
+			_, gotWindow := got.Context["over_budget_window"]
+			if gotRecent != test.wantWindow || gotWindow != test.wantWindow {
+				t.Fatalf("over-budget keys present = (%v, %v), want %v: %s", gotRecent, gotWindow, test.wantWindow, file.String())
+			}
+		})
+	}
+}

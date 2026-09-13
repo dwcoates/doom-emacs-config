@@ -45,7 +45,7 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 	}
 	started := time.Now()
 
-	tx, err := d.sql.BeginTx(ctx, nil)
+	tx, err := d.beginRead(ctx)
 	if err != nil {
 		return BashRunReplay{}, d.refuse(base, storagef(err, "begin read transaction"))
 	}

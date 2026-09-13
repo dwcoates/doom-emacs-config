@@ -68,16 +68,27 @@ func TestSlowQueryFromEnvRefusesANonPositiveValue(t *testing.T) {
 	}
 }
 
+// sustainOverBudget drives one statement family over its budget enough times
+// that the NEXT observation is reported as a persistent defect rather than an
+// isolated spike. It is what a lost index looks like: every statement of the
+// family, not one unlucky one.
+func sustainOverBudget(d *DB, statement string) {
+	for i := 0; i < BudgetWarnAt-1; i++ {
+		d.observeBudget(statement, true)
+	}
+}
+
 func TestObserveQueryReportsAStatementOverTheThreshold(t *testing.T) {
 	// Arrange
 	s, log := newSink(t)
 	d := &DB{log: log, slowQuery: time.Nanosecond}
+	sustainOverBudget(d, StatementOpenPage)
 
 	// Act
 	d.observeQuery(StatementOpenPage, "entry", logging.Fields{BookAgentID: "agent-1"}, time.Now().Add(-time.Second), 12)
 
 	// Assert
-	s.assertLogged(t, "warn", "exceeded the slow-query threshold")
+	s.assertLogged(t, "warn", "persistently over its budget")
 	s.assertContext(t, "statement", StatementOpenPage)
 	s.assertContext(t, "book_agent_id", "agent-1")
 	s.assertContext(t, "rows", float64(12))
@@ -89,6 +100,7 @@ func TestObserveQueryReportsTheLockWaitApartFromTheTotal(t *testing.T) {
 	// the two numbers together say it never got to run.
 	s, log := newSink(t)
 	d := &DB{log: log, slowQuery: time.Nanosecond}
+	sustainOverBudget(d, StatementWriteBatch)
 
 	// Act
 	d.observeQuery(StatementWriteBatch, "entry",
@@ -297,12 +309,113 @@ func TestObserveQueryStillWarnsOnAPathologicalBulkWrite(t *testing.T) {
 	// and the reported threshold is the row-scaled budget, not the fixed one.
 	s, log := newSink(t)
 	d := &DB{log: log, slowQuery: 250 * time.Millisecond, bulkBase: 250 * time.Millisecond, bulkPerRow: 5 * time.Millisecond}
+	sustainOverBudget(d, StatementWriteBatch)
 
 	// Act: budget is 3125ms; ten seconds blows past it.
 	d.observeQuery(StatementWriteBatch, "entry", logging.Fields{}, time.Now().Add(-10*time.Second), 575)
 
 	// Assert
-	s.assertLogged(t, "warn", "exceeded the slow-query threshold")
+	s.assertLogged(t, "warn", "persistently over its budget")
 	s.assertContext(t, "statement", StatementWriteBatch)
 	s.assertContext(t, "threshold_ms", float64((250*time.Millisecond + 575*5*time.Millisecond).Milliseconds()))
+}
+
+// TestObserveQueryLevelsAnOverBudgetSampleByItsFamilysWindow pins the boundary
+// between the two causes of a long wall clock. A lost index or a reintroduced
+// scan is a property of the STATEMENT and fills the family's window; a loaded
+// host takes whichever statement was unlucky.
+func TestObserveQueryLevelsAnOverBudgetSampleByItsFamilysWindow(t *testing.T) {
+	tests := []struct {
+		name      string
+		priorOver int
+		wantLevel string
+		wantText  string
+	}{
+		{
+			name:      "the first sample of a healthy family is an isolated spike",
+			priorOver: 0,
+			wantLevel: "info",
+			wantText:  "isolated sample",
+		},
+		{
+			name:      "one short of the bar is still an isolated spike",
+			priorOver: BudgetWarnAt - 2,
+			wantLevel: "info",
+			wantText:  "isolated sample",
+		},
+		{
+			name:      "the sample that reaches the bar is a persistent defect",
+			priorOver: BudgetWarnAt - 1,
+			wantLevel: "warn",
+			wantText:  "persistently over its budget",
+		},
+		{
+			name:      "a family that is over budget throughout stays a defect",
+			priorOver: BudgetWindow - 1,
+			wantLevel: "warn",
+			wantText:  "persistently over its budget",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			s, log := newSink(t)
+			d := &DB{log: log, slowQuery: time.Nanosecond}
+			for i := 0; i < test.priorOver; i++ {
+				d.observeBudget(StatementOpenPage, true)
+			}
+
+			// Act
+			d.observeQuery(StatementOpenPage, "entry", logging.Fields{}, time.Now().Add(-time.Second), 1)
+
+			// Assert
+			s.assertLogged(t, test.wantLevel, test.wantText)
+			s.assertContext(t, "over_budget_recent", float64(test.priorOver+1))
+		})
+	}
+}
+
+// TestObserveQueryKeepsAWindowPerStatementFamily pins that one family's spikes
+// never promote another's. The budget answers a question about a statement, so
+// its evidence is that statement's.
+func TestObserveQueryKeepsAWindowPerStatementFamily(t *testing.T) {
+	// Arrange: write_batch is persistently over budget; open_page is not.
+	s, log := newSink(t)
+	d := &DB{log: log, slowQuery: time.Nanosecond}
+	sustainOverBudget(d, StatementWriteBatch)
+
+	// Act
+	d.observeQuery(StatementOpenPage, "entry", logging.Fields{}, time.Now().Add(-time.Second), 1)
+
+	// Assert
+	s.assertLogged(t, "info", "isolated sample")
+	s.assertContext(t, "over_budget_recent", float64(1))
+}
+
+// TestObserveQueryForgetsAFamilyThatRecovered pins that the window SLIDES: a
+// family whose statements went back within budget is no longer a defect, so a
+// later spike reads as the spike it is.
+func TestObserveQueryForgetsAFamilyThatRecovered(t *testing.T) {
+	// Arrange: over budget throughout one whole window, then a full window of
+	// healthy statements. An under-budget statement writes no record, but its
+	// verdict is still what the window is made of.
+	s, log := newSink(t)
+	d := &DB{log: log, slowQuery: time.Hour}
+	for i := 0; i < BudgetWindow; i++ {
+		d.observeBudget(StatementOpenPage, true)
+	}
+	for i := 0; i < BudgetWindow; i++ {
+		d.observeQuery(StatementOpenPage, "entry", logging.Fields{}, time.Now(), 1)
+	}
+	if len(s.records(t)) != 0 {
+		t.Fatalf("a statement within budget was reported: %s", s.file.String())
+	}
+
+	// Act: one spike, against a family that has been healthy since.
+	d.slowQuery = time.Nanosecond
+	d.observeQuery(StatementOpenPage, "entry", logging.Fields{}, time.Now().Add(-time.Second), 1)
+
+	// Assert
+	s.assertLogged(t, "info", "isolated sample")
+	s.assertContext(t, "over_budget_recent", float64(1))
 }

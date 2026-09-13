@@ -126,6 +126,15 @@ type Fields struct {
 	LockWait  time.Duration
 	Rows      int64
 	Threshold time.Duration
+	// OverBudget and BudgetWindow are how many of this statement family's last
+	// BudgetWindow observations exceeded their budget, and they are what
+	// separates a DEFECT from a spike: a lost index or a reintroduced scan
+	// makes every statement of the family slow, while a loaded host makes one
+	// of them slow. A record carries them only when the store measured the
+	// window, so an unmeasured record omits both rather than reporting zero of
+	// zero.
+	OverBudget   int
+	BudgetWindow int
 }
 
 type record struct {
@@ -303,6 +312,10 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		context["lock_wait_ms"] = merged.LockWait.Milliseconds()
 		context["rows"] = merged.Rows
 		context["threshold_ms"] = merged.Threshold.Milliseconds()
+		if merged.BudgetWindow != 0 {
+			context["over_budget_recent"] = merged.OverBudget
+			context["over_budget_window"] = merged.BudgetWindow
+		}
 	}
 	terminal := merged.TerminalOwner != "" || merged.TerminalReason != ""
 	if merged.Delivered != 0 || terminal {
@@ -445,6 +458,10 @@ func merge(base, extra Fields) Fields {
 	}
 	if extra.Threshold != 0 {
 		base.Threshold = extra.Threshold
+	}
+	if extra.BudgetWindow != 0 {
+		base.OverBudget = extra.OverBudget
+		base.BudgetWindow = extra.BudgetWindow
 	}
 	return base
 }
