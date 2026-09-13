@@ -106,11 +106,24 @@ type Fields struct {
 	// opaque to it by design, and a slow-query record that quoted a statement
 	// with its parameters would put session content into the global log.
 	//
-	// It is also the marker for the query-timing trio below: Duration, Rows
-	// and Threshold are emitted only alongside a statement family, so a zero
-	// row count is reported as zero rather than omitted as "unset".
+	// It is also the marker for the query-timing group below: Duration,
+	// LockWait, Rows and Threshold are emitted only alongside a statement
+	// family, so a zero row count is reported as zero rather than omitted as
+	// "unset".
 	Statement string
 	Duration  time.Duration
+	// LockWait is how much of Duration was spent WAITING to begin — for the
+	// database's write lock, and for a connection out of the pool — rather
+	// than running the statement.
+	//
+	// IT IS NOT AN OPTIONAL EXTRA. Every transaction this store opens is
+	// BEGIN IMMEDIATE, reads included, so one producer's batch queues behind
+	// any other caller's transaction for as long as busy_timeout allows. A
+	// record reporting only the total said "this statement took 3.8 seconds"
+	// about a statement that ran in microseconds behind a 3.8 second queue,
+	// and an operator reading it went looking for a missing index that was
+	// never missing. Split out, the same record says which of the two it was.
+	LockWait  time.Duration
 	Rows      int64
 	Threshold time.Duration
 }
@@ -287,6 +300,7 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 	if merged.Statement != "" {
 		context["statement"] = merged.Statement
 		context["duration_ms"] = merged.Duration.Milliseconds()
+		context["lock_wait_ms"] = merged.LockWait.Milliseconds()
 		context["rows"] = merged.Rows
 		context["threshold_ms"] = merged.Threshold.Milliseconds()
 	}
@@ -422,6 +436,9 @@ func merge(base, extra Fields) Fields {
 	}
 	if extra.Duration != 0 {
 		base.Duration = extra.Duration
+	}
+	if extra.LockWait != 0 {
+		base.LockWait = extra.LockWait
 	}
 	if extra.Rows != 0 {
 		base.Rows = extra.Rows

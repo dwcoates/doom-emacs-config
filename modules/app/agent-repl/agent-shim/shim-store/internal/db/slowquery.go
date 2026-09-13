@@ -42,6 +42,15 @@ const (
 // count, so a FIXED quarter-second threshold flags every healthy bulk write on a
 // large database while telling an operator nothing they can act on.
 //
+// AND IT IS STILL NOT THE WHOLE STORY, WHICH IS WHY `lock_wait_ms` EXISTS. A
+// batch's measured duration starts before its transaction does, and every
+// transaction here is BEGIN IMMEDIATE, so a batch that queued behind another
+// caller's write lock blows any row-scaled budget without having done a row's
+// worth of work — the owner's store reported 3822ms for SIX rows. The budget
+// deliberately still covers the total, because a batch nobody can start is as
+// slow to its caller as one that runs slowly; the record's `lock_wait_ms`
+// context is what says which of the two happened.
+//
 // The budget scales with rows so a healthy large batch does not warn, while a
 // per-row cost far above the I/O budget — a reintroduced O(n) scan, a lost index
 // — still blows past it and warns. The default per-row budget sits comfortably
@@ -182,7 +191,10 @@ func (d *DB) traceStatement(ctx context.Context, statement, table string, fields
 // stalled is already over.
 //
 // rows is what the statement actually produced or touched, which is the term
-// that distinguishes a slow query from a large answer.
+// that distinguishes a slow query from a large answer, and `fields.LockWait` is
+// the term that distinguishes a slow statement from a QUEUED one. The caller
+// that can measure a wait sets it before the observation runs; a statement with
+// no wait to measure reports zero, which is a fact rather than an omission.
 func (d *DB) observeQuery(statement, table string, fields logging.Fields, started time.Time, rows int64) {
 	threshold := d.budgetFor(statement, rows)
 	if threshold <= 0 {
@@ -199,6 +211,6 @@ func (d *DB) observeQuery(statement, table string, fields logging.Fields, starte
 	fields.Duration = elapsed
 	fields.Rows = rows
 	fields.Threshold = threshold
-	d.log.Log(fields, "SQLite statement exceeded the slow-query threshold statement=%s duration_ms=%d rows=%d threshold_ms=%d",
-		statement, elapsed.Milliseconds(), rows, threshold.Milliseconds())
+	d.log.Log(fields, "SQLite statement exceeded the slow-query threshold statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d",
+		statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds())
 }

@@ -438,7 +438,7 @@ func TestLogTimestampUsesLocalZoneRatherThanUTC(t *testing.T) {
 	}
 }
 
-func TestStatementFamilyEmitsTheQueryTimingTrio(t *testing.T) {
+func TestStatementFamilyEmitsTheQueryTimingGroup(t *testing.T) {
 	tests := []struct {
 		name   string
 		fields Fields
@@ -453,6 +453,19 @@ func TestStatementFamilyEmitsTheQueryTimingTrio(t *testing.T) {
 			want: map[string]any{
 				"statement": "replay", "duration_ms": float64(900),
 				"rows": float64(4212), "threshold_ms": float64(250),
+				"lock_wait_ms": float64(0),
+			},
+		},
+		{
+			name: "a queued statement reports the wait apart from the total",
+			fields: Fields{
+				Operation: "store.db.slow-query", Level: "warn",
+				Statement: "write_batch", Duration: 3822 * time.Millisecond,
+				LockWait: 3800 * time.Millisecond, Rows: 6, Threshold: 280 * time.Millisecond,
+			},
+			want: map[string]any{
+				"statement": "write_batch", "duration_ms": float64(3822),
+				"lock_wait_ms": float64(3800),
 			},
 		},
 		{
@@ -487,7 +500,7 @@ func TestStatementFamilyEmitsTheQueryTimingTrio(t *testing.T) {
 	}
 }
 
-func TestNoStatementFamilyOmitsTheQueryTimingTrio(t *testing.T) {
+func TestNoStatementFamilyOmitsTheQueryTimingGroup(t *testing.T) {
 	// Arrange. Every ordinary store record would otherwise carry three zeroed
 	// query-timing fields it has no query for.
 	var file, stderr bytes.Buffer
@@ -501,7 +514,7 @@ func TestNoStatementFamilyOmitsTheQueryTimingTrio(t *testing.T) {
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
 		t.Fatalf("record is not JSON: %v\n%s", err, file.String())
 	}
-	for _, key := range []string{"statement", "duration_ms", "rows", "threshold_ms"} {
+	for _, key := range []string{"statement", "duration_ms", "lock_wait_ms", "rows", "threshold_ms"} {
 		if _, present := got.Context[key]; present {
 			t.Fatalf("context carries %q on a non-query record: %+v", key, got.Context)
 		}
