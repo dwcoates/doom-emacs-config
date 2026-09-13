@@ -29,7 +29,7 @@ import (
 //     real key events, then `workspaces.closed` at 1, the name gone from the
 //     drawn order, and the roster row still present and marked closed, which is
 //     what the reopen picker offers back.
-//   - REOPEN RESTORES THE SAME WORKSPACE. `SPC TAB o`'s chord is proven, and
+//   - REOPEN RESTORES THE SAME WORKSPACE. `SPC TAB O`'s chord is proven, and
 //     the identity asserted is the workspace id byte for byte: `OpenWorkspace`
 //     takes the ref off the closed roster row and the daemon mints nothing on
 //     that path, so a different id would mean a second workspace standing where
@@ -281,9 +281,14 @@ func TestRealtestPriorityCloseReopenKill(t *testing.T) {
 		func(tabs []string) bool { return wsActHasTab(tabs, alphaName) })
 	t.Logf("the registered workspace is %s (%q) at %s", alpha.ID, alphaName, alpha.Dir)
 
-	section := rt8SectionLabel(ctx, t, client, scratch)
-	const betaRequestedName = "realtest-8-second"
-	if err := wsActCreateWorkspace(ctx, client, section, betaRequestedName); err != nil {
+	// The second workspace is made with the DYNAMIC create, which takes its
+	// repository from the workspace the editor is standing on — the one
+	// register just minted and selected — and lets the daemon name it. That
+	// standing place is asserted rather than assumed: a create against the
+	// wrong current workspace would write into a repository this run is not
+	// allowed to touch.
+	wsActRequireDynamicRepository(ctx, t, client, scratch)
+	if err := wsActCreateWorkspace(ctx, client); err != nil {
 		t.Fatalf("create the second workspace through `SPC TAB n`'s command: %v", err)
 	}
 	afterCreate := wsActWaitForDB(ctx, t, "the registry to hold the created workspace", dbPath,
@@ -592,7 +597,7 @@ func rt8AssertReopenRestoresTheSameWorkspace(ctx context.Context, t *testing.T, 
 		[]Chord{wsActLeader, wsActTab, wsActOpenKey}, "Open workspace:", manifest)
 
 	if err := wsActOpenWorkspace(ctx, client, ws.Name); err != nil {
-		t.Fatalf("re-open the closed workspace %q through `SPC TAB o`'s command: %v", ws.Name, err)
+		t.Fatalf("re-open the closed workspace %q through `SPC TAB O`'s command: %v", ws.Name, err)
 	}
 
 	afterReopen := wsActWaitForDB(ctx, t, "the registry to hold the workspace open again", dbPath,
@@ -889,30 +894,6 @@ func rt8TabName(ctx context.Context, t *testing.T, client *Client, ws Workspace)
 		return row.Name
 	}
 	return ws.Name
-}
-
-// rt8SectionLabel is the label the create command's repository picker offers
-// for one directory.
-//
-// Read rather than guessed: the label is composed by the daemon's resolver, and
-// a test that spelled its own would be answering a `require-match`
-// `completing-read` with a candidate that does not exist.
-func rt8SectionLabel(ctx context.Context, t *testing.T, client *Client, dir string) string {
-	t.Helper()
-	sections, err := wsActRepoSections(ctx, client)
-	if err != nil {
-		t.Fatalf("read the repository sections the create command picks from: %v", err)
-	}
-	section, ok := wsActSectionForDir(sections, dir)
-	if !ok {
-		labels := make([]string, 0, len(sections))
-		for _, s := range sections {
-			labels = append(labels, fmt.Sprintf("%q (%s)", s.Label, s.Dir))
-		}
-		t.Fatalf("the roster offers no repository section for the scratch repository %s, so the create "+
-			"command's picker has no candidate to answer with. It offers: %s", dir, strings.Join(labels, ", "))
-	}
-	return section.Label
 }
 
 // rt8Sources enumerates the log sources for a workspace set.

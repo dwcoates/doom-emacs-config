@@ -21,10 +21,12 @@ import (
 // What it asserts, in order:
 //
 //   - `SPC TAB n` REACHES ITS COMMAND. The chord is pressed as real key events
-//     and the create command's own first prompt, "Repository: ", is read back
-//     out of the minibuffer. Nothing else in the editor asks that question
-//     first, so the prompt standing there is evidence Emacs's keymap resolved
-//     the chord. It is then aborted with a real `C-g`.
+//     and the create command's own first prompt, "Initial prompt: ", is read
+//     back out of the minibuffer, then aborted with a real `C-g`. Since the
+//     2026-09-12 creation ruling that prompt is shared with the other dynamic
+//     modes (`SPC TAB c`, `SPC TAB f`), so it is not evidence on its own that
+//     THIS chord ran; Emacs's own `(recent-keys)` is asserted to carry the
+//     sequence as well, and the two together identify the command.
 //   - THE CREATE PRODUCES A ROSTER ROW AND A DRAWN TAB. The state database
 //     gains exactly one workspace, Emacs's roster holds a row for it, and the
 //     tab bar's own order (`agent-repl-roster--tab-order`) holds its tab, with
@@ -60,20 +62,23 @@ import (
 // is reported in the run's own output rather than left to be found
 // (wsActCleanupRegistered says exactly what happened).
 //
-// THE REGISTER IS BOOTSTRAP HERE, NOT THE SUBJECT. `SPC TAB n` picks its
-// repository from the roster's sections, and a repository is in the roster
-// only once it has been registered, so the scratch repository is registered
-// first. Registering is realtest 6's subject and is asserted there; here it is
-// only the ground the create stands on.
+// THE REGISTER IS BOOTSTRAP HERE, NOT THE SUBJECT. Since the 2026-09-12
+// creation ruling `SPC TAB n` takes its repository from the roster section the
+// CURRENT workspace's row sits in — it asks for nothing but the prompt — so the
+// scratch repository is registered first and the editor lands on the workspace
+// that register minted (`agent-repl-verbs-select-minted`). That standing place
+// IS the repository the create will use, and it is asserted before the act
+// rather than assumed (wsActRequireDynamicRepository): a create against the
+// wrong current workspace would write into a repository this run is not
+// allowed to touch. Registering is realtest 6's subject and is asserted there;
+// here it is only the ground the create stands on.
 //
 // A DELIBERATE, STATED DEVIATION FROM "REAL KEYS" for the act itself
 // (authorized by the lead, 2026-09-12; the substrate's "The acts" commentary
-// carries the full reasoning). The chord is real. The four minibuffer answers
-// the create command then asks for are supplied through the read-only probe
-// transport, entering the same user-facing command with `call-interactively`,
-// because the first of them is a `completing-read` with `require-match` and
-// typing into a completion UI with synthetic keystrokes would test vertico's
-// candidate ordering rather than the product.
+// carries the full reasoning). The chord is real. The ONE minibuffer answer the
+// create command asks for — its initial prompt, answered blank — is supplied
+// through the read-only probe transport, entering the same user-facing command
+// with `call-interactively`.
 //
 // THE REMEDIATION BAR IS THE LOG HARVEST, the same one realtest 1 carries:
 // every WARN and ERROR written inside the run window across every log, with no
@@ -238,30 +243,17 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 	}
 	t.Cleanup(func() { wsActCleanupRegistered(ctx, t, client, dbPath, registered, registeredName) })
 
-	sections, err := wsActRepoSections(ctx, client)
-	if err != nil {
-		t.Fatalf("read the repository sections the create command picks from: %v", err)
-	}
-	section, ok := wsActSectionForDir(sections, scratch)
-	if !ok {
-		labels := make([]string, 0, len(sections))
-		for _, candidate := range sections {
-			labels = append(labels, fmt.Sprintf("%q at %s", candidate.Label, candidate.Dir))
-		}
-		t.Fatalf("the scratch repository %s is registered but the roster offers no repository section for it, "+
-			"so the create command's picker could not name it. The sections it does offer are: %s",
-			scratch, strings.Join(labels, "; "))
-	}
-	t.Logf("the create command's picker offers the scratch repository as %q", section.Label)
+	// The dynamic create derives its repository from where the editor is
+	// STANDING, so that is what has to be true before the act — not that the
+	// scratch repository appears in some picker.
+	wsActRequireDynamicRepository(ctx, t, client, scratch)
 
 	// ---- The act: `SPC TAB n` -----------------------------------------
 
-	wsActProveChord(ctx, t, client, driver,
-		[]Chord{wsActLeader, wsActTab, wsActNewWorkspaceKey}, "Repository:", &manifest)
+	rt5ProveCreateChord(ctx, t, client, driver, &manifest)
 
-	createdName := fmt.Sprintf("realtest5-%s", time.Now().Format("150405"))
 	actStarted := time.Now()
-	if err := wsActCreateWorkspace(ctx, client, section.Label, createdName); err != nil {
+	if err := wsActCreateWorkspace(ctx, client); err != nil {
 		t.Fatalf("create a workspace in the scratch repository through `SPC TAB n`'s command: %v", err)
 	}
 
@@ -269,8 +261,8 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 		func(all []Workspace) bool { return len(wsActNewSince(afterRegister, all)) > 0 })
 	fresh := wsActNewSince(afterRegister, afterCreate)
 	if len(fresh) == 0 {
-		t.Fatalf("`SPC TAB n` was entered with repository %q and name %q, and the state database gained no "+
-			"workspace at all: the create produced no roster row", section.Label, createdName)
+		t.Fatalf("`SPC TAB n` was entered against the scratch repository %s and the state database gained no "+
+			"workspace at all: the create produced no roster row", scratch)
 	}
 	if len(fresh) > 1 {
 		names := make([]string, 0, len(fresh))
@@ -282,10 +274,12 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 	created := fresh[0]
 	t.Logf("the create produced workspace %s (%s) at %s, %s after the command was entered",
 		created.ID, created.Name, created.Dir, time.Since(actStarted).Round(time.Millisecond))
-	if created.Name != createdName {
-		t.Logf("note: the name asked for was %q and the daemon minted %q; the name is the daemon's to normalize "+
-			"and every assertion below is keyed on the id", createdName, created.Name)
-	}
+	// THE NAME IS THE DAEMON'S SINCE THE 2026-09-12 RULING, and with a blank
+	// prompt there is nothing to name the workspace after, so the daemon names
+	// it after the workspace's own minted id and issues no headless naming call
+	// at all (daemon/internal/workspace/create.go, `branchFor`). Nothing here
+	// predicts a name: every assertion below is keyed on the id, and the tab
+	// name is read back off the roster row for that id.
 
 	// The nuke is the test's own last act, but it is registered as a cleanup
 	// the moment the workspace exists: a failure between here and there must
@@ -496,4 +490,47 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 				finding.Level, finding.Note, finding.Raw)
 		}
 	}
+}
+
+// ---- The act's chord ---------------------------------------------------
+
+// rt5ProveCreateChord presses `SPC TAB n` as real key events and proves it
+// reached `agent-repl-create-workspace`.
+//
+// TWO FACTS, BECAUSE THE PROMPT IS NO LONGER UNIQUE. Before the 2026-09-12
+// creation ruling the create was the only command that opened with
+// "Repository: " and the prompt alone identified it. The dynamic modes now
+// share "Initial prompt: " — `SPC TAB c` and `SPC TAB f` ask the same first
+// question — so the prompt says only that one of them ran, and Emacs's own
+// `(recent-keys)` is asserted to carry the sequence as well. It is the only
+// thing that says which key completed the chord.
+//
+// Like the substrate's proof, a failure here does not stop the run: the chord
+// and the verb are separate claims, and a run that stopped would say nothing
+// about whether creating a workspace works at all.
+func rt5ProveCreateChord(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver, manifest *Manifest) {
+	t.Helper()
+	sequence := []Chord{wsActLeader, wsActTab, wsActNewWorkspaceKey}
+	if !wsActProveChord(ctx, t, client, driver, sequence, "Initial prompt:", manifest) {
+		return
+	}
+	keys, err := RecentKeys(ctx, client)
+	if err != nil {
+		t.Errorf("read Emacs's own (recent-keys) to tell `SPC TAB n` from the other dynamic modes: %v", err)
+		return
+	}
+	spelled := wsActSpell(sequence)
+	if !strings.Contains(keys, spelled) {
+		note := fmt.Sprintf("`%s` put a dynamic mode's prompt up, but Emacs's own (recent-keys) does not "+
+			"contain %q, so the prompt cannot be credited to this chord: `SPC TAB c` and `SPC TAB f` ask the "+
+			"same first question. recent-keys ends with: %s", spelled, spelled, tail(keys, 120))
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
+		return
+	}
+	note := fmt.Sprintf("`%s` is confirmed as the CREATE command and not one of the other dynamic modes: "+
+		"Emacs's own (recent-keys) contains %q and the prompt it raised was the dynamic create's",
+		spelled, spelled)
+	manifest.Notes = append(manifest.Notes, note)
+	t.Logf("%s", note)
 }
