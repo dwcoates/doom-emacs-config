@@ -594,12 +594,28 @@ var _ = []rollout.DispositionKind{
 func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUpReport {
 	log := s.deps.Log.Global()
 	report := BringUpReport{}
+	// A START THAT HAS BEGUN IS FINISHED, NEVER ABANDONED MID-WRITE, and the
+	// NEXT one is simply not begun once the daemon is leaving. The step now
+	// runs beside the accept loop, so an exit CAN land in the middle of it,
+	// and a start cancelled halfway is not a session that failed: it is a
+	// half-written session record, a shim stopped between spawn and attach,
+	// and a fault the daemon then could not record because the same
+	// cancellation refused its transaction. The exit joins this goroutine
+	// (cmd/claude-repld/run.go, loopJoinBound) rather than cutting it.
+	startCtx := context.WithoutCancel(ctx)
 	for _, ws := range pending {
+		if err := ctx.Err(); err != nil {
+			log.Info("daemon.boot.bring_up", "the daemon is leaving; the remaining workspaces are not started", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws.ID),
+				"error":             err.Error(),
+			})
+			break
+		}
 		fields := dlog.Context{
 			dlog.KeyWorkspaceID:  string(ws.ID),
 			dlog.KeyWorkspaceDir: ws.Dir,
 		}
-		session, exists, err := s.deps.DB.Session(ctx, ws.ID)
+		session, exists, err := s.deps.DB.Session(startCtx, ws.ID)
 		if err != nil {
 			fields["error"] = err.Error()
 			log.Error("daemon.boot.bring_up", "a workspace's session record could not be read; it is not brought up", fields)
@@ -611,7 +627,7 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 			report.HibernatedLeft = append(report.HibernatedLeft, ws.ID)
 			continue
 		}
-		if err := s.deps.StartSession(ctx, ws.ID); err != nil {
+		if err := s.deps.StartSession(startCtx, ws.ID); err != nil {
 			fields["error"] = err.Error()
 			log.Error("daemon.boot.bring_up", "an open workspace's session did not come up; the boot goes on", fields)
 			report.BringUpFailed = append(report.BringUpFailed, ws.ID)
