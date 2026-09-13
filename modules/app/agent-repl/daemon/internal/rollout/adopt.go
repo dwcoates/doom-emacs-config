@@ -88,6 +88,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	if !found {
 		return false, nil
 	}
+	c.recordManifestSeen()
 	// A JOINING SUCCESSOR ADOPTED NOTHING AT BOOT — the manifest is present
 	// here by construction, so the no-manifest accounting cannot apply.
 	if _, err := c.Reconcile(ctx, nil); err != nil {
@@ -291,6 +292,7 @@ func (c *controller) armFromManifest() error {
 	if err != nil || !found {
 		return err
 	}
+	c.recordManifestSeen()
 	added := c.armSessions(m.Daemon, m.Sessions)
 	if added > 0 {
 		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
@@ -330,13 +332,13 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	c.mu.Lock()
 	e, armed := c.rendezvous[ws]
 	if !armed && c.joiningMode {
-		// THE MANIFEST MAY HAVE ARRIVED SINCE BOOT. The incumbent writes it
-		// only after the successor has reported its address, so a successor
-		// that armed nothing at boot is the ordinary case, not a refusal: it
-		// re-reads once, here, when a participant actually calls.
+		// THE MANIFEST MAY NOT HAVE ARRIVED YET. The incumbent writes it only
+		// after the successor has reported its address, so a successor that
+		// armed nothing at boot is the ordinary case, not a refusal: it
+		// re-reads here, when a participant actually calls, and WAITS for the
+		// manifest that has not landed.
 		c.mu.Unlock()
-		if err := c.armFromManifest(); err != nil {
-			c.log.Error(operation, "could not re-read the intent manifest", withCause(fields, err))
+		if err := c.awaitArm(ctx, ws, operation, fields); err != nil {
 			return err
 		}
 		c.mu.Lock()
@@ -541,6 +543,99 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.advertise(ctx, fields)
 	}
 	return nil
+}
+
+// recordManifestSeen latches that the incumbent's intent manifest has been
+// read, so the transfer set is known from here on.
+func (c *controller) recordManifestSeen() {
+	c.mu.Lock()
+	first := !c.manifestSeen
+	c.manifestSeen = true
+	c.mu.Unlock()
+	if first {
+		c.log.Debug(opJoin, "rollout state changed", dlog.Context{
+			"state": "manifest_seen", "before": false, "after": true,
+			"path": c.deps.IntentManifest,
+		})
+	}
+}
+
+// awaitArm holds a participant's adopt call until the incumbent's intent
+// manifest arrives and arms this workspace's rendezvous.
+//
+// THE ANNOUNCEMENT COMES BEFORE THE MANIFEST. `Handover` spawns the successor,
+// announces its address, snapshots the participants and only THEN writes the
+// manifest — so a participant that dials the announced address the moment it
+// hears it can reach a successor that has been told nothing at all. Answering
+// that call `no_transfer_announced` loses the transfer outright: Emacs does not
+// re-adopt after a refusal, so the incumbent then waits out its entire
+// AdoptionWindow for a workspace nobody is going to adopt, which delays its
+// exit and with it the primary stream close Emacs promotes the successor on.
+// That is `TestASuccessorDoesNotAdoptABusyWorkspaceBeforeTheIncumbentTransfersIt`
+// failing under host contention with `no_transfer_announced` and passing alone.
+//
+// SO THE CALL WAITS, exactly the way adoption waits for the incumbent's
+// durable serving release one step later (`awaitServingRelease`).
+//
+// IT IS BOUNDED BY THE HANDOVER'S OWN WINDOW. AdoptionWindow is how long the
+// incumbent gives an adoption; a manifest that has not arrived by then belongs
+// to no handover this call can join, and the refusal stands.
+//
+// IT ENDS THE MOMENT THE MANIFEST IS IN HAND, armed or not. A manifest that
+// arrived and does not name this workspace is a genuine no_transfer_announced
+// — which is the ORDINARY answer on every non-handover web page boot, and must
+// stay immediate.
+//
+// Returning nil does not mean armed: the caller re-reads the ledger and
+// answers the refusal itself, so the two arms keep one record between them.
+func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation string, fields dlog.Context) error {
+	// THE BOUND IS ARMED ONLY IF THIS CALL ACTUALLY WAITS. The overwhelmingly
+	// common path — a manifest already in hand, or none because no handover is
+	// in flight — answers on the first read and must cost nothing.
+	var bound <-chan time.Time
+	waiting := false
+	for {
+		if err := c.armFromManifest(); err != nil {
+			c.log.Error(operation, "could not re-read the intent manifest", withCause(fields, err))
+			return err
+		}
+		c.mu.Lock()
+		_, armed := c.rendezvous[ws]
+		seen := c.manifestSeen
+		c.mu.Unlock()
+		if armed {
+			if waiting {
+				c.log.Info(operation, "the intent manifest arrived and armed this workspace; the held adopt call resumes", fields)
+			}
+			return nil
+		}
+		if seen {
+			// The transfer set is known and this workspace is not in it.
+			return nil
+		}
+		if !waiting {
+			c.log.Info(operation, "no intent manifest yet; holding this adopt call until the incumbent writes one",
+				merge(fields, dlog.Context{
+					"poll_interval": manifestPoll.String(),
+					"bound":         c.deps.AdoptionWindow.String(),
+				}))
+			waiting = true
+			bound = c.deps.Clock.After(c.deps.AdoptionWindow)
+		}
+		select {
+		case <-ctx.Done():
+			c.log.Debug(operation, "the caller gave up before the intent manifest arrived", fields)
+			return ErrNotYetAdopted
+		case <-bound:
+			// INFO, NOT WARN. This is the same refusal the caller is about to
+			// record, reached the slow way; the ruling on `no_transfer_announced`
+			// is that it is never a warning and never a fault.
+			c.log.Info(operation, "no intent manifest arrived within the adoption window; nothing was announced for this workspace",
+				merge(fields, dlog.Context{"bound": c.deps.AdoptionWindow.String()}))
+			return nil
+		case <-c.deps.Clock.After(manifestPoll):
+		}
+	}
 }
 
 // outgoingDaemon returns the incumbent recorded on a workspace's armed
