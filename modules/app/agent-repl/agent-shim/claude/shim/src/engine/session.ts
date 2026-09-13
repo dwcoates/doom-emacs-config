@@ -117,6 +117,15 @@ export interface QuerySpec {
   /** The rewind: resume only THROUGH this record. */
   readonly resumeSessionAt?: string;
   readonly prompt: AsyncIterable<SdkUserMessage>;
+  /**
+   * Every chunk the vendor child writes to stderr.
+   *
+   * THE VENDOR'S OWN WORDS FOR ITS OWN FAILURE. A CLI that refuses a resume
+   * says so on stderr and then simply never announces the session, so without
+   * this the shim can only report the silence it observed, never the reason the
+   * child printed. Optional: the mocked vendor has no child and no stderr.
+   */
+  readonly onStderr?: (chunk: string) => void;
 }
 
 /** Build one query. `--fake` swaps the implementation and nothing else. */
@@ -235,12 +244,19 @@ const WATCHER_CONCLUSION_BUDGET_MS = 1_000;
  * How long StartSession waits for the vendor's own `system:init`.
  *
  * STARTSESSION ALWAYS ANSWERS. The verb is unsettled until `init` arrives, and
- * exactly three things settle it: `init` itself, a hook that BLOCKS before it
- * (which has blocked the session's own opening), or this bound. Without the
- * bound a vendor that goes quiet after its `SessionStart` hooks held the verb
- * open forever — the grounded case, where a blocking `SessionStart:resume` hook
- * left every boot bring-up hanging until the DAEMON's 60s bound fired and named
- * the shim instead of the hook.
+ * five things settle it: `init` itself; a hook that BLOCKS before it (which has
+ * blocked the session's own opening); a `result` carrying `is_error` (the
+ * vendor refusing the opening in its own words); the query ENDING before it (a
+ * child that exited, a stream that ended, an iterator that threw); or this
+ * bound.
+ *
+ * SO THIS BOUND IS FOR SILENCE, AND ONLY SILENCE. Every conclusive answer is
+ * relayed the instant it lands, because waiting a bound out on an answer
+ * already in hand is what let the DAEMON's 60s bound fire first and name the
+ * shim instead of the vendor. Two grounded cases: a blocking
+ * `SessionStart:resume` hook, and (2026-09-13, workspace 2b81f45a724642ef) a
+ * resume whose vendor emitted its `SessionStart:resume` hook, succeeded it in
+ * 12ms, and then said nothing for the whole 45s — twice.
  *
  * Sized under that daemon bound on purpose: the shim knows WHY the start failed
  * and the daemon does not, so the shim must be the one that answers first. The
@@ -248,6 +264,30 @@ const WATCHER_CONCLUSION_BUDGET_MS = 1_000;
  * ample room for.
  */
 const INIT_TIMEOUT_MS = 45_000;
+
+/**
+ * How many pre-`init` vendor messages a failed start names in its own record.
+ *
+ * A START THAT FAILS SAYS WHAT THE VENDOR DID SAY. The grounded case
+ * (2026-09-13, workspace 2b81f45a724642ef) waited the whole bound out with two
+ * messages already in hand — a `SessionStart:resume` hook that started and then
+ * SUCCEEDED — and nothing in any log said so, so the only way to learn what the
+ * vendor had emitted was to decode the store's frames by hand. The kinds are
+ * bounded because the list is a diagnosis, not a transcript: everything the
+ * vendor emitted is on the record plane already.
+ */
+const PRE_INIT_KINDS_KEPT = 24;
+
+/**
+ * How much of the vendor child's stderr a failed start may quote.
+ *
+ * The CLI names its own refusals there — "No conversation found with session ID
+ * ..." is the shape this exists for — and that text is the ONE thing that turns
+ * "the vendor did not send its init message" into an answer the reader can act
+ * on. Bounded: a chatty child must not push a refusal detail past what any
+ * consumer will render.
+ */
+const VENDOR_STDERR_KEPT = 2_000;
 
 /**
  * The component name the log sink's own fault and degraded window carry.
@@ -399,6 +439,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let initReject: ((reason: Error) => void) | undefined;
   /** The pending start's own bound, cleared by whatever settles the start first. */
   let initTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * What the vendor DID emit before the pending start settled, kind by kind.
+   *
+   * Reset by every attempt, so a retry's record is its own and not the previous
+   * attempt's. Bounded by {@link PRE_INIT_KINDS_KEPT}.
+   */
+  let preInitKinds: string[] = [];
+  /** Whether {@link preInitKinds} dropped anything to its bound. */
+  let preInitKindsDropped = 0;
+  /** The tail of the vendor child's stderr, kept for the start's own detail. */
+  let vendorStderrTail = "";
   let loop: Promise<void> | undefined;
   /** Rows the store never acked by the time the teardown finished. */
   let lostRowsAtStandDown = 0;
@@ -1176,8 +1227,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   // -- the message loop -----------------------------------------------------
 
   async function onSdkMessage(message: SdkMessage): Promise<void> {
+    notePreInitMessage(message);
     noteIdentityFacts(message);
     settleStartOnBlockingHook(message);
+    settleStartOnErrorResult(message);
     noteDetachedWork(message);
     converterDefectThisMessage = false;
     const output = deps.fold.onSdkMessage(message, foldContext());
@@ -1206,6 +1259,91 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       converterDefectThisTurn = false;
       await closeTurn();
     }
+  }
+
+  /**
+   * The vendor's own name for one message: `type`, or `type:subtype`.
+   *
+   * The one reading of "what kind of thing was that", shared by the pre-`init`
+   * ledger and the failed start's record, so the two cannot describe the same
+   * message differently.
+   */
+  function messageKind(message: SdkMessage): string {
+    const subtype = (message as { subtype?: unknown }).subtype;
+    return typeof subtype === "string" && subtype !== "" ? `${message.type}:${subtype}` : message.type;
+  }
+
+  /** Remember a message that arrived while a start was still pending. */
+  function notePreInitMessage(message: SdkMessage): void {
+    if (initReject === undefined) return;
+    if (preInitKinds.length >= PRE_INIT_KINDS_KEPT) {
+      preInitKindsDropped += 1;
+      return;
+    }
+    preInitKinds.push(messageKind(message));
+  }
+
+  /** Keep the tail of the vendor child's stderr, bounded. */
+  function noteVendorStderr(chunk: string): void {
+    if (chunk === "") return;
+    const joined = vendorStderrTail + chunk;
+    vendorStderrTail =
+      joined.length <= VENDOR_STDERR_KEPT ? joined : joined.slice(joined.length - VENDOR_STDERR_KEPT);
+    LOGGER.debug({ characters: chunk.length }, "the vendor child wrote to stderr");
+  }
+
+  /**
+   * A START'S DETAIL CARRIES THE VENDOR'S OWN WORDS WHEN THERE ARE ANY.
+   *
+   * The shim's reason states what the shim observed; the child's stderr states
+   * what the vendor decided. Both, in that order, because a reader who sees
+   * only the first cannot tell a refused resume from a slow one.
+   */
+  function withVendorStderr(reason: string): string {
+    const said = vendorStderrTail.trim();
+    return said === "" ? reason : `${reason}; the vendor said: ${said}`;
+  }
+
+  /**
+   * A RESULT THAT IS AN ERROR, BEFORE THE SESSION EVER OPENED.
+   *
+   * The vendor answers an opening it cannot honour with a `result` carrying
+   * `is_error` — a refused resume, an exhausted budget, an execution error in
+   * its own bring-up — and then has nothing further to say. That result IS the
+   * start's answer, so relaying it at once is what keeps {@link INIT_TIMEOUT_MS}
+   * a bound on SILENCE rather than a bound on every kind of failure.
+   */
+  function settleStartOnErrorResult(message: SdkMessage): void {
+    const reject = initReject;
+    if (reject === undefined) return;
+    if (message.type !== "result") return;
+    if (!message.is_error) return;
+    const said =
+      message.subtype === "success" ? message.result : message.errors.join("; ");
+    LOGGER.error(
+      { subtype: message.subtype, detail: said },
+      "the vendor answered the session's opening with an error result; the start is refused with its own text",
+    );
+    reject(
+      new Error(
+        `the vendor ended the session's opening with an error result (${message.subtype}): ${said}`,
+      ),
+    );
+  }
+
+  /**
+   * THE QUERY ENDED BEFORE `init`, SO THE START IS SETTLED NOW.
+   *
+   * A child that exits, a stream that ends, an iterator that throws: each is a
+   * conclusive answer already in hand, and waiting {@link INIT_TIMEOUT_MS} out
+   * on top of it buys nothing and costs the daemon its whole bring-up. The
+   * bound survives for the one case it was written for — a vendor that is
+   * genuinely still there and genuinely silent.
+   */
+  function settleStartOnQueryEnd(detail: string): void {
+    const reject = initReject;
+    if (reject === undefined) return;
+    reject(new Error(`the vendor query ended before its init message: ${detail}`));
   }
 
   function noteIdentityFacts(message: SdkMessage): void {
@@ -1491,6 +1629,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         for await (const message of active) {
           await onSdkMessage(message);
         }
+        if (isStaleLoop(active)) return;
         if (!standingDown) {
           pushes.push(
             create(conversationv1.SessionUpdateSchema, {
@@ -1508,6 +1647,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           onQueryLost("the vendor query ended without being asked to");
         }
       } catch (err) {
+        if (isStaleLoop(active)) return;
         pushes.push(
           create(conversationv1.SessionUpdateSchema, {
             update: {
@@ -1528,8 +1668,29 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     })();
   }
 
-  /** The query is gone: unwedge the vendor's callbacks, then report the fault. */
+  /**
+   * Whether this loop belongs to a query the session has already let go.
+   *
+   * A REPLACED QUERY'S DEATH IS NOT THE LIVE QUERY'S DEATH. The keep-alive
+   * rewind and the failed-start teardown both close the query they are done
+   * with, and its loop then ends exactly as a real death does — so without this
+   * a healthy session reported `query_died` and raised a permanent fault for a
+   * query nothing was using. The live query is the only one that can lose the
+   * session.
+   */
+  function isStaleLoop(active: QueryLike): boolean {
+    if (query === active) return false;
+    LOGGER.debug({}, "a query the session had already released ended its message loop");
+    return true;
+  }
+
+  /** The query is gone: settle any pending start, unwedge the callbacks, report. */
   function onQueryLost(detail: string): void {
+    LOGGER.error({ cause: detail }, "the vendor query is gone");
+    // BEFORE ANYTHING ELSE. A start still waiting on `init` has its answer the
+    // moment the query it was waiting on ends, and the teardown below would
+    // otherwise run while the verb sat out the rest of its bound.
+    settleStartOnQueryEnd(detail);
     gate.standDown(`the vendor query died: ${detail}`);
     query = undefined;
     // THE STREAM OWNER GETS ITS OWN TERMINAL. `query_died` is a SESSION fact,
@@ -1611,6 +1772,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       canUseTool: gate.canUseTool,
       abortController: controller,
       prompt: queue,
+      onStderr: noteVendorStderr,
       ...(effectiveModel === "" ? {} : { model: effectiveModel }),
       ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
     });
@@ -1631,6 +1793,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * inert rather than settling a start that a later attempt owns.
    */
   function awaitInit(): Promise<void> {
+    // EVERY ATTEMPT REPORTS ITS OWN EVIDENCE. A retry that inherited the
+    // previous attempt's ledger would name messages this query never emitted.
+    preInitKinds = [];
+    preInitKindsDropped = 0;
+    vendorStderrTail = "";
     return new Promise<void>((resolve, reject) => {
       const timeout = deps.initTimeoutMs ?? INIT_TIMEOUT_MS;
       initResolve = () => {
@@ -1860,6 +2027,36 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // does NOT control is the vendor, which writes through the converter the
       // moment its query is live — so whether the name is still free is a
       // question asked, not assumed.
+      // WHAT THE VENDOR DID SAY, BEFORE ANY OF IT IS THROWN AWAY. Recorded at
+      // info because a start that failed is exactly when the reader needs the
+      // kinds: the grounded silent resume had a `SessionStart:resume` hook
+      // start and succeed, and nothing said so anywhere.
+      LOGGER.info(
+        {
+          vendor_session_id: inForce,
+          binding: brandNew || clearedTo !== undefined ? "fresh" : "resume",
+          pre_init_messages: preInitKinds.length + preInitKindsDropped,
+          pre_init_kinds: preInitKinds.join(","),
+          vendor_stderr: vendorStderrTail.trim(),
+        },
+        "what the vendor emitted before the start failed",
+      );
+      // NO ORPHANED VENDOR CHILD. `startQuery` returning means a child is
+      // running, and the failure path used to walk away from it: the retry then
+      // opened a SECOND child on the same conversation, two writers on one
+      // transcript, and the first went on burning a session slot for the life
+      // of the shim. Cleared BEFORE it is closed so its own loop reads as the
+      // released query it now is rather than as the live session dying.
+      const orphan = query;
+      if (orphan !== undefined) {
+        query = undefined;
+        prompts?.close();
+        prompts = undefined;
+        abort?.abort();
+        abort = undefined;
+        orphan.close();
+        LOGGER.info({ vendor_session_id: inForce }, "closed the vendor query the failed start had opened");
+      }
       await releaseLock?.();
       releaseLock = undefined;
       await releaseWorkspaceLock?.();
@@ -1888,7 +2085,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         if (!identityWasPersisted) await identityStore.forget();
       }
       identity = undefined;
-      const detail = err instanceof Error ? err.message : String(err);
+      const detail = withVendorStderr(err instanceof Error ? err.message : String(err));
       LOGGER.error({ cause: detail }, "the vendor query could not be started");
       return startSessionRefused({ kind: "vendorStartFailed" }, detail);
     }

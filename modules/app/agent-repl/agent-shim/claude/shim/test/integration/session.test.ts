@@ -54,6 +54,7 @@ import {
   setPermissionModeAccepted,
   setPermissionModeCause,
   startSessionCause,
+  startSessionDetail,
   startSessionCold,
   turnStarted,
   watchAgentEntry,
@@ -1623,6 +1624,48 @@ describe("the vendor refusing a CONTROL call", () => {
       ),
     ) as { original_vendor_session_id: string };
     expect(persisted.original_vendor_session_id).toBe(retried.vendorSessionId);
+  });
+
+  test("StartSession answers at once when the vendor's stream ENDS before its init", async () => {
+    // THE GROUNDED SHAPE (2026-09-13, workspace 2b81f45a724642ef): the query
+    // was created, the vendor emitted its `SessionStart` hook, and then simply
+    // stopped. The shim used to sit out its whole 45s init bound on this —
+    // longer than the daemon's own bring-up bound, so the daemon answered
+    // first and named the shim instead of the vendor. The bound is for
+    // SILENCE; an ended stream is an answer.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-eof" } });
+
+    const response = await shim.clients.h1.startSession(freshSession());
+
+    expect(startSessionCause(response)).toBe("vendorStartFailed");
+  });
+
+  test("a stream that ends before the init names the query's end as the reason", async () => {
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-eof" } });
+
+    const response = await shim.clients.h1.startSession(freshSession());
+
+    expect(startSessionDetail(response)).toContain("the vendor query ended before its init message");
+  });
+
+  test("StartSession relays the vendor's own words when it refuses the opening", async () => {
+    // A refused resume is answered with an error result and nothing else, and
+    // the vendor's text is the only part of it a reader can act on.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-error-result" } });
+
+    const response = await shim.clients.h1.startSession(freshSession());
+
+    expect(startSessionDetail(response)).toContain("No conversation found with session ID");
+  });
+
+  test("a start the vendor ENDED leaves the shim alive for the retry", async () => {
+    // The refusal is a session failure, not a process one: the daemon may fix
+    // the condition and start again on the same warm shim.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-eof" } });
+
+    await shim.clients.h1.startSession(freshSession());
+
+    expect(shim.child.exitCode).toBeNull();
   });
 
   test("a retried start serves an ordinary turn", async () => {

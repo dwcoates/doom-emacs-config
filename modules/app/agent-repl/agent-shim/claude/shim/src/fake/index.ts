@@ -154,14 +154,27 @@ export const SPOOL_ROOT_ENV = "AGENT_REPL_FAKE_SPOOL_ROOT";
  * to CONTROL CALLS, not to a turn, so the lever has to be an environment knob
  * the whole process reads rather than a prompt.
  *
- * Recognized verbs: `start` (createFakeQuery itself throws), `set_model`,
- * `set_permission_mode`. Anything else is a refusal to start rather than a
- * silently ignored knob.
+ * Recognized verbs: `start` (createFakeQuery itself throws), `start-once`,
+ * `start-eof`, `start-error-result`, `set_model`, `set_permission_mode`.
+ * Anything else is a refusal to start rather than a silently ignored knob.
+ *
+ * `start-eof` and `start-error-result` are the two ways a query that WAS
+ * created still never opens a session — the child exits, or the vendor answers
+ * the opening with an error result — and they exist because the grounded
+ * failure (2026-09-13) was neither a refused `query()` nor a blocking hook: the
+ * vendor simply stopped, and the shim sat out its whole init bound.
  */
 const REFUSE_ENV = "AGENT_REPL_FAKE_REFUSE";
 
 /** The control verbs {@link REFUSE_ENV} may name. */
-const REFUSABLE = new Set(["start", "start-once", "set_model", "set_permission_mode"]);
+const REFUSABLE = new Set([
+  "start",
+  "start-once",
+  "start-eof",
+  "start-error-result",
+  "set_model",
+  "set_permission_mode",
+]);
 
 /**
  * How many starts `start-once` has already refused.
@@ -1212,6 +1225,31 @@ export function createFakeQuery(
   };
 
   const main = async (): Promise<void> => {
+    if (refuse.has("start-eof")) {
+      // THE CHILD IS GONE BEFORE IT SAID ANYTHING. No init, no result, no
+      // error: the stream simply ends, which is what a vendor binary that died
+      // during its own bring-up looks like from here.
+      LOGGER.info(
+        { claude_session_id: sessionUuid },
+        "the mocked vendor was told to END ITS STREAM before the session's init",
+      );
+      out.end();
+      return;
+    }
+    if (refuse.has("start-error-result")) {
+      // THE VENDOR REFUSED THE OPENING IN ITS OWN WORDS. A resume the binary
+      // will not honour is answered with an error result and nothing else.
+      LOGGER.info(
+        { claude_session_id: sessionUuid },
+        "the mocked vendor was told to REFUSE the session's opening with an error result",
+      );
+      result({
+        subtype: "error_during_execution",
+        errors: [`No conversation found with session ID: ${sessionUuid}`],
+      });
+      out.end();
+      return;
+    }
     emitInit();
     LOGGER.info(
       {
