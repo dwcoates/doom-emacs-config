@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { Code } from "@connectrpc/connect";
 import {
   AnswerColdGateErrorSchema,
   AnswerColdGateResponseSchema,
@@ -313,14 +314,50 @@ describe("answering the gate", () => {
     expect(el.querySelector(".refusal")).toBeNull();
   });
 
-  it("draws a transport failure at the buttons", async () => {
-    const h = askHarness({ fail: true });
+  /** What the daemon answered on 2026-09-13, relayed from the shim verbatim. */
+  const REFUSED_START = "shim.v1.StartSession: the producer has already written rows";
+
+  it("draws a transport failure at the buttons when the daemon was NOT reached", async () => {
+    const h = askHarness({ fail: true, failCode: Code.Unavailable });
     const el = drawFeedColdGate(gate(standing()), h.rc);
     el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
     await settle();
     expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe(
       "transport",
     );
+  });
+
+  // GROUNDED 2026-09-13: the owner answered this gate with `clear`, the daemon
+  // answered `internal` with the shim's own account of the refused start, and
+  // the card drew nothing the owner could act on.
+  it("draws the daemon's OWN account when the daemon answered a failure", async () => {
+    const h = askHarness({ fail: true, failCode: Code.Internal, failMessage: REFUSED_START });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    await settle();
+    expect(el.querySelector(".hibernation-actions .refusal")?.textContent).toContain(
+      REFUSED_START,
+    );
+  });
+
+  it("does not report an unreachable daemon that answered", async () => {
+    const h = askHarness({ fail: true, failCode: Code.Internal, failMessage: REFUSED_START });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    await settle();
+    expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe(
+      "failed",
+    );
+  });
+
+  it("leaves the gate ANSWERABLE after a failed answer", async () => {
+    // The whole point of drawing at the click: the user's next move is to try
+    // again, and a card latched inert offers no next move at all.
+    const h = askHarness({ fail: true });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    await settle();
+    expect([...el.querySelectorAll("button")].every((b) => !b.disabled)).toBe(true);
   });
 });
 

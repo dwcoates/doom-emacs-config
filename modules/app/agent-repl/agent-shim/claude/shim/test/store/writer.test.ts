@@ -523,6 +523,37 @@ describe("clearProducer", () => {
   });
 });
 
+describe("producerHasWrittenRows", () => {
+  it("says no before anything is written, so an abandoned attempt may un-name", async () => {
+    const { persistence: plane } = await persistence("wrote-none");
+    plane.setProducer("vendor-session-1");
+
+    expect(plane.producerHasWrittenRows()).toBe(false);
+  });
+
+  it("says yes once a row has been handed over, so the caller keeps the name", async () => {
+    // THE QUESTION `clearProducer` ANSWERS BY THROWING, asked instead. A start
+    // the vendor opened and then refused has already written through the
+    // converter, and its caller must learn that from a question rather than
+    // from an exception escaping a typed verb.
+    const { persistence: plane } = await persistence("wrote-some");
+    plane.setProducer("vendor-session-1");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    expect(plane.producerHasWrittenRows()).toBe(true);
+  });
+
+  it("re-announcing the SAME name after rows is the no-op a retry needs", async () => {
+    const { persistence: plane } = await persistence("re-announce");
+    plane.setProducer("vendor-session-1");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    expect(() => plane.setProducer("vendor-session-1")).not.toThrow();
+  });
+});
+
 describe("liveWork", () => {
   it("delegates to the reconciler's own answer", async () => {
     const { persistence: plane } = await persistence("writer-live-work");
