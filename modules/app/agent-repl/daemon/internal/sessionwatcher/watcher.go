@@ -1208,9 +1208,10 @@ func (w *watcher) stale(gen uint64) bool { return w.closed || gen != w.gen }
 //
 // THERE ARE TWO WAYS THE DAEMON SAYS SO AND BOTH ARE READ HERE. `SessionEnding`
 // is the announcement one caller makes out of band (`Fleet.KillSession`), and
-// the shim client's stand-down latch is the shim's OWN record that a
-// `KillSession` was asked of it. The latch is the one that cannot be bypassed:
-// every route to ending a session goes through the rpc that sets it, while the
+// the shim client's stand-down latch is the shim client's OWN record that this
+// daemon asked this shim to go — a `KillSession`, or a `Kill` of the process.
+// The latch is the one that cannot be bypassed: every route to ending a
+// session goes through one of the two verbs that set it, while the
 // announcement depends on each caller remembering to make it -- and the callers
 // that do not remember are what put this record in the log.
 //
