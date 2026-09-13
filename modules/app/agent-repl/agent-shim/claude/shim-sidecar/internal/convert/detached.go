@@ -249,8 +249,28 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		// stream's book, and the task id names the harness's bookkeeping for it.
 		run, launched := c.spawnedRuns[taskID]
 		if !launched {
-			c.log.With(at.ctxWarn("task-stop")).With(logging.Context{TaskID: taskID}).
-				Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is stored as vendor_specific")
+			// AN ABSENT LAUNCH IS ONLY A SIGNAL IF THE LAUNCH COULD HAVE BEEN
+			// SEEN. This converter learns a task's spawning call from a launch
+			// result it read on this same stream, so a converter that RESUMED
+			// mid-file — at the cursor the store already holds — has no way to
+			// have seen a launch that lies behind that cursor. That is the
+			// ordinary shape of a restart, not a gap: on the owner's machine
+			// five of these landed in one millisecond at offset ~50 MB of a
+			// transcript a freshly-started reader had joined minutes earlier,
+			// stopping five agents whose launches a previous process had already
+			// converted and committed.
+			//
+			// A converter that read the file FROM BYTE 0 and still has no launch
+			// for the task IS looking at a gap, and keeps the warning. The
+			// residue is identical either way; only the severity moves, and the
+			// record names which case it is.
+			if c.resumedMidFile() {
+				c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, Offset: logging.Off(c.joinedOffset)}).
+					LogVerbose("TaskStop names an agent task whose launch lies before this reader joined the file, so the spawn unit it settles cannot be identified here and the record is stored as vendor_specific")
+			} else {
+				c.log.With(at.ctxWarn("task-stop")).With(logging.Context{TaskID: taskID}).
+					Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is stored as vendor_specific")
+			}
 			return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unlaunched", result)}
 		}
 		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: run, UpsertKey: ActivityKey(run)}).

@@ -149,6 +149,21 @@ type Converter struct {
 	// keepalive marks every record converted while a keep-alive turn is open.
 	// ONE REMEMBERED BOOL per file, cleared by the next non-keepalive prompt.
 	keepalive bool
+
+	// joined records WHERE IN THE FILE this converter started reading, and
+	// whether it has started at all. ONE OFFSET, written once.
+	//
+	// IT IS THE DIFFERENCE BETWEEN "NOT THERE" AND "BEFORE MY TIME". Everything
+	// this converter correlates — an open call, a launched run — it learned from
+	// a line it read itself, because a converter cannot ask the reader anything.
+	// So a correlation that comes up empty means one of two entirely different
+	// things, and only this offset separates them: a converter that read the file
+	// from byte 0 and still has no launch for a task is looking at a real gap,
+	// while one that resumed at the cursor the store held is simply looking
+	// before its own window. Without it, every restart on a large transcript
+	// reported the second as the first.
+	joined       bool
+	joinedOffset int64
 }
 
 // New builds a Converter with no observer installed.
@@ -196,6 +211,10 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 	// thirty call sites having to pass it — and residue minted anywhere in that
 	// fan-out keys on the same record the other plane keys on.
 	at.RecordUUID = str(record["uuid"])
+	if !c.joined {
+		c.joined = true
+		c.joinedOffset = at.Offset
+	}
 	kind := str(record["type"])
 	c.log.With(at.ctxFor("convert-line")).
 		LogVerbose("converting line type=%q", kind)
@@ -237,6 +256,11 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
+
+// resumedMidFile reports that this converter started reading the file somewhere
+// other than its beginning, so a correlation it never saw may simply predate its
+// window rather than be missing.
+func (c *Converter) resumedMidFile() bool { return c.joined && c.joinedOffset > 0 }
 
 // withheldLineKind reports whether a top-level line type is CLI
 // bookkeeping/machinery that must never become a feed row, and the kind string

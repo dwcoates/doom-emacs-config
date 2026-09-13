@@ -668,3 +668,52 @@ func TestATaskStopNamingNoTaskIsRecordedAtDebug(t *testing.T) {
 		t.Fatalf("the unattributable TaskStop was recorded at %q, want debug (benign)", got)
 	}
 }
+
+// TestAnUnlaunchedAgentStopIsWarnedOnlyWhenTheLaunchCouldHaveBeenSeen is the
+// difference between "not there" and "before my time". This converter learns a
+// task's spawning call only from a launch it read on this same stream, so an
+// absent launch is a SIGNAL only for a converter that read the file from its
+// beginning. One that resumed at the store's cursor — five of these landed in
+// one millisecond at offset ~50 MB on the owner's machine, after a restart —
+// is looking before its own window, which is the ordinary shape of a restart.
+func TestAnUnlaunchedAgentStopIsWarnedOnlyWhenTheLaunchCouldHaveBeenSeen(t *testing.T) {
+	cases := []struct {
+		name        string
+		joinAt      int64
+		wantLevel   string
+		wantMessage string
+	}{
+		{
+			name:        "read from the beginning, so the launch is genuinely absent",
+			joinAt:      0,
+			wantLevel:   "warn",
+			wantMessage: "no launch on this stream opened",
+		},
+		{
+			name:        "resumed at the store's cursor, so the launch predates the window",
+			joinAt:      50_182_940,
+			wantLevel:   "debug",
+			wantMessage: "before this reader joined the file",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c, sink := loggedConverter(t)
+			call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"a9"}`))
+			result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+				`{"command":"stop","task_type":"agent","task_id":"a9","message":"stopped"}`)
+
+			// Act.
+			entries := convertLinesFrom(t, c, tc.joinAt, call, result)
+
+			// Assert: the residue is identical either way; only the severity moves.
+			if got := entries[0].GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind(); got != "task_stop/unlaunched" {
+				t.Fatalf("kind = %q, want task_stop/unlaunched in both cases", got)
+			}
+			if got := levelForMessage(t, sink, tc.wantMessage); got != tc.wantLevel {
+				t.Fatalf("the unattributable stop was recorded at %q, want %q", got, tc.wantLevel)
+			}
+		})
+	}
+}

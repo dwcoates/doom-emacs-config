@@ -948,6 +948,30 @@ func (s *sidecar) rekeyRotations() {
 			continue
 		}
 		previous := w.ctx.MainAgentID
+		// AN ABSENCE OF EVIDENCE NEVER MOVES A FILE OFF A BOOK IT ALREADY HAS.
+		// SourceUnrecorded is not a fact about this transcript; it is the R9
+		// resume DEFAULT this package falls back to when no identity record
+		// names the id — and the resolver documents that answer as the one that
+		// "goes stale the instant a rotation writes one". Letting it override an
+		// established book made this pass move a transcript on the strength of a
+		// file that was not there yet: on the owner's machine the reader booked
+		// 4da5f881 out of 90a1151f at 11:06:53 with source=unrecorded, then the
+		// shim's link file appeared and moved every record straight back at
+		// 11:06:55 with source=vendor_link. Two WARN book moves, both spurious,
+		// for a book that never actually changed.
+		//
+		// A FIRST attribution from `unrecorded` is still taken below: there is no
+		// book to override, and the resume rule is the right default for a file
+		// nothing has named.
+		if previous != "" && resolved.Source == identity.SourceUnrecorded {
+			s.log.With(logging.Context{
+				Operation: "identity-rekey", Path: path,
+				VendorSessionID: observed, BookAgentID: previous, AgentID: previous,
+			}).LogVerbose(
+				"no identity record names %s, so its book stays %s; the resume default never moves a file off a book that evidence gave it",
+				observed, previous)
+			continue
+		}
 		w.ctx.MainAgentID = resolved.Original
 		if !s.parked[path] {
 			if previous == "" {

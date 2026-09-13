@@ -378,3 +378,51 @@ func bookOfLastWrite(t *testing.T, store *fakeStore) string {
 	t.Fatal("the last batch carried no agent update to read a book off")
 	return ""
 }
+
+// TestAnUnrecordedResolutionNeverMovesAFileOffItsBook is the flip-flop the
+// owner's log caught: 4da5f881 was booked out of 90a1151f at 11:06:53 with
+// resolution source=unrecorded, and moved straight back at 11:06:55 with
+// source=vendor_link. Two WARN book moves for a book that never changed.
+//
+// SourceUnrecorded is not a fact about the transcript. It is the R9 resume
+// DEFAULT the resolver falls back to when no identity record names the id — the
+// answer its own header says "goes stale the instant a rotation writes one" — so
+// it may seed a book but never overrule one that evidence gave.
+func TestAnUnrecordedResolutionNeverMovesAFileOffItsBook(t *testing.T) {
+	cases := []struct {
+		name string
+		// remove is the identity record that stops answering for this id.
+		remove string
+	}{
+		{name: "the link file stops answering", remove: filepath.Join("vendor-id", bookRotated+".json")},
+		{name: "the whole identity record set stops answering", remove: "agent-id.json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the file is booked to the original on real evidence.
+			h := newHarness(t, &fakeStore{})
+			path := h.transcript(t, bookRotated, promptLine)
+			h.mintIdentity(t, bookWorkspace, bookOriginal)
+			h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+			if got := h.sc.watchers[path].ctx.MainAgentID; got != bookOriginal {
+				t.Fatalf("precondition: the file books to %q, want the linked original %q", got, bookOriginal)
+			}
+
+			// Act: the record stops answering, so the next resolution is the
+			// bare resume default.
+			if err := os.Remove(filepath.Join(h.state, "shim", bookWorkspace, tc.remove)); err != nil {
+				t.Fatalf("removing the identity record: %v", err)
+			}
+			h.sc.rescan()
+
+			// Assert.
+			if got := h.sc.watchers[path].ctx.MainAgentID; got != bookOriginal {
+				t.Errorf("the file moved to book %q on an unrecorded resolution, want it to stay at %q", got, bookOriginal)
+			}
+			h.requireNone(t, "identity-rekey", "warn")
+		})
+	}
+}
