@@ -995,6 +995,111 @@ test_the_editor_is_quit_before_the_unguarded_daemon_is_stopped() {
     pass "$name"
 }
 
+# ---- the shims the stopped daemon leaves listening -------------------------
+#
+# A DAEMON'S SHIMS OUTLIVE IT. Stopping the unguarded daemon does not take them
+# with it, and the run's own daemon adopts whatever is still listening, so the
+# consent that stops the daemon has to stand its sessions down too. Without
+# that, a sweep quit the owner's editor, stopped their daemon and then declined
+# over the shims, leaving nothing standing (owner complaint, 2026-09-13 15:2x).
+
+# unguarded_shim_line PID SOCKET — a shim of THIS state directory listening
+# without the vendor guard.
+unguarded_shim_line() {
+    printf '%s node /opt/agent-shim/claude/shim/dist/main.js --listen %s/.claude-emacs/sock/%s PATH=/usr/bin\n' \
+        "$1" "$SCRATCH/home" "$2"
+}
+
+test_the_unguarded_shim_refusal_names_the_consent() {
+    local name="the refusal over unguarded shims names AGENT_REPL_REALTEST_STOP_DAEMON=1 as the remedy"
+    local dir out status=0
+    dir="$(scratch_bin unguarded-shim-remedy)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    unguarded_shim_line 39689 0100059cb65649bc.n1.sock > "$SCRATCH/procs"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'THE REMEDY IS AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
+        fail "$name" "the refusal does not name the consent that resolves it: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_unguarded_shims_are_stopped_under_the_consent() {
+    local name="unguarded shims are STOPPED under AGENT_REPL_REALTEST_STOP_DAEMON=1 and the run continues"
+    local dir out status=0
+    dir="$(scratch_bin unguarded-shim-stopped)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    {
+        unguarded_shim_line 39689 0100059cb65649bc.n1.sock
+        printf '39736 /Users/someone/.cache/agent-repl/bin/shim-lock --hold /tmp/lock PATH=/usr/bin\n'
+    } > "$SCRATCH/procs"
+    SCRIPT_ARGS=(1)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if ! grep -q '^39689$' "$SCRATCH/kill-log"; then
+        fail "$name" "the unguarded shim was never signalled: $(cat "$SCRATCH/kill-log")"
+        return
+    fi
+    if ! grep -q '^39736$' "$SCRATCH/kill-log"; then
+        fail "$name" "the unguarded shim-lock was never signalled: $(cat "$SCRATCH/kill-log")"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "the owner's unguarded shim pid 39689 listening on .*0100059cb65649bc.n1.sock was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
+        fail "$name" "the run did not state the shim it stopped: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "the owner's unguarded shim-lock pid 39736 was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
+        fail "$name" "the run did not state the shim-lock it stopped: $out"
+        return
+    fi
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+        fail "$name" "the realtest did not run once the unguarded shims were stopped"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_preflight_decline_after_a_quit_still_hands_an_editor_back() {
+    local name="a run that quit the owner's editor in the preflight and then DECLINED still launches a guard-free one"
+    local dir out status=0
+    dir="$(scratch_bin preflight-decline-handback)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    # The consent is given, so the editor is quit and the daemon signalled; the
+    # daemon then ignores SIGTERM, which is a decline with the desktop already
+    # empty — the exact shape that left the owner with nothing standing.
+    unguarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    standing_emacs
+    SCRIPT_ARGS=(1)
+
+    out="$(STUB_KILL_IGNORED=1 AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 \
+        AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if [ ! -f "$SCRATCH/open-reached" ]; then
+        fail "$name" "the run quit the owner's editor, declined, and launched nothing; output: $out"
+        return
+    fi
+    if ! grep -q -- '-gj -a Emacs guard=unset' "$SCRATCH/open-reached"; then
+        fail "$name" "the editor handed back was not a guard-free cold start: $(cat "$SCRATCH/open-reached")"
+        return
+    fi
+    pass "$name"
+}
+
 # ---- the sweep: one world per realtest ------------------------------------
 
 test_unknown_selector_declines_before_anything() {
@@ -2004,6 +2109,9 @@ test_declines_when_a_listening_shim_lacks_the_guard
 test_runs_when_every_listening_shim_carries_the_guard
 test_ignores_a_shim_listening_under_another_state_directory
 test_declines_when_a_shim_lock_lacks_the_guard
+test_the_unguarded_shim_refusal_names_the_consent
+test_the_unguarded_shims_are_stopped_under_the_consent
+test_a_preflight_decline_after_a_quit_still_hands_an_editor_back
 test_unknown_selector_declines_before_anything
 test_run_pattern_matching_nothing_declines
 test_run_pattern_selects_one_realtest

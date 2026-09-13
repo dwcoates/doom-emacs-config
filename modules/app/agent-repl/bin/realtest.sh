@@ -486,6 +486,16 @@ if ! emacs_answering; then
     RUN_OWNS_EDITOR=1
 fi
 
+# RUN_QUIT_EDITOR — has THIS RUN quit an editor that was already standing?
+#
+# Separate from RUN_OWNS_EDITOR, which only says whose the next editor is. This
+# one is the debt: a run that closed the owner's editor owes them one back at
+# the end, and it owes it whether the run finished a sweep, failed a realtest
+# or DECLINED in the preflight two lines after the quit (owner complaint,
+# 2026-09-13: a sweep quit the editor, stopped the daemon, then declined over
+# the shims and left the desktop with nothing on it).
+RUN_QUIT_EDITOR=0
+
 # quit_standing_emacs — quit the editor answering the socket and wait for it to
 # go. Non-zero if there is still one answering afterwards, or if the consent
 # was not given.
@@ -529,8 +539,61 @@ quit_standing_emacs() {
     fi
     note "the running Emacs has exited"
     RUN_OWNS_EDITOR=1
+    RUN_QUIT_EDITOR=1
     return 0
 }
+
+REALTEST_MAIN_PID="${BASHPID:-$$}"
+
+# launch_guard_free_editor — cold-start the editor the owner is owed, with the
+# guard stripped from the environment by construction (`env -u`) rather than by
+# trusting that no line above exported it. ONE SPELLING, because the two places
+# that owe the owner an editor — the preflight handback below and the sweep's
+# handback at the end — must not disagree about how it is launched.
+# shellcheck disable=SC2329
+# Invoked from restore_editor_this_run_quit and restore_owner_editor, both of
+# which the EXIT traps reach indirectly.
+launch_guard_free_editor() {
+    if env -u "$VENDOR_GUARD_ENV" "$REALTEST_OPEN" -gj -a Emacs >/dev/null 2>&1; then
+        return 0
+    fi
+    printf '[realtest] THE GUARD-FREE EMACS COULD NOT BE LAUNCHED (open -gj -a Emacs failed), so the owner has\n' >&2
+    printf '[realtest] no editor standing. Start one when you next want it.\n' >&2
+    return 1
+}
+
+# ---- the editor a preflight refusal owes back -----------------------------
+#
+# THE PREFLIGHT CAN QUIT THE EDITOR AND THEN DECLINE. The vendor-guard section
+# below quits the standing Emacs before it stops an unguarded daemon, and every
+# refusal after that point exits with the desktop already empty. The sweep's
+# handback would cover it, but the sweep's EXIT trap is not installed yet and
+# its rule is "nothing is answering, so there is nothing of this run's to hand
+# back" — true of a run that never quit anything, false of this one.
+#
+# So this trap stands from here until `trap sweep_end EXIT` replaces it, and
+# sweep_end calls the same body when it is reached before a sweep began.
+# shellcheck disable=SC2329
+# Invoked from the EXIT trap installed below it, and from sweep_end.
+restore_editor_this_run_quit() {
+    [ "${BASHPID:-$$}" = "$REALTEST_MAIN_PID" ] || return 0
+    [ "$RUN_QUIT_EDITOR" = "1" ] || return 0
+    if emacs_answering; then
+        return 0
+    fi
+    note "this run quit the owner's editor and ends with nothing answering; a guard-free Emacs is launched in its place"
+    if launch_guard_free_editor; then
+        note "the owner's editor was restored: a guard-free Emacs launched"
+    fi
+    return 0
+}
+# shellcheck disable=SC2329
+preflight_editor_handback() {
+    local status=$?
+    restore_editor_this_run_quit
+    exit "$status"
+}
+trap preflight_editor_handback EXIT
 
 # How long the daemon is given to exit after SIGTERM before realtest 3 is
 # skipped. A daemon drains its shims on the way out; this is a small multiple
@@ -687,42 +750,132 @@ fi
 STATE_DIR="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}"
 SOCK_DIR="${STATE_DIR%/}/sock"
 
+# scan_unguarded_shims — fill UNGUARDED (the lines a refusal prints),
+# UNGUARDED_SHIM_PIDS and UNGUARDED_SHIM_SOCKETS from the process table. A
+# function rather than a straight-line loop because the stop below has to ask
+# the same question a second time, afterwards, and the two answers must come
+# from one spelling.
 UNGUARDED=""
-note "checking every listening shim under $SOCK_DIR for the vendor guard"
-for pid in $(pgrep -f 'shim/dist/main\.js' 2>/dev/null || true); do
-    COMMAND_LINE="$(ps -Eww -o command= -p "$pid" 2>/dev/null || true)"
-    [ -n "$COMMAND_LINE" ] || continue
-    # Only a shim listening under THIS state directory: another checkout's
-    # shim is not a process this run would adopt, and declining on it would
-    # send the operator after the wrong thing.
-    case "$COMMAND_LINE" in
-        *"--listen $SOCK_DIR/"*) ;;
-        *) continue ;;
-    esac
-    SOCKET="$(printf '%s' "$COMMAND_LINE" | tr ' ' '\n' | grep "^$SOCK_DIR/" | head -n1)"
-    if ! process_carries_guard "$pid"; then
-        UNGUARDED="$UNGUARDED
-  shim pid $pid listening on ${SOCKET:-(no socket named on its command line)}"
-    fi
-done
+UNGUARDED_SHIM_PIDS=()
+UNGUARDED_SHIM_SOCKETS=()
+scan_unguarded_shims() {
+    UNGUARDED=""
+    UNGUARDED_SHIM_PIDS=()
+    UNGUARDED_SHIM_SOCKETS=()
+    local pid command_line socket
+    for pid in $(pgrep -f 'shim/dist/main\.js' 2>/dev/null || true); do
+        command_line="$(ps -Eww -o command= -p "$pid" 2>/dev/null || true)"
+        [ -n "$command_line" ] || continue
+        # Only a shim listening under THIS state directory: another checkout's
+        # shim is not a process this run would adopt, and declining on it would
+        # send the operator after the wrong thing.
+        case "$command_line" in
+            *"--listen $SOCK_DIR/"*) ;;
+            *) continue ;;
+        esac
+        socket="$(printf '%s' "$command_line" | tr ' ' '\n' | grep "^$SOCK_DIR/" | head -n1)"
+        if ! process_carries_guard "$pid"; then
+            UNGUARDED="$UNGUARDED
+  shim pid $pid listening on ${socket:-(no socket named on its command line)}"
+            UNGUARDED_SHIM_PIDS+=("$pid")
+            UNGUARDED_SHIM_SOCKETS+=("${socket:-}")
+        fi
+    done
 
-for pid in $(pgrep -f 'agent-repl/bin/shim-lock' 2>/dev/null || true); do
-    ps -Eww -o command= -p "$pid" >/dev/null 2>&1 || continue
-    if ! process_carries_guard "$pid"; then
-        UNGUARDED="$UNGUARDED
+    for pid in $(pgrep -f 'agent-repl/bin/shim-lock' 2>/dev/null || true); do
+        ps -Eww -o command= -p "$pid" >/dev/null 2>&1 || continue
+        if ! process_carries_guard "$pid"; then
+            UNGUARDED="$UNGUARDED
   shim-lock pid $pid"
-    fi
-done
+            UNGUARDED_SHIM_PIDS+=("$pid")
+            UNGUARDED_SHIM_SOCKETS+=("")
+        fi
+    done
+}
 
+# shim_pid_alive PID — is this process still in the kernel's table? The stop
+# below waits on this rather than on `kill -0`, so it reads the same table the
+# guard question is answered from.
+shim_pid_alive() {
+    ps -Eww -o command= -p "$1" >/dev/null 2>&1
+}
+
+note "checking every listening shim under $SOCK_DIR for the vendor guard"
+scan_unguarded_shims
+
+# THE SHIMS OUTLIVE THE DAEMON THAT SPAWNED THEM, BY DESIGN. Stopping the
+# unguarded daemon above does not take them with it: they keep listening on
+# their workspace sockets, and the guarded daemon this run's Emacs brings up
+# ADOPTS them rather than spawning fresh ones. So a sweep that had just stopped
+# the daemon under consent declined here anyway, having already quit the
+# owner's editor (owner complaint, 2026-09-13 15:2x).
+#
+# The consent that covers stopping the daemon covers these for the same reason
+# and in the same breath: they ARE the daemon's live sessions, and the sentence
+# AGENT_REPL_REALTEST_STOP_DAEMON=1 says is "end them". THE ORDER IS ORDERLY:
+# the daemon is already gone by the time this runs, so nothing respawns a shim
+# behind the stop, and each shim gets SIGTERM — never SIGKILL, the same rule
+# the daemon stop holds — and the same bound to go in.
 if [ -n "$UNGUARDED" ]; then
-    printf '[realtest] DECLINED: these shim processes do not carry %s:\n' "$VENDOR_GUARD_ENV" >&2
-    printf '%s\n' "$UNGUARDED" >&2
-    printf '[realtest] A daemon ADOPTS a shim that is already listening on a workspace'"'"'s socket rather than\n' >&2
-    printf '[realtest] spawning a fresh one, so the guard this run puts on the daemon would never reach these.\n' >&2
-    printf '[realtest] One of them kept a keepalive prompt going to the real vendor through realtest 1'"'"'s first\n' >&2
-    printf '[realtest] run. Stop them (kill the pids above) so the run'"'"'s daemon spawns guarded shims, then\n' >&2
-    printf '[realtest] try again.\n' >&2
-    exit "$EXIT_DECLINED"
+    if [ "${AGENT_REPL_REALTEST_STOP_DAEMON:-}" != "1" ]; then
+        printf '[realtest] DECLINED: these shim processes do not carry %s:\n' "$VENDOR_GUARD_ENV" >&2
+        printf '%s\n' "$UNGUARDED" >&2
+        printf '[realtest] A daemon ADOPTS a shim that is already listening on a workspace'"'"'s socket rather than\n' >&2
+        printf '[realtest] spawning a fresh one, so the guard this run puts on the daemon would never reach these.\n' >&2
+        printf '[realtest] One of them kept a keepalive prompt going to the real vendor through realtest 1'"'"'s first\n' >&2
+        printf '[realtest] run. They outlive the daemon that spawned them, so stopping the daemon does not take\n' >&2
+        printf '[realtest] them with it.\n' >&2
+        printf '[realtest] THE REMEDY IS AGENT_REPL_REALTEST_STOP_DAEMON=1: that consent lets this run stand these\n' >&2
+        printf '[realtest] sessions down itself, orderly, after the daemon is gone. Stopping them by hand (kill the\n' >&2
+        printf '[realtest] pids above) works too.\n' >&2
+        exit "$EXIT_DECLINED"
+    fi
+    note "AGENT_REPL_REALTEST_STOP_DAEMON=1: standing down the unguarded shim processes the stopped daemon left listening (pid(s) ${UNGUARDED_SHIM_PIDS[*]}) with SIGTERM"
+    "$REALTEST_KILL" -TERM "${UNGUARDED_SHIM_PIDS[@]}" >/dev/null 2>&1 || true
+    for _i in $(seq 1 "$DAEMON_STOP_SECONDS"); do
+        SHIMS_LEFT=""
+        for _idx in "${!UNGUARDED_SHIM_PIDS[@]}"; do
+            if shim_pid_alive "${UNGUARDED_SHIM_PIDS[$_idx]}"; then
+                SHIMS_LEFT="$SHIMS_LEFT ${UNGUARDED_SHIM_PIDS[$_idx]}"
+                continue
+            fi
+            # The socket has to go too: a shim that has exited but whose socket
+            # file is still there is a socket the run's daemon would connect to
+            # and find nothing behind, which is not a stack to measure a
+            # startup against.
+            if [ -n "${UNGUARDED_SHIM_SOCKETS[$_idx]}" ] && [ -e "${UNGUARDED_SHIM_SOCKETS[$_idx]}" ]; then
+                SHIMS_LEFT="$SHIMS_LEFT ${UNGUARDED_SHIM_PIDS[$_idx]}"
+            fi
+        done
+        [ -n "$SHIMS_LEFT" ] || break
+        sleep 1
+    done
+    if [ -n "${SHIMS_LEFT# }" ]; then
+        printf '[realtest] DECLINED: these shim processes were still there %ss after SIGTERM:%s\n' \
+            "$DAEMON_STOP_SECONDS" "$SHIMS_LEFT" >&2
+        printf '[realtest] This run does not escalate to SIGKILL on the owner'"'"'s processes, so nothing is run\n' >&2
+        printf '[realtest] against a stack whose shims could reach the real vendor. Stop them by hand.\n' >&2
+        exit "$EXIT_DECLINED"
+    fi
+    # EACH ONE IS STATED, not just the count: the operator is being told which
+    # of their live sessions this run ended, and a summed number is not that.
+    for _idx in "${!UNGUARDED_SHIM_PIDS[@]}"; do
+        if [ -n "${UNGUARDED_SHIM_SOCKETS[$_idx]}" ]; then
+            note "the owner's unguarded shim pid ${UNGUARDED_SHIM_PIDS[$_idx]} listening on ${UNGUARDED_SHIM_SOCKETS[$_idx]} was stopped under AGENT_REPL_REALTEST_STOP_DAEMON so the realtest's daemon spawns a guarded one"
+        else
+            note "the owner's unguarded shim-lock pid ${UNGUARDED_SHIM_PIDS[$_idx]} was stopped under AGENT_REPL_REALTEST_STOP_DAEMON so the realtest's daemon spawns a guarded one"
+        fi
+    done
+    # ASKED AGAIN, FROM THE KERNEL. The stop is only worth what a fresh scan
+    # says about it, and a shim that respawned behind the stop is exactly the
+    # thing this refusal exists for.
+    scan_unguarded_shims
+    if [ -n "$UNGUARDED" ]; then
+        printf '[realtest] DECLINED: unguarded shim processes are listening again after the stop:\n' >&2
+        printf '%s\n' "$UNGUARDED" >&2
+        printf '[realtest] Something is respawning them; this run does not fight it. Stop them by hand.\n' >&2
+        exit "$EXIT_DECLINED"
+    fi
 fi
 note "every listening shim carries $VENDOR_GUARD_ENV"
 
@@ -995,6 +1148,14 @@ restore_owner_editor() {
     local daemon_left=""
 
     if ! emacs_answering; then
+        # NOTHING ANSWERING IS NOT ALWAYS NOTHING OWED. It means "no editor of
+        # this run's to hand back" only when this run did not quit one; a run
+        # that quit the owner's editor and then failed or declined owes them a
+        # cold, guard-free one however it ended.
+        if [ "$RUN_QUIT_EDITOR" = "1" ]; then
+            restore_editor_this_run_quit
+            return 0
+        fi
         note "no Emacs is answering as this run ends; there is no editor of this run's to hand back"
         return 0
     fi
@@ -1052,14 +1213,8 @@ restore_owner_editor() {
         fi
     fi
 
-    # `env -u`, rather than trusting that this shell never exported the guard:
-    # the editor the owner gets back must be guard-free by construction, not by
-    # the absence of an export somewhere above.
-    if env -u "$VENDOR_GUARD_ENV" "$REALTEST_OPEN" -gj -a Emacs >/dev/null 2>&1; then
+    if launch_guard_free_editor; then
         launched=1
-    else
-        printf '[realtest] THE GUARD-FREE EMACS COULD NOT BE LAUNCHED (open -gj -a Emacs failed), so the owner has\n' >&2
-        printf '[realtest] no editor standing. Start one when you next want it.\n' >&2
     fi
 
     local summary="the owner's editor was restored: guarded Emacs pid $quit_pid quit"
@@ -1079,7 +1234,6 @@ restore_owner_editor() {
     return 0
 }
 
-REALTEST_MAIN_PID="${BASHPID:-$$}"
 SWEEP_STARTED=0
 SWEEP_ENDED=0
 
@@ -1091,7 +1245,13 @@ sweep_end() {
     # clean the registry from inside a command substitution and report into a
     # pipe nobody reads.
     [ "${BASHPID:-$$}" = "$REALTEST_MAIN_PID" ] || return 0
-    [ "$SWEEP_STARTED" = "1" ] || return 0
+    # A run that ended before the sweep began still owes the owner the editor
+    # it quit in the preflight; the trap this one replaced is what would
+    # otherwise have paid it.
+    if [ "$SWEEP_STARTED" != "1" ]; then
+        restore_editor_this_run_quit
+        return 0
+    fi
     [ "$SWEEP_ENDED" = "0" ] || return 0
     SWEEP_ENDED=1
     trap - EXIT
