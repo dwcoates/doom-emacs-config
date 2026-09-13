@@ -662,6 +662,8 @@ type fakeFooter struct {
 	closingSet   int
 	coldGates    map[ids.WorkspaceID]footer.ColdGate
 	interrupting map[ids.WorkspaceID]bool
+	// startFailed is the bring-up failure each workspace was told to stand.
+	startFailed map[ids.WorkspaceID]*footer.StartFailed
 	// dirs is what registration bound, keyed by workspace.
 	dirs map[ids.WorkspaceID]string
 }
@@ -671,6 +673,7 @@ func newFakeFooter() *fakeFooter {
 		closing:      map[ids.WorkspaceID]*footer.CloseBlocked{},
 		coldGates:    map[ids.WorkspaceID]footer.ColdGate{},
 		interrupting: map[ids.WorkspaceID]bool{},
+		startFailed:  map[ids.WorkspaceID]*footer.StartFailed{},
 	}
 }
 
@@ -685,6 +688,10 @@ func (f *fakeFooter) SetColdGate(ws ids.WorkspaceID, gate footer.ColdGate) {
 
 func (f *fakeFooter) SetInterrupting(ws ids.WorkspaceID, on bool) {
 	f.interrupting[ws] = on
+}
+
+func (f *fakeFooter) SetStartFailed(ws ids.WorkspaceID, failure *footer.StartFailed) {
+	f.startFailed[ws] = failure
 }
 
 // fakeSidebar is a sidebar.Resolver.

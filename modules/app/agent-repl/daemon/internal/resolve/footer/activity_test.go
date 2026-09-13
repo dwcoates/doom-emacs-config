@@ -6,6 +6,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/shimclient"
 )
 
 // notificationFrame is an outbound push notification, the highest-ranking
@@ -789,4 +792,174 @@ func TestAnAllowanceIsNewsworthyOnlyAboveTheThresholdOnceTheScalesAgree(t *testi
 			}
 		})
 	}
+}
+
+// ---- the bring-up failure line --------------------------------------------
+
+// startFailedLine is the drawn bring-up failure arm, nil when the disconnected
+// activity draws something else or nothing.
+func startFailedLine(t *testing.T, h *harness) *frontendv1.FooterStatusActivityStartFailed {
+	t.Helper()
+	return h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetStartFailed()
+}
+
+func TestTheBringUpFailureLineDrawsTheCauseItWasGiven(t *testing.T) {
+	// The resolver never composes the cause: the site that opens the
+	// shim_start_failed fault composes it out of that fault's own evidence, so
+	// a spawn death and an adoption refusal reach the strip the same way and
+	// differ only in what they say.
+	cases := []struct {
+		name   string
+		detail string
+	}{
+		{name: "a failed spawn", detail: "exit 1: Error: Cannot find module '/opt/shim/main.js'"},
+		{name: "a failed adoption", detail: "the lock's owner is unreachable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			h.r.SetStartFailed(testWS, &StartFailed{Detail: tc.detail})
+			h.r.OnLink(testWS, shimclient.LinkDead)
+
+			// Assert
+			line := startFailedLine(t, h)
+			if line.GetDetail() != tc.detail {
+				t.Fatalf("detail = %q, want %q", line.GetDetail(), tc.detail)
+			}
+		})
+	}
+}
+
+func TestTheBringUpFailureLineStandsUnderTheStartFailedStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStartFailed() == nil {
+		t.Fatalf("want the line under disconnected · start_failed, got %+v",
+			h.view(t).GetStrip().GetStatus())
+	}
+}
+
+func TestTheBringUpFailureLineCarriesTheDroppedPromptCount(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Act
+	h.r.AddDroppedPrompts(testWS, 2)
+
+	// Assert
+	if got := startFailedLine(t, h).GetDroppedPrompts(); got != 2 {
+		t.Fatalf("dropped_prompts = %d, want 2", got)
+	}
+}
+
+func TestABringUpFailureThatDroppedNothingCountsZero(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if got := startFailedLine(t, h).GetDroppedPrompts(); got != 0 {
+		t.Fatalf("dropped_prompts = %d, want 0 for a failure that dropped none", got)
+	}
+}
+
+func TestASecondBringUpFailureStartsItsOwnDroppedCount(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
+	h.r.AddDroppedPrompts(testWS, 3)
+
+	// Act
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 2: boom again"})
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if got := startFailedLine(t, h).GetDroppedPrompts(); got != 0 {
+		t.Fatalf("dropped_prompts = %d, want 0: the count belongs to the failure that dropped them", got)
+	}
+}
+
+func TestDroppedPromptsWithNoStandingFailureAreRecordedLoudly(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.r.AddDroppedPrompts(testWS, 1)
+
+	// Assert
+	if !hasLevel(h.log.Records(), dlog.LevelWarn, "daemon.footer.dropped_prompts_unattributed") {
+		t.Fatalf("records = %+v, want a WARN for a drop with no failure to attribute it to", h.log.Records())
+	}
+}
+
+func TestASuccessfulLinkClearsTheBringUpFailureLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Act
+	connected(h)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if line := startFailedLine(t, h); line != nil {
+		t.Fatalf("start_failed line = %+v, want it spent once the session served", line)
+	}
+}
+
+func TestTheBringUpFailureLineOutranksANotification(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.OnActivity(testWS, mainAgent, notificationFrame("the agent needs you"))
+
+	// Act
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	activity := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity()
+	if activity.GetStartFailed() == nil {
+		t.Fatalf("activity = %+v, want the bring-up failure to outrank the notification", activity.GetKind())
+	}
+}
+
+func TestTheBringUpFailureLineIsRecordedOnceWhenItIsComposed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Act
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Assert
+	if got := countOf(h.log.Records(), dlog.LevelInfo, "daemon.footer.start_failed_activity"); got != 1 {
+		t.Fatalf("start_failed_activity records = %d, want exactly 1 for one standing line", got)
+	}
+}
+
+// countOf counts the records at one level and operation.
+func countOf(records []dlog.Record, level, operation string) int {
+	n := 0
+	for _, rec := range records {
+		if rec.Level == level && rec.Operation == operation {
+			n++
+		}
+	}
+	return n
 }

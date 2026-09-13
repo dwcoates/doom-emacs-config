@@ -214,4 +214,5 @@ command behind it is defined.
 No feed row for a dropped held prompt whose bring-up failed. The footer
 alone carries it: status is the detached/disconnected arm (whatever that
 arm is named), and the substatus and the activity field after it are
-specific to the bring-up failure.
+specific to the bring-up failure. Landed as
+`FooterStatusActivityStartFailed` (footer/bringup-activity).

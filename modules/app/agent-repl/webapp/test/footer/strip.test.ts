@@ -296,6 +296,52 @@ describe("drawFooterStatusActivity", () => {
     expect(row.querySelector(".footer-activity")?.textContent).toContain(expected);
   });
 
+  it("draws the bring-up failure's cause verbatim", () => {
+    const { row } = drawStrip({
+      status: withActivity("disconnected", "startFailed", "startFailed", {
+        detail: "exit 1: Cannot find module",
+        droppedPrompts: 0,
+      }),
+    });
+    expect(row.querySelector(".footer-activity")?.textContent).toContain(
+      "exit 1: Cannot find module",
+    );
+  });
+
+  it("says nothing about dropped prompts when the failure dropped none", () => {
+    const { row } = drawStrip({
+      status: withActivity("disconnected", "startFailed", "startFailed", {
+        detail: "exit 1: Cannot find module",
+        droppedPrompts: 0,
+      }),
+    });
+    expect(row.querySelector(".footer-activity")?.textContent).not.toContain("dropped");
+  });
+
+  it("names the ONE held prompt a bring-up failure dropped in the singular", () => {
+    const { row } = drawStrip({
+      status: withActivity("disconnected", "startFailed", "startFailed", {
+        detail: "exit 1: Cannot find module",
+        droppedPrompts: 1,
+      }),
+    });
+    expect(row.querySelector(".footer-activity")?.textContent).toContain(
+      "· 1 held prompt dropped",
+    );
+  });
+
+  it("counts the held prompts a bring-up failure dropped in the plural", () => {
+    const { row } = drawStrip({
+      status: withActivity("disconnected", "startFailed", "startFailed", {
+        detail: "exit 1: Cannot find module",
+        droppedPrompts: 3,
+      }),
+    });
+    expect(row.querySelector(".footer-activity")?.textContent).toContain(
+      "· 3 held prompts dropped",
+    );
+  });
+
   it("names the activity's kind on the cell", () => {
     const { row } = drawStrip({
       status: withActivity("thinking", "thinking", "hook", { name: "fmt" }),

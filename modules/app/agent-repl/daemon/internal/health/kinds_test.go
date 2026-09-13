@@ -464,3 +464,58 @@ func TestDetailArmPrefersTheRecordedEvidenceOverTheProse(t *testing.T) {
 		})
 	}
 }
+
+func TestStartFailedDetailComposesTheLineFromTheFaultsOwnEvidence(t *testing.T) {
+	cases := []struct {
+		name  string
+		fault wsm.Fault
+		want  string
+	}{
+		{
+			name: "a failed spawn names the exit code and the tail's last line",
+			fault: wsm.Fault{
+				Kind:     KindShimStartFailed,
+				Detail:   "the workspace's shim would not come up",
+				Evidence: map[string]string{"exit_code": "1", "stderr_tail": "starting\nError: Cannot find module\n"},
+			},
+			want: "exit 1: Error: Cannot find module",
+		},
+		{
+			name: "a spawn death with no stderr names the exit code alone",
+			fault: wsm.Fault{
+				Kind:     KindShimStartFailed,
+				Detail:   "the workspace's shim would not come up",
+				Evidence: map[string]string{"exit_code": "9", "stderr_tail": ""},
+			},
+			want: "exit 9",
+		},
+		{
+			name: "a failed adoption names the refusal itself",
+			fault: wsm.Fault{
+				Kind:     KindShimStartFailed,
+				Detail:   "the workspace's shim would not come up",
+				Evidence: map[string]string{"stderr_tail": "the lock's owner is unreachable"},
+			},
+			want: "the lock's owner is unreachable",
+		},
+		{
+			name: "a failure with no evidence falls back to the fault's own detail",
+			fault: wsm.Fault{
+				Kind:   KindShimStartFailed,
+				Detail: "the workspace's shim would not come up",
+			},
+			want: "the workspace's shim would not come up",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act
+			got := StartFailedDetail(tc.fault)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("StartFailedDetail = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -56,6 +56,7 @@ import type {
   FooterAllowanceSample,
   FooterStatusActivityRateLimited,
   FooterStatusActivityRetrying,
+  FooterStatusActivityStartFailed,
   FooterStatusActivityWakeup,
   FooterStatusBackground,
   FooterStatusBackgroundActivity,
@@ -418,6 +419,8 @@ function drawActivityKind(
       return drawFooterStatusActivityAuthenticating(kind.value);
     case "queryDied":
       return drawFooterStatusActivityQueryDied(kind.value);
+    case "startFailed":
+      return drawFooterStatusActivityStartFailed(kind.value);
     case "closeBlocked":
       return drawFooterStatusActivityCloseBlocked(kind.value);
     default: {
@@ -477,6 +480,23 @@ export function drawFooterStatusActivityInterrupting(
 /** The dead-query line, verbatim. */
 export function drawFooterStatusActivityQueryDied(u: FooterStatusActivityQueryDied): HTMLElement {
   return textLine("footer-activity-query-died", u.text);
+}
+
+/**
+ * The bring-up failure: the daemon's composed cause, and what the failure cost
+ * in held prompts when it dropped any. The count is a fact of the failure the
+ * daemon states as a number, so the line says it in words here rather than
+ * leaving the user to learn it from an emptied tray.
+ */
+export function drawFooterStatusActivityStartFailed(
+  u: FooterStatusActivityStartFailed,
+): HTMLElement {
+  if (u.droppedPrompts === 0) return textLine("footer-activity-start-failed", u.detail);
+  const prompts = u.droppedPrompts === 1 ? "prompt" : "prompts";
+  return textLine(
+    "footer-activity-start-failed",
+    `${u.detail} · ${u.droppedPrompts} held ${prompts} dropped`,
+  );
 }
 
 /** The close-blocked reasons, verbatim. */
