@@ -44,6 +44,8 @@ type fakeSupervisor struct {
 	// what the real supervisor does for a survivor whose lock reads HELD and
 	// whose socket path is gone: shimclient.bringUp redials that forever.
 	hang bool
+	// standingDown is the supervisor's stand-down latch.
+	standingDown bool
 }
 
 func (s *fakeSupervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, _, udsPath string) (shimclient.Client, error) {
@@ -388,6 +390,25 @@ func (d failingLease) Lease(context.Context, wsm.WorkspaceID) (wsm.Lease, bool, 
 // and still owns. These fakes spawn no process, so there is never one to
 // sweep.
 func (s *fakeSupervisor) StandDownEverySpawn(context.Context, string) error { return nil }
+
+// BeginStandDown latches the fake supervisor's stand-down, answering whether
+// this call was the one that latched it.
+func (s *fakeSupervisor) BeginStandDown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.standingDown {
+		return false
+	}
+	s.standingDown = true
+	return true
+}
+
+// StandingDown answers the fake supervisor's latch.
+func (s *fakeSupervisor) StandingDown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.standingDown
+}
 
 // runAndBringUp runs the reconciliation and then the bring-up step over the
 // set it named, which is the order the daemon runs them in: the

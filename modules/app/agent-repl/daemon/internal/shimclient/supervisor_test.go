@@ -841,3 +841,57 @@ func TestTheSweptSpawnIsRecordedAtInfo(t *testing.T) {
 		t.Fatalf("the swept spawn was recorded at %q, want info", level)
 	}
 }
+
+// TestBeginStandDownLatchesWithoutSweeping pins the half of the latch the
+// immediate shutdown needs before it walks anything: the flag goes up, and no
+// process is touched.
+func TestBeginStandDownLatchesWithoutSweeping(t *testing.T) {
+	// Arrange.
+	sup := &supervisor{}
+
+	// Act.
+	first := sup.BeginStandDown()
+
+	// Assert.
+	if !first {
+		t.Fatal("the first BeginStandDown() = false, want the call that latched it to say so")
+	}
+	if !sup.StandingDown() {
+		t.Fatal("StandingDown() = false after BeginStandDown()")
+	}
+}
+
+// TestBeginStandDownIsIdempotent pins that a re-statement is not a transition:
+// the sweep raises the same latch, and a caller that records the transition
+// must not record it twice.
+func TestBeginStandDownIsIdempotent(t *testing.T) {
+	// Arrange.
+	sup := &supervisor{}
+	sup.BeginStandDown()
+
+	// Act.
+	again := sup.BeginStandDown()
+
+	// Assert.
+	if again {
+		t.Fatal("a second BeginStandDown() = true, want only the first call to claim the latch")
+	}
+}
+
+// TestASpawnedClientReadsTheSupervisorsLatch is the wiring's own case: every
+// client the supervisor hands out must read the daemon's latch, or the whole
+// invariant holds only for the clients a teardown walk happens to name.
+func TestASpawnedClientReadsTheSupervisorsLatch(t *testing.T) {
+	// Arrange.
+	sup := &supervisor{}
+	c := newClient(newTestSurfaces().Global(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c.daemonStandDown = sup.StandingDown
+
+	// Act.
+	sup.BeginStandDown()
+
+	// Assert.
+	if !c.StandingDown() {
+		t.Fatal("a client wired to the supervisor reports StandingDown() = false after the supervisor latched")
+	}
+}
