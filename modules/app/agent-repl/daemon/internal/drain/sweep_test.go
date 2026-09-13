@@ -1074,3 +1074,54 @@ func TestSweepStillRecordsAGenuineDirectiveFailureAtError(t *testing.T) {
 		t.Fatal("a genuine directive failure on a serving workspace was not recorded at error")
 	}
 }
+
+// scheduleErrDB fails every schedule read with one error, leaving the rest of
+// the store exactly as it is.
+type scheduleErrDB struct {
+	wsm.DB
+	err error
+}
+
+func (d scheduleErrDB) DrainSchedule(context.Context) (*wsm.DrainSchedule, error) {
+	return nil, d.err
+}
+
+// TestRunLevelsTheScheduleReadByWhetherTheLoopWasCancelled pins the level of
+// the drain loop's schedule read: the serving lifetime ending under the read is
+// this daemon's own exit withdrawing the loop, so it records at debug; a read
+// that fails while serving is still an error.
+func TestRunLevelsTheScheduleReadByWhetherTheLoopWasCancelled(t *testing.T) {
+	tests := []struct {
+		name      string
+		readErr   error
+		wantLevel string
+	}{
+		{name: "the read was cancelled by the exit", readErr: context.Canceled, wantLevel: "debug"},
+		{name: "the read timed out", readErr: context.DeadlineExceeded, wantLevel: "debug"},
+		{name: "the read failed while serving", readErr: errFake, wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, func(d *Deps) { d.DB = scheduleErrDB{DB: d.DB, err: tt.readErr} })
+
+			// Act
+			err := h.c.Run(context.Background())
+
+			// Assert
+			if !errors.Is(err, tt.readErr) {
+				t.Fatalf("Run err = %v, want %v", err, tt.readErr)
+			}
+			var levels []string
+			for _, rec := range records(h.log, opRun) {
+				if rec.Level == "debug" && rec.Message == "the drain loop is running" {
+					continue
+				}
+				levels = append(levels, rec.Level)
+			}
+			if len(levels) != 1 || levels[0] != tt.wantLevel {
+				t.Fatalf("schedule-read levels = %v, want exactly [%s]", levels, tt.wantLevel)
+			}
+		})
+	}
+}
