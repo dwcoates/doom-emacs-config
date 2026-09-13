@@ -15,6 +15,15 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The adopt that outruns the intent manifest, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | An adopt arriving before the incumbent armed the rendezvous was refused `no_transfer_announced`; wait for the arm, or move the manifest write ahead of the announcement? | Wait for the arm, in `rendezvousCall` via `awaitArm` | The announcement carries the successor's address and the participants act on it the instant they hear it, so no write order removes the window — only a wait does; and `awaitServingRelease` already establishes the pattern one step later in the same function | Restore the single `armFromManifest` call in `rendezvousCall` (daemon/internal/rollout/adopt.go) |
+| 2026-09-13 | What bounds the wait? | `Deps.AdoptionWindow`, the handover's own window, armed lazily on the first poll that has to wait | It is the same bound the incumbent gives the adoption, so a call that outlives it has no handover left to join; arming it only when the call actually waits keeps the ordinary answer free of a window | Arm `bound` at the top of `awaitArm` unconditionally, or give the wait its own constant |
+| 2026-09-13 | The web side's `no_transfer_announced` is the ORDINARY page-boot answer; does the wait swallow it? | No — the wait ends the moment a manifest is READ (`manifestSeen`), armed or not, and a non-joining daemon never enters it at all | A manifest in hand names the whole transfer set, so a workspace absent from it genuinely has nothing announced; making that boot pay a 30s window would be a worse defect than the one being fixed | Drop the `seen` early return in `awaitArm` (daemon/internal/rollout/adopt.go) |
+| 2026-09-13 | The bound elapsing with no manifest at all is anomalous; WARN it? | INFO | The ruling on `no_transfer_announced` is that it is never a warning and never a fault, and the record is the same refusal reached the slow way | Change the `<-bound` record to `c.log.Warn` |
+
 ## The boot's bring-up and the health bound, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |

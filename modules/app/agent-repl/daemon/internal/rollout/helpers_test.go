@@ -121,6 +121,31 @@ func (c *fakeClock) awaitArmed(t *testing.T, d time.Duration) {
 	}
 }
 
+// armedSignal answers a channel that CLOSES once a window of exactly d has
+// been armed. It is awaitArmed's non-fatal form, for a test that has to race
+// that edge against a call answering early: the early answer is the failure
+// worth reporting, so it must not be pre-empted by this helper's own t.Fatalf.
+//
+// It consumes `asked`, so exactly one of it and awaitArmed is in flight at a
+// time within one test.
+func (c *fakeClock) armedSignal(d time.Duration) <-chan struct{} {
+	ready := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case got := <-c.asked:
+				if got == d {
+					close(ready)
+					return
+				}
+			case <-time.After(10 * time.Second):
+				return
+			}
+		}
+	}()
+	return ready
+}
+
 // fakeSpawner is the successor spawner.
 type fakeSpawner struct {
 	address string
