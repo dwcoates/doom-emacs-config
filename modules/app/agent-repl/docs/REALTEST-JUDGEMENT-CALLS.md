@@ -949,3 +949,12 @@ discovered later. The module AGENTS.md documents the catalog.
 | 2026-09-13 | Where the session-line reveal anchors once the glyph and the label are one cell | On the CELL | The ruling's reason for the pairing is that the two are one element; anchoring under the label alone would place the panel under half of it and leave a click on the glyph answering nothing | Pass the account button back to `bindSessionReveal` |
 | 2026-09-13 | Whether the hibernated and cold-gate cells needed a style of their own to read as the right group's content | No — the right group's own box, at the strip's right edge, is the whole answer | Both already carried the right cells' padding, border and radius; what made them read as a spill was the flex row's centered title, which the tracks fix, so a style of their own would have been a second answer to a question the box already answers | Give `.topbar-hibernated` / `.topbar-cold-gate` their own box |
 | 2026-09-13 | Whether the topbar proto's header sketch is regenerated after a comment-only edit | Yes, `make -C proto all` | The committed bindings carry the file's leading comment verbatim and `check-generated` diffs a fresh regen byte for byte, so a comment-only edit that skipped codegen would fail that gate | Strip leading comments from the generated headers |
+
+## Owner ruling: every daemon update reaches the footer (2026-09-13, owner)
+
+Every update the daemon produces for a workspace must reach the user in
+some form through the footer (or the feed). The topology is to be
+established by an audit: every response vector from the daemon to the
+webapp (unary refusals, stream endings, transport failures, warnings,
+errors, progress) that is NOT reflected in the footer or the feed today
+is catalogued in a summary doc, then remediated.
