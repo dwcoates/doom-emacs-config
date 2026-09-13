@@ -1069,14 +1069,64 @@ func (f *Fleet) noteStartFailed(ctx context.Context, log dlog.Logger, ws ids.Wor
 	f.publishHost(ws)
 }
 
+// noteSessionRefused records a StartSession the shim would not serve as the
+// workspace's OWN fault, so it reaches a surface a user reads.
+//
+// GROUNDED, 2026-09-13: a shim refused the start of one workspace on every
+// boot, and `daemon.boot.bring_up` logged it, counted it and went on. Nothing
+// else happened — no fault, no line anywhere — so the workspace looked merely
+// idle while it was in fact unserveable, and the same silence met the start a
+// cold-gate answer re-opens with.
+//
+// NOT `shim_start_failed`, AND THE LINK IS NOT DEAD. That kind and the dead
+// link both name the shim PROCESS, which here is up and answering: what it
+// refused is the SESSION. `resume_failed` is the kind for that, its typed arm
+// carries the shim's own account as the cause, and nothing about the link is
+// restated — saying it died would send every surface hunting a process that is
+// right there.
+func (f *Fleet) noteSessionRefused(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, cause error) {
+	if ctx.Err() != nil {
+		// A CANCELLED CONTEXT IS A DAEMON STANDING DOWN, not a fault to file:
+		// the write would fail, and the error it logged would be about the
+		// shutdown rather than about this workspace.
+		return
+	}
+	workspace := ws
+	fault := wsm.Fault{
+		Workspace: &workspace,
+		Kind:      health.KindResumeFailed,
+		Detail:    "the shim refused to start this workspace's session",
+		Evidence:  map[string]string{"cause": cause.Error()},
+		OpenedAt:  f.now(),
+	}
+	if _, err := f.deps.DB.OpenFault(ctx, fault); err != nil {
+		log.Error(opBringUp, "could not record the refused session start", dlog.Context{"cause": err.Error()})
+		return
+	}
+	f.publishHost(ws)
+}
+
 // linkFaultKinds are the fault kinds a lost daemon-to-shim link records, and
 // the ones a healthy attach retracts.
 var linkFaultKinds = []string{health.KindShimDied, health.KindLinkSevered}
 
 // closeLinkFaults retracts the lost-link faults of one workspace.
 func (f *Fleet) closeLinkFaults(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
+	f.closeFaults(ctx, log, ws, linkFaultKinds, "a healthy attach retracted a lost-link fault")
+}
+
+// closeSessionRefusedFaults retracts the refused-start fault of one workspace,
+// because a session that IS serving is the repair of the refusal that preceded
+// it. One shared closer with closeLinkFaults, so the two cannot drift.
+func (f *Fleet) closeSessionRefusedFaults(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
+	f.closeFaults(ctx, log, ws, []string{health.KindResumeFailed},
+		"a started session retracted a refused-start fault")
+}
+
+// closeFaults retracts every standing fault of these kinds on one workspace.
+func (f *Fleet) closeFaults(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kinds []string, note string) {
 	workspace := ws
-	for _, kind := range linkFaultKinds {
+	for _, kind := range kinds {
 		open, err := f.deps.DB.OpenFaults(ctx, wsm.FaultScope{Workspace: &workspace, Kind: kind})
 		if err != nil {
 			log.Error(opBringUp, "could not read the standing link faults", dlog.Context{
@@ -1091,7 +1141,7 @@ func (f *Fleet) closeLinkFaults(ctx context.Context, log dlog.Logger, ws ids.Wor
 				})
 				continue
 			}
-			log.Info(opBringUp, "a healthy attach retracted a lost-link fault", dlog.Context{
+			log.Info(opBringUp, note, dlog.Context{
 				"kind": kind, "fault": string(fault.ID),
 			})
 		}
@@ -1192,7 +1242,27 @@ const DefaultStartSessionBound = 60 * time.Second
 // startSession runs StartSession and answers a COLD refusal with the gate. A
 // nil SessionStarted with a nil error means the session is parked behind a
 // standing gate, which is an answer and not a failure.
+// startSession asks the shim to start the workspace's session, and files a
+// fault for every way that can fail.
+//
+// THE FAULT IS FILED HERE, AT THE ONE SITE, rather than in each arm below: the
+// refusals are a growing set, every one of them leaves the workspace with no
+// session, and an arm added later must not be able to go unsurfaced by
+// forgetting a call. The two conditions that are NOT failures — a cold gate,
+// which is a designed product state the user answers, and a stand-down this
+// daemon ordered — are the only ones that pass through unfiled.
 func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session) (*conversationv1.SessionStarted, error) {
+	started, err := f.askToStartSession(ctx, log, ws, client, src, session)
+	switch {
+	case err != nil && !errors.Is(err, shimclient.ErrStandDownOrdered):
+		f.noteSessionRefused(ctx, log, ws, err)
+	case err == nil && started != nil:
+		f.closeSessionRefusedFaults(ctx, log, ws)
+	}
+	return started, err
+}
+
+func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session) (*conversationv1.SessionStarted, error) {
 	req := &shimv1.StartSessionRequest{}
 	if src.Fresh {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
