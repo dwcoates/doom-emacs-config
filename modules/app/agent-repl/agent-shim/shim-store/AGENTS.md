@@ -192,8 +192,19 @@ the sidecar and the runtime un-bounced. Unlinking costs the same whatever the
 file weighs, so `ensureSchema` never drops: it returns a `schemaMismatchError`
 naming what it found, and `Open` — the layer that owns the file — closes the
 handle, removes the file with its siblings, and reopens onto an empty one. The
-mismatch is recorded ONCE, as a warn from `Open`, naming the found version and
-table set and saying the file was removed.
+mismatch is recorded ONCE, from `Open`, naming the found version and table set
+and saying the file was removed.
+
+**WHOSE DATABASE IT WAS DECIDES THE LEVEL.** A stamp BELOW `SchemaVersion` is a
+version this binary superseded, and meeting one is what an ordinary deploy that
+bumped the schema does; with no retention during development (owner ruling
+2026-09-13), recreating it is the convention working, so it is INFO naming both
+versions. Everything else is ERROR and still nuked: a stamp at or above this
+binary's is a database it cannot have created (a newer store was here, or the
+same version carries a shape this one did not write), a database with no
+`schema_meta` at all is somebody else's file, and a file this binary cannot read
+is damaged. A recreate that fails after the superseded file has been unlinked is
+ERROR too — there is no database at all at that point.
 
 ### Throwing the database away on purpose: `bin/store-reset.sh`
 
@@ -232,7 +243,7 @@ answer, because the store holds a cache of what the vendor and the shim already
 know how to produce again, and refusing to boot would wedge the service on bytes
 nobody can read. It is removed with its `-wal`/`-shm` siblings (a stale WAL
 beside a fresh database is how a "recreated" store comes up carrying fragments of
-the one it replaced) and recreated, with a warning naming the cause. Two guards:
+the one it replaced) and recreated, with an ERROR naming the cause. Two guards:
 the nuke happens ONCE (a second failure is a real problem — an unwritable
 directory, a full disk — and is returned), and only for a REGULAR FILE. A
 directory at `--db` is reported, never replaced: unlinking whatever sits at an

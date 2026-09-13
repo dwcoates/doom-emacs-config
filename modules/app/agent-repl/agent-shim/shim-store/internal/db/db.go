@@ -281,13 +281,35 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 			"the database path cannot be opened and is not a regular file, so it will not be replaced: %v", err)
 		return nil, err
 	}
+	// WHAT LEVEL A NUKE IS RECORDED AT DEPENDS ON WHOSE DATABASE IT WAS.
+	//
+	// A stamp BELOW SchemaVersion is a version this binary superseded, and
+	// meeting one is the ordinary outcome of a deploy that bumped the schema:
+	// the store is a cache with no retention during development (owner ruling
+	// 2026-09-13), so recreating it is the documented convention working, not a
+	// defect. It is recorded at INFO, naming both versions, because the fact
+	// that the database was replaced is worth having and the fact that it
+	// HAPPENED is not a fault. Held at warn, every schema bump put a warning in
+	// the owner's log for doing exactly what it is supposed to do (found
+	// version=5, want version=6, 2026-09-13 16:03:25).
+	//
+	// ANYTHING ELSE IS AN ERROR, and still nuked. A stamp AT OR ABOVE this
+	// binary's is a database this binary cannot have created — a newer store
+	// was here, or the same version carries a shape this one did not write —
+	// and a file this binary cannot read at all is damaged. Neither is a
+	// convention; both discard data that nothing planned to discard.
 	var mismatch *schemaMismatchError
-	if errors.As(err, &mismatch) {
-		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn"},
-			"on-disk schema does not match this binary (found version=%d tables=%v, want version=%d tables=%v) — removing the database file and its WAL siblings and recreating; the store is nuked, never migrated",
+	switch {
+	case errors.As(err, &mismatch) && supersededVersion(mismatch.version):
+		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
+			"the on-disk schema is a superseded version (found version=%d tables=%v, want version=%d tables=%v) — removing the database file and its WAL siblings and recreating; the store is nuked, never migrated",
 			mismatch.version, mismatch.tables, SchemaVersion, schemaTables)
-	} else {
-		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn", ErrorCause: err.Error()},
+	case errors.As(err, &mismatch):
+		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error"},
+			"on-disk schema was not created by this binary and is not a version it superseded (found version=%d tables=%v, want version=%d tables=%v) — removing the database file and its WAL siblings and recreating; the store is nuked, never migrated",
+			mismatch.version, mismatch.tables, SchemaVersion, schemaTables)
+	default:
+		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
 			"the database file cannot be read by this binary (%v) — removing it and its WAL siblings and recreating; the store is nuked, never migrated", err)
 	}
 	if removeErr := removeDatabaseFiles(path); removeErr != nil {
@@ -295,12 +317,26 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 			"removing the superseded database failed: %v", removeErr)
 		return nil, removeErr
 	}
-	d, err = openAt(writeDSN, readDSN, path, log, opts, clock)
+	d, err = reopenAfterNuke(writeDSN, readDSN, path, log, opts, clock)
 	if err != nil {
+		// THE RECREATE IS THE LAST RESORT, so its failure is stated here rather
+		// than left to whatever the caller does with the error: at this point
+		// the superseded file has already been unlinked and there is no
+		// database at all.
+		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
+			"the database could not be recreated at version=%d after the superseded file was removed: %v", SchemaVersion, err)
 		return nil, err
 	}
 	return finishOpen(d, log, path, opts)
 }
+
+// reopenAfterNuke is openAt, reached through a variable so a test can construct
+// the one failure the filesystem will not hold still for: a recreate that fails
+// AFTER the superseded file has already been unlinked. Every path that could
+// make the real open fail (a read-only directory, a full disk) also makes the
+// unlink fail, which is a different branch, so the record on this one would
+// otherwise be untested.
+var reopenAfterNuke = openAt
 
 // finishOpen records the ready state. It is the one exit both the first attempt
 // and the post-nuke attempt take.
@@ -548,6 +584,13 @@ CREATE TABLE schema_meta (version INTEGER NOT NULL);
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
 var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "schema_meta", "workflow", "write_ledger"}
+
+// supersededVersion reports whether an on-disk stamp names a schema THIS
+// binary superseded: any version below its own, and not the 0 of a database
+// that carries no `schema_meta` at all (somebody else's file, never a version
+// of ours). It is what separates the ordinary deploy-time bump from a database
+// this binary has no account of.
+func supersededVersion(onDisk int) bool { return onDisk > 0 && onDisk < SchemaVersion }
 
 // schemaMismatchError is an on-disk shape this binary did not create. It is
 // NOT a storage failure and nothing outside Open ever sees it: it is the signal
