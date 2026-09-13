@@ -212,17 +212,36 @@ Scale
 
 ## Status
 
+Sweeps are named by their run directory stamp under `~/.claude-emacs/realtest/`.
+The two most recent are 2026-09-13 111010 and 2026-09-13 121317. Every sweep now
+also opens with the BETWEEN-SWEEPS GAP SCAN, which holds the window since the
+previous sweep ended — when no realtest was running and the editor was the
+owner's — to the same bar as a run window, with no allowlist. It ran for the
+first time in sweep 121317 and reported 31 findings in the 11:12–12:13 hour;
+most were already closed by the log sweeps merged at 12:10, and the rest are
+dispatched.
+
 | # | status | ruling |
 |---|---|---|
 | 0 | done (cc93abb9d) | retire the old playtest layer |
-| 1 | PASSED 2026-09-12 (sweep 152051), clean harvest; needs one more green for twice-green | remediated; see judgement ledger |
-| 2 | PASSED 2026-09-12 (sweeps 133741 and 152051) — TWICE-GREEN | `TestRealtestRestartWithTheDaemonUp` |
-| 3 | PASSED 2026-09-12 (sweeps 133741 and 152051) — TWICE-GREEN | `TestRealtestStartWithTheDaemonDown` |
-| 4 | passed once (sweep 133741); FAILING on the tab bar reordering under a switch (finding SS) | needs a bar drawing at least THREE tabs: with two, `s-{` and `s-}` reach the same tab and a reversed direction cannot be told from a correct one |
-| 5 | RUNS; runs end to end; harvest not yet clean | `TestRealtestCreateWorkDeleteAWorkspace`; acts against a dedicated scratch repo under the run directory |
-| 6 | RUNS; blocked on harness key delivery (finding TT) | `TestRealtestRegisterAndReopen`; same scratch-repo rule |
-| 7 | RUNS; blocked on a phantom shim adoption (finding UU) | `TestRealtestForkAWorkspace`; same scratch-repo rule. Needs a prompt ANSWERED, which the vendor guard now provides on its own, see below |
-| 8 | RUNS; blocked on harness key delivery (finding TT) | `TestRealtestPriorityCloseReopenKill`; same scratch-repo rule |
+| 1 | PASSED 2026-09-13 (sweeps 111010 and 121317), clean harvest both times — TWICE-GREEN | `TestRealtestStartTheEditor` |
+| 2 | PASSED 2026-09-13 (sweeps 111010 and 121317), clean harvest both times — TWICE-GREEN (already twice-green on 2026-09-12) | `TestRealtestRestartWithTheDaemonUp` |
+| 3 | PASSED 2026-09-13 (sweeps 111010 and 121317), clean harvest both times — TWICE-GREEN (already twice-green on 2026-09-12) | `TestRealtestStartWithTheDaemonDown` |
+| 4 | PASSED 2026-09-13 (sweeps 111010 and 121317), clean harvest both times — TWICE-GREEN | `TestRealtestSwitchBetweenWorkspaces`; the three-tab bar the reordering finding asked for |
+| 5 | every product assertion passes in both sweeps; FAILING only on the harness's C-g press ("C-g DID NOT REACH EMACS"), and it harvested the elisp central-log fallback warning for the freshly created workspace | `TestRealtestCreateWorkDeleteAWorkspace`; C-g judged a harness key-delivery failure, fix in flight on `realtest/quit-press`; the fallback warning's fix is in flight on `elisp/gap-warnings` |
+| 6 | every product assertion passes in both sweeps; FAILING only on the harness's C-g press ("C-g DID NOT REACH EMACS") | `TestRealtestRegisterAndReopen`; same harness key-delivery failure, `realtest/quit-press` |
+| 7 | every product assertion passes in both sweeps; FAILING only on the harness's C-g press ("C-g DID NOT REACH EMACS") | `TestRealtestForkAWorkspace`; the phantom shim adoption is gone; same harness key-delivery failure, `realtest/quit-press` |
+| 8 | every product assertion passes in both sweeps; FAILING only on the harness's C-g press ("C-g DID NOT REACH EMACS") | `TestRealtestPriorityCloseReopenKill`; same harness key-delivery failure, `realtest/quit-press` |
+| 9–14 | not yet authored | Conversation |
+| 15–16 | not yet authored | Panels and windows |
+| 17–19 | not yet authored | Daemon lifecycle |
+| 20–22 | not yet authored | Failure |
+| 23–24 | not yet authored | Scale |
+
+The C-g failure is the harness's own: the driver posts a pid-addressed CGEvent
+that Emacs's `(recent-keys)` never gains, while the lead verified live that the
+same driver's C-g DOES dismiss a `read-string` when invoked by hand. An agent is
+finding the difference on `realtest/quit-press`.
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
