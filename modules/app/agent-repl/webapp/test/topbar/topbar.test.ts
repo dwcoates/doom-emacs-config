@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import { TopbarViewSchema, type TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import STYLESHEET from "../../src/styles.css?raw";
 import { drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
 import { GEOMETRY, NOW, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
@@ -308,5 +309,43 @@ describe("mountTopbar", () => {
     await settle();
     handle.dispose();
     expect(host.children.length).toBe(0);
+  });
+});
+
+/**
+ * THE STRIP'S LAYOUT (owner rulings 1-4, 2026-09-13).
+ *
+ * jsdom resolves the cascade but lays nothing out, so a layout claim is
+ * asserted where it is DECIDED — the declarations in `src/styles.css` and the
+ * DOM order `drawTopbarView` builds — rather than by measuring boxes that are
+ * all zero here. The stylesheet is read raw for the same reason
+ * `test/feed/rows/separation.test.ts` reads it: the token a rule was written
+ * with is the assertion, and jsdom would hand back a resolved-away shorthand.
+ */
+function ruleBody(selector: string): string {
+  const start = STYLESHEET.indexOf(`\n${selector} {`);
+  expect(start).toBeGreaterThan(-1);
+  const open = STYLESHEET.indexOf("{", start);
+  const close = STYLESHEET.indexOf("}", open);
+  return STYLESHEET.slice(open + 1, close);
+}
+
+/** The value of DECLARATION in SELECTOR's block, comments stripped. */
+function declaration(selector: string, property: string): string {
+  const body = ruleBody(selector).replace(/\/\*[\s\S]*?\*\//g, "");
+  const match = new RegExp(`(?:^|;|\\n)\\s*${property}\\s*:([^;]*);`).exec(body);
+  expect(match).not.toBeNull();
+  return (match?.[1] ?? "").trim();
+}
+
+describe("the strip's layout", () => {
+  // RULING 1. Not "both are 0.5rem" — both are the SAME TOKEN, which is what
+  // keeps them from drifting apart the next time one of them is tuned.
+  it("pads the strip's edges with the very token that gaps its cells", () => {
+    // ARRANGE / ACT
+    const padding = declaration(".topbar-row", "padding");
+    const gap = declaration(".topbar-row", "gap");
+    // ASSERT
+    expect(padding).toBe(`0 ${gap}`);
   });
 });
