@@ -127,8 +127,10 @@ the module."
 (map! :leader
       (:prefix "TAB"
        :desc "Add project from directory" "C-n" #'agent-repl-add-project-workspace
-       :desc "New workspace (C-u = child of current)" "n" #'agent-repl-create-workspace
-       :desc "New named workspace (no prompt; C-u = child)" "N" #'agent-repl-create-workspace-static
+       :desc "New workspace" "n" #'agent-repl-create-workspace
+       :desc "New named workspace (no prompt)" "N" #'agent-repl-create-workspace-static
+       :desc "New child workspace" "c" #'agent-repl-create-child-workspace
+       :desc "New named child workspace (no prompt)" "C" #'agent-repl-create-child-workspace-static
        :desc "Fork workspace + fork the conversation" "f" #'agent-repl-fork-workspace
        :desc "Re-open a closed workspace" "o" #'agent-repl-open-workspace
        :desc "Merge current workspace (enqueue)" "M" #'agent-repl-merge-workspace

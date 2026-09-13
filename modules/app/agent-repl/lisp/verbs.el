@@ -994,59 +994,93 @@ the obvious default rather than something to retype."
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
     (read-string prompt-text initial)))
 
-(defun agent-repl-create-workspace (&optional child)
-  "Create a DYNAMIC workspace (`SPC TAB n'): a prompt, and nothing else.
-Owner ruling, 2026-09-12.  This is the dynamic normal mode, so the only
-question it asks is the prompt, which defaults to the composer's text.
-The repository is the one the current workspace sits in, off that repo's
-MAIN (default) branch -- an absent base ref IS that resolution -- and the
-daemon mints the name.  A prefix argument makes the new workspace a CHILD
-of the current one, whose merge target is then the parent's worktree and
-branch rather than the repo's main checkout.
+(defun agent-repl-verbs--create-standard (mode child)
+  "Create a standard workspace in MODE, as a CHILD of the current one when set.
+MODE is `dynamic\=' -- a prompt and nothing else, the repository read off
+the current workspace\='s roster section -- or `static\=', which asks for a
+repository and a REQUIRED name and sends no prompt at all.
 
-Naming a repository or a name by hand is the STATIC mode's business:
-`agent-repl-create-workspace-static'.
+CHILD non-nil makes the new workspace a child of the current workspace:
+its parent is the current workspace\='s ref, so its merge target is the
+parent\='s worktree and branch rather than the repo\='s main checkout.
+Owner ruling, 2026-09-12: the child variants are their own commands
+rather than a prefix argument, and they share this body so the two
+spellings of one mode cannot drift apart.
 
 THE NEW WORKSPACE IS SELECTED.  Creating one is a statement about where
 you intend to work next, so this stands on it the moment the daemon
 answers -- the same step registering a directory takes."
-  (interactive "P")
-  (let* ((repository (agent-repl-verbs--dynamic-repository "a dynamic create"))
-         (prompt (agent-repl-verbs--read-prompt "Initial prompt: "))
+  (let* ((repository (if (eq mode 'static)
+                         (agent-repl-verbs--read-repository)
+                       (agent-repl-verbs--dynamic-repository "a dynamic create")))
+         (name (when (eq mode 'static) (string-trim (read-string "Name: "))))
+         (prompt (unless (eq mode 'static)
+                   (agent-repl-verbs--read-prompt "Initial prompt: ")))
          (parent (when child
                    (agent-repl-verbs--ref (agent-repl--ws-current-name)))))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-standard mode=dynamic child=%s"
-                      (and child t))
-    (agent-repl-verb-create
-     repository :standard
-     :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
-     :parent parent
-     :select t)))
+    (when (and (eq mode 'static) (string-empty-p name))
+      (user-error "agent-repl: a static workspace IS its name"))
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-standard mode=%s child=%s"
+                      mode (and child t))
+    (apply #'agent-repl-verb-create
+           repository :standard
+           :parent parent
+           :select t
+           (if (eq mode 'static)
+               (list :name name)
+             (list :initial-prompt
+                   (unless (string-empty-p (string-trim prompt)) prompt))))))
 
-(defun agent-repl-create-workspace-static (&optional child)
-  "Create a STATIC workspace (`SPC TAB N'): a repository and a name, no prompt.
+(defun agent-repl-create-workspace ()
+  "Create a DYNAMIC workspace (`SPC TAB n\='): a prompt, and nothing else.
+Owner ruling, 2026-09-12.  This is the dynamic normal mode, so the only
+question it asks is the prompt, which defaults to the composer\='s text.
+The repository is the one the current workspace sits in, off that repo\='s
+MAIN (default) branch -- an absent base ref IS that resolution -- and the
+daemon mints the name.
+
+It never makes a child: `agent-repl-create-child-workspace\=' is the child
+variant, and naming a repository or a name by hand is the STATIC mode\='s
+business (`agent-repl-create-workspace-static\=').
+
+THE NEW WORKSPACE IS SELECTED."
+  (interactive)
+  (agent-repl-verbs--create-standard 'dynamic nil))
+
+(defun agent-repl-create-child-workspace ()
+  "Create a dynamic CHILD workspace (`SPC TAB c\='): a prompt, and nothing else.
+Owner ruling, 2026-09-12.  Exactly `agent-repl-create-workspace\=', except
+the new workspace is a CHILD of the current one: its parent is the
+current workspace\='s ref, so it merges back into the parent\='s worktree and
+branch rather than the repo\='s main checkout.
+
+THE NEW WORKSPACE IS SELECTED."
+  (interactive)
+  (agent-repl-verbs--create-standard 'dynamic t))
+
+(defun agent-repl-create-workspace-static ()
+  "Create a STATIC workspace (`SPC TAB N\='): a repository and a name, no prompt.
 Owner ruling, 2026-09-12.  This is the one creation mode that asks for a
 repository, and the one that REQUIRES a name; it sends no initial prompt
-at all, so the workspace comes up idle and waits for the user.  A prefix
-argument makes it a CHILD of the current workspace, exactly as the
-dynamic create's does.
+at all, so the workspace comes up idle and waits for the user.
 
-THE NEW WORKSPACE IS SELECTED, for the same reason the dynamic create's
+It never makes a child: `agent-repl-create-child-workspace-static\=' is the
+child variant.
+
+THE NEW WORKSPACE IS SELECTED, for the same reason the dynamic create\='s
 is."
-  (interactive "P")
-  (let* ((repository (agent-repl-verbs--read-repository))
-         (name (string-trim (read-string "Name: ")))
-         (parent (when child
-                   (agent-repl-verbs--ref (agent-repl--ws-current-name)))))
-    (when (string-empty-p name)
-      (user-error "agent-repl: a static workspace IS its name"))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-standard mode=static child=%s"
-                      (and child t))
-    (agent-repl-verb-create
-     repository :standard
-     :name name
-     :parent parent
-     :select t)))
+  (interactive)
+  (agent-repl-verbs--create-standard 'static nil))
+
+(defun agent-repl-create-child-workspace-static ()
+  "Create a static CHILD workspace (`SPC TAB C\='): a repository and a name.
+Owner ruling, 2026-09-12.  Exactly `agent-repl-create-workspace-static\=',
+except the new workspace is a CHILD of the current one and merges back
+into the parent\='s worktree and branch.  It asks no prompt.
+
+THE NEW WORKSPACE IS SELECTED."
+  (interactive)
+  (agent-repl-verbs--create-standard 'static t))
 
 (defun agent-repl-fork-workspace ()
   "Create a CHILD workspace forking the current one's conversation.
