@@ -1120,3 +1120,16 @@ never set it.
   and sink across all runtimes.
   - A workspace whose directory no longer exists is closed automatically
     by the daemon.
+
+## No warning or error anywhere is neglected
+
+A realtest's harvest reads only its own run window. That is not the whole
+truth: warnings and errors also land between runs (deploy restarts, boot
+catch-up, the owner's own use, leftovers a run failed to clean), and the
+owner sees them in the live Emacs. Every WARN/ERROR/non-record in ANY
+agent-repl log source, and every `*Warnings*` entry the module raises, is a
+finding the moment it exists, whether or not a test was running. Before a
+sweep, the gap since the previous sweep is scanned and its findings recorded
+in the run's manifest; a run leaves the owner's state exactly as it found
+it, and a leftover it cannot clean fails the run by name. Never allowlist,
+never dismiss, never let a popup stand unexplained.
