@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- webapp hold tray: the `held (N)` heading is no longer drawn — the daemon still composes `DaemonHoldTray.heading` and the tray still requires it, but nothing puts it on screen (owner ruling 2, 2026-09-13)
+
 - webapp hold tray: a held prompt card hangs on the `.bubble.user` right rail with that bubble's own 60% width rule (`held-right`), instead of the agent's left rail (owner ruling 1, 2026-09-13)
 
 - elisp: a workspace that becomes OPEN in this editor session opens its agent-repl panels at once, before it is switched to (`agent-repl--panels-open-on-arrival` called from `agent-repl-roster--open-tab`), with the startup roster exempt and a plain switch untouched (owner ruling 2026-09-13, look-and-feel aside #6)
