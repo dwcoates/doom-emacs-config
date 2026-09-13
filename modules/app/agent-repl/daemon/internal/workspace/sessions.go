@@ -1064,7 +1064,13 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if failure := response.GetFailure(); failure != nil {
 		if cold := failure.GetCold(); cold != nil {
 			f.raiseColdGate(ws, src.VendorSessionID, cold)
-			log.Warn(opBringUp, "the session is parked behind a cold gate", dlog.Context{
+			// AN ANSWER, NOT A FAILURE -- as this function's own doc says. The
+			// gate is a designed product state: the shim states the cost of
+			// resuming a large context, `raiseColdGate` publishes it to the
+			// footer and the feed, and the USER chooses pay, clear or compact.
+			// Nothing is broken and nothing is to be fixed, so it is INFO,
+			// carrying the cost facts that no other record does.
+			log.Info(opBringUp, "the session is parked behind a cold gate", dlog.Context{
 				"context_tokens":  cold.GetContextTokens(),
 				"requested_model": cold.GetRequestedModel().GetName(),
 			})
