@@ -15,6 +15,16 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The deploy's own store outage, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | `bin/deploy-all.sh` kickstarted the store underneath a running sidecar, and the sidecar logged dial failures, `cursor not advanced`, failed cursor recovery and `production-suspended` for the length of the socket gap. Harden the sidecar against the gap, or take the gap with the sidecar stopped? | Stop the sidecar for the restart | The gap is the deploy's own doing and `bin/store-reset.sh` already records the order that has none of it (sidecar down, store down, store up, sidecar up); teaching the sidecar to tolerate an outage nobody needs to cause would leave the outage in place | Restore the single `kickstart` pair in step 4 of `bin/deploy-all.sh` |
+| 2026-09-13 | Stop it with `launchctl kill` or `bootout`? | `bootout`, as the reset does | Both plists set `KeepAlive`, so a signalled process is answered by a new pid within a second and a poll for "stopped" can never succeed; bootout takes the relaunch away with the process | Replace `stop_sidecar`/`start_sidecar` with a `kill` in `bin/deploy-all.sh` |
+| 2026-09-13 | The sidecar's plist is then required to bring it back. Refuse a deploy that cannot find it, or bounce the store anyway? | Refuse, before anything is stopped | A bootout with no plist to bootstrap from leaves the host with no sidecar and no way for the script to return one, so the refusal is taken while everything is still running | Drop `require_sidecar_plist` from `bin/deploy-all.sh` |
+| 2026-09-13 | A store that fails to come up leaves the sidecar down. Start it again on the way out, or leave it stopped? | Leave it stopped, and name that in every failure message | A sidecar started against a store that is not serving recovers its cursors cold, which is the silent full re-read the ordering exists to prevent; the operator is told in the same breath as the store failure | Add a `start_sidecar` to the three exit paths in `wait_for_store_sock` |
+| 2026-09-13 | Does a SIDECAR-ONLY bounce also go through bootout? | No — plain `kickstart` | The store never moves in that case, so its socket is up throughout and there is no gap to avoid | Route the `elif` branch through `stop_sidecar`/`start_sidecar` too |
+
 ## The adopt that outruns the intent manifest, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
