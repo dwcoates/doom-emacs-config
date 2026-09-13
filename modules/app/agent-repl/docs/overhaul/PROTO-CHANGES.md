@@ -918,3 +918,26 @@ transaction: a shape observed and not committed with the advance that consumed
 its line is a shape no re-read will ever observe again.
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+### `frontend.v1` + `agentrepl.v1` — the account cell's dropdown
+
+`TopbarAccount` gains `repeated TopbarAccountOption options = 3`, with the new
+message `TopbarAccountOption { string config_dir = 1; oneof state {
+TopbarAccountLoggedIn logged_in = 2; TopbarAccountLoggedOut logged_out = 3; }
+bool current = 4; }` — the existing logged-in/out messages reused, the daemon
+composing the list from the account package's known roots. A new unary
+`AgentRepl.SelectAccount` (`endpoint_select_account.proto`: request
+`{WorkspaceRef workspace, string config_dir}`, success `{bool logged_in}`, and
+an error union carrying `unknown_account` beside the four cross-cutting
+workspace arms every verb carries) switches the workspace's session to a root.
+
+USER-RULED, 2026-09-13. Clicking the account cell did nothing while logged in
+— it opened the session-line reveal, which was empty — so the cell now presents
+every root the daemon knows with its email or "logged out", the current one
+marked, and choosing one makes the workspace's session spend as that account.
+
+THE SWITCH IS A RESTART, so the cold gate applies as it does to any resume, and
+a chosen root that is logged out is still a SUCCESS: the client opens that
+root's login flow afterwards, exactly as the logged-out cell's own click does.
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4

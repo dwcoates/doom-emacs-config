@@ -490,3 +490,23 @@ func seedIdentitylessSession(t *testing.T, path string) {
 	execRaw(t, path, `INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at)
 		VALUES ('ws-layout3', '', '', '/root/.claude', 'opus', 'default', 1, 1)`)
 }
+
+func TestTheMigrationAddsTheSelectedAccountRootColumn(t *testing.T) {
+	// Arrange — a file written before anybody could choose an account root.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[int](t, s,
+		`SELECT count(*) FROM pragma_table_info('sessions') WHERE name = 'selected_config_dir'`)
+	if got != 1 {
+		t.Fatalf("sessions.selected_config_dir exists %d times after the migration, want 1", got)
+	}
+}

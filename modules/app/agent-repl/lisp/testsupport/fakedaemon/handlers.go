@@ -127,6 +127,10 @@ func (s *fakeServer) SetPermissionMode(ctx context.Context, req *connect.Request
 	return handleUnary[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse](ctx, s, "SetPermissionMode", req.Msg)
 }
 
+func (s *fakeServer) SelectAccount(ctx context.Context, req *connect.Request[v1.SelectAccountRequest]) (*connect.Response[v1.SelectAccountResponse], error) {
+	return handleUnary[v1.SelectAccountRequest, v1.SelectAccountResponse](ctx, s, "SelectAccount", req.Msg)
+}
+
 func (s *fakeServer) WatchFooter(ctx context.Context, req *connect.Request[v1.WatchFooterRequest], stream *connect.ServerStream[v1.WatchFooterResponse]) error {
 	s.record(ctx, "WatchFooter", req.Msg)
 	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",

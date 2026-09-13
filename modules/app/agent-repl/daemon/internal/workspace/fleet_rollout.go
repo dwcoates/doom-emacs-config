@@ -193,10 +193,7 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 	if err != nil {
 		return nil, fmt.Errorf("workspace: prelaunch %q: read the session record: %w", ws, err)
 	}
-	configDir := session.ConfigDir
-	if configDir == "" {
-		configDir = f.deps.Accounts.ConfigDirFor(record.Dir)
-	}
+	configDir := spawnRootFor(f.deps.Accounts, record.Dir, session)
 	sink, err := f.deps.Log.ShimSink(record.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("workspace: prelaunch %q: shim log sink: %w", ws, err)
@@ -479,6 +476,18 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: %w", ws, err)
 	}
 
+	// THE BOUNCE IS ALSO HOW AN ACCOUNT SWITCH TAKES EFFECT (SelectAccount,
+	// owner ruling 2026-09-13). The prelaunched shim above was spawned under
+	// exactly this root, so the transcript has to be carried into it before
+	// the resume is sent: a resume against a root that does not hold the
+	// transcript is a resume of nothing.
+	configDir := spawnRootFor(f.deps.Accounts, record.Dir, session)
+	if session.ConfigDir != "" && session.ConfigDir != configDir {
+		if err := f.portAcrossAccounts(ctx, log, record.Dir, session, configDir, src); err != nil {
+			return rollout.Resumed{}, err
+		}
+	}
+
 	started, err := f.startSession(ctx, log, ws, c, src, session)
 	if err != nil {
 		return rollout.Resumed{}, err
@@ -513,7 +522,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	f.remember(ws, &live{client: c, watcher: watcher, hostSessionID: session.HostSessionID, sessionStarted: true})
 	// A resume keeps the session's host identity: the process rotated, the
 	// session did not.
-	if err := f.recordFacts(ctx, log, ws, session, started, session.ConfigDir, session.HostSessionID, c.PID()); err != nil {
+	if err := f.recordFacts(ctx, log, ws, session, started, configDir, session.HostSessionID, c.PID()); err != nil {
 		return rollout.Resumed{}, err
 	}
 	f.publishHost(ws)
