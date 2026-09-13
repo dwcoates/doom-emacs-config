@@ -442,3 +442,88 @@ func TestTheQuitChordIsMarkedInterrupting(t *testing.T) {
 			wsActQuit.Emacs)
 	}
 }
+
+// A PRESS THAT HAD TO TAKE FOCUS SAYS SO. Under the sweep's policy Emacs is
+// normally already frontmost, so a press that found it was not has met either
+// the owner clicking away or an Emacs a realtest just cold-started, and the
+// receipt is the only place either fact is recorded.
+func TestARefocusedPressIsNoted(t *testing.T) {
+	driver := &KeyDriver{Pid: 1}
+
+	driver.noteRefocus(SwitchRight, "keydriver-receipt: posted keycode=30 pid=1 hold=released "+
+		"keepFocus=yes refocused=yes")
+
+	notes := driver.DrainNotes()
+	if len(notes) != 1 {
+		t.Fatalf("a refocused press left %d note(s), want 1: %v", len(notes), notes)
+	}
+	if !strings.Contains(notes[0], "NOT FRONTMOST") {
+		t.Errorf("the note does not say Emacs had to be brought forward again: %s", notes[0])
+	}
+}
+
+// An ordinary press — Emacs already frontmost — leaves no note, so the refocus
+// note stays a signal rather than one line per keystroke.
+func TestAPressThatFoundEmacsFrontmostIsNotNoted(t *testing.T) {
+	driver := &KeyDriver{Pid: 1}
+
+	driver.noteRefocus(SwitchRight, "keydriver-receipt: posted keycode=30 pid=1 hold=released "+
+		"keepFocus=yes refocused=no")
+
+	if notes := driver.DrainNotes(); len(notes) != 0 {
+		t.Errorf("a press that found Emacs frontmost left notes: %v", notes)
+	}
+}
+
+// The driver's METHOD line is what the manifest carries about who hands focus
+// back, and the two policies must not read the same.
+func TestTheFocusPolicyIsStatedInTheDriversOwnWords(t *testing.T) {
+	tests := []struct {
+		name      string
+		keepFocus bool
+		want      string
+	}{
+		{name: "inside a sweep the sweep holds focus", keepFocus: true, want: "SWEEP holds focus"},
+		{name: "outside one every press hands it back", keepFocus: false, want: "restores the previously"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			driver := &KeyDriver{KeepFocus: test.keepFocus}
+
+			if got := driver.focusPolicy(); !strings.Contains(got, test.want) {
+				t.Errorf("focusPolicy() = %q, want it to contain %q", got, test.want)
+			}
+		})
+	}
+}
+
+// THE HELPER'S THREE FOCUS MODES ARE THE HARNESS'S CONTRACT WITH ITSELF, and
+// the Go side spells them as literals. A mode renamed in the Swift without the
+// Go following would post a flag the helper rejects — or, worse for
+// `--keep-focus`, silently put the per-press flicker back.
+func TestTheKeyHelperImplementsTheFocusModesTheGoSideSpells(t *testing.T) {
+	source, err := os.ReadFile(keyDriverSource)
+	if err != nil {
+		t.Fatalf("read %s: %v", keyDriverSource, err)
+	}
+	tests := []struct {
+		name string
+		want string
+	}{
+		{name: "the sweep can take focus", want: `arguments.first == "--take"`},
+		{name: "the sweep can hand it back", want: `arguments.first == "--give-back"`},
+		{name: "a press can keep it", want: `argument == "` + keyDriverKeepFocusFlag + `"`},
+		{name: "a press says whether it had to re-take it", want: "refocused="},
+		{name: "the take names where focus started", want: sweepFocusTookPrefix},
+		{name: "the handback names what it restored", want: sweepFocusGaveBackPrefix},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if !strings.Contains(string(source), test.want) {
+				t.Errorf("%s does not contain %q", keyDriverSource, test.want)
+			}
+		})
+	}
+}

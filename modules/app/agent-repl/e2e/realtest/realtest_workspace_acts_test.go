@@ -1221,7 +1221,7 @@ func wsActKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	if err != nil {
 		t.Fatalf("read the Emacs pid for the key driver: %v", err)
 	}
-	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client}
+	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client, KeepFocus: sweepHoldsFocus()}
 	if err := driver.Build(ctx); err != nil {
 		note := fmt.Sprintf("KEY DRIVER UNAVAILABLE: %v", err)
 		manifest.Notes = append(manifest.Notes, note)

@@ -27,8 +27,49 @@ The ONE substitution is the vendor. `AGENT_REPL_FORBID_VENDOR_CALLS=1` is set on
 the Emacs process and inherited by everything it spawns, so no real Claude call
 can occur. The owner may lift it per test.
 
-No picture is taken at this stage, which is why Emacs is never brought
-frontmost.
+No picture is taken at this stage.
+
+## Focus: stolen once, handed back once (owner ruling, 2026-09-13)
+
+Emacs used to be brought frontmost for the instant of every keypress and
+reactivated away again immediately, so a sweep flickered the owner's desktop
+once per keystroke and nothing on the screen said whether a run was still going.
+That is no longer the policy.
+
+- **The sweep STEALS FOCUS ONCE, at the start.** `bin/realtest.sh` runs
+  `TestSweepFocusTake` before its first realtest: the helper records where focus
+  is now as a TOKEN — a bundle identifier, else a pid, else `none` — and brings
+  the answering Emacs forward. A sweep whose first realtest cold-starts the
+  editor has nothing to bring forward, and the take then records only where
+  focus started; the first press against the new process takes focus for it.
+- **No press hands focus back.** Every press still verifies the target can
+  receive a key and activates it, because AppKit dispatches a key event only to
+  a key window — it simply LEAVES it there (`keydriver --keep-focus`). A press
+  that finds Emacs not frontmost re-activates it and says `refocused=yes` in its
+  receipt, which is what a mid-sweep relaunch (realtests 1, 2, 3 and 5 through
+  8 all cold-start their own editor) and an owner clicking away both look like.
+- **The sweep HANDS FOCUS BACK ONCE, at the end.** `TestSweepFocusGiveBack`
+  runs from `bin/realtest.sh`'s EXIT trap, so a realtest that failed, a
+  `go test` that panicked and an operator's interrupt all return the desktop —
+  and the desktop coming back is how the owner knows the sweep is over.
+  `bin/realtest.sh -run <one realtest>` is the same script and behaves the same
+  way.
+- **The token travels through a file**, `sweep-focus.txt` in the run directory,
+  because the process that took focus has exited by the time the handback runs.
+  A missing or empty token is an ERROR rather than a `none`: handing focus to
+  nobody would leave the owner staring at Emacs.
+- **A desktop that will not cooperate is REPORTED, never a refusal.** A declined
+  activation (macOS 14 makes activation cooperative) and a locked screen are
+  readings the take prints and the sweep carries on from; refusing to collect a
+  run's findings over the window server's mood would throw the run away. What
+  DOES stop the take is this harness failing its own part — a helper that will
+  not compile, a token that could not be written — and then
+  `AGENT_REPL_REALTEST_FOCUS_HELD` stays unset, every press restores focus the
+  old way, and no handback is owed.
+- **Where focus ends up is judged against whichever policy is in force**
+  (`focusAfterPressesNote`). Under the sweep's policy Emacs still holding focus
+  is the correct outcome and the old "focus is exactly where it started"
+  assertion would fail every phase.
 
 ## The entry point: `bin/realtest.sh`
 
@@ -111,6 +152,8 @@ Environment:
 | `AGENT_REPL_REALTEST_EMACS_SOCKET` | the Emacs server socket, when it is not `$TMPDIR/emacs<uid>/server` |
 | `AGENT_REPL_REALTEST_EMACSCLIENT` | the `emacsclient` to use; the script exports the one it used so its refusals and the run's probes cannot end up on two different clients |
 | `AGENT_REPL_REALTEST=1` | set by the script; without it every `TestRealtest*` skips |
+| `AGENT_REPL_REALTEST_FOCUS` | `take` or `give-back`, set by the script for its two focus harness checks and by nothing else |
+| `AGENT_REPL_REALTEST_FOCUS_HELD=1` | set by the script for each realtest, but ONLY once its own focus take actually ran: it tells every press that the sweep owns the desktop and no press may hand focus back |
 
 The gate is deliberately doubled: the `realtest` build tag keeps these tests out
 of `go test ./...`, and the environment variable keeps them out of a tagged run
@@ -187,12 +230,15 @@ standing here having it.
 posts key events with `CGEventPostToPid` addressed to the Emacs pid. A
 no-activation post reached nothing in run 3: a background app launched hidden
 (`open -gj`) has no key window for AppKit to dispatch the event to, so it was
-dropped with no error. The helper therefore activates the target Emacs for the
-instant of the keypress, posts the event, and restores the previously frontmost
-application. That momentary focus is the ONE place a realtest brings Emacs
-forward, bounded to the keypress and reversed immediately, and it is distinct
-from startup, which never activates Emacs (docs/REALTEST-JUDGEMENT-CALLS.md,
-realtest 1, row 30; lead verifies delivery and restore on the next run).
+dropped with no error. The helper therefore activates the target Emacs and posts
+the event while it is key.
+
+WHO HANDS FOCUS BACK CHANGED ON 2026-09-13 (see "Focus: stolen once, handed back
+once" above). The helper used to restore the previously frontmost application
+after every press; under `--keep-focus` it leaves the target frontmost, because
+the SWEEP took focus at its start and its EXIT trap gives it back at its end.
+Without `--keep-focus` the old per-press restore is exactly what still happens,
+for a caller outside a sweep. Startup itself still never activates Emacs.
 
 Elisp NEVER performs an act. An elisp call that performs the act tests the
 function and says nothing about whether the chord reaches it, which is exactly
@@ -743,7 +789,16 @@ e2e/realtest/
   emacsclient.go               read-only elisp, JSON through a file
   launch.go                    the two unfocused launches, and the guard check
   keys.go                      the chords and the two mechanisms
-  keydriver.swift              CGEventPostToPid, with the trust check
+  keydriver.swift              CGEventPostToPid, with the trust check, the
+                               sweep's --take/--give-back and the press's
+                               --keep-focus
+  focus.go                     what the EDITOR says about its own focus, and
+                               where focus is supposed to be when a phase of
+                               presses ends under each policy
+  sweepfocus.go                the sweep's one steal and one handback, and the
+                               token that travels between the two processes
+  sweepfocus_driver_test.go    TestSweepFocusTake and TestSweepFocusGiveBack,
+                               driven from bin/realtest.sh
   state.go                     what the state database holds, read-only
   manifest.go                  MANIFEST.md
   startup_shared_test.go         what realtests 2 and 3 share

@@ -19,10 +19,20 @@ Input is what the owner would send: real key events into the real Emacs
 process (`s-}`, `M-2`, `SPC TAB n`, typed prompt text), never an elisp call
 that performs the act. Elisp is read-only, for reading state and asserting.
 
-The editor must not disturb the owner: Emacs is launched without taking focus,
-and NO pictures are taken at this stage, so Emacs is never brought frontmost.
-If key delivery to an unfocused Emacs is impossible on macOS, that is surfaced
-to the owner before any alternative is chosen.
+The editor is launched without taking focus, and NO pictures are taken at this
+stage. If key delivery to an unfocused Emacs is impossible on macOS, that is
+surfaced to the owner before any alternative is chosen.
+
+FOCUS IS STOLEN ONCE AND HANDED BACK ONCE (owner ruling, 2026-09-13). It used to
+be per press: every keystroke activated Emacs, posted, and reactivated whatever
+had been frontmost, so a sweep flickered the owner's desktop dozens of times and
+nothing on the screen said whether a run was still going. The sweep now brings
+Emacs forward once, before its first realtest, and keeps it there for the whole
+run — so the owner can watch it — and the application that was frontmost before
+the sweep gets focus back once, at the end. That handback runs from
+`bin/realtest.sh`'s EXIT trap, so a failure, a panic and an interrupt all return
+the desktop, and the desktop coming back is how the owner knows the sweep is
+over. `bin/realtest.sh -run <one realtest>` behaves exactly the same way.
 
 There is exactly one launch method, `open -g` (owner ruling, 2026-09-11): it
 asks LaunchServices not to bring the application forward, and it never brings
@@ -85,6 +95,11 @@ e2e and Emacs-layer suites stay.
   and the REGISTRY untouched with it: every workspace the run created is closed
   and forgotten through the daemon before the run directory goes away, and a
   row that survives fails the run (see "Running a sweep", "The leftovers").
+- The DESKTOP is left as the run found it too. The sweep takes focus before its
+  first realtest and gives it back from its EXIT trap; expect Emacs to be
+  frontmost for the whole run and the previous application to come back when it
+  ends. Clicking away mid-run is allowed: the next press re-takes focus and says
+  so in its receipt.
 
 ## Running a sweep
 
@@ -101,6 +116,14 @@ this; the runner is what gets out of their way.
   adoption are what they measure. `AGENT_REPL_REALTEST_TAKEOVER=1` is one
   answer for the whole run, and the refusal says how many quits the plan holds
   before any of them happens.
+- **The focus.** The sweep steals it ONCE at the start (Emacs frontmost, so the
+  owner can watch) and hands it back ONCE at the end, from the EXIT trap, so a
+  failed, panicked or interrupted sweep still returns the desktop. No press
+  hands focus back on its own any more; a press that finds Emacs not frontmost
+  — the owner clicked away, or the realtest just cold-started a new Emacs —
+  re-takes it and records that in its receipt. A desktop that will not
+  cooperate (a declined activation, a locked screen) is REPORTED and the sweep
+  runs anyway.
 - **The daemon.** Realtest 3 needs none running, and stopping the owner's
   daemon is a consent of its own: `AGENT_REPL_REALTEST_STOP_DAEMON=1`. Without
   it realtest 3 is SKIPPED with the reason rather than run into its refusal.

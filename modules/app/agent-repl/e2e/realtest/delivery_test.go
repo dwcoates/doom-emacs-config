@@ -341,17 +341,31 @@ func TestHoldCeilingOutlivesTheConfirmation(t *testing.T) {
 // handback that dropped keys.
 func TestKeyDriverArgs(t *testing.T) {
 	tests := []struct {
-		name string
-		hold bool
-		want []string
+		name      string
+		hold      bool
+		keepFocus bool
+		want      []string
 	}{
 		{name: "a held press asks for the hold", hold: true, want: []string{"--hold=5", "42", "5", "control"}},
 		{name: "a blind press does not", hold: false, want: []string{"42", "5", "control"}},
+		{
+			name:      "a press inside a sweep that holds focus says so",
+			hold:      true,
+			keepFocus: true,
+			want:      []string{"--hold=5", "--keep-focus", "42", "5", "control"},
+		},
+		{
+			name:      "a press outside a sweep does not, so the helper hands focus back itself",
+			hold:      true,
+			keepFocus: false,
+			want:      []string{"--hold=5", "42", "5", "control"},
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			args := keyDriverArgs(42, Chord{Emacs: "C-g", Keycode: 5, Modifiers: []string{"control"}}, test.hold)
+			args := keyDriverArgs(42, Chord{Emacs: "C-g", Keycode: 5, Modifiers: []string{"control"}},
+				test.hold, test.keepFocus)
 
 			if len(args) != len(test.want) {
 				t.Fatalf("args = %v, want %d of them", args, len(test.want))
