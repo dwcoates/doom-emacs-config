@@ -640,7 +640,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// account. When the two disagree, the vendor transcript is carried into
 	// the newly routed root BEFORE the resume is sent — a resume against a
 	// root that does not hold the transcript is a resume of nothing.
-	configDir := f.deps.Accounts.ConfigDirFor(record.Dir)
+	configDir := accountRootFor(f.deps.Accounts, record.Dir, session)
 	if session.ConfigDir != "" && session.ConfigDir != configDir {
 		if err := f.portAcrossAccounts(ctx, log, record.Dir, session, configDir, src); err != nil {
 			return err
@@ -868,7 +868,7 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 		return refuse(log, "AnswerColdGate", ArmNoSession,
 			fmt.Sprintf("the shim refused the remediated resume of %q as cold again", ws), false)
 	}
-	configDir := f.deps.Accounts.ConfigDirFor(record.Dir)
+	configDir := accountRootFor(f.deps.Accounts, record.Dir, previous)
 	return f.sessionUp(ctx, log, ws, session.client, started, previous, configDir, hostSessionID)
 }
 
@@ -1439,14 +1439,18 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, previous wsm.Session, started *conversationv1.SessionStarted, configDir, hostSessionID string, pid int) error {
 	now := f.now()
 	next := wsm.Session{
-		Workspace:        ws,
-		HostSessionID:    hostSessionID,
-		VendorSessionID:  started.GetVendorSessionId(),
-		ConfigDir:        configDir,
-		Model:            started.GetEffectiveModel().GetName(),
-		PermissionMode:   permissionModeName(started.GetPermissionMode()),
-		StartedAt:        previous.StartedAt,
-		LastEngagementAt: now,
+		Workspace:       ws,
+		HostSessionID:   hostSessionID,
+		VendorSessionID: started.GetVendorSessionId(),
+		ConfigDir:       configDir,
+		// THE CHOICE SURVIVES THE START THAT HONORED IT. recordFacts composes
+		// the row fresh, so a selected root left out here would be erased by
+		// the very bring-up it asked for and the next one would re-route.
+		SelectedConfigDir: previous.SelectedConfigDir,
+		Model:             started.GetEffectiveModel().GetName(),
+		PermissionMode:    permissionModeName(started.GetPermissionMode()),
+		StartedAt:         previous.StartedAt,
+		LastEngagementAt:  now,
 	}
 	if next.StartedAt.IsZero() {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "next.StartedAt.IsZero()"})
