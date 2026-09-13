@@ -21,19 +21,31 @@ Analyze what the store keeps and stop keeping what is never served.
 
 ## Proposal
 
-1. LANDED (first two kinds), 2026-09-13. Do not store residue kinds that no
-   reader serves. `attachment/hook_success` and `attachment/total_tokens_reminder`
-   are now classified and then not written — 286,389 rows and ~263 MB, 47% of the
-   residue this item names. The sidecar still READS every line (the discovery
-   mandate is untouched). The list is NAMED rather than a predicate, in
-   `internal/convert/neverpersist.go` and documented in the sidecar's AGENTS.md
-   under "residue kinds never persisted", so an unknown kind stays persisted for
-   forward compatibility and only the named kinds are dropped. Each drop is DEBUG
-   and the boot walk states one INFO summary per file with the counts by kind.
+1. LANDED IN FULL, 2026-09-13. THE SIDECAR PERSISTS NO RESIDUE AT ALL. Nothing
+   in the daemon, the webapp or the editor reads `vendor_specific`, `unknown` or
+   `unparsed` — zero readers — so the whole class was stored for nothing. Only
+   TYPED entries are now written; every residue outcome is classified, counted,
+   and withheld.
 
-   STILL OPEN: `queue-operation` (18,458 rows / 34 MB) and
-   `file-history-snapshot` (4,006 rows / 63 MB), which are top-level withheld
-   line kinds rather than attachments, and which the owner has not ruled on.
+   That removes every no-reader row this table measures — `hook_success`,
+   `total_tokens_reminder`, `queue-operation`, `file-history-snapshot`, the
+   unparsed residue, and every other residue kind — leaving `page_line`,
+   `user_prompt`'s served half, and the typed rows.
+
+   The sidecar still READS every line: the discovery mandate and the
+   classification are untouched, so the counts and the per-record debug records
+   still name exactly what was seen. The predicate is `convert.IsResidue`
+   (`internal/convert/neverpersist.go`) and it is applied at `cycle.go`'s
+   `withholdResidue`, immediately above `storeWrite` — the sidecar's ONLY door to
+   the store — so no producer can route around it. `keepalive` rides the same
+   `unserved_item` field and is NOT residue: it is a typed fact with no book and
+   stays persisted. Documented in the sidecar's AGENTS.md under "Residue is never
+   persisted".
+
+   Forward compatibility no longer rests on the stored row. A residue arm nobody
+   has modelled is still classified and still counted, and the sidecar's sources
+   are the vendor's own durable files — the day it earns a model, the file is
+   re-read.
 2. `write_ledger` gets a retention rule: entries older than the newest
    transcript offset they could ever absorb again are prunable (design
    question: absorption correctness vs growth without bound).
@@ -41,5 +53,4 @@ Analyze what the store keeps and stop keeping what is never served.
    storing the raw line bytes once (blob) instead would roughly halve the
    bytes for `page_line`, but it changes the store's read contract. Later.
 
-The owner ruled item 1's first two kinds on 2026-09-13; item 2 and the
-remaining item-1 kinds are still open.
+The owner ruled item 1 in full on 2026-09-13; items 2 and 3 are still open.

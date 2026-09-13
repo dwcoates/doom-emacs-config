@@ -1,28 +1,37 @@
 package integration
 
 import (
-	"fmt"
+	"strings"
 	"testing"
 )
 
-// SUBJECT — the two RESIDUE KEY spellings, as literals on the wire.
+// SUBJECT — RESIDUE IS CLASSIFIED AND NEVER PERSISTED (owner ruling 2026-09-13).
 //
-// `residue:<vendor record uuid>` is what makes the two planes COLLAPSE: the
-// shim and the sidecar see the same vendor record and either may store it, and
-// keyed by the vendor's own uuid both writes land on ONE row. A record with no
-// uuid — an unparsed line — has nothing the other plane could agree on, so it is
-// keyed by where it lives: `residue:file:<path>:<offset>`, a visibly separate
-// space no path can collide with a uuid in.
+// These subjects once pinned the two RESIDUE KEY spellings, because a stored
+// residue row was the evidence a line had been read. THE ROW IS GONE: every
+// residue arm — `vendor_specific` of any kind, `unknown`, and `unparsed` — is
+// still framed and classified exactly as before and is then withheld at the
+// sidecar's single write path, so there is no upsert_key left to compare.
 //
-// THE LITERALS ARE THE SUBJECT. A digest, a rename, or a path spelled
-// differently from the reader's own normalized one all pass every structural
-// assertion and silently break cross-plane collapse, so both keys are compared
-// as strings.
+// WHAT SURVIVES IS THE CLASSIFICATION, and that is what these subjects pin now.
+// The reader still says, per record, WHICH residue it read — the arm plus the
+// arm's own discriminator — and the store still holds none of it. A classifier
+// that quietly stopped naming what the vendor recorded, or a write path that let
+// one arm slip through, still fails here; only the key spelling is unobservable.
+//
+// THE RECORDS ARE VERBOSE, so every subject here runs the sidecar through
+// `debugLogging`: without it the reader's own account of what it withheld is
+// never emitted and the subject would assert nothing.
 
-// TestAWithheldRecordIsKeyedByTheVendorsOwnUuid drives a real withheld class —
+// TestAWithheldRecordIsClassifiedByItsVendorKind drives a real withheld class —
 // `system/local_command`, which the converter understands and deliberately does
-// not carry — and asserts the key is the record's uuid.
-func TestAWithheldRecordIsKeyedByTheVendorsOwnUuid(t *testing.T) {
+// not carry.
+//
+// RE-AIMED: it asserted the row was keyed by the vendor's own uuid, which was
+// the cross-plane collapse rule. No row is written, so the uuid key is not
+// observable from here; what remains worth pinning is that the record is read,
+// named as the vendor's own kind, and stored nowhere.
+func TestAWithheldRecordIsClassifiedByItsVendorKind(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -39,32 +48,36 @@ func TestAWithheldRecordIsKeyedByTheVendorsOwnUuid(t *testing.T) {
 	if uuid == "" {
 		t.Fatalf("the system/local_command fixture carries no uuid")
 	}
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)))
 	g.AppendLine(encodeRecord(t, rec))
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
-	// Assert.
-	wantKey := "residue:" + uuid
-	e := entryByUpsertKey(fake.Entries(), wantKey)
-	if e == nil {
-		t.Fatalf("no entry was keyed %q; keys were %v", wantKey, upsertKeysOf(fake.Entries()))
-	}
-	if got := e.GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind(); got != "system/local_command" {
-		t.Errorf("the withheld record landed as kind %q, wanted %q", got, "system/local_command")
-	}
-	if e.GetAgentUpdate().GetServeableFrame() != nil {
-		t.Errorf("a withheld record reached a page: %v", e.GetAgentUpdate().GetServeableFrame())
+	// Assert: the reader named the vendor's own kind, and stored nothing for it.
+	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/system/local_command")
+	requireNoResidueStored(t, fake.Entries())
+	// The record reached no row AT ALL — not a page line and not an unserved
+	// one — so nothing anywhere in the store names it.
+	for _, e := range fake.Entries() {
+		if strings.Contains(e.GetUpsertKey(), uuid) {
+			t.Errorf("the withheld record produced a row keyed %q", e.GetUpsertKey())
+		}
 	}
 }
 
-// TestAnUnparsableLineIsKeyedByItsFileCoordinates asserts the fallback: a line
-// that cannot be READ has no uuid, so its key names the file and the offset the
-// bytes start at — in the reader's own discovery-normalized spelling of the path.
-func TestAnUnparsableLineIsKeyedByItsFileCoordinates(t *testing.T) {
+// TestAnUnparsableLineIsClassifiedAgainstItsFile asserts the fallback: a line
+// that cannot be READ still produces an account of itself, and that account
+// names the file whose bytes it was.
+//
+// RE-AIMED: it asserted the row's key was `residue:file:<path>:<offset>` and
+// that the row restated its source, offset and parse error. No row is written,
+// so the file COORDINATES survive only as the withheld record's `file_id`; the
+// byte offset and the parse error are no longer observable from a test.
+func TestAnUnparsableLineIsClassifiedAgainstItsFile(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -75,39 +88,34 @@ func TestAnUnparsableLineIsKeyedByItsFileCoordinates(t *testing.T) {
 	cwd := "/Users/dodgecoates/residue-file-probe"
 	slug := cwdSlug(cwd)
 	session := "8b8b8b8b-8b8b-48b8-88b8-8b8b8b8b8b8b"
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)))
-	offset := g.AppendLine(`{"type":"assistant","uuid":"` + session + `",`)
+	g.AppendLine(`{"type":"assistant","uuid":"` + session + `",`)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
-	// Assert.
-	wantKey := fmt.Sprintf("residue:file:%s:%d", resolved(g.Path()), offset)
-	e := entryByUpsertKey(fake.Entries(), wantKey)
-	if e == nil {
-		t.Fatalf("no entry was keyed %q; keys were %v", wantKey, upsertKeysOf(fake.Entries()))
+	// Assert: the unreadable bytes were classified against their own file, and
+	// the reader still advanced past them rather than stalling on a line it
+	// could store nothing for.
+	rec := awaitResidueWithheld(ctx, t, opts.LogPath, "unparsed")
+	if got, want := rec.Context["file_id"], fileID(t, g.Path()); got != want {
+		t.Errorf("the withheld unparsed record names file_id %v, wanted the file it was read from %q", got, want)
 	}
-	unparsed := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
-	if unparsed == nil {
-		t.Fatalf("the entry under %q is not on the unparsed arm: %v", wantKey, e.GetAgentUpdate())
-	}
-	if unparsed.GetOffset() != uint64(offset) {
-		t.Errorf("the unparsed record states offset %d, wanted %d", unparsed.GetOffset(), offset)
-	}
-	if !samePath(unparsed.GetSource(), g.Path()) {
-		t.Errorf("the unparsed record names source %q, wanted %q", unparsed.GetSource(), g.Path())
-	}
-	if unparsed.GetParseError() == "" {
-		t.Errorf("the unparsed record states no parse error, so nothing can be investigated")
-	}
+	requireNoResidueStored(t, fake.Entries())
 }
 
-// TestTheTwoResidueSpacesNeverCollide asserts the shape rule the fallback exists
-// for: a file-keyed residue is always in its own `residue:file:` space, so no
-// path can ever be mistaken for a vendor uuid.
-func TestTheTwoResidueSpacesNeverCollide(t *testing.T) {
+// TestTheTwoResiduePopulationsStayDistinct asserts what the two key spaces
+// existed for: a uuid-bearing residue and an unreadable line are separately
+// attributable, so a tally says WHICH vendor behavior produced the volume.
+//
+// RE-AIMED: it asserted the `residue:` and `residue:file:` key spaces could
+// never collide. With no rows there are no keys, and the distinction now lives
+// in the labels the classifier mints — which is the property the separate key
+// space was protecting.
+func TestTheTwoResiduePopulationsStayDistinct(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -120,25 +128,19 @@ func TestTheTwoResidueSpacesNeverCollide(t *testing.T) {
 	session := "8c8c8c8c-8c8c-48c8-88c8-8c8c8c8c8c8c"
 	withheld := retargetSession(t,
 		decodeRecord(t, corpusLine(t, "transcript-lines/system-local_command.jsonl", 0)), session, cwd)
-	uuid, _ := withheld["uuid"].(string)
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act: both kinds of residue in one file.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)))
 	g.AppendLine(encodeRecord(t, withheld))
-	offset := g.AppendLine(`{"type":"assistant"`)
+	g.AppendLine(`{"type":"assistant"`)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.
-	uuidKey := "residue:" + uuid
-	fileKey := fmt.Sprintf("residue:file:%s:%d", resolved(g.Path()), offset)
-	for _, want := range []string{uuidKey, fileKey} {
-		if entryByUpsertKey(fake.Entries(), want) == nil {
-			t.Fatalf("no entry was keyed %q; keys were %v", want, upsertKeysOf(fake.Entries()))
-		}
+	for _, label := range []string{"vendor_specific/system/local_command", "unparsed"} {
+		awaitResidueWithheld(ctx, t, opts.LogPath, label)
 	}
-	if uuidKey == fileKey {
-		t.Fatalf("the two residue spaces produced one key %q", uuidKey)
-	}
+	requireNoResidueStored(t, fake.Entries())
 }

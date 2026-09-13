@@ -8,7 +8,6 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-	storev1 "agentrepl/proto/store/v1"
 )
 
 // SUBJECT — the LOST policy, exercised end to end against the real sidecar.
@@ -372,18 +371,23 @@ func TestAPreBootUnclaimedSpoolIsConcludedSweptUp(t *testing.T) {
 	awaitLostConclusion(ctx, t, opts.LogPath, spoolPath, "swept_up")
 }
 
-// TestAPreBootUnclaimedSpoolsBytesStillLandAsResidue asserts the other half:
-// concluding a run LOST is never a licence to drop what is on disk. Nobody
-// claimed the spool, so its bytes land as unparsed residue naming it as their
-// source.
-func TestAPreBootUnclaimedSpoolsBytesStillLandAsResidue(t *testing.T) {
+// TestAPreBootUnclaimedSpoolsBytesAreStillReadAndClassified asserts the other
+// half: concluding a run LOST is never a licence to skip what is on disk.
+// Nobody claimed the spool, so its bytes are read whole and classified as
+// unparsed residue naming that file.
+//
+// CLASSIFIED, NOT STORED. Residue is never persisted, so the evidence that the
+// bytes were ingested is the reader's own withholding record for this file plus
+// a cursor that reached the end of it — an empty store is the contract here,
+// not the failure it once was.
+func TestAPreBootUnclaimedSpoolsBytesAreStillReadAndClassified(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	opts := lostOptions(t, fake.Socket, tree)
+	opts := debugLogging(lostOptions(t, fake.Socket, tree))
 	opts.UnownedSpoolWindow = time.Millisecond
 	payload := "output from before the reboot\n"
 	spoolPath := seedPreBootSpool(t, tree, "/Users/dodgecoates/lost-swept-residue-probe",
@@ -391,25 +395,12 @@ func TestAPreBootUnclaimedSpoolsBytesStillLandAsResidue(t *testing.T) {
 
 	// Act.
 	startSidecar(t, opts)
-	fake.awaitEntry(ctx, t, "residue naming the swept spool", func(e *storev1.StoreEntry) bool {
-		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
-		return u != nil && samePath(u.GetSource(), spoolPath)
-	})
+	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
 
-	// Assert.
-	var found bool
-	for _, residue := range unparsedOf(fake.Entries()) {
-		if !samePath(residue.GetSource(), spoolPath) {
-			continue
-		}
-		found = true
-		if residue.GetRaw() != payload {
-			t.Errorf("residue for %s carries %q, wanted the file's bytes exactly, %q", spoolPath, residue.GetRaw(), payload)
-		}
-	}
-	if !found {
-		t.Fatalf("the swept spool's bytes never landed as residue; a LOST conclusion is not a licence to drop them")
-	}
+	// Assert: every byte of the file was read...
+	awaitCursorInBatches(ctx, t, fake, spoolPath, int64(len(payload)))
+	// ...and none of it was stored.
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // ---------------------------------------------------------------------------

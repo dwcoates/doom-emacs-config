@@ -242,3 +242,56 @@ func TestAWithdrawnWriteIsNotStatedAsATransportFailure(t *testing.T) {
 		})
 	}
 }
+
+// TestAWithdrawnCursorRecoveryIsNotStatedAsATransportFailure is the same
+// separation on the OTHER verb. Cancellation is this process withdrawing the
+// request on the way out — no position recovered, so nothing is read and no
+// tailer is built, and the next boot asks again. A deadline is the store failing
+// to answer, which is a fact about the store.
+func TestAWithdrawnCursorRecoveryIsNotStatedAsATransportFailure(t *testing.T) {
+	cases := []struct {
+		name    string
+		callCtx func(*testing.T) context.Context
+		// wantErrors is how many ERROR records the call is allowed to leave.
+		wantErrors int
+	}{
+		{
+			name: "this process cancelled its own cycle context",
+			callCtx: func(t *testing.T) context.Context {
+				t.Helper()
+				c, cancel := context.WithCancel(context.Background())
+				cancel()
+				return c
+			},
+			wantErrors: 0,
+		},
+		{
+			name: "the store did not answer within the deadline",
+			callCtx: func(t *testing.T) context.Context {
+				t.Helper()
+				c, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				t.Cleanup(cancel)
+				return c
+			},
+			wantErrors: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			client, logs := serveLogged(t, &fakeStore{})
+
+			// Act.
+			_, err := client.Cursors(tc.callCtx(t), "")
+
+			// Assert: the caller is told either way.
+			if err == nil {
+				t.Fatal("a cursor recovery that never reached the store returned no error")
+			}
+			records := parseLogLines(t, *logs)
+			if got := len(opsAt(records, "storeclient-cursors", "error")); got != tc.wantErrors {
+				t.Fatalf("error records = %d, want %d: %v", got, tc.wantErrors, operationLevels(records))
+			}
+		})
+	}
+}

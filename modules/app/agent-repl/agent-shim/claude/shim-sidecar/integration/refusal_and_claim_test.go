@@ -4,8 +4,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	storev1 "agentrepl/proto/store/v1"
 )
 
 // SUBJECTS — four branches the harness already had the hooks for and nothing
@@ -128,7 +126,9 @@ func TestAParkedFileStaysParkedAcrossAStoreBounce(t *testing.T) {
 // arbitrate: picking either one puts a run's output in another run's card, and
 // there is no evidence that favors the first claim over the second. So the task
 // is permanently unresolvable, the conflict is its own ERROR operation, and the
-// spool's bytes fall to residue rather than being attributed to a guess.
+// spool's bytes fall to residue rather than being attributed to a guess —
+// classified as residue and, because residue is never persisted, stored
+// nowhere at all.
 func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -141,7 +141,8 @@ func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "21212121-2121-4121-8121-212121212121"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
-	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// The falling-to-residue half is stated per record at DEBUG.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 	opts.UnownedSpoolWindow = 200 * time.Millisecond
 
 	// The SAME task id, launched by two different calls. Both pairs are the
@@ -174,12 +175,13 @@ func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
 		t.Errorf("the conflict record names task %q, wanted the contested task %q; without it the conflict is not investigable", got, capturedSpoolTask1)
 	}
 
-	// ...and the spool's bytes reach the store attributed to NEITHER call.
+	// ...and the spool's bytes are read and classified attributed to NEITHER
+	// call: residue, which names no run and reaches no store.
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte("output nobody can be sure owns it\n"))
-	fake.awaitEntry(ctx, t, "residue for the contested spool", func(e *storev1.StoreEntry) bool {
-		return residueNamesSource(e, spoolPath)
-	})
+	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
+	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
+	requireNoResidueStored(t, fake.Entries())
 	for _, run := range []string{capturedBashCall1, capturedBashCall2} {
 		if frames := bashFramesForRun(fake.Entries(), run); len(frames) != 0 {
 			t.Errorf("the contested spool was attributed to run %q anyway (%d frames); a conflicted task resolves to nothing, never to a guess",
@@ -217,7 +219,7 @@ func TestAStopArrivingBeforeTheSpoolIsClaimedCancelsItOnClaim(t *testing.T) {
 	// "Startup catch-up"), and this subject asserts the per-item record rather
 	// than the summary, so it reads the log at the threshold the detail is
 	// written to.
-	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
+	opts = debugLogging(opts)
 
 	stop := retargetTaskStop(t,
 		retargetSession(t, decodeRecord(t, corpusLine(t, "tool-results/task_stop.jsonl", 0)), session, cwd),

@@ -322,7 +322,7 @@ func TestTailerCountersReportedToHandler(t *testing.T) {
 }
 
 // droppingHandler converts every frame and stores none of them — the shape a
-// batch of never-persisted residue lines takes (convert/neverpersist.go).
+// batch the reader withheld as residue takes (convert/neverpersist.go).
 type droppingHandler struct{ frames int }
 
 func (d *droppingHandler) Handle(fr []Frame, _ *Context) []*storev1.StoreEntry {

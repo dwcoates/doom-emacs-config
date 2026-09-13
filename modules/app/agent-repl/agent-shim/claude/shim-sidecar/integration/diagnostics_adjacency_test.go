@@ -77,8 +77,13 @@ func TestDiagnosticsJoinTheChangeUnitAcrossAPollBoundary(t *testing.T) {
 }
 
 // TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed asserts the
-// refusal: with no remembered change unit the findings are stored, never pinned
-// onto a unit the reader guessed at.
+// refusal: with no remembered change unit the findings are carried whole as
+// residue, never pinned onto a unit the reader guessed at.
+//
+// WHOLE MEANS CLASSIFIED WHOLE, not stored. Residue is never persisted, so the
+// report's disposition is stated by the sidecar's own withholding record naming
+// `attachment/diagnostics` — and the refusal to guess is exactly what that
+// record proves, because a guessed join would have produced a page line instead.
 func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -90,13 +95,12 @@ func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing
 	cwd := "/Users/dodgecoates/diagnostics-orphan-probe"
 	slug := cwdSlug(cwd)
 	session := "7b7b7b7b-7b7b-47b7-87b7-7b7b7b7b7b7b"
-	opts := defaultSidecarOptions(t, fake.Socket, tree)
 	// The orphaned-diagnostics record is BENIGN on a re-scan and emitted at
 	// debug (see diagnosticsAttachment): a report whose causing change scrolled
-	// past this reader's cursor is stored whole as residue, which is correct,
+	// past this reader's cursor is carried whole as residue, which is correct,
 	// so it must not flood the strict all-logs harvest at warn. Debug logging is
-	// enabled here so the trace still reaches the log to be asserted.
-	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
+	// enabled here so that trace, and the withholding record, both reach the log.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 	report := retargetSession(t,
 		decodeRecord(t, corpusLine(t, "attachments/diagnostics.jsonl", 0)), session, cwd)
 
@@ -108,9 +112,8 @@ func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.
-	fake.awaitEntry(ctx, t, "the orphaned diagnostics residue", func(e *storev1.StoreEntry) bool {
-		return e.GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind() == "attachment/diagnostics"
-	})
+	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/attachment/diagnostics")
+	requireNoResidueStored(t, fake.Entries())
 	for _, line := range pageLinesOf(fake.Entries()) {
 		a := activityOf(line)
 		if a.GetWrite().GetDiagnostics() != nil || a.GetEdit().GetDiagnostics() != nil {

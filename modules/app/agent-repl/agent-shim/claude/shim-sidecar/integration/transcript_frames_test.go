@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -258,6 +259,11 @@ func TestToolResultUpsertsItsCallRatherThanAddingARow(t *testing.T) {
 
 // TestCapturedTranscriptLandsNothingAsUnparsed is the golden-corpus contract in
 // its executable form: a real capture must convert whole.
+//
+// RE-AIMED for the 2026-09-13 residue ruling: residue is classified and never
+// stored, so an empty store no longer proves the capture parsed. The reader's
+// own account of what it withheld is the evidence now, and this subject fails
+// the moment any line of the capture is classified `unparsed`.
 func TestCapturedTranscriptLandsNothingAsUnparsed(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -266,25 +272,30 @@ func TestCapturedTranscriptLandsNothingAsUnparsed(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
+	// The withheld-record accounts are verbose, so the subject asks for them.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := writeCapturedTranscript(t, tree, captured)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.
-	residue := unparsedOf(fake.Entries())
-	if len(residue) != 0 {
-		for _, r := range residue {
-			t.Errorf("unparsed residue at %s:%d — %s\n%s", r.GetSource(), r.GetOffset(), r.GetParseError(), r.GetRaw())
-		}
-		t.Fatalf("a real capture produced %d unparsed entries; a recognizable kind reaching residue is a producer defect", len(residue))
+	labels := residueWithheldLabels(t, opts.LogPath)
+	if containsString(labels, "unparsed") {
+		t.Fatalf("a real capture produced unparsed residue; a recognizable kind reaching residue is a producer defect. Withheld: %v", labels)
 	}
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestCapturedTranscriptLandsNothingAsUnknown asserts the allow-list is EMPTY:
 // context cuts and api errors have carriers now, so no discriminator may reach
 // the `unknown` arm.
+//
+// RE-AIMED for the 2026-09-13 residue ruling: the `unknown` arm is classified
+// and withheld rather than stored, and the classification names the vendor's own
+// discriminator — so the allow-list is checked against what the reader said it
+// withheld, which is exactly where an unmodelled discriminator now shows up.
 func TestCapturedTranscriptLandsNothingAsUnknown(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -293,20 +304,25 @@ func TestCapturedTranscriptLandsNothingAsUnknown(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
+	// The withheld-record accounts are verbose, so the subject asks for them.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := writeCapturedTranscript(t, tree, captured)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.
 	var got []string
-	for _, u := range unknownsOf(fake.Entries()) {
-		got = append(got, u.GetDiscriminatorField()+"="+u.GetDiscriminator())
+	for _, label := range residueWithheldLabels(t, opts.LogPath) {
+		if strings.HasPrefix(label, "unknown/") {
+			got = append(got, label)
+		}
 	}
 	if len(got) != 0 {
 		t.Fatalf("the allowed `unknown` set is empty; the capture produced %v", sortedStrings(got))
 	}
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestEveryWriteCarriesTheFilePlaneEnvelope asserts the producer's envelope
@@ -451,6 +467,10 @@ func TestKeepAliveEndsAtTheNextOrdinaryPrompt(t *testing.T) {
 
 // TestWithheldMachineryNeverReachesAPage asserts the CLI's bookkeeping lines
 // are classified at ingest into vendor_specific rather than becoming feed rows.
+//
+// RE-AIMED for the 2026-09-13 residue ruling: the classification is unchanged
+// and is now the whole of the record's fate, so the machinery kinds are read
+// off the reader's own account of what it withheld.
 func TestWithheldMachineryNeverReachesAPage(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -459,20 +479,20 @@ func TestWithheldMachineryNeverReachesAPage(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
+	// The withheld-record accounts are verbose, so the subject asks for them.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := writeCapturedTranscript(t, tree, captured)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert: the capture's own machinery lines (two queue-operation records and
 	// a last-prompt record) are withheld, and nothing modeled joined them.
-	kinds := vendorSpecificKinds(fake.Entries())
 	for _, want := range []string{"queue-operation", "last-prompt"} {
-		if !containsString(kinds, want) {
-			t.Errorf("machinery kind %q was not withheld; withheld kinds were %v", want, kinds)
-		}
+		awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/"+want)
 	}
+	requireNoResidueStored(t, fake.Entries())
 	for _, line := range linesForBook(fake.Entries(), captured.Session) {
 		if frameOf(line) == nil && line.GetAgentItem().GetAgentPrompt() == nil {
 			t.Errorf("a page line carries neither a frame nor a prompt: %v", line)
@@ -483,6 +503,10 @@ func TestWithheldMachineryNeverReachesAPage(t *testing.T) {
 // TestFilePlaneUserPromptIsWithheldRatherThanServed asserts R15: a user record
 // with prose is never a page line, because TurnId and PromptOrigin are the
 // daemon's to mint.
+//
+// RE-AIMED for the 2026-09-13 residue ruling: the prompt is classified exactly
+// as before and then withheld instead of stored, so the classification is read
+// off the reader's own account of what it withheld.
 func TestFilePlaneUserPromptIsWithheldRatherThanServed(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -491,18 +515,18 @@ func TestFilePlaneUserPromptIsWithheldRatherThanServed(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
+	// The withheld-record accounts are verbose, so the subject asks for them.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := writeCapturedTranscript(t, tree, captured)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.
+	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/"+vendorSpecificUserPrompt)
 	entries := fake.Entries()
-	if !containsString(vendorSpecificKinds(entries), vendorSpecificUserPrompt) {
-		t.Errorf("the capture's user prompt was not withheld as vendor_specific{kind:%q}; kinds were %v",
-			vendorSpecificUserPrompt, vendorSpecificKinds(entries))
-	}
+	requireNoResidueStored(t, entries)
 	for _, line := range pageLinesOf(entries) {
 		if line.GetAgentItem().GetAgentPrompt() != nil {
 			t.Errorf("the file plane minted an AgentPrompt page line, which is the shim's alone: %v", line)
@@ -766,6 +790,11 @@ func TestOrdinalsResetWhenTheMessageIdChanges(t *testing.T) {
 // TestUnmodeledAttachmentsAreWithheldAsVendorSpecific asserts the ruled
 // disposition of a parsed-but-unmodeled attachment: vendor_specific with kind
 // "attachment/<type>", never the `unknown` arm.
+//
+// RE-AIMED for the 2026-09-13 residue ruling: the disposition is unchanged and
+// now ends at the classification, so the kinds are read off the reader's own
+// account of what it withheld — where the `unknown` arm would equally show up
+// had the attachment fallen through to it.
 func TestUnmodeledAttachmentsAreWithheldAsVendorSpecific(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -774,18 +803,18 @@ func TestUnmodeledAttachmentsAreWithheldAsVendorSpecific(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
+	// The withheld-record accounts are verbose, so the subject asks for them.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := writeCapturedTranscript(t, tree, captured)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert: the capture carries a deferred_tools_delta and an
 	// agent_listing_delta, neither of which this contract models.
-	kinds := vendorSpecificKinds(fake.Entries())
 	for _, want := range []string{"attachment/deferred_tools_delta", "attachment/agent_listing_delta"} {
-		if !containsString(kinds, want) {
-			t.Errorf("unmodeled attachment kind %q was not withheld; withheld kinds were %v", want, kinds)
-		}
+		awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/"+want)
 	}
+	requireNoResidueStored(t, fake.Entries())
 }

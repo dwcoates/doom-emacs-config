@@ -99,11 +99,21 @@ type Lost struct {
 	// — without it the flood this policy exists to stop simply reappeared one
 	// layer down, as one `bash-lost` WARN per backlog run.
 	Catchup bool
+	// TreeRemoved says the file did not merely disappear: its DIRECTORY went
+	// with it. A whole tree removed on purpose (a harness deleting its run
+	// directory, a vendor session directory deleted wholesale) is an ordinary
+	// end — the committed offset was the last thing the file had — so the
+	// conclusion is stated at INFO. Only a file unlinked while its directory
+	// stands is the genuine unlink-under-the-reader this policy warns about.
+	// It changes NO conclusion and NO wire arm: the run is still LOST and the
+	// arm is still file_vanished.
+	TreeRemoved bool
 }
 
 type entry struct {
 	work         Work
 	vanishedAtMs int64 // 0 = the file is present
+	treeRemoved  bool  // the file's directory was gone too when it vanished
 }
 
 // Tracker holds the open runs and concludes LOST. Safe for concurrent use: the
@@ -211,7 +221,13 @@ func (t *Tracker) Activity(path string, nowMs int64) {
 }
 
 // MarkVanished starts the grace clock for a file that disappeared.
-func (t *Tracker) MarkVanished(path string, nowMs int64) {
+//
+// treeRemoved says the file's DIRECTORY was gone too. That is what separates a
+// tree deleted on purpose from a file unlinked under the reader, and it decides
+// only the LEVEL of the records: a tree removal is an ordinary end and is stated
+// at INFO, an unlink under a standing directory stays a WARNING. The conclusion
+// itself and the wire arm are identical either way.
+func (t *Tracker) MarkVanished(path string, nowMs int64, treeRemoved bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	existing, ok := t.open[path]
@@ -222,6 +238,12 @@ func (t *Tracker) MarkVanished(path string, nowMs int64) {
 		return
 	}
 	existing.vanishedAtMs = nowMs
+	existing.treeRemoved = treeRemoved
+	if treeRemoved {
+		t.bound(existing.work).Log(
+			"the run's file vanished along with its whole directory, which is an ordinary end rather than a loss; the grace window of %s still decides the conclusion", t.opt.Grace)
+		return
+	}
 	t.bound(existing.work).With(logging.Context{Level: "warn"}).Log(
 		"the run's file vanished; the grace window of %s decides whether that is a rename race or a LOST run", t.opt.Grace)
 }
@@ -268,7 +290,7 @@ func (t *Tracker) Sweep(bootMs, nowMs int64) []Lost {
 			continue
 		}
 		delete(t.open, path)
-		out = append(out, Lost{Work: existing.work, Reason: reason, ObservedAtMs: nowMs})
+		out = append(out, Lost{Work: existing.work, Reason: reason, ObservedAtMs: nowMs, TreeRemoved: existing.treeRemoved})
 	}
 	return t.state(out, nowMs)
 }
@@ -346,6 +368,24 @@ func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
 			c.add(lost.LastActivityMs)
 			t.bound(lost.Work).With(logging.Context{Level: "debug", Reason: string(lost.Reason)}).LogVerbose(
 				"run concluded LOST during startup catch-up reason=%s: it was already stale before this sidecar started, so it is summarized rather than stated on its own (last_activity_ms=%d observed_at_ms=%d)",
+				lost.Reason, lost.LastActivityMs, nowMs)
+			continue
+		}
+		if lost.TreeRemoved {
+			// THE WHOLE TREE WENT, SO NOTHING WAS LOST UNDER US. The committed
+			// offset was the last thing the file had, and a directory removed on
+			// purpose is an ordinary end. The conclusion is unchanged and the
+			// wire arm is unchanged — only the level, because there is nothing
+			// here for an operator to act on.
+			//
+			// THE `reason` KEY STAYS THE WIRE ARM. `lost-terminal` joins to this
+			// record on it (seam.go), so spelling a second vocabulary into the
+			// same key would break the join that exists to explain a terminal.
+			// The tree removal is stated in the sentence and is filterable one
+			// record earlier, on the `file-vanished` record that carries
+			// reason=tree_removed.
+			t.bound(lost.Work).With(logging.Context{Reason: string(lost.Reason)}).Log(
+				"run concluded LOST reason=%s: its file went with the whole directory it lived in, which is an ordinary end rather than a loss (last_activity_ms=%d observed_at_ms=%d)",
 				lost.Reason, lost.LastActivityMs, nowMs)
 			continue
 		}

@@ -293,6 +293,15 @@ because neither spelling may make a spool invisible.
   `tail.KindResidueSpool` so its bytes land whole as residue. Dropping the
   file from discovery, which this package used to do, is the one outcome the
   mandate forbids.
+- A TRANSCRIPT THAT IS GONE BEFORE ITS FIRST BYTE IS AN ORDINARY END, NOT A
+  HELD ATTRIBUTION (owner ruling, 2026-09-13). Workspace attribution is the
+  FIRST thing done to a discovered transcript, and a vendor session directory
+  deleted between the scan and that read leaves nothing to attribute and nothing
+  to wait for — no bytes were skipped, because none were ever read. So an
+  `fs.ErrNotExist` from the attribution read is stated at INFO with
+  `reason=transcript_vanished`, once per file, and summarized when it is startup
+  backlog. A transcript that is PRESENT and cannot be attributed keeps its
+  WARNING: that one is a real hold an operator must look at.
 - A TRANSCRIPT WITHOUT ITS META IS HELD, NEVER DROPPED: `agent-<id>.meta.json`
   is the ONLY source of the agent's type, spawn depth, model and worktree, so
   the transcript is discovered, stated ONCE, re-checked every rescan, and not
@@ -493,6 +502,14 @@ A stop that is asked for is a stop that happens.
   and the next boot resolves it by resuming from whichever cursor the store
   holds. The shutdown record says exactly that and never claims the write was
   undone.
+- A STORE CALL THIS PROCESS WITHDREW IS NOT A STORE FAILURE, ON EITHER VERB.
+  `context.Canceled` can only come from the sidecar cancelling its own cycle
+  context on the way out — a call the store failed to answer in time comes back
+  `DeadlineExceeded` — so `storeclient` states the withdrawal at DEBUG and the
+  narration belongs to the layer that knows a shutdown is running: `storeWrite`
+  for a batch, `attempt` and `cursorFor` for a cursor recovery, each one INFO
+  `shutdown`. The error value is returned to the caller unchanged either way,
+  and a DEADLINE keeps its ERROR because that is a fact about the store.
 - THE LOG DRAIN IS THE ONE UNBOUNDED WAIT, AND IT IS NOW BOUNDED.
   `logging.Logger.Close` waits for the forwarding queue to drain, and the
   closing forward loop probes and dials the daemon ONCE PER QUEUED RECORD. With
@@ -537,6 +554,27 @@ re-derives every historical run at once, so a run whose last activity predates
 `processStartMs` is summarized rather than stated on its own (see "Startup
 catch-up"); only a run that went stale while the sidecar watched is a per-item
 WARNING. `state` partitions each sweep — the boot sweep included — into the two.
+
+A FILE THAT WENT WITH ITS WHOLE TREE IS AN ORDINARY END, NOT A LOSS (owner
+ruling, 2026-09-13). When a watched file disappears the reader stats its PARENT
+DIRECTORY. A directory that is gone too means nobody unlinked a file out from
+under us — a harness deleted its run directory, a vendor session directory went
+wholesale — so the committed offset is the last thing that file ever had and
+there is nothing for an operator to act on. Every record on that path is then
+INFO: the `file-vanished` record carries `reason=tree_removed`, and the
+`lost-policy` grace-clock and conclusion records say the directory went with it.
+A file unlinked while its directory STANDS keeps its WARNING, because that is a
+genuine unlink under the reader.
+
+- ONLY A DEFINITE ABSENCE COUNTS. `treeRemoved` (cycle.go) answers true for
+  `fs.ErrNotExist` and nothing else; a stat that fails for a permission change
+  or an unresponsive mount is not evidence the tree was removed, and reading it
+  as one would quietly downgrade a real unlink.
+- IT CHANGES NO CONCLUSION AND NO WIRE ARM. The run is still LOST and
+  `DetachedLost` still carries `file_vanished`. `lost-terminal` joins back to the
+  sweep on the `reason` key, so that key stays the wire's own arm on every
+  `lost-policy` record; `tree_removed` rides the `file-vanished` record, which
+  names a FILE rather than a run and has no arm to collide with.
 
 A VANISHED FILE KEEPS ITS TAILER until its terminal has been stated. The
 converter that spells the terminal is reached through the watcher entry, so
@@ -1201,41 +1239,51 @@ daemon-minted; a file reader holds neither, so no history page can regrow a fake
 prompt bubble from this producer. The shim's `AgentPrompt` is the one served form,
 and a subagent's commission rides `AgentSubagentStart.prompt`.
 
-### Residue kinds never persisted
+### Residue is never persisted
 
-Owner ruling 2026-09-13 (`docs/STORE-VOLUME-PROPOSAL.md` item 1, first two
-kinds). `internal/convert/neverpersist.go` holds the list; it is filtered out of
-what `Converter.Line` returns, so the drop is decided from the residue kind the
-converter itself minted and no producer of these kinds can route around it.
+Owner ruling 2026-09-13 (`docs/STORE-VOLUME-PROPOSAL.md` item 1). ONLY TYPED
+ENTRIES ARE PERSISTED. Every residue outcome — `vendor_specific` of any kind,
+`unknown`, and the `unparsed` bytes an unowned or unclassifiable spool ingests —
+is classified, counted, and NOT WRITTEN.
 
-| kind | why nothing is served from it |
-|---|---|
-| `attachment/hook_success` | The STREAM plane owns the served hook row (`activity:<hook_id>`, ruling 2026-09-04). The two planes hold disjoint identity material, so this transcript copy can never be joined to the row a reader sees. 229,013 rows / 218 MB of the measured 1.64 GB store. |
-| `attachment/total_tokens_reminder` | The vendor's per-turn `<total_tokens>N tokens left</total_tokens>` line: one bare `text` field, reaching no arm of the conversation vocabulary and read by nothing. 57,376 rows / 45 MB. |
+WHY: NOBODY READS IT. Those three arms have zero readers anywhere downstream —
+not in the daemon, not in the webapp, not in the editor — and the measured store
+(1.64 GB, 612,214 rows) is overwhelmingly made of them. The volume was stored
+for nothing.
 
-- THE DISCOVERY MANDATE IS UNTOUCHED. The line is read, framed and classified by
-  the same branch it always was — a hook attachment still runs through
-  `hookAttachment` and still states what the vendor recorded. Only the write is
+- `internal/convert/neverpersist.go` holds the predicate (`IsResidue`) and the
+  counting label (`ResidueLabel`); `cycle.go withholdResidue` applies it.
+- IT SITS IMMEDIATELY ABOVE `storeWrite`, THE SIDECAR'S ONLY DOOR TO THE STORE.
+  Residue is minted by the converter, by three handlers and by the detached-stop
+  seam, so a filter at any producer is a filter the next producer forgets. A rule
+  enforced at the one write path is a rule about the SIDECAR rather than about
+  the callers that happen to exist today.
+- THE DISCOVERY MANDATE AND THE CLASSIFICATION ARE UNTOUCHED. Every line is still
+  read, framed and filed under its own arm by the branch it always was, and the
+  golden-corpus census still pins the vendor_specific kinds the converter mints —
+  a new kind appearing there is still a mapping regression. Only the write is
   skipped.
-- AN UNKNOWN KIND STAYS PERSISTED. The list is NAMED and never a predicate: a
-  residue kind nobody has ruled on is exactly the one whose stored record IS the
-  coverage, so forward compatibility is the default and only the two spellings
-  above are dropped. Adding a third is an owner ruling, and the golden-corpus
-  census plus `TestTheNamedListIsExactlyTheTwoRuledKinds` fail if the list drifts
-  without one.
-- THE OFFSET IS ABSORBED BY THE CURSOR, NOT BY THE WRITE LEDGER. A dropped line
-  produces no entry and therefore mints no `write_id`, so the store's ledger —
-  one row per APPLIED write — holds nothing for it. Nothing needs to: the
-  tailer's cursor advance is the BYTES READ (`PollResult.Changed` turns on the
-  offset, not on the entry count), and it rides the same batch, so the line is
-  never handed to the converter a second time. No "seen, not stored" mark exists
-  and none is needed.
-- LOGGING. Each drop is DEBUG (`residue-drop`) — a dropped kind is the steady
-  state, not news, and 37% of a transcript's records are hook attachments, so one
-  INFO per line would be a permanent inverted pyramid. The boot walk states one
-  INFO `residue-drop-summary` PER FILE at the catch-up edge
-  (`cycle.go summarizeDroppedResidue`), carrying the counts by kind; a file that
-  dropped nothing states nothing.
+- KEEPALIVE IS NOT RESIDUE. It rides the same `unserved_item` field, but it is a
+  well-formed conversation fact with no book rather than something the reader
+  could not carry, and it is persisted like any other typed entry.
+- THE FORWARD-COMPAT ARGUMENT MOVES TO THE COUNTS. `unknown` used to be kept on
+  the grounds that its stored row IS the coverage for a vendor behavior nobody
+  has modelled. The classification, the per-record `residue-drop` label and the
+  per-file summary are that coverage now — and nothing is unrecoverable, because
+  the sidecar's sources are the vendor's own DURABLE files: the day a residue arm
+  earns a model, the file is simply re-read.
+- THE CURSOR STILL ADVANCES. It rides the batch, not the entries
+  (`PollResult.Changed` turns on the offset, not the entry count), so a batch
+  whose every record was residue still commits the reader's position — the bytes
+  were read, and re-reading them would produce the same nothing. A batch left
+  with no entries AND no cursor advance is not sent at all.
+- LOGGING. Each withholding is DEBUG (`residue-drop`), carrying the residue label
+  on `reason` and NO `upsert_key` — it announces no row, and a key nobody can
+  look up is exactly what the field-set contract forbids. The boot walk states
+  one INFO `residue-drop-summary` PER FILE at the catch-up edge
+  (`cycle.go summarizeWithheldResidue`), carrying the counts by label; the
+  inferred batches, which name no file, are summarized under their own record. A
+  file that withheld nothing states nothing.
 
 ### Keep-alive
 

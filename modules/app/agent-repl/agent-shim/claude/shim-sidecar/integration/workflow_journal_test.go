@@ -2,6 +2,7 @@ package integration
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,14 +14,18 @@ import (
 // vendor really does write records into rather than raw output.
 //
 // THE DISPOSITION IS THE SAME AND THAT IS THE POINT. A kicked kind is not an
-// unread one: the file is discovered, cursor-tailed, and every record lands as
-// DECLARED residue under `workflow_journal/<type>` — findable by that kind the
-// day workflow ingestion arrives — while reaching no page, because a kicked
-// kind is structurally unservable.
+// unread one: the file is discovered, cursor-tailed, and every record is
+// CLASSIFIED as declared residue under `workflow_journal/<type>` — named by that
+// kind the day workflow ingestion arrives — while reaching no page, because a
+// kicked kind is structurally unservable.
+//
+// AND NONE OF IT IS PERSISTED. Residue is never written, so the evidence that
+// the reader carried the journal is the sidecar's own withholding record naming
+// the kind it classified, not a row.
 
-// TestAWorkflowJournalIsTailedToResidueAndReachesNoPage drives the checked-in
-// complete journal capture through the discovered journal path.
-func TestAWorkflowJournalIsTailedToResidueAndReachesNoPage(t *testing.T) {
+// TestAWorkflowJournalIsClassifiedAsDeclaredResidueAndReachesNoPage drives the
+// checked-in complete journal capture through the discovered journal path.
+func TestAWorkflowJournalIsClassifiedAsDeclaredResidueAndReachesNoPage(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -31,35 +36,35 @@ func TestAWorkflowJournalIsTailedToResidueAndReachesNoPage(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "a6a6a6a6-a6a6-4a6a-8a6a-a6a6a6a6a6a6"
 	journalPath := filepath.Join(tree.projectDir(slug), session, "subagents", "workflows", "wf_0001", "journal.jsonl")
+	// The withholding record is the only evidence a kicked kind leaves, and it
+	// is verbose.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
 	anchor := newGrowingFile(t, tree.sessionPath(slug, session))
 	anchor.AppendLine(encodeRecord(t, map[string]any{"type": "queue-operation", "cwd": cwd, "sessionId": session}))
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	journal := newGrowingFile(t, journalPath)
 	for _, line := range corpusLines(t, "journals/complete-journal.jsonl") {
 		journal.AppendLine(line)
 	}
 	awaitCursorInBatches(ctx, t, fake, journalPath, journal.Offset())
 
-	// Assert: the capture's two record types each landed as declared residue...
-	entries := fake.Entries()
-	kinds := vendorSpecificKinds(entries)
-	for _, want := range []string{"workflow_journal/started", "workflow_journal/result"} {
-		if !containsString(kinds, want) {
-			t.Errorf("the journal produced no vendor_specific %q; the kinds written were %v", want, kinds)
-		}
+	// Assert: the capture's two record types were each classified under their
+	// declared kind and withheld...
+	for _, want := range []string{"vendor_specific/workflow_journal/started", "vendor_specific/workflow_journal/result"} {
+		awaitResidueWithheld(ctx, t, opts.LogPath, want)
 	}
 	// ...nothing failed to parse or fell to `unknown`, which would mean the
 	// records were being classified rather than deliberately held...
-	for _, u := range unparsedOf(entries) {
-		if samePath(u.GetSource(), journalPath) {
-			t.Errorf("a journal record failed to parse: %q", u.GetParseError())
+	for _, label := range residueWithheldLabels(t, opts.LogPath) {
+		if label == "unparsed" || strings.HasPrefix(label, "unknown/") {
+			t.Errorf("the journal produced residue %q; both of the capture's record types are declared shapes", label)
 		}
 	}
-	if n := len(unknownsOf(entries)); n != 0 {
-		t.Errorf("the journal produced %d unknown-residue rows; both of the capture's record types are declared shapes", n)
-	}
+	// ...none of it was persisted, because residue never is...
+	entries := fake.Entries()
+	requireNoResidueStored(t, entries)
 	// ...and none of it reached a page.
 	if n := len(pageLinesOf(entries)); n != 0 {
 		t.Errorf("a workflow journal produced %d page line(s) while workflow is kicked", n)

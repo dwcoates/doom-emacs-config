@@ -71,7 +71,7 @@ func convertFrames(conv *convert.Converter, log *logging.Bound, frames []tail.Fr
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {
 			log.With(handleWarn("parse", ctx)).With(logging.Context{Offset: logging.Off(frame.Offset)}).
-				Log("parse failure; the record is stored whole with no path to a page: %v", frame.ParseErr)
+				Log("parse failure; the line is classified as unparsed residue and not stored, so the bytes to investigate are this file at this offset: %v", frame.ParseErr)
 			unparsed := convert.UnparsedEntry(at, frame.Raw, frame.ParseErr)
 			logResidue(log, ctx, frame.Offset, []*storev1.StoreEntry{unparsed})
 			out = append(out, unparsed)
@@ -141,6 +141,5 @@ func (h *SessionTranscriptHandler) holdCount(frames []tail.Frame, ctx *Context) 
 }
 
 // Conv exposes the handler's converter, so the reader can read the per-file
-// facts the conversion accumulated — the never-persisted residue tally the
-// catch-up summary states.
+// facts the conversion accumulated.
 func (h *SessionTranscriptHandler) Conv() *convert.Converter { return h.conv }
