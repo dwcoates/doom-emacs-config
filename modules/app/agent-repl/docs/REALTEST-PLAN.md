@@ -91,6 +91,14 @@ e2e and Emacs-layer suites stay.
   once per realtest: the copy is of the state as it was before the run began.
 - Refuse to run unless every deployed system is at master's HEAD (the
   readiness report is the judge) and no human is using Emacs.
+- Set BOTH consents. `AGENT_REPL_REALTEST_TAKEOVER=1` lets the run quit the
+  standing editor; `AGENT_REPL_REALTEST_STOP_DAEMON=1` lets it stop the
+  standing daemon. The second one is needed on EVERY sweep, not only when
+  realtest 3 is asked for: the previous sweep's handback deliberately leaves
+  the owner a guard-free daemon, so a sweep always opens against a daemon that
+  cannot be adopted. With the consent the run quits the editor first and then
+  stops that daemon itself (SIGTERM, never SIGKILL) and says which pid it
+  stopped; without it the preflight declines and names the variable.
 - After the run the owner is left with a GUARD-FREE editor and the stack
   untouched. A run's own editor forbids the vendor; the handback quits it and
   cold-starts a normal one in its place (see "Running a sweep", "The editor the

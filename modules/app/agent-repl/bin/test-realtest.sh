@@ -592,7 +592,7 @@ run_script() {
     STUB_GO_MARKER="${STUB_GO_MARKER:-$SCRATCH/go-reached}" \
     STUB_FOCUS_MARKER="${STUB_FOCUS_MARKER:-$SCRATCH/focus-reached}" \
     STUB_HELD_MARKER="${STUB_HELD_MARKER:-$SCRATCH/focus-held}" \
-    STUB_KILL_MARKER="$SCRATCH/killed" \
+    STUB_KILL_MARKER="${STUB_KILL_MARKER:-$SCRATCH/killed}" \
     STUB_KILL_LOG="${STUB_KILL_LOG:-$SCRATCH/kill-log}" \
     STUB_ALIVE_FLAG="${STUB_ALIVE_FLAG:-$SCRATCH/alive}" \
     AGENT_REPL_REALTEST_EMACSCLIENT="$dir/emacsclient" \
@@ -902,6 +902,94 @@ test_declines_when_the_daemon_lacks_the_guard() {
     fi
     if ! printf '%s' "$out" | grep -q '55501'; then
         fail "$name" "the refusal does not name the daemon pid to stop: $out"
+        return
+    fi
+    pass "$name"
+}
+
+# unguarded_daemon_line PID DIR — a daemon of this checkout whose kernel
+# environment does NOT carry the vendor guard. This is what a sweep finds on
+# the machine every time, because the previous sweep's handback deliberately
+# left the owner a guard-free one.
+unguarded_daemon_line() {
+    printf '%s %s/daemon/bin/claude-repld --state-dir /tmp PATH=/usr/bin\n' \
+        "$1" "$(cd "$2/.." && pwd)"
+}
+
+test_the_unguarded_daemon_refusal_names_the_consent() {
+    local name="the refusal over an unguarded daemon names AGENT_REPL_REALTEST_STOP_DAEMON=1 as the remedy"
+    local dir out status=0
+    dir="$(scratch_bin unguarded-daemon-remedy)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    unguarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
+        fail "$name" "the refusal does not name the consent that resolves it: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_unguarded_daemon_is_stopped_under_the_consent() {
+    local name="an unguarded daemon is STOPPED under AGENT_REPL_REALTEST_STOP_DAEMON=1 and the run continues"
+    local dir out status=0
+    dir="$(scratch_bin unguarded-daemon-stopped)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    unguarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    SCRIPT_ARGS=(1)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ "$(cat "$SCRATCH/kill-log")" != "55501" ]; then
+        fail "$name" "the unguarded daemon was not the pid signalled: $(cat "$SCRATCH/kill-log")"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "the owner's unguarded daemon pid 55501 was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
+        fail "$name" "the run did not state that it stopped the owner's unguarded daemon: $out"
+        return
+    fi
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+        fail "$name" "the realtest did not run once the unguarded daemon was stopped"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_editor_is_quit_before_the_unguarded_daemon_is_stopped() {
+    local name="the standing editor is QUIT BEFORE the unguarded daemon is stopped"
+    local dir out status=0
+    dir="$(scratch_bin unguarded-daemon-order)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    unguarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    standing_emacs
+    SCRIPT_ARGS=(1)
+
+    # The two stubs write to the same log, so the ORDER of the two lines is the
+    # assertion: an editor left standing while the daemon goes brings an
+    # unguarded daemon straight back up.
+    out="$(STUB_KILL_MARKER="$SCRATCH/order-log" STUB_KILL_LOG="$SCRATCH/order-log" \
+        AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ "$(head -n1 "$SCRATCH/order-log")" != "killed" ]; then
+        fail "$name" "the editor quit was not first; log: $(cat "$SCRATCH/order-log")"
+        return
+    fi
+    if ! grep -q '^55501$' "$SCRATCH/order-log"; then
+        fail "$name" "the unguarded daemon was never stopped; log: $(cat "$SCRATCH/order-log")"
         return
     fi
     pass "$name"
@@ -1909,6 +1997,9 @@ test_declines_when_the_backup_copy_totally_fails
 test_runs_when_nothing_stands_in_the_way
 test_records_the_deployed_revisions
 test_declines_when_the_daemon_lacks_the_guard
+test_the_unguarded_daemon_refusal_names_the_consent
+test_the_unguarded_daemon_is_stopped_under_the_consent
+test_the_editor_is_quit_before_the_unguarded_daemon_is_stopped
 test_declines_when_a_listening_shim_lacks_the_guard
 test_runs_when_every_listening_shim_carries_the_guard
 test_ignores_a_shim_listening_under_another_state_directory
