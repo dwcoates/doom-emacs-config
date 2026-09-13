@@ -2950,3 +2950,82 @@ func TestTheSpoolRootIsTheParentOfTheUidSegment(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Residue is never persisted (owner ruling 2026-09-13)
+// ---------------------------------------------------------------------------
+//
+// The sidecar stores only TYPED entries. Every residue outcome — `vendor_specific`
+// of any kind, `unknown`, and the `unparsed` bytes an unowned spool ingests — is
+// still read, framed and CLASSIFIED, and is then counted and withheld at the
+// write path. So a subject that used to look for a residue ROW now looks for the
+// sidecar saying it classified that residue and stored none of it.
+//
+// THE WITHHOLDING RECORD IS VERBOSE, because it is the steady state: use
+// debugLogging on the options, or the records the assertions read are never
+// emitted.
+
+// debugLogging turns on the sidecar's verbose emission, which is what the
+// per-record residue-withholding records are written at.
+func debugLogging(opts sidecarOptions) sidecarOptions {
+	opts.ExtraEnv = append(opts.ExtraEnv, "AGENT_REPL_LOG_LEVEL=debug")
+	return opts
+}
+
+// awaitResidueWithheld waits until the sidecar's log says it classified `label`
+// and did not store it. The label is the residue arm plus its own discriminator
+// — `vendor_specific/<kind>`, `unknown/<field>:<discriminator>`, or `unparsed`
+// — which is exactly what `convert.ResidueLabel` mints.
+func awaitResidueWithheld(ctx context.Context, t *testing.T, logPath, label string) logRecord {
+	t.Helper()
+	return awaitLog(ctx, t, logPath, "residue "+label+" classified and withheld", func(r logRecord) bool {
+		return r.Operation == "residue-drop" && r.Context["reason"] == label
+	})
+}
+
+// residueWithheldLabels answers every residue label the sidecar has said it
+// withheld, for a failure message that names what WAS classified.
+func residueWithheldLabels(t *testing.T, logPath string) []string {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, r := range readLog(t, logPath) {
+		if r.Operation != "residue-drop" {
+			continue
+		}
+		if label, ok := r.Context["reason"].(string); ok {
+			seen[label] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for label := range seen {
+		out = append(out, label)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// requireNoResidueStored asserts the invariant itself: whatever the reader
+// classified, the store holds no residue row of any arm.
+func requireNoResidueStored(t *testing.T, entries []*storev1.StoreEntry) {
+	t.Helper()
+	for _, e := range entries {
+		if label := residueLabelOf(e); label != "" {
+			t.Errorf("the store holds residue %q (upsert_key %q); only typed entries are persisted", label, e.GetUpsertKey())
+		}
+	}
+}
+
+// residueLabelOf mirrors convert.ResidueLabel over a stored entry, so a subject
+// can name what leaked without importing the reader's own package.
+func residueLabelOf(e *storev1.StoreEntry) string {
+	switch arm := e.GetAgentUpdate().GetUnservedItem().GetUnservedItem().(type) {
+	case *storev1.StoreUnservedItem_VendorSpecific:
+		return "vendor_specific/" + arm.VendorSpecific.GetKind()
+	case *storev1.StoreUnservedItem_Unknown:
+		return fmt.Sprintf("unknown/%s:%s", arm.Unknown.GetDiscriminatorField(), arm.Unknown.GetDiscriminator())
+	case *storev1.StoreUnservedItem_Unparsed:
+		return "unparsed"
+	default:
+		return ""
+	}
+}

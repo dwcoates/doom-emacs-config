@@ -130,14 +130,17 @@ func TestARotationLinkThatAppearsMidTailMovesTheBook(t *testing.T) {
 	options.StateDir = stateDir
 	startSidecar(t, options)
 	g := newGrowingFile(t, tree.sessionPath(captured.Slug, rotationNewID))
-	first := decodeRecord(t, captured.Lines[0])
-	first["cwd"] = "/Users/dodgecoates/.config/doom-worktrees/bounce-continuity-probe-hhj"
-	g.AppendLine(encodeRecord(t, first))
+	// THE HEAD MUST CONVERT TO A TYPED ENTRY. The book is read off a STORED
+	// update's `top_level`, and residue is never stored — so a head of the
+	// capture's opening bookkeeping lines would leave the store empty and the
+	// precondition unable to say which book the file was reading into. Lines 0-7
+	// end on the first response's own assistant record, which is typed.
+	for _, line := range captured.Lines[:8] {
+		g.AppendLine(line)
+	}
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 	// The books are read off `top_level`, which every update carries, rather
-	// than off page lines: the transcript's first record need not be a page
-	// line at all, and a precondition that missed a residue update would report
-	// "booked nowhere" for a file that was booked perfectly well.
+	// than off page lines alone.
 	if books := booksOf(fake.Entries()); !contains(books, rotationNewID) {
 		t.Fatalf("precondition: with no link on disk the transcript must book under its own id %q; the books written were %v",
 			rotationNewID, books)
@@ -145,7 +148,7 @@ func TestARotationLinkThatAppearsMidTailMovesTheBook(t *testing.T) {
 
 	// Act: the link appears, and the rest of the transcript is written.
 	writeVendorLink(t, stateDir, rotationNewID, rotationOriginalID)
-	for _, line := range captured.Lines[1:] {
+	for _, line := range captured.Lines[8:] {
 		g.AppendLine(line)
 	}
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())

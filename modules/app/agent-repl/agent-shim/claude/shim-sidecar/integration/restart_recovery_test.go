@@ -1,10 +1,11 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -132,8 +133,9 @@ func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
 	// the six corpus-walk operations the startup catch-up window levels (see
 	// "Startup catch-up"), and this subject asserts the per-item record rather
 	// than the summary, so it reads the log at the threshold the detail is
-	// written to.
-	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
+	// written to. The per-record residue-withholding trace it also reads rides
+	// the same threshold.
+	opts = debugLogging(opts)
 
 	g := newGrowingFile(t, path)
 	var headBytes int64
@@ -183,10 +185,14 @@ func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
 	}
 
 	// Assert: nothing from before that turn was re-read. The file's
-	// queue-operation lines are the only records ahead of its single turn start.
-	for _, kind := range vendorSpecificKinds(fake.Entries()) {
-		if kind == "queue-operation" {
-			t.Errorf("a record from BEFORE the in-progress turn was written; the rewind stops at the turn's first record, not at the file's")
+	// queue-operation lines are the only records ahead of its single turn start,
+	// and they are residue — never stored, so a store read cannot answer this.
+	// What answers it is the sidecar saying it classified one: a withheld
+	// `vendor_specific/queue-operation` means the reader went back past the
+	// turn's first record, whether or not anything was persisted for it.
+	for _, label := range residueWithheldLabels(t, opts.LogPath) {
+		if label == "vendor_specific/queue-operation" {
+			t.Errorf("a record from BEFORE the in-progress turn was read; the rewind stops at the turn's first record, not at the file's")
 		}
 	}
 }
@@ -402,16 +408,19 @@ func toSet(counts map[string]int) map[string]bool {
 	return out
 }
 
-// TestOneVendorRecordIngestedTwiceIsOneResidueRow asserts the point of keying
-// residue by the vendor's own uuid: the SAME record read again lands on the SAME
-// row rather than beside itself.
+// TestAReReadOfAResidueRecordStoresNothingTwice re-aims what used to be a
+// subject about ONE RESIDUE ROW ingested twice. Residue is never persisted now,
+// so there is no row for the vendor's uuid to key and no write id to compare:
+// the idempotence that survives is the reader's, not the store's.
 //
-// A RE-READ IS THE ORDINARY CASE, not an edge one — the boot rewind re-reads the
-// in-progress turn on every restart by design, and the store absorbs the replay
-// only because the key and the write id are both identical. With a plane-local
-// key (a digest of the file position, say) this would still have passed, which
-// is why the assertion also pins that the key is the record's uuid.
-func TestOneVendorRecordIngestedTwiceIsOneResidueRow(t *testing.T) {
+// WHAT THE RESTART STILL GUARANTEES, and what this pins:
+//   - a re-read is the ORDINARY case — the boot rewind re-reads the in-progress
+//     turn on every restart by design — so the same residue records really are
+//     classified a second time, which the withholding records show;
+//   - and the second pass stores NOTHING for them: no residue row on either
+//     pass, and no upsert_key the first pass had not already written, so the
+//     replay adds nothing beside itself.
+func TestAReReadOfAResidueRecordStoresNothingTwice(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -419,7 +428,8 @@ func TestOneVendorRecordIngestedTwiceIsOneResidueRow(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// The withholding records are the only trace a re-read of residue leaves.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act: ingest the whole file, stop, and start again over a store that holds
 	// no cursor, so every record is necessarily read a second time.
@@ -429,64 +439,63 @@ func TestOneVendorRecordIngestedTwiceIsOneResidueRow(t *testing.T) {
 		g.AppendLine(line)
 	}
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
-	firstPass := residueWriteIDsByKey(fake.Entries())
+	firstPassKeys := upsertKeySet(fake.Entries())
+	firstPassDrops := len(residueDropRecords(t, opts.LogPath))
 	first.Stop()
 
 	before := fake.BatchCount()
 	startSidecar(t, opts)
 	fake.awaitBatches(ctx, t, before+1)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
-	secondPass := residueWriteIDsByKey(fake.Entries()[countEntriesInBatches(fake.Batches()[:before]):])
+	secondPass := fake.Entries()[countEntriesInBatches(fake.Batches()[:before]):]
 
-	// Assert: the second pass introduced no new residue row, and every row it
-	// re-wrote carries the identical write id — which is what makes the store
-	// absorb it rather than store the record twice.
-	if len(firstPass) == 0 {
+	// Assert: the capture really does hold residue, or nothing was checked.
+	if firstPassDrops == 0 {
 		t.Fatal("the capture produced no residue at all, so nothing was checked")
 	}
-	var uuidKeyed int
-	for key, id := range secondPass {
-		was, seen := firstPass[key]
-		if !seen {
-			t.Errorf("the re-read minted a NEW residue row %q; one record must land on one row", key)
-			continue
+	// The second reader classified it again — the re-read happened.
+	awaitResidueDropsAtLeast(ctx, t, opts.LogPath, firstPassDrops+1)
+	// And stored none of it, on either pass.
+	requireNoResidueStored(t, fake.Entries())
+	// Nor anything else the first pass had not already written: a replay lands
+	// on the rows it landed on before, never beside them.
+	for _, e := range secondPass {
+		if !firstPassKeys[e.GetUpsertKey()] {
+			t.Errorf("the re-read wrote a NEW row %q; a replay must land on the rows the first pass wrote", e.GetUpsertKey())
 		}
-		if was != id {
-			t.Errorf("residue row %q minted write_id %q then %q; the store cannot absorb a replay that changed identity",
-				key, was, id)
-		}
-		if !strings.HasPrefix(key, "residue:file:") {
-			uuidKeyed++
-		}
-	}
-	// The key must be the VENDOR'S uuid, which is the only thing the other plane
-	// could agree on: a plane-local key would satisfy everything above and still
-	// leave one record as two rows across the two producers.
-	if uuidKeyed == 0 {
-		t.Fatalf("no residue row was keyed by a vendor record uuid; keys were %v",
-			sortedStrings(keysOf(toSetOfKeys(secondPass))))
 	}
 }
 
-// residueWriteIDsByKey indexes each residue row's write id by its upsert key.
-func residueWriteIDsByKey(entries []*storev1.StoreEntry) map[string]string {
-	out := map[string]string{}
-	for _, e := range entries {
-		if e.GetAgentUpdate().GetUnservedItem() == nil {
-			continue
+// residueDropRecords answers every withholding record the sidecar has written,
+// so a subject can count re-classifications rather than only name them.
+func residueDropRecords(t *testing.T, logPath string) []logRecord {
+	t.Helper()
+	var out []logRecord
+	for _, r := range readLog(t, logPath) {
+		if r.Operation == "residue-drop" {
+			out = append(out, r)
 		}
-		if !strings.HasPrefix(e.GetUpsertKey(), "residue:") {
-			continue
-		}
-		out[e.GetUpsertKey()] = e.GetWriteId()
 	}
 	return out
 }
 
-func toSetOfKeys(in map[string]string) map[string]bool {
-	out := make(map[string]bool, len(in))
-	for k := range in {
-		out[k] = true
+// awaitResidueDropsAtLeast waits until the sidecar has said it classified and
+// withheld at least n records. A COUNT rather than a match, because the fact
+// under test is that the SAME residue was classified a second time, which no
+// single record can state.
+func awaitResidueDropsAtLeast(ctx context.Context, t *testing.T, logPath string, n int) {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		got := len(residueDropRecords(t, logPath))
+		if got >= n {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("the sidecar withheld %d residue record(s), wanted at least %d, within the deadline", got, n)
+		case <-tick.C:
+		}
 	}
-	return out
 }

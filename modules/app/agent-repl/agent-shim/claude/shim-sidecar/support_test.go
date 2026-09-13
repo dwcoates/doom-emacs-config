@@ -51,10 +51,25 @@ type fakeStore struct {
 	// so a subject can wait for the wedge instead of sleeping toward it.
 	writeWedged bool
 	entered     chan struct{}
+
+	// cursorsWedged is the same wedge on the cursor verb: GetSidecarCursors
+	// hangs until the CALL's context is cancelled, so a subject can withdraw a
+	// recovery that is genuinely in flight rather than one that already failed.
+	// cursorsEntered is closed on the first such call.
+	cursorsWedged  bool
+	cursorsEntered chan struct{}
 }
 
-func (f *fakeStore) GetSidecarCursors(_ context.Context, _ *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {
+func (f *fakeStore) GetSidecarCursors(ctx context.Context, _ *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {
 	f.cursorsCalls++
+	if f.cursorsWedged {
+		if f.cursorsEntered != nil {
+			close(f.cursorsEntered)
+			f.cursorsEntered = nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if f.cursorsFail != "" {
 		return connect.NewResponse(&storev1.GetSidecarCursorsResponse{
 			Result: &storev1.GetSidecarCursorsResponse_Failure{

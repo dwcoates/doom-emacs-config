@@ -16,7 +16,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/discover"
@@ -230,6 +232,12 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 	return target, true
 }
 
+// reasonTranscriptVanished is the `resolve-transcript-workspace` record's
+// discriminator: attribution did not FAIL, the file it had to read is no longer
+// there. It separates an ordinary end from a transcript that is present and
+// cannot be attributed, which is the one an operator must look at.
+const reasonTranscriptVanished = "transcript_vanished"
+
 func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.Target, bool) {
 	key := target.ConfigRoot + "\x00" + target.ProjectKey + "\x00" + target.SessionID
 	workspace, ok := s.workspaceBySession[key]
@@ -261,6 +269,25 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 				s.catchupWorkspaces.add(mtimeMs)
 				ctx.Level = "debug"
 				s.log.With(ctx).LogVerbose("transcript held without workspace attribution during startup catch-up; it is summarized rather than stated on its own: %v", err)
+				return discover.Target{}, false
+			}
+			if errors.Is(err, fs.ErrNotExist) {
+				// THE TRANSCRIPT IS GONE, SO THERE IS NOTHING TO HOLD FOR. The
+				// attribution read is the FIRST thing done to a discovered
+				// transcript, and a vendor session directory deleted between the
+				// scan and that read leaves nothing to attribute and nothing to
+				// wait on: no bytes were skipped, because none were ever read.
+				// That is an ordinary end, not an attribution failure, so it is
+				// STATED rather than warned — once per file, by the same
+				// dedupe above, and summarized when it is startup backlog.
+				//
+				// Every one of the ten of these in the 2026-09-13 15:28 gap scan
+				// was exactly this: ten `.claude-chesscom` transcripts, a main
+				// session and its `subagents/` subtree, whose whole session
+				// directory was removed at 14:37.
+				ctx.Level = "info"
+				ctx.Reason = reasonTranscriptVanished
+				s.log.With(ctx).Log("the transcript was gone before its first byte could be read, so there is no workspace to attribute and nothing was skipped: %v", err)
 				return discover.Target{}, false
 			}
 			s.log.With(ctx).Log("transcript held: workspace attribution is required before any bytes are read: %v", err)
