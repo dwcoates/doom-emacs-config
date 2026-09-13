@@ -128,6 +128,13 @@ EOF
     #   dead      — no socket, and launchd reports no pid: it died on boot
     #   wedged    — alive, silent, no socket
     #   nuking    — alive, writing a nuke record on every poll, no socket
+    #
+    # The SIDECAR is modelled by a loaded-flag file, because the deploy stops
+    # it with `bootout` (which removes the label from the user domain) and
+    # brings it back with `bootstrap` (which puts the label back). `print`
+    # exits non-zero for a label the domain does not hold — the only question a
+    # bootout can be polled on. SIDECAR_STUB_STUCK=1 is a bootout that does not
+    # take, so the poll's own upper bound is exercised.
     cat > "$stubs/launchctl" <<'EOF'
 #!/usr/bin/env bash
 echo "launchctl $*" >> "$STUB_LOG"
@@ -151,6 +158,16 @@ case "$*" in
         case "${STORE_STUB_MODE:-immediate}" in
             immediate) bind_socket ;;
         esac
+        ;;
+    bootout*com.agentrepl.shim-claude-sidecar*)
+        [ "${SIDECAR_STUB_STUCK:-0}" = "1" ] || rm -f "$HOME/.sidecar-loaded"
+        ;;
+    bootstrap*com.agentrepl.shim-claude-sidecar*)
+        : > "$HOME/.sidecar-loaded"
+        ;;
+    print*com.agentrepl.shim-claude-sidecar*)
+        [ -f "$HOME/.sidecar-loaded" ] || exit 1
+        printf 'com.agentrepl.shim-claude-sidecar = {\n\tpid = 4343\n\tstate = running\n}\n'
         ;;
     print*com.agentrepl.shim-store*)
         polls=$(( $(cat "$POLLS" 2>/dev/null || echo 0) + 1 ))
@@ -279,6 +296,16 @@ run_deploy() {
     make_tree "$dir/tree"
     make_stubs "$dir/stubs"
     mkdir -p "$dir/h"
+    # The installed launchd plists. The deploy boots the sidecar OUT for a
+    # store restart and needs its plist to bootstrap it back, exactly as
+    # store-reset.sh does; NO_SIDECAR_PLIST=1 is the case where it is missing.
+    mkdir -p "$dir/h/Library/LaunchAgents"
+    printf '<plist/>\n' > "$dir/h/Library/LaunchAgents/com.agentrepl.shim-store.plist"
+    if [ "${NO_SIDECAR_PLIST:-0}" != "1" ]; then
+        printf '<plist/>\n' > "$dir/h/Library/LaunchAgents/com.agentrepl.shim-claude-sidecar.plist"
+    fi
+    # launchd holds the sidecar label at the start of every case.
+    : > "$dir/h/.sidecar-loaded"
     # PRE_RUN runs against the built tree, for a case whose subject is a tree
     # that is WRONG — a control-plane file the checkout does not have.
     if [ -n "${PRE_RUN:-}" ]; then ( cd "$dir/tree" && eval "$PRE_RUN" ); fi
@@ -300,6 +327,13 @@ run_deploy() {
 
 log_has()    { grep -q "$1" "$STUB_LOG"; }
 log_line()   { grep -n "$1" "$STUB_LOG" | head -1 | cut -d: -f1; }
+log_last()   { grep -n "$1" "$STUB_LOG" | tail -1 | cut -d: -f1; }
+# assert the LAST occurrence of $1 still precedes $2 — "every one of these came
+# before that one", which a first-match comparison cannot say.
+log_all_before() {
+    local a b
+    a="$(log_last "$1")" && b="$(log_line "$2")" && [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]
+}
 log_before() { # assert pattern $1 appears before pattern $2
     local a b
     a="$(log_line "$1")" && b="$(log_line "$2")" && [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]
@@ -314,11 +348,11 @@ if [ "$RC" -eq 0 ] \
    && log_before "make -C .*proto all" "build-frontend" \
    && log_before "build-frontend" "go build -o .*claude-repld" \
    && log_before "go build -o .*claude-repld" "pwd=shim-store" \
-   && log_before "kickstart -k gui/.*shim-store" "kickstart -k gui/.*shim-claude-sidecar" \
+   && log_before "kickstart -k gui/.*shim-store" "bootstrap gui/.*shim-claude-sidecar" \
    && log_before "load .*daemon.el" "runtime-restart" \
    && log_before "load .*services.el" "runtime-restart" \
    && ! log_has "frontend-client.el" \
-   && log_before "kickstart -k gui/.*shim-claude-sidecar" "runtime-restart" \
+   && log_before "bootstrap gui/.*shim-claude-sidecar" "runtime-restart" \
    && log_has "readiness-report --require-ready webapp" \
    && log_has "readiness-report --require-ready daemon" \
    && log_before "readiness-report --require-ready webapp" "kickstart -k gui/.*shim-store" \
@@ -443,7 +477,8 @@ log_count() { grep -c "$1" "$STUB_LOG"; }
 d="$TMP/t2b"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && [ "$(log_count "kickstart -k gui/.*shim-store")" -eq 1 ] \
-   && [ "$(log_count "kickstart -k gui/.*shim-claude-sidecar")" -eq 1 ]; then
+   && [ "$(log_count "bootstrap gui/.*shim-claude-sidecar")" -eq 1 ] \
+   && [ "$(log_count "bootout gui/.*shim-claude-sidecar")" -eq 1 ]; then
     pass "a full deploy kickstarts each service exactly once"
 else
     fail "a full deploy kickstarts each service exactly once" "rc=$RC log: $(cat "$STUB_LOG")"
@@ -455,10 +490,88 @@ seed_deployed "$d" shim-store bin-v0
 seed_deployed "$d" shim-claude-sidecar bin-v1
 RUN_ENV="" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_before "kickstart -k gui/.*shim-store" "kickstart -k gui/.*shim-claude-sidecar"; then
-    pass "a store change cascades into a sidecar kickstart, store first"
+   && log_before "kickstart -k gui/.*shim-store" "bootstrap gui/.*shim-claude-sidecar"; then
+    pass "a store change cascades into a sidecar restart, store first"
 else
-    fail "a store change cascades into a sidecar kickstart, store first" "rc=$RC log: $(cat "$STUB_LOG")"
+    fail "a store change cascades into a sidecar restart, store first" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 3a. the store restart is taken with the sidecar already stopped -------
+# The gap between the store's socket being unlinked and rebound is the whole
+# defect: a sidecar writing across it logged dial failures, "cursor not
+# advanced", failed cursor recovery and a suspended producer, all caused by the
+# deploy. bin/store-reset.sh records the order that has none of that, and this
+# is that order — sidecar out, store restarted, socket up, sidecar back.
+d="$TMP/t3a"
+seed_deployed "$d" shim-store bin-v0
+seed_deployed "$d" shim-claude-sidecar bin-v1
+RUN_ENV="" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && log_before "bootout gui/.*shim-claude-sidecar" "kickstart -k gui/.*shim-store" \
+   && log_before "kickstart -k gui/.*shim-store" "bootstrap gui/.*shim-claude-sidecar" \
+   && ! log_has "kickstart -k gui/.*shim-claude-sidecar"; then
+    pass "a store restart boots the sidecar out first and bootstraps it back after"
+else
+    fail "a store restart boots the sidecar out first and bootstraps it back after" \
+         "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 3b. the sidecar is stopped only after the store's socket is proved up --
+# Bootstrapping it while store.sock is still absent is the same outage in a
+# smaller window: the sidecar's first batch would dial a socket that is not
+# there yet.
+d="$TMP/t3b"; mkdir -p "$d"
+RUN_ENV="STORE_STUB_MODE=late STORE_STUB_LATE_POLLS=3" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && grep -q "store: socket appeared" "$d/stdout" \
+   && log_all_before "print gui/.*shim-store" "bootstrap gui/.*shim-claude-sidecar"; then
+    pass "the sidecar is bootstrapped only after the store's socket wait has returned"
+else
+    fail "the sidecar is bootstrapped only after the store's socket wait has returned" \
+         "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 3c. a store that never comes up leaves the sidecar stopped, and says so -
+d="$TMP/t3c"; mkdir -p "$d"
+RUN_ENV="STORE_STUB_MODE=dead" run_deploy "$d"
+if [ "$RC" -eq 1 ] \
+   && log_has "bootout gui/.*shim-claude-sidecar" \
+   && ! log_has "bootstrap gui/.*shim-claude-sidecar" \
+   && grep -q "The sidecar was stopped for this restart and has NOT been started again" "$d/stderr"; then
+    pass "a store that fails to come up leaves the sidecar stopped and names that in the failure"
+else
+    fail "a store that fails to come up leaves the sidecar stopped and names that in the failure" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 3d. a missing sidecar plist refuses before anything is stopped --------
+# A bootout with no plist to bootstrap back from would leave the host with no
+# sidecar and no way for this script to return one.
+d="$TMP/t3d"; mkdir -p "$d"
+NO_SIDECAR_PLIST=1 RUN_ENV="" run_deploy "$d"
+NO_SIDECAR_PLIST=0
+if [ "$RC" -eq 1 ] \
+   && grep -q "com.agentrepl.shim-claude-sidecar.plist is missing" "$d/stderr" \
+   && ! log_has "bootout" \
+   && ! log_has "kickstart" \
+   && ! log_has "runtime-restart"; then
+    pass "a missing sidecar plist refuses the deploy before the sidecar is stopped"
+else
+    fail "a missing sidecar plist refuses the deploy before the sidecar is stopped" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 3e. a bootout that does not take stops the deploy before the store ----
+d="$TMP/t3e"; mkdir -p "$d"
+RUN_ENV="SIDECAR_STUB_STUCK=1 AGENT_REPL_STORE_SOCK_MAX=2" run_deploy "$d"
+if [ "$RC" -eq 1 ] \
+   && grep -q "did not leave the user domain within the 2s upper bound" "$d/stderr" \
+   && ! log_has "kickstart -k gui/.*shim-store" \
+   && ! log_has "runtime-restart"; then
+    pass "a sidecar that will not boot out stops the deploy before the store is kickstarted"
+else
+    fail "a sidecar that will not boot out stops the deploy before the store is kickstarted" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
 # --- 4. sidecar changed alone: store untouched ------------------------------
@@ -468,6 +581,7 @@ seed_deployed "$d" shim-claude-sidecar bin-v0
 RUN_ENV="" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && ! log_has "kickstart -k gui/.*shim-store" \
+   && ! log_has "bootout" \
    && log_has "kickstart -k gui/.*shim-claude-sidecar"; then
     pass "a sidecar-only change leaves the store un-bounced"
 else
@@ -486,7 +600,7 @@ printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-claude-sidecar"
 RUN_ENV="" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && log_has "kickstart -k gui/.*shim-store" \
-   && log_has "kickstart -k gui/.*shim-claude-sidecar"; then
+   && log_has "bootstrap gui/.*shim-claude-sidecar"; then
     pass "an installed but never-kickstarted binary bounces despite an unchanged build"
 else
     fail "an installed but never-kickstarted binary bounces despite an unchanged build" "rc=$RC log: $(cat "$STUB_LOG")"
@@ -634,7 +748,7 @@ seed_deployed "$d" shim-claude-sidecar bin-v0
 RUN_ENV="" run_deploy "$d" --force
 if [ "$RC" -eq 0 ] \
    && log_has "kickstart -k gui/.*shim-store" \
-   && log_has "kickstart -k gui/.*shim-claude-sidecar"; then
+   && log_has "bootstrap gui/.*shim-claude-sidecar"; then
     pass "--force still kickstarts a service that is not running the installed binary"
 else
     fail "--force still kickstarts a service that is not running the installed binary" \
@@ -869,7 +983,7 @@ d="$TMP/t29"; mkdir -p "$d"
 RUN_ENV="STORE_STUB_MODE=late STORE_STUB_LATE_POLLS=3" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && grep -q "store: socket appeared .*s after kickstart" "$d/stdout" \
-   && log_has "kickstart -k gui/.*shim-claude-sidecar" \
+   && log_has "bootstrap gui/.*shim-claude-sidecar" \
    && log_has "runtime-restart"; then
     pass "a store socket that appears late but within the bound completes the deploy"
 else
@@ -885,12 +999,12 @@ d="$TMP/t30"; mkdir -p "$d"
 RUN_ENV="STORE_STUB_MODE=dead" run_deploy "$d"
 if [ "$RC" -eq 1 ] \
    && grep -q "the store died before" "$d/stderr" \
-   && grep -q "The sidecar was NOT kickstarted" "$d/stderr" \
-   && ! log_has "kickstart -k gui/.*shim-claude-sidecar" \
+   && grep -q "The sidecar was stopped for this restart and has NOT been started again" "$d/stderr" \
+   && ! log_has "bootstrap gui/.*shim-claude-sidecar" \
    && ! log_has "runtime-restart"; then
-    pass "a store that dies before its socket appears fails the deploy without kickstarting the sidecar"
+    pass "a store that dies before its socket appears fails the deploy without restarting the sidecar"
 else
-    fail "a store that dies before its socket appears fails the deploy without kickstarting the sidecar" \
+    fail "a store that dies before its socket appears fails the deploy without restarting the sidecar" \
          "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
@@ -899,7 +1013,7 @@ d="$TMP/t31"; mkdir -p "$d"
 RUN_ENV="STORE_STUB_MODE=wedged" run_deploy "$d"
 if [ "$RC" -eq 1 ] \
    && grep -q "has written nothing for 2s" "$d/stderr" \
-   && ! log_has "kickstart -k gui/.*shim-claude-sidecar"; then
+   && ! log_has "bootstrap gui/.*shim-claude-sidecar"; then
     pass "a store that is alive but writing nothing fails the wait as wedged"
 else
     fail "a store that is alive but writing nothing fails the wait as wedged" \
@@ -915,7 +1029,7 @@ RUN_ENV="STORE_STUB_MODE=nuking AGENT_REPL_STORE_SOCK_MAX=3" run_deploy "$d"
 if [ "$RC" -eq 1 ] \
    && grep -q "did not appear within the 3s upper bound" "$d/stderr" \
    && grep -q "the database is being replaced" "$d/stdout" \
-   && ! log_has "kickstart -k gui/.*shim-claude-sidecar" \
+   && ! log_has "bootstrap gui/.*shim-claude-sidecar" \
    && ! log_has "runtime-restart"; then
     pass "a store still working past the upper bound fails loudly and names the schema nuke"
 else

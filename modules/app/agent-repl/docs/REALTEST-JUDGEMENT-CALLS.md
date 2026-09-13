@@ -15,6 +15,32 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The deploy's own store outage, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | `bin/deploy-all.sh` kickstarted the store underneath a running sidecar, and the sidecar logged dial failures, `cursor not advanced`, failed cursor recovery and `production-suspended` for the length of the socket gap. Harden the sidecar against the gap, or take the gap with the sidecar stopped? | Stop the sidecar for the restart | The gap is the deploy's own doing and `bin/store-reset.sh` already records the order that has none of it (sidecar down, store down, store up, sidecar up); teaching the sidecar to tolerate an outage nobody needs to cause would leave the outage in place | Restore the single `kickstart` pair in step 4 of `bin/deploy-all.sh` |
+| 2026-09-13 | Stop it with `launchctl kill` or `bootout`? | `bootout`, as the reset does | Both plists set `KeepAlive`, so a signalled process is answered by a new pid within a second and a poll for "stopped" can never succeed; bootout takes the relaunch away with the process | Replace `stop_sidecar`/`start_sidecar` with a `kill` in `bin/deploy-all.sh` |
+| 2026-09-13 | The sidecar's plist is then required to bring it back. Refuse a deploy that cannot find it, or bounce the store anyway? | Refuse, before anything is stopped | A bootout with no plist to bootstrap from leaves the host with no sidecar and no way for the script to return one, so the refusal is taken while everything is still running | Drop `require_sidecar_plist` from `bin/deploy-all.sh` |
+| 2026-09-13 | A store that fails to come up leaves the sidecar down. Start it again on the way out, or leave it stopped? | Leave it stopped, and name that in every failure message | A sidecar started against a store that is not serving recovers its cursors cold, which is the silent full re-read the ordering exists to prevent; the operator is told in the same breath as the store failure | Add a `start_sidecar` to the three exit paths in `wait_for_store_sock` |
+| 2026-09-13 | Does a SIDECAR-ONLY bounce also go through bootout? | No — plain `kickstart` | The store never moves in that case, so its socket is up throughout and there is no gap to avoid | Route the `elif` branch through `stop_sidecar`/`start_sidecar` too |
+
+## The schema bump the deploy warned about, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The store logged `store.db.schema` WARN "on-disk schema does not match this binary (found version=5 ... want version=6)" at a deploy. Fix the condition, or re-level? | Re-level to INFO, for a superseded version only | The store is nuked, never migrated, and the owner ruled it needs no retention during development, so meeting an older stamp at a deploy is the documented convention working; there is no condition to fix | Restore the single `Level: "warn"` mismatch record in `agent-shim/shim-store/internal/db/db.go` |
+| 2026-09-13 | Which mismatches keep their weight? | Everything that is not a version this binary superseded: a stamp at or above `SchemaVersion`, a database with no `schema_meta` (version 0), an unreadable file, and a recreate that fails after the unlink — all ERROR | Those discard data nothing planned to discard, or leave the host with no database at all; only "an older version of ours" is routine | Widen `supersededVersion` (same file) |
+| 2026-09-13 | Warn or error for the ones that keep their weight? | ERROR | A warning that nobody may leave standing is an error in everything but name, and the standing order is zero warnings; these are faults, not conventions | Set those three records back to `Level: "warn"` |
+| 2026-09-13 | The failed-recreate record is unreachable from a test (every filesystem state that fails the open also fails the unlink). Ship it untested, add a seam, or drop it? | Add the `reopenAfterNuke` seam | Dropping the record would leave the one branch with no database at all silent, and shipping it untested is the coverage rule this module holds everything else to | Inline `openAt` at that call site and delete the variable |
+
+## The talkative run's output bound, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The sidecar warned `run-output-bound` three times in one session ("the run has said more than 1048576 bytes"). Raise the bound, or re-level? | Re-level to INFO | The terminal the record is about CARRIES the omitted count, so no reader is misled and nothing is silently lost; a run saying more than a megabyte is ordinary, not a defect | Restore `handleWarn` at `agent-shim/claude/shim-sidecar/internal/handler/runoutput.go` |
+| 2026-09-13 | Keep the record at all? | Yes, with both counts | It is the only place the operator learns a terminal is partial and by how much, and dropping it would make the omission invisible outside the terminal | Delete the `Log` call in `RunOutput.Remember` |
+
 ## The adopt that outruns the intent manifest, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |

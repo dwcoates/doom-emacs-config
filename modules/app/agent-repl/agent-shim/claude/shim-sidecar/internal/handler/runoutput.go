@@ -114,8 +114,14 @@ func (r *RunOutput) Remember(ctx *Context, raw []byte) {
 	}
 	r.seen = append(r.seen, raw[:room]...)
 	r.omitted += uint64(len(raw) - room)
-	r.log.With(handleWarn("run-output-bound", ctx)).Log(
-		"the run has said more than %d bytes; its terminal will state the first %d and report %d omitted rather than claiming to carry the whole",
+	// THE TERMINAL ITSELF CARRIES THE OMITTED COUNT, so the reader is told what
+	// it is looking at and nothing is silently truncated. The bound firing is
+	// the bound doing its job on a talkative run — a run that says more than a
+	// megabyte is ordinary, and three of them put three warnings in the owner's
+	// log on 2026-09-13 at 16:10 — so the record is informational and states
+	// the counts.
+	r.log.With(handleCtx("run-output-bound", ctx)).Log(
+		"the run has said more than %d bytes; its terminal states the first %d and reports %d omitted rather than claiming to carry the whole",
 		maxRememberedOutput, maxRememberedOutput, r.omitted)
 }
 

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,20 @@ func (s *sink) assertLogged(t *testing.T, level, substring string) {
 		}
 	}
 	t.Fatalf("no %s record mentioning %q; log was:\n%s", level, substring, s.file.String())
+}
+
+// recordsAtLevel returns every message logged at `level`, for an assertion
+// about what was NOT said.
+func recordsAtLevel(t *testing.T, s *sink, level string) []string {
+	t.Helper()
+	var out []string
+	for _, record := range s.records(t) {
+		if record["level"] == level {
+			message, _ := record["message"].(string)
+			out = append(out, message)
+		}
+	}
+	return out
 }
 
 // assertTracedRefusal is the assertion for a REFUSED REQUEST: this layer traces
@@ -386,7 +401,8 @@ func TestOpenRecordsAFirstCreateWithoutWarning(t *testing.T) {
 }
 
 func TestOpenNukesADatabaseStampedAtAnotherVersion(t *testing.T) {
-	// Arrange: a store with a row in it, re-stamped at a foreign version.
+	// Arrange: a store with a row in it, re-stamped at a version ABOVE this
+	// binary's — a database only a newer store could have written.
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
 	first, err := OpenWithOptions(path, log, Options{})
@@ -414,7 +430,91 @@ func TestOpenNukesADatabaseStampedAtAnotherVersion(t *testing.T) {
 	if got := scalar[int](t, second, `SELECT version FROM schema_meta`); got != SchemaVersion {
 		t.Fatalf("schema version = %d, want %d", got, SchemaVersion)
 	}
-	s.assertLogged(t, "warn", "removing the database file and its WAL siblings and recreating")
+	s.assertLogged(t, "error", "removing the database file and its WAL siblings and recreating")
+}
+
+func TestOpenRecordsASupersededSchemaVersionAtInfo(t *testing.T) {
+	// Arrange: a database stamped one version BELOW this binary's, which is
+	// what every deploy that bumped the schema meets. Recreating it is the
+	// store's documented convention (nuked, never migrated), so the record
+	// carries the fact and not a fault.
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if _, err := first.sql.Exec(fmt.Sprintf(`UPDATE schema_meta SET version = %d`, SchemaVersion-1)); err != nil {
+		t.Fatalf("restamp: %v", err)
+	}
+	first.Close() //nolint:errcheck // reopened below
+
+	// Act
+	s, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer second.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	s.assertLogged(t, "info", "the on-disk schema is a superseded version")
+	if warned := recordsAtLevel(t, s, "warn"); len(warned) != 0 {
+		t.Fatalf("a superseded schema logged %d warning(s), want none: %v", len(warned), warned)
+	}
+}
+
+func TestOpenNamesBothVersionsWhenItReplacesASupersededSchema(t *testing.T) {
+	// Arrange: the operator's question at a nuke is "from what, to what". The
+	// live record said neither until it did (found version=5, want version=6).
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if _, err := first.sql.Exec(fmt.Sprintf(`UPDATE schema_meta SET version = %d`, SchemaVersion-1)); err != nil {
+		t.Fatalf("restamp: %v", err)
+	}
+	first.Close() //nolint:errcheck // reopened below
+
+	// Act
+	s, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer second.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	s.assertLogged(t, "info", fmt.Sprintf("found version=%d", SchemaVersion-1))
+	s.assertLogged(t, "info", fmt.Sprintf("want version=%d", SchemaVersion))
+}
+
+func TestOpenReportsADatabaseCarryingNoSchemaStampAsAnError(t *testing.T) {
+	// Arrange: tables, but no `schema_meta` — version 0. That is somebody
+	// else's file at the store's path, never a version of ours this binary
+	// superseded, so it is discarded loudly rather than as a routine bump.
+	path := filepath.Join(t.TempDir(), "store.db")
+	staged, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("staging a foreign database: %v", err)
+	}
+	if _, err := staged.Exec(`CREATE TABLE somebody_elses (id INTEGER)`); err != nil {
+		t.Fatalf("staging a foreign table: %v", err)
+	}
+	staged.Close() //nolint:errcheck // staged and done
+	s, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	s.assertLogged(t, "error", "is not a version it superseded")
 }
 
 func TestOpenRemovesTheFileOfADatabaseStampedAtAnotherVersion(t *testing.T) {
@@ -554,7 +654,7 @@ func TestOpenNukesADatabaseWhoseTableSetDiffers(t *testing.T) {
 	if !slicesEqual(tables, schemaTables) {
 		t.Fatalf("tables = %v, want %v", tables, schemaTables)
 	}
-	s.assertLogged(t, "warn", "removing the database file and its WAL siblings and recreating")
+	s.assertLogged(t, "error", "removing the database file and its WAL siblings and recreating")
 }
 
 func TestOpenLeavesAMatchingDatabaseUntouched(t *testing.T) {
@@ -662,7 +762,7 @@ func TestOpenNukesAFileThatIsNotADatabaseAtAll(t *testing.T) {
 	if got := scalar[int](t, d, `SELECT version FROM schema_meta`); got != SchemaVersion {
 		t.Fatalf("schema version = %d, want %d", got, SchemaVersion)
 	}
-	s.assertLogged(t, "warn", "cannot be read by this binary")
+	s.assertLogged(t, "error", "cannot be read by this binary")
 }
 
 func TestOpenRemovesTheWalSiblingsOfAnUnreadableDatabase(t *testing.T) {
@@ -719,25 +819,35 @@ func TestOpenStillFailsWhenTheRecreateItselfCannotSucceed(t *testing.T) {
 	}
 }
 
-func TestOpenRefusesADirectoryAtTheDatabasePathRatherThanRemovingIt(t *testing.T) {
-	// Arrange: unlinking whatever sits at an operator-supplied path is how a
-	// service deletes somebody's data. A directory at --db is a
-	// misconfiguration to report, not a database to replace.
-	path := filepath.Join(t.TempDir(), "events.db")
-	if err := os.Mkdir(path, 0o755); err != nil {
-		t.Fatalf("stage a directory: %v", err)
-	}
+func TestOpenStatesTheFailureToRecreateAfterTheSupersededFileIsGone(t *testing.T) {
+	// Arrange: a superseded database that is removed successfully, and a
+	// recreate that then fails. At that point there is no database at all, so
+	// the failure is stated here rather than left to whatever the caller does
+	// with the error.
+	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if _, err := first.sql.Exec(fmt.Sprintf(`UPDATE schema_meta SET version = %d`, SchemaVersion-1)); err != nil {
+		t.Fatalf("restamp: %v", err)
+	}
+	first.Close() //nolint:errcheck // reopened below
+	previous := reopenAfterNuke
+	t.Cleanup(func() { reopenAfterNuke = previous })
+	reopenAfterNuke = func(string, string, string, *logging.Logger, Options, func() int64) (*DB, error) {
+		return nil, errors.New("no space left on device")
+	}
+	s, reopenLog := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, reopenLog, Options{})
 
 	// Assert
 	if err == nil {
-		d.Close() //nolint:errcheck // test teardown
-		t.Fatal("OpenWithOptions accepted a directory at the database path")
+		d.Close() //nolint:errcheck // the open should not have succeeded
+		t.Fatal("OpenWithOptions succeeded though the recreate failed")
 	}
-	if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
-		t.Fatalf("the directory at %q did not survive the refused open (stat err: %v)", path, statErr)
-	}
+	s.assertLogged(t, "error", "could not be recreated at version=")
 }

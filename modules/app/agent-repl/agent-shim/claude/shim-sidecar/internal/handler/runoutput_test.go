@@ -5,9 +5,49 @@ package handler
 // is the shared machinery itself.
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
+
+// capturingLogger is testLogger with the file sink kept, so a test can pin the
+// LEVEL a record was written at rather than only its text.
+func capturingLogger() (*bytes.Buffer, *logging.Bound) {
+	// BOTH SINKS ARE SUPPLIED, as testLogger's comment requires, and they are
+	// DIFFERENT buffers: one buffer behind both would record every line twice
+	// and no "exactly one record" assertion could hold.
+	sink := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	return sink, logging.New(sink, stderr).With(logging.Context{Component: "test"})
+}
+
+// levelForMessage returns the level of the ONE captured record whose message
+// contains substring, failing unless exactly one does.
+func levelForMessage(t *testing.T, sink *bytes.Buffer, substring string) string {
+	t.Helper()
+	var level string
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("captured log line is not JSON: %v: %q", err, line)
+		}
+		if msg, _ := rec["message"].(string); strings.Contains(msg, substring) {
+			level, _ = rec["level"].(string)
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("message mentioning %q: got %d records, want exactly 1; log:\n%s", substring, count, sink.String())
+	}
+	return level
+}
 
 func runOutputCtx(path, fileID string, observed int64) *Context {
 	return &Context{Path: path, FileID: fileID, BytesObserved: observed}
@@ -52,6 +92,57 @@ func TestRunOutputReportsWhatItOmittedPastTheBound(t *testing.T) {
 	seen, omitted := r.Seen()
 	if len(seen) != maxRememberedOutput || omitted != 64 {
 		t.Fatalf("seen = %d bytes omitted = %d, want the bound held and the rest counted", len(seen), omitted)
+	}
+}
+
+func TestRunOutputRecordsTheBoundAtInfo(t *testing.T) {
+	// Arrange. A run saying more than the bound is ordinary — three did it in
+	// one session on 2026-09-13 — and the terminal carries the omitted count,
+	// so the reader is told rather than misled. Held at warn it was a defect
+	// report for something that is not a defect.
+	sink, log := capturingLogger()
+	r := NewRunOutput(log)
+
+	// Act.
+	r.Remember(runOutputCtx("/tmp/b1.output", "1:2", 0), []byte(strings.Repeat("x", maxRememberedOutput+64)))
+
+	// Assert.
+	if got := levelForMessage(t, sink, "the run has said more than"); got != "info" {
+		t.Fatalf("the run-output bound was recorded at %q, want info", got)
+	}
+}
+
+func TestRunOutputStatesBothCountsWhenItPassesTheBound(t *testing.T) {
+	// Arrange. "How much was kept, how much was dropped" is the whole question
+	// the record answers.
+	sink, log := capturingLogger()
+	r := NewRunOutput(log)
+
+	// Act.
+	r.Remember(runOutputCtx("/tmp/b1.output", "1:2", 0), []byte(strings.Repeat("x", maxRememberedOutput+64)))
+
+	// Assert.
+	logged := sink.String()
+	if !strings.Contains(logged, "1048576") {
+		t.Errorf("the run-output bound record does not state the bound it held; log:\n%s", logged)
+	}
+	if !strings.Contains(logged, "64 omitted") {
+		t.Errorf("the run-output bound record does not state what it omitted; log:\n%s", logged)
+	}
+}
+
+func TestRunOutputSaysNothingWhileItIsInsideTheBound(t *testing.T) {
+	// Arrange. The record belongs to the ONE batch that crosses the bound; a
+	// run that stays inside it is not worth a line.
+	sink, log := capturingLogger()
+	r := NewRunOutput(log)
+
+	// Act.
+	r.Remember(runOutputCtx("/tmp/b1.output", "1:2", 0), []byte("a short run\n"))
+
+	// Assert.
+	if strings.Contains(sink.String(), "the run has said more than") {
+		t.Fatalf("a run inside the bound recorded the bound; log:\n%s", sink.String())
 	}
 }
 
