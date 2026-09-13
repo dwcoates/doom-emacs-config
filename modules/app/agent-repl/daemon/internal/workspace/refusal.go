@@ -121,6 +121,9 @@ const (
 	// ArmModeNotServed is a permission mode outside what the topbar's picker
 	// served.
 	ArmModeNotServed = "mode_not_served"
+	// ArmUnknownAccount is a SelectAccount naming a config root that is not
+	// one of the roots the daemon knows.
+	ArmUnknownAccount = "unknown_account"
 	// ArmNotInCatalog is a model outside what the topbar's selector served.
 	ArmNotInCatalog = "not_in_catalog"
 	// ArmPathEscapesWorkspace is an OpenInEditor path outside the workspace.

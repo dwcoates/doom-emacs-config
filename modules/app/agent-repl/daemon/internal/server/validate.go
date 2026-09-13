@@ -401,6 +401,19 @@ func validateSetPermissionModeRequest(req *agentreplv1.SetPermissionModeRequest)
 	return nil
 }
 
+// validateSelectAccountRequest is SelectAccountRequest's base function. The
+// root is an ECHO TOKEN — an option's own config_dir — so a blank one names
+// nothing the daemon could have served.
+func validateSelectAccountRequest(req *agentreplv1.SelectAccountRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetConfigDir() == "" {
+		return invalid("config_dir", "an account root is required")
+	}
+	return nil
+}
+
 // validateSetWorkspacePriorityRequest is SetWorkspacePriorityRequest's base
 // function. An unset priority is the CLEAR spelling, which is legal.
 func validateSetWorkspacePriorityRequest(req *agentreplv1.SetWorkspacePriorityRequest) *connect.Error {

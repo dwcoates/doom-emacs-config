@@ -192,6 +192,11 @@ type fakeVerbs struct {
 	answerPermissionErr  error
 	answerQuestionErr    error
 	setPermissionModeErr error
+	// selectAccountDir is the root the last SelectAccount named; the answer
+	// and the failure the fixture hands back sit beside it.
+	selectAccountDir      string
+	selectAccountLoggedIn bool
+	selectAccountErr      error
 	assignTaskErr        error
 }
 
@@ -204,6 +209,11 @@ func (f *fakeVerbs) Open(context.Context, ids.WorkspaceID) error { return f.open
 
 func (f *fakeVerbs) SetPermissionMode(context.Context, ids.WorkspaceID, string) error {
 	return f.setPermissionModeErr
+}
+
+func (f *fakeVerbs) SelectAccount(_ context.Context, _ ids.WorkspaceID, configDir string) (bool, error) {
+	f.selectAccountDir = configDir
+	return f.selectAccountLoggedIn, f.selectAccountErr
 }
 
 func (f *fakeVerbs) AssignTask(context.Context, ids.WorkspaceID, *ids.TaskID) error {
