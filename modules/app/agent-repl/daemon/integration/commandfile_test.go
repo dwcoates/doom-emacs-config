@@ -60,6 +60,11 @@ func TestACreateEntryMaterializesAWorkspaceExactlyLikeCreateWorkspace(t *testing
 	// Arrange
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{})
+	// THE REPOSITORY IS REGISTERED FIRST, which is what the editor does when it
+	// opens the tree: a create naming a repository the registry does not hold is
+	// refused on `unknown_repository', through the command-file channel exactly
+	// as through the rpc.
+	harness.Register(t, d, repo.Dir)
 	roster := d.WatchRoster()
 
 	// Act
@@ -282,6 +287,11 @@ func TestAOneShotCreateEntryDecoratesThePromptLikeCreateWorkspace(t *testing.T) 
 	// Arrange
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{})
+	// THE REPOSITORY IS REGISTERED FIRST, which is what the editor does when it
+	// opens the tree: a create naming a repository the registry does not hold is
+	// refused on `unknown_repository', through the command-file channel exactly
+	// as through the rpc.
+	harness.Register(t, d, repo.Dir)
 	roster := d.WatchRoster()
 
 	// Act
@@ -312,6 +322,11 @@ func TestACreateEntryHonorsAnExplicitBaseRef(t *testing.T) {
 	// Arrange
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{})
+	// THE REPOSITORY IS REGISTERED FIRST, which is what the editor does when it
+	// opens the tree: a create naming a repository the registry does not hold is
+	// refused on `unknown_repository', through the command-file channel exactly
+	// as through the rpc.
+	harness.Register(t, d, repo.Dir)
 	repo.Branch("release")
 	repo.Checkout(harness.DefaultBranch)
 	roster := d.WatchRoster()
@@ -569,4 +584,30 @@ func TestForgettingAWorkspaceWithALiveSessionRecordsNoFault(t *testing.T) {
 	awaitRoster(t, f.d, roster, "the forgotten live workspace's row removal", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, f.ws.GetId()) == nil
 	})
+}
+
+// TestACreateEntryNamingAnUnregisteredRepositoryIsRefused pins the command-file
+// half of the repository invariant. A workspace whose repository is
+// unregistered must be impossible (owner ruling, 2026-09-13), so a create
+// naming a directory the registry does not hold is refused on
+// `unknown_repository' here exactly as it is on the rpc — and the file is
+// quarantined like every other command file the ingress cannot honor.
+func TestACreateEntryNamingAnUnregisteredRepositoryIsRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange: a real repository on disk that nothing has registered.
+	repo := harness.NewRepo(t)
+	d := harness.StartDaemon(t, harness.Opts{})
+
+	// Act
+	path := commandfileWrite(t, d, "workspace_commands_unregistered.json",
+		`[{"type":"create","git_root":"`+repo.Dir+`","name":"stray-ws","prompt":"build it"}]`)
+
+	// Assert
+	d.AwaitFileGone(path)
+	d.AwaitFileExists(filepath.Join(d.StateDir, "output", "quarantine", "workspace_commands_unregistered.json"))
+	d.AwaitRunLogOperation("daemon.commandfile.quarantine")
+	d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry")
+	if repo.HasBranch("stray-ws") {
+		t.Fatalf("branches = %v, want nothing materialized for the refused create", repo.Branches())
+	}
 }
