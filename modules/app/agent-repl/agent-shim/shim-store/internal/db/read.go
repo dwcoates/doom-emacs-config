@@ -22,6 +22,32 @@ type OpenedPage struct {
 	PinSeq uint64
 }
 
+// beginRead opens the transaction a PURE READ runs in.
+//
+// IT IS DEFERRED, AND THAT IS THE WHOLE POINT. The DSN carries
+// `_txlock=immediate` because every transaction that WRITES must take the write
+// lock at BEGIN rather than try to upgrade into it (see AGENTS.md). A read that
+// writes nothing has no upgrade to fear and no business holding the write lock
+// at all: WAL exists so readers never contend with the writer, and an
+// `sql.TxOptions{ReadOnly: true}` makes the driver issue a plain `BEGIN`, which
+// takes only a read snapshot.
+//
+// A READ THAT TOOK THE WRITE LOCK COULD BE REFUSED BY A BUSY ONE, AND WAS. The
+// owner's store answered two `OpenAgentSession` calls with
+// `store.db.open-page` ERROR "begin read transaction: database is locked (5)
+// (SQLITE_BUSY)" while a producer held the write lock — a page repaint failed
+// outright because somebody else was writing, which is precisely the failure
+// mode WAL is chosen to remove.
+//
+// THE PIN AND THE PAGE STILL COME FROM ONE SNAPSHOT. A deferred transaction in
+// WAL takes its read snapshot at its FIRST statement and holds that snapshot
+// until it ends, so `OpenPage`'s watch pin is read from the same view of the
+// database as the lines it answers with — which is the property that comment
+// asks for, and it never needed the write lock to get it.
+func (d *DB) beginRead(ctx context.Context) (*sql.Tx, error) {
+	return d.sql.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+}
+
 // OpenPage answers one agent's opening page.
 //
 // AN AGENT THE STORE HAS HEARD OF BUT THAT HAS SAID NOTHING IS A LEGAL, EMPTY
@@ -42,7 +68,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 	}
 	started := time.Now()
 
-	tx, err := d.sql.BeginTx(ctx, nil)
+	tx, err := d.beginRead(ctx)
 	if err != nil {
 		return OpenedPage{}, d.refuse(base, storagef(err, "begin read transaction"))
 	}
@@ -109,7 +135,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 	}
 	started := time.Now()
 
-	tx, err := d.sql.BeginTx(ctx, nil)
+	tx, err := d.beginRead(ctx)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "begin read transaction"))
 	}
