@@ -42,7 +42,7 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 // mono reads the DB's monotonic clock — the one every measured duration is
 // taken from. A zero-value DB (only constructible inside this package, by a
@@ -576,6 +576,34 @@ CREATE TABLE write_ledger (
 CREATE INDEX write_ledger_upsert_key ON write_ledger(upsert_key);
 CREATE INDEX write_ledger_source     ON write_ledger(source_file_id, source_offset);
 
+-- residue_shapes is the catalog of key structures observed on lines NO
+-- PRODUCER STORED (owner ruling 2026-09-13). A residue line the sidecar no
+-- longer persists takes its bytes out of the store with it, and with them the
+-- only evidence the vendor emits that line at all; one row per distinct
+-- recursive key structure keeps the vendor's API discoverable at a cost that
+-- does not grow with traffic.
+--
+-- THE TABLE HOLDS STRUCTURE, NOT CONTENT. key_structure is the canonical
+-- rendering the hash was taken over -- key names and scalar TYPES, every value
+-- dropped. first_example is the one verbatim line, written once on the insert
+-- and never replaced, because a shape nobody can read an example of is a shape
+-- nobody can act on.
+--
+-- NO RETENTION RULE, by ruling: the row count is bounded by the number of
+-- distinct shapes a vendor emits, not by traffic, so there is nothing here for
+-- a sweep to remove.
+CREATE TABLE residue_shapes (
+  shape_hash    TEXT PRIMARY KEY,
+  kind          TEXT    NOT NULL,
+  key_structure TEXT    NOT NULL,
+  first_example BLOB,
+  first_seen_ms INTEGER NOT NULL,
+  last_seen_ms  INTEGER NOT NULL,
+  count         INTEGER NOT NULL
+);
+CREATE INDEX residue_shapes_kind      ON residue_shapes(kind, last_seen_ms);
+CREATE INDEX residue_shapes_last_seen ON residue_shapes(last_seen_ms);
+
 CREATE TABLE schema_meta (version INTEGER NOT NULL);
 `
 
@@ -583,7 +611,7 @@ CREATE TABLE schema_meta (version INTEGER NOT NULL);
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "schema_meta", "workflow", "write_ledger"}
+var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "residue_shapes", "schema_meta", "workflow", "write_ledger"}
 
 // supersededVersion reports whether an on-disk stamp names a schema THIS
 // binary superseded: any version below its own, and not the 0 of a database

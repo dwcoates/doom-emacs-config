@@ -44,7 +44,7 @@ func TestConcurrentWriteBatchesAllSucceed(t *testing.T) {
 					<-start
 					entry := pageEntry(fmt.Sprintf("w%d", i), fmt.Sprintf("u%d", i), "agent-1",
 						frameItem(activityFrame("agent-1", fmt.Sprintf("act-%d", i), prose())))
-					_, errs[i] = d.WriteBatch(ctx(), "test-producer", batch(entry))
+					_, errs[i] = d.WriteBatch(ctx(), "test-producer", batch(entry), nil)
 				}(i)
 			}
 			close(start)
@@ -121,7 +121,7 @@ func TestQueuedWriteBatchReportsItsQueueWaitAndStillSucceeds(t *testing.T) {
 			done := make(chan error, 1)
 			go func() {
 				entry := pageEntry("w2", "u2", "agent-1", frameItem(activityFrame("agent-1", "act-2", prose())))
-				_, err := d.WriteBatch(ctx(), "test-producer", batch(entry))
+				_, err := d.WriteBatch(ctx(), "test-producer", batch(entry), nil)
 				done <- err
 			}()
 			<-queued
@@ -179,7 +179,7 @@ func TestQueuedWriteBatchAnswersTheCallersCancellation(t *testing.T) {
 				defer release()
 				done := make(chan error, 1)
 				go func() {
-					_, err := d.WriteBatch(callCtx, "test-producer", batch(entry))
+					_, err := d.WriteBatch(callCtx, "test-producer", batch(entry), nil)
 					done <- err
 				}()
 				<-queued
@@ -187,7 +187,7 @@ func TestQueuedWriteBatchAnswersTheCallersCancellation(t *testing.T) {
 				err = <-done
 			} else {
 				cancel()
-				_, err = d.WriteBatch(callCtx, "test-producer", batch(entry))
+				_, err = d.WriteBatch(callCtx, "test-producer", batch(entry), nil)
 			}
 
 			// Assert
@@ -227,7 +227,7 @@ func TestTheWriteSlotIsReleasedByEveryOutcome(t *testing.T) {
 			writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
 			if test.firstFails {
 				bad := pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("", "act-2", prose())))
-				if _, err := d.WriteBatch(ctx(), "test-producer", batch(bad)); err == nil {
+				if _, err := d.WriteBatch(ctx(), "test-producer", batch(bad), nil); err == nil {
 					t.Fatal("the arranged batch was expected to be refused")
 				}
 			}

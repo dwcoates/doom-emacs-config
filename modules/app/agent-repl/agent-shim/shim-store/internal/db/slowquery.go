@@ -80,6 +80,8 @@ const (
 	StatementLiveWork    = "live_work"
 	StatementListCursors = "list_cursors"
 	StatementBashRun     = "bash_run"
+	// StatementResidueShapes is the residue shape catalog listing.
+	StatementResidueShapes = "residue_shapes"
 )
 
 // SlowQueryFromEnv resolves the slow-query threshold from the environment.

@@ -164,7 +164,7 @@ func seedCursor(t *testing.T, d *DB, fileID, path string, offset int64) {
 	t.Helper()
 	if _, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: path, Offset: offset},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("seed cursor: %v", err)
 	}
 }
@@ -265,7 +265,7 @@ func TestCursorsPreservesTheCarry(t *testing.T) {
 	d, _ := newStore(t)
 	if _, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 5, Carry: []byte(`{"partial":`)},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 

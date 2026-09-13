@@ -493,7 +493,7 @@ func TestWriteBatchAdvancesTheCursorInTheSameTransaction(t *testing.T) {
 		CursorAdvance: &storev1.CursorState{
 			FileId: "12:34", Path: "/t/a.jsonl", Offset: 4096, Carry: []byte("half a line"),
 		},
-	})
+	}, nil)
 
 	// Assert
 	if err != nil {
@@ -514,7 +514,7 @@ func TestWriteBatchAcceptsACursorOnlyBatch(t *testing.T) {
 	// Act
 	result, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10},
-	})
+	}, nil)
 
 	// Assert
 	if err != nil {
@@ -539,7 +539,7 @@ func TestWriteBatchCommitsNothingWhenALaterEntryIsInvalid(t *testing.T) {
 	_, err := d.WriteBatch(ctx(), "shim", &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{good, bad},
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 99},
-	})
+	}, nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -560,7 +560,7 @@ func TestWriteBatchLeavesTheCursorUnchangedWhenTheBatchFails(t *testing.T) {
 	d, _ := newStore(t)
 	if _, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -568,7 +568,7 @@ func TestWriteBatchLeavesTheCursorUnchangedWhenTheBatchFails(t *testing.T) {
 	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{pageEntry("w1", "u1", "", promptItem("agent-1"))},
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 999},
-	})
+	}, nil)
 
 	// Assert
 	if err == nil {
@@ -584,7 +584,7 @@ func TestWriteBatchRefusesAnEmptyProducer(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "", batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))))
+	_, err := d.WriteBatch(ctx(), "", batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))), nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -598,7 +598,7 @@ func TestWriteBatchRefusesAnUnsetBatch(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", nil)
+	_, err := d.WriteBatch(ctx(), "shim", nil, nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -612,7 +612,7 @@ func TestWriteBatchRefusesABatchThatCarriesNothing(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", &storev1.EntryBatch{})
+	_, err := d.WriteBatch(ctx(), "shim", &storev1.EntryBatch{}, nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -628,7 +628,7 @@ func TestWriteBatchRefusesACursorWithNoFileIdentity(t *testing.T) {
 	// Act
 	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{Path: "/t/a.jsonl", Offset: 1},
-	})
+	}, nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -644,7 +644,7 @@ func TestWriteBatchRefusesACursorWithNoPath(t *testing.T) {
 	// Act
 	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Offset: 1},
-	})
+	}, nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -659,7 +659,7 @@ func TestWriteBatchRefusesANegativeCursorOffset(t *testing.T) {
 	// Act
 	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: -1},
-	})
+	}, nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -675,7 +675,7 @@ func TestWriteBatchReportsAStorageFailureOnAClosedDatabase(t *testing.T) {
 	}
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))))
+	_, err := d.WriteBatch(ctx(), "shim", batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))), nil)
 
 	// Assert
 	if !errors.Is(err, ErrStorage) {
@@ -693,7 +693,7 @@ func TestWriteBatchCorrelatesTheRefusalWithTheOffendingWrite(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", batch(pageEntry("w1", "u1", "", promptItem("agent-1"))))
+	_, err := d.WriteBatch(ctx(), "shim", batch(pageEntry("w1", "u1", "", promptItem("agent-1"))), nil)
 
 	// Assert
 	if err == nil {
@@ -857,7 +857,7 @@ func TestWriteBatchCommitsNoLedgerRowWhenTheBatchFails(t *testing.T) {
 	bad := pageEntry("w2", "u2", "agent-1", frameItem(activityFrame("", "act-2", prose())))
 
 	// Act
-	if _, err := d.WriteBatch(ctx(), "producer", batch(good, bad)); !errors.Is(err, ErrInvalid) {
+	if _, err := d.WriteBatch(ctx(), "producer", batch(good, bad), nil); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("WriteBatch error = %v, want ErrInvalid", err)
 	}
 

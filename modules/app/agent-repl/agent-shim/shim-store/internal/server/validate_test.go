@@ -193,7 +193,7 @@ func TestValidateEntryBatchAcceptsACursorOnlyBatch(t *testing.T) {
 	// Act.
 	ref := validateEntryBatch(&storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "16777232:424242", Path: "/t/a.jsonl", Offset: 100},
-	})
+	}, false)
 
 	// Assert.
 	if ref != nil {
@@ -206,7 +206,7 @@ func TestValidateEntryBatchRefusesAnEmptyBatch(t *testing.T) {
 	// nothing at all.
 
 	// Act.
-	ref := validateEntryBatch(&storev1.EntryBatch{})
+	ref := validateEntryBatch(&storev1.EntryBatch{}, false)
 
 	// Assert.
 	if siteOf(ref) != SiteBatchEmpty {
@@ -218,7 +218,7 @@ func TestValidateEntryBatchRefusesAMissingBatch(t *testing.T) {
 	// Arrange.
 
 	// Act.
-	ref := validateEntryBatch(nil)
+	ref := validateEntryBatch(nil, false)
 
 	// Assert.
 	if siteOf(ref) != SiteBatchMissing {
@@ -234,7 +234,7 @@ func TestValidateEntryBatchValidatesTheCursorAdvance(t *testing.T) {
 	}
 
 	// Act.
-	ref := validateEntryBatch(batch)
+	ref := validateEntryBatch(batch, false)
 
 	// Assert.
 	if siteOf(ref) != SiteCursorFileIDEmpty {

@@ -236,22 +236,22 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	msg := req.Msg
 	log := s.rpcLogger(storev1connect.ShimStoreWriteBatchProcedure, req.Header()).With(batchAttribution(msg.GetBatch()))
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
-		"write batch entries=%d cursor_advance=%t", len(msg.GetBatch().GetEntries()), msg.GetBatch().GetCursorAdvance() != nil)
+		"write batch entries=%d shapes=%d cursor_advance=%t", len(msg.GetBatch().GetEntries()), len(msg.GetShapes()), msg.GetBatch().GetCursorAdvance() != nil)
 
 	if ref := validateWriteBatchRequest(msg); ref != nil {
 		s.logRefusal(log, "store.rpc.write-batch", ref, logging.Fields{Producer: msg.GetProducer()})
 		return writeBatchFailure(ref), nil
 	}
 
-	result, err := s.store.WriteBatch(correlated(ctx, req.Header()), msg.GetProducer(), msg.GetBatch())
+	result, err := s.store.WriteBatch(correlated(ctx, req.Header()), msg.GetProducer(), msg.GetBatch(), msg.GetShapes())
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.write-batch", err, logging.Fields{Producer: msg.GetProducer()})
 		return writeBatchFailure(ref), nil
 	}
 
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
-		"batch durable written=%d absorbed=%d skipped=%d page_lines=%d bash_rows=%d",
-		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), len(result.BashRows))
+		"batch durable written=%d absorbed=%d skipped=%d page_lines=%d bash_rows=%d shapes=%d",
+		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), len(result.BashRows), result.Shapes)
 	s.publish(log, msg.GetProducer(), result.Lines)
 	s.publishBashRows(log, msg.GetProducer(), result.BashRows)
 	return connect.NewResponse(&storev1.WriteBatchResponse{
@@ -637,6 +637,52 @@ func liveWorkFailure(ref *refusal) *connect.Response[storev1.GetLiveWorkResponse
 			Detail: ref.detail,
 			Kind:   &storev1.GetLiveWorkFailure_StorageFailure{StorageFailure: &storev1.GetLiveWorkStorageFailure{}},
 		}},
+	})
+}
+
+// ---- ListResidueShapes ----
+
+// ListResidueShapes serves the catalog of key structures observed on lines no
+// producer stored.
+//
+// IT IS A DISCOVERY SURFACE, NOT A DATA PATH. Nothing in the running system
+// reads it; it exists so a human can ask what the vendor is emitting that this
+// system does not model, without opening the database by hand.
+func (s *Server) ListResidueShapes(ctx context.Context, req *connect.Request[storev1.ListResidueShapesRequest]) (*connect.Response[storev1.ListResidueShapesResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreListResidueShapesProcedure, req.Header())
+	msg := req.Msg
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.list-residue-shapes"},
+		"reading the residue shape catalog scoped=%t limit=%d example=%t", msg.Kind != nil, msg.GetLimit(), msg.GetIncludeExample())
+
+	if ref := validateListResidueShapesRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.list-residue-shapes", ref, logging.Fields{})
+		return residueShapesFailure(ref), nil
+	}
+
+	shapes, err := s.store.ResidueShapes(correlated(ctx, req.Header()), msg.Kind, msg.GetLimit(), msg.GetIncludeExample())
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.list-residue-shapes", err, logging.Fields{})
+		return residueShapesFailure(ref), nil
+	}
+	// An empty answer is the fresh-catalog answer, not a failure: a store that
+	// has observed no unstored residue has no shapes.
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.list-residue-shapes"}, "catalog served shapes=%d", len(shapes))
+	return connect.NewResponse(&storev1.ListResidueShapesResponse{
+		Result: &storev1.ListResidueShapesResponse_Success{Success: &storev1.ListResidueShapesSuccess{Shapes: shapes}},
+	}), nil
+}
+
+func residueShapesFailure(ref *refusal) *connect.Response[storev1.ListResidueShapesResponse] {
+	failure := &storev1.ListResidueShapesFailure{Detail: ref.detail}
+	if ref.class == classStorage {
+		failure.Kind = &storev1.ListResidueShapesFailure_StorageFailure{StorageFailure: &storev1.ListResidueShapesStorageFailure{}}
+	} else {
+		failure.Kind = &storev1.ListResidueShapesFailure_InvalidRequest{
+			InvalidRequest: &storev1.ListResidueShapesInvalidRequest{Field: ref.field},
+		}
+	}
+	return connect.NewResponse(&storev1.ListResidueShapesResponse{
+		Result: &storev1.ListResidueShapesResponse_Failure{Failure: failure},
 	})
 }
 
