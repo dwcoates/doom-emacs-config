@@ -210,7 +210,25 @@ message SessionUpdate {
     // status:compacting signal, relayed). The ContextCut record that
     // follows is the end signal — no progress figure exists upstream.
     SessionCompacting compacting = 27;
+    // The vendor's own SUMMARY of what this conversation is about — its
+    // `ai-title`. Session-scoped and STANDING: the vendor restates it as the
+    // conversation moves on, and the last statement is the title. The topbar
+    // draws it in place of the workspace name whenever the vendor has stated
+    // one (owner ruling, 2026-09-13: THE TITLE IS THE WORKSPACE SUMMARY).
+    SessionTitle title = 29;
   }
+}
+
+// The vendor's summary of the conversation, verbatim.
+//
+// A SUMMARY, NOT AN IDENTITY. It says what the conversation is about ("Add SPC
+// j keybinding support"), so it is the best thing a strip can put where a
+// reader looks for "which conversation is this" — and it is the vendor's own
+// text, never composed here.
+message SessionTitle {
+  // The title, verbatim as the vendor stated it. Never empty: the shim does
+  // not state a title it did not read.
+  string text = 1;
 }
 
 // Presence is the fact: the vendor is compacting the context right now.
