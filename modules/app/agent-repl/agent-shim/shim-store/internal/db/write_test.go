@@ -979,3 +979,129 @@ func TestRefuseRecordsACanceledCallerAsAbandoned(t *testing.T) {
 		})
 	}
 }
+
+// TestAThirtyRowBatchOnAFullSizedCorpusStaysWithinItsOwnBudget is the bound the
+// owner's `store.db.slow-query` warning of 2026-09-13 18:05:36 claimed was
+// missed: `statement=write_batch duration_ms=1480 lock_wait_ms=0 rows=30
+// threshold_ms=400`.
+//
+// `lock_wait_ms=0` says the batch never queued, so the claim is entirely about
+// the statements INSIDE the transaction — the absorption probe, the identity
+// probe, the entry upsert, the ledger insert, the shape upsert and the cursor
+// advance. Every one of them is an indexed seek by construction, and this
+// states it as a MEASUREMENT against a corpus larger than the one that produced
+// the warning rather than as a reading of the schema.
+//
+// THE BOUND IS THE PRODUCTION BUDGET, not a tighter number of this test's own
+// choosing: DefaultBulkBase + 30*DefaultBulkPerRow is exactly the 400ms the
+// store itself would warn past, so a regression that would put a warning in the
+// owner's log fails here first.
+func TestAThirtyRowBatchOnAFullSizedCorpusStaysWithinItsOwnBudget(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a wall-clock budget measures the race detector's instrumentation, not the store; see racedetector_on_test.go")
+	}
+
+	// Arrange
+	d, _ := newStore(t)
+	spread := seedSyntheticCorpus(t, d)
+	budget := DefaultBulkBase + 30*DefaultBulkPerRow
+
+	// Act
+	started := time.Now()
+	result, err := d.WriteBatch(ctx(), "test-sidecar", thirtyRowFileBatch("live", "corpus-file-0", spread+4096), nil)
+	elapsed := time.Since(started)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("WriteBatch on a %d-row corpus: %v", syntheticCorpusRows, err)
+	}
+	if result.Written != 30 {
+		t.Fatalf("batch wrote %d rows, want 30", result.Written)
+	}
+	if elapsed > budget {
+		t.Fatalf("a 30-row batch on a %d-row corpus took %v, past its own %v budget", syntheticCorpusRows, elapsed, budget)
+	}
+}
+
+// TestEveryStatementOfAWriteBatchSeeksRatherThanScans is the structural half of
+// the 400ms budget above: not "it was fast on this box", but "no statement in
+// the write transaction is allowed to walk a table".
+//
+// A DURATION CANNOT TELL A SEEK FROM A SCAN and a plan can. The owner's store
+// reported `write_batch` at 1480ms for 30 rows with `lock_wait_ms=0` — no
+// queueing, so the claim was about these statements — and the schema had just
+// grown `write_ledger.source_file_id`/`source_offset` and the whole
+// `residue_shapes` table. A column added without the index it is looked up by,
+// or a primary key that did not land, turns one of these into a scan that is
+// invisible on an idle box and ruinous on a loaded one.
+func TestEveryStatementOfAWriteBatchSeeksRatherThanScans(t *testing.T) {
+	tests := []struct {
+		name      string
+		statement string
+		args      []any
+	}{
+		{
+			name:      "the write ordinal the batch orders itself by",
+			statement: `SELECT COALESCE(MAX(write_seq), 0) FROM entry`,
+		},
+		{
+			name:      "the absorption probe against the write ledger",
+			statement: `SELECT 1 FROM write_ledger WHERE write_id = ?`,
+			args:      []any{"corpus-write-1"},
+		},
+		{
+			name:      "the identity probe against the entry row",
+			statement: `SELECT book_agent_id, kind FROM entry WHERE upsert_key = ?`,
+			args:      []any{"corpus-key-1"},
+		},
+		{
+			name: "the entry upsert",
+			statement: `INSERT INTO entry (upsert_key, write_id, write_seq, plane, kind, book_agent_id, run_id, top_level, frame, first_inserted_at_ms, last_written_at_ms)
+			  VALUES (?,?,?,?,?,?,?,?,?,?,?)
+			  ON CONFLICT(upsert_key) DO UPDATE SET write_id = excluded.write_id`,
+			args: []any{"k", "w", 1, 2, "page_line", nil, nil, nil, []byte{0}, testNow, testNow},
+		},
+		{
+			name:      "the ledger insert that stamps the batch's source position",
+			statement: `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms, source_file_id, source_offset) VALUES (?,?,?,?,?,?)`,
+			args:      []any{"w", "k", 1, testNow, "corpus-file-0", 0},
+		},
+		{
+			name: "the residue shape upsert",
+			statement: `INSERT INTO residue_shapes (shape_hash, kind, key_structure, first_example, first_seen_ms, last_seen_ms, count)
+			  VALUES (?,?,?,?,?,?,1)
+			  ON CONFLICT(shape_hash) DO UPDATE SET
+			    last_seen_ms = MAX(residue_shapes.last_seen_ms, excluded.last_seen_ms),
+			    count = residue_shapes.count + 1`,
+			args: []any{"h", "unparsed", "{a:string}", nil, testNow, testNow},
+		},
+		{
+			name: "the cursor advance",
+			statement: `INSERT INTO cursor (file_id, path, offset, carry, updated_at_ms) VALUES (?,?,?,?,?)
+			  ON CONFLICT(file_id) DO UPDATE SET offset = excluded.offset`,
+			args: []any{"corpus-file-0", "/p", 0, nil, testNow},
+		},
+		{
+			name:      "the detached-work join lookup",
+			statement: `SELECT work_id FROM detached_work WHERE origin_unit = ? LIMIT 1`,
+			args:      []any{"act-1"},
+		},
+		{
+			name:      "the agent terminal update",
+			statement: `UPDATE agent SET ended_at_ms = ?, terminal = ? WHERE agent_id = ?`,
+			args:      []any{testNow, []byte{0}, "agent-1"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+
+			// Act
+			plan := queryPlan(t, d, test.statement, test.args...)
+
+			// Assert
+			assertNoTableScan(t, test.name, plan)
+		})
+	}
+}
