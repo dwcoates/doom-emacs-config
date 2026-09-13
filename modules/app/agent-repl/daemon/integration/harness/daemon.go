@@ -132,6 +132,17 @@ func BuildIdentityEnv(checkout string) []string {
 type Opts struct {
 	// StateDir overrides the state root; empty mints a fresh temp one.
 	StateDir string
+	// ProfileDir overrides where the fake shim reads its per-workspace startup
+	// profiles from; empty mints a fresh one under this start's own root.
+	//
+	// IT EXISTS FOR THE RELAUNCH. A daemon BRINGS ITS OPEN WORKSPACES' SESSIONS
+	// UP AT BOOT, so a profile the successor's own shims must read has to be on
+	// disk before the successor starts — and a profile dir minted by
+	// StartDaemon cannot be, because the caller does not know its path until
+	// the daemon is already running. Handing the predecessor's dir over is what
+	// makes "the same daemon, restarted" true of the shim fixtures as well as
+	// of the state root.
+	ProfileDir string
 	// Joining, when set, starts the daemon in joining mode against the address.
 	Joining string
 	// IdleCutoff sets the hibernation idle cutoff via --idle-cutoff.
@@ -349,7 +360,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 
 	d := &Daemon{
 		StateDir:           opts.StateDir,
-		ProfileDir:         filepath.Join(root, "shim-profiles"),
+		ProfileDir:         opts.ProfileDir,
 		PromptsDir:         CopyPrompts(t, filepath.Join(root, "prompts")),
 		WebappDir:          NewFakeWebappDist(t, filepath.Join(root, "dist")),
 		DefaultConfigDir:   NewConfigRoot(t, filepath.Join(root, "config-default"), accountEmail(opts.DefaultAccountEmail, "default@example.invalid")),
@@ -360,6 +371,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		t:                  t,
 		expected:           map[string]bool{},
 		shims:              map[string]*ShimControl{},
+	}
+	if d.ProfileDir == "" {
+		d.ProfileDir = filepath.Join(root, "shim-profiles")
 	}
 	if d.StateDir == "" {
 		d.StateDir = filepath.Join(sockRoot, "state")
