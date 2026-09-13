@@ -16,6 +16,12 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "./app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { createTicker } from "../../src/clock.js";
+import {
+  clearClientFailures,
+  onClientVerdict,
+  reportClientFailure,
+  standingClientFailure,
+} from "../../src/rpc/link.js";
 import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -687,5 +693,80 @@ describe("watchStream: quiescing a stream that was already cancelled", () => {
     await settle();
     // ASSERT
     expect(lines.some(([, line]) => line.includes("rpc.stream-quiesced"))).toBe(false);
+  });
+});
+
+describe("watchStream and the client's link verdict", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  it("reports a stream that concluded on its own, naming the stream and the ending", async () => {
+    const { client } = scriptedClient([[]]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    expect(standingClientFailure()).toEqual({
+      kind: "stream_ended",
+      substatus: "daemon unreachable",
+      activity: "WatchFooter stream ended (producer_ended)",
+    });
+  });
+
+  it("names a thrown ending as the transport failure it was", async () => {
+    const { client } = scriptedClient([new ConnectError("no route", Code.Unavailable)]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    expect(standingClientFailure()?.activity).toBe(
+      "WatchFooter stream ended (transport_failure)",
+    );
+  });
+
+  it("clears the verdict when the stream reads again", async () => {
+    // The reopened run pushes and then ENDS, which reports afresh -- so the
+    // clear is asserted on what was PUBLISHED, not on what stands at the end.
+    const published: Array<string | null> = [];
+    const stop = onClientVerdict((verdict) => published.push(verdict?.kind ?? null));
+    const { client } = scriptedClient([[], [push()]]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    await advance(250);
+    handle.cancel();
+    stop();
+    expect(published).toEqual([null, "stream_ended", null, "stream_ended"]);
+  });
+
+  it("clears an undecodable-frame verdict as soon as a frame decodes", async () => {
+    // Arrange: the run's first frame cannot be read, the second can.
+    reportClientFailure("frame_undecodable_card", "a frame could not be read");
+    const { client } = scriptedClient([[undecodablePush(), push()]]);
+    // Act
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    // Assert: the run ends after the good frame, so what stands is the
+    // ENDING's verdict -- the undecodable one was dropped by the decode.
+    expect(standingClientFailure()?.kind).toBe("stream_ended");
+  });
+
+  it("leaves a VERB's verdict standing when a frame decodes, which does not disprove it", async () => {
+    // A STANDING stream: it pushes and never ends, so nothing but the decode
+    // could have cleared the verdict.
+    reportClientFailure("unary_transport", "SubmitPrompt: unavailable");
+    const { client } = standingClient();
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    expect(standingClientFailure()?.kind).toBe("unary_transport");
+  });
+
+  it("leaves a verdict standing while the stream is still down", async () => {
+    reportClientFailure("unary_transport", "SubmitPrompt: unavailable");
+    const { client } = scriptedClient([[]]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    expect(standingClientFailure()).not.toBeNull();
   });
 });

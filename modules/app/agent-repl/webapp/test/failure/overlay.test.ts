@@ -12,6 +12,7 @@ import {
   staleBundle,
   workspaceGone,
 } from "../../src/failure/sink.js";
+import { clearClientFailures, standingClientFailure } from "../../src/rpc/link.js";
 import { drawFailureCard, mountFailureOverlay } from "../../src/failure/overlay.js";
 
 let host: HTMLElement;
@@ -362,5 +363,44 @@ describe("drawFailureCard: evidence for an arm it has no rows for", () => {
     const card = drawFailureCard(foreign, "bootFailed");
     // ASSERT
     expect(card.querySelectorAll(".failure-detail")).toHaveLength(0);
+  });
+});
+
+describe("mountFailureOverlay and the client's link verdict", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  it("relays the daemonUnreachable card to the footer", () => {
+    mountFailureOverlay(host).report(daemonUnreachable(1006, "abnormal"));
+    expect(standingClientFailure()).toEqual({
+      kind: "daemon_unreachable_card",
+      substatus: "daemon unreachable",
+      activity: "lost the connection to the daemon; reconnecting",
+    });
+  });
+
+  it("relays the frameUndecodable card as a frame this page could not read", () => {
+    mountFailureOverlay(host).report(frameUndecodable("a oneof sets no arm", "FooterView"));
+    expect(standingClientFailure()).toEqual({
+      kind: "frame_undecodable_card",
+      substatus: "frame unreadable",
+      activity: "a frame could not be read and was skipped, so conversation may be missing",
+    });
+  });
+
+  it("relays NOTHING for an arm that is not about this page's link", () => {
+    mountFailureOverlay(host).report(staleBundle("schema drift"));
+    expect(standingClientFailure()).toBeNull();
+  });
+
+  it("relays nothing while the card is suppressed for an announced outage", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    const overlay = mountFailureOverlay(host);
+    overlay.suppress("daemonUnreachable", Date.now() + 60_000);
+    overlay.report(daemonUnreachable(1006, "abnormal"));
+    vi.useRealTimers();
+    expect(standingClientFailure()).toBeNull();
   });
 });

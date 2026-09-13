@@ -52,6 +52,7 @@ import {
   type SubscribePageRequest,
   type WatchPageResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_page_pb.js";
+import { reportClientFailure } from "./link.js";
 import { MalformedView } from "./malformed.js";
 import { watchStream, type StreamContext, type StreamHandle } from "./streams.js";
 import { callUnary } from "./unary.js";
@@ -301,6 +302,14 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
               operation: "rpc.page-subscription-source-ended",
               context: { page, subscription: ended.subscription },
             });
+            // THE COMPONENT IS NOW PERMANENTLY UNFED and nothing else says so:
+            // the queue closes, the caller's stream concludes, and its surface
+            // stands with whatever it last drew (the audit's N2 row 8). The
+            // footer carries the notice.
+            reportClientFailure(
+              "subscription_source_ended",
+              `the ${ended.subscription} page subscription ended (source_ended)`,
+            );
             queue.close();
             return;
           case "failed": {
@@ -422,6 +431,11 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
         operation: "rpc.page-unsubscribe-failed",
         context: { page, subscription: id, cause: String(err) },
       });
+      // Debug-only was the whole of it before (the audit's N2 row 9). The
+      // daemon may well have dropped the subscription with the page, but this
+      // end could not confirm it, and an unconfirmed call is a link this page
+      // cannot vouch for.
+      reportClientFailure("unsubscribe_failed", `UnsubscribePage ${id} could not be delivered`);
     }
   }
 }

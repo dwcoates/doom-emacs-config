@@ -20,6 +20,7 @@
  * snapping shut under a reader who opened it is the whole failure R2 names.
  */
 import { log } from "../log.js";
+import { reportClientFailure } from "../rpc/link.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
@@ -361,6 +362,12 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
           operation: "feed.bubble-reopen-refused",
           context: { row: id.value },
         });
+        // The sub-feed stops tailing here and the bubble looks merely idle
+        // (the audit's N3 row 15), so the footer carries the fact instead.
+        reportClientFailure(
+          "feed_not_tailing",
+          "the daemon refused to re-open a sub-feed after its tail died",
+        );
         return null;
       default:
         return unreachableArm("OpenFeedResponse.result", armName(result));

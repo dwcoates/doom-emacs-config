@@ -8,6 +8,11 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
+import {
+  clearClientFailures,
+  onClientVerdict,
+  standingClientFailure,
+} from "../../src/rpc/link.js";
 import { REVEAL_CLASS, mountFeed } from "../../src/feed/feed.js";
 import {
   Channel,
@@ -716,5 +721,65 @@ describe("mountFeed: disposal is once", () => {
       null,
       1,
     ]);
+  });
+});
+
+describe("mountFeed and the client's link verdict", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  it("reports the root feed's OpenFeed being REFUSED as a feed that is not tailing", async () => {
+    // Arrange: the daemon answers, and refuses. The link is plainly up, so the
+    // verdict must not name an unreachable daemon (the audit's N3 row 14).
+    const h = harness({
+      openFeed: () =>
+        create(OpenFeedResponseSchema, {
+          result: { case: "error", value: { cause: { case: "feedUndecodable", value: {} } } },
+        }),
+    });
+    const published: Array<string | null> = [];
+    const stop = onClientVerdict((verdict) => published.push(verdict?.activity ?? null));
+    // Act
+    mount(h);
+    await settle();
+    stop();
+    // Assert: the refusal is reported. The retry loop's own ending verdict
+    // follows it in the same tick, because a generator that returned is an
+    // ending the loop cannot tell from a dead link -- see the judgement row
+    // "the feed's refusal verdict is superseded by the tail's ending".
+    expect(published).toContain("the daemon refused to open the workspace's root feed");
+  });
+
+  it("reports a reveal probe that never reached the daemon as a transport failure", async () => {
+    const h = harness({
+      openFeed: (req) => {
+        if (req.feed !== undefined) throw new Error("gone");
+        return openSuccess(page([]), tokenFor(req));
+      },
+    });
+    const { feed } = mount(h);
+    await settle();
+    await feed.revealRow(feedId("deep"));
+    expect(standingClientFailure()?.activity).toBe(
+      "OpenFeed (the feed's reveal probe) could not reach the daemon",
+    );
+  });
+
+  it("reports a reveal probe the daemon REFUSED as a feed that is not tailing", async () => {
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([]), tokenFor(req))
+          : create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const { feed } = mount(h);
+    await settle();
+    await feed.revealRow(feedId("shell"));
+    expect(standingClientFailure()).toEqual({
+      kind: "feed_not_tailing",
+      substatus: "feed not tailing",
+      activity: "the daemon refused the feed's reveal probe",
+    });
   });
 });
