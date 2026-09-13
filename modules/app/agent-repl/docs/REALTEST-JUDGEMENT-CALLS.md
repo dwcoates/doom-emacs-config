@@ -780,3 +780,12 @@ a special section".
 | 2026-09-13 | That refusal broke three command-file integration subjects that created against a repository nothing had registered. Amend the subjects, or back the change out? | Amend: each now calls `harness.Register(t, d, repo.Dir)` first | The state they arranged is one the CreateWorkspace rpc has NEVER allowed, so they were the only place in the suite where a create ran against an unregistered tree; the idiom they now use is the one the rest of the same file already uses, and it is what the editor does when it opens a repository. No assertion was weakened — every one of the three still asserts the create materializes exactly as `CreateWorkspace` does — and a new subject pins the refusal and the quarantine | Drop the three `harness.Register` calls (integration/commandfile_test.go) |
 | 2026-09-13 | `RegisterWorkspace` was to "register the repository row first". Did it? | It already did, and now a test says so | `ensureRepo` runs before the workspace INSERT inside the same transaction (workspaces.go), so the ordering was never in doubt; what was missing was a subject that would fail if it were reversed | Delete `TestRegisterWorkspaceWritesTheRepositoryRowBeforeTheWorkspace` |
 | 2026-09-13 | `repositoryView` "asserts the invariant, an internal error surfaced, not a silent drop". Should the roster build return an error and publish nothing? | No. The orphan branch becomes a NAMED assertion (`assertRepositoryInvariant`), keeping the ERROR record and the drop | `render` has no error channel and `mutate` publishes whatever it returns, so an error would have to become "publish no roster at all" — every workspace invisible instead of one, over a state three layers now make unreachable. The assertion is the same shape as `assertArm` beside it, and it quotes the state store's own remedy so the two logs say the same thing | Give `render`/`repositoryView` an error return and refuse the publication (resolver.go, sections.go) |
+
+## Owner ruling: footer expanded section (2026-09-13, owner)
+
+The footer's expanded section draws UNDER the main strip, not over it.
+The two sections are separated by a line that is slightly darker than the
+line separating rows inside the expanded section, and that line spans the
+footer's full width, left edge to right edge, so it fully partitions the
+two sections. (The token-usage figures in the footer are known to be
+wrong as currently described; deferred.)
