@@ -21,6 +21,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
@@ -94,6 +95,12 @@ type FleetDeps struct {
 	Feed feed.Resolver
 	// Footer carries the parked-session status a standing cold gate produces.
 	Footer footer.Resolver
+	// Topbar carries the cold-gate state of the STRIP. A cold-gated workspace
+	// never starts a session, so the topbar's session facts never arrive and
+	// its readiness gate never passes: without this the strip is blank for as
+	// long as the gate stands. It is set from the same call sites as the feed
+	// row and the footer status, so one gate cannot be three answers.
+	Topbar topbar.Resolver
 	// SocketPath answers a workspace's shim socket path under the state root.
 	SocketPath func(ws ids.WorkspaceID) string
 	// StoreSocket is passed to every shim explicitly.
@@ -1175,6 +1182,10 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	f.deps.Footer.SetColdGate(ws, footer.ColdGate{
 		Standing: true,
 		Detail:   fmt.Sprintf("the conversation is cold at %d context tokens", cold.GetContextTokens()),
+	})
+	f.deps.Topbar.SetColdGate(ws, topbar.ColdGate{
+		Standing:      true,
+		ContextTokens: int64(cold.GetContextTokens()),
 	})
 }
 

@@ -163,6 +163,23 @@ type wsState struct {
 	// wire carries the instant and never a duration that would be stale on
 	// arrival.
 	parkedAtMs int64
+	// coldGate reports that this workspace is STANDING AT THE COLD GATE: the
+	// shim answered `cold` to the session start, so no session was ever
+	// created and the feed is showing the gate card the reader has to answer.
+	// It is the same fact the footer's own cold-gate status keys on, stated
+	// here by the same call sites, and it is retired when the gate is
+	// answered.
+	coldGate bool
+	// coldGateAtMs is when the gate rose, epoch ms, and coldGateTokens is what
+	// the cold read would re-read. They are the cold-gate view's whole
+	// content, for the same reason parkedAtMs is the hibernated view's.
+	coldGateAtMs   int64
+	coldGateTokens int64
+	// coldGatePublished is what the LAST published view said about the cold
+	// gate. It is the edge detector behind the two info records: a
+	// publication is the cold-gate one, or the return to the full view, only
+	// by comparison with what the reader was last shown.
+	coldGatePublished bool
 	// hostStream and webStream are the other two hops of connectivity truth
 	// (daemon.md invariant 11): the WatchHostWorkspace and WatchWebWorkspace
 	// streams' liveness, stated by the server on every open and close edge.
@@ -234,40 +251,49 @@ func (s *wsState) nextSeq() int {
 	return s.seq
 }
 
+// sessionless reports whether this workspace is in one of the two states that
+// HAVE NO SESSION AT ALL — hibernated, or standing at the cold gate. Both are
+// whole-view topbar states drawn from the workspace facts alone, and both are
+// gated and reported through this one predicate so a third session-scoped
+// exemption can never be added to one of them and forgotten in the other.
+func (s *wsState) sessionless() bool {
+	return s.parked || s.coldGate
+}
+
 // ready reports whether every non-optional element of the view can be
 // resolved. See the package comment: these five are the whole gate.
 //
-// A PARKED WORKSPACE IS GATED ON TWO OF THEM, NOT FIVE. The other three are
-// SESSION facts, and a hibernated workspace has no session to state them —
-// waiting for them is waiting forever, which is exactly the blank topbar the
-// hibernated view exists to replace. The naming and the account are not
-// session facts (one is WSM's, one is the config root's), so the hibernated
-// view is still never a partial one: it states every element it declares.
+// A SESSIONLESS WORKSPACE IS GATED ON TWO OF THEM, NOT FIVE. The other three
+// are SESSION facts, and a workspace with no session has nothing to state them
+// with — waiting for them is waiting forever, which is exactly the blank
+// topbar these states exist to replace. The naming and the account are not
+// session facts (one is WSM's, one is the config root's), so neither state is
+// ever a partial view: each states every element it declares.
 func (s *wsState) ready() bool {
-	if s.parked {
+	if s.sessionless() {
 		return s.namingSet && s.accountSet
 	}
 	return s.namingSet && s.started && s.accountSet && s.picker != nil && s.contextUsage != nil
 }
 
 // missing names what readiness is still waiting on, for the record. It names
-// the gates of the view that WOULD be published, so a parked workspace is
+// the gates of the view that WOULD be published, so a sessionless workspace is
 // never reported as awaiting the session facts it will never have.
 func (s *wsState) missing() []string {
 	var out []string
 	if !s.namingSet {
 		out = append(out, "naming")
 	}
-	if !s.parked && !s.started {
+	if !s.sessionless() && !s.started {
 		out = append(out, "session_started")
 	}
 	if !s.accountSet {
 		out = append(out, "account")
 	}
-	if !s.parked && s.picker == nil {
+	if !s.sessionless() && s.picker == nil {
 		out = append(out, "permission_mode_picker")
 	}
-	if !s.parked && s.contextUsage == nil {
+	if !s.sessionless() && s.contextUsage == nil {
 		out = append(out, "context_usage")
 	}
 	return out
