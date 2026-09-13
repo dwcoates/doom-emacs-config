@@ -1,8 +1,10 @@
 package handler
 
-// shell.go — the detached shell spool: unstructured bytes with exactly ONE
-// structured thing in them, the `EXIT=<code>` terminator the harness appends when
-// the wrapped command finishes.
+// shell.go — the detached shell spool: unstructured bytes with exactly TWO
+// structured things in them, both terminators — the `EXIT=<code>` line our own
+// harness scripts append, and the `[exited with code N]` line the vendor's
+// background-shell wrapper appends. Either one ends the run; when both are
+// present the harness's is the command's verdict and wins.
 //
 // So the handler does two things: append the bytes to the run as a DELTA carrying
 // the offset they start at, and END the run when the marker arrives. Completion is
@@ -22,6 +24,24 @@ import (
 // exitMarkerPrefix opens the terminator line the harness appends to a shell spool
 // when the wrapped command exits: `EXIT=<code>` on its own line.
 var exitMarkerPrefix = []byte("EXIT=")
+
+// wrapperExitPrefix opens the OTHER terminator a shell spool can carry, and the
+// one the vendor's own background-shell wrapper writes: `[exited with code N]`
+// on its own final line.
+//
+// THIS READER USED TO KNOW ONLY `EXIT=`, AND THAT WAS A DEFECT, not a lifecycle
+// outcome. `EXIT=` is written by OUR harness scripts; the bracket line is written
+// by the tool that detached the shell in the first place, so it is present on
+// runs no script of ours wrapped. Measured over the shell spools of one session
+// (67 of them, 2026-09-13): 32 end on the bracket line, 11 carry an `EXIT=`
+// marker, and ALL 11 of those also carry the bracket line AFTER it. So the
+// bracket is the outer terminator and `EXIT=` the inner one — and a spool where
+// both land in the same poll failed the old "the marker is the batch's last
+// line" rule outright, leaving a run that plainly ended to sit open until a
+// silence window concluded it LOST. Realtest 2026-09-13 harvested exactly that:
+// three runs whose spools end `[exited with code 0]` were each written up as
+// `went_silent`.
+var wrapperExitPrefix = []byte("[exited with code ")
 
 // maxExitMarkerDigits bounds the digits accepted after `EXIT=`. A shell exit code
 // is 0-255, so anything longer is not the harness's marker.
@@ -172,28 +192,92 @@ func (h *ShellOutputHandler) observe(raw []byte) {
 //     at all, a real observed case: a 7-byte spool that is exactly `EXIT=0\n`)
 //     and whenever the previous batch this handler read ended on a newline.
 //
+// The SAME strictness governs the wrapper's `[exited with code N]` line: it must
+// be the batch's last line, it must start a line, the text between the prefix and
+// the closing bracket must be nothing but at most maxExitMarkerDigits digits, and
+// the bracket must close the line. A run that merely PRINTS that sentence
+// mid-stream therefore does not end here.
+//
+// WHEN BOTH TERMINATORS ARE PRESENT, `EXIT=` WINS. The bracket reports the
+// WRAPPER's exit — it reads `[exited with code 0]` above a harness `EXIT=77`,
+// because the wrapper ran fine and the command did not — so taking the bracket's
+// code there would report a failed command as a clean one.
+//
 // A marker split across two polls is NOT matched and is left to the staleness
-// policy, which is the pre-existing behavior of the ~91% of shell spools carrying
-// no marker at all — not a new silent failure mode.
+// policy, which is the pre-existing behavior of the shell spools carrying no
+// terminator at all — not a new silent failure mode.
 func trailingExitCode(raw []byte, batchAtLineStart bool) (int, bool) {
-	if !bytes.HasSuffix(raw, []byte("\n")) {
+	before, line, ok := finalLine(raw, batchAtLineStart)
+	if !ok {
 		return 0, false
 	}
-	line := raw[:len(raw)-1]
+	if code, ok := parseExitMarker(line); ok {
+		return code, true
+	}
+	code, ok := parseWrapperExit(line)
+	if !ok {
+		return 0, false
+	}
+	// The wrapper's own line ends the run, but the wrapped command's verdict
+	// beats the wrapper's whenever the harness recorded one right above it.
+	if inner, ok := parseExitMarker(lastLineOf(before, batchAtLineStart)); ok {
+		return inner, true
+	}
+	return code, true
+}
 
-	// Locate the final line's start, and require it to genuinely BE one.
-	start := bytes.LastIndexByte(line, '\n') + 1
+// finalLine splits a newline-terminated batch into everything before its last
+// line and the last line itself, refusing a last line that cannot be shown to
+// START one.
+func finalLine(raw []byte, batchAtLineStart bool) (before, line []byte, ok bool) {
+	if !bytes.HasSuffix(raw, []byte("\n")) {
+		return nil, nil, false
+	}
+	body := raw[:len(raw)-1]
+	start := bytes.LastIndexByte(body, '\n') + 1
 	if start == 0 && !batchAtLineStart {
 		// The batch does not begin a line and holds no newline before this text,
 		// so this may be the tail of a line that began in an earlier batch.
-		return 0, false
+		return nil, nil, false
 	}
-	line = line[start:]
+	return body[:start], body[start:], true
+}
 
+// lastLineOf returns the final non-empty line of a batch prefix, skipping the
+// blank lines the wrapper leaves between the command's output and its own
+// terminator. It returns nil when no line there can be shown to start one, which
+// is what keeps an `EXIT=` fragment carried over from an earlier poll out.
+func lastLineOf(before []byte, batchAtLineStart bool) []byte {
+	trimmed := bytes.TrimRight(before, "\n")
+	if len(trimmed) == 0 {
+		return nil
+	}
+	start := bytes.LastIndexByte(trimmed, '\n') + 1
+	if start == 0 && !batchAtLineStart {
+		return nil
+	}
+	return trimmed[start:]
+}
+
+// parseExitMarker reads `EXIT=<code>` off a whole line.
+func parseExitMarker(line []byte) (int, bool) {
 	if !bytes.HasPrefix(line, exitMarkerPrefix) {
 		return 0, false
 	}
-	digits := line[len(exitMarkerPrefix):]
+	return parseExitDigits(line[len(exitMarkerPrefix):])
+}
+
+// parseWrapperExit reads `[exited with code <code>]` off a whole line.
+func parseWrapperExit(line []byte) (int, bool) {
+	if !bytes.HasPrefix(line, wrapperExitPrefix) || !bytes.HasSuffix(line, []byte("]")) {
+		return 0, false
+	}
+	return parseExitDigits(line[len(wrapperExitPrefix) : len(line)-1])
+}
+
+// parseExitDigits accepts the bounded run of digits either terminator's code is
+// spelled with, and nothing else.
+func parseExitDigits(digits []byte) (int, bool) {
 	if len(digits) == 0 || len(digits) > maxExitMarkerDigits {
 		return 0, false
 	}
