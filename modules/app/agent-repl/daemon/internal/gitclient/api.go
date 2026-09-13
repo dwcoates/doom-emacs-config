@@ -25,6 +25,11 @@ type Git interface {
 	DefaultBranch(ctx context.Context, repoDir string) (string, error)
 	// ResolveRef resolves a ref to a full sha.
 	ResolveRef(ctx context.Context, repoDir, ref string) (string, error)
+	// BranchExists reports whether a LOCAL branch by that name exists. It is
+	// a PROBE, not a resolution: a branch that is not there is an ordinary
+	// answer and never an error record, which is what a naming collision
+	// check asks of it.
+	BranchExists(ctx context.Context, repoDir, branch string) (bool, error)
 	// CreateWorktree creates branch at baseRef and checks it out at
 	// worktreeDir.
 	CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error

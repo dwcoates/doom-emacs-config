@@ -528,11 +528,11 @@ Ordered, small, each landable alone. Two are already written.
 | --- | --- | --- |
 | 1 | **Repository one-shot and merge policy.** `prompts.Source`/`Files`, `requireOneShotPolicy`, the merge `actions` rule, the `one_shot_policy_missing` arm, the Emacs and webapp refusal wording, `docs/ONE-SHOT-POLICY.md`. | **written**, branch `policy/repo-oneshot`, 9 commits, unmerged pending this design |
 | 2 | **Four creation modes and the child commands.** `agent-repl-verbs--dynamic-repository`, `--create-standard`, `SPC TAB n/N/c/C`. | **landed on master** |
-| 3 | `internal/headless`: the shared guarded exec, extracted from `classifier.runVendor`, with the classifier moved onto it and its empty-binary hole (`graph.go:1000`) closed. Pure refactor plus one bug fix; no naming yet. | proposed |
-| 4 | The naming brief `prompts/workspace-naming.md`, and retirement of the two `workspace-generation-name-*.md` fragments. Docs and corpus only. | proposed |
-| 5 | The proto arm for a failed naming call (§6), landed as owner-settled text. Proto only, plus regenerated bindings. | blocked on Q1 |
-| 6 | `Create` names through the call: a `namerFunc` seam on `verbs`, `branchFor` rewritten, **`Slug` and `words` deleted**, the validator, the retry, the collision probe, the refusal site, the log lines. The behavioral change. | blocked on 3, 4, 5 |
-| 7 | Emacs: the minibuffer phase message and the naming-refusal warning, beside the `one_shot_policy_missing` warning landing in 1. | blocked on 5, 6 |
+| 3 | `internal/headless`: the shared guarded exec, extracted from `classifier.runVendor`, with the classifier moved onto it and its empty-binary hole (`graph.go:1000`) closed. Pure refactor plus one bug fix; no naming yet. | **landed** (`create/headless-naming`) |
+| 4 | The naming brief, and retirement of the two `workspace-generation-name-*.md` fragments. Docs and corpus only. Landed as `prompts/workspace-name-from-prompt.md`, which declares `{{prompt}}` and `{{correction}}` — the retry's correction is spliced into the corpus's own words rather than appended by the daemon. | **landed** (`create/headless-naming`) |
+| 5 | The proto arm for a failed naming call (§6), landed as owner-settled text. Proto only, plus regenerated bindings. Owner settled Q1: ONE message, `cause` a STRING and not an enum, `answer` on the wire, `no_slug` kept for the promptless one-shot. | **landed** (`create/headless-naming`) |
+| 6 | `Create` names through the call: the seam landed as `Deps.Headless` (a `headless.Runner`) rather than a `namerFunc`, so the naming logic is the workspace package's and only the exec is shared; `branchFor` rewritten, **`Slug` and `words` deleted**, the validator, the retry, the collision probe (through a new `gitclient.Git.BranchExists`, so an absent branch is an ANSWER and not an error record), the refusal site, the log lines. | **landed** (`create/headless-naming`) |
+| 7 | Emacs: the minibuffer phase message and the naming-refusal warning, beside the `one_shot_policy_missing` warning landing in 1. The webapp's exhaustive refusal union gained the arm with it. | **landed** (`create/headless-naming`) |
 | 8 | The command-file `finish` field (§7): `Entry`, `Validate`, `applyCreate`. | **withdrawn** — the finish choice is retired (owner ruling, 2026-09-12) |
 
 Test obligations, per the module's one-suite-per-source rule: `internal/headless`

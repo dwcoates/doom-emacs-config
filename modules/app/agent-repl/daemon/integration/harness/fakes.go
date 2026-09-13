@@ -134,9 +134,31 @@ func NewTestAllScript(t *testing.T, repoDir string) *Recorder {
 // runs, so a test can recognize the terminal it attached to.
 const FakeClaudeLoginMarker = "FAKE-CLAUDE-LOGIN-READY"
 
-// fakeClaudeScript prints the marker and echoes every keystroke back, so
-// WatchLoginTerminal has scrollback to replay and input to echo.
+// FakeClaudeMintedName is the slug the fake vendor answers a naming call
+// with. It is what an integration create names its workspace, so a test may
+// assert on the branch a nameless create produced.
+const FakeClaudeMintedName = "fake-minted-name"
+
+// fakeClaudeScript is the vendor stand-in for BOTH call shapes the daemon
+// has. A headless run (`-p`) drains the question off stdin and answers as the
+// requested output format: a naming call gets the JSON envelope with a legal
+// three-word slug in `result`. Anything else is the login pty: it prints the
+// marker and echoes every keystroke back, so WatchLoginTerminal has scrollback
+// to replay and input to echo.
 const fakeClaudeScript = `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "-p" ]; then
+    cat > /dev/null
+    for fmt in "$@"; do
+      if [ "$fmt" = "json" ]; then
+        printf '{"type":"result","subtype":"success","is_error":false,"result":"` + FakeClaudeMintedName + `"}'
+        exit 0
+      fi
+    done
+    printf 'ROUTE_HOLD'
+    exit 0
+  fi
+done
 printf '%s\n' "` + FakeClaudeLoginMarker + `"
 while IFS= read -r line; do
   printf 'echo:%s\n' "$line"
