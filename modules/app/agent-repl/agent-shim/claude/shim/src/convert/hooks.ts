@@ -102,6 +102,33 @@ function hookEvent(literal: string): conversationv1.AgentHookEvent {
   return value;
 }
 
+/**
+ * The refusal text of a hook that BLOCKED, or `undefined` for one that did not.
+ *
+ * A HOOK THAT BLOCKED is the refusal the user must understand, and it is told
+ * apart from a hook that merely failed by whether it produced BLOCKING TEXT —
+ * the vendor's `output`, which is what the gated action is answered with and
+ * what the model reads.
+ *
+ * STDERR IS NOT THAT SIGNAL. A hook that gates nothing still writes stderr when
+ * it fails — a `SessionStart` hook with no interpreter on PATH is the grounded
+ * case — and reading stderr as blocking text drew every such failure as a
+ * refusal of an action that was never gated.
+ *
+ * The engine asks this too: a hook that blocks BEFORE the vendor's `init` has
+ * blocked the session's own opening, and StartSession refuses with this text as
+ * its reason. Both readings come from here so the two cannot drift apart.
+ */
+export function hookBlockingText(
+  message: Pick<
+    Extract<SdkMessage, { type: "system"; subtype: "hook_response" }>,
+    "outcome" | "output"
+  >,
+): string | undefined {
+  if (message.outcome !== "error") return undefined;
+  return message.output === "" ? undefined : message.output;
+}
+
 /** A hook's printed output, when it printed anything. */
 function hookOutput(stdout: string, stderr: string): conversationv1.AgentHookOutput | undefined {
   if (stdout === "" && stderr === "") return undefined;
@@ -174,19 +201,17 @@ export function convertHookResponse(
       value: create(conversationv1.AgentHookCancelledSchema, {}),
     };
   } else if (message.outcome === "error") {
-    // A HOOK THAT BLOCKED is the refusal the user must understand, and it is
-    // told apart from a hook that merely failed by whether it produced BLOCKING
-    // TEXT — the vendor's `output`, which is what the gated call is answered
-    // with and what the model reads.
-    //
-    // STDERR IS NOT THAT SIGNAL. A hook that gates nothing still writes stderr
-    // when it fails — a `SessionStart` hook with no interpreter on PATH is the
-    // grounded case — and reading stderr as blocking text drew every such
-    // failure as a refusal of a call that was never gated.
-    const blockingText = message.output;
-    if (blockingText !== "") {
+    // Blocking or merely failing is {@link hookBlockingText}'s single reading,
+    // shared with the engine's start gate.
+    const blockingText = hookBlockingText(message);
+    if (blockingText !== undefined) {
       LOGGER.info(
-        { hook_id: message.hook_id, hook: message.hook_name },
+        {
+          hook_id: message.hook_id,
+          hook: message.hook_name,
+          event: message.hook_event,
+          blocking_text: blockingText,
+        },
         "a hook blocked the gated action",
       );
       result = {
