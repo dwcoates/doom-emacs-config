@@ -75,6 +75,16 @@ func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string
 		workspaceID:     workspaceID,
 		claudeSessionID: claudeSessionID,
 	})
+	// A SPAWN IS ONE OF THE TWO FACTS A HELD STOP WAITS FOR, so it retries the
+	// stop exactly as a spool's first durable batch does.
+	//
+	// WITHOUT THIS EDGE THE STOP WAS NEVER RETRIED AT ALL in the shape it is
+	// most often held by. applyStop is otherwise reached only after a batch of
+	// the run's spool commits — and a run a person stopped has, by definition,
+	// stopped writing, so on a reader that learned of the stop before the launch
+	// (a restart catching up on a large transcript) no further batch ever
+	// arrived and the run stayed open forever. Now the launch itself closes it.
+	s.applyStop(taskID)
 }
 
 // TaskStopped implements Observer for the sidecar.
@@ -115,6 +125,22 @@ func (s *sidecar) applyStop(taskID string) {
 		return
 	}
 	bound := s.log.With(logging.Context{Operation: "cancel-terminal", TaskID: taskID, Path: path})
+	// A STOP WAITING ON ITS SPAWNING CALL IS HELD, NOT REFUSED. The terminal is
+	// keyed on the spawning call's activity id and nothing else, so a stop read
+	// before the launch line naming that call has no unit to settle yet — which
+	// is the ORDINARY shape of a restart with a backlog, not a failure: the
+	// reader joins a 50 MB transcript at the cursor the store holds and the
+	// launch is tens of megabytes behind it, still to be caught up on. It is the
+	// same "not known yet" as the unwatched-spool branch above and it is held the
+	// same way, on the same pending stop, and retried the moment TaskSpawned
+	// names the call. Reaching the sink here instead turned each one into an
+	// ERROR that no operator could act on (31 of them on the owner's machine,
+	// one per distinct b* run) while leaving the run open anyway.
+	run := s.owners.activityFor(taskID)
+	if run == "" {
+		bound.LogVerbose("the stopped task's spawning call is not known yet; the stop is held until a launch names it")
+		return
+	}
 	sink, ok := s.watchers[path].tailer.Handler().(cancelTerminalSink)
 	if !ok {
 		bound.With(logging.Context{Level: "error"}).Log(
@@ -122,7 +148,6 @@ func (s *sidecar) applyStop(taskID string) {
 			s.watchers[path].target.Kind)
 		return
 	}
-	run := s.owners.activityFor(taskID)
 	entries := sink.CancelTerminal(taskID, run, s.owners.agentFor(taskID), stoppedAt)
 	if len(entries) == 0 {
 		// CancelTerminal already stated why it refused.

@@ -427,3 +427,67 @@ func TestAForegroundSpawnIsNeverReportedAsBackgrounded(t *testing.T) {
 		t.Fatal("a foreground spawn is reported as backgrounded")
 	}
 }
+
+// unownedResidueSpool arranges the shape that wrote 31 cancel-terminal ERRORs
+// on the owner's machine: a spool whose hold lapsed with nothing naming its
+// spawning call, so it is demoted to residue and TAILED — watched, readable,
+// and still owned by nobody. The launch line naming its call is tens of
+// megabytes back in a transcript the restarted reader is still catching up on.
+func unownedResidueSpool(t *testing.T, store *fakeStore, task, output string) (*harness, string) {
+	t.Helper()
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, task, output)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+	if got := h.sc.watchers[spool].target.Kind; got != tail.KindResidueSpool {
+		t.Fatalf("kind = %s, want the spool demoted to residue and tailed", got)
+	}
+	h.sc.pollAll()
+	return h, spool
+}
+
+// TestAStopWhoseSpawningCallIsUnknownIsHeldNotErrored pins the LEVEL. The spool
+// is being read, but the terminal is keyed on the spawning call and nothing has
+// named it yet, so there is nothing to settle YET — a wait, not a failure.
+func TestAStopWhoseSpawningCallIsUnknownIsHeldNotErrored(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h, _ := unownedResidueSpool(t, store, "b1unknown", "work with no launch in sight\n")
+
+	// Act.
+	h.sc.TaskStopped("b1unknown")
+
+	// Assert.
+	h.requireNone(t, "cancel-terminal", "error")
+}
+
+// TestALaunchAppliesAStopThatWasWaitingForIt is the retry edge the seam was
+// missing. applyStop was reached only after a batch of the run's spool
+// committed — and a run a person stopped has stopped writing, so a stop learned
+// before its launch was never retried at all and the run stayed open forever.
+// The launch itself must close it, with no further poll.
+func TestALaunchAppliesAStopThatWasWaitingForIt(t *testing.T) {
+	// Arrange: the spool is read and stopped while nothing names its call.
+	store := &fakeStore{}
+	h, spool := unownedResidueSpool(t, store, "b1waiting", "everything this run ever said\n")
+	h.sc.TaskStopped("b1waiting")
+	if cut := interruptedFor(store.writes, "toolu_waiting_run"); cut != nil {
+		t.Fatal("a terminal was minted before anything named the run's spawning call")
+	}
+
+	// Act: the transcript catches up and states who spawned it. Nothing polls
+	// afterwards — a stopped run writes no more bytes, so no poll would come.
+	h.sc.TaskSpawned("b1waiting", "toolu_waiting_run", "", spool, false, "/workspace", "workspace-id", "session-1")
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_waiting_run")
+	if cut == nil {
+		t.Fatalf("the launch did not apply the stop that was waiting for it: %s", h.logText())
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("the applied stop must state by_user: %v", cut.GetCause())
+	}
+}
