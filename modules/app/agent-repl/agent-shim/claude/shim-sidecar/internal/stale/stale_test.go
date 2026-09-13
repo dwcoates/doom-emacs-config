@@ -231,7 +231,17 @@ func TestSweepStopsTrackingWhatItConcluded(t *testing.T) {
 	}
 }
 
-func TestConclusionIsLoggedAsAWarning(t *testing.T) {
+// TestASilenceConclusionIsStatedAtInfo pins the reason that is NOT a fault.
+//
+// The file plane cannot tell a quiet DEAD run from a quiet LIVE one: the
+// vendor's launch result carries no pid, the spool carries no heartbeat, and a
+// terminator is the only end it ever writes — so a silence window expiring is
+// this reader losing sight of a run, exactly as the record's own sentence says,
+// and never a fault an operator must act on. The owner's own polling background
+// shells produce it on purpose. The conclusion, the wire arm and the terminal
+// are unchanged; only the level moves. (A file unlinked under a STANDING
+// directory keeps its warn — TestAnUnlinkUnderAStandingDirectoryStillWarnsItsConclusion.)
+func TestASilenceConclusionIsStatedAtInfo(t *testing.T) {
 	// Arrange.
 	tr, logs := tracker(t, Options{})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
@@ -240,9 +250,14 @@ func TestConclusionIsLoggedAsAWarning(t *testing.T) {
 	tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
-	rec := requireOnceIn(t, parseLogLines(t, *logs), "lost-policy", "warn")
+	records := parseLogLines(t, *logs)
+	requireNoneIn(t, records, "lost-policy", "warn")
+	rec := requireConclusion(t, records)
+	if got := ctxString(t, rec, "reason"); got != string(ReasonWentSilent) {
+		t.Fatalf("conclusion reason = %q, want the wire arm %q", got, ReasonWentSilent)
+	}
 	if got := ctxString(t, rec, "task_id"); got != "b1" {
-		t.Fatalf("lost-policy/warn task_id = %q, want b1", got)
+		t.Fatalf("the conclusion's task_id = %q, want b1", got)
 	}
 }
 
@@ -490,7 +505,7 @@ func TestStartupCatchUpStatesEachBacklogRunAtDebug(t *testing.T) {
 	}
 }
 
-func TestASteadyStateRunAfterCatchUpWarnsPerItem(t *testing.T) {
+func TestASteadyStateRunAfterCatchUpIsStatedPerItem(t *testing.T) {
 	// Arrange: a run that grew AFTER the sidecar started, then went silent.
 	tr, logs := trackerFromStart(t, Options{}, startMs)
 	tr.Observe(Work{Path: "/private/tmp/b1.output", TaskID: "b1", Kind: tail.KindShellSpool, RunActivityID: "call-1", LastActivityMs: startMs + 1}, startMs+1)
@@ -501,7 +516,7 @@ func TestASteadyStateRunAfterCatchUpWarnsPerItem(t *testing.T) {
 	// Assert: a newly-arising conclusion is stated per item, never folded into a
 	// catch-up summary.
 	records := parseLogLines(t, *logs)
-	requireOnceIn(t, records, "lost-policy", "warn")
+	requireConclusion(t, records)
 	if got := len(opsAt(records, "catchup-summary", "")); got != 0 {
 		t.Fatalf("a steady-state run produced %d catch-up summaries, want none", got)
 	}
