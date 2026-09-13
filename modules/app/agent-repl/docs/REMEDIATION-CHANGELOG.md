@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- footer tokens: swept every footer token-count site against the one-format ruling — all already route through `figures.Tokens`/`formatTokens` — and added the ruled boundary cases (1049, 1050, 10113, 142300, 1000000) to both formatters' tests (owner ruling, token-count format, 2026-09-13)
 - webapp topbar: the hibernated and cold-gate cells are stated as the right group's own content at the strip's right edge, in the right cells' box (owner ruling 4, 2026-09-13)
 - webapp topbar: the connectivity glyph and the account label are one `.topbar-account-cell`, glyph first and at half the strip's gap, and the session-line reveal anchors on the pair (owner ruling 3, 2026-09-13)
 - webapp topbar: the row is a three-track grid (`1fr minmax(0, auto) 1fr`), so the title is centered on its own content against the whole strip whatever the flank groups weigh, and a title with no room ellipsis-clips instead of squeezing them (owner ruling 2, 2026-09-13)
