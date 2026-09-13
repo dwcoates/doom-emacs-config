@@ -587,3 +587,10 @@ they are covered by tests.
    fake rather than writing a second one keeps the naming contract in one
    place, so the slug a nameless create produces is the same
    `harness.FakeClaudeMintedName` in both layers.
+2. The teardown's daemon-stop acceptance check is matched against the arm
+   plist `(:arm :accepted)` rather than a bare `t`.
+   `agent-repl-frontend-daemon-stop` documents an arm for its on-done
+   callback, so the harness was reading a shape production no longer answers
+   with and logged every healthy teardown as unaccepted. The check is
+   TIGHTENED, not dropped: the accepted arm is matched by name, so a
+   `(:arm :not-restarted ...)` refusal still reports.
