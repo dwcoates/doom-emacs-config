@@ -4065,13 +4065,6 @@ body.draining #composer-input::placeholder {
    prompt is separated from the next exactly as a footer panel's rows are. */
 .hold-tray-items > * + * { padding-top: 0.5rem; }
 .hold-tray-items > * { padding-bottom: 0.5rem; }
-/* AN EMPTY TRAY IS A VALUE, drawn rather than collapsed away: the reader can
-   see that nothing is held instead of inferring it from a gap. */
-.hold-tray-empty {
-  font-size: 0.8rem;
-  color: var(--muted);
-  font-style: italic;
-}
 
 /* The ticking queued-at age, trailing the badge. Tabular so the number does
    not shuffle the badge sideways once a second. */
