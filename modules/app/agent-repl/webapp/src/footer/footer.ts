@@ -114,7 +114,14 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   };
 
   /**
-   * Redraw the whole footer: the open panel above, the strip below.
+   * Redraw the whole footer: the strip on top, then the divider, then the open
+   * panel under it (owner ruling, 2026-09-13). The strip is the dock's face and
+   * the expanded section hangs off its underside, so the section never rises
+   * above the strip or overlays it.
+   *
+   * The DIVIDER is drawn only when a panel is open, because it partitions two
+   * sections and a closed footer has one. It is the dock's own child rather
+   * than a border on either neighbour, so it spans the dock edge to edge.
    *
    * The old subtree's clock subscriptions are dropped BEFORE it is discarded,
    * or every push would leave one ticking against a detached element.
@@ -138,8 +145,11 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       revealRow: deps.revealRow,
       activity: footerStatusActivity(requireMessage(strip.status, `FooterStrip.status`)),
     });
-    if (panel !== null) dock.appendChild(panel);
     dock.appendChild(drawFooterStrip(strip, { ctx, selection, onSelect: select, stops }));
+    if (panel !== null) {
+      dock.appendChild(drawFooterDivider());
+      dock.appendChild(panel);
+    }
 
     stopTicking(host);
     host.replaceChildren(dock);
@@ -169,6 +179,22 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     statusCase = requireCase(status.status, "FooterStatus.status").case;
     for (const fn of [...statusListeners]) fn(statusCase);
   }
+}
+
+/**
+ * The single line partitioning the strip from the expanded section.
+ *
+ * A PRESENTATIONAL ELEMENT and not a border on either neighbour: a border on
+ * the section would be inset by whatever padding that section carries, and the
+ * ruling asks for a line that spans the footer's full width so the two sections
+ * are fully partitioned. It paints `--border-strong`, one step darker than the
+ * `--border` the section's own row delimiters take.
+ */
+export function drawFooterDivider(): HTMLElement {
+  const divider = document.createElement("div");
+  divider.className = "footer-divider";
+  divider.setAttribute("role", "presentation");
+  return divider;
 }
 
 /**

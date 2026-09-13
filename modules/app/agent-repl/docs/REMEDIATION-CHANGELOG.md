@@ -12,6 +12,7 @@ Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — t
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 - daemon/drain: the drain loop's schedule read cancelled by the serving lifetime's end records at debug as the exit withdrawing the loop, and a read that fails while serving keeps its error (`daemon.drain.run` `context canceled` during an ordinary shutdown, integration suite under load 2026-09-13)
+- webapp footer: the expanded section draws UNDER the strip (strip, one full-width `--border-strong` divider, then the panel) instead of over it (owner ruling, 2026-09-13)
 
 - daemon handover: an adopt call that reaches a joining successor BEFORE the incumbent's intent manifest arrives is held for the arm within the handover's own `AdoptionWindow` instead of refused, and a workspace an arrived manifest does not name is still refused at once (integration `no_transfer_announced` under contention, 2026-09-13)
 - realtest daemon stop: every harness-ordered daemon stop goes through the daemon's own `UpdateShutdownSchedule{now}` door (`TestOrderlyDaemonStop`), so its sessions are stood down and the successor stops reporting unaccounted-for bounces; SIGTERM survives only as a stated fallback when nothing answers (`daemon.rollout.reconcile` WARN x4, 2026-09-13 15:19/15:29)
