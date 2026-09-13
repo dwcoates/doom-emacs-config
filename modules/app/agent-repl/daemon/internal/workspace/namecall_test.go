@@ -24,7 +24,7 @@ func TestCreateUsesTheModelsName(t *testing.T) {
 	script(f, headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -42,7 +42,7 @@ func TestCreateTrimsTheModelsAnswer(t *testing.T) {
 	script(f, headlessAnswer{text: "  flaky-login-test\n"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestCreatePrefixesTheModelsName(t *testing.T) {
 	script(f, headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestCreateAsksTheNamingCallForHaiku(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestCreateAsksTheNamingCallUnderItsOwnGuardSite(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestCreateAsksTheNamingCallUnderItsOwnGuardSite(t *testing.T) {
 func TestCreateNamesFromTheRawPrompt(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.InitialPrompt = "fix the login bug"
 
 	// Act.
@@ -125,7 +125,7 @@ func TestCreateBillsTheWorkspacesOwnAccount(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestCreateRetriesExactlyOnceOnAnInvalidAnswer(t *testing.T) {
 		headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestCreateTellsTheModelWhatWasWrongWithItsFirstAnswer(t *testing.T) {
 		headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -189,7 +189,7 @@ func TestCreateRefusesWhenBothAnswersAreInvalid(t *testing.T) {
 		headlessAnswer{text: "Fix The Login Bug Today"})
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmNamingFailed)
@@ -206,7 +206,7 @@ func TestNamingRefusalCarriesTheAttemptCount(t *testing.T) {
 		headlessAnswer{text: "Fix The Login Bug Today"})
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmNamingFailed)
@@ -225,7 +225,7 @@ func TestNamingRefusalCarriesTheLastAnswer(t *testing.T) {
 		headlessAnswer{text: "Fix The Login Bug Today"})
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmNamingFailed)
@@ -240,7 +240,7 @@ func TestNamingRefusalNamesTheModel(t *testing.T) {
 	script(f, headlessAnswer{text: "not a slug"}, headlessAnswer{text: "still not a slug!!"})
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmNamingFailed)
@@ -257,7 +257,7 @@ func TestCreateRefusesWhenTheNamingCallFails(t *testing.T) {
 		headlessAnswer{err: &headless.Error{Cause: headless.CauseExitStatus, Detail: "exit status 3"}})
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmNamingFailed)
@@ -273,7 +273,7 @@ func TestCreateRefusesWhenTheNamingCallTimesOut(t *testing.T) {
 	script(f, headlessAnswer{err: timeout}, headlessAnswer{err: timeout})
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmNamingFailed)
@@ -292,7 +292,7 @@ func TestCreateDoesNotRetryAGuardRefusal(t *testing.T) {
 	script(f, headlessAnswer{err: refused}, headlessAnswer{err: refused})
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmNamingFailed)
@@ -310,7 +310,7 @@ func TestCreateRefusesWhenTheNamingBriefIsAbsent(t *testing.T) {
 	delete(f.briefs, BriefWorkspaceName)
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmBriefMissing)
@@ -327,7 +327,7 @@ func TestCreateRefusesWithNoNamingRunnerAtAll(t *testing.T) {
 	f.verbs.(*verbs).deps.Headless = nil
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmNamingFailed)
@@ -339,7 +339,7 @@ func TestCreateRefusesWithNoNamingRunnerAtAll(t *testing.T) {
 func TestCreateSkipsTheNamingCallWhenANameIsSupplied(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.Name = "chosen-name"
 
 	// Act.
@@ -356,7 +356,7 @@ func TestCreateSkipsTheNamingCallWhenANameIsSupplied(t *testing.T) {
 func TestCreateSkipsTheNamingCallWithNoPrompt(t *testing.T) {
 	// Arrange: a promptless standard create, named after its own minted id.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.InitialPrompt = ""
 
 	// Act.
@@ -379,7 +379,7 @@ func TestCreateSuffixesAMintedNameThatCollidesWithABranch(t *testing.T) {
 	script(f, headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -398,7 +398,7 @@ func TestCreateWalksToTheNextFreeSuffix(t *testing.T) {
 	script(f, headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -420,7 +420,7 @@ func TestCreateSuffixesAMintedNameThatCollidesWithAWorkspace(t *testing.T) {
 	script(f, headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -438,7 +438,7 @@ func TestCreateDoesNotSuffixAnUncollidedName(t *testing.T) {
 	script(f, headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -457,7 +457,7 @@ func TestCreateDoesNotDisambiguateASuppliedName(t *testing.T) {
 	t.Setenv(PrefixEnv, "")
 	t.Setenv(LegacyPrefixEnv, "")
 	f.git.existingBranches = map[string]bool{"chosen-name": true}
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.Name = "chosen-name"
 
 	// Act.

@@ -48,6 +48,28 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 			Rows: rows,
 		})
 	}
+	r.assertRepositoryInvariant(byRepo, log)
+	return out
+}
+
+// assertRepositoryInvariant records a workspace whose `Repo` names no
+// registered repository. IT IS UNREACHABLE, and the assertion is what says so
+// out loud rather than letting the roster quietly draw one workspace fewer.
+//
+// A workspace whose repository is unregistered is an INVARIANT VIOLATION and
+// must be impossible (owner ruling, 2026-09-13). Three layers hold it and the
+// roster is none of them: `workspaces.repo_id` is `NOT NULL REFERENCES
+// repositories(id)` and every state-store handle carries
+// `_pragma=foreign_keys(1)`, so SQLite refuses the row; `RegisterWorkspace`
+// mints the repository row through `ensureRepo` FIRST, in the workspace
+// insert's own transaction; and `Create` refuses a repository the registry does
+// not hold before anything is built. The state store's open reports a row that
+// was already there when it boots.
+//
+// So reaching here is a defect in one of those, not a state to render, and it
+// is recorded the way this resolver records every other assertion it cannot
+// serve (see assertArm): loudly, once, naming the remedy.
+func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspace, log dlog.Logger) {
 	for repo, orphans := range byRepo {
 		log.Error("daemon.sidebar.repository_view",
 			"workspaces name a repository the registry does not carry and were left out of the repo grouping",
@@ -55,10 +77,9 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 				"repo_id":             string(repo),
 				"workspaces":          len(orphans),
 				"invariant_violation": "workspace.Repo names no registered repository",
-				"remediation":         "register the repository before its workspaces",
+				"remediation":         "re-register the workspace's directory, which mints its repository row, or forget the workspace",
 			})
 	}
-	return out
 }
 
 // taskView resolves the task grouping: one section per task, with the task's

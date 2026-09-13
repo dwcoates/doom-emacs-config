@@ -53,9 +53,12 @@ type fakeDB struct {
 	// republish does with a state client that would not answer.
 	listWorkspacesErr error
 	repositories      []wsm.Repository
-	tasks             []wsm.Task
-	current           *ids.WorkspaceID
-	sessions          map[ids.WorkspaceID]wsm.Session
+	// listRepositoriesErr fails the registry read, which the create path must
+	// surface rather than read as "the repository is not registered".
+	listRepositoriesErr error
+	tasks               []wsm.Task
+	current             *ids.WorkspaceID
+	sessions            map[ids.WorkspaceID]wsm.Session
 	// sessionErr makes every session read fail, which is the only way to
 	// reach the roster's session-read error branch: the fake's own map
 	// cannot fail.
@@ -208,6 +211,9 @@ func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 }
 
 func (d *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
+	if d.listRepositoriesErr != nil {
+		return nil, d.listRepositoriesErr
+	}
 	return d.repositories, nil
 }
 
