@@ -146,12 +146,17 @@ import (
 // answer re-opens — which is exactly the shape that constant is sized for.
 const coldGateChainTimeout = HandoverChainTimeout
 
-// coldSeedContextTokens is the context size the gate must report: the fake
-// SDK's own usage object, summed the way engine/cold.ts sums it
-// (cache_read + cache_creation + input = 21755 + 3224 + 10). Asserting the
+// coldSeedContextTokens is the context size the gate must report: the context
+// the `!cold-seed` scenario states on its assistant line, summed the way
+// engine/cold.ts sums it (cache_read + cache_creation + input). Asserting the
 // exact figure is what proves the number crossed the whole stack from the
 // vendor's transcript line rather than being composed by the daemon.
-const coldSeedContextTokens = 21_755 + 3_224 + 10
+//
+// THE SCENARIO STATES 90,000 BECAUSE THE GATE HAS A FLOOR. The owner ruled on
+// 2026-09-13 that a cold read under 70,000 tokens is not gated at all, so the
+// mock's ordinary ~25,000-token usage would resume warm and this whole area
+// would test nothing.
+const coldSeedContextTokens = 90_000
 
 // coldGateWarnings are the daemon warning records this area's arrangement
 // legitimately produces: the graceful stand-down and the shim exit it causes, the

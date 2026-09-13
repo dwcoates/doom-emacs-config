@@ -71,6 +71,17 @@ function writeTranscript(configDir: string, cwd: string, sessionId: string, line
   );
 }
 
+/** The context this fixture reports, ABOVE the cold gate's 70,000-token floor. */
+const FIXTURE_CONTEXT_TOKENS = 100_000;
+
+/**
+ * One assistant line, reporting a context the cold gate WILL ask about.
+ *
+ * The floor (owner ruling, `engine/cold.ts`) means a fixture under 70,000
+ * tokens resumes warm no matter how long the lapse, so a cold-gate test built
+ * on one would pass for the wrong reason. `smallAssistantLine` is the
+ * deliberately-under-the-floor counterpart.
+ */
 function assistantLine(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     type: "assistant",
@@ -83,12 +94,27 @@ function assistantLine(overrides: Record<string, unknown> = {}): Record<string, 
       usage: {
         input_tokens: 0,
         cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 500,
+        cache_read_input_tokens: FIXTURE_CONTEXT_TOKENS,
         cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 1 },
       },
     },
     ...overrides,
   };
+}
+
+/** One assistant line whose context is UNDER the cold-gate floor. */
+function smallAssistantLine(): Record<string, unknown> {
+  return assistantLine({
+    message: {
+      model: "claude-opus-5",
+      usage: {
+        input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 500,
+        cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 1 },
+      },
+    },
+  });
 }
 
 function harness(
@@ -697,7 +723,21 @@ describe("StartSession, resume", () => {
 
     const response = await h.engine.startSession(resumeRequest("resume-1"));
     const failure = response.result.case === "failure" ? response.result.value : undefined;
-    expect(failure?.cause.case === "cold" ? failure.cause.value.contextTokens : undefined).toBe(500n);
+    expect(failure?.cause.case === "cold" ? failure.cause.value.contextTokens : undefined).toBe(
+      BigInt(FIXTURE_CONTEXT_TOKENS),
+    );
+  });
+
+  it("CONTINUES a lapsed resume whose context is under the cold-gate floor, without asking", async () => {
+    // OWNER RULING, 2026-09-13: under 70,000 tokens the cold read is not worth
+    // a gate, so the session continues automatically however long the lapse.
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [smallAssistantLine()]);
+
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+
+    expect((await pending).result.case).toBe("success");
   });
 
   it("does not create a query for a refused cold resume", async () => {
@@ -1297,6 +1337,25 @@ describe("SetSessionModel", () => {
     );
 
     expect(response.result.case === "failure" ? response.result.value.cause.case : undefined).toBe("cold");
+  });
+
+  it("ALLOWS a switch under the cold-gate floor, even at a threshold of zero", async () => {
+    // The floor is the owner's, not the caller's: a threshold of 0 asks for a
+    // gate on every switch, and below 70,000 tokens there is no gate to give.
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [smallAssistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    const response = await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+        coldThresholdTokens: 0n,
+      }),
+    );
+
+    expect(response.result.case).toBe("success");
   });
 });
 

@@ -165,7 +165,51 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
 }
 
 /** Why a continuation would be cold, or absence when it would be warm. */
-type ColdReason = "lapsed" | "model_switch";
+export type ColdReason = "lapsed" | "model_switch";
+
+/**
+ * THE COLD GATE HAS A FLOOR.
+ *
+ * Owner ruling, 2026-09-13 ("Owner ruling: the cold gate has a floor" in
+ * `docs/REALTEST-JUDGEMENT-CALLS.md`): no cold gate when the context a cold
+ * read would re-read is under 70,000 tokens — the session continues
+ * automatically. At or above 70,000 the gate asks as before. The ruling covers
+ * every lapse (hibernation revival, daemon restart, resume after the TTL) AND
+ * a model change, whose cache is per model and so re-reads everything
+ * regardless.
+ *
+ * It is a constant and not a knob because the shim has no configuration
+ * surface for thresholds — every environment variable it reads is a refusal
+ * rather than a default — and inventing one would put the owner's ruling
+ * behind a setting nothing sets.
+ */
+export const COLD_GATE_FLOOR_TOKENS = 70_000;
+
+/**
+ * Whether a cold read this small falls under the floor, recorded once when it
+ * does.
+ *
+ * INFO AND NOT SILENCE: the session continuing without asking is an action the
+ * user did not authorize turn by turn, so the log has to be able to answer
+ * "why was I not asked" with the size, the lapse and the rule that decided it.
+ */
+export function underColdGateFloor(
+  facts: TranscriptFacts,
+  nowMs: number,
+  reason: ColdReason,
+): boolean {
+  if (facts.contextTokens >= COLD_GATE_FLOOR_TOKENS) return false;
+  LOGGER.info(
+    {
+      context_tokens: facts.contextTokens,
+      floor_tokens: COLD_GATE_FLOOR_TOKENS,
+      lapse_ms: facts.lastRequestAtMs === 0 ? 0 : nowMs - facts.lastRequestAtMs,
+      reason,
+    },
+    "continuing without the cold gate: the cold read is under the cold-gate floor",
+  );
+  return true;
+}
 
 /**
  * Judge the cache.
@@ -173,8 +217,21 @@ type ColdReason = "lapsed" | "model_switch";
  * A model switch is cold UNCONDITIONALLY when the models differ, because the
  * prompt cache is per model: continuing under a different model reads nothing
  * back no matter how recent the last request was.
+ *
+ * The floor is applied AFTER the reason is settled, so a conversation that was
+ * warm anyway is never recorded as having been let through by the floor.
  */
 export function judgeCold(
+  facts: TranscriptFacts,
+  nowMs: number,
+  requestedModel: string | undefined,
+): ColdReason | undefined {
+  const reason = coldReason(facts, nowMs, requestedModel);
+  if (reason === undefined) return undefined;
+  return underColdGateFloor(facts, nowMs, reason) ? undefined : reason;
+}
+
+function coldReason(
   facts: TranscriptFacts,
   nowMs: number,
   requestedModel: string | undefined,

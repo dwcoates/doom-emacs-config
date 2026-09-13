@@ -78,6 +78,17 @@ export interface AssistantOptions {
    * record beside a freshly-stamped assistant line.
    */
   readonly timestamp?: string;
+  /**
+   * Report a specific CONTEXT SIZE on the message's usage, instead of the
+   * mock's ordinary one.
+   *
+   * FOR SCENARIOS THAT SEED A COLD READ. The cold gate sums the last assistant
+   * line's `cache_read_input_tokens + cache_creation_input_tokens +
+   * input_tokens`, and it has a floor (`engine/cold.ts`) below which it does
+   * not ask. A scenario whose whole purpose is to trip the gate has to state a
+   * context above that floor; the mock's ordinary usage is far below it.
+   */
+  readonly contextTokens?: number;
 }
 
 /** Who a sidechain message belongs to. */

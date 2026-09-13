@@ -1648,8 +1648,11 @@ describe("SetSessionModel's cold gate", () => {
   test("a switch above the caller's threshold is REFUSED with its cost", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    // A turn so the transcript has context to lose.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    // A turn so the transcript has context to lose -- AND ABOVE THE COLD-GATE
+    // FLOOR. The gate does not ask below 70,000 tokens (owner ruling), and an
+    // ordinary turn reports far less than that, so `!cold-seed` is the seed
+    // that puts a real cost on the switch.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
 
     const response = await shim.clients.h1.setSessionModel(
       create(shimv1.SetSessionModelRequestSchema, {
@@ -1670,7 +1673,8 @@ describe("SetSessionModel's cold gate", () => {
     // The refusal is not a veto: it exists so the caller decides knowingly.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    // Above the cold-gate floor, so the first call is genuinely refused.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
     setModelCause(
       await shim.clients.h1.setSessionModel(
         create(shimv1.SetSessionModelRequestSchema, {
