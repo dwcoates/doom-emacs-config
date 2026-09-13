@@ -362,6 +362,11 @@ func (q *queue) dropRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dl
 	if dropped == 0 {
 		return
 	}
+	// WHAT THE FAILURE COST GOES ON THE FOOTER'S LINE. The bring-up already
+	// installed the standing failure and its cause; the drop is decided here,
+	// afterwards, so the count joins the line the strip is already drawing
+	// rather than being left to the tray alone.
+	q.deps.Footer.AddDroppedPrompts(ws, uint32(dropped))
 	// The turn the roster took at acceptance is never going to run: the row
 	// falls back to whatever the route reports, which is the bring-up's own
 	// fault arm, rather than standing at `submitting` for a dropped prompt.

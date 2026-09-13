@@ -516,6 +516,49 @@ func TestAFailedRevivalRepushesTheTrayWithoutTheDroppedEntry(t *testing.T) {
 	}
 }
 
+// TestAFailedRevivalTellsTheFooterWhatTheDropCost pins the owner's ruling of
+// 2026-09-12 that a bring-up failure is FOOTER-ONLY: the drop writes no feed
+// row, so the count of what it cost has to reach the footer's own line.
+func TestAFailedRevivalTellsTheFooterWhatTheDropCost(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveErr = errors.New("the shim would not spawn")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	got := h.footer.droppedPrompts()
+	if len(got) != 1 || got[0] != 1 {
+		t.Fatalf("dropped counts told to the footer = %+v, want exactly one drop of one prompt", got)
+	}
+}
+
+// TestARevivalThatSucceedsTellsTheFooterNoDrop is the other edge: the session
+// came up, the hold was released rather than dropped, and there is no cost to
+// put on a line.
+func TestARevivalThatSucceedsTellsTheFooterNoDrop(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { h.noSession = false }
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if got := h.footer.droppedPrompts(); len(got) != 0 {
+		t.Fatalf("dropped counts told to the footer = %+v, want none when nothing was dropped", got)
+	}
+}
+
 // unroutableSurfaces is dlog.Surfaces whose per-workspace sink never opens, so
 // a test can drive the one condition production hits when a workspace's
 // directory is a scratch path or a deleted worktree.
