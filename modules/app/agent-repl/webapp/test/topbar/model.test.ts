@@ -591,3 +591,24 @@ describe("routeToColdGate", () => {
     expect(() => routeToColdGate(document)).toThrow();
   });
 });
+
+describe("the model selector with no session behind it", () => {
+  it("draws the dash in its own slot rather than vanishing", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const cell = drawTopbarModelSelector(undefined, tc);
+    // ASSERT
+    expect(cell.getAttribute("data-no-session")).toBe("model");
+  });
+
+  it("offers no reveal, because there is nothing to pick", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarModelSelector(undefined, tc));
+    // ACT
+    host.querySelector(".topbar-model")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)).toBeNull();
+  });
+});

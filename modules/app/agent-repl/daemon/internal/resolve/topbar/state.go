@@ -48,7 +48,10 @@ type warningKind int
 
 // The warning kinds, one per TopbarWarning detail arm.
 const (
-	warnAccounting warningKind = iota
+	// warnSessionless is the one warning with NO detail arm: the workspace's
+	// session-less state is a statement, not a control.
+	warnSessionless warningKind = iota
+	warnAccounting
 	warnUnmodeledTool
 	warnDetachedUnmodeled
 	warnSessionFault
@@ -135,6 +138,12 @@ type wsState struct {
 	// catalog is the switchable model set the selector renders.
 	catalog []*conversationv1.ModelOption
 
+	// sessionTitle is the vendor's OWN summary of this conversation, as the
+	// session last stated it (conversation.v1 SessionUpdate.title). Empty
+	// until the vendor has written one, which is what makes the workspace name
+	// the fallback rather than a second title.
+	sessionTitle string
+
 	// permissionMode is the mode in force, as the session facts spell it.
 	permissionMode string
 	// picker is exactly the switchable set the daemon will accept.
@@ -178,11 +187,12 @@ type wsState struct {
 	// content, for the same reason parkedAtMs is the hibernated view's.
 	coldGateAtMs   int64
 	coldGateTokens int64
-	// coldGatePublished is what the LAST published view said about the cold
-	// gate. It is the edge detector behind the two info records: a
-	// publication is the cold-gate one, or the return to the full view, only
-	// by comparison with what the reader was last shown.
-	coldGatePublished bool
+	// sessionlessPublished is what the LAST published view said about the
+	// session-scoped half of the strip. It is the edge detector behind the two
+	// info records: a strip drawn with dashes where its controls belong, or
+	// the return of the session facts, is only an EDGE by comparison with what
+	// the reader was last shown.
+	sessionlessPublished bool
 	// hostStream and webStream are the other two hops of connectivity truth
 	// (daemon.md invariant 11): the WatchHostWorkspace and WatchWebWorkspace
 	// streams' liveness, stated by the server on every open and close edge.
@@ -254,50 +264,42 @@ func (s *wsState) nextSeq() int {
 	return s.seq
 }
 
-// sessionless reports whether this workspace is in one of the two states that
-// HAVE NO SESSION AT ALL — hibernated, or standing at the cold gate. Both are
-// whole-view topbar states drawn from the workspace facts alone, and both are
-// gated and reported through this one predicate so a third session-scoped
-// exemption can never be added to one of them and forgotten in the other.
-func (s *wsState) sessionless() bool {
-	return s.parked || s.coldGate
-}
-
-// ready reports whether every non-optional element of the view can be
-// resolved. See the package comment: these five are the whole gate.
+// sessionless reports whether this workspace HAS NO SESSION AT ALL — the idle
+// sweep stood it down, it is standing at the cold gate, or no session has
+// started yet. It is ONE predicate so a cell can never be drawn as live in one
+// of those states and dead in another.
 //
-// A SESSIONLESS WORKSPACE IS GATED ON TWO OF THEM, NOT FIVE. The other three
-// are SESSION facts, and a workspace with no session has nothing to state them
-// with — waiting for them is waiting forever, which is exactly the blank
-// topbar these states exist to replace. The naming and the account are not
-// session facts (one is WSM's, one is the config root's), so neither state is
-// ever a partial view: each states every element it declares.
-func (s *wsState) ready() bool {
-	if s.sessionless() {
-		return s.namingSet && s.accountSet
-	}
-	return s.namingSet && s.started && s.accountSet && s.picker != nil && s.contextUsage != nil
+// IT IS NOT A WHOLE-VIEW STATE. Under the FIXED SCHEMA ruling the strip has
+// one shape; this only decides what each session-scoped cell states, and the
+// two named states additionally contribute their reason to the context chip's
+// hover and one line to the warning strip.
+func (s *wsState) sessionless() bool {
+	return s.parked || s.coldGate || !s.started
 }
 
-// missing names what readiness is still waiting on, for the record. It names
-// the gates of the view that WOULD be published, so a sessionless workspace is
-// never reported as awaiting the session facts it will never have.
+// ready reports whether the view can be resolved at all. THE GATE IS THE
+// WORKSPACE FACTS AND NOTHING ELSE — the naming (WSM's) and the account (the
+// config root's) — under the FIXED SCHEMA ruling of 2026-09-13.
+//
+// NO SESSION FACT IS EVER A GATE. Every session-scoped cell states "I do not
+// know yet" in its own slot: the three controls by ABSENCE, which the client
+// draws as a dash, and the context chip and warning strip by their own
+// content. So a workspace with no session — hibernated, cold-gated, or simply
+// not started — publishes the same strip as every other workspace, and the
+// facts fill in as they arrive. Gating on a session fact was how a strip that
+// would never get one stayed BLANK for as long as the state stood.
+func (s *wsState) ready() bool {
+	return s.namingSet && s.accountSet
+}
+
+// missing names what readiness is still waiting on, for the record.
 func (s *wsState) missing() []string {
 	var out []string
 	if !s.namingSet {
 		out = append(out, "naming")
 	}
-	if !s.sessionless() && !s.started {
-		out = append(out, "session_started")
-	}
 	if !s.accountSet {
 		out = append(out, "account")
-	}
-	if !s.sessionless() && s.picker == nil {
-		out = append(out, "permission_mode_picker")
-	}
-	if !s.sessionless() && s.contextUsage == nil {
-		out = append(out, "context_usage")
 	}
 	return out
 }

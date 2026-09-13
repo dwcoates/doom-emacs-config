@@ -84,14 +84,18 @@ describe("drawTopbarFastMode", () => {
     expect(cooldown?.textContent).not.toBe(off?.textContent);
   });
 
-  // UNSET IS NOT OFF EITHER: the vendor has stated nothing, so the strip
-  // states nothing.
-  it("draws nothing at all when the view carries no fast mode", () => {
-    expect(drawTopbarFastMode(undefined)).toBeNull();
+  // UNSET IS NOT OFF EITHER: the vendor has stated nothing, so the cell states
+  // nothing — but the SLOT STAYS, because the strip has one shape and a cell
+  // that vanished would shift every cell beside it (topbar.proto, FIXED
+  // SCHEMA AND ORGANIZATION).
+  it("draws the no-session dash when the view carries no fast mode", () => {
+    expect(drawTopbarFastMode(undefined).getAttribute("data-no-session")).toBe("fast");
   });
 
-  it("draws nothing when the fast-mode message carries no arm", () => {
-    expect(drawTopbarFastMode(create(TopbarFastModeSchema, {}))).toBeNull();
+  it("draws the no-session dash when the fast-mode message carries no arm", () => {
+    expect(
+      drawTopbarFastMode(create(TopbarFastModeSchema, {})).getAttribute("data-no-session"),
+    ).toBe("fast");
   });
 
   it("refuses an arm this bundle cannot name", () => {

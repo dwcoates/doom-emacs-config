@@ -34,8 +34,6 @@ import type { TopbarContext } from "./context.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarFastMode } from "./fast-mode.js";
-import { drawTopbarHibernated } from "./hibernated.js";
-import { drawTopbarColdGate } from "./cold-gate.js";
 import { bindAccountReveal } from "./account.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import {
@@ -141,41 +139,22 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   const right = document.createElement("div");
   right.className = "topbar-right";
 
-  // THE COLD-GATE STATE IS THE WHOLE RIGHT-HAND GROUP, for the same reason
-  // the hibernated one is: a workspace standing at the gate has no session,
-  // so the daemon sent no session-scoped element to draw. The daemon never
-  // sets both states at once and states this one when both hold, so the two
-  // branches cannot disagree about which strip the reader gets.
-  if (u.coldGate !== undefined) {
-    right.append(drawTopbarColdGate(u.coldGate, tc));
-    row.append(left, center, right);
-    return row;
-  }
-
-  // THE HIBERNATED STATE IS THE WHOLE RIGHT-HAND GROUP. Every element it
-  // replaces is session-scoped and the daemon sent none of them, so this is
-  // not a strip with holes in it: it is the same strip saying there is no
-  // session to describe. The left group and the title above are drawn either
-  // way, because a workspace has an account, a route and a name whether or
-  // not a session is up.
-  if (u.hibernated !== undefined) {
-    right.append(drawTopbarHibernated(u.hibernated, tc));
-    row.append(left, center, right);
-    return row;
-  }
-
+  // THE STRIP HAS ONE SHAPE AND ONLY ONE (topbar.proto, FIXED SCHEMA AND
+  // ORGANIZATION; owner ruling 2026-09-13). There is no branch here: every
+  // cell is drawn on every push and in the same slot, whether or not the
+  // workspace has a session. A control the daemon left ABSENT states so in
+  // its own slot — each draw function answers with `no-session.ts`'s dash —
+  // and the context chip and the warning strip carry the session-less facts
+  // themselves, the chip's hover leading with the reason and the strip
+  // carrying it as a line.
   right.append(
-    drawTopbarModelSelector(requireMessage(u.modelSelector, "TopbarView.model_selector"), tc),
-    drawTopbarPermissionModePicker(
-      requireMessage(u.permissionModePicker, "TopbarView.permission_mode_picker"),
-      tc,
-    ),
+    drawTopbarModelSelector(u.modelSelector, tc),
+    drawTopbarPermissionModePicker(u.permissionModePicker, tc),
+    // The fast-mode cell sits directly after the mode picker it is the
+    // sibling of.
+    drawTopbarFastMode(u.fastMode),
+    drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc),
   );
-  // The fast-mode cell sits directly after the mode picker it is the sibling
-  // of. It is ABSENT, not empty, when the vendor has stated no fast mode.
-  const fastMode = drawTopbarFastMode(u.fastMode);
-  if (fastMode !== null) right.append(fastMode);
-  right.append(drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc));
   // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list yields no
   // chip at all, not a quiet one.
   const warnings = drawTopbarWarningStrip(requireMessage(u.warnings, "TopbarView.warnings"), tc);

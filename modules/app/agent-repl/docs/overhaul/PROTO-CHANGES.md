@@ -940,4 +940,34 @@ THE SWITCH IS A RESTART, so the cold gate applies as it does to any resume, and
 a chosen root that is logged out is still a SUCCESS: the client opens that
 root's login flow afterwards, exactly as the logged-out cell's own click does.
 
+## Landing — topbar fixed schema, and the vendor's title (2026-09-13)
+
+USER-RULED (docs/REALTEST-JUDGEMENT-CALLS.md, "Owner rulings: the topbar's
+fixed schema and the vendor's title").
+
+### `frontend.v1` — THE TOPBAR SCHEMA AND ORGANIZATION ARE FIXED
+
+`TopbarView.hibernated` (tag 11, `TopbarHibernated`) and
+`TopbarView.cold_gate` (tag 12, `TopbarColdGate`) — both landed earlier the
+same day — are REVERSED. Both tags are reserved per the file's retired-tag
+convention and both messages are deleted. No whole-view state may replace,
+suppress or rearrange the strip ever again; the invariant is stated at the top
+of `topbar.proto` and in `modules/app/agent-repl/AGENTS.md`.
+
+In their place: `model_selector` (3), `permission_mode_picker` (9) and
+`fast_mode` (10) become `optional` — absent is "no session has stated this",
+and the client draws the cell's dash IN ITS SLOT rather than omitting the
+cell. `context` (7) and `warnings` (5) are ALWAYS SET: a session-less
+workspace's chip carries the hibernated or cold context size (0 when unknown)
+with the reason in its hover breakdown, and the strip carries the state as one
+warning line. `TopbarWarning.detail` may now be UNSET — a warning that is a
+statement with no overlay, which is exactly what that line is.
+
+### `conversation.v1` — the vendor's own conversation summary
+
+`SessionUpdate.title` (tag 29) carrying the new `SessionTitle { string text =
+1; }`. The vendor writes an `ai-title` line into the session transcript; the
+shim reads it and states it, and the topbar resolver composes
+`TopbarTitle.text` from it in preference to the workspace name.
+
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
