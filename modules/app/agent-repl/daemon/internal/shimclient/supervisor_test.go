@@ -685,7 +685,7 @@ func TestStandDownEverySpawnReportsAKillThatFailed(t *testing.T) {
 	leader := startPeer(t, 0)
 	p := startPeer(t, leader.pid)
 	sup := newSupervisor(t).(*supervisor)
-	c := newClient(newTestSurfaces().Global(), ids.WorkspaceID("ws-1"), p.uds, defaultBackoff, nil)
+	c := newClient(newTestSurfaces().Global(), ids.WorkspaceID("ws-1"), p.uds, defaultBackoff, nil, nil)
 	sup.hold(c)
 
 	// Act.
@@ -884,7 +884,7 @@ func TestBeginStandDownIsIdempotent(t *testing.T) {
 func TestASpawnedClientReadsTheSupervisorsLatch(t *testing.T) {
 	// Arrange.
 	sup := &supervisor{}
-	c := newClient(newTestSurfaces().Global(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(newTestSurfaces().Global(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 	c.daemonStandDown = sup.StandingDown
 
 	// Act.
@@ -917,7 +917,7 @@ func TestSpawnedForAnswersTheLiveSpawnRegistry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			sup := newSupervisor(t).(*supervisor)
-			c := newClient(newTestSurfaces().Global(), held, "/sock/ws-1.sock", defaultBackoff, nil)
+			c := newClient(newTestSurfaces().Global(), held, "/sock/ws-1.sock", defaultBackoff, nil, nil)
 			c.mu.Lock()
 			c.pid = 4242
 			c.mu.Unlock()
@@ -937,5 +937,82 @@ func TestSpawnedForAnswersTheLiveSpawnRegistry(t *testing.T) {
 				t.Fatalf("SpawnedFor(%q) pid = %d, want the held spawn's 4242", tt.ask, pid)
 			}
 		})
+	}
+}
+
+// ---- the adopted survivor of a refused start ----
+
+// TestAnAdoptedClientReadsTheSupervisorsLatch is the measured shape's own
+// wiring case. A bring-up whose StartSession refused leaves its shim serving,
+// and the next bring-up ADOPTS that inert survivor -- so one process ends up
+// with two clients, and the adopted one is the client no teardown walk can
+// name. It is handed the supervisor's latch by construction, so an immediate
+// shutdown is an ordered departure to it as much as to the spawn record.
+func TestAnAdoptedClientReadsTheSupervisorsLatch(t *testing.T) {
+	// Arrange: a shim already serving, adopted the way the inert-survivor
+	// bring-up adopts one.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	sup := newSupervisor(t)
+	type result struct {
+		c   Client
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		c, err := sup.Adopt(context.Background(), ids.WorkspaceID("ws-1"), dir, uds)
+		done <- result{c: c, err: err}
+	}()
+	waitForSessionOpen(t, f)
+	f.push(healthyUpdate())
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("Adopt() error = %v", r.err)
+	}
+	t.Cleanup(r.c.Detach)
+
+	// Act: the immediate shutdown latches before it ends anything.
+	sup.BeginStandDown()
+
+	// Assert.
+	if !r.c.StandingDown() {
+		t.Fatal("the adopted client reports StandingDown() = false after this daemon latched")
+	}
+}
+
+// TestAnAdoptedClientsOrderedDepartureIsNotADeath carries that wiring through
+// to the record the realtest harvest reads: the adopted client of a shim this
+// daemon ordered away must not report `daemon.shimclient.exit` ERROR "shim
+// died", which it did eight times over one `UpdateShutdownSchedule{now}`.
+func TestAnAdoptedClientsOrderedDepartureIsNotADeath(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	sup, surfaces := newSupervisorLogging(t)
+	type result struct {
+		c   Client
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		c, err := sup.Adopt(context.Background(), ids.WorkspaceID("ws-1"), dir, uds)
+		done <- result{c: c, err: err}
+	}()
+	waitForSessionOpen(t, f)
+	f.push(healthyUpdate())
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("Adopt() error = %v", r.err)
+	}
+	t.Cleanup(r.c.Detach)
+	sup.BeginStandDown()
+
+	// Act: the adopted shim's departure, which carries the -1 sentinel because
+	// it is not this daemon's child.
+	r.c.(*client).publishExit(ExitInfo{PID: r.c.PID(), Code: -1, Inferred: true})
+
+	// Assert.
+	if hasRecordAt(surfaces.log, "error", "daemon.shimclient.exit") {
+		t.Fatal("the adopted client recorded this daemon's own teardown as a death")
 	}
 }
