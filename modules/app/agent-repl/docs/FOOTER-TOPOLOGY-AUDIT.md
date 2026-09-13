@@ -21,8 +21,8 @@ These decide every row below, so they are stated once.
 
 | # | fact | evidence |
 |---|---|---|
-| F1 | **The footer is written only by the daemon.** `FooterView` arrives on `WatchFooter` and the webapp replaces the whole dock from it. There is no client-side write path into the footer at all, so nothing the CLIENT observes — a transport failure, a stream ending, an unreadable frame — can reach it. | `webapp/src/footer/footer.ts:129-156` (`draw()` builds the dock from `view` alone); no `footer` import anywhere in `webapp/src/rpc/` or `webapp/src/failure/` |
-| F2 | **`FooterStatusDisconnected` is about the daemon→shim link, not the webapp→daemon link.** Its five substatuses (`starting`, `degraded`, `severed`, `dead`, `start_failed`) all describe the shim. A webapp that cannot reach the daemon has no arm to be drawn in, and could not be pushed one if it had. | `proto/src/frontend/v1/footer.proto:536-564` |
+| F1 | **The footer is written by the daemon, and — since the owner's ruling of 2026-09-13 — by the CLIENT'S OWN LINK VERDICT.** `FooterView` arrives on `WatchFooter` and the webapp replaces the whole dock from it; there was no client-side write path into the footer at all, so nothing the CLIENT observed — a transport failure, a stream ending, an unreadable frame — could reach it. That is now the one carved exception: every failing client site reports through `reportClientFailure`, and while a verdict stands the footer composes its three status cells locally (`disconnected`, the kind's substatus, the site's ad-hoc line) over the daemon's last clock, tokens and chips. Every N2 and N3 row below is therefore **drawn: footer (client verdict)**. | `webapp/src/rpc/link.ts`; `webapp/src/footer/footer.ts` (`draw`'s verdict branch); `webapp/src/footer/strip.ts` (`drawClientDisconnectedStrip`) |
+| F2 | **`FooterStatusDisconnected` is about the daemon→shim link, not the webapp→daemon link.** Its five substatuses (`starting`, `degraded`, `severed`, `dead`, `start_failed`) all describe the shim. A webapp that cannot reach the daemon has no arm to be drawn in, and could not be pushed one if it had — which is why the client's own substatus is a locally composed WORD ("daemon unreachable", "feed not tailing", "frame unreadable") and not a sixth arm. **No proto change was made or needed.** | `proto/src/frontend/v1/footer.proto:536-564` |
 | F3 | **The daemon's fault table reaches Emacs, not the webapp.** Open faults are rendered as `HostFault` onto `WatchHostWorkspace`, which only the elisp host subscribes to. `WatchWebWorkspace` carries exactly two arms, `transferred` and `session_identity`. `frontend.v1.FailureKind`'s eleven daemon-minted arms — `session_start_failed` among them — are imported by the webapp only in its own client-local failure sink. | `daemon/internal/server/host.go:418-446`; `proto/src/agentrepl/v1/endpoint_watch_web_workspace.proto:27`; `webapp/src/failure/sink.ts:24`, and `sessionStartFailed` appears nowhere under `webapp/src` |
 
 ## 2. Vector table
@@ -139,24 +139,31 @@ are listed so the owner can rule on whether their surface suffices.
 | 5 | every unlanded refusal arm: raised under `OpenWorkspace`'s vocabulary from inside the cold-gate re-open, answered on an `AnswerColdGateResponse` that has no such arm | `daemon/internal/workspace/sessions.go:1265,1276,1288,1299,1306`; `daemon/internal/server/refuse.go:165` |
 | 6 | ~190 of the 193 distinct workspace-scoped `log.Info` progress messages | §2d |
 
-### N2 — client-observed conditions with nowhere to go (5)
+### N2 — client-observed conditions with nowhere to go (5) — CLOSED
 
-| # | row | evidence |
-|---|---|---|
-| 7 | a unary transport failure: never reaches the footer, never files a card, and the `.refusal` span is destroyed by the next upsert of its container | `webapp/src/rpc/unary.ts:69-80`; `webapp/src/feed/feed-view.ts:307` |
-| 8 | a subscription that ends `source_ended`: queue closed, `log.info` only | `webapp/src/rpc/page-streams.ts:295-305` |
-| 9 | `UnsubscribePage` failing: `log.debug` only | `webapp/src/rpc/page-streams.ts:414-425` |
-| 10 | `ClientLog` failing: console only, counted in `sinkFailureCount`, forwarding stops after the first failure | `webapp/src/log.ts:205-260`; `webapp/src/main.ts:81-93` |
-| 11 | the `daemon_unreachable` and `frame_undecodable` cards reach the overlay but never the footer, so a footer left showing `thinking` under a dead link keeps saying `thinking` | `webapp/src/rpc/streams.ts:197-205`; F1 |
+**All five are now drawn: footer (client verdict).** The row states what was
+missing and what reports it today.
 
-### N3 — silently swallowed at a call site (4)
+| # | row | drawn | evidence |
+|---|---|---|---|
+| 7 | a unary transport failure: never reached the footer, never filed a card, and the `.refusal` span was destroyed by the next upsert of its container | **drawn: footer (client verdict)** — `unary_transport`, "`<Rpc>`: `<the daemon's own account>`" | `webapp/src/rpc/unary.ts` (the transport catch) |
+| 8 | a subscription that ends `source_ended`: queue closed, `log.info` only | **drawn: footer (client verdict)** — `subscription_source_ended` | `webapp/src/rpc/page-streams.ts` (the `sourceEnded` arm) |
+| 9 | `UnsubscribePage` failing: `log.debug` only | **drawn: footer (client verdict)** — `unsubscribe_failed` | `webapp/src/rpc/page-streams.ts` (`unsubscribe`'s catch) |
+| 10 | `ClientLog` failing: console only, counted in `sinkFailureCount`, forwarding stops after the first failure | **drawn: footer (client verdict)** — `client_log_failed`, on a fixed line so the report→log→forward→fail loop terminates | `webapp/src/main.ts` (`clientLogSink`) |
+| 11 | the `daemon_unreachable` and `frame_undecodable` cards reached the overlay but never the footer, so a footer left showing `thinking` under a dead link kept saying `thinking` | **drawn: footer (client verdict)** — `daemon_unreachable_card`, and `frame_undecodable_card` under the substatus "frame unreadable" (judgement row) | `webapp/src/failure/overlay.ts` (`report`, after the card is filed) |
 
-| # | row | evidence |
-|---|---|---|
-| 12 | `OpenFeed` reveal probe, transport failure: bare `catch { return false; }` | `webapp/src/feed/feed.ts:307-309` |
-| 13 | `OpenFeed` reveal probe, refusal: `log.warn`, returns false | `webapp/src/feed/feed.ts:315-319` |
-| 14 | `OpenFeed` root tail, refusal: `log.error`, the attempt ends and the loop retries behind a card that says the daemon is unreachable when it is not | `webapp/src/feed/feed.ts:196-200` |
-| 15 | `OpenFeed` bubble reopen, refusal: `log.error`, returns null; the sub-feed silently stops tailing | `webapp/src/feed/bubble.ts:359-364` |
+### N3 — silently swallowed at a call site (4) — CLOSED
+
+Every one reports now. A REFUSED `OpenFeed` draws the substatus "feed not
+tailing" rather than "daemon unreachable", because the daemon answered — the
+judgement row argues it, and row 14 below is the audit's own account of why.
+
+| # | row | drawn | evidence |
+|---|---|---|---|
+| 12 | `OpenFeed` reveal probe, transport failure: was a bare `catch { return false; }` | **drawn: footer (client verdict)** — `unary_transport`, naming the probe | `webapp/src/feed/feed.ts` (`revealRow`'s catch) |
+| 13 | `OpenFeed` reveal probe, refusal: `log.warn`, returns false | **drawn: footer (client verdict)** — `feed_not_tailing` | `webapp/src/feed/feed.ts` (`revealRow`'s error arm) |
+| 14 | `OpenFeed` root tail, refusal: `log.error`, the attempt ends and the loop retries behind a card that says the daemon is unreachable when it is not | **drawn: footer (client verdict)** — `feed_not_tailing`. The tail's own ending verdict still replaces the LINE in the same tick; teaching the retry loop to tell a refused open from a dead link is priority 6, not this wiring | `webapp/src/feed/feed.ts` (`openAndTail`'s error arm) |
+| 15 | `OpenFeed` bubble reopen, refusal: `log.error`, returns null; the sub-feed silently stops tailing | **drawn: footer (client verdict)** — `feed_not_tailing` | `webapp/src/feed/bubble.ts` (`reopen`'s error arm) |
 
 ### N4 — drawn, but not at the footer or the feed (5)
 
@@ -200,17 +207,17 @@ already suffice are named.
 | class | rule | needs | already sufficient |
 |---|---|---|---|
 | **a. unary refusal** | drawn at the control that asked, AND a footer activity line naming the refused verb and its arm | a footer activity kind that can stand under any status, carrying a verb name and a composed sentence. The activity oneofs are per-status and closed (`footer.proto:170-661`), so a cross-status kind means adding one arm to each of the ten — or a single status-independent slot beside them | the refusal arms themselves: every endpoint already types its causes, and `refusalOf` already composes the sentence |
-| **b. transport failure** | a footer activity saying the link to the daemon is down, plus the retractable window card that already exists | F1 and F2 block this outright: the footer cannot be pushed over a link that is down, and `FooterStatusDisconnected` means the shim. Either a client-composed footer cell carved explicitly out of the stateless-renderer rule, or a client-side "last known footer, stale" treatment. **This is the one class that cannot be solved by a proto addition alone** | `FailureControlPlaneFailed` (`failure.proto:128`) already carries `{what, cause}` and is client-mintable — it is the right card for a failed verb, and today only `AdoptWebWorkspace` and the login terminal use it |
+| **b. transport failure** — **SETTLED AND LANDED** (owner ruling, 2026-09-13): the client composes the three status cells itself, out of `webapp/src/rpc/link.ts`'s verdict; the daemon's clock, tokens and chips still come from its last push, and its pushed view returns when a unary is answered or a stream reads again | a footer activity saying the link to the daemon is down, plus the retractable window card that already exists | F1 and F2 blocked this outright: the footer cannot be pushed over a link that is down, and `FooterStatusDisconnected` means the shim. Either a client-composed footer cell carved explicitly out of the stateless-renderer rule, or a client-side "last known footer, stale" treatment. **This is the one class that cannot be solved by a proto addition alone** | `FailureControlPlaneFailed` (`failure.proto:128`) already carries `{what, cause}` and is client-mintable — it is the right card for a failed verb, and today only `AdoptWebWorkspace` and the login terminal use it |
 | **c. stream ending** | the link's own status: `source_ended` and a `failed` subscription both draw the same window card the page stream's death draws | nothing — `PageSubscriptionEnded` already carries `how`; the gap is that `source_ended` files nothing | `FailureDaemonUnreachable` (`failure.proto:125`) |
 | **d. daemon fault** | footer status/substatus for the link kinds it already covers, plus a feed failure card for every other kind | a web-side carrier for the fault list. The `HostFault` shape already exists on `WatchHostWorkspace`; the described addition is a mirror on `WatchWebWorkspace`, or a feed row arm carrying `FailureKind` so the eleven daemon-minted arms have a place to be drawn | the eleven `FailureKind` arms are already defined and already have a producer split documented in `webapp/src/failure/sink.ts:5-11` — only the carrier is missing |
 | **e. progress** | a footer activity line for the operations a user waits on (bring-up, merge, adopt, revive, drain), not for all 193 | a selection: which `log.Info` operations are progress a user waits on. The footer's activity precedence is already specified (`footer.proto:118-123`), so a new kind slots into it | `FooterStatusActivityRetrying`, `FooterStatusActivityStartFailed`, `FooterStatusActivityMergingCommit` show the shape a progress kind takes |
 
 Two contract questions the remediation cannot settle on its own, for the owner:
 
-1. Rule (b) requires the footer to draw something the daemon did not compose.
-   That is a deliberate exception to the webapp's STATELESS RENDERER rule
-   (`webapp/AGENTS.md`, Standing rules) and belongs to the owner, not to an
-   implementer.
+1. ~~Rule (b) requires the footer to draw something the daemon did not compose.~~
+   **RULED, 2026-09-13**: the owner granted the exception. It is written into
+   `webapp/AGENTS.md`'s standing rules and implemented in
+   `webapp/src/rpc/link.ts`; the drawing is `drawClientDisconnectedStrip`.
 
 2. Rule (a) asks whether every refused click deserves a footer line, or only
    those whose refusal the control cannot survive to show. A control inside a
@@ -223,9 +230,9 @@ Two contract questions the remediation cannot settle on its own, for the owner:
 | 1 | **`AnswerColdGate`'s re-open failure has no arm.** Add the arm(s) `AnswerColdGateError` needs so a failed re-open is an ANSWER rather than a `CodeInternal`, and stop raising `OpenWorkspace`'s vocabulary from a cold-gate call path | the ruling's own incident; the user's answer to a gate silently does nothing, twice on one day |
 | 2 | **`ResumeCold`'s failure raises no fault and no footer line.** A failed re-open is a bring-up death and should take `noteStartFailed`'s path — `shim_start_failed` + `SetStartFailed` + a dead link — exactly as a failed spawn does | it is the same failure the owner already ruled on for held prompts (`REALTEST-JUDGEMENT-CALLS.md` row 65, 2026-09-12), applied to the one bring-up path that was missed |
 | 3 | **The unlanded-arm path draws nothing.** Any refusal the response cannot carry becomes a Connect error the user reads as "the daemon could not be reached" | it is silent by construction and affects every rpc, not just this one |
-| 4 | **A unary transport failure leaves nothing durable.** File `control_plane_failed` from `callUnary`'s own catch, so every failed verb has a card, and settle rule (b)'s footer question | the failure sink already has the arm; this is the cheapest of the five rules |
-| 5 | **`source_ended` files nothing.** A subscription whose source finished leaves its component permanently unfed with no notice | a whole surface can go stale silently |
-| 6 | **The four `OpenFeed` swallows** (`feed.ts:307`, `feed.ts:315`, `feed.ts:196`, `bubble.ts:359`) | a feed that stops tailing is the failure most likely to be read as "the agent is idle" |
+| 4 | ~~**A unary transport failure leaves nothing durable.**~~ **DONE** — it files a footer verdict; the `control_plane_failed` card is still open as described. File `control_plane_failed` from `callUnary`'s own catch, so every failed verb has a card, and settle rule (b)'s footer question | the failure sink already has the arm; this is the cheapest of the five rules |
+| 5 | ~~**`source_ended` files nothing.**~~ **DONE** — it files a footer verdict. A subscription whose source finished leaves its component permanently unfed with no notice | a whole surface can go stale silently |
+| 6 | **The four `OpenFeed` swallows** (each REPORTS now; what is left is the retry loop naming a refused open as an unreachable daemon) (`feed.ts:307`, `feed.ts:315`, `feed.ts:196`, `bubble.ts:359`) | a feed that stops tailing is the failure most likely to be read as "the agent is idle" |
 | 7 | **Sixteen fault kinds have no webapp carrier.** Settle rule (d)'s carrier, then draw them | large but not acute: Emacs sees them today |
 | 8 | **Progress selection.** Pick the operations a user waits on and give them footer activity kinds | the widest and the least urgent |
 
