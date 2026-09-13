@@ -10,9 +10,10 @@
  */
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { writeSync } from "node:fs";
 import { conversationv1, shimv1 } from "../../src/proto.js";
-import { PersistenceError } from "../../src/store/persistence.js";
+import { PersistenceError, type AgentPageSession } from "../../src/store/persistence.js";
 import { ForegroundUnitTable } from "../../src/engine/foreground.js";
 import { PermissionGate } from "../../src/engine/permission-gate.js";
 import { LiveWorkTable } from "../../src/engine/detached.js";
@@ -53,6 +54,24 @@ interface Harness {
   knows: boolean;
   /** When set, `SessionContext.query()` answers absence, as a dead query does. */
   queryDead: boolean;
+  /**
+   * Every reading session the engine registered with the session, in order.
+   *
+   * The teardown concludes a watcher through exactly this registration, so it
+   * is the only handle a test has on the conclusion the handler observes.
+   */
+  readonly watchers: AgentPageSession[];
+}
+
+/** Every structured record the logger wrote since `before`. */
+function recordsSince(before: number): Record<string, unknown>[] {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as [number, Buffer, number, number][];
+  return calls.slice(before).map(([, bytes, offset, length]) => {
+    return JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+  });
 }
 
 async function harness(persistence: RecordingPersistence = new RecordingPersistence()): Promise<Harness> {
@@ -86,6 +105,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     storeRecoveries: [] as number[],
     knows: true,
     queryDead: false,
+    watchers: [] as AgentPageSession[],
   };
   const context: SessionContext = {
     persistence,
@@ -96,7 +116,10 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     query: () => (state.queryDead ? undefined : query),
     nowMs: () => 1,
     openTurn: () => state.open,
-    watcherOpened: () => () => undefined,
+    watcherOpened: (_agent, page) => {
+      state.watchers.push(page);
+      return () => undefined;
+    },
     bashWatcherOpened: () => () => undefined,
     concludeStoppedRuns: () => undefined,
     knowsAgent: () => state.knows,
@@ -898,6 +921,95 @@ describe("WatchAgent", () => {
     })();
 
     expect(error instanceof ConnectError ? error.code : undefined).toBe(Code.NotFound);
+  });
+
+  it("records an ending nothing asked for at error", async () => {
+    // THE SILENT ENDING IS THE DEFECT. A `WatchAgent` whose tail runs out while
+    // the session lives is what the daemon reports as a severed link, and the
+    // shim used to say nothing about it at any level it runs at.
+    // Arrange. The fake's tail is finite, so it runs out with no conclusion.
+    const h = await harness();
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    for await (const _ of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+    )) {
+      // every frame, to the end of the tail
+    }
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message:
+          "the WatchAgent tail ended without anything asking it to; the daemon will see a standing stream end while the session lives",
+      }),
+    );
+  });
+
+  it("records an ending the teardown concluded at info", async () => {
+    // A CONCLUDED TAIL IS THE ONE ENDING THAT IS ORDINARY: the teardown wrote
+    // what it owed, named the pointer, and the stream ended on it.
+    // Arrange.
+    const h = await harness();
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act. The conclusion arrives while the stream stands, as the teardown's
+    // does: the registration the session holds is the only way in.
+    for await (const _ of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+    )) {
+      h.watchers[0]?.concludeThrough(undefined);
+    }
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message: "the WatchAgent tail served everything its conclusion named and ended",
+      }),
+    );
+  });
+
+  it("records a consumer that stopped consuming as the departure it is", async () => {
+    // Arrange. A standing tail, so only the consumer can end this stream.
+    const persistence = new RecordingPersistence();
+    persistence.standingTail = true;
+    const h = await harness(persistence);
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    for await (const _ of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+    )) {
+      break;
+    }
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "debug",
+        message: "the WatchAgent stream ended: its consumer stopped consuming it",
+      }),
+    );
+  });
+
+  it("passes the teardown's conclusion through to the reading session", async () => {
+    // Observing the conclusion must not absorb it: the record plane is what
+    // actually ends the tail on the pointer the teardown named.
+    // Arrange.
+    const h = await harness();
+
+    // Act.
+    for await (const _ of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+    )) {
+      h.watchers[0]?.concludeThrough(undefined);
+    }
+
+    // Assert.
+    expect(h.persistence.concludedThrough).toEqual([""]);
   });
 });
 

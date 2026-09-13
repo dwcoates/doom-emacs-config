@@ -968,21 +968,153 @@ describe("the tail against a malformed or ending watch", () => {
     });
   });
 
-  it("ends the tail when the store closes the watch without refusing it", async () => {
-    // A standing stream concludes nothing on its own, so a watch that simply
-    // ends is the store closing and the tail stops rather than re-opening.
+  it("keeps standing when the store ends the watch without refusing it", async () => {
+    // THE STORE ENDING A STANDING WATCH IS NOT A CONCLUSION. Its own handler
+    // returns a clean end of stream when it shuts down, and this tail used to
+    // stop there -- which ended the shim's WatchAgent while the session lived,
+    // silently, and reached the daemon as a severed link. The recovery is the
+    // refused token's: re-open from the last served pointer and carry on.
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1 ? opened(floorPage([]), WATCH) : opened(floorPage([]), WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? { async *[Symbol.asyncIterator]() {} }
+          : standingWatch([
+              create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("1", "unit-a") }),
+            ]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+
+    // Act.
+    const served: (string | undefined)[] = [];
+    for await (const entry of session.tail) {
+      served.push(unitOf(entry));
+      break;
+    }
+    session.close();
+
+    // Assert.
+    expect(served).toEqual(["unit-a"]);
+  });
+
+  it("re-opens from the last served pointer when the store ends the watch", async () => {
+    // The recovery is lossless only if it states the caller's own high-water
+    // mark, so the rows written during the gap come back in the catch-up page.
+    // Arrange.
+    const reopened: (storev1.StoreItemPointer | undefined)[] = [];
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        reopened.push(request.knownThrough);
+        opens += 1;
+        return opens === 1 ? opened(floorPage([]), WATCH) : opened(floorPage([]), WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? {
+              async *[Symbol.asyncIterator]() {
+                yield create(storev1.WatchAgentSessionResponseSchema, {
+                  line: storedLine("7", "unit-a"),
+                });
+              },
+            }
+          : standingWatch([]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const iterator = session.tail[Symbol.asyncIterator]();
+
+    // Act. The first entry, then the end that forces the re-open.
+    await iterator.next();
+    const raced = await Promise.race([iterator.next().then(() => "served"), hangGuard()]);
+    session.close();
+
+    // Assert.
+    expect(raced).toBe("hung");
+    expect(reopened[1]?.value).toBe("7");
+  });
+
+  it("records the store ending a standing watch as the unasked ending it is", async () => {
+    // THE SILENCE WAS THE DEFECT. The daemon reported the severed link and the
+    // shim's own log -- the only place that could say what ended the stream --
+    // held nothing at any level it runs at.
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1 ? opened(floorPage([]), WATCH) : opened(floorPage([]), WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? { async *[Symbol.asyncIterator]() {} }
+          : standingWatch([]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    await Promise.race([session.tail[Symbol.asyncIterator]().next(), hangGuard()]);
+    session.close();
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "the store ended a standing watch that nothing asked it to end; re-opening the book from the last served pointer",
+      }),
+    );
+  });
+
+  it("gives up once the store has ended one more re-opened watch than the budget allows", async () => {
+    // A store that accepts a token and ends the stream again cannot be
+    // recovered from, and a tail that kept re-opening would spin against it.
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opened(floorPage([]), WATCH);
+      },
+      watchAgentSession: () => ({ async *[Symbol.asyncIterator]() {} }),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+
+    // Act, Assert.
+    await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+    // The opening open, plus one re-open per end the budget admitted.
+    expect(opens).toBe(1 + 3);
+  });
+
+  it("records giving up on a store that keeps ending the re-opened watch", async () => {
     // Arrange.
     const reader = readerOver({
       openAgentSession: async () => opened(floorPage([]), WATCH),
       watchAgentSession: () => ({ async *[Symbol.asyncIterator]() {} }),
     });
     const session = await reader.openAgentPage(BOOK, 10);
+    const before = vi.mocked(writeSync).mock.calls.length;
 
     // Act.
-    const next = await session.tail[Symbol.asyncIterator]().next();
+    await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(
+      PersistenceError,
+    );
 
     // Assert.
-    expect(next.done).toBe(true);
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message:
+          "gave up re-opening an agent's tail: the store keeps ending a standing watch nothing asked it to end",
+      }),
+    );
   });
 
   it("ends the tail on the very entry the teardown concluded it through", async () => {
@@ -1399,17 +1531,23 @@ describe("the re-open's catch-up page", () => {
         opens += 1;
         return opens === 1 ? opened(floorPage([]), WATCH) : opened(undefined, WATCH_2);
       },
-      // The re-opened watch ends at once, so the tail's only possible output
-      // would be the catch-up page the re-open failed to carry.
-      watchAgentSession: refusedOnce(() => ({ async *[Symbol.asyncIterator]() {} })),
+      // The re-opened watch STANDS and pushes nothing, so the tail's only
+      // possible output would be the catch-up page the re-open failed to carry.
+      watchAgentSession: refusedOnce(() => standingWatch([])),
     });
     const session = await reader.openAgentPage(BOOK, 10);
 
     // Act.
-    const next = await session.tail[Symbol.asyncIterator]().next();
+    const raced = await Promise.race([
+      session.tail[Symbol.asyncIterator]()
+        .next()
+        .then(() => "served"),
+      hangGuard(),
+    ]);
+    session.close();
 
     // Assert.
-    expect(next.done).toBe(true);
+    expect(raced).toBe("hung");
   });
 
   it("follows the re-open's own watch token once the catch-up page is drained", async () => {
