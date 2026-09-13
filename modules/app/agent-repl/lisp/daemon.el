@@ -1296,13 +1296,58 @@ flag, not the protection itself."
     (agent-repl--with-deferred-quit "daemon-sentinel"
       (agent-repl-daemon--record-exit proc event))))
 
+(defvar agent-repl-daemon--exit-requested nil
+  "Non-nil once this editor has asked the daemon to shut down.
+Set where the request is issued (`agent-repl-frontend-daemon-stop\'),
+consumed by `agent-repl-daemon--record-exit\', and cleared again when a
+daemon is spawned so an order given to one daemon can never excuse the
+departure of its successor.")
+
+(defconst agent-repl-daemon--exit-log-format
+  "elisp.daemon.exited status=%S event=%s requested=%s"
+  "The one format every daemon exit is recorded with, whatever its level.
+One format keeps every exit under a single operation name, so a harvest
+groups a requested exit with an unrequested one and the LEVEL is what
+separates them; `requested=' says which this was.")
+
 (defun agent-repl-daemon--record-exit (proc event)
   "Record PROC's EVENT and release the daemon this Emacs spawned.
 The quit-guarded critical section of `agent-repl-daemon--sentinel\',
 named separately so the guard has a body to wrap and a test can drive the
-recording without a process death."
-  (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.exited status=%S event=%s"
-                    (process-exit-status proc) (string-trim (or event "")))
+recording without a process death.
+
+THE LEVEL FOLLOWS WHO ASKED.  A daemon exit is not one fact:
+
+  - AN EXIT THIS EDITOR ASKED FOR is the requested outcome arriving.  Every
+    deploy and every backend restart goes through
+    `agent-repl-frontend-daemon-stop\', and the exit that follows was the
+    point of the exercise — recorded at INFO.  Warning about it put a
+    `WARNING:\' line in *Messages* twice in one morning for two orderly
+    `bin/deploy-all.sh\' restarts, which is the log crying wolf about its
+    own instruction being obeyed.
+
+  - AN EXIT NOBODY ASKED FOR is the daemon leaving on its own.  A clean
+    status still means work this editor believed was being served has
+    stopped, so it stays a WARN; a non-zero status is the daemon reporting
+    its own failure, and that is an ERROR.
+
+The request is CONSUMED here, so it excuses exactly the one exit it
+ordered and the next unrequested departure is heard in full."
+  (let* ((status (process-exit-status proc))
+         (requested agent-repl-daemon--exit-requested)
+         (trimmed (string-trim (or event "")))
+         (scope '(:agent-repl-central "the resident daemon lifecycle spans workspaces")))
+    (setq agent-repl-daemon--exit-requested nil)
+    (cond
+     (requested
+      (agent-repl--info scope agent-repl-daemon--exit-log-format
+                        status trimmed "t"))
+     ((eql status 0)
+      (agent-repl--warn scope agent-repl-daemon--exit-log-format
+                        status trimmed "nil"))
+     (t
+      (agent-repl--error scope agent-repl-daemon--exit-log-format
+                         status trimmed "nil"))))
   (when (eq proc agent-repl--frontend-daemon-process)
     (agent-repl-daemon--retire-own-addr)
     (setq agent-repl--frontend-daemon-process nil)))
@@ -1472,6 +1517,10 @@ is stated on the spawn rather than assumed."
              (proc (agent-repl--frontend-spawn-daemon
                     argv (agent-repl-daemon--environment))))
         (setq agent-repl--frontend-daemon-process proc)
+        ;; A NEW DAEMON INHERITS NO ORDERS.  Any shutdown this editor asked
+        ;; of a predecessor is spent; leaving it standing would let one
+        ;; deliberate restart excuse the next daemon's unasked-for death.
+        (setq agent-repl-daemon--exit-requested nil)
         (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.started argv=%S state-dir=%S"
                           argv (agent-repl--global-state-dir))
         (agent-repl-daemon--set-lifecycle 'starting)
@@ -1697,6 +1746,10 @@ missing link, or transport failure; interactive callers leave it out."
                                :reason "no daemon link is available")))
           nil)
       (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop")
+      ;; RECORDED AT THE REQUEST, not at its acceptance: the daemon may be
+      ;; gone before its answer reaches us, and the exit that races the
+      ;; acknowledgement is still the exit this editor asked for.
+      (setq agent-repl-daemon--exit-requested t)
       (agent-repl-rpc-update-shutdown-schedule
        conn (list :action
                   (list :arm :now
@@ -1710,6 +1763,9 @@ missing link, or transport failure; interactive callers leave it out."
             (message "agent-repl: daemon shutting down")
             (when on-done (funcall on-done '(:arm :accepted))))
            (:error
+            ;; A REFUSED shutdown is one nobody obeyed, so the request is
+            ;; withdrawn and a later departure is heard as unrequested.
+            (setq agent-repl-daemon--exit-requested nil)
             (let ((detail (format "daemon refused the immediate shutdown: %S"
                                   (plist-get response :value))))
               (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-refused error=%S"
@@ -1718,6 +1774,8 @@ missing link, or transport failure; interactive callers leave it out."
                 (funcall on-done (list :arm :not-restarted :reason detail))))
             (message "agent-repl: daemon refused the shutdown"))
            (arm
+            ;; An answer this editor cannot read is not an acceptance.
+            (setq agent-repl-daemon--exit-requested nil)
             (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-unknown-arm arm=%S" arm)
             (when on-done
               (funcall on-done
@@ -1725,6 +1783,10 @@ missing link, or transport failure; interactive callers leave it out."
                              :reason (format "daemon returned unknown shutdown arm %S" arm)))))))
        :on-failure
        (lambda (detail)
+         ;; THE REQUEST NEVER LANDED.  A daemon that goes away after a
+         ;; shutdown this editor could not deliver went away on its own, and
+         ;; is heard as such.
+         (setq agent-repl-daemon--exit-requested nil)
          (agent-repl--error '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.stop-failed detail=%S" detail)
          (message "agent-repl: could not reach the daemon to stop it")
          (when on-done
