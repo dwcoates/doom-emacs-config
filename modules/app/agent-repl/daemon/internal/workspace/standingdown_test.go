@@ -120,3 +120,51 @@ func TestStartStillSpawnsWhenTheDaemonIsNotStandingDown(t *testing.T) {
 		t.Fatalf("spawn attempts = %d, want exactly 1", got)
 	}
 }
+
+// TestOpenLevelsAStandingDownStartAtInfo is the same relay on the other
+// endpoint the realtest exercised. Open reports EVERY start failure at ERROR,
+// and a bring-up refused because the daemon is leaving is not one: the
+// successor opens the workspace from the same record.
+func TestOpenLevelsAStandingDownStartAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		startErr  error
+		wantLevel string
+	}{
+		{
+			name:      "this daemon is standing down",
+			startErr:  shimclient.ErrStandingDown,
+			wantLevel: "info",
+		},
+		{
+			name:      "the shim would not spawn",
+			startErr:  errors.New("the shim would not spawn"),
+			wantLevel: "error",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.fleet.startErr = tt.startErr
+
+			// Act.
+			if err := f.verbs.Open(context.Background(), "w1"); err == nil {
+				t.Fatal("Open = nil error, want the start's own failure")
+			}
+
+			// Assert.
+			var level string
+			for _, r := range f.log.logger.Records() {
+				if r.Operation == opOpen && (r.Message == "the session did not come up" ||
+					r.Message == "the session was not brought up: this daemon is standing down") {
+					level = r.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("the start-failure record is %q, want %q", level, tt.wantLevel)
+			}
+		})
+	}
+}
