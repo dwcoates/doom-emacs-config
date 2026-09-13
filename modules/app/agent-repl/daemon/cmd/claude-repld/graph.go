@@ -387,6 +387,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		},
 		Feed:         feedResolver,
 		Footer:       footerResolver,
+		Topbar:       topbarResolver,
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
 		NodeBin:      p.Opts.node,

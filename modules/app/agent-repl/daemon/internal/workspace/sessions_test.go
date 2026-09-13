@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
@@ -179,11 +180,15 @@ type fleetFixture struct {
 	client     *fakeClient
 	feed       *fakeFeed
 	footer     *fakeFooter
-	log        *fakeSurfaces
-	watcher    *fakeWatcher
-	links      *recordingLinkSink
-	probeState sessionlock.State
-	probeErr   error
+	// topbarGates is every cold-gate state the STRIP was handed, in order. A
+	// cold-gated workspace starts no session, so the topbar's own state is
+	// the only thing standing between the reader and a blank strip.
+	topbarGates []topbar.ColdGate
+	log         *fakeSurfaces
+	watcher     *fakeWatcher
+	links       *recordingLinkSink
+	probeState  sessionlock.State
+	probeErr    error
 	// socketState and socketErr script the shim-socket listener probe, which
 	// decides adopt-versus-spawn beside the lock.
 	socketState shimsocket.State
@@ -270,7 +275,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 
 	fleet, err := NewFleet(FleetDeps{
 		DB: f.db, Accounts: f.accounts, Supervisor: f.supervisor,
-		Feed: f.feed, Footer: f.footer, Log: f.log,
+		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Footer:  footerLinkSink{rec: f.links},
 			Topbar:  topbarLinkSink{rec: f.links},
@@ -813,6 +818,27 @@ func TestStartAnswersAColdRefusalWithTheGate(t *testing.T) {
 	}
 	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding() == nil {
 		t.Fatalf("synthesized rows = %v, want one standing gate row", f.feed.synthesized)
+	}
+}
+
+func TestStartStatesTheColdGateToTheTopbar(t *testing.T) {
+	// Arrange: a cold refusal starts NO session, so the topbar's session facts
+	// never arrive and its own gate state is the only thing that keeps the
+	// strip from staying blank for as long as the gate stands.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	want := []topbar.ColdGate{{Standing: true, ContextTokens: 120_000}}
+	if len(f.topbarGates) != len(want) || f.topbarGates[0] != want[0] {
+		t.Fatalf("topbar cold gates = %v, want %v", f.topbarGates, want)
 	}
 }
 

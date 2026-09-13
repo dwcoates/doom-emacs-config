@@ -39,6 +39,20 @@ function hibernatedView(): TopbarView {
   });
 }
 
+/**
+ * A COLD-GATED workspace's view: the same three workspace-scoped elements, and
+ * the cold-gate state. Nothing session-scoped is set, because the shim
+ * answered `cold` and no session was ever created.
+ */
+function coldGateView(): TopbarView {
+  return create(TopbarViewSchema, {
+    title: { text: "DWC/fix" },
+    account: { state: { case: "loggedIn", value: { email: "a@b.test" } } },
+    connectivity: { tone: "none", glyph: "○", title: "no session" },
+    coldGate: { contextTokens: 142_300n, sinceMs: BigInt(NOW - 60_000) },
+  });
+}
+
 describe("drawTopbarView", () => {
   it("draws the three groups", () => {
     const { tc } = topbarContext();
@@ -72,6 +86,36 @@ describe("drawTopbarView", () => {
   it("draws no session-scoped element for a parked workspace", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(hibernatedView(), tc);
+    expect([
+      row.querySelector(".topbar-model") !== null,
+      row.querySelector(".topbar-permission-mode") !== null,
+      row.querySelector(".topbar-context-figure") !== null,
+      row.querySelector(".topbar-fast") !== null,
+    ]).toEqual([false, false, false, false]);
+  });
+
+  // THE COLD-GATE STRIP. A workspace standing at the gate resolves no session
+  // fact at all, so before this branch the strip published nothing and stayed
+  // blank for as long as the gate stood.
+  it("draws the cold-gate cell for a workspace standing at the gate", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(coldGateView(), tc);
+    expect(row.querySelector(".topbar-cold-gate")?.textContent).toBe("cold context 142.3k 1m");
+  });
+
+  it("draws the account, the connectivity and the title for a cold-gated workspace", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(coldGateView(), tc);
+    expect([
+      row.querySelector(".topbar-account") !== null,
+      row.querySelector(".topbar-connectivity") !== null,
+      row.querySelector(".topbar-title") !== null,
+    ]).toEqual([true, true, true]);
+  });
+
+  it("draws no session-scoped element for a cold-gated workspace", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(coldGateView(), tc);
     expect([
       row.querySelector(".topbar-model") !== null,
       row.querySelector(".topbar-permission-mode") !== null,
