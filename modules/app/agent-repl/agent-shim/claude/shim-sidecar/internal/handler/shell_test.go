@@ -1,11 +1,12 @@
 package handler
 
-// shell_test.go — the detached shell spool: deltas, the two terminators it can
-// carry, and the LOST terminal the reader asks for.
+// shell_test.go — the detached shell spool: deltas, the three terminators it
+// can carry, and the LOST terminal the reader asks for.
 
 import (
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -608,5 +609,97 @@ func TestAWrapperLineEndingTheRunTellsTheReaderItCannotBeLost(t *testing.T) {
 	// Assert.
 	if toldPath != "/t/b1.output" || toldRun != "toolu_run1" {
 		t.Fatalf("onTerminal saw (%q, %q), want the spool and its run", toldPath, toldRun)
+	}
+}
+
+// terminationOf returns the completed terminal's termination arm, so a test can
+// claim which of the two endings the reader spelled.
+func terminationOf(t *testing.T, entries []*storev1.StoreEntry) (*conversationv1.AgentBashTermination, bool) {
+	t.Helper()
+	for _, e := range entries {
+		success := e.GetAgentUpdate().GetBash().GetFrame().GetSuccess()
+		if success == nil || success.GetCompleted() == nil {
+			continue
+		}
+		return success.GetCompleted().GetTermination(), true
+	}
+	return nil, false
+}
+
+// TestTheWrapperKilledLineEndsTheRunOnTheKilledArm is the third terminator the
+// vendor writes and the one this reader did not know. 121 of one machine's
+// shell spools end on it, and every one of them was left open for a silence
+// window to conclude LOST — `bpth8pp8m.output`, written 16:21:33 and concluded
+// `went_silent` at 16:51:47, is the harvested case.
+func TestTheWrapperKilledLineEndsTheRunOnTheKilledArm(t *testing.T) {
+	// Arrange.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("PACKAGE_COMPILES\n\n[killed]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	termination, ok := terminationOf(t, entries)
+	if !ok {
+		t.Fatalf("the wrapper's killed line did not end the run: keys=%v", allKeys(entries))
+	}
+	if termination.GetKilled() == nil {
+		t.Fatalf("termination = %v, want the killed arm: a kill reports no status", termination)
+	}
+}
+
+// TestAKilledRunIsReportedAsATerminalRead pins what stops the LOST policy
+// restating a killed run as `went_silent`: the handler must tell the reader it
+// READ the run's own terminal, exactly as it does for an exit.
+func TestAKilledRunIsReportedAsATerminalRead(t *testing.T) {
+	// Arrange.
+	h := NewShellOutputHandler(testLogger(t))
+	var gotPath, gotRun string
+	h.SetTerminalObserver(func(path, run string) { gotPath, gotRun = path, run })
+
+	// Act.
+	h.Handle(spoolFrames("[killed]\n", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	if gotPath != "/t/b1.output" || gotRun != "toolu_run1" {
+		t.Fatalf("terminal reported for (%q, %q), want (/t/b1.output, toolu_run1)", gotPath, gotRun)
+	}
+}
+
+// TestTheHarnessMarkerBeatsTheKilledLineWhenBothArePresent applies the existing
+// precedence to the new line: a kill reports no status, so a harness `EXIT=`
+// recorded right above it is the only verdict the command gave.
+func TestTheHarnessMarkerBeatsTheKilledLineWhenBothArePresent(t *testing.T) {
+	// Arrange.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("EXIT=77\n\n[killed]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	code, ok := exitCodeOf(t, entries)
+	if !ok {
+		t.Fatalf("the run did not end: keys=%v", allKeys(entries))
+	}
+	if code != 77 {
+		t.Fatalf("exit code = %d, want the command's own 77 rather than an unqualified kill", code)
+	}
+}
+
+// TestAMidLineKilledSentenceIsNotReadAsTheTerminator holds the new line to the
+// same strictness as the other two: a run that PRINTS the word must not end.
+func TestAMidLineKilledSentenceIsNotReadAsTheTerminator(t *testing.T) {
+	// Arrange.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("the child said [killed] and carried on\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	if _, ok := terminationOf(t, entries); ok {
+		t.Fatalf("a mid-line killed sentence must not terminate the run: keys=%v", allKeys(entries))
 	}
 }

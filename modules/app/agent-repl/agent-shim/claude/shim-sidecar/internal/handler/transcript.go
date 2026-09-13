@@ -127,8 +127,12 @@ func (h *SessionTranscriptHandler) holdCount(frames []tail.Frame, ctx *Context) 
 	if heldOffset == last.Offset && heldFor >= maxHoldDeliveries {
 		// Held once already and the file still says nothing after it. Stop
 		// waiting: the boundary converts without a summary, loudly.
-		h.log.With(handleWarn("hold", ctx)).With(logging.Context{Offset: logging.Off(last.Offset)}).
-			Log("the held compaction boundary was held for %d delivery and no summary followed; converting it without one", heldFor)
+		// INFO, NOT WARN: converting without one is no longer a loss. The cut is
+		// drawn with the stated placeholder, and a summary that names this
+		// boundary supersedes it whenever it arrives, however many deliveries
+		// later (convert.attachCompactSummary).
+		h.log.With(handleCtx("hold", ctx)).With(logging.Context{Offset: logging.Off(last.Offset)}).
+			Log("the held compaction boundary was held for %d delivery and no summary followed; converting it with the placeholder, which a later summary naming it supersedes", heldFor)
 		return n
 	}
 	if heldOffset == last.Offset {

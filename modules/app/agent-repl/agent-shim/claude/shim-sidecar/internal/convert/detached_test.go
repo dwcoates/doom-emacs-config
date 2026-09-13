@@ -533,22 +533,45 @@ func TestABacklogLostVerdictIsNotAWarning(t *testing.T) {
 	}
 }
 
-// TestALostVerdictReachedWhileWatchingIsAWarning is the other half: a run that
-// went quiet WHILE we were watching it is a newly-arising condition, and keeping
-// it loud is the whole reason the two cases are told apart.
-func TestALostVerdictReachedWhileWatchingIsAWarning(t *testing.T) {
-	// Arrange.
-	c, sink := loggedConverter(t)
-	at := testAttribution(0)
-	at.TaskID = "b1"
+// TestALostTerminalTakesTheSameLevelAsThePolicyThatConcludedIt keeps the two
+// layers in step. A conclusion reached while watching is a newly-arising
+// condition and stays loud for a file that VANISHED under us; a run that merely
+// went SILENT is not a fault this reader can attribute to anything — the file
+// plane cannot tell a quiet dead run from a quiet live one — and warning here
+// under an informational `lost-policy` would put the flood straight back one
+// layer down.
+func TestALostTerminalTakesTheSameLevelAsThePolicyThatConcludedIt(t *testing.T) {
+	cases := []struct {
+		name      string
+		reason    LostReason
+		wantLevel string
+	}{
+		{
+			name:      "the file vanished under us, which is an anomaly to act on",
+			reason:    LostFileVanished,
+			wantLevel: "warn",
+		},
+		{
+			name:      "the run went silent, which a healthy poll loop also does",
+			reason:    LostWentSilent,
+			wantLevel: "info",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c, sink := loggedConverter(t)
+			at := testAttribution(0)
+			at.TaskID = "b1"
 
-	// Act.
-	c.BashLost(at, "toolu_run", "", 0, LostWentSilent, false, false)
+			// Act.
+			c.BashLost(at, "toolu_run", "", 0, tc.reason, false, false)
 
-	// Assert.
-	if !strings.Contains(sink.String(), `"operation":"bash-lost"`) ||
-		!strings.Contains(sink.String(), `"level":"warn"`) {
-		t.Fatalf("a conclusion reached while watching must stay at warn: %s", sink.String())
+			// Assert.
+			if got := levelForMessage(t, sink, "the detached run is LOST"); got != tc.wantLevel {
+				t.Fatalf("the terminal was recorded at %q, want %q", got, tc.wantLevel)
+			}
+		})
 	}
 }
 

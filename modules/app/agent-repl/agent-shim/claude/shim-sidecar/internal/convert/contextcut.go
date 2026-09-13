@@ -72,18 +72,18 @@ func clearCutIdentity(at Attribution, env envelope) string {
 	return env.uuid
 }
 
+// NoSummaryWritten is what the cut says when the vendor wrote no summary for
+// it. IT IS A STATEMENT, NOT A SUMMARY: an empty `summary` renders as a hole,
+// and a reader looking at a hole cannot tell "the history was discarded and
+// nothing stood in for it" from "this feed lost something". The sentence says
+// which, in the reader's own words, and is replaced the moment a real summary
+// arrives.
+const NoSummaryWritten = "context compacted; no summary was written"
+
 // contextCompacted stores that history was replaced by a summary of itself.
 func (c *Converter) contextCompacted(record map[string]any, at Attribution, env envelope, agent string, next map[string]any) *storev1.StoreEntry {
 	metadata := obj(record["compactMetadata"])
-	summary := compactSummaryText(next)
-
-	if summary == "" {
-		// A compaction with no summary renders as a hole where the discarded
-		// history was. It is emitted anyway — the cut is REAL and a reader must
-		// see WHERE — but never silently.
-		c.log.With(at.ctxWarn("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
-			Log("compact boundary is not followed by a summary line; the cut renders with nothing in place of the discarded history")
-	}
+	summary := compactSummaryText(env.uuid, next)
 
 	compacted := &conversationv1.ContextCompacted{
 		Summary:    &conversationv1.AgentResponseProse{Markdown: summary},
@@ -96,9 +96,29 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		compacted.Trigger = &conversationv1.ContextCompacted_Requested{Requested: &conversationv1.ContextCompactionRequested{}}
 	}
 
-	c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
-		Log("compaction trigger=%q tokens %d->%d coalesced with its summary (%d characters)",
-			str(metadata["trigger"]), compacted.GetTokens().GetTokensBefore(), compacted.GetTokens().GetTokensAfter(), len(summary))
+	if summary == "" {
+		// THE CUT IS REAL AND IS DRAWN EITHER WAY, but never as a hole: the
+		// placeholder stands in for the discarded history so the reader is TOLD
+		// there was no summary rather than left to guess. It is INFO because
+		// nothing here is degraded any more — the condition is stated on the
+		// wire, and the vendor writing no summary is the vendor's business.
+		//
+		// AND THE SUMMARY MAY STILL BE COMING. It is not always the very next
+		// line: a real transcript put a `system/scheduled_task_fire` between a
+		// boundary and its summary, and the summary named the boundary as its
+		// parent. The boundary is remembered here so that summary, whenever it
+		// lands and however many lines or batches later, supersedes this
+		// placeholder on the cut's own key (attachCompactSummary).
+		compacted.Summary = &conversationv1.AgentResponseProse{Markdown: NoSummaryWritten}
+		c.pendingCut = &pendingCompaction{boundaryUUID: env.uuid, agent: agent, compacted: compacted}
+		c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
+			Log("compact boundary carries no summary on the following line; the cut is drawn with the stated placeholder %q, and a summary naming this boundary later supersedes it", NoSummaryWritten)
+	} else {
+		c.pendingCut = nil
+		c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
+			Log("compaction trigger=%q tokens %d->%d coalesced with its summary (%d characters)",
+				str(metadata["trigger"]), compacted.GetTokens().GetTokensBefore(), compacted.GetTokens().GetTokensAfter(), len(summary))
+	}
 
 	// A COMPACTION IS ONE VENDOR RECORD ON BOTH PLANES — the stream's
 	// `compact_boundary` and this one share a uuid — so the boundary's own uuid
@@ -145,14 +165,75 @@ func IsCompactBoundary(record map[string]any) bool {
 	return str(record["type"]) == "system" && str(record["subtype"]) == "compact_boundary"
 }
 
+// pendingCompaction is a cut this converter drew with the placeholder, kept so
+// the summary that names it can supersede that draw whenever it arrives.
+//
+// ONE, NOT A MAP. A session compacts one context at a time and the boundary is
+// the only record that can be waiting; a second boundary means the first one's
+// summary is never coming.
+type pendingCompaction struct {
+	boundaryUUID string
+	agent        string
+	compacted    *conversationv1.ContextCompacted
+}
+
+// attachCompactSummary supersedes a placeholder cut with the summary that named
+// its boundary, and answers nil for a summary that names none of ours.
+//
+// THE KEY IS THE CUT'S, THE POSITION IS THIS RECORD'S. Re-emitting under
+// `session:context_cut:<boundary uuid>` is what makes the store replace the
+// placeholder row rather than stand a second cut beside it, and attributing at
+// the SUMMARY's offset is what makes it a later write rather than a replay of
+// the first.
+func (c *Converter) attachCompactSummary(record map[string]any, at Attribution) *storev1.StoreEntry {
+	pending := c.pendingCut
+	if pending == nil {
+		return nil
+	}
+	if str(record["parentUuid"]) != pending.boundaryUUID {
+		return nil
+	}
+	summary := summaryProse(record)
+	if summary == "" {
+		return nil
+	}
+	c.pendingCut = nil
+	pending.compacted.Summary = &conversationv1.AgentResponseProse{Markdown: summary}
+	c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", pending.boundaryUUID)}).
+		Log("the compact boundary's summary arrived on a later line (%d characters); it supersedes the placeholder on the cut's own key", len(summary))
+	return c.contextCutEntry(at, pending.boundaryUUID, pending.agent, &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Compacted{Compacted: pending.compacted},
+	})
+}
+
 // compactSummaryText returns the summary carried by the line FOLLOWING a
 // boundary, or "" when that line is not a summary.
 //
 // The summary line is typed `user`, which is why it is identified by the
 // envelope's flag and never by its type: it is the harness's own text standing in
 // for the discarded history, not the user's prompt.
-func compactSummaryText(next map[string]any) string {
-	if next == nil || str(next["type"]) != "user" || !boolean(next["isCompactSummary"]) {
+//
+// POSITION IS THE WHOLE CLAIM HERE, and it is why this asks for no parent link:
+// the line immediately after a boundary is that boundary's summary by file
+// order, which is the rule two compactions in one file are told apart by. A
+// summary further away has to name its boundary instead — see
+// attachCompactSummary.
+func compactSummaryText(boundaryUUID string, next map[string]any) string {
+	if next == nil {
+		return ""
+	}
+	if parent := str(next["parentUuid"]); parent != "" && parent != boundaryUUID {
+		// It names a DIFFERENT boundary, so file order is not what it looks
+		// like and this cut's summary is elsewhere.
+		return ""
+	}
+	return summaryProse(next)
+}
+
+// summaryProse reads the harness's standing-in text off a compaction summary
+// record, or "" for a record that is not one.
+func summaryProse(next map[string]any) string {
+	if str(next["type"]) != "user" || !boolean(next["isCompactSummary"]) {
 		return ""
 	}
 	content := obj(next["message"])["content"]

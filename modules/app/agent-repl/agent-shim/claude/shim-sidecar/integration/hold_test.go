@@ -6,6 +6,7 @@ import (
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 )
 
 // SUBJECT 8 — THE HOLD, the one legitimate deferral.
@@ -265,11 +266,16 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 	if got := recordsFor(records, "hold-exhausted"); len(got) != 0 {
 		t.Errorf("the handler held the boundary again on its forced redelivery; the tailer had to refuse %d hold(s)", len(got))
 	}
-	// GIVING UP ON THE SUMMARY IS STATED, and stated as a degradation: the cut a
-	// reader gets from here is missing prose the vendor may yet have written, so
-	// the bound expiring is a warning rather than a routine info beat.
-	if got := recordsAt(records, "hold", "warn"); len(got) != 1 {
-		t.Errorf("the summary-less conversion was stated %d time(s) at warn, want exactly one; the log held %v",
+	// GIVING UP ON THE WAIT IS STATED, and stated at info: the cut a reader gets
+	// from here carries the placeholder rather than a hole, and a summary that
+	// names this boundary still supersedes it whenever it lands, so the bound
+	// expiring degrades nothing. It must never be silent.
+	if got := recordsAt(records, "hold", "warn"); len(got) != 0 {
+		t.Errorf("the summary-less conversion was stated %d time(s) at warn, want none; the log held %v",
+			len(got), operationLevels(records))
+	}
+	if got := recordsFor(records, "hold"); len(got) != 2 {
+		t.Errorf("the hold was stated %d time(s), want the deferral and the expiry; the log held %v",
 			len(got), operationLevels(records))
 	}
 
@@ -284,13 +290,13 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 	if cut.GetCompacted() == nil {
 		t.Fatalf("a compaction boundary produces the compacted arm even with no summary: %v", cut.GetCut())
 	}
-	// The summary's PROSE is what must be absent. The message itself is always
-	// present (internal/convert/contextcut.go builds it unconditionally, so the
-	// field's absence is not expressible), and the empty markdown IS the "no
-	// summary" statement: a reader renders a hole where the discarded history
-	// was, rather than prose the vendor never wrote.
-	if got := cut.GetCompacted().GetSummary().GetMarkdown(); got != "" {
-		t.Errorf("the cut carries summary prose %q; no summary line was ever written, and one must not be invented", got)
+	// The summary's PROSE is the reader's own STATEMENT about the condition, and
+	// never prose the vendor did not write. An empty markdown drew the cut as a
+	// hole, which a reader cannot tell from a summary this pipeline lost; the
+	// placeholder says which it is, and a summary naming this boundary replaces
+	// it on the cut's own key if one ever arrives.
+	if got := cut.GetCompacted().GetSummary().GetMarkdown(); got != convert.NoSummaryWritten {
+		t.Errorf("the cut carries summary prose %q, want the stated placeholder %q", got, convert.NoSummaryWritten)
 	}
 }
 

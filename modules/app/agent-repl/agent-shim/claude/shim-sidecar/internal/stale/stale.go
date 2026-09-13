@@ -389,6 +389,35 @@ func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
 				lost.Reason, lost.LastActivityMs, nowMs)
 			continue
 		}
+		if lost.Reason == ReasonWentSilent {
+			// SILENCE IS NOT A FAULT, AND THIS READER CANNOT SAY OTHERWISE.
+			//
+			// The record's own sentence is the argument: "we stopped seeing
+			// it, which is not a claim that it failed". A detached run that is
+			// quiet and ALIVE is the ordinary shape of a poll loop — the
+			// owner's own background shells sit in an `until` loop that prints
+			// nothing between checks — and this package has no way to tell one
+			// from a run that died. It was looked for: the vendor's launch
+			// result carries `backgroundTaskId` and a cwd hint and NO pid, the
+			// spool is a plain file with no heartbeat, nothing is written
+			// beside it, and a terminator (`EXIT=`, `[exited with code N]`,
+			// `[killed]`) is the only end signal the vendor ever writes. The
+			// package doc's "it has no view of process liveness" is a fact
+			// about the file plane, not a shortcut.
+			//
+			// So the conclusion stands — the run IS no longer being seen, the
+			// wire arm is unchanged, the terminal is still minted — and only
+			// the level moves, because a warn asks an operator to act on a
+			// silent-but-healthy loop that needs nothing.
+			//
+			// A VANISHED FILE UNDER A STANDING DIRECTORY KEEPS ITS WARN. That
+			// one is an unlink under the reader, which is a real anomaly about
+			// the file plane rather than an inference about a process.
+			t.bound(lost.Work).With(logging.Context{Reason: string(lost.Reason)}).Log(
+				"run concluded LOST reason=%s: it stopped writing for longer than its silence window, which is not a claim that it failed and not a fault to act on — a detached run that is quiet and alive looks exactly like this from the file plane (last_activity_ms=%d observed_at_ms=%d)",
+				lost.Reason, lost.LastActivityMs, nowMs)
+			continue
+		}
 		t.bound(lost.Work).With(logging.Context{Level: "warn"}).Log(
 			"run concluded LOST reason=%s: we stopped seeing it, which is not a claim that it failed (last_activity_ms=%d observed_at_ms=%d)",
 			lost.Reason, lost.LastActivityMs, nowMs)

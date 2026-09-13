@@ -93,6 +93,29 @@ func (c *Converter) BashExited(at Attribution, run, output string, omitted uint6
 	})
 }
 
+// BashKilled converts the spool's `[killed]` terminator into the run's terminal.
+//
+// A KILL IS AN ENDING, NOT A LOSS. The wrapper wrote the line, so the run's own
+// file says it ended — which is why this is the COMPLETED arm carrying the
+// `killed` termination and never `interrupted{lost}`: we did not stop seeing
+// it, we read how it stopped. It is not `by_user` either: the wrapper's line
+// names no actor, and a run the harness killed for its own reasons is not a
+// person's decision.
+func (c *Converter) BashKilled(at Attribution, run, output string, omitted uint64) *storev1.StoreEntry {
+	c.log.With(at.ctxFor("bash-killed")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
+		Log("[killed] observed on disk; the run ends on evidence rather than on a silence timeout, with no status the shell reported")
+	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: spoolOutput(output, omitted),
+				Termination: &conversationv1.AgentBashTermination{
+					How: &conversationv1.AgentBashTermination_Killed{Killed: &conversationv1.AgentBashKilled{}},
+				},
+			}},
+		}},
+	})
+}
+
 // BashLost converts a run we STOPPED BEING ABLE TO SEE into its terminal.
 //
 // THE CAUSE IS `lost`, AND THE ARM IS HOW WE CONCLUDED IT. Landing 3 gave
@@ -102,7 +125,7 @@ func (c *Converter) BashExited(at Attribution, run, output string, omitted uint6
 // decisions, and no decision was observed — which is exactly why `lost` draws as
 // its own word downstream and never as a cancel or a failure.
 func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64, reason LostReason, observed, catchup bool) *storev1.StoreEntry {
-	bound := c.log.With(lostCtx(at, "bash-lost", catchup)).With(logging.Context{
+	bound := c.log.With(lostCtx(at, "bash-lost", catchup, reason)).With(logging.Context{
 		ActivityID: run, UpsertKey: BashTerminalKey(run), Reason: string(reason),
 	})
 	line := "the detached run is LOST (%s); it resolves interrupted with cause=lost naming that arm, output_observed=%t"
@@ -130,14 +153,26 @@ func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64,
 // per-item catch-up statement uses, and the totals still ride the INFO summary,
 // so nothing is silenced.
 //
-// A conclusion reached about a run that went stale WHILE WE WATCHED is a
+// A conclusion reached about a run that VANISHED while we watched is a
 // newly-arising condition and stays at WARN, which is the whole point of keeping
 // the two apart.
-func lostCtx(at Attribution, operation string, catchup bool) logging.Context {
+//
+// WENT_SILENT IS THE ONE REASON THAT IS NOT A FAULT, and it is recorded at INFO
+// for the reason stale.Tracker.state gives at the layer above: the file plane
+// cannot tell a quiet dead run from a quiet live one — no pid is written, no
+// heartbeat, and a terminator is the only end the vendor states — so a silence
+// window expiring asks an operator to act on something that may need nothing.
+// The two layers classify identically ON PURPOSE; a `bash-lost` warn under an
+// info `lost-policy` would put the flood straight back one level down, which is
+// exactly how the catch-up flood came back before it.
+func lostCtx(at Attribution, operation string, catchup bool, reason LostReason) logging.Context {
 	if catchup {
 		ctx := at.ctxFor(operation)
 		ctx.Level = "debug"
 		return ctx
+	}
+	if reason == LostWentSilent {
+		return at.ctxFor(operation)
 	}
 	return at.ctxWarn(operation)
 }
@@ -224,14 +259,14 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 	taskType := str(pick(result, "task_type", "taskType"))
 	if taskID == "" {
 		// BENIGN UNATTRIBUTABLE — debug, not warn. A TaskStop that names no task
-		// carries nothing to attribute the stop to; it is stored whole as
+		// carries nothing to attribute the stop to; it is classified whole as
 		// residue, which is the correct outcome, not data loss. It recurs across
 		// history and would flood a cold re-scan's strict harvest at warn. The
-		// residue record stays; only the severity drops. (An agent TaskStop that
+		// classification stays; only the severity drops. (An agent TaskStop that
 		// DOES name a task but whose launch this stream never opened stays warn
 		// below — that is a pointier "expected-but-absent launch" signal.)
 		c.log.With(at.ctxFor("task-stop")).
-			LogVerbose("TaskStop result names no task; the stop cannot be attributed and the record is stored as vendor_specific")
+			LogVerbose("TaskStop result names no task; the stop cannot be attributed and the record is classified as vendor_specific residue")
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unattributed", result)}
 	}
 
@@ -250,26 +285,35 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		run, launched := c.spawnedRuns[taskID]
 		if !launched {
 			// AN ABSENT LAUNCH IS ONLY A SIGNAL IF THE LAUNCH COULD HAVE BEEN
-			// SEEN. This converter learns a task's spawning call from a launch
-			// result it read on this same stream, so a converter that RESUMED
-			// mid-file — at the cursor the store already holds — has no way to
-			// have seen a launch that lies behind that cursor. That is the
-			// ordinary shape of a restart, not a gap: on the owner's machine
-			// five of these landed in one millisecond at offset ~50 MB of a
-			// transcript a freshly-started reader had joined minutes earlier,
-			// stopping five agents whose launches a previous process had already
-			// converted and committed.
+			// SEEN, and there are TWO ways it could not have been.
 			//
-			// A converter that read the file FROM BYTE 0 and still has no launch
-			// for the task IS looking at a gap, and keeps the warning. The
-			// residue is identical either way; only the severity moves, and the
+			// THE LAUNCH WAS WRITTEN TO A DIFFERENT FILE. The vendor's
+			// background agents outlive the transcript that launched them: a
+			// `/clear` rotates the session id and opens a new file while the
+			// harness keeps every running agent, so the first thing the new
+			// file says about such a run is the stop that settles it. The
+			// vendor states where the launch lives — the run's spool sits under
+			// the LAUNCHING session's directory — and foreignspawn.go reads
+			// that off the notifications this stream did carry.
+			//
+			// THE LAUNCH LIES BEHIND THIS READER'S CURSOR. A converter that
+			// RESUMED mid-file has no way to have seen a launch before its
+			// window; that is the ordinary shape of a restart.
+			//
+			// A converter that read the file FROM BYTE 0, with no foreign owner
+			// on record, IS looking at a gap and keeps the warning. The residue
+			// is identical in all three cases; only the severity moves, and the
 			// record names which case it is.
-			if c.resumedMidFile() {
+			switch owner, foreign := c.foreignSpawns[taskID]; {
+			case foreign:
+				c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID}).
+					LogVerbose("TaskStop names an agent task session %s launched, so its launch was written to that session's transcript and never to this one; the spawn unit it settles cannot be identified here and the record is classified as vendor_specific residue", owner)
+			case c.resumedMidFile():
 				c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, Offset: logging.Off(c.joinedOffset)}).
-					LogVerbose("TaskStop names an agent task whose launch lies before this reader joined the file, so the spawn unit it settles cannot be identified here and the record is stored as vendor_specific")
-			} else {
+					LogVerbose("TaskStop names an agent task whose launch lies before this reader joined the file, so the spawn unit it settles cannot be identified here and the record is classified as vendor_specific residue")
+			default:
 				c.log.With(at.ctxWarn("task-stop")).With(logging.Context{TaskID: taskID}).
-					Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is stored as vendor_specific")
+					Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is classified as vendor_specific residue")
 			}
 			return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unlaunched", result)}
 		}
@@ -363,7 +407,7 @@ func terminalOutput(output string, omitted uint64, observed bool) *conversationv
 // The failure carries no `error`: we observed no error, only silence, and
 // inventing one would have this producer assert the run died.
 func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason LostReason, catchup bool) *storev1.StoreEntry {
-	bound := c.log.With(lostCtx(at, "subagent-lost", catchup)).With(logging.Context{
+	bound := c.log.With(lostCtx(at, "subagent-lost", catchup, reason)).With(logging.Context{
 		ActivityID: run, UpsertKey: ActivityKey(run), BookAgentID: ownerAgent, Reason: string(reason),
 	})
 	line := "the backgrounded subagent is LOST (%s); its spawn unit settles failed with cause=lost naming that arm"
