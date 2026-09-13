@@ -90,12 +90,14 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.recoverMerges(ctx, log, workspaces, &report); err != nil {
 			return Report{}, err
 		}
-		// THE BRING-UP GOES LAST, after every reconciliation the sessions it
-		// starts would otherwise race: the orphaned turns are closed, the
-		// holds are restored, the merges are recovered. A session spawned
+		// THE BRING-UP IS ONLY NAMED HERE, and it is named LAST for the same
+		// reason it used to RUN last: the sessions it starts would race every
+		// reconciliation above it — the orphaned turns are closed, the holds
+		// are restored, the merges are recovered — and a session spawned
 		// before those would answer for state this boot had not finished
-		// reading.
-		s.bringUp(ctx, log, clientless, &report)
+		// reading. It does not run here because it must not gate the
+		// listener; see BringUp.
+		report.PendingBringUp = clientless
 	}
 	if err := s.join(ctx, log); err != nil {
 		return Report{}, err
@@ -103,9 +105,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 
 	log.Debug("daemon.boot.run", "the boot reconciliation is complete", dlog.Context{
 		"adopted":            len(report.Adopted),
-		"brought_up":         len(report.BroughtUp),
-		"hibernated_left":    len(report.HibernatedLeft),
-		"bring_up_failed":    len(report.BringUpFailed),
+		"pending_bring_up":   len(report.PendingBringUp),
 		"undetermined":       len(report.Undetermined),
 		"orphans_closed":     len(report.Orphaned),
 		"missing_dir_closed": len(report.MissingDirClosed),
@@ -552,8 +552,18 @@ var _ = []rollout.DispositionKind{
 	rollout.DispositionUnknown,
 }
 
-// bringUp starts the session of every open, client-less workspace, EXCEPT the
-// hibernated ones.
+// BringUp starts the session of every open, client-less workspace the
+// reconciliation named, EXCEPT the hibernated ones.
+//
+// IT RUNS AFTER THE DAEMON ANSWERS, NOT INSIDE THE RECONCILIATION. The boot
+// claim and daemon.addr are published before the reconciliation and nothing is
+// accepted until after it, so a step that spawns N shims here is N spawns in
+// front of the first `DaemonHealth` — the unary Emacs recognizes a replacement
+// daemon by, under a bound of 3s that it does not lengthen. On 2026-09-13 the
+// deploy reported `replacement identity was not observed` against a daemon
+// that had come up and started both its sessions. So the caller runs this on
+// its own goroutine once the listener is accepting, and readiness never waits
+// on a shim spawn.
 //
 // AN OPEN WORKSPACE IS NEVER SESSION-LESS (owner ruling, 2026-09-13). A
 // daemon that outlived its shims came back with rows the user had left open
@@ -581,13 +591,31 @@ var _ = []rollout.DispositionKind{
 // workspace's own start-failed fault and states the dead link on every
 // surface, which is the same evidence a failed open leaves. The boot's own
 // summary counts it.
-func (s *sequence) bringUp(ctx context.Context, log dlog.Logger, clientless []wsm.Workspace, report *Report) {
-	for _, ws := range clientless {
+func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUpReport {
+	log := s.deps.Log.Global()
+	report := BringUpReport{}
+	// A START THAT HAS BEGUN IS FINISHED, NEVER ABANDONED MID-WRITE, and the
+	// NEXT one is simply not begun once the daemon is leaving. The step now
+	// runs beside the accept loop, so an exit CAN land in the middle of it,
+	// and a start cancelled halfway is not a session that failed: it is a
+	// half-written session record, a shim stopped between spawn and attach,
+	// and a fault the daemon then could not record because the same
+	// cancellation refused its transaction. The exit joins this goroutine
+	// (cmd/claude-repld/run.go, loopJoinBound) rather than cutting it.
+	startCtx := context.WithoutCancel(ctx)
+	for _, ws := range pending {
+		if err := ctx.Err(); err != nil {
+			log.Info("daemon.boot.bring_up", "the daemon is leaving; the remaining workspaces are not started", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws.ID),
+				"error":             err.Error(),
+			})
+			break
+		}
 		fields := dlog.Context{
 			dlog.KeyWorkspaceID:  string(ws.ID),
 			dlog.KeyWorkspaceDir: ws.Dir,
 		}
-		session, exists, err := s.deps.DB.Session(ctx, ws.ID)
+		session, exists, err := s.deps.DB.Session(startCtx, ws.ID)
 		if err != nil {
 			fields["error"] = err.Error()
 			log.Error("daemon.boot.bring_up", "a workspace's session record could not be read; it is not brought up", fields)
@@ -599,7 +627,7 @@ func (s *sequence) bringUp(ctx context.Context, log dlog.Logger, clientless []ws
 			report.HibernatedLeft = append(report.HibernatedLeft, ws.ID)
 			continue
 		}
-		if err := s.deps.StartSession(ctx, ws.ID); err != nil {
+		if err := s.deps.StartSession(startCtx, ws.ID); err != nil {
 			fields["error"] = err.Error()
 			log.Error("daemon.boot.bring_up", "an open workspace's session did not come up; the boot goes on", fields)
 			report.BringUpFailed = append(report.BringUpFailed, ws.ID)
@@ -613,9 +641,10 @@ func (s *sequence) bringUp(ctx context.Context, log dlog.Logger, clientless []ws
 	// many sessions this daemon brought back, so that count is stated once at
 	// the level a person reads.
 	log.Info("daemon.boot.bring_up", "the boot brought the open workspaces' sessions up", dlog.Context{
-		"adopted":         len(report.Adopted),
+		"pending":         len(pending),
 		"started":         len(report.BroughtUp),
 		"hibernated_left": len(report.HibernatedLeft),
 		"failed":          len(report.BringUpFailed),
 	})
+	return report
 }
