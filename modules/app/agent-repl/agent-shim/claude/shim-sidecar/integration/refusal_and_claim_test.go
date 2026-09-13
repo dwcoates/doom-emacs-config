@@ -212,6 +212,12 @@ func TestAStopArrivingBeforeTheSpoolIsClaimedCancelsItOnClaim(t *testing.T) {
 	// Long enough that the hold cannot lapse into residue while the subject is
 	// arranging the claim: the point is the stop crossing an UNCLAIMED spool.
 	opts.UnownedSpoolWindow = 30 * time.Second
+	// THE PER-ITEM DETAIL LIVES AT DEBUG DURING CATCH-UP. This record is one of
+	// the six corpus-walk operations the startup catch-up window levels (see
+	// "Startup catch-up"), and this subject asserts the per-item record rather
+	// than the summary, so it reads the log at the threshold the detail is
+	// written to.
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 
 	stop := retargetTaskStop(t,
 		retargetSession(t, decodeRecord(t, corpusLine(t, "tool-results/task_stop.jsonl", 0)), session, cwd),
