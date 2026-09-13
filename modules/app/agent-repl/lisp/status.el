@@ -64,7 +64,13 @@ This logging-boundary helper emits no record because doing so would recurse."
   :group 'agent-repl)
 
 (defcustom agent-repl-tab-name-padding " %s "
-  "Format string for tab workspace name padding."
+  "Format string for tab workspace name padding.
+
+Only the TRAILING half of this format survives as written: it is a width
+fill drawn after the name.  Any LEADING whitespace is stripped by
+`agent-repl--render-tab', which emits the one space between `[N]' and the
+name itself, so the gap is exactly one space whatever this format and the
+badge run do (owner ruling, 2026-09-13)."
   :type 'string
   :group 'agent-repl)
 
@@ -1264,8 +1270,18 @@ SPEC is a plist with keys :bg :fg :bracket-fg :underline :weight (see
 `agent-repl--tab-palette' docstring).  NAME-FACE is applied to the
 workspace-name portion.  LABEL is the bracket content (the tab number).
 IMG-STR, when non-nil, is the badge run (priority label and glyph)
-inserted between bracket and name with a single un-faced space on each
-side so it does not butt up against the name's background.
+inserted between bracket and name with a single space on each side so it
+does not butt up against the name's background.  A blank IMG-STR is
+treated as no badge at all.
+
+EXACTLY ONE SPACE SEPARATES [N] FROM THE NAME, always (owner ruling,
+2026-09-13).  The gap is emitted HERE, as one space carrying the name's
+own face, and never by `agent-repl-tab-name-padding': that format's
+leading whitespace is stripped, so a padding format and a badge run can
+no longer each contribute a space and draw `[3]   ws'.  The name itself
+is trimmed too, so a daemon-supplied leading space cannot widen the gap
+either.  Whatever TRAILING whitespace the padding format adds is a width
+FILL and is kept, drawn in the name's face, after the name.
 
 SELECTION IS AN UNDERLINE, not a background.  When SPEC carries
 `:underline', the SELECTED tab's separator, bracket and name runs are all
@@ -1295,11 +1311,20 @@ whenever an entry landed at a wrap (or the final row's) end."
          (name-face*     (if underline
                              (cons '(:underline t)
                                    (if (listp name-face) name-face (list name-face)))
-                           name-face)))
+                           name-face))
+         (badge          (and img-str
+                              (not (string-blank-p img-str))
+                              img-str))
+         (padded         (string-trim-left
+                          (format agent-repl-tab-name-padding (string-trim name))))
+         (text           (string-trim-right padded))
+         (fill           (substring padded (length text))))
     (concat (propertize " " 'face separator-face)
             (propertize (format agent-repl-tab-bracket-format label) 'face bracket-face)
-            (when img-str (concat " " img-str " "))
-            (propertize (format agent-repl-tab-name-padding name) 'face name-face*)
+            (when badge (concat " " badge))
+            (propertize " " 'face name-face*)
+            (propertize text 'face name-face*)
+            (propertize fill 'face name-face*)
             " ")))
 
 (defun agent-repl--tab-face (state _selected)
@@ -1358,12 +1383,19 @@ Two things live there, in this order: the roster's PRIORITY BADGE label
 resolver's and this is only the label) and the arm's glyph
 \(the merge pipeline's, the inactive question mark, or the attention
 marker).  Both are absent far more often than present, so the whole run
-is nil in the ordinary case and the tab is name and bracket alone."
+is nil in the ordinary case and the tab is name and bracket alone.
+
+A BLANK PART IS NO PART.  A roster row can carry a priority label that is
+present but empty, and joining that into the run produced a run made of
+nothing but spaces — which the renderer then padded on both sides and drew
+as extra gap between `[N]' and the name.  Blank parts are dropped, and a
+run left with no parts is nil."
   (let* ((row (and (fboundp 'agent-repl-roster-row-for-ws)
                    (agent-repl-roster-row-for-ws name)))
          (badge (and row (agent-repl-roster-row-priority-label row)))
          (glyph (agent-repl-status-tab-glyph name arm))
-         (parts (delq nil (list badge glyph))))
+         (parts (seq-remove #'string-blank-p
+                            (delq nil (list badge glyph)))))
     (when parts
       (string-join parts " "))))
 
