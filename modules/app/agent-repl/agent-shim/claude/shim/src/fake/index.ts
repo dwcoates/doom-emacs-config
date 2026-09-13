@@ -361,12 +361,19 @@ export interface FakeQueryOpts {
   readonly abortSignal?: AbortSignal;
 }
 
-/** The usage object every fake API response reports, shaped like the corpus's. */
-function fakeUsage(): Record<string, unknown> {
+/**
+ * The usage object every fake API response reports, shaped like the corpus's.
+ *
+ * `contextTokens`, when a scenario states one, is the total the cold gate
+ * reads back (`cache_read + cache_creation + input`); the cache READ is the
+ * part that absorbs the difference, because that is what a re-read pays for.
+ */
+function fakeUsage(contextTokens?: number): Record<string, unknown> {
+  const cacheRead = contextTokens === undefined ? 21_755 : contextTokens - 10 - 3_224;
   return {
     input_tokens: 10,
     cache_creation_input_tokens: 3_224,
-    cache_read_input_tokens: 21_755,
+    cache_read_input_tokens: cacheRead,
     cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 3_224 },
     output_tokens: 36,
     output_tokens_details: { thinking_tokens: 30 },
@@ -378,7 +385,7 @@ function fakeUsage(): Record<string, unknown> {
       {
         input_tokens: 10,
         output_tokens: 36,
-        cache_read_input_tokens: 21_755,
+        cache_read_input_tokens: cacheRead,
         cache_creation_input_tokens: 3_224,
         cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 3_224 },
         type: "message",
@@ -656,7 +663,7 @@ export function createFakeQuery(
     const messageId = options.messageId ?? mintMessageId();
     streamParentToolUseId = options.agent?.parentToolUseId ?? null;
     const reportedModel = options.model ?? model;
-    const usage = fakeUsage();
+    const usage = fakeUsage(options.contextTokens);
     const requestId = `req_fake_${spawnTag}_${messageCounter}`;
     const uuids: string[] = [];
     emitStream({
