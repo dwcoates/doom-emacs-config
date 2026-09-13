@@ -232,3 +232,16 @@ A repository with no such config does NOT inherit doom's: the DAEMON
 detects the absence and returns it as a one-shot creation error, and Emacs
 surfaces that refusal as a warning in the minibuffer. Emacs never detects
 this itself.
+
+## Owner rulings: dynamic creation design questions (2026-09-12, owner)
+
+- A failed naming call is an error back to Emacs; the daemon retries once.
+- Name collisions get an incrementing suffix.
+- No per-repository override of the naming brief.
+- A "naming the workspace" minibuffer message is fine.
+- THERE IS NO "OPEN PR" OPTION and no finish choice at all. A repository has
+  one canonical file stating IN PLAIN ENGLISH what is to be done on
+  completion. The daemon concatenates it to the one-shot's initial prompt
+  (the same prompt the name is generated from) as:
+  "when you're all done, please do the following postprocessing directive:
+  <repo-specific-specification>". Doom's directive is the module corpus.
