@@ -145,11 +145,22 @@ type fakeSupervisor struct {
 	// onSpawn runs at the top of Spawn, so a test can hold a start open while
 	// it drives a second one at the same workspace.
 	onSpawn func()
+	// spawnAttempts counts every ASK, including the ones that answer an
+	// error. `spawns` records only what came up, so a guard that is supposed
+	// to prevent the ask cannot be tested against it.
+	spawnAttempts int
 }
 
 func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimclient.Client, error) {
+	s.spawnAttempts++
 	if s.onSpawn != nil {
 		s.onSpawn()
+	}
+	// THE LATCH IS THE REAL SUPERVISOR'S BACKSTOP, so the fake carries it too:
+	// a fixture that spawned happily while standing down would let a guard
+	// that never reads the latch pass every test about reading it.
+	if s.StandingDown() {
+		return nil, shimclient.ErrStandingDown
 	}
 	if s.spawnErr != nil {
 		return nil, s.spawnErr

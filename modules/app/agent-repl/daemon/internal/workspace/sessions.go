@@ -877,6 +877,30 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 // as free: spawning a second shim onto one conversation is the failure the lock
 // exists to prevent.
 func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string, src source) (shimclient.Client, bool, error) {
+	// A DEPARTING DAEMON BRINGS NOTHING UP, and it says so BEFORE it probes or
+	// spawns. The supervisor already refuses the spawn -- that is the latch's
+	// backstop and it stays -- but reaching the refusal that way costs a
+	// wasted fork attempt and, worse, three loud records for a state the
+	// daemon decided on purpose: measured at realtest 2026-09-13T18:32:16 as
+	// `daemon.shimclient.spawn` WARN, `daemon.workspace.bring_up` ERROR "the
+	// shim did not come up" and `daemon.workspace.register` ERROR, plus a
+	// `shim_start_failed` FAULT and a footer failure line, all for an
+	// announcement that arrived while the daemon was leaving.
+	//
+	// IT IS A REFUSAL, NOT A FAILURE, so it is recorded at INFO through the
+	// package's typed-refusal path and opens no workspace fault: nothing is
+	// wrong with this workspace, and the next daemon revives it. The arm is
+	// `spawn_failed`, which is the arm the caller already read for this state
+	// and the only landed one that fits; the error additionally wraps
+	// shimclient.ErrStandingDown so the register can tell the departure from a
+	// shim that genuinely would not come up.
+	if f.deps.Supervisor.StandingDown() {
+		log.Info(opBringUp, "no shim is brought up: this daemon is standing down", dlog.Context{
+			"workspace": string(ws), "socket": udsPath,
+		})
+		return nil, false, fmt.Errorf("%w: %w", shimclient.ErrStandingDown,
+			refuse(log, "OpenWorkspace", ArmSpawnFailed, shimclient.ErrStandingDown.Error(), false))
+	}
 	lockPath := f.lockDir()
 	state, err := f.probe(lockPath, dir)
 	// THE SOCKET IS THE SECOND KERNEL FACT. The lock says whether this

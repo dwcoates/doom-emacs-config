@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon bring-up: a bring-up on a daemon that has begun standing down refuses BEFORE it probes or spawns -- an INFO typed refusal carrying `shimclient.ErrStandingDown`, no fault, no footer failure line -- and the register relays that sentinel at INFO instead of `daemon.workspace.register` ERROR (gap scan 2026-09-13T18:32:16, finding 2)
+
 - daemon stand-down: the stand-down latch every shim client reads is the SUPERVISOR's as well as the client's own, and an immediate shutdown raises it BEFORE it walks the sessions -- so a client no walk can name (an adopted survivor of a refused StartSession) records the daemon's own teardown at INFO instead of `daemon.shimclient.exit` ERROR "shim died" plus `daemon.shimclient.redial` WARN "redial stopped" (gap scan 2026-09-13T18:31:58, finding 1)
 
 - topbar account cell: clicking it opens a dropdown of every account root the daemon knows (email or "logged out", the current one marked), and picking one switches the workspace's session to it through SelectAccount and the restart verb's engine, opening that root's login when it has none; it is the pair's reveal, replacing the session line the cell used to open (owner ruling 2026-09-13: the logged-in cell did nothing)
