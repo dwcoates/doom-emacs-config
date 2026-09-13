@@ -40,6 +40,7 @@ import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
 import { log } from "../log.js";
 import { daemonUnreachable, frameUndecodable, type FailureSink } from "../failure/sink.js";
+import { clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView, isMalformedView } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
 import type { AgentReplClient } from "./client.js";
@@ -178,6 +179,9 @@ export function watchStream<Res extends Message>(
         context: { rpc: opts.name },
       });
       ctx.failures.retract("daemonUnreachable");
+      // The link is reading again, which disproves every client verdict; the
+      // footer goes back to whatever the daemon is pushing.
+      clearClientFailures();
       unreachableFiled = false;
       opts.onReconnected?.();
     }
@@ -201,6 +205,9 @@ export function watchStream<Res extends Message>(
       context: { rpc: opts.name, end: end.kind, close_code: closeCode, close_reason: closeReason, backoff_ms: backoffMs },
     });
     ctx.failures.report(daemonUnreachable(closeCode, closeReason));
+    // AFTER the card, so the footer's line names this stream rather than the
+    // card's generic account of the same ending.
+    reportClientFailure("stream_ended", `${opts.name} stream ended (${end.kind})`);
     unreachableFiled = true;
   };
 

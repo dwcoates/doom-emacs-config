@@ -22,6 +22,7 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { log } from "../log.js";
+import { clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView } from "./malformed.js";
 import { assertNoUnknownFields, requireCase } from "./strict.js";
 import type { AgentReplClient } from "./client.js";
@@ -77,8 +78,15 @@ export async function callUnary<Res extends Message>(
       operation: "rpc.unary-transport-failure",
       context: { rpc: name, code: connectError.code, cause: connectError.rawMessage },
     });
+    // THE FOOTER IS TOLD, and this is the one thing the old shape did not do:
+    // a verb that never reached the daemon left a `.refusal` span the next
+    // upsert destroyed, and nothing durable anywhere (the audit's N2 row 7).
+    reportClientFailure("unary_transport", `${name}: ${connectError.rawMessage}`);
     throw connectError;
   }
+  // THE DAEMON ANSWERED, so whatever this page believed about the link is
+  // disproved -- by evidence, not by a redraw. See `clearClientFailures`.
+  clearClientFailures();
   assertNoUnknownFields(schema, response);
   const arm = outcomeArm(schema, response, name);
   log.debug(`${name} answered ${arm}`, {

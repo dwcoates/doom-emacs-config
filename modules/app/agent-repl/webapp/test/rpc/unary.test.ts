@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -10,6 +10,11 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { ForwardingLogger, setLogger } from "../../src/log.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import {
+  clearClientFailures,
+  reportClientFailure,
+  standingClientFailure,
+} from "../../src/rpc/link.js";
 import { QUIESCED_MESSAGE, callUnary, type UnaryContext } from "../../src/rpc/unary.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -200,5 +205,48 @@ describe("the result oneof lookup", () => {
     // ASSERT
     const answered = lines.find(([, line]) => line.includes("rpc.unary-answered"));
     expect(answered?.[1]).toContain('"outcome":"answered"');
+  });
+});
+
+describe("callUnary and the client's link verdict", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  it("reports a transport failure, naming the rpc and the daemon's account", async () => {
+    const ctx = ctxThrowing(new ConnectError("the shim would not start", Code.Internal));
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+    expect(standingClientFailure()).toEqual({
+      kind: "unary_transport",
+      substatus: "daemon unreachable",
+      activity: "OpenExternal: the shim would not start",
+    });
+  });
+
+  it("clears a standing verdict when the daemon answers", async () => {
+    reportClientFailure("stream_ended", "WatchFooter stream ended (producer_ended)");
+    const ctx = ctxAnswering(() =>
+      create(OpenExternalResponseSchema, { result: { case: "success", value: {} } }),
+    );
+    await call(ctx);
+    expect(standingClientFailure()).toBeNull();
+  });
+
+  it("clears a standing verdict on a REFUSAL too, which the daemon still answered", async () => {
+    reportClientFailure("stream_ended", "WatchFooter stream ended (producer_ended)");
+    const ctx = ctxAnswering(() =>
+      create(OpenExternalResponseSchema, { result: { case: "error", value: {} } }),
+    );
+    await call(ctx);
+    expect(standingClientFailure()).toBeNull();
+  });
+
+  it("reports nothing for a call refused locally by a quiesced page", async () => {
+    const ctx: UnaryContext = {
+      ...ctxAnswering(() => create(OpenExternalResponseSchema, {})),
+      isQuiesced: () => true,
+    };
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+    expect(standingClientFailure()).toBeNull();
   });
 });
