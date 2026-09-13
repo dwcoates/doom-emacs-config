@@ -3,6 +3,7 @@ package stale
 import (
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,7 +117,7 @@ func TestVanishedRunIsLostAfterGrace(t *testing.T) {
 	// Arrange.
 	tr, _ := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
 
 	// Act.
 	lost := tr.Sweep(bootMs, nowMs+1000)
@@ -131,7 +132,7 @@ func TestVanishedRunSurvivesInsideGrace(t *testing.T) {
 	// Arrange: the ordinary rename/replace race.
 	tr, _ := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
 
 	// Act.
 	lost := tr.Sweep(bootMs, nowMs+999)
@@ -146,7 +147,7 @@ func TestAReturningFileClearsTheVanish(t *testing.T) {
 	// Arrange.
 	tr, _ := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
 
 	// Act.
 	tr.Activity("/private/tmp/b1.output", nowMs+500)
@@ -421,7 +422,7 @@ func TestAVanishedRunIsStillJudgedByItsGraceWindowWhenItPredatesBoot(t *testing.
 	// rule, so the grace window keeps deciding.
 	tr, _ := tracker(t, Options{})
 	tr.Observe(shellRun("/private/tmp/b1.output", bootMs-1), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
 
 	// Act.
 	lost := tr.Sweep(bootMs, nowMs+DefaultGrace.Milliseconds())
@@ -618,4 +619,101 @@ func TestAConclusionReachedWhileWatchingIsNotCatchUp(t *testing.T) {
 	if lost[0].Catchup {
 		t.Fatal("a newly-arising conclusion was classified as startup backlog")
 	}
+}
+
+// --- a file that went with its whole tree ----------------------------------
+
+func TestATreeRemovedVanishStatesTheGraceClockWithoutWarning(t *testing.T) {
+	// Arrange: the directory holding the file was removed on purpose.
+	tr, logs := tracker(t, Options{Grace: time.Second})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+
+	// Act.
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, true)
+
+	// Assert.
+	requireNoneIn(t, parseLogLines(t, *logs), "lost-policy", "warn")
+}
+
+func TestAnUnlinkUnderAStandingDirectoryStillWarnsTheGraceClock(t *testing.T) {
+	// Arrange: the file went, its directory did not.
+	tr, logs := tracker(t, Options{Grace: time.Second})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+
+	// Act.
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
+
+	// Assert.
+	requireOnceIn(t, parseLogLines(t, *logs), "lost-policy", "warn")
+}
+
+func TestATreeRemovedConclusionIsStatedAtInfo(t *testing.T) {
+	// Arrange.
+	tr, logs := tracker(t, Options{Grace: time.Second})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, true)
+
+	// Act.
+	tr.Sweep(bootMs, nowMs+1000)
+
+	// Assert: no warning anywhere on the path, and the conclusion still joins to
+	// its terminal on the wire's own arm.
+	records := parseLogLines(t, *logs)
+	requireNoneIn(t, records, "lost-policy", "warn")
+	rec := requireConclusion(t, records)
+	if got := ctxString(t, rec, "reason"); got != string(ReasonFileVanished) {
+		t.Fatalf("conclusion reason = %q, want the wire arm %q", got, ReasonFileVanished)
+	}
+}
+
+func TestATreeRemovedRunIsStillConcludedLostOnTheFileVanishedArm(t *testing.T) {
+	// Arrange: the level changes, the conclusion does not.
+	tr, _ := tracker(t, Options{Grace: time.Second})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, true)
+
+	// Act.
+	lost := tr.Sweep(bootMs, nowMs+1000)
+
+	// Assert.
+	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished || !lost[0].TreeRemoved {
+		t.Fatalf("swept %+v, want one file_vanished conclusion carrying the tree removal", lost)
+	}
+}
+
+func TestAnUnlinkUnderAStandingDirectoryStillWarnsItsConclusion(t *testing.T) {
+	// Arrange.
+	tr, logs := tracker(t, Options{Grace: time.Second})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
+
+	// Act.
+	tr.Sweep(bootMs, nowMs+1000)
+
+	// Assert: two warnings — the grace clock and the conclusion — is the old
+	// behavior, and the conclusion is the one this asserts.
+	warnings := opsAt(parseLogLines(t, *logs), "lost-policy", "warn")
+	if len(warnings) != 2 || !strings.Contains(warnings[1].Message, "run concluded LOST") {
+		t.Fatalf("lost-policy warnings were %v, want the grace clock and then the conclusion", warnings)
+	}
+}
+
+// requireConclusion answers the ONE lost-policy record that states a
+// conclusion. The path writes several informational records for one run (the
+// observation, the grace clock), so a level filter alone cannot name it.
+func requireConclusion(t *testing.T, records []logRecord) logRecord {
+	t.Helper()
+	var found []logRecord
+	for _, r := range records {
+		if r.Operation == "lost-policy" && strings.Contains(r.Message, "run concluded LOST") {
+			found = append(found, r)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("the log holds %d LOST conclusions, want exactly one; it held %v", len(found), operationLevels(records))
+	}
+	if found[0].Level != "info" {
+		t.Fatalf("the conclusion was recorded at level %q, want info", found[0].Level)
+	}
+	return found[0]
 }

@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- sidecar LOST policy: a watched file that vanished along with its own DIRECTORY is stated at info (`file-vanished` carries `reason=tree_removed`, the `lost-policy` grace clock and conclusion say the tree went with it); a file unlinked while its directory stands keeps its warning (gap scan `lost-policy`/`file-vanished` warns, 2026-09-13 15:28)
 - realtest preflight: the unguarded SHIMS a stopped daemon leaves listening are stood down under `AGENT_REPL_REALTEST_STOP_DAEMON` too (SIGTERM per shim and shim-lock after the daemon is gone, each stated), and a run that quit the owner's editor now cold-starts a guard-free one even when it DECLINED before any realtest ran (preflight DECLINE, 2026-09-13 15:2x)
 - realtest preflight: an UNGUARDED standing daemon is now STOPPED under `AGENT_REPL_REALTEST_STOP_DAEMON` (editor quit first, then SIGTERM) instead of declining, so a sweep that follows the guard-free handback can start (preflight DECLINE, 2026-09-13 15:08)
 - daemon sessions: `Fleet.Start` serializes the starts of ONE workspace behind a per-workspace gate, so a relaunch's boot bring-up and Emacs's announce can no longer both spawn and leave the second attaching to the first's shim as an inert survivor (integration `daemon.workspace.bring_up` warn, 2026-09-13)
