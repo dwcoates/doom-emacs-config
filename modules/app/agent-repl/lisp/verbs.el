@@ -551,6 +551,16 @@ and the new workspace\'s tab arrives through the roster push."
     (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-fork-without-parent repository=%S form=%S"
                        repository form)
     (user-error "agent-repl: a fork needs a parent workspace"))
+  ;; THE NAMING CALL IS PART OF THE WAIT.  A create that supplies no name is
+  ;; named by a headless model call the DAEMON makes inside `Create\=', before
+  ;; the worktree exists, so the user\='s wait between the keystroke and the
+  ;; new workspace now carries it.  `CreateWorkspace\=' is unary and has no
+  ;; progress channel, so the phase is echoed HERE, immediately before the
+  ;; rpc is issued -- the owner\='s standing rule that startup phases are
+  ;; messages, not only a mode line.  The daemon-side fact is its own
+  ;; `daemon.workspace.naming\=' record.
+  (unless name
+    (message "agent-repl: naming the workspace..."))
   (agent-repl-verbs--send
    #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
    (list :repository repository
@@ -570,7 +580,39 @@ and the new workspace\'s tab arrives through the roster push."
      (message "agent-repl: workspace requested")
      (when select
        (agent-repl-verbs--select-created success)))
-   :on-error #'agent-repl-verbs--create-policy-refusal))
+   :on-error #'agent-repl-verbs--create-refusal))
+
+(defun agent-repl-verbs--create-refusal (value)
+  "Draw the create refusals Emacs words itself, from VALUE.
+Answers non-nil when one of them claimed the arm, so every other arm
+still falls through to the generic refusal handling."
+  (or (agent-repl-verbs--create-policy-refusal value)
+      (agent-repl-verbs--create-naming-refusal value)))
+
+(defun agent-repl-verbs--create-naming-refusal (value)
+  "Draw a `naming_failed\=' refusal of a create from VALUE.
+Answers non-nil when it claimed the arm.
+
+EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL, and this one
+could not be: there is no truncation fallback, so the create is refused
+rather than given a name nobody chose.  It is drawn as the WARNING it
+is, naming the cause and what the model last said, because those are
+what say whether to retry or to supply a name by hand."
+  (let ((refusal (agent-repl-verbs--refusal-arm value)))
+    (when (eq (plist-get refusal :arm) :naming-failed)
+      (let* ((failed (plist-get refusal :value))
+             (cause (plist-get failed :cause))
+             (answer (plist-get failed :answer))
+             (attempts (plist-get failed :attempts)))
+        (agent-repl--warn
+         '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
+         "elisp.verbs.create-refused arm=%S fields=%S" :naming-failed failed)
+        (message "create refused: the workspace could not be named (%s, %s attempt%s)%s"
+                 cause attempts (if (eql attempts 1) "" "s")
+                 (if (and answer (not (string-empty-p answer)))
+                     (format " -- the model answered %S" answer)
+                   "")))
+      t)))
 
 (defun agent-repl-verbs--create-policy-refusal (value)
   "Draw a `one_shot_policy_missing\=' refusal of a create from VALUE.

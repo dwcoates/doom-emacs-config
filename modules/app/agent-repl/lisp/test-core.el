@@ -423,8 +423,13 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the user's restart command")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
+    ("verbs.el" agent-repl-verb-create "agent-repl: naming the workspace..."
+     "announces the daemon's naming call, which is part of the create's wait")
     ("verbs.el" agent-repl-verb-create "agent-repl: workspace requested"
      "confirms the user's create command")
+    ("verbs.el" agent-repl-verbs--create-naming-refusal
+     "create refused: the workspace could not be named (%s, %s attempt%s)%s"
+     "tells the user why the workspace could not be named and what the model last said")
     ("verbs.el" agent-repl-verbs--create-policy-refusal
      "create refused: %s states no one-shot policy -- write %s"
      "tells the user which repository states no one-shot policy and what to write")

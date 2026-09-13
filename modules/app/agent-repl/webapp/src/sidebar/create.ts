@@ -295,7 +295,7 @@ export function drawCreateWorkspaceForm(
 type CreateWorkspaceCause = NonNullable<CreateWorkspaceError["cause"]> & { case: string };
 
 /**
- * What each of CreateWorkspace's twelve refusals says.
+ * What each of CreateWorkspace's thirteen refusals says.
  *
  * NONE OF THE CROSS-CUTTING FOUR CAN REACH THIS RPC: a creation is addressed
  * to a repository, not to an existing workspace, so every arm here is the
@@ -335,6 +335,10 @@ export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
           ? `${cause.value.missingFiles.join(", ")} in ${cause.value.policyDir}`
           : cause.value.policyDir
       }`;
+    case "namingFailed":
+      return `the workspace could not be named (${cause.value.cause}, ${cause.value.attempts} attempt${
+        cause.value.attempts === 1 ? "" : "s"
+      })${cause.value.answer !== "" ? `: the model answered "${cause.value.answer}"` : ""}`;
     default: {
       const other: { case: string } = cause;
       return unreachableArm("CreateWorkspaceError.cause", other.case);

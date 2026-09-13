@@ -616,6 +616,62 @@ refusal still reaches the generic reporting."
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
     (should (agent-repl-test-verbs--messaged-p "create refused: base-ref-unresolved"))))
 
+(ert-deftest agent-repl-verbs-create-naming-failed-names-the-cause ()
+  "A create refused because the workspace could not be named states the cause
+the daemon read off the failure."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error
+                               :value (:cause (:arm :naming-failed
+                                               :value (:model "haiku" :cause "timeout"
+                                                       :attempts 2 :answer "")))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :initial-prompt "fix the flaky login test")
+    (should (agent-repl-test-verbs--messaged-p
+             "create refused: the workspace could not be named (timeout, 2 attempts)"))))
+
+(ert-deftest agent-repl-verbs-create-naming-failed-quotes-the-model-s-answer ()
+  "An INVALID answer is drawn, because it is what says whether to retry or to
+supply a name by hand."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error
+                               :value (:cause (:arm :naming-failed
+                                               :value (:model "haiku" :cause "invalid_answer"
+                                                       :attempts 2 :answer "Fix The Login")))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :initial-prompt "fix the flaky login test")
+    (should (agent-repl-test-verbs--messaged-p "the model answered \"Fix The Login\""))))
+
+(ert-deftest agent-repl-verbs-create-naming-failed-is-recorded-as-a-warning ()
+  "The refusal is recorded at the WARNING rung, beside the one-shot policy
+refusal it sits next to."
+  (let (levels)
+    (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+               (lambda (_ws level &rest _) (push level levels))))
+      (agent-repl-test-verbs--with
+          '((:create . (:response (:arm :error
+                                   :value (:cause (:arm :naming-failed
+                                                   :value (:model "haiku" :cause "timeout"
+                                                           :attempts 2 :answer "")))))))
+        (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                                :initial-prompt "fix the flaky login test")))
+    (should (member "warn" levels))))
+
+(ert-deftest agent-repl-verbs-create-messages-the-naming-phase ()
+  "A create that supplies NO name echoes the naming phase before the rpc is
+issued: the daemon's naming call is part of the user's wait and
+`CreateWorkspace' is unary, so the phase has nowhere else to show."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :initial-prompt "fix the flaky login test")
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: naming the workspace..."))))
+
+(ert-deftest agent-repl-verbs-create-with-a-supplied-name-skips-the-naming-phase ()
+  "A create that supplies a name makes no naming call, so it announces none."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :name "chosen-name")
+    (should-not (agent-repl-test-verbs--messaged-p "naming the workspace"))))
+
 (ert-deftest agent-repl-verbs-missing-ref-refuses-before-sending ()
   "A workspace with no daemon identity cannot be addressed at all."
   (agent-repl-test-verbs--with nil

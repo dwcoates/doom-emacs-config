@@ -413,6 +413,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
     policyDir: "/src/p/.agent-repl/prompts",
     missingFiles: ["oneshot-success-suffix.md"],
   },
+  namingFailed: { model: "haiku", cause: "invalid_answer", attempts: 2, answer: "Fix The Login" },
 };
 
 describe("CreateWorkspace's typed refusal", () => {
@@ -475,6 +476,24 @@ describe("CreateWorkspace's typed refusal", () => {
         },
       } as never),
     ).toContain("write /src/p/.agent-repl/prompts");
+  });
+
+  it("names the cause when the workspace could not be named", () => {
+    expect(
+      createWorkspaceRefusal({
+        case: "namingFailed",
+        value: { model: "haiku", cause: "timeout", attempts: 2, answer: "" },
+      } as never),
+    ).toContain("timeout");
+  });
+
+  it("carries the model's last answer when it gave one", () => {
+    expect(
+      createWorkspaceRefusal({
+        case: "namingFailed",
+        value: { model: "haiku", cause: "invalid_answer", attempts: 2, answer: "Fix The Login" },
+      } as never),
+    ).toContain("Fix The Login");
   });
 
   it("refuses an arm this build does not know", () => {
