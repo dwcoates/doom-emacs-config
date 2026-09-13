@@ -1283,14 +1283,17 @@ is trimmed too, so a daemon-supplied leading space cannot widen the gap
 either.  Whatever TRAILING whitespace the padding format adds is a width
 FILL and is kept, drawn in the name's face, after the name.
 
-SELECTION IS AN UNDERLINE, not a background.  When SPEC carries
-`:underline', the SELECTED tab's separator, bracket and name runs are all
-drawn `:underline t' — a subtle, distinct marker that says which
+SELECTION IS AN UNDERLINE UNDER THE NAME, AND UNDER NOTHING ELSE.  When
+SPEC carries `:underline', exactly the workspace name's own characters are
+drawn `:underline t' — not the leading separator, not `[N]', not the space
+between them, not the badge run, not the padding fill, not the terminator
+(owner ruling, 2026-09-13; the marker used to run under the separator and
+the bracket too).  It is a subtle, distinct marker that says which
 workspace the user is standing in without touching the background the way
 the panels-open EXTENT and the connection COLOR do.  `:underline t' draws
-in each run's own foreground, so it reads on every state color and on the
-bar alike.  The underline is layered OVER NAME-FACE (a symbol or a
-list of faces) so the name keeps its arm color and gains the marker.
+in the run's own foreground, so it reads on every state color and on the
+bar alike, and it is layered OVER NAME-FACE (a symbol or a list of faces)
+so the name keeps its arm color and gains the marker.
 
 The string ends with an un-faced trailing space so each entry
 self-terminates.  Emacs's `display_tab_bar_line' calls
@@ -1304,10 +1307,8 @@ whenever an entry landed at a wrap (or the final row's) end."
          (bracket-fg (or (plist-get spec :bracket-fg) 'unspecified))
          (weight     (or (plist-get spec :weight)     'normal))
          (underline  (plist-get spec :underline))
-         (separator-face `(:background unspecified :foreground ,fg :weight ,weight
-                           ,@(when underline (list :underline t))))
-         (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight
-                           ,@(when underline (list :underline t))))
+         (separator-face `(:background unspecified :foreground ,fg :weight ,weight))
+         (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight))
          (name-face*     (if underline
                              (cons '(:underline t)
                                    (if (listp name-face) name-face (list name-face)))
@@ -1322,9 +1323,9 @@ whenever an entry landed at a wrap (or the final row's) end."
     (concat (propertize " " 'face separator-face)
             (propertize (format agent-repl-tab-bracket-format label) 'face bracket-face)
             (when badge (concat " " badge))
-            (propertize " " 'face name-face*)
+            (propertize " " 'face name-face)
             (propertize text 'face name-face*)
-            (propertize fill 'face name-face*)
+            (propertize fill 'face name-face)
             " ")))
 
 (defun agent-repl--tab-face (state _selected)
