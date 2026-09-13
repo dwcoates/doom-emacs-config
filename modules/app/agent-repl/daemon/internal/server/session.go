@@ -67,6 +67,37 @@ func (s *server) SetPermissionMode(
 	return connect.NewResponse(resp), nil
 }
 
+// SelectAccount makes the workspace's session spend as one of the roots the
+// topbar's account cell served.
+//
+// THE SWITCH IS THE ANSWER, AND THE LOGIN IS NOT. A chosen root that holds no
+// login is still a success carrying `logged_in: false`: the client opens that
+// root's login flow next, exactly as the logged-out cell's own click does.
+func (s *server) SelectAccount(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SelectAccountRequest],
+) (*connect.Response[agentreplv1.SelectAccountResponse], error) {
+	const rpc = "SelectAccount"
+	if err := validateSelectAccountRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SelectAccountResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	loggedIn, err := s.deps.Verbs.SelectAccount(ctx, subject.Record.ID, req.Msg.GetConfigDir())
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	subject.Log.Info("daemon.server.select_account", "the workspace switched account roots",
+		dlog.Context{"config_dir": req.Msg.GetConfigDir(), "logged_in": loggedIn})
+	resp.Result = &agentreplv1.SelectAccountResponse_Success{
+		Success: &agentreplv1.SelectAccountSuccess{LoggedIn: loggedIn},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // UpdateHeldPrompt acts on one held prompt: deliver it now, discard it, or
 // accept a hold_for_turn_end verdict. All three are the queue's own verbs.
 func (s *server) UpdateHeldPrompt(

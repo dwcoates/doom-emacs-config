@@ -43,6 +43,7 @@ const (
 	opOpenExternal   = "daemon.workspace.open_external"
 	opOpenInEditor   = "daemon.workspace.open_in_editor"
 	opBringUp        = "daemon.workspace.bring_up"
+	opSelectAccount  = "daemon.workspace.select_account"
 )
 
 // verbs is the whole verb surface. It holds no state: every fact it reads is

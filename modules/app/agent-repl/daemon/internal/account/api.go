@@ -5,11 +5,16 @@
 // asymmetry: a parent merely under $MULTI_REPO_ROOT has chosen nothing. See
 // docs/overhaul/daemon.md decision 3, "ACCOUNT SELECTION (MULTI_REPO_ROOT)".
 //
-// INVARIANT — THE ACCOUNT IS DETERMINED, NEVER SELECTED. The path is the only
-// input this package takes. There is no override parameter, no inheritance
-// from a parent workspace, and no request field anywhere in the graph that
-// could carry one, so a workspace whose account disagrees with its path is
-// structurally unrepresentable.
+// INVARIANT — THE PATH IS THE ONLY INPUT THIS PACKAGE TAKES. ConfigDirFor has
+// no override parameter and inherits nothing from a parent workspace, so a
+// routing answer that disagrees with the path is unrepresentable here.
+//
+// THE READER'S CHOICE LIVES ONE LAYER UP, and it outranks the routing. Owner
+// ruling 2026-09-13: the topbar's account cell offers every root this package
+// knows, and picking one (SelectAccount) makes that workspace's session spend
+// as that account. The choice is recorded on the session row and applied by
+// internal/workspace (`accountRootFor`); it never reaches this package, which
+// still answers exactly one question — where does this PATH route.
 package account
 
 import (
