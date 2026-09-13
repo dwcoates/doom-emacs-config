@@ -28,6 +28,10 @@ func TestTokensRendersEveryMagnitudeTheArchitectureFixes(t *testing.T) {
 		{name: "one and a half million", n: 1_500_000, want: "1.5M"},
 		{name: "two point four million", n: 2_400_000, want: "2.4M"},
 		{name: "a whole million drops its fraction", n: 2_000_000, want: "2M"},
+		{name: "rounds down to a whole thousand", n: 1_049, want: "1k"},
+		{name: "rounds up into a fraction just past a whole thousand", n: 1_050, want: "1.1k"},
+		{name: "the owner ruling's own ten-thousands example", n: 10_113, want: "10.1k"},
+		{name: "a whole million from an exact count", n: 1_000_000, want: "1M"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
