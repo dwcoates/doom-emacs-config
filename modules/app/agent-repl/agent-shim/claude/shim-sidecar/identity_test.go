@@ -3,7 +3,10 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"agentrepl/shim-claude-sidecar/internal/identity"
 )
 
 // identity_test.go — WHICH BOOK A ROTATED TRANSCRIPT'S RECORDS LAND IN.
@@ -289,6 +292,70 @@ func TestTheUnparkedFileRereadsTheSameBytesUnderTheNewBook(t *testing.T) {
 	}
 	if got := bookOfLastWrite(t, store); got != bookOriginal {
 		t.Errorf("the re-read records landed in book %q, want %q", got, bookOriginal)
+	}
+}
+
+// TestAFirstAttributionIsNotStatedAsABookMove is the realtest-5 record: a spool
+// aged into residue before anything named its owner is watched with NO book at
+// all, and the launch that finally names one arrives later. That is the first
+// attribution of a file that had nowhere to move FROM, so it must not be stated
+// as the rotation-driven book move a person has to act on.
+func TestAFirstAttributionIsNotStatedAsABookMove(t *testing.T) {
+	// Arrange: the spool ages out unclaimed and is tailed with no book.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1firstbook", "work whose launch line has not been read yet\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+	if got := h.sc.watchers[spool].ctx.MainAgentID; got != "" {
+		t.Fatalf("precondition: the unclaimed spool booked to %q, want no book at all", got)
+	}
+
+	// Act: the launch is converted, and the spawner's book is a subagent's own
+	// identity — a tool_use_id under the cross-plane minting rule, which is
+	// exactly what a spawn observed inside a sidechain reports.
+	h.sc.TaskSpawned("b1firstbook", "toolu_first_call", "toolu_spawning_agent", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.rescan()
+
+	// Assert.
+	if got := h.sc.watchers[spool].ctx.MainAgentID; got != "toolu_spawning_agent" {
+		t.Errorf("the newly attributed spool books to %q, want the spawner's book", got)
+	}
+	h.requireNone(t, "identity-rekey", "warn")
+	rec := h.requireOnce(t, "identity-rekey", "info")
+	if got := ctxString(t, rec, "book_agent_id"); got != "toolu_spawning_agent" {
+		t.Errorf("the first attribution names book %q, want %q", got, "toolu_spawning_agent")
+	}
+}
+
+// TestAFirstAttributionDoesNotBlameTheShimsIdentityFiles: the record that fired
+// in realtest 5 said the shim's identity files "now name" the book, and they
+// named nothing — the answer came from the spawn observation, and the id was a
+// tool_use_id no identity file could ever hold. A reader sent hunting for a
+// rotation that never happened is the defect, so the wording is the subject.
+func TestAFirstAttributionDoesNotBlameTheShimsIdentityFiles(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1blame", "work whose launch line has not been read yet\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+
+	// Act.
+	h.sc.TaskSpawned("b1blame", "toolu_blame_call", "toolu_blame_agent", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.rescan()
+
+	// Assert.
+	rec := h.requireOnce(t, "identity-rekey", "info")
+	if strings.Contains(rec.Message, "identity files") {
+		t.Errorf("the first attribution blames the shim's identity files, which named nothing: %q", rec.Message)
+	}
+	if !strings.Contains(rec.Message, string(identity.SourceUnrecorded)) {
+		t.Errorf("the first attribution does not name where the answer came from: %q", rec.Message)
 	}
 }
 
