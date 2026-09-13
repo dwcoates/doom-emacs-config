@@ -17,9 +17,11 @@ func attachmentLineOf(uuid, body string) string {
 func TestHookOutcomeKindsAreAllKeptWholeAsUnservedItems(t *testing.T) {
 	// Arrange. THE STREAM PLANE OWNS THE SERVED HOOK ROW (ruling 2026-09-04):
 	// the two planes are handed disjoint identity material, so a hook converted
-	// on both drew two rows nothing could reconcile. Every outcome kind the
-	// vendor writes is still READ here — kept whole and unserved, never dropped.
-	cases := []string{"hook_success", "hook_blocking_error", "hook_non_blocking_error", "hook_cancelled"}
+	// on both drew two rows nothing could reconcile. Every FAILING outcome kind
+	// is still kept whole and unserved. `hook_success` is not in this table: it
+	// is the one hook kind the owner ruled never-persisted (neverpersist.go), and
+	// its own test asserts the drop.
+	cases := []string{"hook_blocking_error", "hook_non_blocking_error", "hook_cancelled"}
 	for _, kind := range cases {
 		t.Run(kind, func(t *testing.T) {
 			c := newTestConverter(t)
@@ -62,7 +64,7 @@ func TestAHookAttachmentIsKeyedByItsOwnRecordUuid(t *testing.T) {
 	// Arrange. The record's uuid is the key, which is also what the shim and
 	// this reader would collapse onto if both ever stored the same line.
 	c := newTestConverter(t)
-	body := `{"type":"hook_success","hookName":"PreToolUse:Read","toolUseID":"toolu_g","hookEvent":"PreToolUse","command":"/h.sh"}`
+	body := `{"type":"hook_cancelled","hookName":"PreToolUse:Read","toolUseID":"toolu_g","hookEvent":"PreToolUse","command":"/h.sh"}`
 
 	// Act.
 	entries := convertLines(t, c, attachmentLineOf("h1", body))
@@ -100,8 +102,8 @@ func TestTwoFiringsAroundOneCallDoNotCollapseOntoOneRow(t *testing.T) {
 	// Arrange. A PreToolUse and a PostToolUse gate the SAME call. Keying them by
 	// the gated call alone would make the second overwrite the first.
 	c := newTestConverter(t)
-	pre := attachmentLineOf("h1", `{"type":"hook_success","hookName":"PreToolUse:Read","toolUseID":"toolu_g","hookEvent":"PreToolUse","command":"/h.sh"}`)
-	post := attachmentLineOf("h2", `{"type":"hook_success","hookName":"PostToolUse:Read","toolUseID":"toolu_g","hookEvent":"PostToolUse","command":"/h.sh"}`)
+	pre := attachmentLineOf("h1", `{"type":"hook_cancelled","hookName":"PreToolUse:Read","toolUseID":"toolu_g","hookEvent":"PreToolUse","command":"/h.sh"}`)
+	post := attachmentLineOf("h2", `{"type":"hook_cancelled","hookName":"PostToolUse:Read","toolUseID":"toolu_g","hookEvent":"PostToolUse","command":"/h.sh"}`)
 
 	// Act.
 	entries := convertLines(t, c, pre, post)
@@ -121,7 +123,7 @@ func TestTwoFiringsOfOneHookNameUnderOneToolUseIdStayTwoItems(t *testing.T) {
 	// carries FOUR PreToolUse:Bash firings under one of them — so keying on
 	// `hook:<hookName>:<toolUseID>` left one row where there were four facts.
 	c := newTestConverter(t)
-	body := `{"type":"hook_success","hookName":"PreToolUse:Bash","toolUseID":"toolu_same","hookEvent":"PreToolUse","command":"/h.sh"}`
+	body := `{"type":"hook_cancelled","hookName":"PreToolUse:Bash","toolUseID":"toolu_same","hookEvent":"PreToolUse","command":"/h.sh"}`
 
 	// Act.
 	entries := convertLines(t, c, attachmentLineOf("h1", body), attachmentLineOf("h2", body))
@@ -140,7 +142,7 @@ func TestAHookThatPrintedNothingInventsNoOutputFields(t *testing.T) {
 	// the vendor wrote it, so a consumer never reads empty streams the hook
 	// never produced.
 	c := newTestConverter(t)
-	body := `{"type":"hook_success","hookName":"PreToolUse:Read","toolUseID":"toolu_g","hookEvent":"PreToolUse","command":"/h.sh","exitCode":0}`
+	body := `{"type":"hook_cancelled","hookName":"PreToolUse:Read","toolUseID":"toolu_g","hookEvent":"PreToolUse","command":"/h.sh","exitCode":0}`
 
 	// Act.
 	entries := convertLines(t, c, attachmentLineOf("h1", body))

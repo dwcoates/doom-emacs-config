@@ -87,3 +87,8 @@ func (h *WorkflowJournalHandler) convert(record map[string]any, at convert.Attri
 func isWorkflowAgentTranscript(path string) bool {
 	return strings.HasPrefix(filepath.Base(path), "agent-")
 }
+
+// Conv exposes the handler's converter, so the reader can read the per-file
+// facts the conversion accumulated — the never-persisted residue tally the
+// catch-up summary states.
+func (h *WorkflowJournalHandler) Conv() *convert.Converter { return h.conv }

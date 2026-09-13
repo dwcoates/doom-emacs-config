@@ -139,3 +139,8 @@ func (h *SessionTranscriptHandler) holdCount(frames []tail.Frame, ctx *Context) 
 	ctx.HeldOffset = last.Offset
 	return n - 1
 }
+
+// Conv exposes the handler's converter, so the reader can read the per-file
+// facts the conversion accumulated — the never-persisted residue tally the
+// catch-up summary states.
+func (h *SessionTranscriptHandler) Conv() *convert.Converter { return h.conv }
