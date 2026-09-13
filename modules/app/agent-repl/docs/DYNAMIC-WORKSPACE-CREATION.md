@@ -108,14 +108,14 @@ lands.
 
 | step | site | note |
 | --- | --- | --- |
-| 1 | `validateCreate` | one-shot needs a finish; a finish needs one-shot; a one-shot needs a prompt; an ungated permission mode needs consent |
+| 1 | `validateCreate` | a one-shot needs a prompt; an ungated permission mode needs consent |
 | 1b (branch) | `requireOneShotPolicy` | one-shot only; refuses `one_shot_policy_missing` before anything is minted |
 | 2 | `wsm.NewWorkspaceID()` | the creation job's key, and today the name of a promptless unnamed create |
 | 3 | `branchFor` | supplied name → `Name(Prefix(), supplied)`; no prompt → `Name(Prefix(), "workspace-"+id)`; else `Slug(prompt)` |
 | 4 | `WorktreeDir` | bare branch component under `<repo>-worktrees/` (`naming.go`) |
 | 5 | `Git.DefaultBranch`, `Git.ResolveRef` | an unresolvable base ref is `base_ref_unresolved`, with the ref in the arm |
 | 6 | `mergeTargetDir` | parent's worktree for a child, else the repo main worktree |
-| 7 | `DB.PutCreationJob` | merge geometry, actions, base ref, one-shot, finish, initial prompt, consent — recorded BEFORE materialization |
+| 7 | `DB.PutCreationJob` | merge geometry, actions, base ref, one-shot, initial prompt, consent — recorded BEFORE materialization |
 | 8 | `Git.CreateWorktree` | `git worktree add -b <branch> <dir> <baseRef>` (`gitclient.go`) |
 | 9 | `Register` | mints the registry id; the job is re-keyed onto it |
 | 10 | `PutSession` (+ `forkTranscript`) | model, permission mode, host session id; a fork ports the parent transcript under a FRESH vendor session id |
@@ -219,7 +219,7 @@ routine event.
 | INFO | `daemon.workspace.naming_call` | `the workspace naming call answered` | `model`, `duration_ms`, `name`, `attempt` |
 | DEBUG | `daemon.workspace.naming_call` | `the naming prompt` | `prompt` (the composed brief, verbatim) |
 | DEBUG | `daemon.workspace.naming_call` | `the naming answer did not validate` | `answer`, `reason`, `attempt` |
-| ERROR | `daemon.workspace.naming_call` | `the workspace naming call failed` | `model`, `cause`, `attempts` — paired with the refusal, one record, not two (the `openPrFollowup` precedent in `oneshotfinish.go`) |
+| ERROR | `daemon.workspace.naming_call` | `the workspace naming call failed` | `model`, `cause`, `attempts` — paired with the refusal, one record, not two |
 
 ---
 
@@ -423,100 +423,78 @@ proto shape is the owner's; this section is the description, not a landing.
 ### Where it stands
 
 `ingress.applyCreate` (`daemon/internal/commandfile/ingress.go`) builds a
-`workspace.CreateSpec` from an `Entry` and calls the same `Verbs.Create`. Its
-comment states the limitation outright: "A one-shot create from this channel
-is the SELF-MERGE form: the channel carries no finish field, and the
-self-merge one-shot is the flow this channel has always dispatched." The
-`Entry` struct has `one_shot bool` and no finish.
+`workspace.CreateSpec` from an `Entry` and calls the same `Verbs.Create`. The
+`Entry` struct has `one_shot bool` and no finish — which is now the whole
+story, since no create form has one.
 
 Naming: `Entry.Validate` accepts a create with `name` OR `prompt`, so a
 nameless entry already reaches `branchFor` and is named by `Slug` today.
 Under §1.4 that same entry is named by the Haiku call — the file route
 inherits it for free, because it inherits `Create`.
 
-### Recommendation: yes, add a finish field
+### RULED, 2026-09-12: there is no finish field, here or anywhere
 
-```json
-{"type": "create", "git_root": "…", "prompt": "…", "one_shot": true,
- "finish": "open_pr", "self_certified": true, "add_to_merge_queue": true}
-```
-
-- `finish` is a string with exactly two legal values, `self_merge` and
-  `open_pr`. The daemon already has that vocabulary and its inverse:
-  `finishOrigin` / `parseFinishOrigin` (`daemon/internal/workspace/oneshot.go`)
-  round-trip `self_merge` and `open_pr+self_certified+add_to_merge_queue`
-  through the creation job record. Reusing those spellings means the file
-  field, the recorded job and the acted-on action cannot drift.
-- Back-compatible: `one_shot: true` with no `finish` keeps meaning
-  `self_merge`, so every producer that exists today is unaffected.
-- `Entry.Validate` refuses `finish` on a non-one-shot entry and refuses an
-  unknown value, matching `validateCreate`'s `finish_not_one_shot` rule. The
-  file has no caller, so the refusal lands as a quarantine with a WARN, which
-  is the established handling.
-
-Alternative E2: leave the channel self-merge-only and require the wire for an
-open-pr one-shot. Defensible — the channel is legacy, and every producer today
-is the old skill's `run.sh`. Against it: the one-shot IS the fire-and-forget
-form, and a file drop is the most natural way to dispatch one from a script.
-
-Alternative E3: spell the finish as a nested object mirroring the proto's
-oneof. Rejected: `Entry` is deliberately one flat struct because the file is
-one heterogeneous JSON array and splitting it costs a second decode pass (its
-own doc comment). **Open question (Q2).**
+The proposal was a flat `"finish"` string on `Entry` reusing the
+`finishOrigin` spellings. It is MOOT: the finish choice is retired outright, so
+the channel has nothing to gain a field for. `applyCreate` now sets `OneShot`
+and no more, and what happens on completion is the repository's own directive
+exactly as it is for a wire create.
 
 ---
 
-## 8. One-shot decoration and finish, end to end, under repository policy
+## 8. One-shot decoration, end to end, under repository policy
 
-Confirmed against the branch. The policy source is chosen once and used at
-every step.
+RULED, 2026-09-12: **there is no "open PR" option and no finish choice at all.**
+A repository states, in ONE canonical plain-English file, what is to be done on
+completion. The daemon concatenates it to the commission behind the literal
+sentence
+
+```
+when you're all done, please do the following postprocessing directive: <the repository's directive>
+```
+
+and the AGENT carries it out. The daemon performs no finish action
+programmatically: `OnOneShotTurnConcluded`, the queue's finish hook, the
+creation job's finish column, `finishOrigin`/`parseFinishOrigin`,
+`createPrCommand` and `openPrFollowup` are all retired, and so are the proto's
+`finish` oneof and the two error arms that policed it. Doom's directive is the
+module corpus's `oneshot-completion-directive.md`.
+
+The policy source is chosen once and used at every step.
 
 | stage | site | reads |
 | --- | --- | --- |
-| create, before anything is minted | `requireOneShotPolicy` | probes `policy.Dir` for the briefs `oneShotPolicyBriefs(finish)` names: always `workspace-autonomous-preamble` and `oneshot-success-suffix`, plus `oneshot-create-pr-then-close-followup` for an open-pr finish. Missing → `one_shot_policy_missing`, nothing built. Records `daemon.workspace.oneshot_policy_source` at INFO with `repository_root`, `source`, `policy_dir`. |
-| create, the first prompt | `decorateOneShot(raw, finish, policy)` | `prompts.Wrap(preamble) + the user's words + prompts.Wrap(suffix)`. The user's own text is the only unwrapped span, so the drawn bubble is their words alone while the agent receives the whole composition. |
-| the success suffix | `oneShotSuffix(finish, policy)` | splices `{{invocation}}` and `{{action_phrase}}`: self-merge gets `the /create-or-update-workspace merge skill` + "merge this workspace back into its source"; open-pr gets `` `/create-or-update-pr --patch --rebase [--add-to-merge-queue] [--self-certified]` `` + "push and queue this branch for merge" |
+| create, before anything is minted | `requireOneShotPolicy` | probes `policy.Dir` for the briefs `oneShotPolicyBriefs()` names — always exactly `workspace-autonomous-preamble` and `oneshot-completion-directive`. Missing → `one_shot_policy_missing`, nothing built. Records `daemon.workspace.oneshot_policy_source` at INFO with `repository_root`, `source`, `policy_dir`. |
+| create, the first prompt | `decorateOneShot(raw, policy)` | `prompts.Wrap(preamble) + the user's words + prompts.Wrap("\n" + completionDirectiveLead + directive)`. The user's own text is the only unwrapped span, so the drawn bubble is their words alone while the agent receives the whole composition. |
+| the directive | `oneshot-completion-directive` | plain English, submitted verbatim; it declares no placeholders, and one that declares any fails the create |
 | submission | `submitInitialPrompt` | one turn record, then `Queue.Submit`, origin `PROMPT_ORIGIN_WORKSPACE_CREATED` |
-| conclusion | `OnOneShotTurnConcluded` | reads the creation job's recorded `Finish`, **spends it before acting** (clearing first, so a failed clear cannot enqueue a merge twice), then: self-merge → `Merge.Enqueue`; open-pr → `openPrFollowup(pr, policy)` submitted as a post-prompt with origin `PROMPT_ORIGIN_DEFERRED_PROMPT`, wholly meta-wrapped |
-| the follow-up's content | `oneshot-create-pr-then-close-followup` | splices `{{create_pr_command}}` and `{{wrapup_command}}` (`/create-or-update-workspace close`): once the PR flow's own `/check-cicd` reports PASS, CLOSE the workspace rather than merging it, because the change lands through CICD |
+| conclusion | — | nothing. The daemon does not act on a one-shot's turn ending. |
 
-### The PR path depends on skills, and that is the gap for a non-doom repository
+### A directive may still name a skill the repository cannot supply
 
-The open-pr finish's text names `/create-or-update-pr` and
-`/create-or-update-workspace` (the `CreatePrSkill` and `WorkspaceSkill`
-constants in `oneshot.go`). Those are **user-level** skills — they live in
-`~/.claude/skills/`, not in any repository. So under repository policy:
+A directive's WORDS are the repository's, but any command those words invoke
+resolves out of the agent's skill search path, which is the user's. Doom's
+directive names `/create-or-update-workspace`, a user-level skill in
+`~/.claude/skills/`. A repository may instead name a repo-local skill
+(`.claude/skills/…` in its own tree) or plain `gh` instructions, since the
+directive is free text and nothing in the daemon constrains it.
 
-- The repository owns the WORDS (its `.agent-repl/prompts/*.md`), but the
-  COMMANDS those words invoke resolve out of the agent's skill search path,
-  which is the user's, not the repository's.
-- A repository whose policy brief names `/create-or-update-pr` gets whatever
-  that skill is on the machine running the daemon, or a hard failure if the
-  user has none.
-- A repository may instead name a repo-local skill (`.claude/skills/…` in its
-  own tree) or a plain command, since the brief is free text. Nothing in the
-  daemon constrains it.
+The asymmetry is unchanged and is now the whole of it: the daemon PROBES for
+the directive file at create time and refuses when it is absent, but it cannot
+probe for whatever the directive names. That is a property of handing the work
+to the agent, not a gap to close daemon-side — the daemon no longer runs any
+part of the finish.
 
 **What a non-doom repository must provide, minimally:**
 
 | file | required for | must contain |
 | --- | --- | --- |
 | `.agent-repl/prompts/workspace-autonomous-preamble.md` | every one-shot | the "do not wait for further instructions" preamble; declares no placeholders |
-| `.agent-repl/prompts/oneshot-success-suffix.md` | every one-shot | declares exactly `{{invocation}}` and `{{action_phrase}}` and uses both |
-| `.agent-repl/prompts/oneshot-create-pr-then-close-followup.md` | open-pr one-shots only | declares exactly `{{create_pr_command}}` and `{{wrapup_command}}` |
-| a way for the agent to actually open a PR | open-pr one-shots only | either a user-level `/create-or-update-pr`, a repo-local skill the brief names, or plain `gh` instructions written into the brief |
+| `.agent-repl/prompts/oneshot-completion-directive.md` | every one-shot | the plain-English completion directive; declares no placeholders |
 
 Every file follows the corpus format: a first-line
 `<!-- used by: …; placeholders: … -->` header, then the text, with the
 declared placeholders exactly matching those used (`prompts.Load`).
-
-There is a real asymmetry worth stating: the daemon PROBES for the briefs at
-create time and refuses when they are absent, but it cannot probe for the
-skill the brief names. A repository can therefore pass the policy check and
-still fail at the finish. Making the PR path's dependency explicit — for
-example, a required `oneshot-pr-command.md` naming the command, which the
-daemon splices rather than hardcoding `CreatePrSkill` — is a plausible
-follow-up. **Open question (Q7).**
 
 ---
 
@@ -555,13 +533,13 @@ Ordered, small, each landable alone. Two are already written.
 | 5 | The proto arm for a failed naming call (§6), landed as owner-settled text. Proto only, plus regenerated bindings. | blocked on Q1 |
 | 6 | `Create` names through the call: a `namerFunc` seam on `verbs`, `branchFor` rewritten, **`Slug` and `words` deleted**, the validator, the retry, the collision probe, the refusal site, the log lines. The behavioral change. | blocked on 3, 4, 5 |
 | 7 | Emacs: the minibuffer phase message and the naming-refusal warning, beside the `one_shot_policy_missing` warning landing in 1. | blocked on 5, 6 |
-| 8 | The command-file `finish` field (§7): `Entry`, `Validate`, `applyCreate`. | blocked on Q2 |
+| 8 | The command-file `finish` field (§7): `Entry`, `Validate`, `applyCreate`. | **withdrawn** — the finish choice is retired (owner ruling, 2026-09-12) |
 
 Test obligations, per the module's one-suite-per-source rule: `internal/headless`
 gets its own suite; `internal/workspace` gains naming cases (valid answer,
 invalid answer, retry succeeds, retry fails, guard refusal, timeout,
 collision, supplied name skips the call entirely, static mode skips it);
-`internal/commandfile` gains finish-field cases; the integration harness's
+the integration harness's
 fake `claude` gains its naming branch; the Emacs suites gain the refusal
 message sites.
 
@@ -572,9 +550,9 @@ message sites.
 | # | question | recommendation |
 | --- | --- | --- |
 | Q1 | The naming-failure refusal arm's shape (§6): one message with a cause enum, or four sibling arms? Does `answer` ride the wire? Does `no_slug` survive? | one message with a cause enum, `answer` included, `no_slug` kept for the promptless one-shot only |
-| Q2 | Does the command-file channel gain a `finish` field (§7)? | yes, a flat string reusing the `finishOrigin` spellings |
+| Q2 | Does the command-file channel gain a `finish` field (§7)? | **RULED, 2026-09-12: no.** There is no finish choice at all; completion is the repository's own directive |
 | Q3 | Is the naming brief corpus-only, or may a repository override it in `.agent-repl/prompts/` (§4.1)? | corpus-only for now; a per-repository override is a later, additive change |
 | Q4 | Collision handling (§4.3): deterministic `-2`/`-3` suffix, or refuse with a `name_taken` arm? | the deterministic suffix |
 | Q5 | Retry policy for an invalid naming answer (§4.4): one retry, or none? | exactly one |
 | Q6 | Is the pre-answer `naming the workspace` minibuffer message wanted, and should the timeout be a daemon flag rather than a constant (§5)? | yes to the message; a constant until a measurement justifies a flag |
-| Q7 | The open-pr finish names user-level skills a repository cannot supply (§8). Should the PR command become a required policy brief the daemon splices, instead of the hardcoded `CreatePrSkill`? | yes, as a follow-up after 1 lands |
+| Q7 | The open-pr finish names user-level skills a repository cannot supply (§8). Should the PR command become a required policy brief the daemon splices, instead of the hardcoded `CreatePrSkill`? | **RULED, 2026-09-12: moot.** The whole finish is now the repository's own plain-English directive, which names whatever it likes |
