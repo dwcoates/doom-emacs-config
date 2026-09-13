@@ -8,10 +8,11 @@
 #
 # A realtest drives the OWNER'S ACTUAL EDITOR against the OWNER'S ACTUAL state:
 # ~/.claude-emacs/wsm.db holds every workspace, its branch, its selection and
-# its held prompts, and the store's events.db holds every conversation the
-# sidecar has ever picked up. Nothing in a realtest is supposed to write to
-# either — but "supposed to" is not a guarantee, and the failure mode is the
-# owner losing their workspaces, so the copy is taken first and unconditionally.
+# its held prompts. Nothing in a realtest is supposed to write to it — but
+# "supposed to" is not a guarantee, and the failure mode is the owner losing
+# their workspaces, so the copy is taken first and unconditionally. The store's
+# events.db is deliberately NOT copied: it is a cache needing no retention
+# during development (owner ruling 2026-09-13) and its clones cost gigabytes.
 #
 # THE HELPER REFUSES TO OVERWRITE AN EXISTING BACKUP. That is the one rule here
 # and it is not a convenience check: a second run reusing a stamp would replace
