@@ -1,10 +1,7 @@
 package integration
 
 import (
-	"strings"
 	"testing"
-
-	storev1 "agentrepl/proto/store/v1"
 )
 
 // CRITIQUE 24 — the spool task-id PREFIX is how a conversion is selected (R-S4),
@@ -76,9 +73,14 @@ func TestAnAgentSpoolConvertsAsATranscriptIntoItsSpawningCallsBook(t *testing.T)
 }
 
 // TestAnAgentSpoolIsNotIngestedAsRawResidue asserts the routing was a
-// CONVERSION rather than a fallback: an a* spool read raw would land its whole
-// contents as unparsed residue and still advance its cursor, which no assertion
-// about the book above would notice on its own.
+// CONVERSION rather than a fallback: an a* spool read raw would classify its
+// whole contents as unparsed residue and still advance its cursor, which no
+// assertion about the book above would notice on its own.
+//
+// THE READER'S OWN STATEMENT IS THE EVIDENCE. Residue is never persisted, so an
+// empty store proves nothing here — a raw-read spool would leave the store just
+// as clean. What separates conversion from fallback is that the reader never
+// said it classified a single line of this file as residue.
 func TestAnAgentSpoolIsNotIngestedAsRawResidue(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -88,9 +90,10 @@ func TestAnAgentSpoolIsNotIngestedAsRawResidue(t *testing.T) {
 	tree := newVendorTree(t)
 	session := "a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2"
 	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/Users/dodgecoates/agent-spool-residue-probe", session)
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	awaitCursorInBatches(ctx, t, fake, parent.Path(), parent.Offset())
 	spool := newGrowingFile(t, spoolPath)
 	for _, line := range corpusLines(t, "sidechain/agent-"+corpusSubagentID+".jsonl") {
@@ -99,16 +102,27 @@ func TestAnAgentSpoolIsNotIngestedAsRawResidue(t *testing.T) {
 	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
 
 	// Assert.
-	for _, r := range unparsedOf(fake.Entries()) {
-		if samePath(r.GetSource(), spoolPath) {
-			t.Errorf("an a* spool's bytes landed as unparsed residue: %q", r.GetParseError())
+	// `unparsed` IS THE FALLBACK, and it is the only label that says this file
+	// was read raw. A converted transcript legitimately classifies some of its
+	// own lines as `vendor_specific` — that is the converter working, not the
+	// routing failing — so the defect this subject hunts is the raw arm alone.
+	id := fileID(t, spoolPath)
+	for _, r := range readLog(t, opts.LogPath) {
+		if r.Operation == "residue-drop" && r.Context["file_id"] == id && r.Context["reason"] == "unparsed" {
+			t.Errorf("an a* spool's bytes were read raw and classified unparsed rather than converted: %v", r.Context)
 		}
 	}
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestAWorkflowSpoolLandsAsResidueOnly asserts the w* routing while workflow is
-// KICKED: the file is discovered and cursor-tailed like any other, its bytes
-// land whole, and nothing about it is converted as workflow.
+// KICKED: the file is discovered and cursor-tailed like any other, its bytes are
+// read whole and classified as residue, and nothing about it is converted as
+// workflow.
+//
+// RESIDUE IS NEVER PERSISTED, so "landed" is asserted where the evidence now is:
+// the reader's own record saying it classified this file's bytes and withheld
+// them, and a cursor that reached the end of the file.
 func TestAWorkflowSpoolLandsAsResidueOnly(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -121,26 +135,25 @@ func TestAWorkflowSpoolLandsAsResidueOnly(t *testing.T) {
 	session := "a3a3a3a3-a3a3-4a3a-8a3a-a3a3a3a3a3a3"
 	spoolPath := tree.spoolPath(slug, session, "ww0dfgg1i")
 	payload := "{\"kind\":\"workflow-journal-line\"}\n"
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte(payload))
-	awaitAnyCursorFor(ctx, t, fake, spoolPath)
+	// The label is `unparsed`: no transcript ever names this spool, so it is
+	// held and then ingested by the unowned path rather than by its w* prefix.
+	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
 
-	// Assert: the bytes reached the store, and nothing workflow-shaped did.
-	var landed bool
+	// Assert: the whole file was read, nothing workflow-shaped was produced, and
+	// no residue row was stored.
+	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
 	for _, e := range fake.Entries() {
 		if e.GetAgentUpdate().GetWorkflow() != nil {
 			t.Errorf("a w* spool produced a workflow entry while workflow is kicked: %v", e.GetUpsertKey())
 		}
-		if residueNamesSource(e, spoolPath) {
-			landed = true
-		}
 	}
-	if !landed {
-		t.Fatalf("a w* spool advanced its cursor but its bytes never landed as residue")
-	}
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestAWorkflowSpoolReachesNoPage asserts the other half of "residue only": a
@@ -167,19 +180,4 @@ func TestAWorkflowSpoolReachesNoPage(t *testing.T) {
 	if len(pageLinesOf(fake.Entries())) != 0 {
 		t.Errorf("a w* spool produced %d page line(s) while workflow is kicked", len(pageLinesOf(fake.Entries())))
 	}
-}
-
-// residueNamesSource reports whether an entry is residue naming a source path,
-// on either of the two arms a spool's bytes can land on.
-func residueNamesSource(e *storev1.StoreEntry, path string) bool {
-	item := e.GetAgentUpdate().GetUnservedItem()
-	if u := item.GetUnparsed(); u != nil && samePath(u.GetSource(), path) {
-		return true
-	}
-	// A DECLARED residue row (a w* spool's `spool/workflow`) carries no source
-	// field of its own: its source is its upsert key, `residue:file:<path>:<offset>`.
-	if item.GetVendorSpecific() != nil && strings.Contains(e.GetUpsertKey(), resolved(path)) {
-		return true
-	}
-	return false
 }

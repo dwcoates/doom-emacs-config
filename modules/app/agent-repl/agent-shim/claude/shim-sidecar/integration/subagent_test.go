@@ -211,6 +211,11 @@ func TestASubagentsFramesNameTheSessionsMainAgentAsTopLevel(t *testing.T) {
 
 // TestASubagentsFirstUserMessageIsWithheld asserts the sidechain's opening user
 // message is a commission, not a served prompt (R15).
+//
+// RE-AIMED for the 2026-09-13 residue ruling: the commission was read and
+// classified as before, but a `vendor_specific` classification is now withheld
+// at the write path instead of stored, so it is checked in the reader's own
+// account of what it withheld.
 func TestASubagentsFirstUserMessageIsWithheld(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -221,9 +226,11 @@ func TestASubagentsFirstUserMessageIsWithheld(t *testing.T) {
 	cwd := "/Users/dodgecoates/subagent-prompt-probe"
 	slug := cwdSlug(cwd)
 	session := "77777777-7777-4777-8777-777777777777"
+	// The withheld-record accounts are verbose, so the subject asks for them.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := writeSubagentTranscript(t, tree, slug, session, corpusSubagentID)
 	writeSubagentMeta(t, tree, slug, session, corpusSubagentID)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
@@ -234,8 +241,6 @@ func TestASubagentsFirstUserMessageIsWithheld(t *testing.T) {
 			t.Errorf("a subagent transcript minted an AgentPrompt page line: %v", line)
 		}
 	}
-	if !containsString(vendorSpecificKinds(fake.Entries()), vendorSpecificUserPrompt) {
-		t.Errorf("the sidechain's first user message was not withheld as %q; kinds were %v",
-			vendorSpecificUserPrompt, vendorSpecificKinds(fake.Entries()))
-	}
+	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/"+vendorSpecificUserPrompt)
+	requireNoResidueStored(t, fake.Entries())
 }

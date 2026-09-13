@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- sidecar store volume: the sidecar persists NO residue — `vendor_specific` of any kind, `unknown` and `unparsed` are classified, counted and withheld at `storeWrite`, the one door to the store; only typed entries are written, and the cursor still advances (owner ruling, STORE-VOLUME-PROPOSAL item 1, 2026-09-13)
 - sidecar storeclient: a CURSOR RECOVERY the shutdown withdrew is stated at debug by the client and as one info `shutdown` record by `cursorFor`, never as a transport failure; a deadline keeps its error (gap scan `storeclient-cursors` errors, 2026-09-13 15:28)
 - sidecar transcript attribution: a transcript that was GONE before its first byte could be read is stated at info with `reason=transcript_vanished` instead of held at warn; a transcript that is present and unattributable keeps its warning (gap scan `resolve-transcript-workspace` warns, 2026-09-13 15:28)
 - sidecar LOST policy: a watched file that vanished along with its own DIRECTORY is stated at info (`file-vanished` carries `reason=tree_removed`, the `lost-policy` grace clock and conclusion say the tree went with it); a file unlinked while its directory stands keeps its warning (gap scan `lost-policy`/`file-vanished` warns, 2026-09-13 15:28)

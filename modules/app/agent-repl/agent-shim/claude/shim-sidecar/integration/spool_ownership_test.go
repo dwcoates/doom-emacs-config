@@ -1,9 +1,9 @@
 package integration
 
 import (
+	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,8 +14,54 @@ import (
 //
 // A spool that appears BEFORE the transcript line naming it is retained and
 // re-checked, never dropped; an unclassifiable task-id prefix is a loud
-// total-ingestion violation whose bytes still land as residue; and the /tmp
-// versus /private/tmp spellings of one file are one file.
+// total-ingestion violation whose bytes are still read whole and classified as
+// residue; and the /tmp versus /private/tmp spellings of one file are one file.
+//
+// RESIDUE IS NEVER PERSISTED, so "landed as residue" is asserted where the
+// evidence now is: the reader's own withholding record, plus a cursor that
+// reached the end of the file. The store must hold no residue row at all.
+
+// awaitResidueWithheldNamingFile waits for the sidecar's statement that it
+// classified a record read from ONE file as residue and did not store it.
+//
+// THE FILE IS THE POINT HERE. `awaitResidueWithheld` matches a label anywhere in
+// the process, which is enough for a subject about a label but not for one about
+// a particular spool: these subjects say "THIS file's bytes were read and
+// classified", and the record's file_id is what says which file that was.
+func awaitResidueWithheldNamingFile(ctx context.Context, t *testing.T, logPath, path, label string) logRecord {
+	t.Helper()
+	id := fileID(t, path)
+	return awaitLog(ctx, t, logPath, "residue "+label+" classified and withheld for "+path, func(r logRecord) bool {
+		return r.Operation == "residue-drop" && r.Context["reason"] == label && r.Context["file_id"] == id
+	})
+}
+
+// firstResidueWithheldIndexFor answers where in the log the reader FIRST said it
+// had classified residue out of one file, or -1. It is an index rather than a
+// timestamp because the log is written in order, and ordering is the only thing
+// a subject about "nothing was read before X" needs.
+func firstResidueWithheldIndexFor(t *testing.T, logPath, path string) int {
+	t.Helper()
+	id := fileID(t, path)
+	for i, r := range readLog(t, logPath) {
+		if r.Operation == "residue-drop" && r.Context["file_id"] == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// logIndexOf answers where in the log a record matching `match` first appears,
+// or -1.
+func logIndexOf(t *testing.T, logPath string, match func(logRecord) bool) int {
+	t.Helper()
+	for i, r := range readLog(t, logPath) {
+		if match(r) {
+			return i
+		}
+	}
+	return -1
+}
 
 // TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue asserts the
 // whole shape of the hold, which the design states in two halves:
@@ -25,8 +71,11 @@ import (
 //     inventing an owner or keying its output on the spool path's runtime id.
 //     Nothing is read, so no cursor is offered for it.
 //   - AN AGED UNOWNED SPOOL IS NEVER DROPPED. Once the bounded wait lapses the
-//     bytes are ingested attributed to the residue path, with a WARNING, and the
+//     bytes are READ WHOLE and classified as residue, with a WARNING, and the
 //     file keeps being tailed — so a cursor appears exactly then and not before.
+//     RESIDUE IS NEVER PERSISTED, so what the reader saw is stated in the log
+//     rather than stored: the file is still read to its end, and the store holds
+//     no row for it.
 func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -44,7 +93,10 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 	// the assertion is an ORDERING now (see below) rather than a snapshot taken
 	// during a race, so the window buys nothing and the subject pays production
 	// nothing to wait it out.
-	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// THE WITHHOLDING IS STATED PER RECORD AT DEBUG, because it is the steady
+	// state rather than news. This subject asserts the per-record statement, so
+	// it reads the log at the threshold that statement is written to.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act: the spool exists and no transcript ever names it. It is created AFTER
 	// the first production cycle so it is a steady-state spool, not startup
@@ -64,56 +116,35 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 	awaitLog(ctx, t, opts.LogPath, "the hold expiring", func(r logRecord) bool {
 		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
 	})
-	fake.awaitEntry(ctx, t, "residue naming the aged spool", func(e *storev1.StoreEntry) bool {
-		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
-		return u != nil && samePath(u.GetSource(), spoolPath)
+	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
+
+	// Assert (the first half): HELD IS NOT TAILED, stated as an ordering in the
+	// log rather than as a look taken while the hold happened to still stand.
+	// Every line of an unowned spool classifies as `unparsed`, so the reader's
+	// first withholding record for this file IS the moment it first read it, and
+	// "the lapse was written before it" says exactly what the design says —
+	// nothing was read until the wait lapsed — whatever the window's length or
+	// the machine's load.
+	lapsedAt := logIndexOf(t, opts.LogPath, func(r logRecord) bool {
+		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
 	})
-
-	// Assert (the first half): HELD IS NOT TAILED, stated as an ordering on the
-	// wire rather than as a look taken while the hold happened to still stand.
-	// The write stream is in write order, so "no cursor for this spool was
-	// offered before the batch that carried its residue" says exactly what the
-	// design says — nothing was read until the wait lapsed — and says it
-	// whatever the window's length or the machine's load.
-	batches := fake.Batches()
-	residueAt := -1
-	for i, b := range batches {
-		for _, e := range b.GetBatch().GetEntries() {
-			u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
-			if u != nil && samePath(u.GetSource(), spoolPath) {
-				residueAt = i
-				break
-			}
-		}
-		if residueAt >= 0 {
-			break
-		}
+	readAt := firstResidueWithheldIndexFor(t, opts.LogPath, spoolPath)
+	if readAt < 0 {
+		t.Fatalf("the reader never said it classified %s, so there is no read to order against the lapse", spoolPath)
 	}
-	if residueAt < 0 {
-		t.Fatalf("no batch carried residue naming %s, so there is no lapse to order anything against", spoolPath)
-	}
-	for _, b := range batches[:residueAt] {
-		if cs := b.GetBatch().GetCursorAdvance(); cs != nil && samePath(cs.GetPath(), spoolPath) {
-			t.Fatalf("a held spool was tailed: a cursor for %s was offered at %d before its bytes were ingested as residue, while its owner was unknown",
-				spoolPath, cs.GetOffset())
-		}
+	if lapsedAt < 0 || lapsedAt > readAt {
+		t.Fatalf("a held spool was tailed: %s was read and classified at log record %d, before its hold expired at %d, while its owner was unknown",
+			spoolPath, readAt, lapsedAt)
 	}
 
-	// Assert (the second half): the bytes landed and the file is being read.
-	awaitAnyCursorFor(ctx, t, fake, spoolPath)
-	var found bool
-	for _, r := range unparsedOf(fake.Entries()) {
-		if !samePath(r.GetSource(), spoolPath) {
-			continue
-		}
-		found = true
-		if !strings.Contains(r.GetRaw(), strings.TrimSpace(payload)) {
-			t.Errorf("residue for %s carries %q, wanted the spool's bytes %q", spoolPath, r.GetRaw(), payload)
-		}
-	}
-	if !found {
-		t.Fatal("an aged unowned spool's bytes were dropped rather than ingested as residue")
-	}
+	// Assert (the second half): the file is being read, and read WHOLE — the
+	// cursor reaching the end of the payload is what says the bytes were
+	// ingested rather than dropped, now that residue leaves no row behind.
+	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
+
+	// Assert (the invariant): none of it was stored. The bytes were read,
+	// classified and counted; residue is never persisted.
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses asserts the lapse is
@@ -149,6 +180,10 @@ func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
 	_ = fake
 }
 
+// backlogPayload is the one line each backlog spool holds, so a file's withheld
+// tally is exactly one `unparsed` record and its summary's count is readable.
+const backlogPayload = "backlog output nobody claimed\n"
+
 // TestStartupCatchUpSummarizesABacklogOfUnownedSpools asserts the realtest-1
 // flood is leveled: a sidecar that starts with a backlog of pre-existing
 // unclaimed spools states ONE summary rather than one warning per spool. The
@@ -164,31 +199,39 @@ func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 	cwd := "/Users/dodgecoates/spool-catchup-probe"
 	slug := cwdSlug(cwd)
 	session := "12121212-1212-4212-8212-121212121212"
-	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// The per-line withholding statement is DEBUG; the leveling this subject is
+	// about is stated at INFO either way.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 	tasks := []string{"b0aaaaaaa", "b0bbbbbbb", "b0ccccccc"}
 	var spoolPaths []string
 	for _, task := range tasks {
 		path := tree.spoolPath(slug, session, task)
 		spool := newGrowingFile(t, path)
-		spool.AppendRaw([]byte("backlog output nobody claimed\n"))
+		spool.AppendRaw([]byte(backlogPayload))
 		spoolPaths = append(spoolPaths, path)
 	}
 
 	// Act: the sidecar starts with the backlog already on disk.
 	startSidecar(t, opts)
 	for _, spoolPath := range spoolPaths {
-		sp := spoolPath
-		fake.awaitEntry(ctx, t, "residue for the backlog spool", func(e *storev1.StoreEntry) bool {
-			u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
-			return u != nil && samePath(u.GetSource(), sp)
-		})
+		// EVERY BACKLOG SPOOL IS READ WHOLE. Its bytes are never stored — they
+		// classify as residue — so the cursor reaching the end of the file is
+		// what says the reader ingested it rather than skipped it.
+		awaitCursorInBatches(ctx, t, fake, spoolPath, int64(len(backlogPayload)))
 	}
 	rec := awaitLog(ctx, t, opts.LogPath, "the spool catch-up summary", func(r logRecord) bool {
 		return r.Operation == "catchup-summary" && r.Context["reason"] == "spool_unclaimed"
 	})
+	// EVERY BACKLOG SPOOL WAS ALSO CLASSIFIED, one record per line read. The
+	// bytes are never stored, so this is what says the reader saw them rather
+	// than merely stepped its cursor past them.
+	for _, spoolPath := range spoolPaths {
+		awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
+	}
 
 	// Assert: the backlog is summarized, not stated one spool at a time. The
-	// bytes still landed as residue (awaited above), so nothing was silenced.
+	// bytes were still read whole and classified (awaited above), so nothing was
+	// silenced — only unstored.
 	if rec.Level != "info" {
 		t.Errorf("the catch-up summary is at level %q, want info", rec.Level)
 	}
@@ -209,6 +252,7 @@ func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 			t.Errorf("a backlog spool was stated as a per-file record: %v", r.Context)
 		}
 	}
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears asserts the retained spool
@@ -236,7 +280,7 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 	// "Startup catch-up"), and this subject asserts the per-item record rather
 	// than the summary, so it reads the log at the threshold the detail is
 	// written to.
-	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
+	opts = debugLogging(opts)
 
 	call := retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd)
 	result := retargetSession(t, decodeRecord(t, captured.Lines[10]), session, cwd)
@@ -264,11 +308,17 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 	if len(frames) == 0 {
 		t.Fatalf("the spool was never attributed to its owner; runs seen: %v", runsSeen(fake.Entries()))
 	}
-	for _, r := range unparsedOf(fake.Entries()) {
-		if samePath(r.GetSource(), spoolPath) {
-			t.Errorf("a spool that was claimed inside its window still had bytes ingested as residue: %q", r.GetRaw())
+	// NOT ONE LINE OF IT WAS EVER CLASSIFIED AS RESIDUE. Residue is never
+	// stored, so an absence in the store would now be true of a spool that fell
+	// to residue as well; the reader's own withholding record is what separates
+	// "attributed" from "read as bytes belonging to nobody".
+	id := fileID(t, spoolPath)
+	for _, r := range readLog(t, opts.LogPath) {
+		if r.Operation == "residue-drop" && r.Context["file_id"] == id {
+			t.Errorf("a spool that was claimed inside its window still had bytes classified as residue: %v", r.Context)
 		}
 	}
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestAnUnclassifiableSpoolPrefixIsRefusedLoudly asserts a task id with no
@@ -298,9 +348,12 @@ func TestAnUnclassifiableSpoolPrefixIsRefusedLoudly(t *testing.T) {
 	})
 }
 
-// TestAnUnclassifiableSpoolStillLandsAsResidue asserts the refusal does not
-// drop the bytes: nothing on disk is ever lost.
-func TestAnUnclassifiableSpoolStillLandsAsResidue(t *testing.T) {
+// TestAnUnclassifiableSpoolIsStillReadWholeAndClassifiedAsResidue asserts the
+// refusal does not drop the bytes: nothing on disk is ever skipped. The reader
+// still reads the file to its end and still classifies what it read — and
+// because residue is never persisted, what it read is stated in the log and the
+// cursor, not in a row.
+func TestAnUnclassifiableSpoolIsStillReadWholeAndClassifiedAsResidue(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -312,33 +365,21 @@ func TestAnUnclassifiableSpoolStillLandsAsResidue(t *testing.T) {
 	session := "40404040-4040-4040-8040-404040404040"
 	spoolPath := tree.spoolPath(slug, session, "z0uncla551f1able")
 	payload := "bytes nobody can classify\n"
+	// The withholding is stated per record at DEBUG, which is where this
+	// subject's evidence lives.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte(payload))
-	fake.awaitEntry(ctx, t, "residue naming the unclassifiable spool", func(e *storev1.StoreEntry) bool {
-		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
-		return u != nil && samePath(u.GetSource(), spoolPath)
-	})
+	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
 
-	// Assert.
-	var found bool
-	for _, r := range unparsedOf(fake.Entries()) {
-		if !samePath(r.GetSource(), spoolPath) {
-			continue
-		}
-		found = true
-		if !strings.Contains(r.GetRaw(), strings.TrimSpace(payload)) {
-			t.Errorf("residue for %s carries %q, wanted the file's bytes %q", spoolPath, r.GetRaw(), payload)
-		}
-		if r.GetParseError() == "" {
-			t.Errorf("residue for %s states no parse_error, so it is not investigable", spoolPath)
-		}
-	}
-	if !found {
-		t.Fatalf("the refused spool's bytes never landed as residue")
-	}
+	// Assert: read to the end of the file — the cursor is what says the bytes
+	// were consumed rather than skipped over.
+	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
+	// And stored nowhere.
+	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestOneSpoolReachedByTwoPathSpellingsIsOneFile asserts the /tmp ->
@@ -442,9 +483,12 @@ func TestTheSpoolRootIsAcceptedAtEitherLevel(t *testing.T) {
 	awaitAnyCursorFor(ctx, t, fake, spoolPath)
 }
 
-// TestResidueCarriesNoTopLevel asserts residue names no agent: an unparsed
-// record may belong to nothing, and top_level is UNSET rather than guessed.
-func TestResidueCarriesNoTopLevel(t *testing.T) {
+// TestWithheldResidueAnnouncesNoRow asserts residue attributes itself to
+// nothing at all: an unclassifiable record may belong to nobody, so it names no
+// agent — and now that it is never persisted, it names no ROW either. The
+// reader's withholding record therefore carries no upsert_key, because a record
+// naming a key nobody can look up is an untraceable announcement.
+func TestWithheldResidueAnnouncesNoRow(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -455,25 +499,17 @@ func TestResidueCarriesNoTopLevel(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "70707070-7070-4070-8070-70707070aaaa"
 	spoolPath := tree.spoolPath(slug, session, "z0uncla551f1able")
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte("bytes belonging to nobody\n"))
-	fake.awaitEntry(ctx, t, "residue naming the unclassifiable spool", func(e *storev1.StoreEntry) bool {
-		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
-		return u != nil && samePath(u.GetSource(), spoolPath)
-	})
+	rec := awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
 
 	// Assert.
-	for _, e := range fake.Entries() {
-		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
-		if u == nil || !samePath(u.GetSource(), spoolPath) {
-			continue
-		}
-		if got := e.GetAgentUpdate().GetTopLevel(); got != nil {
-			t.Errorf("residue entry %q names top_level %q; residue that names no agent must leave it UNSET",
-				e.GetUpsertKey(), got.GetValue())
-		}
+	if key, ok := rec.Context["upsert_key"]; ok && key != "" {
+		t.Errorf("the withholding record names upsert_key %v; it announces no row, and a key nobody can look up is untraceable", key)
 	}
+	requireNoResidueStored(t, fake.Entries())
 }

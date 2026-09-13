@@ -12,6 +12,7 @@ import (
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
@@ -1702,14 +1703,14 @@ func hookSuccessTranscriptLine(uuid string) string {
 }
 
 // tokensReminderTranscriptLine is the vendor's per-turn budget line, the other
-// never-persisted kind.
+// other residue kind the boot-walk fixtures use.
 func tokensReminderTranscriptLine(uuid string) string {
 	return `{"type":"attachment","uuid":"` + uuid + `","isSidechain":false,` +
 		`"timestamp":"2026-08-29T12:00:00.000Z","attachment":{"type":"total_tokens_reminder",` +
 		`"text":"<total_tokens>18000 tokens left</total_tokens>"}}`
 }
 
-// readAndDropACatchupCorpus walks one transcript of never-persisted residue to
+// readAndDropACatchupCorpus walks one transcript of withheld residue to
 // completion and closes the catch-up window off that drained pass.
 func readAndDropACatchupCorpus(t *testing.T, lines ...string) *harness {
 	t.Helper()
@@ -1742,16 +1743,18 @@ func TestTheCatchupSummaryCarriesTheDroppedResidueCountsByKind(t *testing.T) {
 	if !strings.Contains(text, `"operation":"residue-drop-summary"`) {
 		t.Fatalf("no per-file residue-drop summary was stated: %s", text)
 	}
-	if !strings.Contains(text, "attachment/hook_success=2, attachment/total_tokens_reminder=1") {
-		t.Fatalf("the summary does not carry the counts by kind: %s", text)
+	if !strings.Contains(text, "vendor_specific/attachment/hook_success=2, vendor_specific/attachment/total_tokens_reminder=1") {
+		t.Fatalf("the summary does not carry the counts by residue label: %s", text)
 	}
 }
 
-// A file that dropped nothing states nothing, exactly as EndCatchup states
-// nothing for an operation that demoted nothing.
+// A file that withheld nothing states nothing, exactly as EndCatchup states
+// nothing for an operation that demoted nothing. `assistantLine` is the fixture
+// that converts to a TYPED page line and nothing else; `promptLine` is not,
+// because the file plane's user prompt is itself residue.
 func TestAFileThatDroppedNoResidueStatesNoSummary(t *testing.T) {
 	// Arrange, Act.
-	h := readAndDropACatchupCorpus(t, promptLine, assistantLine)
+	h := readAndDropACatchupCorpus(t, assistantLine)
 
 	// Assert.
 	if strings.Contains(h.logText(), `"operation":"residue-drop-summary"`) {
@@ -1760,7 +1763,7 @@ func TestAFileThatDroppedNoResidueStatesNoSummary(t *testing.T) {
 }
 
 // The summary is INFO: it is the one record at normal verbosity that reports the
-// volume the never-persisted list removed.
+// volume the residue rule withheld.
 func TestTheResidueDropSummaryIsStatedAtInfo(t *testing.T) {
 	// Arrange, Act.
 	h := readAndDropACatchupCorpus(t, promptLine, hookSuccessTranscriptLine("h1"))
@@ -1887,4 +1890,130 @@ func TestAStoreThatCannotAnswerACursorStillWarns(t *testing.T) {
 
 	// Assert.
 	h.requireOnce(t, "recover-cursors", "warn")
+}
+
+// --- only typed entries are persisted ---------------------------------------
+
+// residueAttribution is the coordinates the withholding fixtures mint their
+// entries at; the label, not the position, is what these subjects are about.
+func residueAttribution() convert.Attribution {
+	return convert.Attribution{
+		VendorSessionID: "sess-1", MainAgentID: "sess-1", AgentID: "sess-1",
+		Path: "/p/projects/proj/sess-1.jsonl", FileID: "1:1",
+	}
+}
+
+func TestOnlyTypedEntriesReachTheStore(t *testing.T) {
+	at := residueAttribution()
+	cases := []struct {
+		name   string
+		entry  *storev1.StoreEntry
+		stored bool
+	}{
+		{
+			name:   "vendor_specific is understood and not carried, so it is not stored",
+			entry:  convert.VendorSpecificEntry(at, "attachment/hook_success", map[string]any{}),
+			stored: false,
+		},
+		{
+			name:   "unknown is parsed and not modelled, so it is not stored either",
+			entry:  convert.UnknownEntry(at, "a_new_line_type", "type", map[string]any{}),
+			stored: false,
+		},
+		{
+			name:   "unparsed bytes from an unowned spool are not stored",
+			entry:  convert.UnparsedEntry(at, []byte("{"), errors.New("truncated object")),
+			stored: false,
+		},
+		{
+			name:   "keepalive is a well-formed fact with no book, not residue",
+			entry:  convert.Keepalive(at, "keepalive", "turn:1", at.AgentID, &storev1.StoreAgentItem{}),
+			stored: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := &fakeStore{}
+			h := newHarness(t, store)
+
+			// Act.
+			h.sc.emit("subject", []*storev1.StoreEntry{tc.entry})
+
+			// Assert.
+			written := 0
+			for _, batch := range store.writes {
+				written += len(batch.GetEntries())
+			}
+			if (written == 1) != tc.stored {
+				t.Fatalf("entries written = %d, want stored=%v", written, tc.stored)
+			}
+		})
+	}
+}
+
+func TestABatchOfOnlyResidueIsNotEvenSentToTheStore(t *testing.T) {
+	// Arrange: nothing to store and no position to advance, so there is nothing
+	// for the store to do and asking anyway would spend an rpc per residue line.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+
+	// Act.
+	h.sc.emit("subject", []*storev1.StoreEntry{
+		convert.VendorSpecificEntry(residueAttribution(), "attachment/hook_success", map[string]any{}),
+	})
+
+	// Assert.
+	if store.writeCalls != 0 {
+		t.Fatalf("write calls = %d, want none for a batch that was only residue", store.writeCalls)
+	}
+}
+
+func TestABatchWhoseEveryRecordWasResidueStillAdvancesTheCursor(t *testing.T) {
+	// Arrange: the bytes WERE read, and re-reading them would produce the same
+	// nothing, so the reader's position must still become durable.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	advance := &storev1.CursorState{FileId: "1:1", Offset: 512}
+
+	// Act.
+	if _, err := h.sc.storeWrite("subject", &storev1.EntryBatch{
+		Entries:       []*storev1.StoreEntry{convert.VendorSpecificEntry(residueAttribution(), "attachment/hook_success", map[string]any{})},
+		CursorAdvance: advance,
+	}); err != nil {
+		t.Fatalf("storeWrite: %v", err)
+	}
+
+	// Assert.
+	if len(store.writes) != 1 {
+		t.Fatalf("batches written = %d, want the cursor advance still sent", len(store.writes))
+	}
+	if got := store.writes[0].GetCursorAdvance().GetOffset(); got != 512 {
+		t.Fatalf("cursor advance = %d, want 512", got)
+	}
+	if got := len(store.writes[0].GetEntries()); got != 0 {
+		t.Fatalf("entries written = %d, want none", got)
+	}
+}
+
+func TestTheWithheldRecordAnnouncesNoRow(t *testing.T) {
+	// Arrange: the whole point is that nothing was stored, and a record naming an
+	// upsert_key nobody can look up is the untraceable announcement the field-set
+	// contract forbids.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+
+	// Act.
+	h.sc.emit("subject", []*storev1.StoreEntry{
+		convert.UnknownEntry(residueAttribution(), "a_new_line_type", "type", map[string]any{}),
+	})
+
+	// Assert.
+	rec := h.requireOnce(t, "residue-drop", "debug")
+	if got := ctxString(t, rec, "reason"); got != "unknown/type:a_new_line_type" {
+		t.Fatalf("the record's reason = %q, want the residue label", got)
+	}
+	if _, ok := rec.Context["upsert_key"]; ok {
+		t.Fatalf("the withholding record announced a row: %v", rec.Context)
+	}
 }

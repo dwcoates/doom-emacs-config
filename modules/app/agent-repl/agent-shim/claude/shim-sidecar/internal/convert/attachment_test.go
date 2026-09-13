@@ -19,8 +19,9 @@ func TestHookOutcomeKindsAreAllKeptWholeAsUnservedItems(t *testing.T) {
 	// the two planes are handed disjoint identity material, so a hook converted
 	// on both drew two rows nothing could reconcile. Every FAILING outcome kind
 	// is still kept whole and unserved. `hook_success` is not in this table: it
-	// is the one hook kind the owner ruled never-persisted (neverpersist.go), and
-	// its own test asserts the drop.
+	// has its own subject in neverpersist_test.go. NONE of these is persisted
+	// since the residue ruling (2026-09-13) — the reader withholds every residue
+	// arm — but the classification asserted here is what the counts name.
 	cases := []string{"hook_blocking_error", "hook_non_blocking_error", "hook_cancelled"}
 	for _, kind := range cases {
 		t.Run(kind, func(t *testing.T) {
