@@ -332,3 +332,39 @@ func TestCloseBlockerReportsAQueuedMergeBehindALeadingBlocker(t *testing.T) {
 		t.Fatalf("blocker = %+v, want merge_queued evidence", blocked)
 	}
 }
+
+func TestOpenRevivesAndUnparksAHibernatedWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
+		t.Fatalf("started = %v, want [w1]", f.fleet.started)
+	}
+	if len(f.topbarParked) != 1 || f.topbarParked[0] {
+		t.Fatalf("topbar parked = %v, want the park lifted", f.topbarParked)
+	}
+}
+
+func TestOpenLiftsNoParkFromAWorkspaceThatWasNotAsleep(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.topbarParked) != 0 {
+		t.Fatalf("topbar parked = %v, want untouched", f.topbarParked)
+	}
+}

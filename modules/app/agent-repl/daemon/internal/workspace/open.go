@@ -43,11 +43,26 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID) error {
 			fmt.Sprintf("the workspace's directory no longer exists: %s", record.Dir), false)
 	}
 
+	// A PARKED WORKSPACE IS REVIVED THROUGH THE SAME PATH, and the park is
+	// LIFTED by it. The start below would have spawned the session either way
+	// — that is the implicit revival this verb has always performed — but
+	// nothing retracted the sweep's park from the session-scoped views, so the
+	// topbar went on drawing the hibernated strip over a live session until
+	// the shim's first link state happened to arrive.
+	asleep, err := v.parked(ctx, ws)
+	if err != nil {
+		log.Error(opOpen, "could not tell whether the workspace was hibernated", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("open %q: %w", ws, err)
+	}
 	if v.deps.Sessions.Live(ws) {
 		log.Debug(opOpen, "the session is already live", nil)
 	} else if err := v.deps.Sessions.Start(ctx, ws); err != nil {
 		log.Error(opOpen, "the session did not come up", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("open %q: start the session: %w", ws, err)
+	}
+	if asleep {
+		v.unpark(ws)
+		log.Info(opOpen, "revived the hibernated workspace", nil)
 	}
 
 	if record.Closed {
