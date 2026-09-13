@@ -721,6 +721,9 @@ const RESIDUE = scenario({
   },
 });
 
+/** The context `!cold-seed` reports: comfortably above the cold-gate floor. */
+const COLD_SEED_CONTEXT_TOKENS = 90_000;
+
 const COLD_SEED = scenario({
   name: "cold-seed",
   prompt: "!cold-seed",
@@ -737,9 +740,15 @@ const COLD_SEED = scenario({
     // instant, read from the same record. Back-dating only the turn_duration
     // line left a freshly-stamped assistant line as the newest one, so the gate
     // saw a session seconds old and never lapsed.
+    // AND A CONTEXT ABOVE THE COLD-GATE FLOOR. The gate does not ask below
+    // 70,000 tokens (owner ruling, engine/cold.ts COLD_GATE_FLOOR_TOKENS), and
+    // the mock's ordinary usage reports ~25,000 — a seed that left it there
+    // would produce a session that resumes warm, which is the opposite of what
+    // this scenario exists to set up.
     ctx.assistant([{ type: "text", text: "An answer from two hours ago." }], {
       stopReason: "end_turn",
       timestamp: twoHoursAgo,
+      contextTokens: COLD_SEED_CONTEXT_TOKENS,
     });
     // Back-dated too, so nothing in the file contradicts it. Written directly
     // rather than through a helper because the scenario is deliberately lying
