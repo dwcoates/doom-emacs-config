@@ -88,6 +88,28 @@ const recoverTick = 50 * time.Millisecond
 // store that is not answering, which is a suspension like any other.
 const rpcTimeout = 30 * time.Second
 
+// shutdownSettle is how long a store call that is ALREADY ON THE WIRE is given
+// to answer after a termination signal, before its context is cancelled.
+//
+// CANCELLING A SENT WRITE DOES NOT WITHDRAW IT. The store's transaction is its
+// own: by the time this process cancels, the batch may already be committing,
+// and the server learns the client is gone only when net/http notices the
+// closed connection — which, for a process that is exiting, is AFTER it has
+// exited. So an instant cancel does not undo the write; all it destroys is
+// THIS PROCESS'S KNOWLEDGE of whether the write landed, and it leaves the store
+// still committing a batch nobody is waiting for. Waiting a beat for the answer
+// costs nothing and buys the truth: a durable success advances the cursor
+// normally, and a genuine failure is stated as one.
+//
+// IT IS SHORT, BECAUSE A WEDGED STORE MUST NOT HOLD THE PROCESS. A healthy
+// WriteBatch answers in single-digit milliseconds, and the latest answer ever
+// observed after a signal was ~50ms (a store finishing a withdrawn commit under
+// a deliberately overcommitted box); this is a 5x margin on that, and it spends
+// under a tenth of the 3s a signalled sidecar's shutdown is held to
+// (integration/sigterm_wedged_write_test.go), so a store that has stopped
+// answering still lets the process leave promptly.
+const shutdownSettle = 250 * time.Millisecond
+
 // watched is one file the sidecar is currently reading.
 type watched struct {
 	target discover.Target
@@ -109,14 +131,20 @@ type sidecar struct {
 	tracker *stale.Tracker
 	log     *logging.Bound
 
-	// shutdown is the context every store rpc derives from, so a SIGTERM that
-	// arrives while a call is in flight cancels THAT CALL rather than being
-	// read only once rpcTimeout expires. Cancelling a WriteBatch mid-flight
-	// loses nothing: the store commits records and cursor in one transaction,
-	// so a cancelled call committed nothing, the tailer's cursor therefore
-	// never advanced, and the next boot recovers that same cursor and re-reads
-	// the identical durable bytes into the identical deterministic write ids /
-	// upsert keys. Nil only in tests that drive the cycle's steps directly.
+	// shutdown is the context every store rpc is tied to, so a SIGTERM that
+	// arrives while a call is in flight ends THAT CALL rather than being read
+	// only once rpcTimeout expires — but it ends it after shutdownSettle, not
+	// instantly, because a write already on the wire cannot be recalled.
+	//
+	// NOTHING IS LOST EITHER WAY, and this is the whole reason the shutdown may
+	// be abrupt: the store commits a batch's records and its cursor advance in
+	// ONE transaction, so it ends up holding both or neither. A write this
+	// process never got an answer for is therefore not a torn state, it is an
+	// UNKNOWN one — and the next boot resolves it by reading whichever cursor
+	// the store holds and re-reading the durable bytes past it into the
+	// identical deterministic write ids / upsert keys.
+	//
+	// Nil only in tests that drive the cycle's steps directly.
 	shutdown context.Context
 
 	watchers map[string]*watched // by resolved path
@@ -1134,8 +1162,10 @@ func (s *sidecar) pollAll() {
 		skips, err := s.writeBatch(result)
 		if err != nil {
 			if s.interrupted(err) {
-				// The process is going away; storeWrite stated the replay and
-				// the cursor stayed where it was.
+				// The process is going away; storeWrite stated the
+				// interrupted write, and THIS reader's cursor stayed where it
+				// was — whatever the store ends up doing with the batch, the
+				// next boot resumes from the cursor the store holds.
 				return
 			}
 			if field, invalid := storeclient.InvalidRequest(err); invalid {
@@ -1329,12 +1359,39 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
 
 // rpcContext bounds one store call by rpcTimeout AND ties it to the process's
 // shutdown, so the deadline is the ceiling rather than the only way out.
+//
+// THE SHUTDOWN IS NOT THE CALL'S PARENT, DELIBERATELY. A context that is simply
+// a child of s.shutdown dies the instant the signal lands, which abandons a
+// write the store may be committing right then and leaves this process unable
+// to say whether it landed. The call is instead given shutdownSettle after the
+// signal to answer for itself, and only then cancelled — the ceiling on how
+// long a shutdown may wait for the store, with rpcTimeout still capping the
+// call as a whole.
 func (s *sidecar) rpcContext() (context.Context, context.CancelFunc) {
 	parent := s.shutdown
 	if parent == nil {
-		parent = context.Background()
+		return context.WithTimeout(context.Background(), rpcTimeout)
 	}
-	return context.WithTimeout(parent, rpcTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), rpcTimeout)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-parent.Done():
+		}
+		settle := time.NewTimer(shutdownSettle)
+		defer settle.Stop()
+		select {
+		case <-done:
+		case <-settle.C:
+			cancel()
+		}
+	}()
+	return ctx, func() {
+		close(done)
+		cancel()
+	}
 }
 
 // interrupted reports that this error is the shutdown cancelling an in-flight
@@ -1352,10 +1409,13 @@ func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) ([]storecli
 	skipped, err := s.store.WriteBatch(ctx, batch)
 	if s.interrupted(err) {
 		// NOT AN OUTAGE AND NOT SWALLOWED: the error still returns, but the
-		// store was fine and the records replay from the unadvanced cursor on
-		// the next boot.
+		// store was fine. What it did with the batch is unknown — it may have
+		// committed records and cursor together after this process stopped
+		// listening — and either way the next boot resumes from the cursor the
+		// store holds and re-reads the durable bytes past it.
 		s.log.With(logging.Context{Operation: "shutdown"}).Log(
-			"shutdown interrupted a write; it will replay (%s, %d record(s))", what, len(batch.GetEntries()))
+			"shutdown interrupted a write that had not answered within %s of the signal; whether the store committed it is UNKNOWN and nothing is lost either way, because records and cursor ride one transaction: the next boot resumes from whichever cursor the store holds (%s, %d record(s))",
+			shutdownSettle, what, len(batch.GetEntries()))
 		return nil, err
 	}
 	s.noteStoreErr(what, err)
