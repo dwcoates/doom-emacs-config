@@ -461,3 +461,26 @@ the source.
 | Date | Question | Decision | Why | How to reverse |
 | --- | --- | --- | --- | --- |
 | 2026-09-13 | 4 `lost-policy` and 3 `bash-lost` WARNs reading `went_silent`. An earlier sweep called them "genuine, level correct", which is not an outcome. Reader defect, or ordinary lifecycle? | READER DEFECT for 3 of the 4; fixed rather than re-leveled. The 4th is a genuine LOST and its WARN stands | The named spools were checked. `b3bkckml9`, `bc50109ws` and `beabw25qa` each END on `[exited with code 0]`, at exactly the byte offset the reader's own record reports — so it read the terminator and did not recognize it. This reader knew only the `EXIT=` line OUR harness scripts write; the bracket line is written by the vendor's own background-shell wrapper and so is the only terminator a run no script of ours wrapped ever gets. Over that session's 67 shell spools, 32 end on the bracket and all 11 carrying `EXIT=` carry the bracket AFTER it, which also defeated the old "the marker is the batch's last line" rule outright. `bp5nba0f0` carries no terminator of either spelling and genuinely went silent, so it keeps its warn: that arm is the policy working | Delete `wrapperExitPrefix`, `parseWrapperExit` and the `finalLine`/`lastLineOf` split in `internal/handler/shell.go`; the nine new subjects in `shell_test.go` then fail and name the choice |
+
+## Owner rulings: six look-and-feel asides noticed during the playtests (2026-09-13, owner)
+
+These are OWNER-ORDERED visual changes, the one path the no-look-and-feel
+rule allows.
+
+1. Emacs tab bar: exactly one space between `[N]` and the workspace name.
+   Never `[3]    test-workspace`.
+2. Webapp sidebar: remove the small white dot preceding each workspace
+   entry; the larger status dot already carries the meaning.
+3. Webapp feed: the left-hand "nothing held" section. The owner wants it
+   DIAGNOSED and discussed first: what it shows when something IS held;
+   the empty state should say nothing rather than announce emptiness.
+4. Emacs tab bar: when selected, only `<workspace-name>` is underlined,
+   never `[N] `, never a leading or trailing space.
+5. Emacs tab bar background, DIAGNOSE BEFORE FIXING and define the terms
+   in AGENTS.md: "full" = the whole `[N] <workspace-name>` entry carries
+   the status color; "partial" = only `[N]` carries it. Rule: full IF AND
+   ONLY IF the workspace's agent-repl panels (webapp and input window) are
+   open; partial IF AND ONLY IF they are not.
+6. Opening a workspace by any means other than switching to an already
+   open one (creation, re-open, register, fork) opens its agent-repl
+   panels immediately, as `SPC o c` does, before it is switched to.
