@@ -1002,3 +1002,37 @@ verbatim, never a count this ruling governs.
 | 2026-09-13 | A refused StartSession reached no surface. Which fault kind, and does the link go dead as it does for a shim that will not come up? | `resume_failed`, and the link is left alone | `shim_start_failed` and the dead link both name the shim PROCESS, which here is up and answering — what it refused is the SESSION. `resume_failed` already has a typed arm that carries a cause, so nothing new goes on the wire; saying the link died would send every surface hunting a process that is right there | Drop `noteSessionRefused` and the wrapper around `askToStartSession` (`internal/workspace/sessions.go`) |
 | 2026-09-13 | File the fault in each refusal arm, or once around the call? | Once around the call | The refusal arms are a growing set and every one of them leaves the workspace with no session; an arm added later must not be able to go unsurfaced by forgetting a call. The two non-failures — a cold gate and a stand-down this daemon ordered — are named exceptions rather than the default | Same as above |
 | 2026-09-13 | The cold-gate card DID have a failure branch, and it drew "the daemon could not be reached" over a daemon that answered. Reword only this card, or the rule? | The rule, in `src/rpc/refuse.ts` | The codebase already refuses this exact lie about a malformed view ("it travels up loudly rather than being drawn as 'could not be reached', which would be a lie"); the same reasoning covers a coded answer. `callFailure` is the one place that decides, `drawTransportRefusal` words itself through it when a caller hands it the error, and no call site outside the cold gate had to change | Restore the literal `refusal("transport", …)` in `src/feed/asks/cold-gate.ts` and drop `callFailure` |
+## Owner rulings: the topbar's fixed schema and the vendor's title (2026-09-13, owner)
+
+A. **THE TOPBAR SCHEMA AND ORGANIZATION ARE FIXED, NO EXCEPTIONS.** The
+whole-view states `hibernated` (tag 11) and `cold_gate` (tag 12) landed
+earlier the same day are REVERSED: both fields and both messages are retired
+per the file's retired-tag convention. Every cell is always present in the
+strip; a cell whose session fact is unknown draws its "no session" content in
+its own slot. `model_selector`, `permission_mode_picker` and `fast_mode` are
+OPTIONAL BY PRESENCE (absent → the webapp draws a dash in the slot, never
+omits the cell); the `context` chip and the `warnings` strip are ALWAYS
+present — the chip carries the hibernated or cold context size (0 when
+unknown) with the reason in its hover, and the strip carries the state as a
+warning line. The daemon's readiness gate publishes once naming and account
+are known, always.
+
+B. **THE TITLE IS THE WORKSPACE SUMMARY** when the vendor has one. The vendor
+writes an `ai-title` transcript line; the shim decodes it, `conversation.v1`
+carries it as `SessionUpdate.title` (`SessionTitle`), and the resolver
+composes `TopbarTitle.text` from it in preference to the workspace name.
+
+### Judgement calls implementing the two rulings
+
+| date | question | call | why | rejected |
+|---|---|---|---|---|
+| 2026-09-13 | "OPTIONAL by presence" for three MESSAGE fields, which already have presence in proto3 — document it, or write the `optional` keyword | WRITE THE KEYWORD. `TopbarModelSelector.selected` in the same file already spells an optional message field that way, and the generated Go and TS are byte-identical in shape (a pointer / a `\| undefined`), so the keyword costs nothing and states the ruling where a reader of the schema will look | Leave the fields bare and put "optional by presence" in prose only |
+| 2026-09-13 | The ruling puts the session-less state in the warning strip "as a warning line", but every `TopbarWarning` carried a `detail` arm and the webapp refused one without | `TopbarWarning.detail` may now be UNSET: a warning that is a STATEMENT, drawn as a text row with no click | The ruling's line has nothing to reveal, and for the cold gate there is nothing to answer in the strip at all — the feed's gate card is the one place a gate is answered. A new detail arm would have been a second overlay for a fact whose whole content is its sentence | Add a `TopbarSessionlessWarningDetail` arm carrying the same sentence again |
+| 2026-09-13 | Whether the vendor's summary replaces the whole composed title or only the workspace NAME half of it | Only the name. The branch suffix and the rule about when it is worth showing are unchanged | The summary answers "which conversation is this" and the branch answers "which checkout"; they are different facts, and the ruling replaces the one the owner called the name | Have the summary replace "name · branch" outright |
+| 2026-09-13 | Whether the retired states' log records go with them, leaving the session-less strip unannounced | No — the edge detector is RE-AIMED at the session-scoped half: info when a strip publishes with its controls absent, info when they return | A strip drawn with dashes where its controls belong is still the loudest thing a reader can see, and an invisible action is a logging defect; the record now reads the published view's own `model_selector` rather than a retired field | Drop the two info records with the fields they watched |
+| 2026-09-13 | Which figure the session-less context chip states when both a cold gate's count and a remembered `context_usage` exist | The cold gate's | It is what the shim read off the transcript for THIS resume; a remembered usage is what some earlier session last reported | Prefer the remembered usage as the more recent statement |
+| 2026-09-13 | Where the shim reads the `ai-title` line, given nothing on the SDK stream announces it and the transcript grows all session | An incremental TAIL from a byte cursor (`engine/title.ts`), read at the two edges the context usage is reported at: session start and turn end | Re-reading a megabyte transcript per turn would make the cost of the title grow with the conversation; the cursor stops at the last newline so a torn record is read next pass, and a shorter file is reread from the beginning because it is a different conversation | Re-read the whole transcript per turn, or read it once at start and never again |
+| 2026-09-13 | Whether the title is REPLAYED to a joining WatchSession subscriber | Yes, beside the model, fast mode and account usage | The title is read during StartSession and the daemon opens its standing WatchSession only after StartSession has answered, so without the replay the topbar would draw the workspace name until some later turn happened to change the title | Push it on change only, like the event arms |
+| 2026-09-13 | Whether "the warning strip is ALWAYS drawn" retires its own "nothing is drawn when nothing is wrong" rule | No. The FIELD is always set; an EMPTY list still draws no chip | The ruling's subject is the wire — the strip must be there to carry the state line — and the proto's own rule that a control over an empty list only invites the click that proves it is empty was not reopened | Draw a quiet warning chip on every strip |
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
