@@ -107,8 +107,20 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		}
 	}
 
+	// THE CLOCK STARTS BEFORE THE TRANSACTION, AND THE WAIT IS MEASURED APART
+	// FROM THE WORK. Every transaction this store opens is BEGIN IMMEDIATE,
+	// reads included, so a batch queues behind whatever else holds the write
+	// lock for as long as busy_timeout allows, and behind the connection pool
+	// before that. Timing only the total made every such queue look like a slow
+	// statement: the owner's store reported a 3822ms `write_batch` for SIX rows
+	// whose statements are all single indexed seeks, and the record blamed
+	// index maintenance for time no index spent. `lock_wait_ms` is the half an
+	// operator can act on — it says to look at what ELSE is writing, not for a
+	// missing index.
 	started := time.Now()
+	var lockWait time.Duration
 	defer func() {
+		base.LockWait = lockWait
 		d.observeQuery(StatementWriteBatch, "entry", base, started, int64(len(entries)))
 		d.traceStatement(ctx, StatementWriteBatch, "entry", base, int64(len(entries)))
 	}()
@@ -118,6 +130,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}, "starting transaction entries=%d cursor_advance=%t", len(entries), cursor != nil)
 
 	tx, err := d.sql.BeginTx(ctx, nil)
+	lockWait = time.Since(started)
 	if err != nil {
 		return WriteResult{}, d.refuse(base, storagef(err, "begin write transaction"))
 	}
