@@ -17,10 +17,26 @@ import (
 //   - the ATTENTION MARKER is cleared, because the user has now looked at what
 //     raised it;
 //   - the roster is told, so every webview's selection agrees at once.
+//
+// AND IT REVIVES A HIBERNATED WORKSPACE. Switching to a workspace is looking
+// at it, and an open workspace the user is looking at is never session-less
+// (owner ruling, 2026-09-13). It is not a fourth thing this verb does to a
+// LIVE workspace: `reviveIfParked` is a no-op for anything the idle sweep did
+// not stand down, so a select on a live workspace still changes nothing but
+// the selection.
 func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "SelectWorkspace", ws)
 	if err != nil {
 		return err
+	}
+	// THE REVIVAL GOES FIRST, before the selection is recorded: the roster
+	// republished below is what every client reads, and a roster pushed while
+	// the workspace still reads asleep would show the user the sleep they just
+	// ended. A revival that FAILS fails the select, because a selected
+	// workspace with no session is exactly the state this exists to abolish
+	// and answering success would hide it.
+	if _, err := v.reviveIfParked(ctx, log, opSelect, ws); err != nil {
+		return fmt.Errorf("select %q: %w", ws, err)
 	}
 
 	current, err := v.deps.DB.Current(ctx)

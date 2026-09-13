@@ -681,6 +681,12 @@ type fakeFooter struct {
 	startFailed map[ids.WorkspaceID]*footer.StartFailed
 	// dirs is what registration bound, keyed by workspace.
 	dirs map[ids.WorkspaceID]string
+	// parked records every park state the verbs installed or lifted, in order.
+	parked []bool
+}
+
+func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
+	f.parked = append(f.parked, parked)
 }
 
 func newFakeFooter() *fakeFooter {
@@ -1098,6 +1104,8 @@ type fixture struct {
 	cards    *fakeCards
 	log      *fakeSurfaces
 	headless *fakeHeadless
+	// topbarParked is every park state the topbar seam was handed, in order.
+	topbarParked []bool
 
 	// running is what the freeness probe answers.
 	running Running
@@ -1145,7 +1153,7 @@ func newFixture(t *testing.T) *fixture {
 
 	verbs, err := New(Deps{
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Sessions: f.fleet,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -1275,8 +1283,18 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 
 // stubTopbar and stubHolds satisfy the resolver seams the verbs hold but never
 // call, so a test that does call one nil-panics rather than passing quietly.
-type stubTopbar struct{ topbar.Resolver }
+type stubTopbar struct {
+	topbar.Resolver
+	// parked records every park state the verbs installed or lifted, in order.
+	parked *[]bool
+}
 type stubHolds struct{ holds.Resolver }
+
+func (s stubTopbar) SetParked(_ ids.WorkspaceID, parked bool) {
+	if s.parked != nil {
+		*s.parked = append(*s.parked, parked)
+	}
+}
 
 // The three resolvers registration BINDS record the directory it bound, which
 // is all any verb test needs of them.
@@ -1365,4 +1383,13 @@ func (h *fakeHeadless) Run(_ context.Context, req headless.Request) (headless.Re
 		return headless.Response{}, answer.err
 	}
 	return headless.Response{Text: answer.text, Model: req.Model, Duration: time.Millisecond}, nil
+}
+
+// hibernate records the idle sweep's own terminal on a workspace's session,
+// which is what makes it read as asleep to the verbs that ask.
+func (f *fixture) hibernate(ws ids.WorkspaceID) {
+	f.db.sessions[ws] = wsm.Session{
+		Workspace: ws,
+		Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalHibernated, Detail: "idle past the cutoff", At: fixedNow},
+	}
 }
