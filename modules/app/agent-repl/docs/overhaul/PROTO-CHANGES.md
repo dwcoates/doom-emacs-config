@@ -829,3 +829,21 @@ representable.
 two required files, since no finish varies the set.
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+## Landing — `DaemonHoldTray.heading` retired (2026-09-13)
+
+USER-RULED (owner rulings, second batch, item 5):
+- `frontend.v1.DaemonHoldTray` tag 1 (`heading`) is RETIRED and the
+  `DaemonHoldHeading` message is DELETED — nothing else referenced it.
+
+The webapp stopped drawing the "held (N)" counter earlier the same day (owner
+ruling 2): the cards say what is held, so a count over the visible cards is a
+second answer to a question the cards already answer. With no drawer left, the
+field was a wire obligation nothing consumed, so the owner retired it.
+
+The daemon's `holds` resolver no longer composes a heading (its `heading()`
+helper is gone) and the webapp's tray no longer requires one. The item count
+the heading used to state — an offer counts as a held thing alongside the
+prompts — is now asserted directly on `items`.
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
