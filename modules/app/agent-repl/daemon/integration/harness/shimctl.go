@@ -36,6 +36,10 @@ type ShimProfile struct {
 	// `vendor_start_failed` refusal carrying this detail: the shim process is
 	// healthy and only the vendor failed to start inside it.
 	VendorStartFailed string `json:"vendor_start_failed,omitempty"`
+	// HangStartSession makes the fake never answer StartSession, waiting out
+	// the caller's context instead. It is what pins a boot's own bring-up
+	// open on a workspace whose shim never answers.
+	HangStartSession bool `json:"hang_start_session,omitempty"`
 	// NoTranscriptUntilTurn withholds the transcript until the first turn, the
 	// way the vendor does: a session bounced before its first turn names a
 	// conversation with no transcript at all.

@@ -3,6 +3,7 @@ package boot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1212,5 +1213,53 @@ func TestAStartAlreadyBegunIsNotCutByTheExit(t *testing.T) {
 	}
 	if startCtxErr != nil {
 		t.Fatalf("the start ran under a context reading %v, want one the exit cannot cut", startCtxErr)
+	}
+}
+
+// TestAStandDownDuringTheBringUpIsNotAFailedBringUp covers the exit landing
+// inside the step. The bring-up runs BESIDE the accept loop, so a deploy's
+// SIGTERM reaches the drain while a start is in flight; the drain force-stops
+// every workspace session, and the start then comes back from a shim this same
+// process just killed.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34. Three daemon generations in a row
+// (pids 58458, 68787, 80526) recorded `daemon.boot.bring_up: an open
+// workspace's session did not come up` at ERROR, nine milliseconds after
+// recording their own `daemon.shimclient.standdown` for the same shim at info.
+func TestAStandDownDuringTheBringUpIsNotAFailedBringUp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.startErrs[ws.ID] = fmt.Errorf("start session for %q: %w", ws.ID, shimclient.ErrStandDownOrdered)
+
+	// Act.
+	_, brought := h.runAndBringUp(t)
+
+	// Assert.
+	if len(brought.StoodDown) != 1 || brought.StoodDown[0] != ws.ID {
+		t.Fatalf("StoodDown = %v, want [%v]", brought.StoodDown, ws.ID)
+	}
+	if len(brought.BringUpFailed) != 0 {
+		t.Fatalf("BringUpFailed = %v, want none: the daemon ordered the stand-down", brought.BringUpFailed)
+	}
+}
+
+// TestAStandDownDuringTheBringUpIsNotRecordedAsAnError is the log half of the
+// edge above: the count and the record have to agree, or a harvest still reads
+// the ordered teardown as a defect.
+func TestAStandDownDuringTheBringUpIsNotRecordedAsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.startErrs[ws.ID] = fmt.Errorf("start session for %q: %w", ws.ID, shimclient.ErrStandDownOrdered)
+
+	// Act.
+	h.runAndBringUp(t)
+
+	// Assert.
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.boot.bring_up" && (r.Level == "error" || r.Level == "warn") {
+			t.Fatalf("the ordered stand-down was recorded at %q: %q", r.Level, r.Message)
+		}
 	}
 }

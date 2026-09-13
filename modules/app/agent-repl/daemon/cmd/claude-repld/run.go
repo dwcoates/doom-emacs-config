@@ -422,6 +422,15 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if built.DrainQueue != nil {
 		defer joinQueueWork(built.DrainQueue, loopJoinBound, log)
 	}
+	// AND THE DETACHED SESSION STARTS, on the same bound and for the same
+	// reason: the register's revival brings a session up off the answer's
+	// goroutine, and one still in flight at the exit reads and writes the
+	// state client. The drain ENDS them before it waits, so an exit landing
+	// inside a start costs the shim call's cancellation rather than the whole
+	// bound.
+	if built.DrainStarts != nil {
+		defer joinDetachedStarts(built.DrainStarts, loopJoinBound, log)
+	}
 
 	log.Info("daemon.cmd.serve", "serving", dlog.Context{
 		"address": claim.Address(),
@@ -724,6 +733,18 @@ func joinQueueWork(drain func(time.Duration) bool, bound time.Duration, log dlog
 		return
 	}
 	log.Error("daemon.cmd.serve", "the prompt queue's background work outlived its serving context; tearing down under it", dlog.Context{
+		"bound_ms": bound.Milliseconds(),
+	})
+}
+
+// joinDetachedStarts ends the session starts that run off a caller's goroutine
+// and waits, bounded, for them to leave, saying so loudly when one does not.
+func joinDetachedStarts(drain func(time.Duration) bool, bound time.Duration, log dlog.Logger) {
+	if drain(bound) {
+		log.Debug("daemon.cmd.serve", "every detached session start left before the teardown", nil)
+		return
+	}
+	log.Error("daemon.cmd.serve", "a detached session start outlived its serving context; tearing down under it", dlog.Context{
 		"bound_ms": bound.Milliseconds(),
 	})
 }
