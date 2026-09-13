@@ -5289,16 +5289,38 @@ body.draining #composer-input::placeholder {
 
 /* ---- topbar (src/topbar) ------------------------------------------------ */
 
-/* THE STRIP. Left tight, center flexing, right tight — the flank groups never
-   spread, and all free width goes to the title. `position: relative` makes the
-   host the positioning context for the reveal layer, which is why the reveals
-   can be placed in the host's own coordinates. */
+/* THE STRIP. Left tight, center CONTENT-CENTERED, right tight — the flank
+   groups never spread, and all free width is split evenly on either side of
+   the title. `position: relative` makes the host the positioning context for
+   the reveal layer, which is why the reveals can be placed in the host's own
+   coordinates. */
 [data-component="topbar"] {
   position: relative;
 }
 
+/* THREE TRACKS, AND THE OUTER TWO ARE THE SAME SIZE (owner ruling 2,
+   2026-09-13). The title is centered on ITS OWN CONTENT against the whole
+   strip — the middle character of a three-letter title sits at the strip's
+   exact midpoint — rather than on whatever the left and right groups leave
+   over, which is what a flex row gives and what put the title off-center by
+   half the difference between the two groups.
+
+   `1fr` twice is the entire mechanism: two equal free tracks with the
+   content-sized title between them. The outer tracks keep their AUTO MINIMUM
+   deliberately, which is the overflow rule: a group is never squeezed, and a
+   title with less free space than it wants ellipsis-clips inside
+   `minmax(0, auto)` instead of overlapping either group. A title that outgrows
+   the free space therefore stops being centered before it ever collides —
+   losing the centering is the concession, never the collision.
+
+   Grid rather than an absolutely centered title layer: absolute positioning
+   cannot know either group's width, so it can only guess a max-width and
+   still overlap an asymmetric strip, where the tracks make non-overlap a
+   fact of the layout. The reveal layer is unaffected either way — it is the
+   row's SIBLING inside the host, not a descendant. */
 .topbar-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, auto) 1fr;
   align-items: center;
   /* ONE TOKEN, BOTH DISTANCES (owner ruling 1). The gap between cells and the
      inset at the strip's edges are the same measure by definition, so a change
@@ -5309,18 +5331,27 @@ body.draining #composer-input::placeholder {
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
 }
-.topbar-left,
+/* Each group is a row of cells that hugs its OWN edge of its free track, so
+   the strip's first cell sits at the left edge of the strip and its last cell
+   at the right one. Written out per group rather than shared, because the one
+   declaration that differs is the whole point of the pair. */
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--topbar-cell-gap);
+  justify-self: start;
+}
 .topbar-right {
   display: flex;
   align-items: center;
   gap: var(--topbar-cell-gap);
-  flex: 0 0 auto;
+  justify-self: end;
 }
-/* The one element that flexes. Ellipsis-clipped rather than wrapping: the
-   strip is one line high by definition, and the whole title is in the
-   tooltip. */
+/* THE MIDDLE TRACK. Sized to its content by the template above, so this rule
+   carries only what happens when the content does not fit: ellipsis rather
+   than wrapping, because the strip is one line high by definition and the
+   whole title is in the tooltip. */
 .topbar-title {
-  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

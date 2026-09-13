@@ -349,3 +349,89 @@ describe("the strip's layout", () => {
     expect(padding).toBe(`0 ${gap}`);
   });
 });
+
+/**
+ * THE STRIP'S GEOMETRY, WORKED FROM THE TRACKS THE STYLESHEET DECLARES.
+ *
+ * jsdom lays out nothing, so the boxes are stubbed and placed here by the
+ * rule `grid-template-columns: 1fr minmax(0, auto) 1fr` states: two equal
+ * free tracks either side of a content-sized middle one, each free track
+ * floored at its own content (an `fr` track keeps an auto minimum) and the
+ * middle one clipped when what is left is less than it wants. The template
+ * itself is asserted alongside, so a change to it fails these tests rather
+ * than quietly leaving them measuring a layout the app no longer has.
+ */
+interface StubWidths {
+  readonly row: number;
+  readonly padding: number;
+  readonly gap: number;
+  readonly left: number;
+  readonly right: number;
+  readonly title: number;
+}
+
+interface Placed {
+  readonly left: { start: number; width: number };
+  readonly title: { start: number; width: number };
+  readonly right: { start: number; width: number };
+}
+
+function placeTracks(w: StubWidths): Placed {
+  const inner = w.row - 2 * w.padding - 2 * w.gap;
+  const share = (inner - w.title) / 2;
+  // THE GROUPS NEVER SHRINK: each free track is at least its own content.
+  const left = Math.max(w.left, share);
+  const right = Math.max(w.right, share);
+  // ...so the title is what gives, down to nothing.
+  const title = Math.min(w.title, Math.max(0, inner - left - right));
+  const titleStart = w.padding + left + w.gap;
+  return {
+    left: { start: w.padding, width: left },
+    title: { start: titleStart, width: title },
+    right: { start: titleStart + title + w.gap, width: right },
+  };
+}
+
+describe("the strip's geometry", () => {
+  it("lays the row out in three tracks whose outer two are the same free size", () => {
+    expect(declaration(".topbar-row", "grid-template-columns")).toBe("1fr minmax(0, auto) 1fr");
+  });
+
+  // RULING 2. The title is centered on ITS OWN CONTENT against the whole
+  // strip: a wide right group and a narrow left one move it not at all.
+  it("centers the title on the whole strip with unequal left and right groups", () => {
+    // ARRANGE
+    const w: StubWidths = { row: 1000, padding: 8, gap: 8, left: 120, right: 340, title: 60 };
+    // ACT
+    const placed = placeTracks(w);
+    // ASSERT
+    expect(placed.title.start + placed.title.width / 2).toBe(w.row / 2);
+  });
+
+  // THE OVERFLOW RULE, stated as the ruling states it: the title clips, the
+  // groups keep every pixel they asked for.
+  it("clips a title too wide for the free space without shrinking either group", () => {
+    // ARRANGE
+    const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 200, right: 300, title: 400 };
+    // ACT
+    const placed = placeTracks(w);
+    // ASSERT
+    expect([placed.left.width, placed.right.width, placed.title.width]).toEqual([200, 300, 68]);
+  });
+
+  it("ellipsis-clips the title rather than letting it wrap or spill", () => {
+    expect([
+      declaration(".topbar-title", "min-width"),
+      declaration(".topbar-title", "overflow"),
+      declaration(".topbar-title", "text-overflow"),
+      declaration(".topbar-title", "white-space"),
+    ]).toEqual(["0", "hidden", "ellipsis", "nowrap"]);
+  });
+
+  it("hangs each flank group on its own edge of the strip", () => {
+    expect([
+      declaration(".topbar-left", "justify-self"),
+      declaration(".topbar-right", "justify-self"),
+    ]).toEqual(["start", "end"]);
+  });
+});
