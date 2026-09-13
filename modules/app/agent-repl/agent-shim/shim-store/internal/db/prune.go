@@ -145,20 +145,46 @@ func (d *DB) PruneWriteLedger(ctx context.Context) (PruneResult, error) {
 	return result, nil
 }
 
+// ledgerPruneDeleteSQL is the sweep's one statement, at package scope so the
+// plan it is judged by is EXPLAINed from the statement itself rather than from
+// a copy in a test that can drift away from it.
+//
+// The join to `cursor` is what makes the window a per-FILE question: each
+// row is measured against its own file's committed position, never against
+// a global one.
+//
+// `cursor` IS THE OUTER TABLE, AND THE `CROSS JOIN` IS WHAT FIXES IT THERE.
+// The retention bound is `c.offset - ?`, which is not a constant: it is a
+// column of the OTHER table. Written with the ledger outermost, SQLite can
+// use `write_ledger_source` for nothing — the bound is unknown until `c` is
+// resolved — so it read the whole covering index and probed `cursor` per
+// row: `SCAN l USING COVERING INDEX write_ledger_source`, 318k rows and
+// 111ms PER BATCH on the owner's store, paid even by the final batch that
+// deletes nothing, and paid while HOLDING THE WRITE SLOT every producer's
+// WriteBatch queues on. It is also why a sweep of 21 batches took 4650ms
+// (2026-09-13 16:20:00) — the scan is repeated once per batch, so the sweep
+// is quadratic in the ledger.
+//
+// Driven from `cursor` (2844 rows against 318k) the same index is an
+// ordinary seek: `SEARCH l USING COVERING INDEX write_ledger_source
+// (source_file_id=? AND source_offset>? AND source_offset<?)`, with the
+// LIMIT stopping the outer loop as soon as a batch is full. SQLite's
+// planner reorders a plain JOIN by its own row estimates and picked the
+// scan; `CROSS JOIN` is the documented way to state the order and have it
+// kept, which is why the order is not left to an estimate that can flip
+// back the next time the table statistics move.
+const ledgerPruneDeleteSQL = `DELETE FROM write_ledger WHERE rowid IN (
+  SELECT l.rowid FROM cursor c
+    CROSS JOIN write_ledger l
+      ON l.source_file_id = c.file_id
+     AND l.source_offset IS NOT NULL
+     AND l.source_offset < c.offset - ?
+   LIMIT ?)`
+
 // pruneLedgerBatch removes at most ledgerPruneBatch rows in ONE transaction,
 // through the same write slot every producer's batch goes through.
 func (d *DB) pruneLedgerBatch(ctx context.Context) (int64, error) {
 	base := logging.Fields{Operation: "store.db.ledger-sweep", Table: "write_ledger"}
-
-	// The join to `cursor` is what makes the window a per-FILE question: each
-	// row is measured against its own file's committed position, never against
-	// a global one.
-	const deleteSQL = `DELETE FROM write_ledger WHERE rowid IN (
-	  SELECT l.rowid FROM write_ledger l
-	    JOIN cursor c ON c.file_id = l.source_file_id
-	   WHERE l.source_offset IS NOT NULL
-	     AND l.source_offset < c.offset - ?
-	   LIMIT ?)`
 
 	tx, release, err := d.beginWrite(ctx)
 	if err != nil {
@@ -170,7 +196,7 @@ func (d *DB) pruneLedgerBatch(ctx context.Context) (int64, error) {
 	defer release()
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
-	res, err := tx.ExecContext(ctx, deleteSQL, d.ledgerRetention, ledgerPruneBatch)
+	res, err := tx.ExecContext(ctx, ledgerPruneDeleteSQL, d.ledgerRetention, ledgerPruneBatch)
 	if err != nil {
 		return 0, d.refuse(base, storagef(err, "pruning the write ledger"))
 	}
