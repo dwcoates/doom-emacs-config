@@ -167,7 +167,7 @@ func (r *resolver) SetOffer(ws ids.WorkspaceID, offer *frontendv1.HeldOffer) {
 	}
 }
 
-// render builds the whole tray: the composed heading and every held item, in
+// render builds the whole tray: every held item, in
 // display order.
 func (r *resolver) render(s *wsState, log dlog.Logger) *frontendv1.DaemonHoldTray {
 	items := make([]*frontendv1.DaemonHoldItem, 0, len(s.held)+1)
@@ -186,14 +186,6 @@ func (r *resolver) render(s *wsState, log dlog.Logger) *frontendv1.DaemonHoldTra
 		})
 	}
 	return &frontendv1.DaemonHoldTray{
-		Heading: &frontendv1.DaemonHoldHeading{Text: heading(len(items))},
-		Items:   items,
+		Items: items,
 	}
-}
-
-// heading composes the tray's heading. The COUNT IS THE ITEM COUNT, offer
-// included: the heading names what is drawn below it, and the offer is drawn
-// below it.
-func heading(items int) string {
-	return fmt.Sprintf("held (%d)", items)
 }
