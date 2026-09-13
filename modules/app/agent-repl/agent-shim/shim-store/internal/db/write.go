@@ -255,6 +255,9 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 //     caller walked a book that moved — and its recovery is a repaint. Logging
 //     it at `error` meant a healthy store wrote error records during normal
 //     operation, which is exactly how an error log stops being read.
+//   - A CANCELED CALL IS NOBODY'S FAULT. The caller's context ended before the
+//     statement did, so the database never failed and no operator action
+//     exists; it is recorded at `info` and the error is still returned.
 //   - A STORAGE FAILURE is this layer's own, with statement and table context
 //     nothing above can supply, so it stays a normal-level `error` record here
 //     and the server answers with a verbose trace instead of a second one.
@@ -269,6 +272,26 @@ func (d *DB) refuse(fields logging.Fields, err error) error {
 			fields.RefusalSite = site
 		}
 		d.log.LogVerbose(fields, "refused: %v", err)
+		return err
+	}
+	// A CALLER THAT HUNG UP IS NOT A STORAGE FAILURE. Every statement here runs
+	// under the request's own context, so a client that closed its connection,
+	// a watch whose consumer went away, or an rpc whose deadline passed
+	// cancels the statement mid-flight and the driver hands back
+	// context.Canceled. Nothing about the database went wrong, and nothing an
+	// operator can do would have prevented it: the store's own live store
+	// logged `store.db.live-work` at ERROR for a GetLiveWork the caller
+	// abandoned, which is a healthy store writing an error record during
+	// ordinary operation — exactly how an error log stops being read, and the
+	// same reasoning that already put a stale pointer below `error`.
+	//
+	// IT IS STILL RECORDED, at normal verbosity, and the error is still
+	// RETURNED unchanged for the server to shape into its failure arm. An
+	// abandoned call that left no record at all would be indistinguishable
+	// from one that never arrived.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		fields.Level = "info"
+		d.log.Log(fields, "abandoned: the caller's context ended before the statement finished: %v", err)
 		return err
 	}
 	fields.Level = "error"
