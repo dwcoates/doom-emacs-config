@@ -223,6 +223,24 @@ type Session struct {
 	Terminal *SessionTerminal
 }
 
+// TerminalHibernated is the session terminal the idle sweep records. It is
+// REHYDRATABLE — unlike "deleted", which refuses resurrection — because the
+// next mount of the workspace revives the session from the compacted
+// transcript the Hibernate directive left behind.
+//
+// IT LIVES HERE BECAUSE IT IS READ FROM THREE PLACES, not only written from
+// one: the sweep writes it, the boot's bring-up reads it to leave a
+// hibernated workspace asleep, and the open and select verbs read it to know
+// a workspace they must revive. One authority, on the type that carries it.
+const TerminalHibernated = "hibernated"
+
+// Hibernated reports whether this session was stood down by the idle sweep.
+// The terminal is cleared by the next PutSession, so a revived session stops
+// answering yes the moment its bring-up records its facts.
+func (s Session) Hibernated() bool {
+	return s.Terminal != nil && s.Terminal.Kind == TerminalHibernated
+}
+
 // SessionTerminal is a session's death with its cause.
 type SessionTerminal struct {
 	// Kind names the terminal ("deleted", "killed", "shim_died", "superseded").

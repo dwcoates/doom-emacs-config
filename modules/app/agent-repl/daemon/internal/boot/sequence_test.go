@@ -977,3 +977,132 @@ func TestABootAbandonedMidAdoptionRecordsAtInfo(t *testing.T) {
 		})
 	}
 }
+
+// TestABootStartsANonAdoptedOpenWorkspace pins the owner's ruling of
+// 2026-09-13: an open workspace is never session-less, so a row the user left
+// open whose shim did not survive gets its session started at boot.
+func TestABootStartsANonAdoptedOpenWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(h.started) != 1 || h.started[0] != ws.ID {
+		t.Fatalf("started = %v, want [%v]", h.started, ws.ID)
+	}
+	if len(report.BroughtUp) != 1 || report.BroughtUp[0] != ws.ID {
+		t.Fatalf("report.BroughtUp = %v, want [%v]", report.BroughtUp, ws.ID)
+	}
+}
+
+func TestABootLeavesAHibernatedWorkspaceAsleep(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.hibernate(t, ws)
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(h.started) != 0 {
+		t.Fatalf("started = %v, want none: hibernation is deliberate", h.started)
+	}
+	if len(report.HibernatedLeft) != 1 || report.HibernatedLeft[0] != ws.ID {
+		t.Fatalf("report.HibernatedLeft = %v, want [%v]", report.HibernatedLeft, ws.ID)
+	}
+}
+
+func TestOneFailedBringUpDoesNotStopTheNext(t *testing.T) {
+	// Arrange: two client-less workspaces, the FIRST of which will not start.
+	h := newHarness(t)
+	first := h.register(t, t.TempDir(), sessionlock.StateFree)
+	second := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.startErrs[first.ID] = errBoom
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.BringUpFailed) != 1 || report.BringUpFailed[0] != first.ID {
+		t.Fatalf("report.BringUpFailed = %v, want [%v]", report.BringUpFailed, first.ID)
+	}
+	if len(report.BroughtUp) != 1 || report.BroughtUp[0] != second.ID {
+		t.Fatalf("report.BroughtUp = %v, want [%v]", report.BroughtUp, second.ID)
+	}
+}
+
+func TestABootStartsNoSessionForAClosedRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	if err := h.db.SetClosed(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("SetClosed: %v", err)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(h.started) != 0 {
+		t.Fatalf("started = %v, want none for a closed row", h.started)
+	}
+	if len(report.BroughtUp) != 0 {
+		t.Fatalf("report.BroughtUp = %v, want none for a closed row", report.BroughtUp)
+	}
+}
+
+// TestAnUndeterminedWorkspaceIsNeverStarted pins the other half of "could not
+// tell is never read as free": spawning a second shim onto a conversation a
+// survivor may still own is the loss that discipline prevents.
+func TestAnUndeterminedWorkspaceIsNeverStarted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateUnknown)
+	h.probeErrs[ws.Dir] = errBoom
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(h.started) != 0 {
+		t.Fatalf("started = %v, want none for an undetermined workspace", h.started)
+	}
+	if len(report.Undetermined) != 1 || report.Undetermined[0] != ws.ID {
+		t.Fatalf("report.Undetermined = %v, want [%v]", report.Undetermined, ws.ID)
+	}
+}
+
+func TestTheBringUpSummaryIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.boot.bring_up") {
+		t.Fatalf("records = %+v, want an info bring-up summary", h.log.Records())
+	}
+}
