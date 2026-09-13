@@ -155,19 +155,26 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext): HTMLElement {
   return card;
 }
 
-/** The lease/keep-alive/starting cards borrow their own legacy frames. */
+/**
+ * `held-right` is the RAIL, and every held prompt wears it (owner ruling 1,
+ * 2026-09-13). A held prompt is the user's own prompt bubble before it is one,
+ * so it hangs on the rail the released bubble will hang on — the same side and
+ * the same max-width rule as `.bubble.user` — rather than on the agent's left
+ * rail it used to borrow. Nothing else about the card changes: the frames below
+ * still say WHAT is holding it.
+ */
 function holdCardClass(hold: string | null): string {
   switch (hold) {
     case null:
-      return "queued-card";
+      return "queued-card held-right";
     case "shutdown":
     case "buildRefresh":
-      return "queued-card lease-card";
+      return "queued-card held-right lease-card";
     default:
       // A keep-alive and a session bring-up are the same statement — the
       // machinery holds this, no classifier judged it, it cannot be forced —
       // which is the card the revival hold always wore.
-      return "queued-card keep-alive-card";
+      return "queued-card held-right keep-alive-card";
   }
 }
 
