@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- shim cold gate: a cold read under 70,000 tokens no longer gates — `judgeCold` and `SetSessionModel` proceed warm and record one INFO line naming the size, the lapse and the floor (owner ruling, cold-gate floor, 2026-09-13)
 - webapp hold tray: an empty tray draws nothing — `drawDaemonHoldTray` answers `null`, the mount empties the host, and `#hold-tray:empty` collapses the region; the "nothing held" line is gone (owner ruling 3, 2026-09-13)
 
 - webapp hold tray: the `held (N)` heading is no longer drawn — the daemon still composes `DaemonHoldTray.heading` and the tray still requires it, but nothing puts it on screen (owner ruling 2, 2026-09-13)
