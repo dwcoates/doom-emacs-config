@@ -13,6 +13,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- sidecar: a watched file getting its FIRST book is recorded at info naming its resolution source, and only a move between two non-empty books stays warn (realtest 5, identity-rekey)
 - elisp: the forbidden-vendor-calls refusal in prompt-summary records at info instead of warn, once per process, still naming `AGENT_REPL_FORBID_VENDOR_CALLS` (realtest 7 finding C)
 - shim: the store's `unknown_agent` is decoded as "no rows for this book yet" — the re-announcement for a new WatchSession serves an empty live membership at debug with no `storeUnreachable` fault, and reconciliation states an empty book rather than warning, while a genuine transport failure keeps every warn, error and fault (finding B)
 - sidecar: the boot `start` record names the roots as discovery globs them (symlink-resolved) rather than the raw `--config-roots`/`--spool-root` flag spellings (realtest sweep 2026-09-12, finding D)
