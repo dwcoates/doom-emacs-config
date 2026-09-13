@@ -185,6 +185,18 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 		return address, nil
 	case *agentreplv1.ClientLogResponse_Error:
 		c.invalidateWorkspace(address, workspace.GetId())
+		if response.Msg.GetError().GetUnknownWorkspace() != nil {
+			// THE WORKSPACE DEPARTED WHILE THIS RECORD WAS IN FLIGHT. The
+			// roster named it when the ref was resolved and the daemon had
+			// forgotten it by the time the record landed — the same conclusion
+			// the roster path reaches when the row is already gone, reached one
+			// round trip later. Marking it unresolvable is what stops the
+			// forwarder for this workspace: forwardLoop does not retry the
+			// sentinel, narrates it at DEBUG, and persists the record
+			// UNATTRIBUTED in the global sink, so nothing is lost.
+			return address, fmt.Errorf("ClientLog at %s: workspace %q is no longer registered: %w",
+				address, workspace.GetId(), logging.ErrForwardWorkspaceUnresolvable)
+		}
 		return address, fmt.Errorf("ClientLog at %s was refused", address)
 	default:
 		c.invalidateWorkspace(address, workspace.GetId())
