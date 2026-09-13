@@ -676,6 +676,7 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
           canUseTool: spec.canUseTool,
           abortController: spec.abortController,
           ...(spec.model === undefined ? {} : { model: spec.model }),
+          ...(spec.onStderr === undefined ? {} : { onStderr: spec.onStderr }),
           ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
         },
         spec.prompt,

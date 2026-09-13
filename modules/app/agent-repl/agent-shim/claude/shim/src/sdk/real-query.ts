@@ -82,6 +82,16 @@ export interface RealQuerySpec {
   readonly abortController: AbortController;
   /** Resolve the metaprompt against this home instead of the real one (tests). */
   readonly home?: string;
+  /**
+   * Every chunk the vendor child writes to stderr.
+   *
+   * THE ONLY CHANNEL THE CLI HAS FOR ITS OWN REFUSALS. A resume the binary will
+   * not honour is printed there and then followed by silence on the message
+   * stream, so a shim that does not read it can report the silence and never
+   * the reason. Absent means the caller does not want it, not that the child
+   * has none.
+   */
+  readonly onStderr?: (data: string) => void;
 }
 
 /**
@@ -109,6 +119,7 @@ export function realQueryOptions(spec: RealQuerySpec): Options {
     // making the account root authoritative rather than inherited by luck.
     env: { ...process.env, CLAUDE_CONFIG_DIR: spec.claudeConfigDir },
     ...(spec.model === undefined ? {} : { model: spec.model }),
+    ...(spec.onStderr === undefined ? {} : { stderr: spec.onStderr }),
     ...(spec.binding.kind === "fresh"
       ? { sessionId: spec.binding.sessionId }
       : {

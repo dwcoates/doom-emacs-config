@@ -235,6 +235,33 @@ export function resultMessage(uuid = "22222222-2222-4222-8222-222222222222"): Sd
   } as unknown as SdkMessage;
 }
 
+/**
+ * A `result` the vendor marks as an ERROR.
+ *
+ * The grounded shape of a refused opening: the CLI answers with an error result
+ * naming what it refused, and then says nothing further.
+ */
+export function errorResultMessage(
+  overrides: Partial<{ errors: string[]; uuid: string }> = {},
+): SdkMessage {
+  return {
+    type: "result",
+    subtype: "error_during_execution",
+    duration_ms: 1,
+    duration_api_ms: 1,
+    is_error: true,
+    num_turns: 0,
+    errors: overrides.errors ?? ["No conversation found with session ID: session-1"],
+    stop_reason: null,
+    total_cost_usd: 0,
+    usage: { input_tokens: 0, output_tokens: 0 },
+    modelUsage: {},
+    permission_denials: [],
+    uuid: overrides.uuid ?? "44444444-4444-4444-8444-444444444444",
+    session_id: "session-1",
+  } as unknown as SdkMessage;
+}
+
 /** An in-memory record plane that remembers everything it was handed. */
 export class RecordingPersistence implements Persistence {
   readonly durable: PersistEntry[] = [];
