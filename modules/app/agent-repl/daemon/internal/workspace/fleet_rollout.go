@@ -581,13 +581,16 @@ func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool)
 		if watcher, ok := f.sessionWatcher(ws); ok {
 			watcher.SessionEnding("the daemon is ending the session")
 		}
+		// THE LATCH IS ARMED BEFORE THE ASK, so it is armed before the
+		// ESCALATION the ask's failure leads to. `Fleet.Stop` below is
+		// unconditional, and a shim that never answered the rpc never latched
+		// anything through it -- the realtest's preflight stood the daemon
+		// down while both shims were hung, and the forced stop that followed
+		// was recorded as `daemon.shimclient.exit` ERROR "shim died" plus four
+		// `daemon.shimclient.redial` WARNs for a teardown this daemon ordered.
+		ordered := shim.StandDown()
 		if err := shim.KillSession(ctx, force); err != nil {
-			if record, recErr := f.deps.DB.Workspace(ctx, ws); recErr == nil {
-				if log, logErr := f.deps.Log.Workspace(record.Dir); logErr == nil {
-					log.Warn(opBringUp, "the session kill did not answer; stopping the process anyway",
-						dlog.Context{"workspace": string(ws), "force": force, "cause": err.Error()})
-				}
-			}
+			f.logKillDidNotAnswer(ctx, ws, force, ordered, err)
 		}
 	} else if live {
 		// A SHIM WITH NO SESSION IS STOPPED, NOT DIRECTED. Asking it to end a
@@ -598,6 +601,32 @@ func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool)
 		f.logNoSessionToKill(ctx, ws, force)
 	}
 	return f.Stop(ctx, ws, force)
+}
+
+// logKillDidNotAnswer records a session kill the shim did not answer, ahead of
+// the process stop that follows it regardless.
+//
+// IT IS INFO WHEN THIS DAEMON ORDERED THE STAND-DOWN, because then the
+// escalation is the mechanism working: the verb's whole contract is that a
+// shim which will not answer is still stopped, and the stop is this daemon's
+// own act, recorded on its own. It stays WARN for a kill outside a stand-down
+// this daemon ordered -- a DETACHED client arms nothing, because that process
+// belongs to the successor daemon and this one is ending nothing of its.
+func (f *Fleet) logKillDidNotAnswer(ctx context.Context, ws ids.WorkspaceID, force, ordered bool, cause error) {
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return
+	}
+	log, err := f.deps.Log.Workspace(record.Dir)
+	if err != nil {
+		return
+	}
+	evidence := dlog.Context{"workspace": string(ws), "force": force, "cause": cause.Error()}
+	if ordered {
+		log.Info(opBringUp, "the session kill did not answer; stopping the process anyway", evidence)
+		return
+	}
+	log.Warn(opBringUp, "the session kill did not answer; stopping the process anyway", evidence)
 }
 
 // logNoSessionToKill records, at DEBUG, that a stand-down skipped the session

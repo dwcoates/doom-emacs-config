@@ -153,10 +153,11 @@ type fakeClient struct {
 
 // standDown latches the fake as having been asked to end its session, which is
 // what every route to a deliberate teardown does to the real client.
-func (c *fakeClient) standDown() {
+func (c *fakeClient) StandDown() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.standingDown = true
+	return true
 }
 
 // StandingDown answers the stand-down latch.

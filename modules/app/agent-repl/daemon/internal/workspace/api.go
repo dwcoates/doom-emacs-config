@@ -309,6 +309,15 @@ type Shim interface {
 	Answer(ctx context.Context, agent *conversationv1.AgentId, answer *conversationv1.AgentAnswer) error
 	// KillSession ends the session, forced when the caller says so.
 	KillSession(ctx context.Context, force bool) error
+	// StandDown arms the shim client's stand-down latch for a teardown THIS
+	// DAEMON is ordering, answering whether it was armed.
+	//
+	// Every verb here that ends a session asks the shim first and stops the
+	// process unconditionally afterwards, so the escalation — the stop after a
+	// kill that did not answer — is itself part of the ordered teardown. The
+	// latch has to be armed BEFORE it, or the exit and the redial that follow
+	// read a departure this daemon ordered as one that happened to it.
+	StandDown() bool
 }
 
 // ColdResume is the resume a cold-gate answer re-opens with: the conversation

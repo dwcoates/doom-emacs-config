@@ -712,3 +712,70 @@ func TestKillSessionSkipsTheDirectiveWhenNoSessionWasStarted(t *testing.T) {
 		})
 	}
 }
+
+// TestKillSessionArmsTheStandDownLatchBeforeTheAsk covers the ORDER the
+// escalation depends on: the process stop after a kill that did not answer is
+// a teardown this daemon ordered, and every side that later sees the departure
+// -- the exit watcher, the redialer, the adopted-death witness -- reads the
+// latch to tell it from a shim that died on its own.
+func TestKillSessionArmsTheStandDownLatchBeforeTheAsk(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.remember(ws.ID, &live{client: f.client, sessionStarted: true})
+
+	// Act.
+	if err := f.fleet.KillSession(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+
+	// Assert.
+	if !f.client.standDownBeforeKill {
+		t.Fatal("the stand-down latch was not armed before the KillSession ask")
+	}
+}
+
+// TestKillSessionRecordsTheUnansweredKillByWhoOrderedIt covers the record the
+// escalation writes. A forced stop under a stand-down THIS DAEMON ordered is
+// the mechanism working and is recorded at INFO; a kill that does not answer
+// outside one -- a DETACHED client, whose process belongs to the successor
+// daemon -- stays a WARN.
+func TestKillSessionRecordsTheUnansweredKillByWhoOrderedIt(t *testing.T) {
+	tests := []struct {
+		name      string
+		refused   bool
+		wantLevel string
+	}{
+		{name: "the daemon ordered this stand-down", refused: false, wantLevel: "info"},
+		{name: "the kill is outside a stand-down this daemon ordered", refused: true, wantLevel: "warn"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.client.standDownRefused = tt.refused
+			f.client.killSessionErr = errors.New("the shim never answered")
+			f.fleet.remember(ws.ID, &live{client: f.client, sessionStarted: true})
+			before := len(f.log.logger.Records())
+
+			// Act.
+			if err := f.fleet.KillSession(context.Background(), ws.ID, true); err != nil {
+				t.Fatalf("KillSession: %v", err)
+			}
+
+			// Assert.
+			for _, record := range f.log.logger.Records()[before:] {
+				if record.Message != "the session kill did not answer; stopping the process anyway" {
+					continue
+				}
+				if record.Level != tt.wantLevel {
+					t.Fatalf("the unanswered kill was recorded at %q, want %q", record.Level, tt.wantLevel)
+				}
+				return
+			}
+			t.Fatalf("records = %+v, want the unanswered kill recorded at %s", f.log.logger.Records()[before:], tt.wantLevel)
+		})
+	}
+}
