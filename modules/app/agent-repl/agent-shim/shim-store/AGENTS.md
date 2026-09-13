@@ -507,10 +507,11 @@ arms are derived from, and each one is logged once with `refusal_site`.
   invariant violations and refusals are `warn`, except the `unknown_agent`
   class, which is the `info` above; owned failures are `error`.
   Slow queries are the
-  one deliberate exception: a statement past its budget emits a normal-verbosity
-  `warn` at `store.db.slow-query` with `statement`, `duration_ms`,
-  `lock_wait_ms`, `rows` and `threshold_ms`, because by the time an operator knows to look the stall is
-  over. The budget is NOT one fixed number. A point query's budget is the fixed
+  one deliberate exception: a statement past its budget emits a
+  normal-verbosity record at `store.db.slow-query` with `statement`,
+  `duration_ms`, `lock_wait_ms`, `rows`, `threshold_ms` and
+  `over_budget_recent`/`over_budget_window`, because by the time an operator
+  knows to look the stall is over. The budget is NOT one fixed number. A point query's budget is the fixed
   `AGENT_REPL_STORE_SLOW_QUERY_MS` (default 250ms). A `write_batch` is bulk
   background I/O, not a point query — every write-path statement is fully
   indexed (`MAX(write_seq)` is a covering-index seek; the `write_id` and
@@ -540,6 +541,25 @@ arms are derived from, and each one is logged once with `refusal_site`.
   missing index. It is emitted with every statement family, zero included — a
   statement with no wait to measure reports `0`, which is a fact, not an
   omission.
+- **A SINGLE OVER-BUDGET SAMPLE IS `info`; A FAMILY THAT IS PERSISTENTLY OVER
+  BUDGET IS `warn`.** `duration_ms` is WALL CLOCK, and wall clock on a shared
+  host measures the host as much as the statement — modernc's SQLite runs
+  in-process on the calling goroutine, so a descheduled goroutine and a slow
+  statement produce the same number and the store cannot tell them apart from
+  one sample. Measured on 2026-09-13: fifteen `slow-query` warnings in one
+  hour, every one `lock_wait_ms=0` and the largest `duration_ms=2543 rows=25`,
+  while the SAME batch shape against a byte-for-byte copy of that same 1.65 GB
+  database ran in 1-2ms — 400 consecutive 7-row batches with six concurrent
+  page readers and a 113 MB WAL had a worst case of 15ms, with begin,
+  `MAX(write_seq)`, the probes and the commit each sub-millisecond. What the
+  budget exists to catch is a property of the STATEMENT — a lost index, a
+  reintroduced scan — so it makes every statement of the family slow; host
+  contention takes whichever statement was unlucky. So the store keeps the last
+  `BudgetWindow` (16) verdicts per statement family and warns once
+  `BudgetWarnAt` (8) of them are over budget. An isolated sample is still
+  RECORDED, at normal verbosity and at `info`, carrying the window that says
+  why it was not called a defect; nothing is dropped and no threshold was
+  loosened.
 
 Read store records and harvest run windows through `../../bin/logs.sh`; the
 full path, rotation, attribution, and level-switch table is in
