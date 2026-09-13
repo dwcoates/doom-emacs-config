@@ -159,7 +159,7 @@ this; the runner is what gets out of their way.
 
 ## The set
 
-Startup and shape
+Startup and shape — COMPLETE
 1. Start Emacs cold. Time to usable; which workspaces open and when; what the
    modeline and tab bar show while waiting.
 
@@ -179,7 +179,7 @@ Startup and shape
 3. Start Emacs with the daemon down. It is built and spawned; time and
    feedback for that path.
 
-Workspaces
+Workspaces — COMPLETE
 4. Switch between workspaces with `s-{`, `s-}` and `M-<n>`. Selection, tab
    highlight, panel and composer all follow.
 5. Create a workspace (`SPC TAB n` — it asks "Initial prompt: " and nothing
@@ -236,35 +236,39 @@ Scale
 ## Status
 
 Sweeps are named by their run directory stamp under `~/.claude-emacs/realtest/`.
-The two most recent are 2026-09-13 111010 and 2026-09-13 121317. Every sweep now
-also opens with the BETWEEN-SWEEPS GAP SCAN, which holds the window since the
-previous sweep ended — when no realtest was running and the editor was the
-owner's — to the same bar as a run window, with no allowlist. It ran for the
-first time in sweep 121317 and reported 31 findings in the 11:12–12:13 hour;
-most were already closed by the log sweeps merged at 12:10, and the rest are
-dispatched.
+The three most recent are 2026-09-13 13:31 (rt-run21), 13:4x (rt-run22) and
+13:5x (rt-run23), all run under the once-per-sweep focus policy (owner ruling,
+landed 2026-09-13). Every sweep opens with the BETWEEN-SWEEPS GAP SCAN, which
+holds the window since the previous sweep ended — when no realtest was running
+and the editor was the owner's — to the same bar as a run window, with no
+allowlist. It reported 0 findings in rt-run22 and rt-run23, and exactly one in
+rt-run21: the sidecar's aged-unowned-spool `hold-expired` warning, which awaits
+the owner's ruling.
+
+Realtests 1–8 ALL PASSED with a clean harvest in rt-run21. In rt-run22 all
+passed except 6, whose chord was lost under a flood of `<triple-wheel-up>`
+mouse events in the key ring (the owner scrolling over Emacs mid-run; not a
+product finding); 6 then passed alone in rt-run23. ALL EIGHT are TWICE-GREEN as
+of 2026-09-13.
 
 | # | status | ruling |
 |---|---|---|
 | 0 | done (cc93abb9d) | retire the old playtest layer |
-| 1 | PASSED 2026-09-13 (sweeps 111010 and 121317), clean harvest both times — TWICE-GREEN | `TestRealtestStartTheEditor` |
-| 2 | PASSED 2026-09-13 (sweeps 111010 and 121317), clean harvest both times — TWICE-GREEN (already twice-green on 2026-09-12) | `TestRealtestRestartWithTheDaemonUp` |
-| 3 | PASSED 2026-09-13 (sweeps 111010 and 121317), clean harvest both times — TWICE-GREEN (already twice-green on 2026-09-12) | `TestRealtestStartWithTheDaemonDown` |
-| 4 | PASSED 2026-09-13 (sweeps 111010 and 121317), clean harvest both times — TWICE-GREEN | `TestRealtestSwitchBetweenWorkspaces`; the three-tab bar the reordering finding asked for |
-| 5 | every product assertion passes in both sweeps; FAILING only on the harness's C-g press ("C-g DID NOT REACH EMACS"), and it harvested the elisp central-log fallback warning for the freshly created workspace | `TestRealtestCreateWorkDeleteAWorkspace`; C-g judged a harness key-delivery failure, fix in flight on `realtest/quit-press`; the fallback warning's fix is in flight on `elisp/gap-warnings` |
-| 6 | every product assertion passes in both sweeps; FAILING only on the harness's C-g press ("C-g DID NOT REACH EMACS") | `TestRealtestRegisterAndReopen`; same harness key-delivery failure, `realtest/quit-press` |
-| 7 | every product assertion passes in both sweeps; FAILING only on the harness's C-g press ("C-g DID NOT REACH EMACS") | `TestRealtestForkAWorkspace`; the phantom shim adoption is gone; same harness key-delivery failure, `realtest/quit-press` |
-| 8 | every product assertion passes in both sweeps; FAILING only on the harness's C-g press ("C-g DID NOT REACH EMACS") | `TestRealtestPriorityCloseReopenKill`; same harness key-delivery failure, `realtest/quit-press` |
-| 9–14 | not yet authored | Conversation |
+| 1 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestStartTheEditor` |
+| 2 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestRestartWithTheDaemonUp` |
+| 3 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestStartWithTheDaemonDown` |
+| 4 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestSwitchBetweenWorkspaces`; the three-tab bar the reordering finding asked for |
+| 5 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestCreateWorkDeleteAWorkspace`; C-g resolved by the once-per-sweep focus policy (docs/REALTEST-JUDGEMENT-CALLS.md, "The vanishing C-g, resolved (2026-09-13 13:31, lead)") |
+| 6 | PASSED 2026-09-13 (rt-run21 and rt-run23) — TWICE-GREEN; rt-run22's chord was lost to a `<triple-wheel-up>` flood in the key ring, not a product finding | `TestRealtestRegisterAndReopen`; same C-g resolution |
+| 7 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestForkAWorkspace`; the phantom shim adoption is gone; same C-g resolution |
+| 8 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestPriorityCloseReopenKill`; same C-g resolution |
+| 9–14 | not yet authored; owner-rules-first | Conversation — the next section |
 | 15–16 | not yet authored | Panels and windows |
 | 17–19 | not yet authored | Daemon lifecycle |
 | 20–22 | not yet authored | Failure |
 | 23–24 | not yet authored | Scale |
 
-The C-g failure is the harness's own: the driver posts a pid-addressed CGEvent
-that Emacs's `(recent-keys)` never gains, while the lead verified live that the
-same driver's C-g DOES dismiss a `read-string` when invoked by hand. An agent is
-finding the difference on `realtest/quit-press`.
+The startup section (1–3) and the workspaces section (4–8) are COMPLETE.
 
 The lead updates this table as each realtest runs, is ruled on, and is
 confirmed.
