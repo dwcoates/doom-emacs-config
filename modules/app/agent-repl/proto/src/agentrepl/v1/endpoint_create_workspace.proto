@@ -168,6 +168,9 @@ message CreateWorkspaceError {
     CreateWorkspaceWorktreeCreationFailed worktree_creation_failed = 10;
     // Spawning the created workspace's shim failed.
     CreateWorkspaceSpawnFailed spawn_failed = 11;
+    // A one-shot was asked for in a repository that states no one-shot
+    // policy of its own.
+    CreateWorkspaceOneShotPolicyMissing one_shot_policy_missing = 12;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -197,4 +200,24 @@ message CreateWorkspaceWorktreeCreationFailed {
 message CreateWorkspaceSpawnFailed {
   // The spawn's own account of the failure.
   string detail = 1;
+}
+
+// A ONE-SHOT RUNS THE REPOSITORY'S OWN POLICY, and this repository states
+// none. A repository declares its one-shot and merge policy in
+// `.agent-repl/prompts/` at its main checkout root; the daemon's own prompt
+// corpus is the policy of exactly one repository — the one the daemon's
+// checkout lives in — and is NEVER a fallback for any other. So a one-shot
+// asked for in a repository missing any required policy brief is refused
+// before anything is minted, rather than run under a policy its author
+// never wrote.
+message CreateWorkspaceOneShotPolicyMissing {
+  // The repository's main checkout root, as the daemon resolved it.
+  string repository_root = 1;
+  // The policy directory that was read, i.e.
+  // `<repository_root>/.agent-repl/prompts`.
+  string policy_dir = 2;
+  // The required policy files that directory does not hold, by file name.
+  // The PR follow-up brief is required only of an open-pr finish, so which
+  // files are required depends on the finish the create asked for.
+  repeated string missing_files = 3;
 }
