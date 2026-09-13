@@ -7,6 +7,11 @@ import (
 	"claude-repld/internal/prompts"
 )
 
+// testPolicy is the policy source the decoration unit tests read from. The
+// fixture's loader ignores the directory, so the source's identity is all that
+// matters here: the briefs come from the fixture's own table.
+var testPolicy = prompts.Source{Dir: "/prompts", Kind: prompts.SourceCorpus, RepositoryRoot: "/repo"}
+
 func TestDecorateOneShotBracketsWhatTheUserDidNotType(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -14,7 +19,7 @@ func TestDecorateOneShotBracketsWhatTheUserDidNotType(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act.
-	got, err := v.decorateOneShot("USER TEXT", &OneShotFinish{SelfMerge: true})
+	got, err := v.decorateOneShot("USER TEXT", &OneShotFinish{SelfMerge: true}, testPolicy)
 
 	// Assert: the user's own words are the only unbracketed span.
 	if err != nil {
@@ -32,7 +37,7 @@ func TestDecorateOneShotSelfMergeNamesTheWorkspaceSkill(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act.
-	got, err := v.decorateOneShot("task", &OneShotFinish{SelfMerge: true})
+	got, err := v.decorateOneShot("task", &OneShotFinish{SelfMerge: true}, testPolicy)
 
 	// Assert.
 	if err != nil {
@@ -50,7 +55,7 @@ func TestDecorateOneShotOpenPrCarriesOnlyTheFirstGate(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act.
-	got, err := v.decorateOneShot("task", &OneShotFinish{OpenPr: &OneShotOpenPr{}})
+	got, err := v.decorateOneShot("task", &OneShotFinish{OpenPr: &OneShotOpenPr{}}, testPolicy)
 
 	// Assert: the CICD-gated wrap-up is a post-prompt, so the agent is never
 	// told how to finish before it has started.
@@ -107,7 +112,7 @@ func TestDecorateOneShotRefusesWithNoFinish(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act.
-	_, err := v.decorateOneShot("task", nil)
+	_, err := v.decorateOneShot("task", nil, testPolicy)
 
 	// Assert.
 	if err == nil {
@@ -122,7 +127,7 @@ func TestDecorateOneShotRefusesAFinishNamingNeitherArm(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act.
-	_, err := v.decorateOneShot("task", &OneShotFinish{})
+	_, err := v.decorateOneShot("task", &OneShotFinish{}, testPolicy)
 
 	// Assert.
 	if err == nil {
@@ -141,7 +146,7 @@ func TestDecorateOneShotRefusesAMisspelledPlaceholder(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act.
-	_, err := v.decorateOneShot("task", &OneShotFinish{SelfMerge: true})
+	_, err := v.decorateOneShot("task", &OneShotFinish{SelfMerge: true}, testPolicy)
 
 	// Assert.
 	if err == nil {
@@ -230,7 +235,7 @@ func TestOpenPrFollowupNamesBothCommands(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act.
-	got, err := v.openPrFollowup(&OneShotOpenPr{AddToMergeQueue: true})
+	got, err := v.openPrFollowup(&OneShotOpenPr{AddToMergeQueue: true}, testPolicy)
 
 	// Assert.
 	if err != nil {
