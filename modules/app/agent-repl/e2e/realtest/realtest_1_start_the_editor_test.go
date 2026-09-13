@@ -489,14 +489,10 @@ func showEmacsAndWaitForPaint(ctx context.Context, t *testing.T, run int, client
 	if err != nil {
 		t.Fatalf("cold start %d: read which application is frontmost after Emacs was shown: %v", run, err)
 	}
-	if before != after {
-		note := fmt.Sprintf("showing Emacs left focus on %q, not on %q where it started: the driver activates "+
-			"Emacs for each keypress and must restore the prior frontmost app, and here it did not", after, before)
-		manifest.Notes = append(manifest.Notes, note)
-		t.Errorf("%s", note)
-	} else if driver != nil {
-		manifest.Notes = append(manifest.Notes,
-			fmt.Sprintf("Emacs was brought forward for the show phase and focus was restored to %q", after))
+	focusNote, focusFinding := focusAfterPressesNote("the show phase", sweepHoldsFocus(), before, after)
+	manifest.Notes = append(manifest.Notes, focusNote)
+	if focusFinding {
+		t.Errorf("%s", focusNote)
 	}
 
 	// The verdict on the paint itself belongs to assertEveryWorkspacePainted,
@@ -774,7 +770,7 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	if err != nil {
 		t.Fatalf("read the Emacs pid for the key driver: %v", err)
 	}
-	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client}
+	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client, KeepFocus: sweepHoldsFocus()}
 	if err := driver.Build(ctx); err != nil {
 		// SURFACED, NOT WORKED AROUND. The plan rules that if key delivery to
 		// Emacs is impossible, the owner decides the alternative; there is no
@@ -830,14 +826,10 @@ func proveKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	if err != nil {
 		t.Fatalf("read which application is frontmost after the key self-test: %v", err)
 	}
-	if before != after {
-		note := fmt.Sprintf("the key self-test left focus on %q, not on %q where it started: the driver "+
-			"activates Emacs for each keypress and must restore the prior frontmost app, and here it did not", after, before)
-		manifest.Notes = append(manifest.Notes, note)
+	note, finding := focusAfterPressesNote("the key self-test", driver.KeepFocus, before, after)
+	manifest.Notes = append(manifest.Notes, note)
+	if finding {
 		t.Errorf("%s", note)
-	} else {
-		manifest.Notes = append(manifest.Notes,
-			fmt.Sprintf("the key self-test restored focus to %q after momentarily activating Emacs for each keypress", after))
 	}
 	return driver
 }

@@ -16,6 +16,9 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - webapp hold tray: the `held (N)` heading is no longer drawn — the daemon still composes `DaemonHoldTray.heading` and the tray still requires it, but nothing puts it on screen (owner ruling 2, 2026-09-13)
 
 - webapp hold tray: a held prompt card hangs on the `.bubble.user` right rail with that bubble's own 60% width rule (`held-right`), instead of the agent's left rail (owner ruling 1, 2026-09-13)
+- realtest: the `C-g` at a standing prompt is bracketed by an eighteen-field diagnostic capture — one before the press and one `emacsclient` eval immediately after the quiet window — written verbatim to `quit-probe.txt` and into the failure note (`e2e/realtest/quitprobe.go`; the unsolved realtests 5-8 quit, no product change)
+
+- realtest: the sweep steals focus ONCE at its start (`TestSweepFocusTake`, `keydriver --take`) and hands it back ONCE from `bin/realtest.sh`'s EXIT trap (`TestSweepFocusGiveBack`, `keydriver --give-back`), and no press hands focus back any more (`keydriver --keep-focus`, `KeyDriver.KeepFocus`) (owner ruling 2026-09-13)
 
 - elisp: a workspace that becomes OPEN in this editor session opens its agent-repl panels at once, before it is switched to (`agent-repl--panels-open-on-arrival` called from `agent-repl-roster--open-tab`), with the startup roster exempt and a plain switch untouched (owner ruling 2026-09-13, look-and-feel aside #6)
 

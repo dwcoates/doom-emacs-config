@@ -1080,6 +1080,19 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 	// that lands while Emacs is running lisp is handed to `handle_interrupt`
 	// instead of being read as a key — so the confirmation used to be the thing
 	// that swallowed the press it was confirming.
+	// THE DIAGNOSTIC CAPTURE BRACKETS THE PRESS (quitprobe.go). It reads the
+	// prompt-raising state now, and the editor's input state again at the first
+	// instant after the quit's quiet window, and both go verbatim into the run
+	// directory and into the failure note. It changes nothing about how the
+	// press is made or judged: the `C-g` of realtests 5 through 8 is posted
+	// with a clean receipt and vanishes, and every reading this harness took
+	// before was on the wrong side of wherever it goes.
+	probeBefore := ReadQuitProbe(ctx, client, fmt.Sprintf("BEFORE the quit press, with %q standing", prompt))
+	probeAfter := QuitProbe{
+		When:    fmt.Sprintf("AFTER the quit press's quiet window, with %q standing when it was posted", prompt),
+		Failure: "the press never reached its quiet window, so this capture was never taken",
+	}
+
 	reported := false
 	arrived := false
 	if driver != nil {
@@ -1092,7 +1105,12 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 				}
 				return read == "", nil
 			},
+			AfterQuietWindow: func(ctx context.Context) {
+				probeAfter = ReadQuitProbe(ctx, client, probeAfter.When)
+			},
 		})
+		wsActRecordQuitProbe(t, client, manifest, prompt, probeBefore, probeAfter,
+			receipt.EffectObserved && pressErr == nil)
 		arrived = receipt.Verdict == DeliveryArrived
 		switch {
 		case pressErr != nil:
@@ -1166,6 +1184,39 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 	t.Fatalf("%s", note)
 }
 
+// wsActRecordQuitProbe files the two captures that bracket a quit press.
+//
+// THE FILE IS ALWAYS WRITTEN, THE NOTE ONLY WHERE THE PRESS DID NOT VISIBLY
+// WORK. A press whose prompt closed inside the hold needs no evidence — the
+// chord is proven — and putting eighteen fields into the manifest for it would
+// bury the presses that DID vanish. The captures still land on disk either way,
+// because a run in which one prompt closed and another did not is exactly the
+// comparison the next sweep needs (quitprobe.go carries what is unsolved).
+//
+// A capture that could not be filed is REPORTED. This is the whole artifact
+// the next sweep is supposed to read, and losing it silently would cost another
+// sweep.
+func wsActRecordQuitProbe(t *testing.T, client *Client, manifest *Manifest, prompt string,
+	before, after QuitProbe, dismissed bool) {
+	t.Helper()
+	path, err := AppendQuitProbes(client.Scratch, before, after)
+	if err != nil {
+		note := fmt.Sprintf("THE QUIT DIAGNOSTIC CAPTURE COULD NOT BE FILED: %v. The captures are still "+
+			"below, verbatim, because they are the only copy.\n\n%s\n%s", err, before.Render(), after.Render())
+		manifest.Notes = append(manifest.Notes, note)
+		t.Errorf("%s", note)
+		return
+	}
+	if dismissed {
+		t.Logf("the quit diagnostic capture for %q is in %s; the chord dismissed the prompt, so it is "+
+			"evidence for comparison rather than a finding", prompt, path)
+		return
+	}
+	note := quitProbeNote(prompt, before, after, path)
+	manifest.Notes = append(manifest.Notes, note)
+	t.Logf("%s", note)
+}
+
 // wsActMinibufferGone polls until no minibuffer is standing, and answers
 // whether it went away inside `ceiling`.
 //
@@ -1221,7 +1272,7 @@ func wsActKeyDriver(ctx context.Context, t *testing.T, client *Client, runDir st
 	if err != nil {
 		t.Fatalf("read the Emacs pid for the key driver: %v", err)
 	}
-	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client}
+	driver := &KeyDriver{Pid: pid, Scratch: runDir, Client: client, KeepFocus: sweepHoldsFocus()}
 	if err := driver.Build(ctx); err != nil {
 		note := fmt.Sprintf("KEY DRIVER UNAVAILABLE: %v", err)
 		manifest.Notes = append(manifest.Notes, note)
