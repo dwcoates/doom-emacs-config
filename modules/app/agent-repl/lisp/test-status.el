@@ -3314,16 +3314,88 @@ green stays green and blue stays blue across the extent change."
 ;; background: it never touches the panels-open (full) background or the
 ;; connection color, so all three axes stay independent.
 
-(ert-deftest agent-repl-test-render-tab-selected-underlines-the-bracket ()
-  "A selected spec draws the [N] bracket `:underline t' while keeping its color."
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-bracket ()
+  "A selected spec leaves the [N] bracket un-underlined, color intact.
+Owner ruling 4 (2026-09-13): the marker is under the NAME alone."
   (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
          (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
          (pos (string-match "\\[" result))
          (face (get-text-property pos 'face result)))
-    (should (eq t (plist-get face :underline)))
-    ;; The bracket still carries the state color, so the underline did not
-    ;; replace the color — it was layered on top.
+    (should-not (plist-get face :underline))
+    ;; The bracket still carries the state color: only the underline went.
     (should (equal (plist-get face :background) "#1a7a1a"))))
+
+(ert-deftest agent-repl-test-render-tab-selected-underline-covers-exactly-the-name ()
+  "The underlined run is exactly the name's character range, nothing else.
+Every position outside `ws1' — the leading separator, the bracket, the
+space between, the trailing fill and the terminator — is un-underlined."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (start (string-match "ws1" result))
+         (end (+ start 3)))
+    ;; Act / Assert
+    (dotimes (i (length result))
+      (let* ((face (get-text-property i 'face result))
+             (marked (and (listp face) (member '(:underline t) face) t)))
+        (if (and (>= i start) (< i end))
+            (should marked)
+          (should-not marked))))))
+
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-gap ()
+  "The one space between [N] and the name carries no underline."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (gap (1- (string-match "ws1" result)))
+         (face (get-text-property gap 'face result)))
+    ;; Act / Assert
+    (should (equal (substring result gap (1+ gap)) " "))
+    (should-not (and (listp face) (member '(:underline t) face)))))
+
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-fill ()
+  "The padding format's trailing width fill carries no underline."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (agent-repl-tab-name-padding " %-8s ")
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (fill (+ (string-match "ws1" result) 3))
+         (face (get-text-property fill 'face result)))
+    ;; Act / Assert
+    (should (equal (substring result fill (1+ fill)) " "))
+    (should-not (and (listp face) (member '(:underline t) face)))))
+
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-badge ()
+  "The badge run between [N] and the name carries no underline."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready "IMG"))
+         (pos (string-match "IMG" result))
+         (face (get-text-property pos 'face result)))
+    ;; Act / Assert
+    (should-not (and (listp face) (member '(:underline t) face)))))
+
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-separator ()
+  "The entry's own leading separator space carries no underline."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (face (get-text-property 0 'face result)))
+    ;; Act / Assert
+    (should (equal (substring result 0 1) " "))
+    (should-not (plist-get face :underline))))
+
+(ert-deftest agent-repl-test-render-tab-unselected-entry-carries-no-underline-anywhere ()
+  "An UNSELECTED entry carries no underline at any position."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready "IMG")))
+    ;; Act / Assert
+    (dotimes (i (length result))
+      (let ((face (get-text-property i 'face result)))
+        (should-not (and (listp face) (member '(:underline t) face)))
+        (should-not (and (listp face) (keywordp (car face))
+                         (plist-get face :underline)))))))
 
 (ert-deftest agent-repl-test-render-tab-selected-underlines-the-name ()
   "A selected spec layers `:underline t' over the name face."
