@@ -107,9 +107,10 @@ hard error. Both outcomes are recorded (`store.pprof.disabled` /
   otherwise — the `WatchBashRun` index, and the bash equivalent of
   `book_agent_id`), `top_level`, and `frame`, the serialized `StoreEntry` the
   store never opens beyond routing.
-- `write_ledger` — one row per write ever APPLIED (`write_id` PK, `upsert_key`,
-  `write_seq`, `applied_at_ms`), written in the same transaction as the row it
-  applied. **ABSORPTION ASKS THIS TABLE, NEVER `entry.write_id`.** `entry` holds
+- `write_ledger` — one row per write APPLIED AND STILL RE-READABLE (`write_id`
+  PK, `upsert_key`, `write_seq`, `applied_at_ms`, `source_file_id`,
+  `source_offset`), written in the same transaction as the row it applied and
+  swept once it falls past the retention window below. **ABSORPTION ASKS THIS TABLE, NEVER `entry.write_id`.** `entry` holds
   only the LATEST write applied to a row, so probing it answered "is this the
   write that currently owns the row?" — and a producer replaying w1 after w2
   settled the same `upsert_key` read as never-seen, overwrote the newer content
@@ -125,6 +126,56 @@ hard error. Both outcomes are recorded (`store.pprof.disabled` /
 filters and joins on them; `entry`'s frame stays a BLOB because activity
 vocabulary is content, and unpacking it would drag every `conversation.v1`
 change into DDL.
+
+### The write ledger is retained only as long as absorption can ask
+
+The ledger answers ONE question — "has this write_id already been applied?" —
+asked when a producer re-emits bytes it has already sent, so the store absorbs
+the replay instead of re-upserting the row, bumping `write_seq` and
+re-delivering a regression to every live watcher. It answered that for EVERY
+write the store had ever applied, forever: 735k rows and 204 MB with its indexes
+on the owner's box, almost none of which any producer could still ask about.
+
+**THE RULE: a ledger row whose source offset is more than
+`DefaultLedgerRetentionBytes` behind its file's COMMITTED cursor is removed.**
+
+The safety argument is the sidecar's own bounds, and the exact form of it lives
+in the comment at the top of `internal/db/prune.go`:
+
+- The sidecar mints a DETERMINISTIC `write_id` from `file_id` + `offset` +
+  discriminator, so only the same bytes at the same offset of the same file ever
+  mint the same id.
+- It re-reads sent bytes in exactly two ways. THE BOOT REWIND
+  (`tail.RewindToTurnStart`, once per file per boot) moves the restored cursor
+  back at most `tail.DefaultRewindWindow` — 4 MB — from the committed cursor, in
+  ONE bounded backward scan that cannot reach further. THE HOLD advances the
+  cursor short of what was read, and the held frame is by definition not yet
+  written.
+- So a row further behind than that window names bytes nothing will read again.
+
+`DefaultLedgerRetentionBytes` is **16 MB, four times the rewind window on
+purpose**: the two numbers live in different modules and are bumped by different
+people, and a margin is cheaper than a cross-module coupling.
+
+**WHAT IS NEVER SWEPT.** A row with no source file — every stream-plane write,
+and any file-plane batch that advanced no cursor — is stamped NULL and kept: the
+shim re-emits from an in-memory retry buffer whose bound the store cannot see,
+and there is no structural argument for a cutoff, so there is no cutoff. A row
+whose file has NO cursor row is kept too, because no cursor means that file is
+re-read FROM ZERO, which is exactly when the ledger is doing the most work.
+
+**THE SWEEP IS BOUNDED AND SHARES THE WRITE SLOT.** `DB.SweepWriteLedger` runs
+`PruneWriteLedger` every `DefaultLedgerSweepInterval` (and once at start), which
+deletes in transactions of `ledgerPruneBatch` rows, each taking and RELEASING
+the serialized write slot — so a producer's batch waits at most one batch of
+deletes, never a whole sweep. It is interruptible and commits as it goes; a
+sweep cut short by shutdown keeps what it removed and returns the caller's
+cancellation, not a storage failure. A sweep that removed rows is one info
+record with the counts; one that removed nothing is verbose. `main.go` stops it
+BEFORE closing the database.
+
+There is no `--` flag: the window is `Options.LedgerRetentionBytes`, which only
+a test sets, and a NEGATIVE value disables the sweep entirely.
 
 ### The store is NUKED, never migrated
 
@@ -187,6 +238,45 @@ directory, a full disk — and is returned), and only for a REGULAR FILE. A
 directory at `--db` is reported, never replaced: unlinking whatever sits at an
 operator-supplied path is how a service deletes somebody's data.
 
+### THE STORE IS THE SINGLE WRITER, AND IT SERIALIZES ITS WRITES ITSELF
+
+Nothing else opens this database by design — the store owns the file and serves
+every producer over its socket — so every writer SQLite could ever arbitrate
+between is one of this process's own goroutines. Leaving that arbitration to
+SQLite meant two of the store's connections both issuing `BEGIN IMMEDIATE`, one
+waiting out the whole `busy_timeout` and then being REFUSED: on 2026-09-13 the
+sidecar's full re-ingestion after a store reset met the shim mid-write and
+produced nine `store.db.write-batch` errors reading "begin write transaction:
+database is locked (5) (SQLITE_BUSY)", each one a batch handed back to its
+caller's retry, plus five `store.db.slow-query` warnings whose whole 5199ms was
+the timeout being burned before the refusal.
+
+So there is a PROCESS-WIDE WRITE SLOT (`DB.writeGate`, `internal/db/writer.go`)
+and **`beginWrite` is the only way a write transaction is opened in this
+package** — grep for `BeginTx` to check it. A batch WAITS ITS TURN, bounded only
+by its own request context, and then writes; it is never refused for a BUSY
+caused by a sibling.
+
+- **The slot is a one-slot channel, not a `sync.Mutex`**, precisely so it can be
+  selected against `ctx.Done()`. A caller that hangs up while queued gets its own
+  `context.Canceled` back — an `info` "abandoned" record, not an `error` — rather
+  than a storage failure its producer would retry for a caller that is gone.
+- **The release is deferred BEFORE the rollback**, so it runs after it. Handing
+  the slot back while the transaction still held the lock would guarantee
+  nothing.
+- **`lock_wait_ms` now measures the IN-PROCESS QUEUE**, which is both the number
+  an operator wanted and a truthful one: before the gate it was time inside
+  SQLite's busy handler, which ended either in a write or in a refusal. A wait
+  now always ends in a turn. Durations are read from `DB.mono`, an injectable
+  monotonic clock, so a test asserts an exact wait by advancing it rather than
+  by sleeping.
+- **THE REFUSAL PATH SURVIVES FOR AN OUTSIDE WRITER.** Nothing else is supposed
+  to open the file, but `sqlite3` at a shell, a stray second store racing the
+  socket singleton check, or a backup tool all still can, and the DSN's
+  `busy_timeout` plus the existing storage-failure refusal remain the answer for
+  that. What the gate guarantees is only, and exactly, that a BUSY can never have
+  come from this process.
+
 ### Any transaction that writes must BEGIN IMMEDIATE
 
 The DSN carries `_txlock=immediate` (plus WAL, `busy_timeout`,
@@ -197,6 +287,23 @@ will not run the busy handler for an upgrade: it returns `SQLITE_BUSY_SNAPSHOT`
 store process serves every live producer on its own pooled connection, which
 makes those collisions routine. Keep the DSN, and never add a read-then-write
 transaction that begins DEFERRED.
+
+**AND A PURE READ RUNS ON ITS OWN POOL, WHICH THE WRITE LOCK IS NOT REACHABLE
+FROM.** There are TWO `sql.DB` handles on the one file: the WRITE handle, capped
+at `SetMaxOpenConns(1)` and reachable only through `beginWrite`; and the READ
+pool, on a DSN with NO `_txlock` and with `query_only(true)`. `OpenPage`,
+`ReadPage`, `BashRun`, `LiveWork` and every other pure read go through
+`db.beginRead` or `d.read` directly, and SQLite itself refuses a write on that
+pool — so a read path that grows one is a hard error at the first attempt rather
+than a silent second writer the gate knows nothing about. The read pool is
+opened AFTER the schema exists (`query_only` would refuse the DDL) and closed
+with the write handle, neither failure swallowed.
+
+The per-call-site `sql.TxOptions{ReadOnly: true}` below is kept and still
+correct; the pool is what makes it unforgettable. `_txlock` is a property of the
+CONNECTION, so a single DSN carrying `immediate` made every transaction a
+writer, and one forgotten option would queue a page repaint behind a producer's
+write exactly as before.
 
 **AND A PURE READ MUST NOT.** `_txlock` is per CONNECTION, so it applied to the
 read path too, and a page repaint therefore queued for — and could be REFUSED
