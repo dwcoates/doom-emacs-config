@@ -155,6 +155,15 @@ func (s *sidecar) applyStop(taskID string) {
 	}
 	skips, err := s.storeWrite("cancelled terminal", &storev1.EntryBatch{Entries: entries})
 	if err != nil {
+		if s.interrupted(err) {
+			// THE LAST storeWrite CALLER WITHOUT THIS GUARD. A shutdown
+			// withdrawing the write is not the store failing: storeWrite has
+			// already stated the one INFO `shutdown` record, the stop stays
+			// pending, and the next boot re-reads the same bytes and re-applies
+			// it. Its two siblings in cycle.go already returned quietly here;
+			// this one accused the store instead.
+			return
+		}
 		bound.With(logging.Context{Level: "error"}).Log(
 			"the cancelled terminal was not committed; the stop stays pending and is restated on the next cycle: %v", err)
 		return

@@ -1,12 +1,14 @@
 package storeclient
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
@@ -180,5 +182,63 @@ func TestARefusedWriteNamesBothTheRefusalsKindAndItsSite(t *testing.T) {
 	}
 	if got := ctxString(t, rec, "field"); got != "batch.entries[0].upsert_key" {
 		t.Errorf("field = %q, want the offending field the store named", got)
+	}
+}
+
+// TestAWithdrawnWriteIsNotStatedAsATransportFailure separates the two ways a
+// WriteBatch can come back without an answer. Cancellation is this process
+// withdrawing the request on the way out — nothing committed, cursor not
+// advanced, the same durable bytes re-read on the next boot, which is exactly
+// what the contract promises. A deadline is the store failing to answer, which
+// is a fact about the store.
+//
+// The error itself is returned unchanged in both cases; only the record moves.
+// The cancelled case drops to the per-call DETAIL level because the sidecar's
+// own storeWrite states the one normal-level `shutdown` record for that fact.
+func TestAWithdrawnWriteIsNotStatedAsATransportFailure(t *testing.T) {
+	cases := []struct {
+		name      string
+		callCtx   func(*testing.T) context.Context
+		// wantErrors is how many ERROR records the call is allowed to leave.
+		wantErrors int
+	}{
+		{
+			name: "this process cancelled its own cycle context",
+			callCtx: func(t *testing.T) context.Context {
+				t.Helper()
+				c, cancel := context.WithCancel(context.Background())
+				cancel()
+				return c
+			},
+			wantErrors: 0,
+		},
+		{
+			name: "the store did not answer within the deadline",
+			callCtx: func(t *testing.T) context.Context {
+				t.Helper()
+				c, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				t.Cleanup(cancel)
+				return c
+			},
+			wantErrors: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			client, logs := serveLogged(t, &fakeStore{})
+
+			// Act.
+			_, err := client.WriteBatch(tc.callCtx(t), &storev1.EntryBatch{})
+
+			// Assert: the caller is told either way.
+			if err == nil {
+				t.Fatal("a write that never reached the store returned no error")
+			}
+			records := parseLogLines(t, *logs)
+			if got := len(opsAt(records, "storeclient-write-batch", "error")); got != tc.wantErrors {
+				t.Fatalf("error records = %d, want %d: %v", got, tc.wantErrors, operationLevels(records))
+			}
+		})
 	}
 }
