@@ -510,6 +510,28 @@ if [ -n "${AGENT_REPL_REALTEST_FOCUS:-}" ]; then
         exit 1
     fi
 fi
+# THE ORDERLY DAEMON STOP IS A `go test` TOO, and this is where a case decides
+# whether the daemon answers its own door. Three worlds:
+#
+#   default                    the door is answered: the daemon stands its
+#                              sessions down and EXITS ITSELF, so it leaves the
+#                              process table without anything signalling it.
+#   STUB_ORDERLY_NO_ANSWER=1   nothing answers the door, which is the run's cue
+#                              to say so and fall back to SIGTERM.
+#   STUB_ORDERLY_IGNORED=1     the door is answered and the daemon stays, which
+#                              is a skip and never an escalation.
+if [ "${AGENT_REPL_REALTEST_DAEMON_STOP:-}" = "1" ]; then
+    printf '%s\n' "$name" >> "${STUB_ORDERLY_MARKER:?the case must state an orderly-stop marker path}"
+    if [ "${STUB_ORDERLY_NO_ANSWER:-}" = "1" ]; then
+        printf 'the daemon did not accept an orderly stop: dial tcp 127.0.0.1:1: connect: connection refused\n'
+        exit 1
+    fi
+    if [ -f "${STUB_PROCS:-}" ] && [ "${STUB_ORDERLY_IGNORED:-}" != "1" ]; then
+        grep -v 'claude-repld' "$STUB_PROCS" > "$STUB_PROCS.next" || true
+        mv "$STUB_PROCS.next" "$STUB_PROCS"
+    fi
+    exit 0
+fi
 if [ -n "${STUB_LEFTOVERS_FAIL:-}" ] && [ "${AGENT_REPL_REALTEST_LEFTOVERS:-}" = "$STUB_LEFTOVERS_FAIL" ]; then
     printf 'REALTEST LEFTOVER WORKSPACES\n  ws-c22fed997b234b27 rt-8 (closed, MISSING) /leftover/dir\n'
     exit 1
@@ -590,6 +612,7 @@ run_script() {
     STUB_READINESS_JSON="$SCRATCH/readiness.json" \
     STUB_SLOT_MARKER="$SCRATCH/slot-reached" \
     STUB_GO_MARKER="${STUB_GO_MARKER:-$SCRATCH/go-reached}" \
+    STUB_ORDERLY_MARKER="${STUB_ORDERLY_MARKER:-$SCRATCH/orderly-reached}" \
     STUB_FOCUS_MARKER="${STUB_FOCUS_MARKER:-$SCRATCH/focus-reached}" \
     STUB_HELD_MARKER="${STUB_HELD_MARKER:-$SCRATCH/focus-held}" \
     STUB_KILL_MARKER="${STUB_KILL_MARKER:-$SCRATCH/killed}" \
@@ -610,7 +633,8 @@ prepare_home() {
     SCRIPT_ARGS=()
     rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed" \
         "${SCRATCH:?}/alive" "${SCRATCH:?}/kill-log" "${SCRATCH:?}/go-reached" \
-        "${SCRATCH:?}/focus-reached" "${SCRATCH:?}/focus-held" "${SCRATCH:?}/open-reached"
+        "${SCRATCH:?}/focus-reached" "${SCRATCH:?}/focus-held" "${SCRATCH:?}/open-reached" \
+        "${SCRATCH:?}/orderly-reached"
     : > "$SCRATCH/procs"
     mkdir -p "$SCRATCH/home/.claude-emacs" "$SCRATCH/home/.cache/agent-repl/store"
     printf 'workspaces' > "$SCRATCH/home/.claude-emacs/wsm.db"
@@ -950,8 +974,12 @@ test_the_unguarded_daemon_is_stopped_under_the_consent() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if [ "$(cat "$SCRATCH/kill-log")" != "55501" ]; then
-        fail "$name" "the unguarded daemon was not the pid signalled: $(cat "$SCRATCH/kill-log")"
+    if ! grep -q '^TestOrderlyDaemonStop$' "$SCRATCH/orderly-reached" 2>/dev/null; then
+        fail "$name" "the daemon was not asked to stop through its own door: $(cat "$SCRATCH/orderly-reached" 2>/dev/null)"
+        return
+    fi
+    if [ -s "$SCRATCH/kill-log" ]; then
+        fail "$name" "a daemon that answered its own door was signalled anyway: $(cat "$SCRATCH/kill-log")"
         return
     fi
     if ! printf '%s' "$out" | grep -q "the owner's unguarded daemon pid 55501 was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
@@ -979,6 +1007,7 @@ test_the_editor_is_quit_before_the_unguarded_daemon_is_stopped() {
     # assertion: an editor left standing while the daemon goes brings an
     # unguarded daemon straight back up.
     out="$(STUB_KILL_MARKER="$SCRATCH/order-log" STUB_KILL_LOG="$SCRATCH/order-log" \
+        STUB_ORDERLY_MARKER="$SCRATCH/order-log" \
         AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 run_script "$dir")" || status=$?
     if [ "$status" -ne 0 ]; then
         fail "$name" "exit was $status, want 0; output: $out"
@@ -988,7 +1017,7 @@ test_the_editor_is_quit_before_the_unguarded_daemon_is_stopped() {
         fail "$name" "the editor quit was not first; log: $(cat "$SCRATCH/order-log")"
         return
     fi
-    if ! grep -q '^55501$' "$SCRATCH/order-log"; then
+    if ! grep -q '^TestOrderlyDaemonStop$' "$SCRATCH/order-log"; then
         fail "$name" "the unguarded daemon was never stopped; log: $(cat "$SCRATCH/order-log")"
         return
     fi
@@ -1076,14 +1105,15 @@ test_a_preflight_decline_after_a_quit_still_hands_an_editor_back() {
     dir="$(scratch_bin preflight-decline-handback)"
     prepare_home
     ready_json > "$SCRATCH/readiness.json"
-    # The consent is given, so the editor is quit and the daemon signalled; the
-    # daemon then ignores SIGTERM, which is a decline with the desktop already
-    # empty — the exact shape that left the owner with nothing standing.
+    # The consent is given, so the editor is quit and the daemon asked to stop;
+    # the daemon then goes nowhere — through either route — which is a decline
+    # with the desktop already empty, the exact shape that left the owner with
+    # nothing standing.
     unguarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
     standing_emacs
     SCRIPT_ARGS=(1)
 
-    out="$(STUB_KILL_IGNORED=1 AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 \
+    out="$(STUB_ORDERLY_IGNORED=1 STUB_KILL_IGNORED=1 AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 \
         AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS=1 run_script "$dir")" || status=$?
     if [ "$status" -ne "$EXIT_DECLINED" ]; then
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
@@ -1298,11 +1328,15 @@ test_realtest_3_is_skipped_without_the_daemon_consent() {
         fail "$name" "the daemon was signalled without the consent: $(cat "$SCRATCH/kill-log")"
         return
     fi
+    if [ -f "$SCRATCH/orderly-reached" ] && [ -s "$SCRATCH/orderly-reached" ]; then
+        fail "$name" "the daemon was asked to stop without the consent: $(cat "$SCRATCH/orderly-reached")"
+        return
+    fi
     pass "$name"
 }
 
 test_realtest_3_stops_the_daemon_under_its_own_consent() {
-    local name="realtest 3 runs, and the daemon is stopped with SIGTERM, under AGENT_REPL_REALTEST_STOP_DAEMON=1"
+    local name="realtest 3 runs, and the daemon is stopped through its own door, under AGENT_REPL_REALTEST_STOP_DAEMON=1"
     local dir out status=0
     dir="$(scratch_bin rt3-consent)"
     prepare_home
@@ -1315,8 +1349,12 @@ test_realtest_3_stops_the_daemon_under_its_own_consent() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if [ "$(cat "$SCRATCH/kill-log")" != "55501" ]; then
-        fail "$name" "the daemon pid signalled was: $(cat "$SCRATCH/kill-log")"
+    if ! grep -q '^TestOrderlyDaemonStop$' "$SCRATCH/orderly-reached" 2>/dev/null; then
+        fail "$name" "the daemon was not asked to stop through its own door: $(cat "$SCRATCH/orderly-reached" 2>/dev/null)"
+        return
+    fi
+    if [ -s "$SCRATCH/kill-log" ]; then
+        fail "$name" "a daemon that answered its own door was signalled anyway: $(cat "$SCRATCH/kill-log")"
         return
     fi
     if ! grep -q 'TestRealtestStartWithTheDaemonDown' "$SCRATCH/slot-reached"; then
@@ -1327,7 +1365,7 @@ test_realtest_3_stops_the_daemon_under_its_own_consent() {
 }
 
 test_a_daemon_that_ignores_sigterm_is_not_escalated() {
-    local name="a daemon that survives SIGTERM makes realtest 3 a SKIP, never a SIGKILL"
+    local name="a daemon that survives the stop makes realtest 3 a SKIP, never a SIGKILL"
     local dir out status=0
     dir="$(scratch_bin rt3-stubborn)"
     prepare_home
@@ -1335,19 +1373,92 @@ test_a_daemon_that_ignores_sigterm_is_not_escalated() {
     guarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
     SCRIPT_ARGS=(3)
 
-    # STUB_KILL_IGNORED: the signal is delivered and the process stays.
-    out="$(STUB_KILL_IGNORED=1 AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 \
+    # STUB_ORDERLY_IGNORED: the door is answered and the process stays.
+    # STUB_KILL_IGNORED covers the fallback for the same daemon, so neither
+    # route can be the one that quietly removed it.
+    out="$(STUB_ORDERLY_IGNORED=1 STUB_KILL_IGNORED=1 AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 \
         AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS=1 run_script "$dir")" || status=$?
     if [ "$status" -ne "$EXIT_DECLINED" ]; then
         fail "$name" "exit was $status, want $EXIT_DECLINED (nothing ran); output: $out"
         return
     fi
-    if grep -q -- '-KILL\|-9' "$SCRATCH/kill-log"; then
+    # A daemon that ANSWERED its door is never signalled at all, so the kill
+    # log may legitimately not exist; what must never appear is an escalation.
+    if [ -f "$SCRATCH/kill-log" ] && grep -q -- '-KILL\|-9' "$SCRATCH/kill-log"; then
         fail "$name" "the owner's daemon was escalated to SIGKILL: $(cat "$SCRATCH/kill-log")"
         return
     fi
     if [ -f "$SCRATCH/slot-reached" ]; then
         fail "$name" "realtest 3 ran with a daemon still up"
+        return
+    fi
+    pass "$name"
+}
+
+# ---- which door the stop goes through --------------------------------------
+#
+# A DAEMON STOPPED BY SIGNAL LEAVES ITS SESSIONS BEHIND. SIGTERM cancels the
+# daemon's serving context and nothing else, so every shim it held survives it
+# and the next daemon reports each one as an unaccounted-for bounce
+# (`daemon.rollout.reconcile`, four times in the harvest of 2026-09-13). The
+# stop therefore goes through the daemon's own door — the
+# `UpdateShutdownSchedule{now}` the editor's own stop sends — and the signal is
+# the fallback, taken only when nothing answers and always said out loud.
+
+test_the_stop_goes_through_the_daemons_own_door() {
+    local name="a daemon that answers is stopped through its own door, and no signal is sent"
+    local dir out status=0
+    dir="$(scratch_bin rt3-orderly-door)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    SCRIPT_ARGS=(3)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if ! grep -q '^TestOrderlyDaemonStop$' "$SCRATCH/orderly-reached" 2>/dev/null; then
+        fail "$name" "the daemon was never asked through its own door: $(cat "$SCRATCH/orderly-reached" 2>/dev/null)"
+        return
+    fi
+    if [ -s "$SCRATCH/kill-log" ]; then
+        fail "$name" "the daemon answered its door and was signalled anyway: $(cat "$SCRATCH/kill-log")"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'UpdateShutdownSchedule{now}'; then
+        fail "$name" "the run does not name the door it stopped the daemon through: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_sigterm_fallback_is_stated_when_the_door_is_unanswered() {
+    local name="a daemon that does not answer its door is SIGTERMed, and the run says why"
+    local dir out status=0
+    dir="$(scratch_bin rt3-orderly-unanswered)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_daemon_line 55501 "$dir" > "$SCRATCH/procs"
+    SCRIPT_ARGS=(3)
+
+    out="$(STUB_ORDERLY_NO_ANSWER=1 AGENT_REPL_REALTEST_TAKEOVER=1 AGENT_REPL_REALTEST_STOP_DAEMON=1 \
+        run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ "$(cat "$SCRATCH/kill-log")" != "55501" ]; then
+        fail "$name" "the unanswered daemon was not signalled: $(cat "$SCRATCH/kill-log" 2>/dev/null)"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'falls back to SIGTERM'; then
+        fail "$name" "the run took the fallback without saying so: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'STANDS NO SESSION DOWN'; then
+        fail "$name" "the run does not say what the fallback costs: $out"
         return
     fi
     pass "$name"
@@ -1978,8 +2089,8 @@ test_a_guarded_daemon_is_stopped_under_its_consent() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if ! grep -q '^4242$' "$SCRATCH/kill-log" 2>/dev/null; then
-        fail "$name" "the guarded daemon was not signalled; kill log: $(cat "$SCRATCH/kill-log" 2>/dev/null); output: $out"
+    if ! grep -q '^TestOrderlyDaemonStop$' "$SCRATCH/orderly-reached" 2>/dev/null; then
+        fail "$name" "the guarded daemon was not asked to stop through its own door: $(cat "$SCRATCH/orderly-reached" 2>/dev/null); output: $out"
         return
     fi
     if ! printf '%s' "$out" | grep -q "guarded daemon pid 4242 stopped"; then
@@ -2003,7 +2114,7 @@ test_a_guarded_daemon_is_left_without_the_consent() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if grep -q '^4242$' "$SCRATCH/kill-log" 2>/dev/null; then
+    if [ -s "$SCRATCH/orderly-reached" ] || grep -q '^4242$' "$SCRATCH/kill-log" 2>/dev/null; then
         fail "$name" "the daemon was stopped without the consent that covers it; output: $out"
         return
     fi
@@ -2122,6 +2233,8 @@ test_declines_a_sweep_that_would_quit_a_standing_editor
 test_realtest_3_is_skipped_without_the_daemon_consent
 test_realtest_3_stops_the_daemon_under_its_own_consent
 test_a_daemon_that_ignores_sigterm_is_not_escalated
+test_the_stop_goes_through_the_daemons_own_door
+test_the_sigterm_fallback_is_stated_when_the_door_is_unanswered
 test_realtest_2_is_skipped_when_no_daemon_is_serving
 test_realtest_2_keeps_the_standing_editor
 test_realtest_4_keeps_the_standing_editor
