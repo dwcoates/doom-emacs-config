@@ -30,6 +30,7 @@ import type { TopbarContext } from "./context.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarFastMode } from "./fast-mode.js";
+import { drawTopbarHibernated } from "./hibernated.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import {
   bindSessionReveal,
@@ -59,7 +60,10 @@ export interface TopbarDeps {
  * only thing that closes it.
  */
 export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps): Handle {
-  log.debug("mounting the topbar", { operation: "topbar.mount" });
+  // AT INFO, LIKE feed.mount. A mount is a lifecycle edge a person asks
+  // about — "did the topbar ever come up in this webview" is the first
+  // question a blank strip raises, and it was only answerable at DEBUG.
+  log.info("mounting the topbar", { operation: "topbar.mount" });
 
   const strip = document.createElement("div");
   strip.className = "topbar-strip";
@@ -124,6 +128,19 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
 
   const right = document.createElement("div");
   right.className = "topbar-right";
+
+  // THE HIBERNATED STATE IS THE WHOLE RIGHT-HAND GROUP. Every element it
+  // replaces is session-scoped and the daemon sent none of them, so this is
+  // not a strip with holes in it: it is the same strip saying there is no
+  // session to describe. The left group and the title above are drawn either
+  // way, because a workspace has an account, a route and a name whether or
+  // not a session is up.
+  if (u.hibernated !== undefined) {
+    right.append(drawTopbarHibernated(u.hibernated, tc));
+    row.append(left, center, right);
+    return row;
+  }
+
   right.append(
     drawTopbarModelSelector(requireMessage(u.modelSelector, "TopbarView.model_selector"), tc),
     drawTopbarPermissionModePicker(

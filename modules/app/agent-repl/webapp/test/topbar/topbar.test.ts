@@ -5,7 +5,7 @@ import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/en
 import { TopbarViewSchema, type TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
-import { GEOMETRY, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
+import { GEOMETRY, NOW, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
 /** A complete view; each test overrides only what it is about. */
 function view(overrides: Partial<TopbarView> = {}): TopbarView {
@@ -25,6 +25,20 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
   return { ...base, ...overrides };
 }
 
+/**
+ * A PARKED workspace's view: the three workspace-scoped elements the daemon
+ * can still resolve, and the hibernated state. Nothing session-scoped is set,
+ * which is what the state means.
+ */
+function hibernatedView(): TopbarView {
+  return create(TopbarViewSchema, {
+    title: { text: "DWC/fix" },
+    account: { state: { case: "loggedIn", value: { email: "a@b.test" } } },
+    connectivity: { tone: "none", glyph: "○", title: "no session" },
+    hibernated: { sinceMs: BigInt(NOW - 60_000) },
+  });
+}
+
 describe("drawTopbarView", () => {
   it("draws the three groups", () => {
     const { tc } = topbarContext();
@@ -34,6 +48,36 @@ describe("drawTopbarView", () => {
       row.querySelector(".topbar-title") !== null,
       row.querySelector(".topbar-right") !== null,
     ]).toEqual([true, true, true]);
+  });
+
+  // THE HIBERNATED STRIP. A parked workspace's view carries the account, the
+  // connectivity and the title and nothing session-scoped, because the daemon
+  // has no session to resolve those from.
+  it("draws the hibernated cell for a parked workspace", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(hibernatedView(), tc);
+    expect(row.querySelector(".topbar-hibernated")?.textContent).toBe("hibernated 1m");
+  });
+
+  it("draws the account, the connectivity and the title for a parked workspace", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(hibernatedView(), tc);
+    expect([
+      row.querySelector(".topbar-account") !== null,
+      row.querySelector(".topbar-connectivity") !== null,
+      row.querySelector(".topbar-title") !== null,
+    ]).toEqual([true, true, true]);
+  });
+
+  it("draws no session-scoped element for a parked workspace", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(hibernatedView(), tc);
+    expect([
+      row.querySelector(".topbar-model") !== null,
+      row.querySelector(".topbar-permission-mode") !== null,
+      row.querySelector(".topbar-context-figure") !== null,
+      row.querySelector(".topbar-fast") !== null,
+    ]).toEqual([false, false, false, false]);
   });
 
   it("draws no fast-mode cell when the vendor has stated no fast mode", () => {

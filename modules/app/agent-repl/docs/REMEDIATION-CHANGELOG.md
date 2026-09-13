@@ -16,6 +16,15 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - webapp sidebar: an open row's detail panel is fixed-positioned out of the rail — it grows into the feed as its content asks and is placed under its row by the topbar reveals' own `clampReveal`, so the sidebar's overflow and the window edges can no longer clip it (owner ruling 3, 2026-09-13)
 - shim cold gate: a cold read under 70,000 tokens no longer gates — `judgeCold` and `SetSessionModel` proceed warm and record one INFO line naming the size, the lapse and the floor (owner ruling, cold-gate floor, 2026-09-13)
 - sidecar store volume: `attachment/hook_success` and `attachment/total_tokens_reminder` are classified and then never persisted (`internal/convert/neverpersist.go`; ~286k rows / 263 MB), with an unruled kind still stored and one INFO `residue-drop-summary` per file at catch-up end (owner ruling 2026-09-13)
+- daemon boot: every OPEN workspace with no adopted client has its session started at boot through the same path `OpenWorkspace` takes, except hibernated ones and those whose lock probe could not tell; failures are per workspace and one `daemon.boot.bring_up` INFO summary states the counts (owner ruling 1, second batch, 2026-09-13)
+
+- daemon workspace: `SelectWorkspace` and `OpenWorkspace` revive a hibernated workspace through `Sessions.Start` and lift the sweep's park from the topbar and the footer; the cold gate still asks (owner ruling 1, second batch, 2026-09-13)
+
+- daemon topbar: a parked workspace is gated on the naming and the account alone and publishes the hibernated view (title, connectivity, account, `hibernated`), instead of holding the whole strip back for session facts that will never arrive (owner ruling 1, second batch, 2026-09-13)
+
+- daemon topbar / webapp: the topbar's incomplete-view record is INFO with its outstanding gates named, and `topbar.mount` is INFO like `feed.mount`, so a blank strip is diagnosable at the default level (owner ruling 1, second batch, 2026-09-13)
+
+- webapp topbar: `TopbarView.hibernated` draws the literal word "hibernated" with a client-ticked age in the strip's right-hand group, taking the fast-mode cell's own declarations (owner ruling 1, second batch, 2026-09-13)
 
 - webapp hold tray: an empty tray draws nothing — `drawDaemonHoldTray` answers `null`, the mount empties the host, and `#hold-tray:empty` collapses the region; the "nothing held" line is gone (owner ruling 3, 2026-09-13)
 

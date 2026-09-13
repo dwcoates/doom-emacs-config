@@ -86,6 +86,20 @@ type Report struct {
 	HoldsRestored int
 	// MergesRecovered are the in-flight merges resumed.
 	MergesRecovered []ids.WorkspaceID
+	// BroughtUp are the open, client-less workspaces whose session this boot
+	// STARTED. An open workspace is never session-less (owner ruling,
+	// 2026-09-13), so a survivor that did not survive is brought back here.
+	BroughtUp []ids.WorkspaceID
+	// HibernatedLeft are the open, client-less workspaces this boot left
+	// asleep. Hibernation is the memory knob and it is deliberate: bringing
+	// one back at boot would spend the ~500MB the sweep reclaimed, for a
+	// workspace nobody has asked for.
+	HibernatedLeft []ids.WorkspaceID
+	// BringUpFailed are the workspaces whose start this boot could not
+	// complete. A failure is PER WORKSPACE — the next one is still started —
+	// and it raises the same fault an open's failed start raises, so the
+	// failure is on every surface and not only in this count.
+	BringUpFailed []ids.WorkspaceID
 	// Undetermined are the workspaces whose kernel lock probe could not tell.
 	// They are neither adopted nor orphan-closed: "could not tell" is never
 	// read as free, and this record is the only place that says so.
@@ -149,6 +163,13 @@ type Deps struct {
 	// it. It is required: an adoption nothing installed would leave the daemon
 	// believing it adopted a shim it cannot reach.
 	Adopted AdoptFunc
+	// StartSession brings ONE workspace's session up, through the same path
+	// OpenWorkspace takes (workspace.Fleet.Start). It is a FUNCTION for the
+	// same reason Adopted is: the session fleet sits beside boot rather than
+	// beneath it. It is required — a boot that silently skipped it would
+	// leave every unadopted workspace session-less, which is the state the
+	// bring-up exists to abolish.
+	StartSession StartFunc
 	// AdoptBound bounds ONE surviving shim's adoption; zero means
 	// DefaultAdoptBound. An adoption that overruns it is reported at ERROR and
 	// the workspace is UNDETERMINED — neither adopted nor orphan-closed — which
@@ -171,6 +192,10 @@ type SocketProbeFunc func(socketPath string) (shimsocket.State, error)
 
 // AdoptFunc installs a client adopted from a surviving shim.
 type AdoptFunc func(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client) error
+
+// StartFunc brings ONE workspace's session up. workspace.Fleet.Start
+// satisfies it, which is exactly what OpenWorkspace calls.
+type StartFunc func(ctx context.Context, ws ids.WorkspaceID) error
 
 // probeWorkspaceLock builds the production probe over log. Every probe result
 // — held, free, and could-not-tell — lands a record, because a lock probe is a
@@ -215,6 +240,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a rollout controller")
 	case deps.Adopted == nil:
 		return nil, missing("an adoption installer")
+	case deps.StartSession == nil:
+		return nil, missing("a session starter")
 	case deps.RunDir == "":
 		return nil, missing("a kernel-lock run directory")
 	case deps.Log == nil:

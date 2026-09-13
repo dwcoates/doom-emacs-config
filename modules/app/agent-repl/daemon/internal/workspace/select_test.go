@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -227,5 +228,59 @@ func TestReselectingStillClearsTheAttentionMarker(t *testing.T) {
 	// Assert.
 	if f.db.attention["w1"] {
 		t.Fatal("re-selecting left the attention marker set")
+	}
+}
+
+func TestSelectRevivesAndUnparksAHibernatedWorkspace(t *testing.T) {
+	// Arrange: the idle sweep stood this workspace's session down.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
+		t.Fatalf("started = %v, want [w1]", f.fleet.started)
+	}
+	if len(f.topbarParked) != 1 || f.topbarParked[0] {
+		t.Fatalf("topbar parked = %v, want the park lifted", f.topbarParked)
+	}
+}
+
+func TestSelectStartsNothingForALiveWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.fleet.live["w1"] = true
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.started) != 0 {
+		t.Fatalf("started = %v, want none: a live workspace has nothing to revive", f.fleet.started)
+	}
+}
+
+func TestSelectFailsWhenTheRevivalFails(t *testing.T) {
+	// Arrange: a selected workspace with no session is the state the revival
+	// exists to abolish, so answering success would hide it.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	f.fleet.startErr = errors.New("boom")
+
+	// Act.
+	err := f.verbs.Select(context.Background(), "w1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Select() answered no error for a failed revival")
 	}
 }

@@ -104,13 +104,18 @@ func TestARelaunchedDaemonRehydratesAnAnnouncedWorkspacesConversation(t *testing
 	}
 	f.d.AwaitExit()
 
-	d2 := harness.StartDaemon(t, harness.Opts{
-		StateDir:  f.d.StateDir,
-		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
-	})
-	// The store's book, as the resumed shim will serve it: newest first.
-	d2.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
+	// The store's book, as the resumed shim will serve it: newest first. IT IS
+	// WRITTEN BEFORE THE SUCCESSOR STARTS, because the successor brings its
+	// open workspaces' sessions up during its own boot: a profile written
+	// afterwards would be read by nothing, and the resumed shim would serve
+	// the empty floor a fresh one serves.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
 		ResumeHistory: harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry()),
+	})
+	d2 := harness.StartDaemon(t, harness.Opts{
+		StateDir:   f.d.StateDir,
+		ProfileDir: f.d.ProfileDir,
+		ExtraArgs:  []string{"--default-config-dir", f.d.DefaultConfigDir},
 	})
 	f2 := &fixture{d: d2, repo: f.repo, ws: f.ws, t: t}
 
