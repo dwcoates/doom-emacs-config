@@ -39,11 +39,15 @@ skipped.
 bin/realtest.sh                                  every realtest
 bin/realtest.sh -run TestRealtestStartTheEditor   one, by name
 bin/realtest.sh 2 3 4                             a sweep, by number, in that order
+bin/realtest.sh --clean-leftovers                 forget the registry rows an
+                                                  earlier sweep left, run nothing
 
-exit 0   every realtest asked for ran and passed
+exit 0   every realtest asked for ran and passed, the run left no registry row
+         behind, and nothing was written between the sweeps
 exit 77  DECLINED, and the message says why; NOTHING ran
 exit 78  INCOMPLETE: what ran passed, at least one realtest was SKIPPED
-other    a realtest failed
+other    a realtest failed, or the sweep left a registry row standing, or the
+         gap since the previous sweep held warnings or errors
 ```
 
 `77` is the autotools "skipped" convention, used rather than `0` so a run can
@@ -90,6 +94,7 @@ worse than not running:
 | a deployed system is not at this checkout's revision | a realtest against a stale daemon measures a build nobody has, and its findings send the owner after defects that were fixed days ago. `bin/readiness-report.sh` is the judge — the same `.source-tree` stamp comparison `bin/build-frontend.sh` rebuilds on, so a system this declines on is exactly a system a plain build will rebuild |
 | the plan would quit an editor the run did not start, and `AGENT_REPL_REALTEST_TAKEOVER=1` is not set | a cold start has to quit the standing editor, and that is the owner's editor with the owner's unsaved work in it. The script does not make that decision. The refusal states how many quits the plan holds, and that one answer covers all of them: an editor the run itself started is the run's own artifact, not the owner's session |
 | a daemon is running without the vendor guard in its environment | Emacs ADOPTS an answering daemon and never kills one, so the new Emacs would inherit it and it would spawn shims with the real SDK reachable. The refusal names the pid to stop |
+| a workspace row in the owner's registry names a directory under `~/.claude-emacs/realtest/` | it belongs to a PREVIOUS sweep, and while it stands the owner's editor reports a stale registry row every time that workspace is touched. See "The leftovers a sweep must not leave" below. The refusal lists every row and ends with the one-line remedy, `bin/realtest.sh --clean-leftovers` |
 | a shim listening under the state directory's `sock/`, or a `shim-lock`, is running without the guard | the daemon ADOPTS a shim that is already listening rather than spawning a fresh one, so the guard on the daemon never reaches it. Realtest 1's first run proved the hole: a shim spawned the day before by an unguarded daemon kept submitting a keepalive prompt to the real vendor every four minutes for the whole run. Every such process is enumerated (`pgrep -f` for the shim's `dist/main.js` and for `shim-lock`, then `ps -Eww` per pid) and the refusal names each pid and its socket |
 
 The backups come BEFORE the takeover refusal. An operator who is told to set the
@@ -362,6 +367,93 @@ is answered from the offline scripted SDK. The launch therefore states the ONE
 variable it always did, and no second knob
 (docs/REALTEST-PLAN.md, "Running realtest 7").
 
+## The leftovers a sweep must not leave
+
+A realtest that registers, creates or forks a workspace puts a row in the
+OWNER'S registry naming a directory under the run directory. The directory goes
+away when the run ends — the scratch repository is deleted, and eventually the
+run directory with it — and **the row does not, unless something forgets it.**
+What the owner sees then is their editor reporting a stale registry row for as
+long as it stands:
+
+```
+workspace "workspace-c22fed997b234b27" cannot host a durable log sink
+(registered-dir=.../scratch-repo-worktrees/workspace-c22fed997b234b27 [MISSING]);
+its records are written centrally
+```
+
+That is the module telling the truth about a mess a realtest made (owner
+complaint, 2026-09-13; the row came from realtest 8 in the 11:10 sweep). Three
+moments now answer for it, and all three go through ONE implementation —
+`e2e/realtest/leftovers.go`, driven by `TestCleanRealtestLeftovers` — because a
+second spelling of "which rows belong to a run" is how two readers of the
+owner's registry come to disagree about it:
+
+| moment | what it does |
+|---|---|
+| the sweep's START, before the run directory exists | DECLINES when any row names a directory under `~/.claude-emacs/realtest/`. Every such row belongs to an earlier sweep by construction, and a run that piled its own rows on top of one would bury the evidence of which run made it |
+| the END of each act realtest | its own `t.Cleanup`, registered from `wsActScratchRepo` so `t.Cleanup`'s LIFO order puts it after every per-workspace nuke, close and forget. It removes what those did not and then FAILS the realtest for anything still standing. It is the one cleanup here that may fail a test: the rule that a cleanup runs after the verdict is about residues the PRODUCT cannot remove, and a row this run created and could have removed is not one |
+| the END of the sweep, through an EXIT trap | so a realtest that failed, a `go test` that panicked and an operator's interrupt all reach it. It closes and forgets every row under THIS run's directory and fails the sweep for any that survived |
+
+`bin/realtest.sh --clean-leftovers` is the same clean over the whole realtest
+root, running no realtest at all. It is what the start refusal names.
+
+**Removal is always THROUGH THE PRODUCT.** Close, then forget — `Forget`
+refuses an open workspace (`daemon/internal/workspace/forget.go`) — written
+into the daemon's command-file ingress, the same door
+`agent-repl workspace-dispatch` scripts use, and waited for in the registry.
+Nothing ever edits `wsm.db`: a harness that repaired the registry itself would
+be hiding a product path that does not undo what it does, and the read of that
+database is a snapshot copy for the reasons `state.go` gives.
+
+**A closed row counts.** The stale-registration warning fires on a closed row
+exactly as it does on an open one, and "the state as the run found it" admits
+no exception for them.
+
+## The gap between sweeps
+
+Every harvest above reads ONE realtest's window. That is the right window for
+judging a realtest and the wrong one for judging the module, because the editor
+keeps running after the sweep and the owner keeps using it: a deploy restart, a
+boot catch-up, a stale registry row's warning arriving twenty minutes later all
+land in a gap nothing reads. The 2026-09-13 complaint was exactly that — the
+warning the owner saw had been written between sweeps, and every sweep since
+had reported a clean harvest.
+
+So a sweep OPENS with a scan of the gap it is standing at the end of, before
+any editor is quit (the buffers it reads belong to the editor the owner has
+been using, and the first cold-start realtest kills it):
+
+- **The window** is the previous sweep's end to now. Its start comes from
+  `~/.claude-emacs/realtest/last-sweep-end`, and when there is no usable mark,
+  from the newest `MANIFEST.md` under the realtest root — the manifest's mtime
+  rather than the run directory's, because a directory is created when a sweep
+  STARTS and a window opening there would re-report what that sweep already
+  reported in window. With neither, there is no previous sweep and nothing is
+  scanned.
+- **The sources** are the ones the in-window harvest already knows — the
+  per-workspace links, the elisp sink, `daemon.run.log`, the store's and the
+  sidecar's logs and stderr — plus Emacs's own `*Messages*` AND `*Warnings*`
+  buffers, read through the same read-only probe. Every line of `*Warnings*` is
+  a finding with no pattern matching at all: a line is in that buffer only
+  because `display-warning` put it there.
+- **The mark is a SNAPSHOT, not just a timestamp.** The two services' `.err.log`
+  and the two Emacs buffers carry no timestamps, so a time alone could only
+  report them whole, every sweep, forever. The mark holds the same inode-keyed
+  `Snapshot` the in-window harvest uses and both buffer sizes, and a source
+  that is now SHORTER than the mark recorded is read whole — the same rule the
+  inode snapshot applies to a truncated file, and what a restarted Emacs looks
+  like from here.
+- **The report** is `between-sweeps/MANIFEST.md` in the run directory, under a
+  `## Between sweeps` heading, with `HARVEST-FULL.jsonl` beside it. Its own
+  subdirectory, like every realtest after the first, because realtest 1 writes
+  `MANIFEST.md` to the run directory itself.
+- **The verdict** is the same bar: a non-zero count makes the sweep exit
+  non-zero, with no allowlist. It does not BLOCK the sweep — the realtests
+  still run, so one run gathers every finding — and the mark is only moved by a
+  sweep that actually read the gap, so a declined run never discards a window
+  nobody looked at.
+
 ## The phases: hidden, then shown
 
 Every phase from spawn to usable is bounded by a record the module already
@@ -567,6 +659,7 @@ The sources are the ones `logging-contract.md` names, and nothing else:
 | the two services' global sinks | `~/.cache/agent-repl/log/shim-store.log`, `shim-claude-sidecar.log`, with rotation siblings |
 | the two services' stderr | `~/.cache/agent-repl/log/*.err.log` |
 | Emacs's `*Messages*` | read through `emacsclient`; a cold start makes the whole buffer the run window |
+| Emacs's `*Warnings*` | read through the same probe, by the BETWEEN-SWEEPS scan only. A realtest's own window has no use for it — a cold start's editor has raised no warnings yet — but the gap between sweeps is exactly where the buffer the owner sees fills up |
 
 The per-workspace TARGETS under `~/.claude-emacs/logs` and the OS temporary
 directory are deliberately NOT enumerated: every one of them is already
@@ -639,6 +732,11 @@ e2e/realtest/
   doc.go                       what the package is and both of its gates
   logs.go                      the source set, read out of logging-contract.md
   harvest.go                   the snapshot, the window, the findings
+  leftovers.go                 which registry rows are a run's, and how the
+                               daemon is asked to forget them
+  leftovers_driver_test.go     the sweep's start and end leftover checks
+  gapscan.go                   the high-water mark and the between-sweeps report
+  gapscan_driver_test.go       the pre-sweep scan and the end-of-sweep mark
   messages.go                  Emacs's own *Messages*, which has no timestamps
   phases.go                    the markers and the measurements
   budgets.go                   the table, and why it ships unmeasured

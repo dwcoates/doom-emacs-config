@@ -1202,31 +1202,60 @@ otherwise the record is a routing invariant violation.")
   "elisp.core.log-central-fallback workspace=%S reason=%s"
   "Format of the once-per-workspace record announcing a central fallback.")
 
+(defun agent-repl--central-log-fallback-class (ws)
+  "Classify WHY WS's records fall back to the central sink.
+
+TWO DIFFERENT FACTS ARRIVE HERE, and conflating them is what put a popup in
+front of the user for a condition that is not a defect:
+
+  - `no-durable-home' — WS names no registered directory at all, or names a
+    directory that still EXISTS but cannot host a sink of its own (a scratch
+    or temporary path, a workspace still inside its registration window).
+    Nothing is broken.  The workspace simply has nowhere of its own to write,
+    its records are written centrally carrying its name, and the user has
+    nothing to do about it.  ORDINARY.
+
+  - `stale-registration' — WS IS registered, and the directory it is
+    registered AT IS GONE.  That is a registry row that outlived its
+    worktree: a real inconsistency in durable state, which writing centrally
+    hides rather than repairs.  It is the one case worth interrupting for.
+
+The two are told apart by the registration alone, so the classification is a
+fact about WS rather than about whichever record happened to meet it."
+  (let ((dir (and (fboundp 'agent-repl--ws-get)
+                  (agent-repl--ws-get ws :project-dir))))
+    (if (and (stringp dir) (not (file-directory-p dir)))
+        'stale-registration
+      'no-durable-home)))
+
 (defun agent-repl--claim-central-log-fallback (ws)
   "Claim the ONE announcement that WS's records go to the central sink.
 
-Returns non-nil exactly once per WS, and raises the user-visible warning on
-that same one occasion.  A workspace that cannot host a durable sink of its
-own is an ORDINARY condition, and it belongs to the WORKSPACE rather than to
-the record that met it: announcing it per record is what turned a single tab
+Returns WS's `agent-repl--central-log-fallback-class' exactly once per WS and
+nil thereafter.  The condition belongs to the WORKSPACE rather than to the
+record that met it: announcing it per record is what turned a single tab
 render into a screenful of identical lines.
+
+THE USER-VISIBLE WARNING IS RAISED ONLY FOR `stale-registration'.  A
+workspace that simply owns no durable sink is an ORDINARY condition and gets
+no popup at all — it is recorded, once, and that is the whole of it.  A
+REGISTERED directory that is MISSING is not ordinary, so it keeps the popup.
 
 The record itself is built and written by `agent-repl--emit-log-record', the
 one builder and writer of records, which is also the only place that can do
 so without re-entering the ladder it runs inside."
   (unless (gethash ws agent-repl--unroutable-log-workspaces)
     (puthash ws t agent-repl--unroutable-log-workspaces)
-    (let ((dir (and (fboundp 'agent-repl--ws-get)
-                    (agent-repl--ws-get ws :project-dir))))
-      (display-warning
-       'agent-repl
-       (format "workspace %S cannot host a durable log sink (registered-dir=%s); its records are written centrally"
-               ws
-               (cond ((not (stringp dir)) "unregistered")
-                     ((file-directory-p dir) dir)
-                     (t (format "%s [MISSING]" dir))))
-       :warning))
-    t))
+    (let ((class (agent-repl--central-log-fallback-class ws)))
+      (when (eq class 'stale-registration)
+        (display-warning
+         'agent-repl
+         (format "workspace %S cannot host a durable log sink (registered-dir=%s); its records are written centrally"
+                 ws
+                 (format "%s [MISSING]"
+                         (agent-repl--ws-get ws :project-dir)))
+         :warning))
+      class)))
 
 (defvar agent-repl--log-preregistration-workspace nil
   "Name of the workspace currently inside its own registration window.
@@ -2003,14 +2032,17 @@ control-flow act, not a rung, and still signals.
 TWO DIFFERENT FACTS REACH THIS FUNCTION UNROUTED, and they are recorded
 differently:
 
-  - A NAMED WORKSPACE THAT OWNS NO DURABLE SINK is an ordinary outcome —
-    its directory is a scratch path, or its worktree has been deleted.
-    The record is written to the global sink carrying
-    `unroutable_workspace', so the line still says which workspace it is
-    about, and the CONDITION is announced once per workspace by
-    `agent-repl--claim-central-log-fallback'.  Nothing that merely renders
-    or sweeps such a workspace may fail or spam because of it: a single
-    tab render used to write 22 ERROR lines this way.
+  - A NAMED WORKSPACE THAT OWNS NO DURABLE SINK falls back to the central
+    sink, and `agent-repl--central-log-fallback-class' says which of the two
+    facts that is.  A workspace with no durable home of its own — an
+    unregistered name, or a registered scratch path — is an ORDINARY
+    outcome, recorded once at INFO and silently.  A workspace registered
+    at a directory that is GONE is a stale registry row, recorded once at
+    WARN and keeping its user-visible popup.  Either way the record is
+    written to the global sink carrying `unroutable_workspace', so the
+    line still says which workspace it is about, and nothing that merely
+    renders or sweeps such a workspace may fail or spam because of it: a
+    single tab render used to write 22 ERROR lines this way.
 
   - NO WORKSPACE AT ALL is missing attribution at the call site, which no
     directory can supply.  It keeps its `log-routing-error' line at ERROR
@@ -2020,16 +2052,27 @@ differently:
          (sink-ws (plist-get routing :workspace))
          (pseudo-ws (plist-get routing :pseudo))
          (unroutable-ws (plist-get routing :unroutable)))
-    (when (and unroutable-ws
-               (agent-repl--claim-central-log-fallback unroutable-ws)
-               agent-repl-log-to-file
-               (agent-repl--log-record-persists-p "debug" "normal"))
-      (agent-repl--do-log-to-file
-       (agent-repl--log-record nil "debug" "normal"
-                               agent-repl--central-log-fallback-format
-                               (list unroutable-ws (plist-get routing :reason))
-                               nil nil unroutable-ws)
-       nil))
+    ;; THE LEVEL FOLLOWS THE CLASS, and the record is still built and written
+    ;; here rather than handed to a rung: `agent-repl--emit-log-record' is the
+    ;; one builder and the one writer, and re-entering a rung from inside it
+    ;; would break that and strip the `unroutable_workspace' stamp this record
+    ;; exists to carry.  A stale registry row is a real inconsistency in
+    ;; durable state, so it is recorded at WARN; a workspace that simply has
+    ;; no durable home of its own is ordinary, so it is recorded at INFO.
+    (when-let* ((class (and unroutable-ws
+                            (agent-repl--claim-central-log-fallback
+                             unroutable-ws)))
+                (fallback-level (if (eq class 'stale-registration)
+                                    "warn"
+                                  "info")))
+      (when (and agent-repl-log-to-file
+                 (agent-repl--log-record-persists-p fallback-level "normal"))
+        (agent-repl--do-log-to-file
+         (agent-repl--log-record nil fallback-level "normal"
+                                 agent-repl--central-log-fallback-format
+                                 (list unroutable-ws (plist-get routing :reason))
+                                 nil nil unroutable-ws)
+         nil)))
     (if routing-error
         (let* ((offender (plist-get routing :offender))
                (reason (plist-get routing :reason))

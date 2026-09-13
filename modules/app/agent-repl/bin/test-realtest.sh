@@ -449,6 +449,41 @@ done < "$STUB_PROCS"
 exit 1
 STUB
 
+    # THE SWEEP'S THREE HARNESS CHECKS ARE `go test` INVOCATIONS — the leftover
+    # report at the start, the between-sweeps gap scan, the leftover clean and
+    # the mark at the end — and they do not go through suite-slot.sh, so this
+    # is where a case sees them and decides what they answer.
+    #
+    # It records "<test name> <leftover mode> <gap scan>" per invocation, which
+    # is what lets a case assert not just THAT the check ran but which question
+    # it asked; the two leftover calls differ only by their mode.
+    cat > "$dir/go" <<'STUB'
+#!/usr/bin/env bash
+name=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -run) name="$2"; shift ;;
+    esac
+    shift
+done
+# The anchors the script wraps the name in (`^Name$`) are stripped, so a case
+# asserts on the test name rather than on the regexp spelling.
+name="${name#^}"
+name="${name%$}"
+printf '%s %s %s %s\n' "$name" "${AGENT_REPL_REALTEST_LEFTOVERS:-none}" \
+    "${AGENT_REPL_REALTEST_GAP_SCAN:-0}" "${AGENT_REPL_REALTEST_LEFTOVER_PREFIX:-none}" \
+    >> "${STUB_GO_MARKER:?the case must state a go marker path}"
+if [ -n "${STUB_LEFTOVERS_FAIL:-}" ] && [ "${AGENT_REPL_REALTEST_LEFTOVERS:-}" = "$STUB_LEFTOVERS_FAIL" ]; then
+    printf 'REALTEST LEFTOVER WORKSPACES\n  ws-c22fed997b234b27 rt-8 (closed, MISSING) /leftover/dir\n'
+    exit 1
+fi
+if [ -n "${STUB_GAPSCAN_FAIL:-}" ] && [ "${AGENT_REPL_REALTEST_GAP_SCAN:-}" = "1" ]; then
+    printf 'BETWEEN-SWEEPS FINDINGS: 3 finding(s)\n'
+    exit 1
+fi
+exit 0
+STUB
+
     # STUB_CP_MODE lets a case make every copy fail (total-fail) without
     # touching the other stubs; unset or any other value passes through to
     # the real cp untouched.
@@ -483,7 +518,7 @@ done
 exit 0
 STUB
 
-    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp" "$dir/kill"
+    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp" "$dir/kill" "$dir/go"
     printf '%s' "$dir"
 }
 
@@ -517,6 +552,7 @@ run_script() {
     STUB_PROCS="${STUB_PROCS:-$SCRATCH/procs}" \
     STUB_READINESS_JSON="$SCRATCH/readiness.json" \
     STUB_SLOT_MARKER="$SCRATCH/slot-reached" \
+    STUB_GO_MARKER="${STUB_GO_MARKER:-$SCRATCH/go-reached}" \
     STUB_KILL_MARKER="$SCRATCH/killed" \
     STUB_KILL_LOG="${STUB_KILL_LOG:-$SCRATCH/kill-log}" \
     STUB_ALIVE_FLAG="${STUB_ALIVE_FLAG:-$SCRATCH/alive}" \
@@ -532,7 +568,7 @@ run_script() {
 prepare_home() {
     SCRIPT_ARGS=()
     rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed" \
-        "${SCRATCH:?}/alive" "${SCRATCH:?}/kill-log"
+        "${SCRATCH:?}/alive" "${SCRATCH:?}/kill-log" "${SCRATCH:?}/go-reached"
     : > "$SCRATCH/procs"
     mkdir -p "$SCRATCH/home/.claude-emacs" "$SCRATCH/home/.cache/agent-repl/store"
     printf 'workspaces' > "$SCRATCH/home/.claude-emacs/wsm.db"
@@ -1222,6 +1258,199 @@ test_every_world_table_row_names_a_real_test() {
     pass "$name"
 }
 
+# ---- the sweep's edges: leftovers and the gap between sweeps --------------
+#
+# The three checks are `go test` invocations that do NOT go through
+# suite-slot.sh (they start no editor and hold no machine), so they are seen
+# through the `go` stub's own marker rather than the slot's.
+
+test_declines_when_a_previous_sweep_left_registry_rows() {
+    local name="the sweep DECLINES when a previous sweep left workspace rows in the registry"
+    local dir out status=0
+    dir="$(scratch_bin leftovers-standing)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    out="$(STUB_LEFTOVERS_FAIL=report run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q -- '--clean-leftovers'; then
+        fail "$name" "the refusal does not name the remedy; output: $out"
+        return
+    fi
+    if [ -s "$SCRATCH/slot-reached" ]; then
+        fail "$name" "a realtest ran anyway: $(cat "$SCRATCH/slot-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_declined_sweep_does_not_move_the_mark() {
+    local name="a sweep that declined does not move the between-sweeps mark"
+    local dir status=0
+    dir="$(scratch_bin leftovers-decline-mark)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    STUB_LEFTOVERS_FAIL=report run_script "$dir" >/dev/null 2>&1 || status=$?
+    if grep -q 'TestBetweenSweepsMarkTheSweepEnd' "$SCRATCH/go-reached"; then
+        fail "$name" "the mark was written for a run that never read the gap, discarding that window"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_sweep_reads_the_gap_before_any_realtest() {
+    local name="the sweep reads the gap since the previous sweep before it runs a realtest"
+    local dir out status=0
+    dir="$(scratch_bin gap-scan-runs)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if ! grep -q '^TestBetweenSweepsGapScan none 1 ' "$SCRATCH/go-reached"; then
+        fail "$name" "the gap scan never ran: $(cat "$SCRATCH/go-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_between_sweep_findings_fail_an_otherwise_green_sweep() {
+    local name="findings between the sweeps fail a sweep whose realtests all passed"
+    local dir out status=0
+    dir="$(scratch_bin gap-scan-findings)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    out="$(STUB_GAPSCAN_FAIL=1 AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -eq 0 ] || [ "$status" -eq "$EXIT_DECLINED" ] || [ "$status" -eq "$EXIT_INCOMPLETE" ]; then
+        fail "$name" "exit was $status, want a failure; output: $out"
+        return
+    fi
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+        fail "$name" "the sweep did not run its realtests; a between-sweeps finding reports, it does not block"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_sweep_cleans_its_own_rows_even_after_a_failure() {
+    local name="the sweep removes the rows it created even when a realtest failed"
+    local dir status=0
+    dir="$(scratch_bin leftovers-clean-after-failure)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(5)
+
+    STUB_SLOT_FAIL=TestRealtestCreateWorkDeleteAWorkspace AGENT_REPL_REALTEST_TAKEOVER=1 \
+        run_script "$dir" >/dev/null 2>&1 || status=$?
+    if ! grep -q "^TestCleanRealtestLeftovers clean 0 $SCRATCH/out\$" "$SCRATCH/go-reached"; then
+        fail "$name" "no clean was asked for over the run directory: $(cat "$SCRATCH/go-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_row_the_sweep_could_not_remove_fails_the_run() {
+    local name="a registry row the sweep could not remove fails an otherwise green run"
+    local dir out status=0
+    dir="$(scratch_bin leftovers-survive)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    out="$(STUB_LEFTOVERS_FAIL=clean AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -eq 0 ] || [ "$status" -eq "$EXIT_DECLINED" ] || [ "$status" -eq "$EXIT_INCOMPLETE" ]; then
+        fail "$name" "exit was $status, want a failure; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'REALTEST LEFTOVER WORKSPACES'; then
+        fail "$name" "the finding is not named in the output: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_sweep_marks_where_it_ended() {
+    local name="the sweep records where every source stood when it ended"
+    local dir status=0
+    dir="$(scratch_bin sweep-mark)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir" >/dev/null 2>&1 || status=$?
+    if ! grep -q 'TestBetweenSweepsMarkTheSweepEnd' "$SCRATCH/go-reached"; then
+        fail "$name" "the mark was never written, so the next sweep has no window start: $(cat "$SCRATCH/go-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_clean_leftovers_runs_no_realtest() {
+    local name="--clean-leftovers clears the realtest root and runs no realtest"
+    local dir out status=0
+    dir="$(scratch_bin clean-leftovers)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(--clean-leftovers)
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if ! grep -q "^TestCleanRealtestLeftovers clean 0 $SCRATCH/home/.claude-emacs/realtest\$" "$SCRATCH/go-reached"; then
+        fail "$name" "the clean did not cover the realtest root: $(cat "$SCRATCH/go-reached")"
+        return
+    fi
+    if [ -s "$SCRATCH/slot-reached" ]; then
+        fail "$name" "a realtest ran: $(cat "$SCRATCH/slot-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_clean_leftovers_reports_rows_it_could_not_remove() {
+    local name="--clean-leftovers answers non-zero when a row survives it"
+    local dir out status=0
+    dir="$(scratch_bin clean-leftovers-survive)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(--clean-leftovers)
+
+    out="$(STUB_LEFTOVERS_FAIL=clean run_script "$dir")" || status=$?
+    if [ "$status" -eq 0 ]; then
+        fail "$name" "a survived row was reported as a successful clean; output: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_clean_leftovers_refuses_to_also_run_a_realtest() {
+    local name="--clean-leftovers with a realtest selector declines rather than guessing"
+    local dir out status=0
+    dir="$(scratch_bin clean-leftovers-and-selector)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(--clean-leftovers 1)
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    pass "$name"
+}
+
 # ---- run ------------------------------------------------------------------
 
 test_backup_copies_the_database
@@ -1264,6 +1493,16 @@ test_a_failing_realtest_does_not_stop_the_sweep
 test_a_realtest_asked_for_twice_runs_once
 test_the_world_table_covers_every_realtest
 test_every_world_table_row_names_a_real_test
+test_declines_when_a_previous_sweep_left_registry_rows
+test_a_declined_sweep_does_not_move_the_mark
+test_the_sweep_reads_the_gap_before_any_realtest
+test_between_sweep_findings_fail_an_otherwise_green_sweep
+test_the_sweep_cleans_its_own_rows_even_after_a_failure
+test_a_row_the_sweep_could_not_remove_fails_the_run
+test_the_sweep_marks_where_it_ended
+test_clean_leftovers_runs_no_realtest
+test_clean_leftovers_reports_rows_it_could_not_remove
+test_clean_leftovers_refuses_to_also_run_a_realtest
 
 echo
 echo "$PASS passed, $FAIL failed"
