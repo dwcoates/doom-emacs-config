@@ -779,6 +779,7 @@ type CreateWorkspaceError struct {
 	//	*CreateWorkspaceError_WorktreeCreationFailed
 	//	*CreateWorkspaceError_SpawnFailed
 	//	*CreateWorkspaceError_OneShotPolicyMissing
+	//	*CreateWorkspaceError_NamingFailed
 	Cause         isCreateWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -929,6 +930,15 @@ func (x *CreateWorkspaceError) GetOneShotPolicyMissing() *CreateWorkspaceOneShot
 	return nil
 }
 
+func (x *CreateWorkspaceError) GetNamingFailed() *CreateWorkspaceNamingFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*CreateWorkspaceError_NamingFailed); ok {
+			return x.NamingFailed
+		}
+	}
+	return nil
+}
+
 type isCreateWorkspaceError_Cause interface {
 	isCreateWorkspaceError_Cause()
 }
@@ -994,6 +1004,11 @@ type CreateWorkspaceError_OneShotPolicyMissing struct {
 	OneShotPolicyMissing *CreateWorkspaceOneShotPolicyMissing `protobuf:"bytes,12,opt,name=one_shot_policy_missing,json=oneShotPolicyMissing,proto3,oneof"`
 }
 
+type CreateWorkspaceError_NamingFailed struct {
+	// The daemon could not mint a name for a create that supplied none.
+	NamingFailed *CreateWorkspaceNamingFailed `protobuf:"bytes,13,opt,name=naming_failed,json=namingFailed,proto3,oneof"`
+}
+
 func (*CreateWorkspaceError_UngatedWithoutConsent) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_NoSlug) isCreateWorkspaceError_Cause() {}
@@ -1017,6 +1032,8 @@ func (*CreateWorkspaceError_WorktreeCreationFailed) isCreateWorkspaceError_Cause
 func (*CreateWorkspaceError_SpawnFailed) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_OneShotPolicyMissing) isCreateWorkspaceError_Cause() {}
+
+func (*CreateWorkspaceError_NamingFailed) isCreateWorkspaceError_Cause() {}
 
 type CreateWorkspaceUngatedWithoutConsent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1528,6 +1545,86 @@ func (x *CreateWorkspaceOneShotPolicyMissing) GetMissingFiles() []string {
 	return nil
 }
 
+// EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL. A create that
+// supplies no name gets one from a headless call the daemon makes inside
+// Create, constrained to at most three lowercase hyphenated words. There is
+// no word-truncation fallback — a name nobody chose is not a name — so a
+// naming call that cannot answer REFUSES the create, and the user retries or
+// supplies a name.
+type CreateWorkspaceNamingFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The model the naming call asked.
+	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// What went wrong, read off the failure: `guard_refused`, `no_binary`,
+	// `timeout`, `exit_status`, `unreadable_envelope` or `invalid_answer`.
+	Cause string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+	// How many calls were made before giving up.
+	Attempts uint32 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	// The last answer the model gave, when there was one. Empty when the call
+	// never answered.
+	Answer        string `protobuf:"bytes,4,opt,name=answer,proto3" json:"answer,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateWorkspaceNamingFailed) Reset() {
+	*x = CreateWorkspaceNamingFailed{}
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateWorkspaceNamingFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateWorkspaceNamingFailed) ProtoMessage() {}
+
+func (x *CreateWorkspaceNamingFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateWorkspaceNamingFailed.ProtoReflect.Descriptor instead.
+func (*CreateWorkspaceNamingFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *CreateWorkspaceNamingFailed) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *CreateWorkspaceNamingFailed) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+func (x *CreateWorkspaceNamingFailed) GetAttempts() uint32 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
+
+func (x *CreateWorkspaceNamingFailed) GetAnswer() string {
+	if x != nil {
+		return x.Answer
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_create_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
@@ -1583,7 +1680,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.CreateWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"R\n" +
 	"\x16CreateWorkspaceSuccess\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x9e\t\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xf0\t\n" +
 	"\x14CreateWorkspaceError\x12l\n" +
 	"\x17ungated_without_consent\x18\x01 \x01(\v22.agentrepl.v1.CreateWorkspaceUngatedWithoutConsentH\x00R\x15ungatedWithoutConsent\x12>\n" +
 	"\ano_slug\x18\x02 \x01(\v2#.agentrepl.v1.CreateWorkspaceNoSlugH\x00R\x06noSlug\x12V\n" +
@@ -1597,7 +1694,8 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x18worktree_creation_failed\x18\n" +
 	" \x01(\v23.agentrepl.v1.CreateWorkspaceWorktreeCreationFailedH\x00R\x16worktreeCreationFailed\x12M\n" +
 	"\fspawn_failed\x18\v \x01(\v2(.agentrepl.v1.CreateWorkspaceSpawnFailedH\x00R\vspawnFailed\x12j\n" +
-	"\x17one_shot_policy_missing\x18\f \x01(\v21.agentrepl.v1.CreateWorkspaceOneShotPolicyMissingH\x00R\x14oneShotPolicyMissingB\a\n" +
+	"\x17one_shot_policy_missing\x18\f \x01(\v21.agentrepl.v1.CreateWorkspaceOneShotPolicyMissingH\x00R\x14oneShotPolicyMissing\x12P\n" +
+	"\rnaming_failed\x18\r \x01(\v2).agentrepl.v1.CreateWorkspaceNamingFailedH\x00R\fnamingFailedB\a\n" +
 	"\x05cause\"&\n" +
 	"$CreateWorkspaceUngatedWithoutConsent\"\x17\n" +
 	"\x15CreateWorkspaceNoSlug\"\x1f\n" +
@@ -1618,7 +1716,12 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x0frepository_root\x18\x01 \x01(\tR\x0erepositoryRoot\x12\x1d\n" +
 	"\n" +
 	"policy_dir\x18\x02 \x01(\tR\tpolicyDir\x12#\n" +
-	"\rmissing_files\x18\x03 \x03(\tR\fmissingFilesB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\rmissing_files\x18\x03 \x03(\tR\fmissingFiles\"}\n" +
+	"\x1bCreateWorkspaceNamingFailed\x12\x14\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model\x12\x14\n" +
+	"\x05cause\x18\x02 \x01(\tR\x05cause\x12\x1a\n" +
+	"\battempts\x18\x03 \x01(\rR\battempts\x12\x16\n" +
+	"\x06answer\x18\x04 \x01(\tR\x06answerB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_create_workspace_proto_rawDescOnce sync.Once
@@ -1632,7 +1735,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*CreateWorkspaceRequest)(nil),                     // 0: agentrepl.v1.CreateWorkspaceRequest
 	(*CreateWorkspaceStandard)(nil),                    // 1: agentrepl.v1.CreateWorkspaceStandard
@@ -1658,30 +1761,31 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*CreateWorkspaceWorktreeCreationFailed)(nil),      // 21: agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
 	(*CreateWorkspaceSpawnFailed)(nil),                 // 22: agentrepl.v1.CreateWorkspaceSpawnFailed
 	(*CreateWorkspaceOneShotPolicyMissing)(nil),        // 23: agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
-	(*v1.RepositoryRef)(nil),                           // 24: workspace.v1.RepositoryRef
-	(*WorkspacePriority)(nil),                          // 25: agentrepl.v1.WorkspacePriority
-	(*v11.UserSaid)(nil),                               // 26: conversation.v1.UserSaid
-	(*v1.WorkspaceRef)(nil),                            // 27: workspace.v1.WorkspaceRef
+	(*CreateWorkspaceNamingFailed)(nil),                // 24: agentrepl.v1.CreateWorkspaceNamingFailed
+	(*v1.RepositoryRef)(nil),                           // 25: workspace.v1.RepositoryRef
+	(*WorkspacePriority)(nil),                          // 26: agentrepl.v1.WorkspacePriority
+	(*v11.UserSaid)(nil),                               // 27: conversation.v1.UserSaid
+	(*v1.WorkspaceRef)(nil),                            // 28: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
-	24, // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
+	25, // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
 	1,  // 1: agentrepl.v1.CreateWorkspaceRequest.standard:type_name -> agentrepl.v1.CreateWorkspaceStandard
 	2,  // 2: agentrepl.v1.CreateWorkspaceRequest.one_shot:type_name -> agentrepl.v1.CreateWorkspaceOneShot
 	5,  // 3: agentrepl.v1.CreateWorkspaceRequest.parent:type_name -> agentrepl.v1.CreateWorkspaceParent
-	25, // 4: agentrepl.v1.CreateWorkspaceRequest.priority:type_name -> agentrepl.v1.WorkspacePriority
+	26, // 4: agentrepl.v1.CreateWorkspaceRequest.priority:type_name -> agentrepl.v1.WorkspacePriority
 	7,  // 5: agentrepl.v1.CreateWorkspaceRequest.allow_ungated:type_name -> agentrepl.v1.CreateWorkspaceUngatedConsent
-	26, // 6: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
+	27, // 6: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
 	8,  // 7: agentrepl.v1.CreateWorkspaceStandard.merge_actions:type_name -> agentrepl.v1.CreateWorkspaceMergeActions
-	26, // 8: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
+	27, // 8: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
 	3,  // 9: agentrepl.v1.CreateWorkspaceOneShot.self_merge:type_name -> agentrepl.v1.CreateWorkspaceOneShotSelfMerge
 	4,  // 10: agentrepl.v1.CreateWorkspaceOneShot.open_pr:type_name -> agentrepl.v1.CreateWorkspaceOneShotOpenPr
-	27, // 11: agentrepl.v1.CreateWorkspaceParent.workspace:type_name -> workspace.v1.WorkspaceRef
+	28, // 11: agentrepl.v1.CreateWorkspaceParent.workspace:type_name -> workspace.v1.WorkspaceRef
 	6,  // 12: agentrepl.v1.CreateWorkspaceParent.fork:type_name -> agentrepl.v1.CreateWorkspaceFork
-	26, // 13: agentrepl.v1.CreateWorkspaceMergeActions.before_ws_merge:type_name -> conversation.v1.UserSaid
-	26, // 14: agentrepl.v1.CreateWorkspaceMergeActions.postprocessing_prompt:type_name -> conversation.v1.UserSaid
+	27, // 13: agentrepl.v1.CreateWorkspaceMergeActions.before_ws_merge:type_name -> conversation.v1.UserSaid
+	27, // 14: agentrepl.v1.CreateWorkspaceMergeActions.postprocessing_prompt:type_name -> conversation.v1.UserSaid
 	10, // 15: agentrepl.v1.CreateWorkspaceResponse.success:type_name -> agentrepl.v1.CreateWorkspaceSuccess
 	11, // 16: agentrepl.v1.CreateWorkspaceResponse.error:type_name -> agentrepl.v1.CreateWorkspaceError
-	27, // 17: agentrepl.v1.CreateWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	28, // 17: agentrepl.v1.CreateWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
 	12, // 18: agentrepl.v1.CreateWorkspaceError.ungated_without_consent:type_name -> agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
 	13, // 19: agentrepl.v1.CreateWorkspaceError.no_slug:type_name -> agentrepl.v1.CreateWorkspaceNoSlug
 	14, // 20: agentrepl.v1.CreateWorkspaceError.finish_required:type_name -> agentrepl.v1.CreateWorkspaceFinishRequired
@@ -1694,11 +1798,12 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	21, // 27: agentrepl.v1.CreateWorkspaceError.worktree_creation_failed:type_name -> agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
 	22, // 28: agentrepl.v1.CreateWorkspaceError.spawn_failed:type_name -> agentrepl.v1.CreateWorkspaceSpawnFailed
 	23, // 29: agentrepl.v1.CreateWorkspaceError.one_shot_policy_missing:type_name -> agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
-	30, // [30:30] is the sub-list for method output_type
-	30, // [30:30] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	24, // 30: agentrepl.v1.CreateWorkspaceError.naming_failed:type_name -> agentrepl.v1.CreateWorkspaceNamingFailed
+	31, // [31:31] is the sub-list for method output_type
+	31, // [31:31] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_workspace_proto_init() }
@@ -1735,6 +1840,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*CreateWorkspaceError_WorktreeCreationFailed)(nil),
 		(*CreateWorkspaceError_SpawnFailed)(nil),
 		(*CreateWorkspaceError_OneShotPolicyMissing)(nil),
+		(*CreateWorkspaceError_NamingFailed)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1742,7 +1848,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

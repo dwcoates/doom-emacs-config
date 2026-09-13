@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
-// The naming rule's constants, adopted from the conventions
-// prompts/workspace-generation-name-{prefixed,unprefixed}.md state — lowercase,
-// hyphenated, at most three words — plus the branch-name length bound the old
-// system used.
+// The naming rule's constants. The rule itself — lowercase, hyphenated, at
+// most three words — is stated to the model by
+// prompts/workspace-name-from-prompt.md and ENFORCED here on its answer: a
+// name is validated, never repaired.
 const (
 	// UnnamedSlugPrefix leads the name a create with neither a supplied name
 	// nor an initial prompt is given: the workspace's own minted id, prefixed
@@ -42,52 +44,29 @@ func Prefix() string {
 	return os.Getenv(LegacyPrefixEnv)
 }
 
-// Slug derives a workspace slug from free text by the naming rule: lowercase,
-// hyphen-separated, at most SlugWordLimit words, at most SlugMaxLen
-// characters. Text that yields nothing at all is an error — a workspace is
-// never given a made-up name.
-func Slug(text string) (string, error) {
-	words := words(text)
-	if len(words) == 0 {
-		return "", fmt.Errorf("no slug can be derived from %q", text)
-	}
-	if len(words) > SlugWordLimit {
-		words = words[:SlugWordLimit]
-	}
-	slug := strings.Join(words, "-")
-	if len(slug) > SlugMaxLen {
-		slug = slug[:SlugMaxLen]
-		// Never end on the hyphen the truncation landed in the middle of: a
-		// trailing hyphen is not a legal branch-name component tail.
-		slug = strings.TrimRight(slug, "-")
-	}
-	if slug == "" {
-		return "", fmt.Errorf("no slug can be derived from %q", text)
-	}
-	return slug, nil
-}
+// slugPattern is the whole naming rule, as the daemon enforces it on the
+// model's answer: at most SlugWordLimit hyphen-separated lowercase
+// alphanumeric words, with no leading or trailing hyphen, no slash and no path
+// component.
+//
+// THERE IS NO REPAIR PATH. An answer that does not match is refused and the
+// call is made again; word truncation — the old `Slug` — is deleted, because
+// a truncated name is a name nobody chose.
+var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+){0,` + strconv.Itoa(SlugWordLimit-1) + `}$`)
 
-// words splits free text into the slug's lowercase alphanumeric words. Runs of
-// anything else separate; a digit or letter run is one word.
-func words(text string) []string {
-	var out []string
-	var cur strings.Builder
-	flush := func() {
-		if cur.Len() > 0 {
-			out = append(out, cur.String())
-			cur.Reset()
-		}
+// ValidateSlug reports whether a naming answer is a legal slug, naming what is
+// wrong with it when it is not.
+func ValidateSlug(slug string) error {
+	if slug == "" {
+		return fmt.Errorf("the answer is empty")
 	}
-	for _, r := range strings.ToLower(text) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			cur.WriteRune(r)
-		default:
-			flush()
-		}
+	if len(slug) > SlugMaxLen {
+		return fmt.Errorf("the answer is %d characters, over the %d-character bound", len(slug), SlugMaxLen)
 	}
-	flush()
-	return out
+	if !slugPattern.MatchString(slug) {
+		return fmt.Errorf("the answer is not at most %d lowercase hyphen-separated alphanumeric words", SlugWordLimit)
+	}
+	return nil
 }
 
 // Name composes the workspace name (which is also the branch name) from the

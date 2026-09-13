@@ -50,7 +50,7 @@ func oneShotBriefs(f *fixture) {
 	}
 }
 
-func TestCreateDerivesTheBranchFromTheInitialPrompt(t *testing.T) {
+func TestCreateNamesTheBranchFromTheModelsAnswer(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "DWC")
@@ -62,8 +62,8 @@ func TestCreateDerivesTheBranchFromTheInitialPrompt(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.git.created) != 1 || f.git.created[0].Branch != "DWC/fix-the-login" {
-		t.Fatalf("created worktrees = %+v, want branch DWC/fix-the-login", f.git.created)
+	if len(f.git.created) != 1 || f.git.created[0].Branch != "DWC/"+FixtureMintedName {
+		t.Fatalf("created worktrees = %+v, want branch DWC/%s", f.git.created, FixtureMintedName)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestCreatePutsTheWorktreeInTheSiblingWorktreesDirectory(t *testing.T) {
 	}
 
 	// Assert.
-	want := filepath.Join(filepath.Dir(spec.RepoDir), filepath.Base(spec.RepoDir)+WorktreeDirSuffix, "fix-the-login")
+	want := filepath.Join(filepath.Dir(spec.RepoDir), filepath.Base(spec.RepoDir)+WorktreeDirSuffix, FixtureMintedName)
 	if f.git.created[0].WorktreeDir != want {
 		t.Fatalf("worktree dir = %q, want %q", f.git.created[0].WorktreeDir, want)
 	}
@@ -330,11 +330,17 @@ func TestCreateRefusesAFinishActionOnTheStandardForm(t *testing.T) {
 	asRefusal(t, err, ArmFinishNotOneShot)
 }
 
-func TestCreateRefusesWhenNoSlugCanBeDerived(t *testing.T) {
+// TestCreateRefusesAPromptlessOneShotWithNoSlug pins the ONE site `no_slug`
+// still has now that word truncation is deleted: a one-shot with nothing to
+// run, which is an argument-validation failure and not a naming failure.
+func TestCreateRefusesAPromptlessOneShotWithNoSlug(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
+	oneShotBriefs(f)
 	spec := standardSpec(t)
-	spec.InitialPrompt = "!!! ???"
+	spec.InitialPrompt = ""
+	spec.OneShot = true
+	spec.Finish = &OneShotFinish{SelfMerge: true}
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
