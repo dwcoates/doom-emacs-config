@@ -377,6 +377,10 @@ func (s *fakeSpawns) BeginStandDown() bool {
 	return true
 }
 
+// SpawnedFor answers the supervisor's live spawn registry. This fake holds no
+// clients of its own, so it owns no spawn for any workspace.
+func (s *fakeSpawns) SpawnedFor(ids.WorkspaceID) (int, bool) { return 0, false }
+
 // StandingDown answers the fake supervisor's latch.
 func (s *fakeSpawns) StandingDown() bool {
 	s.mu.Lock()
