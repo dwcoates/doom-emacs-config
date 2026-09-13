@@ -148,4 +148,3 @@ func TestCreationJobFailsWholeOnACorruptActionList(t *testing.T) {
 		t.Fatalf("the decode failure was not logged at error: %v", log.Records())
 	}
 }
-
