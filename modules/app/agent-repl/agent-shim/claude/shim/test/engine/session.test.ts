@@ -4392,6 +4392,64 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
       "system:hook_response",
     );
   });
+
+  it("records the account root the failed start was spawned under", async () => {
+    // A SILENT START IS DIAGNOSED FROM THE SHIM'S SIDE OR NOT AT ALL. Which
+    // account root and which trust key govern this directory is half of that,
+    // and it was on neither side's record.
+    const h = harness({ initTimeoutMs: 5 });
+    const before = logCursor();
+
+    await h.engine.startSession(freshRequest());
+
+    expect(logContextFor(before, "what the vendor emitted before the start failed")?.["trust_root"]).toBe(
+      "/ws",
+    );
+  });
+
+  it("names the vendor's init-on-first-turn behavior when only hook events arrived", async () => {
+    // THE GROUNDED SILENCE HAS A CAUSE, AND THE REFUSAL SHOULD SAY IT. Driven
+    // as this shim drives it, the vendor answers control requests at once and
+    // emits `system:init` only when a first turn reaches it, so "hook events
+    // then nothing" is the shape of a start that can never settle rather than
+    // of a slow one.
+    const h = harness({ initTimeoutMs: 5 });
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "success", output: "" }));
+
+    const response = await pending;
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      "This vendor announces `system:init` only once a first turn reaches it",
+    );
+  });
+
+  it("names the trust entry to confirm, and the file it lives in", async () => {
+    // THE COMPANION FAULT. An untrusted workspace does not hang, but it runs
+    // with its permission allowlists dropped and says so only on a stderr line
+    // nobody reads, so the one refusal a reader does see names the key.
+    const h = harness({ initTimeoutMs: 5 });
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "success", output: "" }));
+
+    const response = await pending;
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      'projects["/ws"].hasTrustDialogAccepted is true in',
+    );
+  });
+
+  it("keeps the bare bound when the vendor emitted something other than hooks", async () => {
+    // A VENDOR THAT WAS TALKING HAS A MORE SPECIFIC STORY. The init-on-first-
+    // turn reading would talk over it, so it is claimed only for the shape it
+    // was grounded on.
+    const h = harness({ initTimeoutMs: 5 });
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).query.emit(assistantMessage("uuid-pre-init"));
+
+    const response = await pending;
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toBe(
+      "the vendor did not send its init message within 5ms",
+    );
+  });
 });
 
 describe("StartSession's remaining refusals", () => {
