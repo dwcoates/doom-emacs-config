@@ -221,3 +221,14 @@ alone carries it: status is the detached/disconnected arm (whatever that
 arm is named), and the substatus and the activity field after it are
 specific to the bring-up failure. Landed as
 `FooterStatusActivityStartFailed` (footer/bringup-activity).
+
+## Owner ruling: one-shot policy is the repository's (2026-09-12, owner)
+
+The repository defines its one-shot policy through a file set in its tree
+(`.agent-repl/prompts/`, names mirroring the module corpus, plus
+`merge-before.md` / `merge-after.md` for the merge handler). Doom is the
+one repository whose policy is baked into the daemon (the module corpus).
+A repository with no such config does NOT inherit doom's: the DAEMON
+detects the absence and returns it as a one-shot creation error, and Emacs
+surfaces that refusal as a warning in the minibuffer. Emacs never detects
+this itself.
