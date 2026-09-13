@@ -105,7 +105,18 @@ func NewRepoAt(t *testing.T, dir string) *Repo {
 		repo.Worktrees[0].Head = c.SHA
 	})
 	writeFile(t, filepath.Join(dir, "README.md"), "fake repository\n")
+	// EVERY REPOSITORY STATES ITS OWN ONE-SHOT POLICY. A repository that
+	// states none refuses a one-shot create outright (the owner's 2026-09-12
+	// ruling), so a fixture repository carries a copy of the shipped corpus
+	// as its policy exactly as a real repository's author would write one.
+	CopyPrompts(t, r.PolicyDir())
 	return r
+}
+
+// PolicyDir is the repository's own `.agent-repl/prompts`, where it states its
+// one-shot and merge policy.
+func (r *Repo) PolicyDir() string {
+	return filepath.Join(r.Dir, ".agent-repl", "prompts")
 }
 
 // mintName answers a fresh repository directory name.
