@@ -12,6 +12,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
 
@@ -848,5 +849,147 @@ func TestPostPromptNeverParks(t *testing.T) {
 	// Assert.
 	if facts, _ := h.o.Facts(theWorkspace); facts.State == StateParked {
 		t.Fatalf("the merge parked on a failed after-action, want %q", StateMerged)
+	}
+}
+
+// ---- The repository's own merge policy ----
+
+// submittedWith answers the texts submitted under one merge origin.
+func submittedWith(h *harness, origin conversationv1.PromptOrigin) []string {
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	var out []string
+	for _, sub := range h.queue.submissions {
+		if sub.Origin != origin {
+			continue
+		}
+		for _, block := range sub.Said.GetContent().GetBlocks() {
+			if text := block.GetText(); text != nil {
+				out = append(out, text.GetText())
+			}
+		}
+	}
+	return out
+}
+
+// TestRepositoryPolicyFillsTheEmptyBeforeSlot covers the owner's ruling that a
+// repository states its own merge policy in its tree: a workspace that
+// configured no before-action runs the repository's `merge-before` brief.
+func TestRepositoryPolicyFillsTheEmptyBeforeSlot(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.policy[prompts.PolicyMergeBefore] = "run the repository's checklist"
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	got := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
+	if len(got) != 1 || got[0] != "run the repository's checklist" {
+		t.Fatalf("before-merge submissions = %v, want the repository's own brief", got)
+	}
+}
+
+// TestRepositoryPolicyFillsTheEmptyAfterSlot covers the same for the
+// after-merge action.
+func TestRepositoryPolicyFillsTheEmptyAfterSlot(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.policy[prompts.PolicyMergeAfter] = "announce the landing"
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	got := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
+	if len(got) != 1 || got[0] != "announce the landing" {
+		t.Fatalf("after-merge submissions = %v, want the repository's own brief", got)
+	}
+}
+
+// TestConfiguredActionBeatsTheRepositoryPolicy covers the precedence: the file
+// fills an EMPTY slot and never overrides what a create configured.
+func TestConfiguredActionBeatsTheRepositoryPolicy(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.configureActions([]string{"the workspace's own precondition"}, nil)
+	h.policy[prompts.PolicyMergeBefore] = "the repository's default"
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	got := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
+	if len(got) != 1 || got[0] != "the workspace's own precondition" {
+		t.Fatalf("before-merge submissions = %v, want the configured action alone", got)
+	}
+}
+
+// TestAbsentRepositoryPolicyRunsNothing covers the other half of the ruling:
+// a repository that states no merge policy is what every repository looked
+// like before the policy existed, and that is not an error.
+func TestAbsentRepositoryPolicyRunsNothing(t *testing.T) {
+	// Arrange: a repository whose policy directory holds nothing.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	before := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
+	after := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
+	if len(before) != 0 || len(after) != 0 {
+		t.Fatalf("merge-action submissions = (%v, %v), want none", before, after)
+	}
+}
+
+// TestAStatedBeforePolicyThatWillNotReadFailsTheRun covers the distinction an
+// absent brief does not: a policy the repository STATED and that cannot be
+// read is a fault, never a silent skip.
+func TestAStatedBeforePolicyThatWillNotReadFailsTheRun(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.policy[prompts.PolicyMergeBefore] = "unreadable"
+	h.policyErr[prompts.PolicyMergeBefore] = errors.New("the header does not parse")
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
+		t.Fatalf("the merge is %q, want %q", facts.State, StateFailed)
+	}
+	if h.git.seen("merge_no_ff") {
+		t.Fatal("the merge ran despite an unreadable before-merge policy")
 	}
 }
