@@ -15,6 +15,14 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Log sweep (shim, webapp, elisp), 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | `shim.logging.stderr-mirror` warns on every `write EPIPE` from the daemon's closed pipe (13 records, 3 today) | Re-leveled to info, site and message kept | A shim outlives its daemon by design, and the mirror was only a second copy of a record the durable sink — which this very record is written to — already holds | Restore `warn` in `retireStderrMirror` (src/log.ts) |
+| 2026-09-13 | `shim.service.route` reports a write onto a peer-destroyed h2c stream as "an exception no handler anticipated", with a stack (9 records, live) | Classified as the peer's departure and recorded at info; every other exception stays the error it was | It is the other half of a `CANCEL` this process already recorded at info one level up, so an ordinary workspace close produced two records and one of them accused this service of a defect | Delete `peerStreamGone` and its branch in `reportUnhandled` (src/service/routes.ts) |
+| 2026-09-13 | `shim.engine.backup` warns "transcript backup FAILED" when the vendor session id being rotated away from at session start never had a transcript file | ENOENT naming the SOURCE path is recorded at info as nothing to copy; every other cause stays warn | No bytes were at risk and none were lost, and the backup directory is created recursively immediately before, so an ENOENT naming anything else is still unexplained | Delete `missingSource` and its branch (src/engine/backup.ts) |
+
 ## Realtest 1
 
 | Date | Question | Decision | Why | How to reverse |

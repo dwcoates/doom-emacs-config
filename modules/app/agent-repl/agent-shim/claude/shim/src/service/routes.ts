@@ -81,10 +81,52 @@ async function* streaming<T>(rpc: string, frames: () => AsyncIterable<T>): Async
   }
 }
 
-/** Log an unanticipated exception once, at the boundary, and type it. */
+/**
+ * A write that failed because the PEER's stream is already gone.
+ *
+ * Node raises `ERR_HTTP2_INVALID_STREAM` ("The stream has been destroyed") when
+ * the adapter writes a frame onto a stream the peer has already reset. That is
+ * not an exception nobody anticipated: it is the other half of the cancel
+ * `recordStreamReset` in `service/server.ts` has just recorded at info — every workspace the
+ * daemon closes cancels its two standing watches on the way out, and the frame
+ * this side had already produced for that watch lands after the reset.
+ *
+ * Matched on the code first, which is the contract Node states, and on the
+ * message only as the fallback for a wrapper that carried the text without the
+ * code.
+ */
+function peerStreamGone(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if ((error as NodeJS.ErrnoException).code === "ERR_HTTP2_INVALID_STREAM") return true;
+  return error.message.includes("The stream has been destroyed");
+}
+
+/**
+ * Log an unanticipated exception once, at the boundary, and type it.
+ *
+ * A PEER'S DEPARTURE IS EXPLAINED, NEVER MOURNED, which is the same rule
+ * `service/server.ts` applies to the reset itself. Reporting a write onto a
+ * cancelled stream as "an exception no handler anticipated" — with a stack —
+ * made every ordinary consumer departure look like a defect of this service's,
+ * and buried the exceptions that ARE defects among them. The departure is still
+ * RECORDED, because a stream ending mid-serve is a fact the log is the only
+ * place to learn it, and the error still travels to the caller unchanged: the
+ * mapping below is untouched, so nothing that DOES have a listener is silenced.
+ */
 function reportUnhandled(rpc: string, error: unknown): unknown {
   const mapped = internalFromUnknown(rpc, error);
   if (mapped !== error) {
+    if (peerStreamGone(error)) {
+      LOGGER.info(
+        {
+          rpc,
+          detail: mapped.rawMessage,
+          reason: "the peer destroyed the stream before this frame reached it; it had already stopped consuming",
+        },
+        `shim.v1.${rpc} was writing to a stream its peer had already destroyed`,
+      );
+      return mapped;
+    }
     LOGGER.error(
       {
         rpc,
