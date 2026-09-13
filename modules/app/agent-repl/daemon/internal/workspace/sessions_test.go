@@ -2015,3 +2015,35 @@ func TestStartReportsACancelledAdoptionAsItsOwnCause(t *testing.T) {
 		t.Fatalf("Start error = %q, want the cancellation rather than an overrun", err)
 	}
 }
+
+// TestTheColdGateIsRecordedAtInfo pins the gate's LEVEL. A cold refusal is the
+// designed answer to resuming a large context -- the cost is published to the
+// footer and the feed and the user chooses pay, clear or compact -- so it
+// carries no defect and must not stand in a log the owner reads for defects.
+func TestTheColdGateIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	var found bool
+	for _, record := range f.log.logger.Records() {
+		if record.Message != "the session is parked behind a cold gate" {
+			continue
+		}
+		found = true
+		if record.Level != "info" {
+			t.Fatalf("the cold-gate record is %q, want info", record.Level)
+		}
+	}
+	if !found {
+		t.Fatal("no cold-gate record was written")
+	}
+}
