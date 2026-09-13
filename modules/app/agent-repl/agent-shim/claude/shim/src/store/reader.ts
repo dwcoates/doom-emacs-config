@@ -139,6 +139,33 @@ function toHistoryPage(page: storev1.AgentSessionPage): conversationv1.HistoryPa
  */
 const CATCHUP_PAGE_SIZE = 1024;
 
+/**
+ * How many times in a row the store may END a standing tail, delivering
+ * nothing, before the tail stops re-opening and says so.
+ *
+ * A STORE THAT ENDS A STANDING WATCH IS NOT A CONCLUSION. `WatchAgentSession`
+ * has no failure arm and no natural end: the store's own handler returns `nil`
+ * — a clean, error-free end of stream — when it is SHUTTING DOWN or when it
+ * sees the caller go away, and connect-node presents that to this side as an
+ * async iterable that simply finished. This tail used to treat that as "the
+ * store closed, so stop", and the whole chain above it was silent: the engine's
+ * `for await` fell out, the `WatchAgent` generator returned normally, and the
+ * route recorded `completed` at DEBUG. The daemon, on the other side of the
+ * socket, saw a standing stream end while the session lived, opened a
+ * `link_fault` and a health fault — and the shim's own log, the only place that
+ * could say what ended it, held nothing at any level it was running at.
+ *
+ * So an unasked end is now the same class of event as the refused token beside
+ * it: the store forgot the watch, the book still exists, and the recovery is to
+ * re-open from the last pointer actually served. The budget bounds the one case
+ * that recovery cannot fix — a store that accepts a token and immediately ends
+ * the stream again — so a shim cannot spin re-opening against it. Three,
+ * because a store restarting under a live shim ends each watch ONCE; a second
+ * and third are the retry schedule's own attempts landing mid-restart, and a
+ * fourth is no longer a restart.
+ */
+const UNASKED_END_BUDGET = 3;
+
 // ---------------------------------------------------------------------------
 // Failure translation
 // ---------------------------------------------------------------------------
@@ -563,8 +590,17 @@ export function createReader(options: ReaderOptions): Reader {
 
     const tail: AsyncIterable<conversationv1.HistoryEntryAt> = {
       async *[Symbol.asyncIterator]() {
+        /**
+         * Consecutive UNASKED ends of the store's stream that delivered
+         * nothing. Any entry served resets it, because a tail that is still
+         * carrying rows is not the wedged case {@link UNASKED_END_BUDGET}
+         * bounds.
+         */
+        let barrenEnds = 0;
         for (;;) {
           if (stopped) return;
+          /** Whether this attempt ended in the store's refused-token refusal. */
+          let refused = false;
           try {
             for await (const push of client.watchAgentSession(
               create(storev1.WatchAgentSessionRequestSchema, { watch: token }),
@@ -581,18 +617,20 @@ export function createReader(options: ReaderOptions): Reader {
               servedThrough = entry.at;
               if (entry.at !== undefined) served.add(entry.at.value);
               yield entry;
+              barrenEnds = 0;
               if (settled()) {
                 stopped = true;
                 abort.abort();
                 return;
               }
             }
-            // A tail that ends without a refusal is the store closing; a
-            // standing stream concludes nothing on its own, so stop.
-            return;
+            if (stopped) return;
           } catch (error) {
             if (stopped) return;
             if (!isNotFound(error)) throw transportFailure(error);
+            refused = true;
+          }
+          if (refused) {
             // THE REFUSED-OPEN CONVENTION: an unknown token means the store
             // forgot the session (a restart, a consumed token). Re-open from
             // the last pointer actually served — the only thing that makes
@@ -602,37 +640,79 @@ export function createReader(options: ReaderOptions): Reader {
               { agent: agent.value, served_through: servedThrough?.value },
               "the store refused the watch token; re-opening the book from the last served pointer",
             );
-            const reopened = await openSession(agent, CATCHUP_PAGE_SIZE, servedThrough);
-            if (reopened.watch === undefined) {
+          } else {
+            // AN END NOBODY ASKED FOR TAKES THE SAME RECOVERY, AND SAYS SO.
+            // Nothing on this side stopped the tail — `stopped` is false — so
+            // the store ended a standing watch of its own accord. See
+            // {@link UNASKED_END_BUDGET} for what that silence used to cost.
+            barrenEnds += 1;
+            if (barrenEnds > UNASKED_END_BUDGET) {
+              LOGGER.error(
+                {
+                  agent: agent.value,
+                  served_through: servedThrough?.value,
+                  attempts: barrenEnds,
+                  budget: UNASKED_END_BUDGET,
+                  detail: "the store ended each re-opened watch without delivering a line",
+                },
+                "gave up re-opening an agent's tail: the store keeps ending a standing watch nothing asked it to end",
+              );
               throw new PersistenceError(
                 "store_unavailable",
-                "the store re-opened a reading session with no watch token",
+                `the store ended the standing watch on ${agent.value} ${String(barrenEnds)} times in a row ` +
+                  "without delivering a line; the tail cannot be kept standing",
               );
             }
-            // The re-open's page is bounded by `known_through`, so anything
-            // it carries is newer than what was served and must be yielded
-            // before the tail continues.
-            if (reopened.page?.boundary.case === "more") {
-              LOGGER.error(
-                { agent: agent.value, budget: CATCHUP_PAGE_SIZE, detail: "entries exceeded the catch-up page budget" },
-                "the gap since the last served pointer exceeds the catch-up budget; entries were skipped",
-              );
-            }
-            for (const line of [...(reopened.page?.lines ?? [])].reverse()) {
-              const entry = toHistoryEntryAt(line);
-              servedThrough = entry.at;
-              if (entry.at !== undefined) served.add(entry.at.value);
-              yield entry;
-              if (settled()) {
-                stopped = true;
-                abort.abort();
-                return;
-              }
-            }
-            token = reopened.watch;
-            // A fresh controller per attempt: the aborted one stays aborted.
-            abort = new AbortController();
+            // warn: a defect because the store ended a standing watch nothing on this side had asked it to end.
+            LOGGER.warn(
+              {
+                agent: agent.value,
+                served_through: servedThrough?.value,
+                attempt: barrenEnds,
+                budget: UNASKED_END_BUDGET,
+              },
+              "the store ended a standing watch that nothing asked it to end; re-opening the book from the last served pointer",
+            );
           }
+          // ON THE READ HALF'S OWN SCHEDULE. A store that ended every watch
+          // because it is RESTARTING will refuse this open for as long as it is
+          // down, and a single attempt would turn a restart the schedule is
+          // there to absorb into a severed WatchAgent on every live session.
+          const reopened = await readWithRetry(
+            "reopenAgentTail",
+            () => openSession(agent, CATCHUP_PAGE_SIZE, servedThrough),
+            options,
+          );
+          if (reopened.watch === undefined) {
+            throw new PersistenceError(
+              "store_unavailable",
+              "the store re-opened a reading session with no watch token",
+            );
+          }
+          // The re-open's page is bounded by `known_through`, so anything
+          // it carries is newer than what was served and must be yielded
+          // before the tail continues.
+          if (reopened.page?.boundary.case === "more") {
+            LOGGER.error(
+              { agent: agent.value, budget: CATCHUP_PAGE_SIZE, detail: "entries exceeded the catch-up page budget" },
+              "the gap since the last served pointer exceeds the catch-up budget; entries were skipped",
+            );
+          }
+          for (const line of [...(reopened.page?.lines ?? [])].reverse()) {
+            const entry = toHistoryEntryAt(line);
+            servedThrough = entry.at;
+            if (entry.at !== undefined) served.add(entry.at.value);
+            yield entry;
+            barrenEnds = 0;
+            if (settled()) {
+              stopped = true;
+              abort.abort();
+              return;
+            }
+          }
+          token = reopened.watch;
+          // A fresh controller per attempt: the aborted one stays aborted.
+          abort = new AbortController();
         }
       },
     };
@@ -796,7 +876,24 @@ export function createReader(options: ReaderOptions): Reader {
           }
           for (;;) {
             const next = await pending;
-            if (next.done === true) return;
+            if (next.done === true) {
+              // THE INNER TAIL ENDS ONLY WHEN THIS WRAPPER ASKED IT TO. It
+              // recovers from a store that ends a standing watch and throws
+              // when it cannot, so a `done` here with neither a close nor a
+              // conclusion behind it is an ending nobody ordered — the very
+              // shape the daemon reads as a severed link, and the shape that
+              // must never leave this process unrecorded again.
+              if (!closed && !concluded) {
+                LOGGER.error(
+                  {
+                    agent: agent.value,
+                    detail: "the deferred book's inner tail finished with no close and no conclusion",
+                  },
+                  "an agent's tail ended without anything asking it to; the consumer's stream ends with the session still live",
+                );
+              }
+              return;
+            }
             pending = rows.next();
             if (next.value.at !== undefined) served.add(next.value.at.value);
             yield next.value;
