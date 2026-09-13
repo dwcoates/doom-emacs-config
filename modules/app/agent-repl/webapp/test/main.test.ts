@@ -33,6 +33,8 @@ import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/e
 
 /** Every mount, in the order the boot called it. */
 let order: string[] = [];
+/** Whether the mocked `ClientLog` rejects every record. */
+let clientLogFails = false;
 /** The `ClientLog` calls the installed logger forwarded. */
 let clientLogs: { record: { message: string; context?: Record<string, unknown> } }[] = [];
 /** The rejection `main.ts` handed to `queueMicrotask` to re-raise. */
@@ -127,7 +129,12 @@ async function bootMain(): Promise<void> {
     createAgentReplClient: vi.fn(() => ({
       clientLog: (request: { record: { message: string; context?: Record<string, unknown> } }) => {
         clientLogs.push(request);
-        return Promise.resolve({});
+        // A SINK THAT REJECTS is how the daemon being unreachable reaches the
+        // logger, and `clientLogSink` is the one place that failure becomes
+        // something the footer can draw.
+        return clientLogFails
+          ? Promise.reject(new Error("no route to the daemon"))
+          : Promise.resolve({});
       },
       watchPage: async function* (_request: unknown, options: { signal: AbortSignal }) {
         await new Promise<void>((resolve) => {
@@ -231,6 +238,7 @@ beforeEach(() => {
   order = [];
   bootedContext = null;
   clientLogs = [];
+  clientLogFails = false;
   rethrown = [];
   adopt = async () => {};
   onFooterStatus = null;
@@ -509,5 +517,32 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
     await bootMain();
 
     expect(document.querySelector("#failure-overlay [data-arm]")).toBeNull();
+  });
+});
+
+describe("the ClientLog sink and the client's link verdict", () => {
+  test("reports a ClientLog that could not be forwarded", async () => {
+    // ARRANGE: the daemon refuses every record this page tries to file.
+    clientLogFails = true;
+
+    // ACT
+    await bootMain();
+
+    // ASSERT: read out of the BOOT'S OWN module graph, which `vi.resetModules`
+    // made a fresh one -- the statically imported copy is another page.
+    const link = await import("../src/rpc/link.js");
+    expect(link.standingClientFailure()).toEqual({
+      kind: "client_log_failed",
+      substatus: "daemon unreachable",
+      activity: "ClientLog forwarding failed",
+    });
+    link.clearClientFailures();
+  });
+
+  test("reports nothing while the sink is accepting records", async () => {
+    await bootMain();
+
+    const link = await import("../src/rpc/link.js");
+    expect(link.standingClientFailure()).toBeNull();
   });
 });

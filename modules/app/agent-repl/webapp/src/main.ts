@@ -47,6 +47,7 @@ import { mountFailureOverlay, type FailureOverlayHandle } from "./failure/overla
 import { ForwardingLogger, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
 import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
+import { reportClientFailure } from "./rpc/link.js";
 import { pageAddress } from "./rpc/page-address.js";
 import { createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
@@ -78,9 +79,25 @@ function mintConnectionId(): string {
  * logger's own failure path. This is the one rpc the app makes without it; the
  * rejection is what `ForwardingLogger` counts.
  */
-function clientLogSink(getClient: () => AgentReplClient, workspace: WorkspaceRef): ClientLogSink {
+export function clientLogSink(
+  getClient: () => AgentReplClient,
+  workspace: WorkspaceRef,
+): ClientLogSink {
   return async (record) => {
-    const response = await getClient().clientLog({ workspace, record });
+    let response;
+    try {
+      response = await getClient().clientLog({ workspace, record });
+    } catch (err) {
+      // THE SINK ITSELF IS DOWN. `ForwardingLogger` counts the rejection and
+      // says so on the console exactly once, and nothing else knew (the
+      // audit's N2 row 10) -- so the footer is told, with a FIXED line. The
+      // report logs, that log is forwarded through this same sink, and it
+      // fails again: an identical repeat is dropped by `reportClientFailure`,
+      // which is what makes that loop terminate. The rejection is rethrown
+      // unchanged, because the logger's own count is still its to keep.
+      reportClientFailure("client_log_failed", "ClientLog forwarding failed");
+      throw err;
+    }
     // `unknown_workspace` is TERMINAL, not a failure: this page's workspace has
     // been closed or forgotten and the daemon has nowhere to file the record.
     // The logger reads it as the cue to stop forwarding; every other arm is a

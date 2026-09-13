@@ -41,6 +41,7 @@
  */
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { log } from "../log.js";
+import { reportClientFailure } from "../rpc/link.js";
 import { requireCase } from "../rpc/strict.js";
 import { failureSideColor, toneClass } from "../vocab.js";
 import { isClientFailureArm, type ClientFailureArm, type FailureSink } from "./sink.js";
@@ -165,6 +166,17 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
           context: { arm, until_ms: until },
         });
         return;
+      }
+      // THE CARD REACHES THE OVERLAY; THE FOOTER HEARS ABOUT IT TOO (the
+      // audit's N2 row 11: a footer left saying `thinking` under a dead link
+      // kept saying `thinking`). Only the two arms that describe THIS page's
+      // link to the daemon are relayed -- a boot failure, a departed
+      // workspace or a stale bundle is not a link this footer can speak for.
+      if (arm === "daemonUnreachable") {
+        reportClientFailure("daemon_unreachable_card", ARM_HEADLINE.daemonUnreachable);
+      }
+      if (arm === "frameUndecodable") {
+        reportClientFailure("frame_undecodable_card", ARM_HEADLINE.frameUndecodable);
       }
       const replacing = cards.has(arm);
       const write = replacing ? log.debug : log.error;
