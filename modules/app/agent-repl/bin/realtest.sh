@@ -100,7 +100,20 @@
 #   3. THE VENDOR GUARD CANNOT BE HELD. A daemon already running without
 #      AGENT_REPL_FORBID_VENDOR_CALLS in its environment would be adopted by the
 #      new Emacs and would spawn shims without it, so a prompt could reach the
-#      real SDK. The SHIMS are checked in their own right for the same reason:
+#      real SDK.
+#
+#      THE DAEMON HALF RESOLVES ITSELF UNDER THE CONSENT IT ALREADY HAS. Every
+#      sweep ends by handing the owner a guard-free editor and a guard-free
+#      daemon, so every sweep OPENS against an unguarded daemon; refusing it and
+#      naming a kill to run by hand made the second and every later sweep
+#      decline (owner complaint, 2026-09-13). With
+#      AGENT_REPL_REALTEST_STOP_DAEMON=1 the run quits the standing editor first
+#      (under the takeover, so it cannot bring an unguarded daemon straight back
+#      up) and then stops the daemon the same orderly way realtest 3's world
+#      does — SIGTERM, one bound, never SIGKILL — and says so. Without the
+#      consent the refusal stands and names setting the variable as the remedy.
+#
+#      The SHIMS are checked in their own right for the same reason:
 #      a shim already listening on a workspace socket is ADOPTED by the daemon
 #      rather than respawned, so a shim that predates the guard keeps its old
 #      environment — which is exactly what happened in realtest 1's first run,
@@ -452,6 +465,110 @@ emacs_answering() {
     "$EMACSCLIENT" --socket-name "$EMACS_SOCKET" --eval '(emacs-pid)' >/dev/null 2>&1
 }
 
+# ---- what a refusal is allowed to do: quit the editor, stop the daemon ----
+#
+# BOTH ARE DEFINED HERE, ahead of the vendor-guard refusal, because that
+# refusal now RESOLVES itself under the consents rather than only naming what
+# to stop by hand (owner complaint, 2026-09-13: every sweep ends by handing
+# back a guard-free editor AND daemon, so every next sweep opened against an
+# unguarded daemon and declined).
+
+# RUN_OWNS_EDITOR — is the editor that is answering one this RUN started?
+#
+# It is 0 while the editor standing on the socket is the one that was there
+# before the run, and 1 from the moment that editor is gone: every editor after
+# that was launched by a realtest in this run. The takeover consent is about
+# the OWNER'S editor and the owner's unsaved work, so it is required for the
+# first quit and not for the run's own restarts — which is what lets a sweep
+# quit between its cold-start realtests without asking again.
+RUN_OWNS_EDITOR=0
+if ! emacs_answering; then
+    RUN_OWNS_EDITOR=1
+fi
+
+# quit_standing_emacs — quit the editor answering the socket and wait for it to
+# go. Non-zero if there is still one answering afterwards, or if the consent
+# was not given.
+#
+# The consent is re-read here rather than assumed from the plan's check: a
+# function that closes the owner's editor must not depend on its caller having
+# asked first.
+quit_standing_emacs() {
+    if ! emacs_answering; then
+        note "no Emacs is answering; nothing to take over"
+        return 0
+    fi
+    IDLE="$("$EMACSCLIENT" --socket-name "$EMACS_SOCKET" --eval \
+        '(let ((idle (current-idle-time))) (if idle (float-time idle) 0.0))' 2>/dev/null || printf 'unknown')"
+    note "an Emacs is answering; it has been idle for ${IDLE}s (a human counts as present under ${HUMAN_IDLE_SECONDS}s)"
+    if [ "$RUN_OWNS_EDITOR" = "1" ]; then
+        note "this editor was started by this run; quitting it for the next realtest's cold start"
+    elif [ "${AGENT_REPL_REALTEST_TAKEOVER:-}" != "1" ]; then
+        printf '[realtest] an Emacs is running and a cold start has to quit it.\n' >&2
+        printf '[realtest] That is the owner'"'"'s editor, with the owner'"'"'s unsaved work in it, and this script\n' >&2
+        printf '[realtest] does not decide to close it. Set AGENT_REPL_REALTEST_TAKEOVER=1 to say go ahead.\n' >&2
+        return 1
+    else
+        note "AGENT_REPL_REALTEST_TAKEOVER=1: quitting the running Emacs"
+    fi
+    # `kill-emacs`, not `save-buffers-kill-emacs`: the second one PROMPTS, and a
+    # prompt on a headless takeover hangs the run holding the owner's editor open
+    # on a modal question nobody will answer. It does not save; the refusal above
+    # is what protects unsaved work.
+    "$EMACSCLIENT" --socket-name "$EMACS_SOCKET" --eval '(kill-emacs)' >/dev/null 2>&1 || true
+    for _ in $(seq 1 60); do
+        if ! emacs_answering; then
+            break
+        fi
+        sleep 1
+    done
+    if emacs_answering; then
+        printf '[realtest] the running Emacs is still answering %s a minute after (kill-emacs); nothing is\n' "$EMACS_SOCKET" >&2
+        printf '[realtest] launched onto the same socket.\n' >&2
+        return 1
+    fi
+    note "the running Emacs has exited"
+    RUN_OWNS_EDITOR=1
+    return 0
+}
+
+# How long the daemon is given to exit after SIGTERM before realtest 3 is
+# skipped. A daemon drains its shims on the way out; this is a small multiple
+# of that, not a guess at a machine's speed.
+#
+# AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS shortens it for bin/test-realtest.sh,
+# which asserts what happens when a daemon does NOT go and must not wait out a
+# real drain to do it.
+readonly DAEMON_STOP_SECONDS="${AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS:-30}"
+
+# The kill used to stop it. A variable so bin/test-realtest.sh can watch what
+# would be signalled without a process to signal, the same reason
+# AGENT_REPL_REALTEST_EMACSCLIENT exists.
+REALTEST_KILL="${AGENT_REPL_REALTEST_KILL:-/bin/kill}"
+
+
+# stop_daemons_sigterm PID... — SIGTERM every pid named and wait for the
+# daemon to be gone. Prints the pids still standing afterwards (empty when it
+# went). ONE SPELLING of the stop, because the three places that stop a daemon
+# — realtest 3's world, this preflight, and the handback — must not disagree
+# about the signal sent or how long it is given.
+#
+# NO SIGKILL, anywhere. Escalating on the owner's daemon is not a decision this
+# script makes; a daemon that ignored SIGTERM is a finding in its own right.
+stop_daemons_sigterm() {
+    "$REALTEST_KILL" -TERM "$@" >/dev/null 2>&1 || true
+    local _i
+    for _i in $(seq 1 "$DAEMON_STOP_SECONDS"); do
+        if [ -z "$(daemon_pids)" ]; then
+            break
+        fi
+        sleep 1
+    done
+    local left
+    left="$(daemon_pids | tr '\n' ' ')"
+    printf '%s' "${left% }"
+}
+
 # ---- refusal 3, checked before 2: the vendor guard ------------------------
 #
 # Before the backups and before the takeover, because a stack that cannot hold
@@ -487,17 +604,68 @@ standing_emacs_pid() {
     printf '%s' "$pid"
 }
 
+# THE UNGUARDED DAEMON IS THE NORMAL WAY A SWEEP STARTS, not an anomaly. The
+# handback at the end of every sweep leaves the owner a guard-free editor and a
+# guard-free daemon on purpose, so the next sweep opens against exactly the
+# daemon this section refuses. Refusing it and telling the operator to kill it
+# by hand made every sweep after the first one decline (owner complaint,
+# 2026-09-13).
+#
+# So under AGENT_REPL_REALTEST_STOP_DAEMON=1 — the same consent realtest 3's
+# world uses, and the same consent the handback uses — it is STOPPED, through
+# the same orderly path: SIGTERM, and the one bound. Without that consent the
+# refusal stands, and now names setting the variable as the remedy.
+#
+# THE EDITOR IS QUIT FIRST. A standing Emacs that finds its daemon gone brings
+# one up again, so stopping the daemon out from under a live editor can hand
+# this run a fresh unguarded daemon between the stop and the check. The quit
+# costs a takeover, which is the consent the operator has already given for
+# every cold start in the plan; without it this declines rather than stopping a
+# daemon an editor would immediately replace.
 DAEMON_PID="$(daemon_pids | head -n1)"
 if [ -n "$DAEMON_PID" ]; then
     note "a daemon is running as pid $DAEMON_PID; checking its environment for the vendor guard"
     if ! process_carries_guard "$DAEMON_PID"; then
-        printf '[realtest] DECLINED: the running daemon (pid %s) does not carry %s.\n' "$DAEMON_PID" "$VENDOR_GUARD_ENV" >&2
-        printf '[realtest] Emacs ADOPTS an answering daemon and never kills one, so the new Emacs would inherit\n' >&2
-        printf '[realtest] this one and it would spawn shims with the real SDK reachable. Stop it (SPC o C-d from\n' >&2
-        printf '[realtest] the editor, or kill %s) so the realtest'"'"'s Emacs spawns a guarded one, then try again.\n' "$DAEMON_PID" >&2
-        exit "$EXIT_DECLINED"
+        note "the running daemon (pid $DAEMON_PID) does not carry $VENDOR_GUARD_ENV"
+        if [ "${AGENT_REPL_REALTEST_STOP_DAEMON:-}" != "1" ]; then
+            printf '[realtest] DECLINED: the running daemon (pid %s) does not carry %s.\n' "$DAEMON_PID" "$VENDOR_GUARD_ENV" >&2
+            printf '[realtest] Emacs ADOPTS an answering daemon and never kills one, so the new Emacs would inherit\n' >&2
+            printf '[realtest] this one and it would spawn shims with the real SDK reachable.\n' >&2
+            printf '[realtest] THE REMEDY IS AGENT_REPL_REALTEST_STOP_DAEMON=1: that consent lets this run stop the\n' >&2
+            printf '[realtest] daemon itself, orderly, so the realtest'"'"'s Emacs spawns a guarded one. Stopping it by\n' >&2
+            printf '[realtest] hand (SPC o C-d from the editor, or kill %s) works too.\n' "$DAEMON_PID" >&2
+            exit "$EXIT_DECLINED"
+        fi
+        # THE EDITOR, FIRST. Ordered, not incidental: the quit has to complete
+        # before the SIGTERM so the editor cannot respawn an unguarded daemon
+        # in between.
+        if emacs_answering; then
+            note "quitting the standing Emacs BEFORE the daemon, so it cannot bring an unguarded daemon back up"
+            if ! quit_standing_emacs; then
+                printf '[realtest] DECLINED: the standing Emacs could not be quit (above), and stopping the daemon\n' >&2
+                printf '[realtest] under a live editor would only have it brought back up unguarded.\n' >&2
+                exit "$EXIT_DECLINED"
+            fi
+        fi
+        UNGUARDED_DAEMONS=()
+        while IFS= read -r pid; do
+            [ -n "$pid" ] || continue
+            UNGUARDED_DAEMONS+=("$pid")
+        done < <(daemon_pids)
+        if [ "${#UNGUARDED_DAEMONS[@]}" -gt 0 ]; then
+            note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the unguarded daemon (pid(s) ${UNGUARDED_DAEMONS[*]}) with SIGTERM"
+            DAEMON_LEFT="$(stop_daemons_sigterm "${UNGUARDED_DAEMONS[@]}")"
+            if [ -n "$DAEMON_LEFT" ]; then
+                printf '[realtest] DECLINED: the unguarded daemon (pid(s) %s) was still running %ss after SIGTERM.\n' "$DAEMON_LEFT" "$DAEMON_STOP_SECONDS" >&2
+                printf '[realtest] This run does not escalate to SIGKILL on the owner'"'"'s daemon, so nothing is run\n' >&2
+                printf '[realtest] against a stack whose daemon could reach the real vendor. Stop it by hand.\n' >&2
+                exit "$EXIT_DECLINED"
+            fi
+            note "the owner's unguarded daemon pid ${UNGUARDED_DAEMONS[*]} was stopped under AGENT_REPL_REALTEST_STOP_DAEMON so the realtest's Emacs spawns a guarded one"
+        fi
+    else
+        note "the running daemon carries $VENDOR_GUARD_ENV"
     fi
-    note "the running daemon carries $VENDOR_GUARD_ENV"
 else
     note "no daemon is running; the realtest's Emacs will spawn one under the guard"
 fi
@@ -623,65 +791,6 @@ fi
 # on purpose: an operator who then sets the flag is running against state that
 # already has a copy (the refusal says so).
 
-# RUN_OWNS_EDITOR — is the editor that is answering one this RUN started?
-#
-# It is 0 while the editor standing on the socket is the one that was there
-# before the run, and 1 from the moment that editor is gone: every editor after
-# that was launched by a realtest in this run. The takeover consent is about
-# the OWNER'S editor and the owner's unsaved work, so it is required for the
-# first quit and not for the run's own restarts — which is what lets a sweep
-# quit between its cold-start realtests without asking again.
-RUN_OWNS_EDITOR=0
-if ! emacs_answering; then
-    RUN_OWNS_EDITOR=1
-fi
-
-# quit_standing_emacs — quit the editor answering the socket and wait for it to
-# go. Non-zero if there is still one answering afterwards, or if the consent
-# was not given.
-#
-# The consent is re-read here rather than assumed from the plan's check: a
-# function that closes the owner's editor must not depend on its caller having
-# asked first.
-quit_standing_emacs() {
-    if ! emacs_answering; then
-        note "no Emacs is answering; nothing to take over"
-        return 0
-    fi
-    IDLE="$("$EMACSCLIENT" --socket-name "$EMACS_SOCKET" --eval \
-        '(let ((idle (current-idle-time))) (if idle (float-time idle) 0.0))' 2>/dev/null || printf 'unknown')"
-    note "an Emacs is answering; it has been idle for ${IDLE}s (a human counts as present under ${HUMAN_IDLE_SECONDS}s)"
-    if [ "$RUN_OWNS_EDITOR" = "1" ]; then
-        note "this editor was started by this run; quitting it for the next realtest's cold start"
-    elif [ "${AGENT_REPL_REALTEST_TAKEOVER:-}" != "1" ]; then
-        printf '[realtest] an Emacs is running and a cold start has to quit it.\n' >&2
-        printf '[realtest] That is the owner'"'"'s editor, with the owner'"'"'s unsaved work in it, and this script\n' >&2
-        printf '[realtest] does not decide to close it. Set AGENT_REPL_REALTEST_TAKEOVER=1 to say go ahead.\n' >&2
-        return 1
-    else
-        note "AGENT_REPL_REALTEST_TAKEOVER=1: quitting the running Emacs"
-    fi
-    # `kill-emacs`, not `save-buffers-kill-emacs`: the second one PROMPTS, and a
-    # prompt on a headless takeover hangs the run holding the owner's editor open
-    # on a modal question nobody will answer. It does not save; the refusal above
-    # is what protects unsaved work.
-    "$EMACSCLIENT" --socket-name "$EMACS_SOCKET" --eval '(kill-emacs)' >/dev/null 2>&1 || true
-    for _ in $(seq 1 60); do
-        if ! emacs_answering; then
-            break
-        fi
-        sleep 1
-    done
-    if emacs_answering; then
-        printf '[realtest] the running Emacs is still answering %s a minute after (kill-emacs); nothing is\n' "$EMACS_SOCKET" >&2
-        printf '[realtest] launched onto the same socket.\n' >&2
-        return 1
-    fi
-    note "the running Emacs has exited"
-    RUN_OWNS_EDITOR=1
-    return 0
-}
-
 # WHAT THE PLAN COSTS THE EDITOR, worked out before the first realtest runs.
 #
 # Every realtest leaves an editor running, so after the first one there is
@@ -746,20 +855,6 @@ note "when this run ends the owner gets a GUARD-FREE editor back: a standing Ema
 # nothing about: every live session the daemon holds. Without the consent this
 # is a SKIP with the reason, never a run into realtest 3's own refusal.
 
-# How long the daemon is given to exit after SIGTERM before realtest 3 is
-# skipped. A daemon drains its shims on the way out; this is a small multiple
-# of that, not a guess at a machine's speed.
-#
-# AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS shortens it for bin/test-realtest.sh,
-# which asserts what happens when a daemon does NOT go and must not wait out a
-# real drain to do it.
-readonly DAEMON_STOP_SECONDS="${AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS:-30}"
-
-# The kill used to stop it. A variable so bin/test-realtest.sh can watch what
-# would be signalled without a process to signal, the same reason
-# AGENT_REPL_REALTEST_EMACSCLIENT exists.
-REALTEST_KILL="${AGENT_REPL_REALTEST_KILL:-/bin/kill}"
-
 DAEMON_SKIP_REASON=""
 establish_no_daemon() {
     DAEMON_SKIP_REASON=""
@@ -778,21 +873,10 @@ establish_no_daemon() {
         return 1
     fi
     note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the daemon (pid(s) ${pids[*]}) with SIGTERM"
-    "$REALTEST_KILL" -TERM "${pids[@]}" >/dev/null 2>&1 || true
-    local _i
-    for _i in $(seq 1 "$DAEMON_STOP_SECONDS"); do
-        if [ -z "$(daemon_pids)" ]; then
-            break
-        fi
-        sleep 1
-    done
     local left
-    left="$(daemon_pids | tr '\n' ' ')"
-    if [ -n "${left// /}" ]; then
-        # NO SIGKILL. Escalating on the owner's daemon is not a decision this
-        # script makes, and a daemon that ignored SIGTERM is a finding in its
-        # own right rather than something to force past.
-        DAEMON_SKIP_REASON="the daemon (pid(s) ${left% }) was still running ${DAEMON_STOP_SECONDS}s after SIGTERM. This run does not escalate to SIGKILL on the owner's daemon, so this realtest is skipped rather than run with a daemon up."
+    left="$(stop_daemons_sigterm "${pids[@]}")"
+    if [ -n "$left" ]; then
+        DAEMON_SKIP_REASON="the daemon (pid(s) $left) was still running ${DAEMON_STOP_SECONDS}s after SIGTERM. This run does not escalate to SIGKILL on the owner's daemon, so this realtest is skipped rather than run with a daemon up."
         return 1
     fi
     note "the daemon has stopped"
@@ -955,21 +1039,11 @@ restore_owner_editor() {
             printf '[realtest] to let a run stop it, or stop it by hand now (kill %s).\n' "${guarded[*]}" >&2
         else
             note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the guarded daemon (pid(s) ${guarded[*]}) with SIGTERM so the new editor spawns a real one"
-            "$REALTEST_KILL" -TERM "${guarded[@]}" >/dev/null 2>&1 || true
-            local _i
-            for _i in $(seq 1 "$DAEMON_STOP_SECONDS"); do
-                if [ -z "$(daemon_pids)" ]; then
-                    break
-                fi
-                sleep 1
-            done
             local left
-            left="$(daemon_pids | tr '\n' ' ')"
-            if [ -n "${left// /}" ]; then
-                # NO SIGKILL, for the same reason realtest 3's world does not
-                # escalate: forcing the owner's daemon is not this script's call.
-                daemon_left="${left% }"
-                printf '[realtest] THE GUARDED DAEMON (pid(s) %s) IS STILL RUNNING %ss after SIGTERM. This run does\n' "${left% }" "$DAEMON_STOP_SECONDS" >&2
+            left="$(stop_daemons_sigterm "${guarded[@]}")"
+            if [ -n "$left" ]; then
+                daemon_left="$left"
+                printf '[realtest] THE GUARDED DAEMON (pid(s) %s) IS STILL RUNNING %ss after SIGTERM. This run does\n' "$left" "$DAEMON_STOP_SECONDS" >&2
                 printf '[realtest] not escalate to SIGKILL on the owner'"'"'s daemon, so the editor it launches will adopt\n' >&2
                 printf '[realtest] a FAKE-vendor daemon. Stop it by hand.\n' >&2
             else
