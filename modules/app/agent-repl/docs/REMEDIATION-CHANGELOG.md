@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon bring-up: a start that fails after spawning STOPS its own shim through the ordered path -- latch, KillSession, process stop, socket-gone wait -- before it returns the error, and the adopt path refuses a shim this daemon's own supervisor still holds (`ErrAdoptOwnSpawn`), so one process can never have two clients (duplicate-client shape 2026-09-13T18:17:56 -> 18:18:41, shim pid 48170)
+
 - daemon bring-up: adopting an inert survivor (lock free, socket live) is recorded at INFO, matching the boot's own copy of the branch, and the adoption record names the shim pid (gap scan 2026-09-13T18:18:41, finding 3)
 
 - daemon open: `OpenWorkspace` relays a bring-up refused by the daemon's own stand-down at INFO instead of `daemon.workspace.open` ERROR "the session did not come up" (gap scan 2026-09-13T18:32:16, finding 2)
