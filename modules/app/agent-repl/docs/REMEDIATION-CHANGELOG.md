@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon bring-up: adopting an inert survivor (lock free, socket live) is recorded at INFO, matching the boot's own copy of the branch, and the adoption record names the shim pid (gap scan 2026-09-13T18:18:41, finding 3)
+
 - daemon bring-up: a bring-up on a daemon that has begun standing down refuses BEFORE it probes or spawns -- an INFO typed refusal carrying `shimclient.ErrStandingDown`, no fault, no footer failure line -- and the register relays that sentinel at INFO instead of `daemon.workspace.register` ERROR (gap scan 2026-09-13T18:32:16, finding 2)
 
 - daemon stand-down: the stand-down latch every shim client reads is the SUPERVISOR's as well as the client's own, and an immediate shutdown raises it BEFORE it walks the sessions -- so a client no walk can name (an adopted survivor of a refused StartSession) records the daemon's own teardown at INFO instead of `daemon.shimclient.exit` ERROR "shim died" plus `daemon.shimclient.redial` WARN "redial stopped" (gap scan 2026-09-13T18:31:58, finding 1)
