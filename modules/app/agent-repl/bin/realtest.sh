@@ -10,10 +10,16 @@
 # Emacs.app process on the owner's Mac, the real ~/.config/doom on master, the
 # real ~/.claude-emacs state, the real store, sidecar, shim and daemon deployed
 # from master, and the owner's real ~/.claude transcripts. There is NO sandbox
-# and NO image, and no picture is taken at this stage, so Emacs is never brought
-# frontmost. The ONE substitution is the vendor: AGENT_REPL_FORBID_VENDOR_CALLS
-# is set on the Emacs process and inherited by everything it spawns, so no real
-# Claude call can occur.
+# and NO image, and no picture is taken at this stage. The ONE substitution is
+# the vendor: AGENT_REPL_FORBID_VENDOR_CALLS is set on the Emacs process and
+# inherited by everything it spawns, so no real Claude call can occur.
+#
+# FOCUS IS STOLEN ONCE AND HANDED BACK ONCE (owner ruling, 2026-09-13). Emacs is
+# brought frontmost before the first realtest and stays there for the whole
+# sweep, so the owner can watch the run; the application that was frontmost
+# before gets focus back from the EXIT trap, so a failure, a panic and an
+# interrupt all return the desktop, and the desktop coming back is how the owner
+# knows the sweep is over. `-run` of a single realtest behaves the same way.
 #
 # modules/app/agent-repl/docs/REALTEST-PLAN.md is the CONTRACT — which realtests
 # exist, what each measures, and the remediation loop they feed. e2e/REALTEST-SPEC.md
@@ -794,6 +800,41 @@ else
     note "nothing was written between the sweeps that the harvest bar rejects"
 fi
 
+# ---- the sweep takes focus, ONCE ------------------------------------------
+#
+# OWNER RULING, 2026-09-13. Every press used to activate Emacs, post, and hand
+# focus back, so a sweep flickered the owner's desktop once per keystroke and
+# nothing on the screen said whether the run was still going. The sweep now
+# STEALS FOCUS ONCE here and HANDS IT BACK ONCE from the EXIT trap below, so the
+# owner can watch the run and the desktop coming back is how they know it ended.
+#
+# THIS IS NOT A REFUSAL POINT. A declined activation, a locked screen and an
+# editor that does not exist yet are all readings the take reports and the sweep
+# carries on from: a run that refused to collect its findings because the window
+# server would not cooperate would throw away the whole point of the run. What
+# DOES stop the take is this harness failing its own part — a helper that will
+# not compile, a token that could not be written — and then
+# AGENT_REPL_REALTEST_FOCUS_HELD stays unset, every press restores focus the old
+# way, and no handback is owed.
+#
+# The editor a cold-start sweep will use does not exist yet, and that is the
+# ordinary case: the take then records only where focus STARTED, and the first
+# press against the new Emacs takes focus for it and says so in its receipt.
+FOCUS_TAKEN=0
+FOCUS_STATUS=0
+note "taking focus for the whole sweep; it goes back to where it started when the sweep ends"
+run_harness_check TestSweepFocusTake \
+    AGENT_REPL_REALTEST_FOCUS=take \
+    AGENT_REPL_REALTEST_OUT="$RUN_DIR" \
+    AGENT_REPL_REALTEST_EMACS_SOCKET="$EMACS_SOCKET" \
+    AGENT_REPL_REALTEST_EMACSCLIENT="$EMACSCLIENT" || FOCUS_STATUS=$?
+if [ "$FOCUS_STATUS" -eq 0 ]; then
+    FOCUS_TAKEN=1
+else
+    printf '[realtest] THE SWEEP COULD NOT TAKE FOCUS (output above), so every press hands focus back the\n' >&2
+    printf '[realtest] old way, one keystroke at a time, and no handback is owed at the end. The run continues.\n' >&2
+fi
+
 # ---- the end of the sweep, however it ends --------------------------------
 #
 # A TRAP, because "the run left the owner's registry as it found it" must hold
@@ -851,6 +892,28 @@ sweep_end() {
         printf '[realtest] the sweep exits non-zero for its between-sweeps findings alone.\n' >&2
         status="$GAP_SCAN_STATUS"
     fi
+
+    # THE HANDBACK IS LAST, AND IT IS INSIDE THE TRAP FOR THAT REASON. A
+    # realtest that failed, a `go test` that panicked and an operator's
+    # interrupt all reach it, so the owner's desktop comes back however the
+    # sweep ends — which is also how they can tell it HAS ended. It runs after
+    # the leftover clean and the mark so nothing that still needs the editor is
+    # done behind a desktop this has already handed away.
+    #
+    # A handback that could not land does NOT change the sweep's verdict. It is
+    # a disturbed desktop, printed here, not a finding about the module — and
+    # letting it overwrite a realtest's exit status would lose the finding the
+    # sweep exists for.
+    if [ "$FOCUS_TAKEN" = "1" ]; then
+        local focus_back=0
+        run_harness_check TestSweepFocusGiveBack \
+            AGENT_REPL_REALTEST_FOCUS=give-back \
+            AGENT_REPL_REALTEST_OUT="$RUN_DIR" || focus_back=$?
+        if [ "$focus_back" -ne 0 ]; then
+            printf '[realtest] FOCUS WAS NOT HANDED BACK (output above): the owner'"'"'s desktop is not as this\n' >&2
+            printf '[realtest] run found it. This does not change the sweep'"'"'s verdict.\n' >&2
+        fi
+    fi
     exit "$status"
 }
 trap sweep_end EXIT
@@ -863,15 +926,24 @@ trap sweep_end EXIT
 # here is safe even under an outer holder.
 
 note "the vendor is forbidden for this run: $VENDOR_GUARD_ENV=1 on Emacs and everything it spawns"
-note "no picture is taken, and Emacs is never brought frontmost"
+note "no picture is taken; Emacs is brought frontmost ONCE for the whole sweep and focus goes back at the end"
 note "this run holds $PLAN_COUNT realtest(s), each in its own go test invocation"
 
 # run_one NAME — one realtest, in its own `go test`, under its own suite slot.
 # Prints nothing itself; the status is the realtest's.
 run_one() {
     local name="$1"
+    local held=""
+    # ONLY A SWEEP THAT ACTUALLY TOOK FOCUS TELLS THE PRESSES TO HOLD IT. A
+    # press that kept focus with nobody holding the handback would leave the
+    # owner's desktop parked on Emacs after the run.
+    # `if`, not `&&`: this runs before `set +e` below, and an AND-list whose
+    # left side is false is a failing command that `set -e` would exit the
+    # whole sweep on.
+    if [ "$FOCUS_TAKEN" = "1" ]; then held=1; fi
     set +e
     AGENT_REPL_REALTEST=1 \
+    AGENT_REPL_REALTEST_FOCUS_HELD="$held" \
     AGENT_REPL_REALTEST_OUT="$RUN_DIR" \
     AGENT_REPL_REALTEST_EMACS_SOCKET="$EMACS_SOCKET" \
     AGENT_REPL_REALTEST_EMACSCLIENT="$EMACSCLIENT" \

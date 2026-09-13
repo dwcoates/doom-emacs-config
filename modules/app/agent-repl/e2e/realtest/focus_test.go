@@ -196,3 +196,53 @@ func TestNoFocusEdgeNoteCountsThePresses(t *testing.T) {
 		t.Errorf("the note must say how many activations were requested; it said %q", note)
 	}
 }
+
+// UNDER THE SWEEP'S POLICY, EMACS KEEPING FOCUS IS THE CORRECT OUTCOME. The
+// pre-2026-09-13 assertion — focus is exactly where it started — would fail
+// every phase of a sweep that is holding focus on purpose.
+func TestFocusAfterPressesAcceptsEmacsWhenTheSweepHoldsFocus(t *testing.T) {
+	note, finding := focusAfterPressesNote("the key self-test", true, "Google Chrome", emacsApplicationName)
+
+	if finding {
+		t.Errorf("Emacs frontmost under the sweep's focus policy reads as a finding: %s", note)
+	}
+}
+
+// And the sweep still says where focus will go back to, so a reader of the
+// manifest can check the handback happened.
+func TestFocusAfterPressesNamesWhereFocusGoesBack(t *testing.T) {
+	note, _ := focusAfterPressesNote("the key self-test", true, "Google Chrome", emacsApplicationName)
+
+	if !strings.Contains(note, "Google Chrome") {
+		t.Errorf("the note does not name where focus goes back to: %s", note)
+	}
+}
+
+// The owner clicking away mid-sweep is not a finding against anybody: the next
+// press re-takes focus and says so.
+func TestFocusAfterPressesDoesNotBlameTheOwnerClickingAway(t *testing.T) {
+	note, finding := focusAfterPressesNote("the chords", true, "Google Chrome", "Slack")
+
+	if finding {
+		t.Errorf("something else frontmost during a sweep reads as a finding: %s", note)
+	}
+}
+
+// WITHOUT A SWEEP HOLDING FOCUS THE OLD RULE STILL APPLIES, because a caller
+// outside bin/realtest.sh has nobody to hand focus back for it.
+func TestFocusAfterPressesStillRequiresARestoreWithoutASweep(t *testing.T) {
+	note, finding := focusAfterPressesNote("the key self-test", false, "Google Chrome", emacsApplicationName)
+
+	if !finding {
+		t.Errorf("focus left on Emacs with no sweep holding it does not read as a finding: %s", note)
+	}
+}
+
+// And a press outside a sweep that DID restore is not a finding.
+func TestFocusAfterPressesAcceptsARestoreWithoutASweep(t *testing.T) {
+	note, finding := focusAfterPressesNote("the key self-test", false, "Google Chrome", "Google Chrome")
+
+	if finding {
+		t.Errorf("a restored focus reads as a finding: %s", note)
+	}
+}
