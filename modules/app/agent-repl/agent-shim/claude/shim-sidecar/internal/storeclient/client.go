@@ -24,6 +24,9 @@
 // Sad path: nothing is buffered and nothing is spilled. A failed WriteBatch
 // means NOTHING was committed, so the caller simply does not advance its
 // cursor and re-reads the same durable bytes from the last committed position.
+// A call this producer ABANDONED is weaker than a failure and is not the same
+// thing: the store may commit it anyway, so the outcome is unknown rather than
+// negative — and the same re-read from the store's cursor covers both.
 package storeclient
 
 import (
@@ -237,13 +240,17 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) ([]S
 	}))
 	if err != nil {
 		// A WRITE THIS PROCESS WITHDREW IS NOT A TRANSPORT FAILURE. The one way
-		// this call sees context.Canceled is the sidecar cancelling its own
-		// cycle context on the way out, and the outcome is the ordinary one the
-		// contract already promises: nothing committed, the cursor not advanced,
-		// the same durable bytes re-read from the store's cursor on the next
-		// boot. Calling that an error made every deploy restart that landed
-		// mid-batch write one — on the owner's machine, 191 entries at
-		// 2026-09-13T01:21:08, seconds before the process exited.
+		// this call sees context.Canceled is the sidecar ending its own call on
+		// the way out, and the outcome is the ordinary one the contract already
+		// promises: the store holds the records and the cursor advance together
+		// or holds neither, so the next boot resumes from whichever cursor it
+		// holds and re-reads the durable bytes past it. WITHDRAWING IS NOT
+		// RECALLING — a batch already on the wire may still commit — which is
+		// why the caller waits out its settle before cancelling and why nothing
+		// here claims the write was undone. Calling this an error made every
+		// deploy restart that landed mid-batch write one — on the owner's
+		// machine, 191 entries at 2026-09-13T01:21:08, seconds before the
+		// process exited.
 		//
 		// A DEADLINE IS STILL A FAILURE and keeps the error: the store was asked
 		// and did not answer in time, which is a fact about the store. Only a
@@ -256,7 +263,7 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) ([]S
 		// `shutdown` record for it. Two records for one fact is what the
 		// exactly-once rule forbids.
 		if errors.Is(err, context.Canceled) {
-			bound.LogVerbose("write abandoned for %d entrie(s): the caller cancelled the request, so nothing was committed and the cursor did not advance", len(batch.GetEntries()))
+			bound.LogVerbose("write abandoned for %d entrie(s): the caller ended the request, so this producer never learned whether the store committed it and its own cursor did not advance", len(batch.GetEntries()))
 			return nil, fmt.Errorf("storeclient: %s: %w", rpcWriteBatch, err)
 		}
 		bound.With(logging.Context{Level: "error"}).Log("write transport failure for %d entrie(s): %v", len(batch.GetEntries()), err)

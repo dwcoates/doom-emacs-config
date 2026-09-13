@@ -478,6 +478,21 @@ INFO records and rolled the 64 MB durable log five times over.
 
 A stop that is asked for is a stop that happens.
 
+- A STORE WRITE ALREADY ON THE WIRE IS NOT CANCELLED AT ONCE. The signal gives
+  it `shutdownSettle` (cycle.go, 250ms) to answer, because cancelling a sent
+  write does not RECALL it: the store's transaction is its own, and net/http
+  tells the handler the client is gone only once the connection closes, which
+  for an exiting process is after it has exited. An instant cancel therefore
+  destroyed nothing but this process's knowledge of whether the batch landed —
+  and left the store committing a batch nobody was waiting for, which is how an
+  ordinary two-rpc read of the store (book, then cursor) came back looking like
+  a cursor standing past records that were never stored.
+- WHAT MAKES AN ABANDONED WRITE SAFE IS THE STORE'S TRANSACTION, NOT THE
+  CANCEL. Records and cursor advance commit together, so the store holds both or
+  neither; a write this process never got an answer for is UNKNOWN, not torn,
+  and the next boot resolves it by resuming from whichever cursor the store
+  holds. The shutdown record says exactly that and never claims the write was
+  undone.
 - THE LOG DRAIN IS THE ONE UNBOUNDED WAIT, AND IT IS NOW BOUNDED.
   `logging.Logger.Close` waits for the forwarding queue to drain, and the
   closing forward loop probes and dials the daemon ONCE PER QUEUED RECORD. With
@@ -936,9 +951,9 @@ its own sidecar and store processes, and the only package-level state is
   synchronously inside the cycle and the cursor advances only on a durable
   success, so a store that has not answered is a cycle that has not moved on.
   That is what the hold subjects use instead of a 500ms (or 5s) poll interval.
-  Release the gate inside the subject: a process frozen in a withheld write does
-  not see SIGTERM until `rpcTimeout` expires, so `sidecarProc.Kill` exists for
-  the subject that must end one there.
+  Release the gate inside the subject: a process frozen in a withheld write
+  leaves `shutdownSettle` (250ms) after SIGTERM, not at once, so a subject that
+  must end one where it stands has `sidecarProc.Kill`.
 - **Never wait on a count where you mean a set.** `awaitBookLines(…, 4)` is
   satisfied by any four lines; `awaitBookUnits(…, ids…)` waits for the units the
   assertions actually read. The same rule cost four captured-transcript subjects
