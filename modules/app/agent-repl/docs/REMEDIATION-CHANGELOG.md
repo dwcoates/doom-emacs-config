@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- sidecar vanish: a file that disappears with nothing outstanding -- its whole tree removed, its spool past `[exited with code N]`/`[killed]`, or its committed offset equal to the last size a poll saw -- is stated at INFO with `reason=ended`/`fully_read`, and the WARNING is kept for a vanish that could have taken bytes past the committed offset (gap scan 2026-09-13T18:58, `file-vanished` x2 + `lost-policy` x2)
+
 - webapp integration suite: the topbar fixture serves `TopbarAccount.options` (the contract's whole set, never empty) and the fake daemon answers `SelectAccount` off those options, so the 25 scenarios that still clicked the account cell for `OpenLogin` take the ruled route -- the cell opens the dropdown, the pick opens the login (`npm run test:integration` on 15f5175c6)
 
 - daemon bring-up: a start that fails after spawning STOPS its own shim through the ordered path -- latch, KillSession, process stop, socket-gone wait -- before it returns the error, and the adopt path refuses a shim this daemon's own supervisor still holds (`ErrAdoptOwnSpawn`), so one process can never have two clients (duplicate-client shape 2026-09-13T18:17:56 -> 18:18:41, shim pid 48170)
