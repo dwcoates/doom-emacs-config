@@ -32,6 +32,12 @@ const (
 	SiteTokenEmpty             = "token_empty"
 	SiteUnknownWatchToken      = "unknown_watch_token"
 	SiteFileIDEmpty            = "file_id_empty"
+	SiteShapeHashEmpty         = "shape_hash_empty"
+	SiteShapeKindEmpty         = "shape_kind_empty"
+	SiteShapeStructureEmpty    = "shape_structure_empty"
+	SiteShapeSeenMsUnset       = "shape_seen_ms_unset"
+	SiteShapeUnset             = "shape_unset"
+	SiteShapeKindFilterEmpty   = "shape_kind_filter_empty"
 	SiteDatabaseFailure        = "database_failure"
 	SiteWorkflowNotImplemented = "workflow_not_implemented"
 	SiteStreamNotFlushable     = "stream_not_flushable"
@@ -272,12 +278,12 @@ func validateStoreEntry(e *storev1.StoreEntry, index int) *refusal {
 // the same bytes forever. What is empty is a batch carrying NEITHER entries nor
 // a cursor advance: that states nothing at all, which is a defect the store
 // names rather than acknowledging as durable.
-func validateEntryBatch(b *storev1.EntryBatch) *refusal {
+func validateEntryBatch(b *storev1.EntryBatch, carriesShapes bool) *refusal {
 	if b == nil {
 		return refuse(SiteBatchMissing, "batch", "batch: the request carries no EntryBatch")
 	}
-	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil {
-		return refuse(SiteBatchEmpty, "batch", "batch: the EntryBatch carries neither entries nor a cursor advance")
+	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil && !carriesShapes {
+		return refuse(SiteBatchEmpty, "batch", "batch: the EntryBatch carries neither entries nor a cursor advance, and the request carries no shape observation either")
 	}
 	for i, entry := range b.GetEntries() {
 		if ref := validateStoreEntry(entry, i); ref != nil {
@@ -298,7 +304,52 @@ func validateWriteBatchRequest(req *storev1.WriteBatchRequest) *refusal {
 	if req.GetProducer() == "" {
 		return refuse(SiteProducerEmpty, "producer", "producer: the write names no producer, so nothing can be attributed")
 	}
-	return validateEntryBatch(req.GetBatch())
+	if ref := validateEntryBatch(req.GetBatch(), len(req.GetShapes()) > 0); ref != nil {
+		return ref
+	}
+	// THE CATALOG IS PART OF THE WRITE, so a malformed observation refuses the
+	// whole request here rather than reaching a transaction the records share.
+	for i, shape := range req.GetShapes() {
+		if ref := validateShapeObservation(shape, i); ref != nil {
+			return ref
+		}
+	}
+	return nil
+}
+
+// validateShapeObservation refuses a catalog observation that names no shape.
+//
+// EVERY FIELD BUT THE EXAMPLE IS REQUIRED. The example alone is optional
+// because a line can legitimately be empty bytes; a hash, a kind, a rendering
+// and an observation instant are what make a row matchable, filterable,
+// readable and orderable, and a row missing any of them is one nobody can use.
+func validateShapeObservation(s *storev1.ShapeObservation, index int) *refusal {
+	what := fmt.Sprintf("shapes[%d]", index)
+	if s == nil {
+		return refuse(SiteShapeUnset, what, "%s: the shape observation is unset", what)
+	}
+	if s.GetShapeHash() == "" {
+		return refuse(SiteShapeHashEmpty, what+".shape_hash", "%s: shape_hash is empty, and it is the catalog's primary key", what)
+	}
+	if s.GetKind() == "" {
+		return refuse(SiteShapeKindEmpty, what+".kind", "%s (shape %s): kind is empty, so the observation names no residue kind", what, s.GetShapeHash())
+	}
+	if s.GetKeyStructure() == "" {
+		return refuse(SiteShapeStructureEmpty, what+".key_structure", "%s (shape %s): key_structure is empty, so nothing says what was hashed", what, s.GetShapeHash())
+	}
+	if s.GetSeenMs() <= 0 {
+		return refuse(SiteShapeSeenMsUnset, what+".seen_ms", "%s (shape %s): seen_ms is %d, not a positive unix millis; first_seen and last_seen come from the observer's clock", what, s.GetShapeHash(), s.GetSeenMs())
+	}
+	return nil
+}
+
+// validateListResidueShapesRequest refuses a catalog listing whose kind filter
+// is an empty string standing in for absence.
+func validateListResidueShapesRequest(req *storev1.ListResidueShapesRequest) *refusal {
+	if req.Kind != nil && req.GetKind() == "" {
+		return refuse(SiteShapeKindFilterEmpty, "kind", "kind: present but empty; omit the field to ask for every kind")
+	}
+	return nil
 }
 
 func validateOpenAgentSessionRequest(req *storev1.OpenAgentSessionRequest) *refusal {

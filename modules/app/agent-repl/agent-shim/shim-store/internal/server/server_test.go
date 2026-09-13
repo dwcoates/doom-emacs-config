@@ -129,6 +129,16 @@ type fakeStore struct {
 	cursorsFor   *string
 	cursorsScope bool
 
+	// the residue shape catalog, and what the last listing asked for
+	shapes         []*storev1.ResidueShapeRow
+	shapesErr      error
+	shapesKind     *string
+	shapesLimit    uint32
+	shapesExample  bool
+	shapesRequests int
+	// shapesWritten is every observation list the server handed WriteBatch.
+	shapesWritten [][]*storev1.ShapeObservation
+
 	closed bool
 }
 
@@ -142,9 +152,10 @@ func newFakeStore() *fakeStore {
 	}
 }
 
-func (f *fakeStore) WriteBatch(_ context.Context, producer string, _ *storev1.EntryBatch) (WriteResult, error) {
+func (f *fakeStore) WriteBatch(_ context.Context, producer string, _ *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error) {
 	f.mu.Lock()
 	f.writes = append(f.writes, producer)
+	f.shapesWritten = append(f.shapesWritten, shapes)
 	result, err := f.writeResult, f.writeErr
 	f.mu.Unlock()
 	return result, err
@@ -198,6 +209,14 @@ func (f *fakeStore) Cursors(_ context.Context, fileID *string) ([]*storev1.Curso
 	f.cursorsFor = fileID
 	f.mu.Unlock()
 	return f.cursors, f.cursorsErr
+}
+
+func (f *fakeStore) ResidueShapes(_ context.Context, kind *string, limit uint32, includeExample bool) ([]*storev1.ResidueShapeRow, error) {
+	f.mu.Lock()
+	f.shapesRequests++
+	f.shapesKind, f.shapesLimit, f.shapesExample = kind, limit, includeExample
+	f.mu.Unlock()
+	return f.shapes, f.shapesErr
 }
 
 func (f *fakeStore) Close() error {
@@ -1309,6 +1328,147 @@ func TestGetLiveWorkMapsAStorageFailureToTheFailureArm(t *testing.T) {
 	}
 	if res.Msg.GetFailure() == nil {
 		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// ---- ListResidueShapes ----
+
+func TestListResidueShapesServesAnEmptyCatalogAsSuccess(t *testing.T) {
+	// Arrange. A store that has observed no unstored residue has no shapes.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.ListResidueShapes(context.Background(), connect.NewRequest(&storev1.ListResidueShapesRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ListResidueShapes = %v, want nil", err)
+	}
+	if success := res.Msg.GetSuccess(); success == nil || len(success.GetShapes()) != 0 {
+		t.Fatalf("result = %v, want an empty success", res.Msg.GetResult())
+	}
+}
+
+func TestListResidueShapesPassesTheKindFilterThrough(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	kind := "unparsed"
+
+	// Act.
+	if _, err := h.client.ListResidueShapes(context.Background(),
+		connect.NewRequest(&storev1.ListResidueShapesRequest{Kind: &kind})); err != nil {
+		t.Fatalf("ListResidueShapes = %v, want nil", err)
+	}
+
+	// Assert.
+	if store.shapesKind == nil || *store.shapesKind != kind {
+		t.Fatalf("store filtered on %v, want %q", store.shapesKind, kind)
+	}
+}
+
+func TestListResidueShapesPassesTheExampleOptInThrough(t *testing.T) {
+	// Arrange. The example is the one field carrying raw vendor bytes.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.ListResidueShapes(context.Background(),
+		connect.NewRequest(&storev1.ListResidueShapesRequest{IncludeExample: true})); err != nil {
+		t.Fatalf("ListResidueShapes = %v, want nil", err)
+	}
+
+	// Assert.
+	if !store.shapesExample {
+		t.Fatal("the store was asked to withhold the example, want the opt-in passed through")
+	}
+}
+
+func TestListResidueShapesRefusesAPresentButEmptyKind(t *testing.T) {
+	// Arrange. Absence is spelled by omitting the field, never by "".
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	empty := ""
+
+	// Act.
+	res, err := h.client.ListResidueShapes(context.Background(),
+		connect.NewRequest(&storev1.ListResidueShapesRequest{Kind: &empty}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ListResidueShapes = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	if store.shapesRequests != 0 {
+		t.Fatal("the store was queried for a refused request")
+	}
+}
+
+func TestListResidueShapesMapsAStorageFailureToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.shapesErr = fmt.Errorf("%w: select failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.ListResidueShapes(context.Background(), connect.NewRequest(&storev1.ListResidueShapesRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ListResidueShapes = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
+	}
+}
+
+func TestWriteBatchHandsTheShapeObservationsToTheStore(t *testing.T) {
+	// Arrange. The catalog rides the write so it commits in its transaction.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	shape := &storev1.ShapeObservation{
+		ShapeHash: "h1", Kind: "unparsed", KeyStructure: "{a:string}", SeenMs: 1000,
+	}
+
+	// Act.
+	if _, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "sidecar",
+		Batch:    &storev1.EntryBatch{},
+		Shapes:   []*storev1.ShapeObservation{shape},
+	})); err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+
+	// Assert.
+	if len(store.shapesWritten) != 1 || len(store.shapesWritten[0]) != 1 ||
+		store.shapesWritten[0][0].GetShapeHash() != "h1" {
+		t.Fatalf("shapes handed to the store = %v, want the one observation", store.shapesWritten)
+	}
+}
+
+func TestWriteBatchRefusesAShapeObservationWithNoHash(t *testing.T) {
+	// Arrange. shape_hash is the catalog's primary key.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "sidecar",
+		Batch:    &storev1.EntryBatch{},
+		Shapes:   []*storev1.ShapeObservation{{Kind: "unparsed", KeyStructure: "{a:string}", SeenMs: 1000}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetInvalidRequest() == nil {
+		t.Fatalf("result = %v, want the invalid_request arm", res.Msg.GetResult())
+	}
+	if len(store.writes) != 0 {
+		t.Fatal("the store was written to for a refused request")
 	}
 }
 

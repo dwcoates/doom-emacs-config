@@ -15,6 +15,7 @@ package store.v1;
 import "store/v1/endpoint_get_live_work.proto";
 import "store/v1/endpoint_get_sidecar_cursors.proto";
 import "store/v1/endpoint_get_workflow.proto";
+import "store/v1/endpoint_list_residue_shapes.proto";
 import "store/v1/endpoint_open_agent_session.proto";
 import "store/v1/endpoint_read_agent_page.proto";
 import "store/v1/endpoint_watch_agent_session.proto";
@@ -44,6 +45,11 @@ service ShimStore {
   // One workflow run's stored state: description, derived agent level,
   // terminal if ended. Serves the shim's own GetWorkflow endpoint.
   rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+
+  // The catalog of key structures observed on lines no producer stored: one
+  // row per distinct recursive key structure, so the vendor's API stays
+  // discoverable after the bytes stop being kept.
+  rpc ListResidueShapes(ListResidueShapesRequest) returns (ListResidueShapesResponse);
 
   // ---- Recovery: what a restarted producer reads back ----
 

@@ -46,6 +46,13 @@ Analyze what the store keeps and stop keeping what is never served.
    has modelled is still classified and still counted, and the sidecar's sources
    are the vendor's own durable files — the day it earns a model, the file is
    re-read.
+
+   THE SHAPE IS STILL KEPT. Every withheld line contributes its recursive KEY
+   STRUCTURE to the store's `residue_shapes` catalog — one row per distinct
+   shape, with the first example verbatim, the kind, first/last seen and a count
+   — so the vendor's API stays discoverable at a cost bounded by the number of
+   shapes rather than by traffic (owner ruling 2026-09-13; read it back with
+   `make -C agent-shim/shim-store shapes`).
 2. `write_ledger` gets a retention rule: entries older than the newest
    transcript offset they could ever absorb again are prunable (design
    question: absorption correctness vs growth without bound).

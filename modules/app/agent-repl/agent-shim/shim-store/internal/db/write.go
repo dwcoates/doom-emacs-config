@@ -62,6 +62,10 @@ type WriteResult struct {
 	// BashRows is the bash rows this write produced, ready for the WatchBashRun
 	// fan-out. A run's rows are published exactly as a book's lines are.
 	BashRows []BashRowWritten
+	// Shapes is how many residue shape observations this batch folded into the
+	// catalog. A COUNT and not a list: the store's answer is the same whichever
+	// row each landed on, and the producer already knows which hashes it sent.
+	Shapes int
 }
 
 // WriteBatch commits one producer's batch — records and cursor advance — as ONE
@@ -72,7 +76,7 @@ type WriteResult struct {
 // failure knows with certainty that no row and no cursor moved. That certainty
 // is what lets the producer hold the batch in a bounded in-memory buffer with
 // no durable spill behind it.
-func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.EntryBatch) (WriteResult, error) {
+func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error) {
 	var result WriteResult
 	base := logging.Fields{Operation: "store.db.write-batch", Table: "entry", Producer: producer}
 
@@ -84,8 +88,8 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 	entries := batch.GetEntries()
 	cursor := batch.GetCursorAdvance()
-	if len(entries) == 0 && cursor == nil {
-		return result, d.refuse(base, invalidFieldf("batch", "batch carries neither entries nor a cursor advance"))
+	if len(entries) == 0 && cursor == nil && len(shapes) == 0 {
+		return result, d.refuse(base, invalidFieldf("batch", "batch carries neither entries nor a cursor advance nor a shape observation"))
 	}
 
 	// Validation first and whole, so a refusal names the offending entry
@@ -103,6 +107,14 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 	if cursor != nil {
 		if err := validateCursorState(cursor); err != nil {
+			return result, d.refuse(base, err)
+		}
+	}
+	// THE SHAPE CATALOG IS VALIDATED WITH EVERYTHING ELSE, before the
+	// transaction opens, so a malformed observation refuses the batch whole
+	// rather than half-committing the records beside it.
+	for i, shape := range shapes {
+		if err := validateShapeObservation(shape, i); err != nil {
 			return result, d.refuse(base, err)
 		}
 	}
@@ -131,7 +143,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
-	}, "starting transaction entries=%d cursor_advance=%t", len(entries), cursor != nil)
+	}, "starting transaction entries=%d shapes=%d cursor_advance=%t", len(entries), len(shapes), cursor != nil)
 
 	tx, release, err := d.beginWrite(ctx)
 	lockWait = d.mono().Sub(started)
@@ -239,6 +251,15 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		d.log.LogVerbose(verbose, "entry written kind=%s entries_index=%d", r.kind, i)
 	}
 
+	// THE CATALOG COMMITS WITH THE CURSOR ADVANCE THAT CONSUMED THE LINES IT
+	// DESCRIBES. Split them and an advance that survived a lost catalog write
+	// takes the shape with it: the bytes are past the cursor, nothing re-reads
+	// them, and the shape is gone for good.
+	if err := d.applyShapes(ctx, tx, shapes); err != nil {
+		return WriteResult{}, d.refuse(base, err)
+	}
+	result.Shapes = len(shapes)
+
 	if cursor != nil {
 		if err := d.upsertCursor(ctx, tx, cursor, now); err != nil {
 			return WriteResult{}, d.refuse(base, err)
@@ -250,8 +271,8 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
-	}, "transaction committed written=%d absorbed=%d skipped=%d lines=%d cursor_advance=%t",
-		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), cursor != nil)
+	}, "transaction committed written=%d absorbed=%d skipped=%d lines=%d shapes=%d cursor_advance=%t",
+		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), result.Shapes, cursor != nil)
 	return result, nil
 }
 

@@ -18,9 +18,17 @@ type loggingBypass struct {
 	call     string
 }
 
+// A COMMAND-LINE TOOL'S STDOUT IS ITS ANSWER, NOT A DIAGNOSTIC. The rule this
+// test enforces is about the SERVICE: under launchd, stderr is an append-only
+// file the process neither owns nor can roll, so a second copy of an
+// already-rotated log accumulates there forever. `cmd/shapes` is a one-shot
+// report a human runs in a terminal and reads; routing its rows through the
+// rotating log would put the answer somewhere the caller cannot see. The
+// sanction is per FUNCTION, so anything else added to that file is still caught.
 var sanctionedLoggingWrites = map[string]map[string]bool{
 	"main.go":                     {"reportFatal": true},
 	"internal/logging/logging.go": {"writeFull": true},
+	"cmd/shapes/main.go":          {"main": true, "render": true},
 }
 
 func TestProductionHasNoLoggingBypasses(t *testing.T) {
