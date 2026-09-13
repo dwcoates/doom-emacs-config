@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2235,5 +2236,58 @@ func TestDrainStartsReportsAStartThatOutlivesItsBound(t *testing.T) {
 	// Assert.
 	if left {
 		t.Fatal("DrainStarts = true, want false for a start still running at the bound")
+	}
+}
+
+// TestABringUpStandDownIsNotAFailedStartSession is the fleet's half of the
+// same distinction the shim client draws. A StartSession that came back
+// because THIS DAEMON killed the shim it was asking is the teardown arriving,
+// not a session that would not come up, and the bring-up says so.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34: `daemon.workspace.bring_up: the
+// StartSession call failed` at ERROR on three consecutive daemon generations,
+// each one milliseconds after the same process's own
+// `daemon.shimclient.standdown` for the same shim.
+func TestABringUpStandDownIsNotAFailedStartSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		startErr  error
+		wantLevel string
+	}{
+		{
+			name:      "the daemon stood the shim down under the start",
+			startErr:  fmt.Errorf("%w: unavailable: unexpected EOF", shimclient.ErrStandDownOrdered),
+			wantLevel: "info",
+		},
+		{
+			name:      "the shim link broke on its own",
+			startErr:  errors.New("unavailable: unexpected EOF"),
+			wantLevel: "error",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-stood-down")
+			f.client.startErr = tt.startErr
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("Start answered success though StartSession failed")
+			}
+			var level string
+			for _, r := range f.log.logger.Records() {
+				if r.Operation == opBringUp && strings.Contains(r.Message, "StartSession call") {
+					level = r.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("the StartSession failure is recorded at %q, want %q: %+v", level, tt.wantLevel, f.log.logger.Records())
+			}
+		})
 	}
 }
