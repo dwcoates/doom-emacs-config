@@ -167,14 +167,27 @@ export function configureLog(config: ShimLogConfiguration): void {
  * failure recursing into itself is how one broken pipe becomes a stack
  * overflow. A durable-sink failure while recording this poisons the logger, so
  * the next log call throws — the failure is surfaced, never swallowed.
+ *
+ * AND IT IS NOT A WARNING, for the reason the message itself states: a shim
+ * OUTLIVES its daemon by design, so the read end of this pipe closing is the
+ * ordinary end of an ordinary daemon, not a defect of anyone's. Nothing is lost
+ * with it either — the mirror was only ever a second copy of a record the
+ * durable sink already holds, and this very record proves the sink still works.
+ * A warning here is a warning on every daemon bounce, every deploy and every
+ * editor quit, which tells nobody anything while costing a harvest whose bar
+ * admits no WARN at all. The record stays, at the level a designed-for
+ * lifecycle event warrants.
+ *
+ * A DURABLE-SINK FAILURE IS THE DIFFERENT THING and is untouched below: it
+ * poisons the logger and the next call throws.
  */
 function retireStderrMirror(cause: Error): void {
   if (stderrMirror === "retired") return;
   stderrMirror = "retired";
   const runtime = runtimeContext;
   if (runtime === undefined || runtime.poisoned !== undefined) return;
-  if (!levelEnabled(runtime.minimum_level, "warn")) return;
-  const record = buildRecord("warn", "normal", {
+  if (!levelEnabled(runtime.minimum_level, "info")) return;
+  const record = buildRecord("info", "normal", {
     operation: "shim.logging.stderr-mirror",
     cause: cause.message,
   }, "stderr mirror RETIRED — the daemon that owned this pipe is gone; this shim keeps running and keeps logging durably, because a shim outlives its daemon by design");
