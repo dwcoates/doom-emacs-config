@@ -9,7 +9,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../src/proto.js";
-import { convertHookResponse, convertHookStarted, createHookRegistry } from "../../src/convert/hooks.js";
+import {
+  convertHookResponse,
+  convertHookStarted,
+  createHookRegistry,
+  hookBlockingText,
+} from "../../src/convert/hooks.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { activityOf, foldContext } from "./fold-harness.js";
 
@@ -209,5 +214,29 @@ describe("the registry of hook firings in flight", () => {
 
     // Assert
     expect(registry.take("hook-128")?.hookId).toBe("hook-128");
+  });
+});
+
+describe("the single reading of whether a hook blocked", () => {
+  // THE CONVERTER AND THE ENGINE'S START GATE ASK THE SAME QUESTION. Drawing a
+  // hook and refusing a start on one are two readings of one fact, so the fact
+  // has one home; these pin what that home answers.
+
+  it("names the blocking text of a hook that answered the gated action", () => {
+    const message = response({ outcome: "error", output: "no.", stderr: "boom" });
+
+    expect(hookBlockingText(message)).toBe("no.");
+  });
+
+  it("blocks nothing when a failing hook answered with no text at all", () => {
+    const message = response({ outcome: "error", output: "", stderr: "command not found" });
+
+    expect(hookBlockingText(message)).toBeUndefined();
+  });
+
+  it("blocks nothing when a SUCCEEDING hook printed text", () => {
+    const message = response({ outcome: "success", output: "extra context", stdout: "hi" });
+
+    expect(hookBlockingText(message)).toBeUndefined();
   });
 });
