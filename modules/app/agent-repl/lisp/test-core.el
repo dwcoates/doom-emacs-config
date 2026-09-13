@@ -3423,6 +3423,108 @@ ladder made a debug line abort `doom-init-ui-hook'."
                         'no-durable-home)))
         (delete-directory project t)))))
 
+(ert-deftest agent-repl-test-ordered-departure-is-classified-apart ()
+  "A directory that went because the editor asked is not a stale registry row."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-class-departing-" t))
+          (agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+      (agent-repl--ws-put "class-departing-ws" :project-dir project)
+      (delete-directory project t)
+      (agent-repl--log-note-workspace-departing "class-departing-ws")
+      ;; Act / Assert
+      (should (eq (agent-repl--central-log-fallback-class "class-departing-ws")
+                  'ordered-departure)))))
+
+(ert-deftest agent-repl-test-ordered-departure-records-the-central-fallback-at-info ()
+  "The trailing records of a departure the editor ordered are ordinary."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-departing-record-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+        (agent-repl--ws-put "departing-record-ws" :project-dir project)
+        (delete-directory project t)
+        (agent-repl--log-note-workspace-departing "departing-record-ws")
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (agent-repl--log "departing-record-ws" "line from a departing workspace"))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (equal (alist-get 'level record) "info")))))))
+
+(ert-deftest agent-repl-test-ordered-departure-raises-no-popup ()
+  "No workspace the user already asked to destroy interrupts them about it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-departing-popup-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (agent-repl--departed-log-workspaces (make-hash-table :test #'equal))
+            (warned nil))
+        (agent-repl--ws-put "departing-popup-ws" :project-dir project)
+        (delete-directory project t)
+        (agent-repl--log-note-workspace-departing "departing-popup-ws")
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _) (setq warned t))))
+          ;; Act
+          (agent-repl--log "departing-popup-ws" "line from a departing workspace"))
+        ;; Assert
+        (should-not warned)))))
+
+(ert-deftest agent-repl-test-a-refused-departure-is-not-an-excuse ()
+  "A destructive verb the daemon refused withdraws the order it recorded."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-class-refused-" t))
+          (agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+      (agent-repl--ws-put "class-refused-ws" :project-dir project)
+      (delete-directory project t)
+      (agent-repl--log-note-workspace-departing "class-refused-ws")
+      ;; Act
+      (agent-repl--log-forget-workspace-departure "class-refused-ws")
+      ;; Assert
+      (should (eq (agent-repl--central-log-fallback-class "class-refused-ws")
+                  'stale-registration)))))
+
+(ert-deftest agent-repl-test-registering-a-directory-forgets-an-earlier-departure ()
+  "A name is reusable, and the new tenant inherits none of the old one's exit."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((first (make-temp-file "agent-repl-class-reused-first-" t))
+          (second (make-temp-file "agent-repl-class-reused-second-" t))
+          (agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "class-reused-ws" :project-dir first)
+            (delete-directory first t)
+            (agent-repl--log-note-workspace-departing "class-reused-ws")
+            ;; Act: a workspace arrives under the same name, then loses its own
+            ;; directory with nothing having asked for it to go.
+            (agent-repl--ws-put "class-reused-ws" :project-dir second)
+            (delete-directory second t)
+            ;; Assert
+            (should (eq (agent-repl--central-log-fallback-class "class-reused-ws")
+                        'stale-registration)))
+        (when (file-directory-p second) (delete-directory second t))))))
+
+(ert-deftest agent-repl-test-registering-a-directory-forgets-the-spent-claim ()
+  "The one announcement a name is owed is owed again to its next tenant."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-claim-reused-" t))
+          (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+          (agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (puthash "claim-reused-ws" t agent-repl--unroutable-log-workspaces)
+            ;; Act
+            (agent-repl--ws-put "claim-reused-ws" :project-dir project)
+            ;; Assert
+            (should (agent-repl--claim-central-log-fallback "claim-reused-ws")))
+        (delete-directory project t)))))
+
 (ert-deftest agent-repl-test-deleted-worktree-fallback-names-the-workspace ()
   "The announcement says WHICH workspace lost its sink."
   (agent-repl-test--with-clean-state

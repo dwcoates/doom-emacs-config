@@ -280,6 +280,36 @@ answers a bare success, which is what almost every verb's success is."
     (should (equal (agent-repl-test-verbs--request :nuke)
                    (list :workspace (agent-repl-test-verbs--ref))))))
 
+(ert-deftest agent-repl-verbs-nuke-declares-the-departure-it-orders ()
+  "The worktree goes before the answer lands, so the ORDER is what is recorded."
+  (let ((agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+    (agent-repl-test-verbs--with
+        '((:nuke . (:failure (:detail "the daemon never answered"))))
+      ;; Act
+      (agent-repl-verb-nuke "ws-one")
+      ;; Assert
+      (should (agent-repl--log-workspace-departing-p "ws-one")))))
+
+(ert-deftest agent-repl-verbs-a-refused-nuke-withdraws-the-departure ()
+  "A nuke the daemon refused destroyed nothing, so nothing is excused."
+  (let ((agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+    (agent-repl-test-verbs--with
+        '((:nuke . (:response (:arm :error :value (:cause (:arm :blocked :value nil))))))
+      ;; Act
+      (agent-repl-verb-nuke "ws-one")
+      ;; Assert
+      (should-not (agent-repl--log-workspace-departing-p "ws-one")))))
+
+(ert-deftest agent-repl-verbs-a-refused-nuke-still-reaches-the-generic-handling ()
+  "Withdrawing the order claims no arm: the refusal is reported as ever."
+  (let ((agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+    (agent-repl-test-verbs--with
+        '((:nuke . (:response (:arm :error :value (:cause (:arm :blocked :value nil))))))
+      ;; Act
+      (agent-repl-verb-nuke "ws-one")
+      ;; Assert
+      (should (agent-repl-test-verbs--messaged-p "nuke refused: blocked")))))
+
 (ert-deftest agent-repl-verbs-merge-echoes-the-ref ()
   "MergeWorkspace carries the ref and nothing else."
   (agent-repl-test-verbs--with nil

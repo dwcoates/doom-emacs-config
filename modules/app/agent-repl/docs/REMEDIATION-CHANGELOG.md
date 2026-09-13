@@ -13,6 +13,9 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 - sidecar: a shell spool ending `[exited with code N]` now ends its run on that evidence (`internal/handler/shell.go`), so a finished detached run is no longer written up as `went_silent` (realtest 2026-09-13 between-sweeps `lost-policy`/`bash-lost` WARNs)
 - realtest harness: the confirmation leaves the editor alone after a `C-g` (`Chord.Interrupting`, quiet window) and every probe answer carries the sequence of the probe that asked for it (`probeWrapper` seq stamp, slot cleared, `quit` caught), because the confirmation's own emacsclient traffic was turning the press into an interrupt and then reading a stale ring slot as proof it never arrived (realtests 5-8, six `C-g DID NOT REACH EMACS`)
+- elisp logging: a workspace whose departure the editor ordered classifies as `ordered-departure` and records its trailing central fallback at info, so only an unasked-for missing directory keeps the WARN and the popup (realtest 5's own delete, and a departed `scratch-repo`, each raised a popup naming a workspace already forgotten)
+
+- elisp daemon: a daemon exit this editor asked for records at info, an unrequested clean exit stays warn and an unrequested non-zero exit is now an error (two orderly `bin/deploy-all.sh` restarts each wrote `WARNING: elisp.daemon.exited status=0`)
 
 - realtest harness: a chord that did not reach its command is classified off Emacs's ring (`chordring.go`), so a leader eaten by input the run never sent names neither the binding nor the key driver (realtest 8's `SPC j m p`)
 

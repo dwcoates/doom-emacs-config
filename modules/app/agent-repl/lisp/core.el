@@ -1202,10 +1202,66 @@ otherwise the record is a routing invariant violation.")
   "elisp.core.log-central-fallback workspace=%S reason=%s"
   "Format of the once-per-workspace record announcing a central fallback.")
 
+(defvar agent-repl--departed-log-workspaces (make-hash-table :test #'equal)
+  "Names of workspaces whose departure THIS EDITOR ordered.
+
+A workspace does not leave all at once.  The editor asks for the nuke, the
+daemon removes the worktree and answers, and only then are the tab, the
+streams, the buffers and finally the registry row taken down.  Records go on
+being written for the whole of that window — a roster reconcile, a stream
+cancellation, a panel switch — and each of them is attributed to a workspace
+whose registered directory is ALREADY gone from disk.
+
+Read from the registration alone, that is indistinguishable from a registry
+row that outlived its worktree, and it was read that way: on 2026-09-13 the
+delete in realtest 5 raised the `stale-registration' popup for
+`workspace-d4841171eaf540f4' 49ms before its own tab teardown, and a link
+teardown raised another for `scratch-repo' half an hour after that workspace
+had left the roster.  Both popups named a workspace the user had already
+forgotten, and neither named anything the user could act on.
+
+So the ORDER IS REMEMBERED.  A directory that is missing BECAUSE the editor
+asked for the workspace to go is an ordinary consequence of that order; a
+directory that is missing with NO order behind it is the stale row worth
+interrupting for.  The name is forgotten again the moment a workspace
+registers a directory under it, so a recreated workspace starts from the
+same clean slate as a fresh one.")
+
+(defun agent-repl--log-note-workspace-departing (ws)
+  "Remember that this editor ordered WS's departure.
+Called where the departure is ORDERED and again where it is CARRIED OUT:
+the destructive verb's answer can be preceded by records the daemon's own
+worktree removal has already made unroutable."
+  (when (stringp ws)
+    (puthash ws t agent-repl--departed-log-workspaces)))
+
+(defun agent-repl--log-forget-workspace-departure (ws)
+  "Forget an order to depart that WS did not obey.
+A REFUSED destructive verb leaves the workspace standing with its worktree
+intact, so the order must not go on excusing a directory that later goes
+missing on its own."
+  (when (stringp ws)
+    (remhash ws agent-repl--departed-log-workspaces)))
+
+(defun agent-repl--log-note-workspace-registered (ws)
+  "Forget WS's departure and its spent fallback claim: the name is live again.
+A name is reusable, and a workspace registering a directory under one is a
+new workspace whatever became of the last: it is owed the same single
+announcement, and the same popup, as any other."
+  (when (stringp ws)
+    (remhash ws agent-repl--departed-log-workspaces)
+    (remhash ws agent-repl--unroutable-log-workspaces)))
+
+(defun agent-repl--log-workspace-departing-p (ws)
+  "Return non-nil when this editor has ordered WS's departure."
+  (and (stringp ws)
+       (gethash ws agent-repl--departed-log-workspaces)
+       t))
+
 (defun agent-repl--central-log-fallback-class (ws)
   "Classify WHY WS's records fall back to the central sink.
 
-TWO DIFFERENT FACTS ARRIVE HERE, and conflating them is what put a popup in
+THREE DIFFERENT FACTS ARRIVE HERE, and conflating them is what put a popup in
 front of the user for a condition that is not a defect:
 
   - `no-durable-home' — WS names no registered directory at all, or names a
@@ -1215,18 +1271,26 @@ front of the user for a condition that is not a defect:
     its records are written centrally carrying its name, and the user has
     nothing to do about it.  ORDINARY.
 
-  - `stale-registration' — WS IS registered, and the directory it is
-    registered AT IS GONE.  That is a registry row that outlived its
-    worktree: a real inconsistency in durable state, which writing centrally
-    hides rather than repairs.  It is the one case worth interrupting for.
+  - `ordered-departure' — the editor ASKED for WS to go, and the directory
+    went.  The trailing records of a departure the user themselves ordered
+    are the ordinary sound of that departure finishing; see
+    `agent-repl--departed-log-workspaces'.  ORDINARY.
 
-The two are told apart by the registration alone, so the classification is a
-fact about WS rather than about whichever record happened to meet it."
+  - `stale-registration' — WS IS registered, the directory it is registered
+    AT IS GONE, and NOTHING ASKED FOR IT TO GO.  That is a registry row that
+    outlived its worktree: a real inconsistency in durable state, which
+    writing centrally hides rather than repairs.  It is the one case worth
+    interrupting for.
+
+The departure is checked FIRST, because it explains the missing directory
+that would otherwise read as the anomaly.  All three are facts about WS
+rather than about whichever record happened to meet it."
   (let ((dir (and (fboundp 'agent-repl--ws-get)
                   (agent-repl--ws-get ws :project-dir))))
-    (if (and (stringp dir) (not (file-directory-p dir)))
-        'stale-registration
-      'no-durable-home)))
+    (cond
+     ((agent-repl--log-workspace-departing-p ws) 'ordered-departure)
+     ((and (stringp dir) (not (file-directory-p dir))) 'stale-registration)
+     (t 'no-durable-home))))
 
 (defun agent-repl--claim-central-log-fallback (ws)
   "Claim the ONE announcement that WS's records go to the central sink.
@@ -1237,9 +1301,11 @@ record that met it: announcing it per record is what turned a single tab
 render into a screenful of identical lines.
 
 THE USER-VISIBLE WARNING IS RAISED ONLY FOR `stale-registration'.  A
-workspace that simply owns no durable sink is an ORDINARY condition and gets
-no popup at all — it is recorded, once, and that is the whole of it.  A
-REGISTERED directory that is MISSING is not ordinary, so it keeps the popup.
+workspace that simply owns no durable sink, and a workspace whose departure
+the editor itself ordered, are ORDINARY conditions and get no popup at all —
+each is recorded, once, and that is the whole of it.  A REGISTERED directory
+that is MISSING with nothing having asked for it to go is not ordinary, so it
+keeps the popup.
 
 The record itself is built and written by `agent-repl--emit-log-record', the
 one builder and writer of records, which is also the only place that can do
@@ -2036,9 +2102,11 @@ differently:
     sink, and `agent-repl--central-log-fallback-class' says which of the two
     facts that is.  A workspace with no durable home of its own — an
     unregistered name, or a registered scratch path — is an ORDINARY
-    outcome, recorded once at INFO and silently.  A workspace registered
-    at a directory that is GONE is a stale registry row, recorded once at
-    WARN and keeping its user-visible popup.  Either way the record is
+    outcome, recorded once at INFO and silently, and so is a workspace
+    whose departure this editor ordered.  A workspace registered at a
+    directory that is GONE with nothing having asked for it to go is a
+    stale registry row, recorded once at WARN and keeping its
+    user-visible popup.  Either way the record is
     written to the global sink carrying `unroutable_workspace', so the
     line still says which workspace it is about, and nothing that merely
     renders or sweeps such a workspace may fail or spam because of it: a
