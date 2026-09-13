@@ -25,6 +25,23 @@
 // workspace is the stream's, and one ordered stream per component needs no
 // staleness token — a push cannot overtake a newer one on its own stream.
 //
+// FIXED SCHEMA AND ORGANIZATION (owner ruling, 2026-09-13). THE STRIP HAS ONE
+// SHAPE AND ONLY ONE. Every cell named by TopbarView is present in the strip
+// at all times and in the same slot; there is NO whole-view state that
+// replaces, suppresses or rearranges the strip, and none may ever be added.
+// A cell whose SESSION fact is unknown — the workspace is hibernated, or
+// standing at the cold gate, or its session has simply not stated the fact
+// yet — draws its OWN "no session" content in its OWN slot: the model
+// selector, the permission-mode picker and fast mode are ABSENT (presence is
+// how "unknown" is said) and the client draws a dash in the slot rather than
+// omitting it, while the context chip and the warning strip are ALWAYS SET
+// and always drawn. The session-less FACTS are not lost: the chip carries the
+// hibernated or cold context size (0 when none is known) with the reason in
+// its hover content, and the warning strip carries the state as one warning
+// line. Two whole-view states, `hibernated` (tag 11) and `cold_gate` (tag
+// 12), were landed and then RETIRED the same day under this ruling; their
+// tags are reserved below and must not be revived.
+//
 
 syntax = "proto3";
 
@@ -41,84 +58,50 @@ message TopbarView {
   TopbarTitle title = 1;
   // The session identity line (hover/expanded state).
   TopbarSessionLine session_line = 2;
-  // The model selector: current selection and the selectable list.
-  TopbarModelSelector model_selector = 3;
+  // The model selector: current selection and the selectable list. OPTIONAL
+  // BY PRESENCE: absent means no session has stated a model for this
+  // workspace (hibernated, cold-gated, or not yet started), and the client
+  // draws the cell's no-session dash IN ITS SLOT rather than omitting it.
+  optional TopbarModelSelector model_selector = 3;
   // The connectivity glyph.
   TopbarConnectivity connectivity = 4;
-  // The warning strip.
+  // The warning strip. ALWAYS SET, session or no session: a session-less
+  // workspace's state rides it as one warning line, so the fact the retired
+  // whole-view states used to carry is still stated. An EMPTY list remains
+  // the daemon saying nothing is wrong, and the client still draws no chip
+  // for one — "always set" is about the wire, not about a control over
+  // nothing.
   TopbarWarningStrip warnings = 5;
   // Tag 6 RETIRED (TokenBreakdownView token_breakdown): the breakdown now
   // rides the context chip's hover content.
   reserved 6;
-  // The context chip — a NUMBER, not an icon.
+  // The context chip — a NUMBER, not an icon. ALWAYS SET. A session-less
+  // workspace's chip states the context the session HELD (the hibernated
+  // conversation's size, or what a cold read would re-read), 0 when none is
+  // known, and the reason it is not live rides the chip's hover content.
   TopbarContextChip context = 7;
   // Which account the session spends as.
   TopbarAccount account = 8;
-  // The permission-mode picker, the model selector's sibling.
-  TopbarPermissionModePicker permission_mode_picker = 9;
+  // The permission-mode picker, the model selector's sibling. OPTIONAL BY
+  // PRESENCE, for the same reason and with the same no-session drawing.
+  optional TopbarPermissionModePicker permission_mode_picker = 9;
   // The vendor's fast mode, the permission mode's sibling: the other
   // session-level standing state a reader has to know before sending, and
-  // the only one that can be neither on nor off. UNSET means the vendor has
-  // stated no fast mode for this session yet — presence, never a bool that
-  // would have to guess.
-  TopbarFastMode fast_mode = 10;
-  // THE WHOLE-VIEW HIBERNATED STATE. Set means the idle sweep stood this
-  // workspace's session down on purpose: nothing is wired and nothing is
-  // wrong. While it is set the SESSION-SCOPED elements above — the model
-  // selector, the permission-mode picker, the context chip, fast mode, the
-  // warning strip and the session line — are ABSENT, because there is no
-  // session for the daemon to resolve them from; the account, the
-  // connectivity glyph and the title are still resolved and still drawn.
-  //
-  // PRESENCE, NOT A ONEOF OVER THE WHOLE VIEW. Every field of this view is
-  // already an element message, and an element the state suppresses is
-  // expressed by NOT SETTING it — which is exactly what a message field's
-  // presence says. Wrapping the strip's other nine fields in a oneof arm
-  // would restate that partition a second time, in a second place, for one
-  // state.
-  TopbarHibernated hibernated = 11;
-  // THE WHOLE-VIEW COLD-GATE STATE. Set means this workspace is STANDING AT
-  // THE COLD GATE: the shim answered `cold` to the session start, so no
-  // session was ever created and the daemon refused to re-read the context at
-  // full price until the reader answers the gate the feed is showing. While
-  // it is set the SESSION-SCOPED elements above are ABSENT for the same
-  // reason they are absent under `hibernated` — there is no session to
-  // resolve them from — and the account, the connectivity glyph and the title
-  // are still resolved and still drawn.
-  //
-  // THE TOPBAR IS NEVER OPTIONAL, which is the whole reason this field
-  // exists. Without it a cold-gated workspace resolved nothing at all: no
-  // `session_started`, no context usage, so the readiness gate never passed
-  // and the strip stayed BLANK for as long as the gate stood.
-  //
-  // AT MOST ONE OF `hibernated` AND `cold_gate` IS EVER SET, and when both
-  // states hold at once the daemon states THIS one: a cold gate is waiting on
-  // the reader, while hibernation waits on nothing and lifts itself on the
-  // next prompt.
-  TopbarColdGate cold_gate = 12;
-}
-
-// The topbar's cold-gate state. It carries the two facts the daemon already
-// holds from the shim's `SessionCold` — what a resume would cost, and when
-// the gate rose — and nothing else: the CHOICE is the feed's gate card, and
-// restating its menu here would be a second place to answer one question.
-message TopbarColdGate {
-  // How many context tokens the cold read would re-read at full price. The
-  // client formats the figure; the daemon never composes a number as text.
-  int64 context_tokens = 1;
-  // When the gate rose, epoch ms. The age is TICKED CLIENT-SIDE from this
-  // instant, for the same reason `TopbarHibernated.since_ms` is: a topbar is
-  // republished on facts, never on a clock.
-  int64 since_ms = 2;
-}
-
-// The topbar's hibernated state. Empty of everything but the instant: the
-// strip draws the literal word "hibernated" beside the age, and the age is
-// TICKED CLIENT-SIDE from this instant — a formatted duration on the wire is
-// stale the moment it arrives, and a topbar is not republished on a clock.
-message TopbarHibernated {
-  // When the session was stood down, epoch ms.
-  int64 since_ms = 1;
+  // the only one that can be neither on nor off. OPTIONAL BY PRESENCE: unset
+  // means the vendor has stated no fast mode for this session yet — never a
+  // bool that would have to guess — and the client draws the cell's
+  // no-session dash in its slot.
+  optional TopbarFastMode fast_mode = 10;
+  // Tag 11 RETIRED (TopbarHibernated hibernated): the whole-view hibernated
+  // state, landed and reversed on 2026-09-13 by the FIXED SCHEMA AND
+  // ORGANIZATION ruling above. The park now rides the context chip's hover
+  // reason and one warning line.
+  reserved 11;
+  // Tag 12 RETIRED (TopbarColdGate cold_gate): the whole-view cold-gate
+  // state, landed and reversed the same day and for the same reason. The
+  // gate's figure is the context chip's, its reason the chip's hover, and its
+  // standing is one warning line.
+  reserved 12;
 }
 
 // The vendor's fast mode, as it stands. THE ARM IS THE STATE, carried by
@@ -296,6 +279,13 @@ message TopbarWarning {
   TopbarWarningLine line = 1;
   // WHICH concern, carrying that kind's overlay content — the expanded
   // detail a click reveals.
+  //
+  // UNSET IS A WARNING WITH NO OVERLAY: the line is the whole warning, and
+  // the row is a statement rather than a control. That is what the FIXED
+  // SCHEMA ruling's session-less line is — "hibernated since …", "cold
+  // context, awaiting your answer" — a fact with nothing further to reveal
+  // and, for the cold gate, nothing to answer HERE (the feed's gate card is
+  // the one place a gate is answered).
   oneof detail {
     TopbarAccountingWarningDetail accounting = 2;
     TopbarUnmodeledToolWarningDetail unmodeled_tool = 3;

@@ -16,7 +16,8 @@
  * "refused", and a silent WatchSession stalls the daemon's whole bring-up.
  *
  * THEN THE CURRENT VIEW, THEN CHANGES ONLY. A joining subscriber also gets the
- * current `context_usage`, `model_changed` and `permission_mode_changed` — a
+ * current `context_usage`, `model_changed`, `permission_mode_changed` and
+ * `title` — a
  * consumer that attached late is not entitled to a blank session — and after
  * that, an arm is pushed only when its value actually CHANGED. A periodic push
  * of an unchanged view is indistinguishable from a change at the consumer and
@@ -131,12 +132,19 @@ export class SessionPushes {
   // any account usage was the turn-close reprobe 41ms later. The dedup above
   // suppresses nothing real: every sample carries its own `observed_at_ms`, so
   // two samples are never byte-identical.
+  //
+  // `title` is a level too, and the most consequential one to miss: the vendor
+  // states it on the FILE plane and the shim reads it at the session's start,
+  // which is BEFORE the daemon's standing WatchSession exists — so without a
+  // replay the topbar would draw the workspace name until some later turn
+  // happened to change the title.
   private static readonly REPLAYED = [
     "contextUsage",
     "modelChanged",
     "permissionModeChanged",
     "fastMode",
     "accountUsage",
+    "title",
   ];
 
   /**

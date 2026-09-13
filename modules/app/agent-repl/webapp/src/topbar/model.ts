@@ -48,6 +48,7 @@ import {
   type SentenceTable,
 } from "../rpc/refuse.js";
 import { revealNode } from "../scroll.js";
+import { drawNoSessionCell } from "./no-session.js";
 import { asAnchor } from "./strip.js";
 
 /** What the button says when the daemon reports no selection. */
@@ -182,7 +183,14 @@ export function routeToColdGate(doc: Document): "gate" | "notice" {
  * The selector: the button that names the selection and the reveal that offers
  * the alternatives.
  */
-export function drawTopbarModelSelector(u: TopbarModelSelector, tc: TopbarContext): HTMLElement {
+export function drawTopbarModelSelector(
+  u: TopbarModelSelector | undefined,
+  tc: TopbarContext,
+): HTMLElement {
+  // ABSENT IS "NO SESSION HAS STATED A MODEL", and the slot stays. See
+  // `no-session.ts`: the strip has one shape, so a cell with no fact behind it
+  // draws a dash rather than vanishing and shifting its neighbours.
+  if (u === undefined) return drawNoSessionCell("model");
   log.debug("drawing the model selector", {
     operation: "topbar.model-selector",
     context: { options: u.options.length, selected: u.selected !== undefined },

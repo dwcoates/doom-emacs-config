@@ -495,7 +495,8 @@ way a refusal does.
    `SessionPushes.subscribe()`, before the iterable is returned, so the first
    `next()` resolves without waiting on anything. That push IS the daemon's
    readiness signal, and there is no other. A late joiner is then caught up on
-   the current `context_usage`, `model_changed` and `permission_mode_changed`;
+   the current `context_usage`, `model_changed`, `permission_mode_changed`,
+   `fast_mode`, `account_usage` and `title`;
    after that, arms are pushed on CHANGE only.
 3. **The store client ends `WatchAgentSession` by CANCELLING its context**
    (an `AbortSignal`), never by a bare close: a bare close leaves the store

@@ -315,6 +315,22 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 				if identity.GetAgentReplSessionId() != "" {
 					t.Fatalf("%s on a workspace with no session = agent_repl_session_id %q, want empty", k.Name, identity.GetAgentReplSessionId())
 				}
+			case "WatchTopbar":
+				// THE STRIP HAS ONE SHAPE AND IS NEVER WITHHELD (topbar.proto,
+				// FIXED SCHEMA AND ORGANIZATION). Its readiness gate is the
+				// workspace's own two facts — the naming and the account —
+				// both of which a registration installs, so a
+				// registered-but-unopened workspace opens with the session-less
+				// strip: every cell drawn, the three session-scoped controls
+				// absent so the client draws their dashes.
+				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the session-less strip a registered workspace opens with")
+				view := push.(*frontendv1.TopbarView)
+				if view.GetTitle() == nil || view.GetContext() == nil || view.GetWarnings() == nil {
+					t.Fatalf("%s on a registered-but-unopened workspace = %v, want the always-drawn cells", k.Name, view)
+				}
+				if view.GetModelSelector() != nil {
+					t.Fatalf("%s on a workspace with no session = model_selector %v, want absent", k.Name, view.GetModelSelector())
+				}
 			case "WatchWorkspaceRoster":
 				// The BOOT publishes the roster: cmd/claude-repld's Prime step
 				// runs verbs.PublishRegistry after the push surface is bound

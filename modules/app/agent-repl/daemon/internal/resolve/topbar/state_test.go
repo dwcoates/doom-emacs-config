@@ -23,7 +23,10 @@ func TestEveryMissingFactIsNamed(t *testing.T) {
 	got := s.missing()
 
 	// Assert
-	want := []string{"naming", "session_started", "account", "permission_mode_picker", "context_usage"}
+	// THE WORKSPACE FACTS AND NOTHING ELSE. No session fact is a gate under
+	// the fixed-schema ruling: each session-scoped cell states its own
+	// not-yet-known in its own slot instead.
+	want := []string{"naming", "account"}
 	if len(got) != len(want) {
 		t.Fatalf("missing = %v, want %v", got, want)
 	}

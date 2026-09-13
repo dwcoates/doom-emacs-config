@@ -14,11 +14,20 @@ import (
 // built here, and the per-model sections come from the session's own
 // accumulation of usage frames rather than from any turn's.
 func (r *resolver) tokenBreakdown(s *wsState) *frontendv1.TokenBreakdownView {
-	out := &frontendv1.TokenBreakdownView{
-		Sections: []*frontendv1.TokenBreakdownSection{
-			breakdownSection("session", s.totals),
-		},
+	out := &frontendv1.TokenBreakdownView{}
+	// THE REASON COMES FIRST when there is no session. The chip's figure alone
+	// cannot say WHY it is not moving, and the strip has no width to spare for
+	// the sentence — so the hover leads with it, and with the figure it is
+	// about, before the spend the session did while it was alive.
+	if reason := sessionlessReason(s); reason != "" {
+		out.Sections = append(out.Sections, &frontendv1.TokenBreakdownSection{
+			Heading: &frontendv1.TokenBreakdownHeading{Text: reason},
+			Rows: []*frontendv1.TokenBreakdownRow{
+				{Label: "context held", Tokens: contextTokens(s), Emphasized: true},
+			},
+		})
 	}
+	out.Sections = append(out.Sections, breakdownSection("session", s.totals))
 	models := make([]*modelTotals, 0, len(s.perModel))
 	for _, model := range s.perModel {
 		models = append(models, model)

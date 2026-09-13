@@ -440,6 +440,40 @@ describe("fast mode", () => {
   });
 });
 
+describe("the vendor's title for the conversation", () => {
+  function title(text: string): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: { case: "title", value: create(conversationv1.SessionTitleSchema, { text }) },
+    });
+  }
+
+  it("is replayed to a consumer that joins after the shim read it", async () => {
+    // THE DAEMON IS ALWAYS THAT CONSUMER: the title is read during
+    // StartSession and the daemon's standing WatchSession opens after
+    // StartSession has answered, so without the replay it would never see it.
+    const pushes = new SessionPushes(() => 1);
+    pushes.push(title("Add SPC j keybinding support"));
+
+    const opening = await take(pushes.subscribe(), 2);
+
+    expect(opening[1]?.update.case).toBe("title");
+  });
+
+  it("is dropped when the vendor restated the same title", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.push(title("the one title"));
+
+    expect(pushes.push(title("the one title"))).toBe(false);
+  });
+
+  it("goes out when the vendor changed its mind", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.push(title("first guess"));
+
+    expect(pushes.push(title("what it turned out to be"))).toBe(true);
+  });
+});
+
 describe("account usage", () => {
   function accountUsage(observedAtMs: bigint, utilizationPercent: number): conversationv1.SessionUpdate {
     return create(conversationv1.SessionUpdateSchema, {
