@@ -198,9 +198,18 @@ type client struct {
 }
 
 // newClient builds an unstarted client for one shim socket.
-func newClient(log dlog.Logger, ws ids.WorkspaceID, udsPath string, back backoff, probe func(ids.WorkspaceID) (bool, error)) *client {
+//
+// THE DAEMON-WIDE LATCH IS A CONSTRUCTOR ARGUMENT, not a field a caller
+// remembers to set afterwards. Every client this daemon hands out — spawned or
+// ADOPTED, on any path — must be able to answer "did this daemon order the
+// departure", and a client that was handed the reader only on some of the
+// paths that build one is exactly the adopted client whose ordered departure
+// was recorded as ERROR "shim died" with `stand_down_asked: false`. A nil
+// reader is a client built outside a supervisor, which orders nothing.
+func newClient(log dlog.Logger, ws ids.WorkspaceID, udsPath string, back backoff, probe func(ids.WorkspaceID) (bool, error), daemonStandDown func() bool) *client {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &client{
+		daemonStandDown: daemonStandDown,
 		log:           log,
 		ws:            ws,
 		udsPath:       udsPath,
@@ -264,10 +273,26 @@ var ErrStandDownOrdered = errors.New("the shim was stood down by this daemon")
 // departure that lands after that moment is one it ordered whether or not the
 // teardown walk reached this particular client.
 func (c *client) StandingDown() bool {
-	if c.standDown.Load() {
-		return true
-	}
-	return c.daemonStandDown != nil && c.daemonStandDown()
+	asked, daemon := c.standDownLatches()
+	return asked || daemon
+}
+
+// standDownLatches reports the two halves of the stand-down signal separately:
+// `asked` is this client's own record that a teardown was asked OF IT, and
+// `daemon` is the supervisor's daemon-wide latch. Every record that reports a
+// departure states BOTH, because "this daemon ordered it" and "the walk
+// reached this client" are different facts and a reader that is given only the
+// first cannot tell an unnamed client's ordered departure from a crash.
+func (c *client) standDownLatches() (asked, daemon bool) {
+	return c.standDown.Load(), c.daemonStandDown != nil && c.daemonStandDown()
+}
+
+// standDownFields states both latches on a record.
+func (c *client) standDownFields(ctx dlog.Context) dlog.Context {
+	asked, daemon := c.standDownLatches()
+	ctx["stand_down_asked"] = asked
+	ctx["daemon_stand_down"] = daemon
+	return ctx
 }
 
 // StandDown arms the stand-down latch for a teardown this daemon is ordering,
@@ -793,10 +818,10 @@ func (c *client) publishExit(info ExitInfo) {
 	c.exitInfo = &info
 	c.mu.Unlock()
 
-	ctx := dlog.Context{
+	ctx := c.standDownFields(dlog.Context{
 		"workspace_id": string(c.ws), "pid": info.PID, "code": info.Code,
 		"signal": info.Signal, "stderr": info.Stderr,
-	}
+	})
 	if info.Attribution != nil {
 		ctx["actor"] = info.Attribution.Actor
 		ctx["reason"] = info.Attribution.Reason
@@ -824,7 +849,6 @@ func (c *client) publishExit(info ExitInfo) {
 		// it, it is still a death and still loud.
 		c.log.Info("daemon.shimclient.exit", "the shim left after the stand-down it was asked for", ctx)
 	} else {
-		ctx["stand_down_asked"] = c.StandingDown()
 		c.log.Error("daemon.shimclient.exit", "shim died", ctx)
 	}
 
@@ -1080,14 +1104,14 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 			// a fault: redialing here reaches a process that is on its way
 			// out, and publishing `redialing` raises a `link_severed` health
 			// fault against a teardown the daemon itself ordered.
-			c.log.Debug("daemon.shimclient.redial", "the liveness stream ended after a stand-down was asked of this shim; not redialing", dlog.Context{
+			c.log.Debug("daemon.shimclient.redial", "the liveness stream ended after a stand-down was asked of this shim; not redialing", c.standDownFields(dlog.Context{
 				"uds": c.udsPath, "error": errText(broke),
-			})
+			}))
 			return
 		}
-		c.log.Warn("daemon.shimclient.redial", "shim link broke; redialing", dlog.Context{
+		c.log.Warn("daemon.shimclient.redial", "shim link broke; redialing", c.standDownFields(dlog.Context{
 			"uds": c.udsPath, "error": errText(broke),
-		})
+		}))
 		next, err := c.redial(ctx)
 		if err != nil {
 			// THE LATCH IS RE-READ HERE, and that is not the same read as the
@@ -1097,14 +1121,14 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 			// this second read that ordered ending is a WARN, and the realtest
 			// harvest fails a run on every one of them.
 			if c.StandingDown() {
-				c.log.Debug("daemon.shimclient.redial", "the redial ladder ended after a stand-down was asked of this shim", dlog.Context{
+				c.log.Debug("daemon.shimclient.redial", "the redial ladder ended after a stand-down was asked of this shim", c.standDownFields(dlog.Context{
 					"uds": c.udsPath, "error": err.Error(),
-				})
+				}))
 				return
 			}
-			c.log.Warn("daemon.shimclient.redial", "redial stopped", dlog.Context{
+			c.log.Warn("daemon.shimclient.redial", "redial stopped", c.standDownFields(dlog.Context{
 				"uds": c.udsPath, "error": err.Error(),
-			})
+			}))
 			return
 		}
 		stream = next
@@ -1137,9 +1161,9 @@ func (c *client) witnessAdoptedDeath(dialErr error) bool {
 	// read none of it: a forget or a kill of a live adopted workspace ends the
 	// very socket this dial is failing on, and the failure was recorded as a
 	// shim that went missing.
-	evidence := dlog.Context{
+	evidence := c.standDownFields(dlog.Context{
 		"workspace_id": string(c.ws), "uds": c.udsPath, "error": dialErr.Error(),
-	}
+	})
 	if c.StandingDown() {
 		c.log.Debug("daemon.shimclient.exit", "the adopted shim's socket is gone after the stand-down it was asked for", evidence)
 	} else {

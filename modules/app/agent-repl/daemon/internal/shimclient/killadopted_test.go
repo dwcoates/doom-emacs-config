@@ -173,7 +173,7 @@ func startPeer(t *testing.T, joinPGID int, env ...string) *peer {
 // adoptedClientFor is a client shaped exactly like one Adopt returns: a socket
 // path and no child handle at all.
 func adoptedClientFor(udsPath string, grace time.Duration) *client {
-	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), udsPath, defaultBackoff, nil)
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), udsPath, defaultBackoff, nil, nil)
 	c.grace = grace
 	return c
 }

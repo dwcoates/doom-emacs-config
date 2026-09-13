@@ -250,8 +250,7 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	}
 	log = log.With(dlog.Context{"workspace_id": string(spec.WorkspaceID)})
 
-	c := newClient(log, spec.WorkspaceID, spec.UDSPath, s.back, s.workspaceProbe(spec.WorkspaceDir))
-	c.daemonStandDown = s.StandingDown
+	c := newClient(log, spec.WorkspaceID, spec.UDSPath, s.back, s.workspaceProbe(spec.WorkspaceDir), s.StandingDown)
 	c.grace = s.grace
 	c.stderr = newRing(stderrRingBytes)
 
@@ -345,8 +344,7 @@ func (s *supervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, workspaceDir
 	}
 	log = log.With(dlog.Context{"workspace_id": string(ws)})
 
-	c := newClient(log, ws, udsPath, s.back, s.workspaceProbe(workspaceDir))
-	c.daemonStandDown = s.StandingDown
+	c := newClient(log, ws, udsPath, s.back, s.workspaceProbe(workspaceDir), s.StandingDown)
 	c.grace = s.grace
 	c.stderr = newRing(stderrRingBytes)
 
