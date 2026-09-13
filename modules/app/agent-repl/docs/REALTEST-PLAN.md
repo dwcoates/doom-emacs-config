@@ -91,8 +91,10 @@ e2e and Emacs-layer suites stay.
   once per realtest: the copy is of the state as it was before the run began.
 - Refuse to run unless every deployed system is at master's HEAD (the
   readiness report is the judge) and no human is using Emacs.
-- After the run the owner's editor is left working and the stack untouched —
-  and the REGISTRY untouched with it: every workspace the run created is closed
+- After the run the owner is left with a GUARD-FREE editor and the stack
+  untouched. A run's own editor forbids the vendor; the handback quits it and
+  cold-starts a normal one in its place (see "Running a sweep", "The editor the
+  owner gets back"). The REGISTRY is untouched with it: every workspace the run created is closed
   and forgotten through the daemon before the run directory goes away, and a
   row that survives fails the run (see "Running a sweep", "The leftovers").
 - The DESKTOP is left as the run found it too. The sweep takes focus before its
@@ -128,6 +130,22 @@ this; the runner is what gets out of their way.
   daemon is a consent of its own: `AGENT_REPL_REALTEST_STOP_DAEMON=1`. Without
   it realtest 3 is SKIPPED with the reason rather than run into its refusal.
   SIGTERM only; a daemon that ignores it is a skip too.
+- **The editor the owner gets back.** Every editor a realtest launches carries
+  `AGENT_REPL_FORBID_VENDOR_CALLS`, so the one left standing at the end is never
+  the one the owner should keep: until 2026-09-13 it was, and the owner's real
+  workspaces spent the hours after a sweep talking to the FAKE vendor through
+  the daemon that editor spawned. From the same EXIT trap, after the focus
+  handback, the run reads the standing editor's environment from the kernel; a
+  GUARDED one is quit (the same consented takeover path), a guarded DAEMON is
+  stopped under `AGENT_REPL_REALTEST_STOP_DAEMON=1` — or LEFT and said loudly
+  without it — and a normal editor is cold-started with `open -gj -a Emacs` and
+  the guard removed from its environment. A guard-free editor is left exactly
+  alone. The run names the editor the owner gets back before it starts and
+  again at the end: *the owner's editor was restored: guarded Emacs pid N quit,
+  guarded daemon pid M stopped, a guard-free Emacs launched*. None of it
+  changes the sweep's verdict. `bin/deploy-all.sh` holds the other half: it
+  REFUSES to restart the daemon through a guarded Emacs (the incoming daemon
+  would inherit the guard) unless `AGENT_REPL_REALTEST_TAKEOVER=1` says to.
 - **The leftovers.** A realtest that registers, creates or forks a workspace
   puts a row in the OWNER'S registry naming a directory under the run
   directory, and the row outlives the directory. A sweep therefore DECLINES at

@@ -147,6 +147,11 @@ READINESS_REPORT="$THIS_DIR/readiness-report.sh"
 EMACSCLIENT="${AGENT_REPL_EMACSCLIENT:-/Applications/Emacs.app/Contents/MacOS/bin/emacsclient}"
 command -v "$EMACSCLIENT" >/dev/null 2>&1 || EMACSCLIENT="emacsclient"
 
+# The environment variable bin/realtest.sh puts on the editor it drives. An
+# Emacs carrying it forbids every real vendor call and hands its children FAKE
+# shims, so step 5 refuses to restart the daemon through one — see there.
+readonly VENDOR_GUARD_ENV=AGENT_REPL_FORBID_VENDOR_CALLS
+
 FORCE=0
 NO_BOUNCE=0
 NO_DAEMON_BOUNCE=0
@@ -484,6 +489,38 @@ if ! EMACS_PROBE_OUT="$("$EMACSCLIENT" --eval t 2>&1)"; then
 else
     EMACS_AVAILABLE=1
     log "daemon: Emacs server probe succeeded: $EMACS_PROBE_OUT"
+
+    # A GUARDED EMACS MUST NOT BE THE ONE THAT RESTARTS THE DAEMON.
+    # bin/realtest.sh drives the editor with AGENT_REPL_FORBID_VENDOR_CALLS=1,
+    # and everything that editor spawns inherits it. The restart below is made
+    # BY the running Emacs, so a deploy against a guarded editor installs a
+    # daemon whose shims answer from the FAKE vendor — under the owner's real
+    # workspaces, silently, until someone reads a shim log
+    # ("shim.fake.query: fake vendor session STARTED", owner's logs 2026-09-13).
+    #
+    # The environment is read from the KERNEL's copy (`ps -Eww`), not from this
+    # shell's: what matters is what the Emacs process is holding, and this
+    # script's own environment says nothing about that.
+    #
+    # AGENT_REPL_REALTEST_TAKEOVER=1 is the one answer that goes ahead anyway,
+    # because a realtest operator deploying into their own guarded editor has
+    # already said this run may do that to the editor.
+    DEPLOY_EMACS_PID="$("$EMACSCLIENT" --eval '(emacs-pid)' 2>/dev/null | tr -d '"'"'"'[:space:]')"
+    case "$DEPLOY_EMACS_PID" in
+        ''|*[!0-9]*) DEPLOY_EMACS_PID="" ;;
+    esac
+    if [ -n "$DEPLOY_EMACS_PID" ] \
+       && ps -Eww -o command= -p "$DEPLOY_EMACS_PID" 2>/dev/null | tr ' ' '\n' | grep -q "^$VENDOR_GUARD_ENV="; then
+        if [ "${AGENT_REPL_REALTEST_TAKEOVER:-}" != "1" ]; then
+            echo "[deploy-all] REFUSING to restart the daemon: the running Emacs (pid $DEPLOY_EMACS_PID) carries $VENDOR_GUARD_ENV." >&2
+            echo "[deploy-all] The restart is made by that editor, so the incoming daemon would inherit the guard and every" >&2
+            echo "[deploy-all] shim under it would answer from the FAKE vendor while the owner's workspaces think it is real." >&2
+            echo "[deploy-all] Remedy: quit that editor and start a normal one (open -gj -a Emacs), then deploy again — or set" >&2
+            echo "[deploy-all] AGENT_REPL_REALTEST_TAKEOVER=1 if a guarded daemon is what this deploy is for." >&2
+            exit 3
+        fi
+        log "daemon: AGENT_REPL_REALTEST_TAKEOVER=1 — restarting through the guarded Emacs (pid $DEPLOY_EMACS_PID); the incoming daemon inherits $VENDOR_GUARD_ENV"
+    fi
 
     # The daemon, shim, and webapp paths are derived by the runtime control
     # plane from the checkout that loaded it. A deploy invoked from a linked
