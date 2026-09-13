@@ -28,6 +28,7 @@
  * component, and because a component-owned hook is exactly how the second
  * implementation grew last time.
  */
+import { Code, ConnectError } from "@connectrpc/connect";
 import { frameUndecodable } from "../failure/sink.js";
 import { log } from "../log.js";
 import type { AppContext } from "./context.js";
@@ -54,6 +55,39 @@ export function refusal(arm: string, text: string): HTMLElement {
   el.setAttribute("data-arm", arm);
   el.textContent = text;
   return el;
+}
+
+/** The one wording for a call that never landed. */
+const UNREACHABLE = "the daemon could not be reached";
+
+/**
+ * The arm and sentence for a call that THREW, rather than answering.
+ *
+ * "the daemon could not be reached" IS ONLY TRUE WHEN IT WAS NOT. Grounded
+ * 2026-09-13: the owner answered a cold gate, the daemon answered `internal`
+ * with the shim's own account of why the start was refused, and the card drew
+ * the unreachable line over it — the same lie the malformed-view rule already
+ * refuses to tell about an answer this build cannot read. So the three codes
+ * that mean the call never landed keep that line, and every other code carries
+ * the daemon's OWN message to the control the reader clicked.
+ *
+ * The arm is `transport` or `failed`, never a cause name: no cause was named.
+ */
+export function callFailure(err: unknown): { arm: string; text: string } {
+  const connect = ConnectError.from(err);
+  switch (connect.code) {
+    case Code.Unavailable:
+    case Code.DeadlineExceeded:
+    case Code.Canceled:
+      return { arm: "transport", text: UNREACHABLE };
+    default: {
+      const said = connect.rawMessage.trim();
+      return {
+        arm: "failed",
+        text: said === "" ? "the daemon refused the call and said nothing" : said,
+      };
+    }
+  }
 }
 
 /**
@@ -143,10 +177,18 @@ export function drawTypedRefusal(
   return said.arm;
 }
 
-/** State a transport failure at HOST; `callUnary` already logged it once. */
-export function drawTransportRefusal(host: HTMLElement): void {
+/**
+ * State a failed call at HOST; `callUnary` already logged it once.
+ *
+ * Pass the ERROR wherever the call site has it: the wording then comes from
+ * {@link callFailure}, which tells a daemon that could not be reached from one
+ * that answered a failure. Without it the unreachable line is the only thing
+ * this can say, which is the older, blunter contract and not a second wording.
+ */
+export function drawTransportRefusal(host: HTMLElement, err?: unknown): void {
   clearRefusals(host);
-  host.append(refusal("transport", "the daemon could not be reached"));
+  const said = err === undefined ? { arm: "transport", text: UNREACHABLE } : callFailure(err);
+  host.append(refusal(said.arm, said.text));
 }
 
 /**
