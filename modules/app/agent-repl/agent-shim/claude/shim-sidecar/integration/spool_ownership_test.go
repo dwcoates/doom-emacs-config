@@ -140,11 +140,11 @@ func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
 	spool.AppendRaw([]byte("nobody claimed this\n"))
 
 	// Assert.
-	rec := awaitLog(ctx, t, opts.LogPath, "the hold-expiry warning", func(r logRecord) bool {
+	rec := awaitLog(ctx, t, opts.LogPath, "the hold-expiry record", func(r logRecord) bool {
 		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
 	})
-	if rec.Level != "warn" {
-		t.Errorf("the hold expired at level %q; an aged unowned spool is a degradation and is stated as a WARNING", rec.Level)
+	if rec.Level != "info" {
+		t.Errorf("the hold expired at level %q; an aged unowned spool is the mandate working and is stated at INFO", rec.Level)
 	}
 	_ = fake
 }
@@ -205,8 +205,8 @@ func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 		t.Errorf("the catch-up summaries counted %d backlog spools, want %d", summed, len(tasks))
 	}
 	for _, r := range records {
-		if r.Operation == "hold-expired" && r.Level == "warn" {
-			t.Errorf("a backlog spool was stated as a per-file warning: %v", r.Context)
+		if r.Operation == "hold-expired" && r.Level == "info" {
+			t.Errorf("a backlog spool was stated as a per-file record: %v", r.Context)
 		}
 	}
 }
