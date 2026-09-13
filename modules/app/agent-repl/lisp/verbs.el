@@ -49,6 +49,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
+                  (id reason))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -459,7 +461,13 @@ The tab arrives through the roster push, not through this answer."
    #'agent-repl-rpc-open-workspace (agent-repl-verbs--conn)
    (list :workspace ref)
    :op "open"
-   :on-success (lambda (_) (message "agent-repl: opening %s" (plist-get ref :dir)))))
+   :on-success (lambda (_)
+                 ;; The tab arrives on the roster push, and when it does it
+                 ;; opens its panels as a re-open (owner ruling,
+                 ;; 2026-09-13, item 6).
+                 (agent-repl--panels-note-arrival-reason
+                  (plist-get ref :id) "reopened")
+                 (message "agent-repl: opening %s" (plist-get ref :dir)))))
 
 (defun agent-repl-verb-merge (ws)
   "Enqueue WS's merge.  Success means ENQUEUED and nothing more.
@@ -590,6 +598,13 @@ and the new workspace\'s tab arrives through the roster push."
    :on-success
    (lambda (success)
      (message "agent-repl: workspace requested")
+     ;; The minted ref is the FIRST place this workspace has an identity,
+     ;; and it is claimed here rather than at the selection: a one-shot is
+     ;; fire-and-forget and never selects, but it still opens its panels
+     ;; when its tab arrives (owner ruling, 2026-09-13, item 6).
+     (agent-repl--panels-note-arrival-reason
+      (plist-get (plist-get success :workspace) :id)
+      (if fork "forked" "created"))
      (when select
        (agent-repl-verbs--select-created success)))
    :on-error #'agent-repl-verbs--create-refusal))

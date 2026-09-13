@@ -1524,3 +1524,77 @@ saying the roster had been asked for one and declined."
       ;; Assert
       (should-not (seq-some (lambda (text) (string-search "elisp.roster.no-tab:" text))
                             logs)))))
+
+;;;; ---- Opening a workspace opens its panels (owner ruling 2026-09-13, #6) ----
+
+(defmacro agent-repl-test-roster--recording-arrivals (var &rest body)
+  "Run BODY with every panel arrival appended to VAR as (WS ID), oldest first."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl--panels-open-on-arrival)
+              (lambda (ws id) (setq ,var (append ,var (list (list ws id)))))))
+     ,@body))
+
+(ert-deftest agent-repl-test-roster-a-tab-born-after-startup-opens-its-panels ()
+  "A row that becomes open with the editor watching opens that workspace's panels."
+  ;; Arrange — the startup roster has already been delivered.
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--panels-arrivals-armed t)
+          seen)
+      (agent-repl-test-roster--recording-arrivals seen
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)))))))
+      ;; Assert
+      (should (equal seen '(("one" "a")))))))
+
+(ert-deftest agent-repl-test-roster-a-steady-state-push-opens-no-panels ()
+  "A push whose rows are already tabbed — a plain switch — touches no panels."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--panels-arrivals-armed t)
+          (roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+          seen)
+      (agent-repl-roster-apply roster)
+      (agent-repl-test-roster--recording-arrivals seen
+        ;; Act
+        (agent-repl-roster-apply roster))
+      ;; Assert
+      (should-not seen))))
+
+(ert-deftest agent-repl-test-roster-the-first-reconcile-arms-the-arrival-gate ()
+  "The startup roster is what arms later arrivals; it opens no panels itself."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+    ;; Assert
+    (should agent-repl--panels-arrivals-armed)))
+
+(ert-deftest agent-repl-test-roster-panels-open-before-the-minted-landing ()
+  "A created workspace's panels are open BEFORE the verb stands on it."
+  ;; Arrange — a create whose answer beat the roster push, so its landing is
+  ;; still pending when the tab arrives.
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--panels-arrivals-armed t)
+          (agent-repl-verbs--pending-landing '(:id "a" :dir "/w/one"))
+          (agent-repl-roster-update-functions
+           (list #'agent-repl-verbs--pending-landing-fire))
+          order)
+      (cl-letf (((symbol-function 'agent-repl--panels-open-on-arrival)
+                 (lambda (_ws _id) (setq order (append order '(panels)))))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (_dir) (setq order (append order '(landing))))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)))))))
+      ;; Assert
+      (should (equal order '(panels landing))))))

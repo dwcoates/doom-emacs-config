@@ -4053,3 +4053,128 @@ explicitly closed the panels, even with a live view buffer."
               ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
       (agent-repl--on-close)
       (should (agent-repl--ws-get "ws" :panels-closed-by-user)))))
+
+;;;; ---- Tests: opening a workspace opens its panels (arrival) ----
+;;
+;; Owner ruling, 2026-09-13, item 6: opening a workspace by any means other
+;; than switching to an already-open one opens its agent-repl panels
+;; immediately, before it is switched to.
+
+(defmacro agent-repl-test--with-arrival (&rest body)
+  "Run BODY with the arrival opener's dispatches recorded.
+`opened' and `shown' hold the workspace each frontend capability was
+called with, `anchored' the workspace the background anchor ran in, and
+`records' every INFO line the arrival wrote.  The workspace `arrived-ws'
+is registered and live, and the arrival gate is ARMED — the startup
+exemption has its own test."
+  (declare (indent 0))
+  `(agent-repl-test--with-clean-state
+     (let ((opened nil) (shown nil) (anchored nil) (records nil)
+           (agent-repl--panels-arrivals-armed t))
+       (agent-repl--ws-put "arrived-ws" :project-dir "/w/arrived")
+       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "arrived-ws"))
+                 ((symbol-function 'agent-repl--call-in-background-workspace)
+                  (lambda (ws fn) (setq anchored ws) (funcall fn)))
+                 ((symbol-function 'agent-repl--panels-any-visible-p) (lambda () nil))
+                 ((symbol-function 'agent-repl-host-ref)
+                  (lambda (_ws) '(:id "ws-1" :dir "/w/arrived")))
+                 ((symbol-function 'agent-repl-host-state) (lambda (_ws) t))
+                 ((symbol-function 'agent-repl--open-progress-show)
+                  (lambda (_ws buf) buf))
+                 ((symbol-function 'agent-repl--info)
+                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records)))
+                 ((symbol-function 'agent-repl--ws-frontend)
+                  (lambda (_ws)
+                    (agent-repl-frontend-create
+                     :name 'probe
+                     :open-fn (lambda (ws) (setq opened ws) :pending)
+                     :kill-fn #'ignore
+                     :running-p-fn (lambda (_ws) nil)
+                     :show-fn (lambda (ws) (setq shown ws) :pending)
+                     :supported-backends '(claude)))))
+         ,@body))))
+
+(ert-deftest agent-repl-test-panels-arrival-opens-the-panels ()
+  "A workspace that arrives open dispatches its frontend's OPEN capability."
+  ;; Arrange / Act
+  (agent-repl-test--with-arrival
+    (agent-repl--panels-open-on-arrival "arrived-ws" "ws-1")
+    ;; Assert
+    (should (equal opened "arrived-ws"))))
+
+(ert-deftest agent-repl-test-panels-arrival-opens-inside-the-workspace ()
+  "The open is anchored IN the arriving workspace, which is not current yet."
+  ;; Arrange / Act
+  (agent-repl-test--with-arrival
+    (agent-repl--panels-open-on-arrival "arrived-ws" "ws-1")
+    ;; Assert
+    (should (equal anchored "arrived-ws"))))
+
+(ert-deftest agent-repl-test-panels-arrival-records-the-verb-s-reason ()
+  "The arrival record carries the reason the verb that asked for it recorded."
+  ;; Arrange
+  (agent-repl-test--with-arrival
+    (agent-repl--panels-note-arrival-reason "ws-1" "forked")
+    ;; Act
+    (agent-repl--panels-open-on-arrival "arrived-ws" "ws-1")
+    ;; Assert
+    (should (member "elisp.panels.opened-on-arrival ws=arrived-ws reason=forked"
+                    records))))
+
+(ert-deftest agent-repl-test-panels-arrival-with-no-verb-reads-arrived ()
+  "A daemon-side arrival nobody claimed is recorded as `arrived'."
+  ;; Arrange / Act
+  (agent-repl-test--with-arrival
+    (agent-repl--panels-open-on-arrival "arrived-ws" "ws-1")
+    ;; Assert
+    (should (member "elisp.panels.opened-on-arrival ws=arrived-ws reason=arrived"
+                    records))))
+
+(ert-deftest agent-repl-test-panels-arrival-is-idempotent-when-already-open ()
+  "An arrival whose panels are already on screen dispatches nothing."
+  ;; Arrange
+  (agent-repl-test--with-arrival
+    (cl-letf (((symbol-function 'agent-repl--panels-any-visible-p) (lambda () t)))
+      ;; Act
+      (agent-repl--panels-open-on-arrival "arrived-ws" "ws-1")
+      ;; Assert
+      (should (and (null opened) (null shown))))))
+
+(ert-deftest agent-repl-test-panels-startup-arrival-opens-nothing ()
+  "A workspace already open when Emacs started is left to the startup path."
+  ;; Arrange
+  (agent-repl-test--with-arrival
+    (let ((agent-repl--panels-arrivals-armed nil))
+      ;; Act
+      (agent-repl--panels-open-on-arrival "arrived-ws" "ws-1")
+      ;; Assert
+      (should-not opened))))
+
+(ert-deftest agent-repl-test-panels-startup-arrival-a-verb-claimed-still-opens ()
+  "A verb that claimed an arrival opens it even before the startup roster lands."
+  ;; Arrange
+  (agent-repl-test--with-arrival
+    (let ((agent-repl--panels-arrivals-armed nil))
+      (agent-repl--panels-note-arrival-reason "ws-1" "created")
+      ;; Act
+      (agent-repl--panels-open-on-arrival "arrived-ws" "ws-1")
+      ;; Assert
+      (should (equal opened "arrived-ws")))))
+
+(ert-deftest agent-repl-test-panels-arrival-reason-is-consumed-once ()
+  "A reason is spent by the arrival that reads it, never by a second one."
+  ;; Arrange
+  (agent-repl-test--with-arrival
+    (agent-repl--panels-note-arrival-reason "ws-1" "registered")
+    (agent-repl--panels-take-arrival-reason "ws-1")
+    ;; Act / Assert
+    (should (equal (agent-repl--panels-take-arrival-reason "ws-1") "arrived"))))
+
+(ert-deftest agent-repl-test-panels-arrival-skips-a-dead-workspace ()
+  "A workspace that is not live opens no panels."
+  ;; Arrange
+  (agent-repl-test--with-arrival
+    ;; Act
+    (agent-repl--panels-open-on-arrival "never-registered-ws" "ws-2")
+    ;; Assert
+    (should-not opened)))

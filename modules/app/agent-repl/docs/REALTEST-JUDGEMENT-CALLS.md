@@ -499,3 +499,13 @@ rule allows.
 6. Opening a workspace by any means other than switching to an already
    open one (creation, re-open, register, fork) opens its agent-repl
    panels immediately, as `SPC o c` does, before it is switched to.
+
+## Panels open when a workspace opens (owner ruling #6), 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Where the one hook goes, given six ways to open a workspace | `agent-repl-roster--open-tab` (roster.el), the single editor-side birth every open already funnels through — create, fork, one-shot, register, re-open and any daemon-side arrival | Verbs learn the identity at different moments and one-shot never selects at all; the tab is the one event all six share, and it is strictly before the landing the verbs perform | Drop the `agent-repl--panels-open-on-arrival` call from `--open-tab` |
+| 2026-09-13 | How "already open when Emacs started" is told apart from a later arrival, since both are roster rows | The FIRST reconcile of the session arms the gate (`agent-repl--panels-arrivals-armed`) and opens nothing; every arrival after it opens | The startup roster IS the set of workspaces that were open when Emacs started, and the startup path already governs their panels | Set `agent-repl--panels-arrivals-armed` to `t` at load |
+| 2026-09-13 | How the reason reaches the roster, which does not know which verb asked | Each verb records `created`/`forked`/`reopened`/`registered` against the minted ref id and the arrival CONSUMES it; an unclaimed arrival reads `arrived` | The reason is only knowable at the verb, and a table keyed by the daemon's own id cannot mis-attribute it | Log a constant reason and delete `agent-repl--panels-arrival-reasons` |
+| 2026-09-13 | A one-shot is fire-and-forget and never selects, so it has no landing to hang the open on | It claims its arrival at the create ACK, independent of `select`, and reads `created` | The ruling names one-shot explicitly; not selecting is about where the user stands, not about whether the workspace has panels | Move the claim inside the `(when select ...)` branch |
+| 2026-09-13 | The panels must be built for a workspace that is NOT current yet | The open runs inside `agent-repl--call-in-background-workspace`, the existing anchor the webview mount and pre-creation already use | Anchoring is what keeps a background workspace's panels out of the looked-at workspace's frame; the caller's perspective, window and buffer are restored afterwards | Call `agent-repl--panels-show-or-open` directly |

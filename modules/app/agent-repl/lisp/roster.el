@@ -76,6 +76,8 @@
 (declare-function agent-repl--refresh-magit-status-for-dir "session" (dir &optional ws))
 (declare-function agent-repl--maybe-notify-finished "session" (ws))
 ;; W2-A's names (host.el, daemon-link.el).  Declared, never defined here.
+(declare-function agent-repl--panels-open-on-arrival "panels" (ws id))
+(declare-function agent-repl--panels-arm-arrivals "panels" ())
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
 (declare-function agent-repl-host-unsubscribe "host" (ws))
 (declare-function agent-repl-host-rename "host" (old new))
@@ -353,6 +355,15 @@ this file's verb — so the tab's whole birth is a perspective plus the
     (agent-repl--info name "elisp.roster.tab-open: ws=%s id=%s dir=%s"
                       name (plist-get desired :id) dir)
     (agent-repl-roster--subscribe-host name ref)
+    ;; A TAB BORN HERE IS A WORKSPACE THAT JUST BECAME OPEN, and opening a
+    ;; workspace opens its panels before it is switched to (owner ruling,
+    ;; 2026-09-13, item 6).  This is the one landing every open takes --
+    ;; create, fork, one-shot, re-open, register, and any daemon-side
+    ;; arrival -- so it is the one place the panels are asked for.  The
+    ;; startup roster is exempt and panels.el is what knows it
+    ;; (`agent-repl--panels-arrivals-armed').  A plain switch never reaches
+    ;; here: its tab already exists.
+    (agent-repl--panels-open-on-arrival name (plist-get desired :id))
     name))
 
 (defun agent-repl-roster--subscribe-host (name ref)
@@ -577,6 +588,10 @@ A row that fails to reconcile is contained rather than fatal; see
     ;; sees the one this pass produced rather than the previous pass's.
     (when (> opened 0)
       (agent-repl-roster--note-bringup opened untabbed t))
+    ;; The startup roster has now been delivered, so every LATER arrival is a
+    ;; workspace that became open with this editor watching and opens its own
+    ;; panels (`agent-repl--panels-open-on-arrival').
+    (agent-repl--panels-arm-arrivals)
     agent-repl-roster--tab-order))
 
 ;;;; ---- Lookups the renderers use ----------------------------------------

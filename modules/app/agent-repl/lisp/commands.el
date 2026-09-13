@@ -60,6 +60,8 @@
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
 (declare-function agent-repl--ws-name-for-dir "agent-repl-worktree" (dir))
 (declare-function agent-repl--arm-landing-panels "agent-repl-workspace" (target))
+(declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
+                  (id reason))
 (declare-function agent-repl--async-git "agent-repl-worktree" (label root args callback))
 (declare-function agent-repl--send "agent-repl-input" (origin &optional prompt ws force))
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
@@ -599,6 +601,12 @@ moves the user nowhere: there is no workspace to come up on."
            (progn
              (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-registered dir=%s id=%s"
                                canonical (plist-get ref :id))
+             ;; A REGISTERED DIRECTORY COMES UP ON ITS PANELS like every
+             ;; other way of opening a workspace (owner ruling,
+             ;; 2026-09-13, item 6); the roster row is where that happens,
+             ;; so the reason is left for it here.
+             (agent-repl--panels-note-arrival-reason
+              (plist-get ref :id) "registered")
              (agent-repl-verbs-select-minted ref))
          (agent-repl--warn '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-not-registered dir=%s"
                            canonical))))))

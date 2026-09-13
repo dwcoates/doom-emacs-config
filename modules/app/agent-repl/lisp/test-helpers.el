@@ -759,7 +759,14 @@ re-routes their frontend resolution instead."
          ;; precisely the guard that makes a LATER open dispatch nothing — so
          ;; leaking it would make the next test's toggle branch depend on
          ;; suite order.  Its buffers and escalation timers are reaped below.
-         (agent-repl--open-progress (make-hash-table :test 'equal)))
+         (agent-repl--open-progress (make-hash-table :test 'equal))
+         ;; The arrival gate (panels.el).  `--panels-arrivals-armed' is the
+         ;; session-wide fact that the startup roster has been delivered, and
+         ;; the reasons table is the verb-to-arrival handoff: a test that
+         ;; reconciles a roster or drives a create would otherwise decide
+         ;; whether a LATER test's arrival opens panels at all.
+         (agent-repl--panels-arrivals-armed nil)
+         (agent-repl--panels-arrival-reasons (make-hash-table :test 'equal)))
      (unwind-protect
          (progn ,@body)
        (maphash (lambda (_ws entry)

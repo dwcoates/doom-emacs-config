@@ -10,6 +10,7 @@
 (declare-function agent-repl--agent-panel-buffer-p "core")
 (declare-function agent-repl--align-buffer-to-ws-dir "status")
 (declare-function agent-repl--buffer-name "core")
+(declare-function agent-repl--call-in-background-workspace "workspace")
 (declare-function agent-repl--buffer-owner "core")
 (declare-function agent-repl--create-buffer "core")
 (declare-function agent-repl--foreign-owned-buffer-p "core")
@@ -42,6 +43,7 @@
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-gui-frontend-p "frontends")
 (declare-function agent-repl--ws-known-p "workspace")
+(declare-function agent-repl--ws-live-p "workspace")
 (declare-function agent-repl--ws-log-name "workspace")
 (declare-function agent-repl--ws-names-cache "workspace")
 (declare-function agent-repl--ws-put "workspace")
@@ -1241,7 +1243,6 @@ is the `SPC o C' contract: pressing it again on a workspace that is
 already closed / never-started should still mark it `:inactive' and
 push it to the back, not re-show or launch the agent."
   (let* ((ws (agent-repl--ws-current-name))
-         (fe (agent-repl--ws-frontend ws))
          (selection (when (use-region-p)
                      (buffer-substring-no-properties (region-beginning) (region-end)))))
     (agent-repl--log ws "agent-repl selection=%s always-close=%s"
@@ -1271,6 +1272,25 @@ push it to the back, not re-show or launch the agent."
      ((agent-repl--panels-any-visible-p)
       (agent-repl--log ws "toggle: branch=close")
       (funcall close-fn))
+     (t
+      (agent-repl--panels-show-or-open ws)))))
+
+(defun agent-repl--panels-show-or-open (ws)
+  "Bring WS's panels up: the toggle's OPEN direction, and the only one.
+Split out of `agent-repl--toggle' so the arrival path
+\(`agent-repl--panels-open-on-arrival') opens a workspace exactly as
+`SPC o c' does rather than growing a second opener beside it.  WS must
+be the current workspace — every branch here reasons about the frame the
+panels land on.
+
+The three branches, in order:
+- an open ALREADY in flight re-shows its placeholder and dispatches
+  nothing;
+- a frontend that is RUNNING is shown;
+- anything else is OPENED, falling back to the composer alone when no
+  `WorkspaceRef' has arrived to mount a webview with."
+  (let ((fe (agent-repl--ws-frontend ws)))
+    (cond
      ;; An open is ALREADY in flight for this workspace.  Re-show the
      ;; placeholder it owns and dispatch nothing: establishment takes
      ;; seconds to tens of seconds, so a second keypress in that window is
@@ -1306,6 +1326,95 @@ push it to the back, not re-show or launch the agent."
         ;; panels, and the composer half of them is available now.
         (agent-repl--ensure-input-buffer ws)
         (agent-repl--settle-placeholder ws :no-webview))))))
+
+
+;;;; Opening a workspace opens its panels
+
+(defvar agent-repl--panels-arrivals-armed nil
+  "Non-nil once the FIRST roster reconcile of this Emacs session has run.
+
+The workspaces that were already open when Emacs started arrive on that
+first push, and their panels are the STARTUP path\='s business, not this
+one\='s (owner ruling, 2026-09-13, item 6).  Every arrival after it is a
+workspace that BECAME open with this editor watching, so it opens its
+panels immediately.  Armed by `agent-repl--panels-arm-arrivals\='.")
+
+(defvar agent-repl--panels-arrival-reasons (make-hash-table :test 'equal)
+  "Ref id -> the reason string the verb that asked for it recorded.
+
+A verb knows WHY a workspace is about to arrive; the roster, which is
+where it actually lands, does not.  The verb writes the reason here
+against the minted ref id and the arrival CONSUMES it, so a second
+arrival for the same id cannot re-use a stale one.  An arrival with no
+entry is a daemon-side one (`arrived\=').")
+
+(defun agent-repl--panels-arm-arrivals ()
+  "Mark the startup roster as delivered, so later arrivals open their panels.
+Called at the end of every reconcile; the first call is the one that
+matters and the rest are inert."
+  (unless agent-repl--panels-arrivals-armed
+    (setq agent-repl--panels-arrivals-armed t)
+    (agent-repl--log '(:agent-repl-central
+                      "the startup roster spans every workspace")
+                     "elisp.panels.arrivals-armed")))
+
+(defun agent-repl--panels-note-arrival-reason (id reason)
+  "Record REASON as why the workspace with ref ID is about to arrive open.
+REASON is one of `created\=', `reopened\=', `registered\=' or `forked\=';
+an arrival nobody claimed reads `arrived\='.  No-op for a nil ID."
+  (when id
+    (puthash id reason agent-repl--panels-arrival-reasons)
+    (agent-repl--log '(:agent-repl-central
+                      "a workspace that has not arrived owns no sink")
+                     "elisp.panels.arrival-reason-noted id=%s reason=%s" id reason)))
+
+(defun agent-repl--panels-take-arrival-reason (id)
+  "Return and forget the reason recorded for ref ID, or \"arrived\"."
+  (let ((reason (and id (gethash id agent-repl--panels-arrival-reasons))))
+    (when reason (remhash id agent-repl--panels-arrival-reasons))
+    (or reason "arrived")))
+
+(defun agent-repl--panels-open-on-arrival (ws id)
+  "Open WS\='s panels because WS just became open in this editor session.
+
+OPENING A WORKSPACE OPENS ITS PANELS, BEFORE IT IS SWITCHED TO (owner
+ruling, 2026-09-13, item 6).  Creation, fork, one-shot, re-open,
+register and every daemon-side arrival land in exactly one place --
+`agent-repl-roster--open-tab\=' -- and this is what that landing does about
+them.  A plain SWITCH to a workspace that is already open never reaches
+here, so switching still changes nothing about panel state.
+
+ID is the arriving row\='s ref id, which is how the reason the verb
+recorded is found (`agent-repl--panels-take-arrival-reason\=').
+
+Two refusals, both silent about the panels:
+- before the startup roster has been delivered
+  \(`agent-repl--panels-arrivals-armed\'), unless a verb claimed this
+  arrival by name -- a workspace that was already open when Emacs
+  started is the startup path\='s to restore;
+- a workspace that is not live.
+
+The open itself runs through `agent-repl--panels-show-or-open\=', the
+toggle\='s own open direction, so it is idempotent and the webview
+pre-creation park behaves exactly as it does for `SPC o c\='.  It is
+anchored in WS through `agent-repl--call-in-background-workspace\='
+because WS is NOT current yet: the panels must be built into WS\='s own
+perspective, and the caller\='s focus restored afterwards."
+  (let ((reason (agent-repl--panels-take-arrival-reason id)))
+    (cond
+     ((and (not agent-repl--panels-arrivals-armed)
+           (equal reason "arrived"))
+      (agent-repl--log ws "elisp.panels.open-on-arrival: skipped ws=%s reason=startup-restore" ws))
+     ((not (agent-repl--ws-live-p ws))
+      (agent-repl--log ws "elisp.panels.open-on-arrival: skipped ws=%s reason=not-live" ws))
+     (t
+      (agent-repl--call-in-background-workspace
+       ws
+       (lambda ()
+         (if (agent-repl--panels-any-visible-p)
+             (agent-repl--log ws "elisp.panels.open-on-arrival: ws=%s branch=already-open" ws)
+           (agent-repl--panels-show-or-open ws))
+         (agent-repl--info ws "elisp.panels.opened-on-arrival ws=%s reason=%s" ws reason)))))))
 
 (defun agent-repl--settle-placeholder (ws outcome)
   "Tear WS's placeholder down unless OUTCOME says the open is still in flight.

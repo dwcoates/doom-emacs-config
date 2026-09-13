@@ -398,6 +398,20 @@ opened over the new workspace's panel shows up here as a magit call."
         ;; Assert
         (should-not magit-dirs)))))
 
+(ert-deftest agent-repl-test-commands-add-project-claims-its-arrival-as-registered ()
+  "Registering a directory leaves `registered\=' for the tab about to arrive.
+Opening a workspace opens its panels, whichever verb opened it (owner
+ruling, 2026-09-13, item 6), and the roster row is where that happens."
+  ;; Arrange
+  (agent-repl-test-commands--registering (list :id "new-id" :dir "/tmp/proj/")
+    (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir)
+               (lambda (dir) (and (equal dir "/tmp/proj/") "registered")))
+              ((symbol-function 'agent-repl--ws-switch-project) (lambda (_p) nil)))
+      ;; Act
+      (agent-repl-add-project-workspace "/tmp/proj")
+      ;; Assert
+      (should (equal (agent-repl--panels-take-arrival-reason "new-id") "registered")))))
+
 (ert-deftest agent-repl-test-commands-add-project-refused-arms-nothing ()
   "A register the daemon REFUSED moves the user nowhere.
 There is no workspace to come up on, so nothing is switched to and
