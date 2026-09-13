@@ -18,6 +18,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/server"
+	"claude-repld/internal/wsm"
 )
 
 // shortRoot is a state root SHORT ENOUGH for a unix socket path. The daemon
@@ -700,6 +701,10 @@ func (s *stalledSequence) Run(ctx context.Context) (boot.Report, error) {
 
 func (s *stalledSequence) Joining() bool { return false }
 
+func (s *stalledSequence) BringUp(context.Context, []wsm.Workspace) boot.BringUpReport {
+	return boot.BringUpReport{}
+}
+
 // answeringSequence is a reconciliation that completes at once.
 type answeringSequence struct {
 	report boot.Report
@@ -707,6 +712,10 @@ type answeringSequence struct {
 
 func (s *answeringSequence) Run(context.Context) (boot.Report, error) { return s.report, nil }
 func (s *answeringSequence) Joining() bool                            { return false }
+
+func (s *answeringSequence) BringUp(context.Context, []wsm.Workspace) boot.BringUpReport {
+	return boot.BringUpReport{}
+}
 
 // TestReconcileRefusesAStalledBoot pins the watchdog. The listener is bound and
 // daemon.addr published before the reconciliation runs, so a step that never
