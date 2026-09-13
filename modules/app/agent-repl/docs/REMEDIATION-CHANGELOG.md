@@ -13,6 +13,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- footer: a failed session bring-up now stands a line of its own under `disconnected · start_failed`, naming the cause and how many held prompts the failure dropped (owner ruling, a bring-up failure is footer-only)
 - e2e/sandbox: the sandbox preflight is bounded at both layers — each runtime call in preflight.sh exits 14 when it does not answer, and the Go probe runs the script under a 30s deadline — so a wedged Docker engine can no longer hang the whole e2e package (finding A)
 - elisp: workspace creation has four modes, each asking only its own questions — the three dynamic modes (one-shot, new workspace, fork) ask a prompt alone and derive the repository from the current workspace, and the new static create (`SPC TAB N`) asks a repository and a required name with no prompt (owner ruling, workspace creation modes)
 - daemon: forgetting a workspace stands its live session down first, so a forgotten row no longer leaves a shim holding the directory's workspace lock for the next registration of that directory to mis-adopt (realtest 7)
