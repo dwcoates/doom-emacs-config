@@ -428,3 +428,17 @@ func TestTheQuitChordIsRetriedWhenItIsAbsent(t *testing.T) {
 			"after a single attempt", wsActQuit.Emacs)
 	}
 }
+
+// `wsActQuit` IS THE QUIT CHARACTER, and the harness has to know it. Without
+// `Interrupting` the confirmation opens a probe within a millisecond of the
+// post, and a `quit_char` that lands while Emacs is executing that probe is
+// handed to `handle_interrupt`: never read as a key, never dismissing the
+// prompt, never recorded. That is the 2026-09-13 12:13 sweep's six findings.
+func TestTheQuitChordIsMarkedInterrupting(t *testing.T) {
+	// Arrange & Act & Assert
+	if !wsActQuit.Interrupting {
+		t.Errorf("%s is not marked Interrupting, so its confirmation would start probing the editor "+
+			"immediately and the press would be taken as an interrupt rather than read as a key",
+			wsActQuit.Emacs)
+	}
+}
