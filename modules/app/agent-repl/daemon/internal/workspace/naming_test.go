@@ -7,72 +7,54 @@ import (
 	"testing"
 )
 
-func TestSlugAppliesTheNamingRule(t *testing.T) {
+func TestValidateSlugAcceptsTheNamingRule(t *testing.T) {
 	tests := []struct {
 		name string
-		text string
-		want string
+		slug string
 	}{
-		{name: "lowercases and hyphenates", text: "Fix The Login", want: "fix-the-login"},
-		{name: "keeps at most three words", text: "fix the login bug today", want: "fix-the-login"},
-		{name: "collapses punctuation runs", text: "fix:: the -- login", want: "fix-the-login"},
-		{name: "keeps digits", text: "bump v2 deps", want: "bump-v2-deps"},
-		{name: "ignores leading separators", text: "  ...fix login", want: "fix-login"},
+		{name: "one word", slug: "login"},
+		{name: "two words", slug: "flaky-login"},
+		{name: "three words", slug: "flaky-login-test"},
+		{name: "digits are words", slug: "bump-v2-deps"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange in the table. Act.
-			got, err := Slug(tt.text)
+			err := ValidateSlug(tt.slug)
 			// Assert.
 			if err != nil {
-				t.Fatalf("Slug(%q): %v", tt.text, err)
-			}
-			if got != tt.want {
-				t.Fatalf("Slug(%q) = %q, want %q", tt.text, got, tt.want)
+				t.Fatalf("ValidateSlug(%q) = %v, want nil", tt.slug, err)
 			}
 		})
 	}
 }
 
-func TestSlugBoundsTheLength(t *testing.T) {
-	// Arrange: three words that together exceed the bound.
-	text := strings.Repeat("a", 20) + " " + strings.Repeat("b", 20) + " " + strings.Repeat("c", 20)
-
-	// Act.
-	got, err := Slug(text)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Slug: %v", err)
+func TestValidateSlugRefusesWhatTheRuleForbids(t *testing.T) {
+	tests := []struct {
+		name string
+		slug string
+	}{
+		{name: "empty", slug: ""},
+		{name: "four words", slug: "fix-the-login-bug"},
+		{name: "uppercase", slug: "Fix-Login"},
+		{name: "spaces", slug: "fix login"},
+		{name: "a sentence around the name", slug: "the name is fix-login"},
+		{name: "leading hyphen", slug: "-fix-login"},
+		{name: "trailing hyphen", slug: "fix-login-"},
+		{name: "a slash", slug: "DWC/fix-login"},
+		{name: "a path component", slug: "../escape"},
+		{name: "punctuation", slug: "fix_login"},
+		{name: "over the length bound", slug: strings.Repeat("a", SlugMaxLen+1)},
 	}
-	if len(got) > SlugMaxLen {
-		t.Fatalf("Slug() = %q (%d chars), want at most %d", got, len(got), SlugMaxLen)
-	}
-}
-
-func TestSlugNeverEndsOnATruncatedHyphen(t *testing.T) {
-	// Arrange: the bound falls exactly on the separator between two words.
-	text := strings.Repeat("a", SlugMaxLen) + " tail"
-
-	// Act.
-	got, err := Slug(text)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Slug: %v", err)
-	}
-	if strings.HasSuffix(got, "-") {
-		t.Fatalf("Slug() = %q, want no trailing hyphen", got)
-	}
-}
-
-func TestSlugRefusesTextWithNoWords(t *testing.T) {
-	// Arrange. Act.
-	_, err := Slug("!!! ??? ...")
-
-	// Assert.
-	if err == nil {
-		t.Fatal("Slug(punctuation only) = nil error, want a refusal")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			err := ValidateSlug(tt.slug)
+			// Assert.
+			if err == nil {
+				t.Fatalf("ValidateSlug(%q) = nil, want a refusal: there is no repair path", tt.slug)
+			}
+		})
 	}
 }
 
