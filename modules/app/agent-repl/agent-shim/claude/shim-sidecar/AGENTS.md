@@ -927,6 +927,12 @@ the suite rather than quietly shrinking what the feed can show.
   was that very book move — the one refusal that stops being true. Nothing is
   duplicated, because `write_id` and `upsert_key` are digested from a file
   position that did not move.
+- A FIRST ATTRIBUTION IS NOT A BOOK MOVE. A spool aged into residue before its
+  launch line was read is watched with NO book, and the same pass is what
+  finally gives it one. That arm is INFO and names its resolution source; only
+  a move between two NON-EMPTY books is WARN, and only the parked arm may claim
+  the shim's identity files said anything, because a spool's answer comes from
+  the OWNER INDEX and is legitimately a `toolu_` id no identity file holds.
 - IT SHARES THE READ'S CLOCK, NOT DISCOVERY'S, and that is the whole point. A
   record read under a book the link file has already superseded is committed,
   advances the cursor, and — for a file the store never parked — is never read
