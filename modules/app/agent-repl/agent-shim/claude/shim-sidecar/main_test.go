@@ -671,3 +671,32 @@ func TestResolveStateDirPrecedence(t *testing.T) {
 		})
 	}
 }
+
+// THE DURABLE SINK IS THE ONLY COPY. Under launchd the terminal is
+// `StandardErrorPath` — a plain append-only file the service does not own and
+// cannot roll — and mirroring the record stream there grew a 6.28 GB second
+// copy beside a rotated 64 MB log until the disk filled and the process
+// panicked. The production constructor must write NOTHING there.
+func TestOpenLoggerWritesNothingToTheTerminal(t *testing.T) {
+	// Arrange.
+	base := t.TempDir()
+	terminal := &bytes.Buffer{}
+	logPath := filepath.Join(base, "sidecar.log")
+	logf, closeLog, err := openLoggerTo(terminal, filepath.Join(base, "store.sock"), base, logPath)
+	if err != nil {
+		t.Fatalf("openLoggerTo: %v", err)
+	}
+	defer closeLog()
+
+	// Act.
+	logf.With(logging.Context{Operation: "start"}).Log("sidecar starting")
+
+	// Assert.
+	if terminal.Len() != 0 {
+		t.Fatalf("an ordinary record reached the launcher's terminal: %q", terminal.String())
+	}
+	durable, err := os.ReadFile(logPath)
+	if err != nil || len(durable) == 0 {
+		t.Fatalf("the record did not reach the durable sink (%d bytes, err=%v)", len(durable), err)
+	}
+}
