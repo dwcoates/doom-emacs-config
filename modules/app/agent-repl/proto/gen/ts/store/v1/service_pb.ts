@@ -19,6 +19,8 @@ import type { GetSidecarCursorsRequestSchema, GetSidecarCursorsResponseSchema } 
 import { file_store_v1_endpoint_get_sidecar_cursors } from "./endpoint_get_sidecar_cursors_pb";
 import type { GetWorkflowRequestSchema, GetWorkflowResponseSchema } from "./endpoint_get_workflow_pb";
 import { file_store_v1_endpoint_get_workflow } from "./endpoint_get_workflow_pb";
+import type { ListResidueShapesRequestSchema, ListResidueShapesResponseSchema } from "./endpoint_list_residue_shapes_pb";
+import { file_store_v1_endpoint_list_residue_shapes } from "./endpoint_list_residue_shapes_pb";
 import type { OpenAgentSessionRequestSchema, OpenAgentSessionResponseSchema } from "./endpoint_open_agent_session_pb";
 import { file_store_v1_endpoint_open_agent_session } from "./endpoint_open_agent_session_pb";
 import type { ReadAgentPageRequestSchema, ReadAgentPageResponseSchema } from "./endpoint_read_agent_page_pb";
@@ -34,7 +36,7 @@ import { file_store_v1_endpoint_write_batch } from "./endpoint_write_batch_pb";
  * Describes the file store/v1/service.proto.
  */
 export const file_store_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("ChZzdG9yZS92MS9zZXJ2aWNlLnByb3RvEghzdG9yZS52MTKoBQoJU2hpbVN0b3JlElkKEE9wZW5BZ2VudFNlc3Npb24SIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBoiLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25SZXNwb25zZRJeChFXYXRjaEFnZW50U2Vzc2lvbhIiLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVxdWVzdBojLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVzcG9uc2UwARJQCg1SZWFkQWdlbnRQYWdlEh4uc3RvcmUudjEuUmVhZEFnZW50UGFnZVJlcXVlc3QaHy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlUmVzcG9uc2USTwoMV2F0Y2hCYXNoUnVuEh0uc3RvcmUudjEuV2F0Y2hCYXNoUnVuUmVxdWVzdBoeLnN0b3JlLnYxLldhdGNoQmFzaFJ1blJlc3BvbnNlMAESSgoLR2V0V29ya2Zsb3cSHC5zdG9yZS52MS5HZXRXb3JrZmxvd1JlcXVlc3QaHS5zdG9yZS52MS5HZXRXb3JrZmxvd1Jlc3BvbnNlElwKEUdldFNpZGVjYXJDdXJzb3JzEiIuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNSZXF1ZXN0GiMuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNSZXNwb25zZRJKCgtHZXRMaXZlV29yaxIcLnN0b3JlLnYxLkdldExpdmVXb3JrUmVxdWVzdBodLnN0b3JlLnYxLkdldExpdmVXb3JrUmVzcG9uc2USRwoKV3JpdGVCYXRjaBIbLnN0b3JlLnYxLldyaXRlQmF0Y2hSZXF1ZXN0Ghwuc3RvcmUudjEuV3JpdGVCYXRjaFJlc3BvbnNlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_store_v1_endpoint_get_live_work, file_store_v1_endpoint_get_sidecar_cursors, file_store_v1_endpoint_get_workflow, file_store_v1_endpoint_open_agent_session, file_store_v1_endpoint_read_agent_page, file_store_v1_endpoint_watch_agent_session, file_store_v1_endpoint_watch_bash_run, file_store_v1_endpoint_write_batch]);
+  fileDesc("ChZzdG9yZS92MS9zZXJ2aWNlLnByb3RvEghzdG9yZS52MTKGBgoJU2hpbVN0b3JlElkKEE9wZW5BZ2VudFNlc3Npb24SIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBoiLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25SZXNwb25zZRJeChFXYXRjaEFnZW50U2Vzc2lvbhIiLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVxdWVzdBojLnN0b3JlLnYxLldhdGNoQWdlbnRTZXNzaW9uUmVzcG9uc2UwARJQCg1SZWFkQWdlbnRQYWdlEh4uc3RvcmUudjEuUmVhZEFnZW50UGFnZVJlcXVlc3QaHy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlUmVzcG9uc2USTwoMV2F0Y2hCYXNoUnVuEh0uc3RvcmUudjEuV2F0Y2hCYXNoUnVuUmVxdWVzdBoeLnN0b3JlLnYxLldhdGNoQmFzaFJ1blJlc3BvbnNlMAESSgoLR2V0V29ya2Zsb3cSHC5zdG9yZS52MS5HZXRXb3JrZmxvd1JlcXVlc3QaHS5zdG9yZS52MS5HZXRXb3JrZmxvd1Jlc3BvbnNlElwKEUxpc3RSZXNpZHVlU2hhcGVzEiIuc3RvcmUudjEuTGlzdFJlc2lkdWVTaGFwZXNSZXF1ZXN0GiMuc3RvcmUudjEuTGlzdFJlc2lkdWVTaGFwZXNSZXNwb25zZRJcChFHZXRTaWRlY2FyQ3Vyc29ycxIiLnN0b3JlLnYxLkdldFNpZGVjYXJDdXJzb3JzUmVxdWVzdBojLnN0b3JlLnYxLkdldFNpZGVjYXJDdXJzb3JzUmVzcG9uc2USSgoLR2V0TGl2ZVdvcmsSHC5zdG9yZS52MS5HZXRMaXZlV29ya1JlcXVlc3QaHS5zdG9yZS52MS5HZXRMaXZlV29ya1Jlc3BvbnNlEkcKCldyaXRlQmF0Y2gSGy5zdG9yZS52MS5Xcml0ZUJhdGNoUmVxdWVzdBocLnN0b3JlLnYxLldyaXRlQmF0Y2hSZXNwb25zZUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_store_v1_endpoint_get_live_work, file_store_v1_endpoint_get_sidecar_cursors, file_store_v1_endpoint_get_workflow, file_store_v1_endpoint_list_residue_shapes, file_store_v1_endpoint_open_agent_session, file_store_v1_endpoint_read_agent_page, file_store_v1_endpoint_watch_agent_session, file_store_v1_endpoint_watch_bash_run, file_store_v1_endpoint_write_batch]);
 
 /**
  * ---- Reads: what the shim recovers and serves from durable state ----
@@ -95,6 +97,18 @@ export const ShimStore: GenService<{
     methodKind: "unary";
     input: typeof GetWorkflowRequestSchema;
     output: typeof GetWorkflowResponseSchema;
+  },
+  /**
+   * The catalog of key structures observed on lines no producer stored: one
+   * row per distinct recursive key structure, so the vendor's API stays
+   * discoverable after the bytes stop being kept.
+   *
+   * @generated from rpc store.v1.ShimStore.ListResidueShapes
+   */
+  listResidueShapes: {
+    methodKind: "unary";
+    input: typeof ListResidueShapesRequestSchema;
+    output: typeof ListResidueShapesResponseSchema;
   },
   /**
    * The sidecar's persisted file cursors, for resuming every tailed file

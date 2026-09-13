@@ -54,6 +54,9 @@ const (
 	ShimStoreWatchBashRunProcedure = "/store.v1.ShimStore/WatchBashRun"
 	// ShimStoreGetWorkflowProcedure is the fully-qualified name of the ShimStore's GetWorkflow RPC.
 	ShimStoreGetWorkflowProcedure = "/store.v1.ShimStore/GetWorkflow"
+	// ShimStoreListResidueShapesProcedure is the fully-qualified name of the ShimStore's
+	// ListResidueShapes RPC.
+	ShimStoreListResidueShapesProcedure = "/store.v1.ShimStore/ListResidueShapes"
 	// ShimStoreGetSidecarCursorsProcedure is the fully-qualified name of the ShimStore's
 	// GetSidecarCursors RPC.
 	ShimStoreGetSidecarCursorsProcedure = "/store.v1.ShimStore/GetSidecarCursors"
@@ -71,6 +74,7 @@ var (
 	shimStoreReadAgentPageMethodDescriptor     = shimStoreServiceDescriptor.Methods().ByName("ReadAgentPage")
 	shimStoreWatchBashRunMethodDescriptor      = shimStoreServiceDescriptor.Methods().ByName("WatchBashRun")
 	shimStoreGetWorkflowMethodDescriptor       = shimStoreServiceDescriptor.Methods().ByName("GetWorkflow")
+	shimStoreListResidueShapesMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("ListResidueShapes")
 	shimStoreGetSidecarCursorsMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetSidecarCursors")
 	shimStoreGetLiveWorkMethodDescriptor       = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
 	shimStoreWriteBatchMethodDescriptor        = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
@@ -92,6 +96,10 @@ type ShimStoreClient interface {
 	// One workflow run's stored state: description, derived agent level,
 	// terminal if ended. Serves the shim's own GetWorkflow endpoint.
 	GetWorkflow(context.Context, *connect.Request[v1.GetWorkflowRequest]) (*connect.Response[v1.GetWorkflowResponse], error)
+	// The catalog of key structures observed on lines no producer stored: one
+	// row per distinct recursive key structure, so the vendor's API stays
+	// discoverable after the bytes stop being kept.
+	ListResidueShapes(context.Context, *connect.Request[v1.ListResidueShapesRequest]) (*connect.Response[v1.ListResidueShapesResponse], error)
 	// The sidecar's persisted file cursors, for resuming every tailed file
 	// exactly where the last committed batch left it.
 	GetSidecarCursors(context.Context, *connect.Request[v1.GetSidecarCursorsRequest]) (*connect.Response[v1.GetSidecarCursorsResponse], error)
@@ -142,6 +150,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreGetWorkflowMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		listResidueShapes: connect.NewClient[v1.ListResidueShapesRequest, v1.ListResidueShapesResponse](
+			httpClient,
+			baseURL+ShimStoreListResidueShapesProcedure,
+			connect.WithSchema(shimStoreListResidueShapesMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		getSidecarCursors: connect.NewClient[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse](
 			httpClient,
 			baseURL+ShimStoreGetSidecarCursorsProcedure,
@@ -170,6 +184,7 @@ type shimStoreClient struct {
 	readAgentPage     *connect.Client[v1.ReadAgentPageRequest, v1.ReadAgentPageResponse]
 	watchBashRun      *connect.Client[v1.WatchBashRunRequest, v1.WatchBashRunResponse]
 	getWorkflow       *connect.Client[v1.GetWorkflowRequest, v1.GetWorkflowResponse]
+	listResidueShapes *connect.Client[v1.ListResidueShapesRequest, v1.ListResidueShapesResponse]
 	getSidecarCursors *connect.Client[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse]
 	getLiveWork       *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
 	writeBatch        *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
@@ -198,6 +213,11 @@ func (c *shimStoreClient) WatchBashRun(ctx context.Context, req *connect.Request
 // GetWorkflow calls store.v1.ShimStore.GetWorkflow.
 func (c *shimStoreClient) GetWorkflow(ctx context.Context, req *connect.Request[v1.GetWorkflowRequest]) (*connect.Response[v1.GetWorkflowResponse], error) {
 	return c.getWorkflow.CallUnary(ctx, req)
+}
+
+// ListResidueShapes calls store.v1.ShimStore.ListResidueShapes.
+func (c *shimStoreClient) ListResidueShapes(ctx context.Context, req *connect.Request[v1.ListResidueShapesRequest]) (*connect.Response[v1.ListResidueShapesResponse], error) {
+	return c.listResidueShapes.CallUnary(ctx, req)
 }
 
 // GetSidecarCursors calls store.v1.ShimStore.GetSidecarCursors.
@@ -231,6 +251,10 @@ type ShimStoreHandler interface {
 	// One workflow run's stored state: description, derived agent level,
 	// terminal if ended. Serves the shim's own GetWorkflow endpoint.
 	GetWorkflow(context.Context, *connect.Request[v1.GetWorkflowRequest]) (*connect.Response[v1.GetWorkflowResponse], error)
+	// The catalog of key structures observed on lines no producer stored: one
+	// row per distinct recursive key structure, so the vendor's API stays
+	// discoverable after the bytes stop being kept.
+	ListResidueShapes(context.Context, *connect.Request[v1.ListResidueShapesRequest]) (*connect.Response[v1.ListResidueShapesResponse], error)
 	// The sidecar's persisted file cursors, for resuming every tailed file
 	// exactly where the last committed batch left it.
 	GetSidecarCursors(context.Context, *connect.Request[v1.GetSidecarCursorsRequest]) (*connect.Response[v1.GetSidecarCursorsResponse], error)
@@ -277,6 +301,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreGetWorkflowMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreListResidueShapesHandler := connect.NewUnaryHandler(
+		ShimStoreListResidueShapesProcedure,
+		svc.ListResidueShapes,
+		connect.WithSchema(shimStoreListResidueShapesMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreGetSidecarCursorsHandler := connect.NewUnaryHandler(
 		ShimStoreGetSidecarCursorsProcedure,
 		svc.GetSidecarCursors,
@@ -307,6 +337,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreWatchBashRunHandler.ServeHTTP(w, r)
 		case ShimStoreGetWorkflowProcedure:
 			shimStoreGetWorkflowHandler.ServeHTTP(w, r)
+		case ShimStoreListResidueShapesProcedure:
+			shimStoreListResidueShapesHandler.ServeHTTP(w, r)
 		case ShimStoreGetSidecarCursorsProcedure:
 			shimStoreGetSidecarCursorsHandler.ServeHTTP(w, r)
 		case ShimStoreGetLiveWorkProcedure:
@@ -340,6 +372,10 @@ func (UnimplementedShimStoreHandler) WatchBashRun(context.Context, *connect.Requ
 
 func (UnimplementedShimStoreHandler) GetWorkflow(context.Context, *connect.Request[v1.GetWorkflowRequest]) (*connect.Response[v1.GetWorkflowResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetWorkflow is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) ListResidueShapes(context.Context, *connect.Request[v1.ListResidueShapesRequest]) (*connect.Response[v1.ListResidueShapesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.ListResidueShapes is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) GetSidecarCursors(context.Context, *connect.Request[v1.GetSidecarCursorsRequest]) (*connect.Response[v1.GetSidecarCursorsResponse], error) {
