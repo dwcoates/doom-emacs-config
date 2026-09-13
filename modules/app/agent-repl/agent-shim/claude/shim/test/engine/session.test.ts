@@ -6553,3 +6553,153 @@ describe("re-announcing live work the record cannot describe", () => {
     expect(frame?.case === "sessionStarted" ? frame.value.liveWork : undefined).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A book with no rows yet is an ANSWER, not an unreachable store.
+// ---------------------------------------------------------------------------
+
+/**
+ * `unknown_agent` on the re-announcement's read of this session's own book.
+ *
+ * A workspace created seconds ago has written no row, so the store answers
+ * `unknown_agent` — its ordinary answer, which it records at info. Reading that
+ * as "the record plane could not be reached" opened a `storeUnreachable`
+ * session fault and made the daemon open a health fault over a store that was
+ * reachable and answered correctly. The class separates the two: this one is an
+ * empty live membership, every other one is the failure it always was.
+ */
+describe("re-announcing when the store holds no rows for this agent yet", () => {
+  /** A session whose store reports live work but refuses this session's book. */
+  async function sessionWithNoBookYet(
+    error: PersistenceError,
+  ): Promise<Harness> {
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    await started(h);
+    h.persistence.openError = error;
+    return h;
+  }
+
+  /** The unknown-agent refusal the store answers a book it holds no rows for. */
+  function unknownAgent(): PersistenceError {
+    return new PersistenceError(
+      "unknown_agent",
+      'unknown agent: agent "82d48acc" names no book of this store',
+    );
+  }
+
+  /** The re-announcement frame of one new watch. */
+  async function reannouncedLiveWork(
+    h: Harness,
+  ): Promise<conversationv1.AgentDetachedWork[] | undefined> {
+    const watch = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await watch.next();
+    const second = await nextPush(watch);
+    await watch.return?.();
+    return second.frame.case === "sessionStarted" ? second.frame.value.liveWork : undefined;
+  }
+
+  it("serves an empty live membership", async () => {
+    // Arrange.
+    const h = await sessionWithNoBookYet(unknownAgent());
+
+    // Act.
+    const announced = await reannouncedLiveWork(h);
+
+    // Assert.
+    expect(announced).toEqual([]);
+  });
+
+  it("opens no session fault", async () => {
+    // Arrange.
+    const h = await sessionWithNoBookYet(unknownAgent());
+    const before = h.engine.pushes.faultCount;
+
+    // Act.
+    await reannouncedLiveWork(h);
+
+    // Assert.
+    expect(h.engine.pushes.faultCount).toBe(before);
+  });
+
+  it("states the empty membership below warning level", async () => {
+    // Arrange.
+    const h = await sessionWithNoBookYet(unknownAgent());
+    const before = logCursor();
+
+    // Act.
+    await reannouncedLiveWork(h);
+
+    // Assert.
+    expect(logLevelFor(before, "re-announcing an empty live membership")).toBe("debug");
+  });
+
+  it("still records storeUnreachable when the store cannot be reached", async () => {
+    // Arrange.
+    const h = await sessionWithNoBookYet(
+      new PersistenceError("store_unavailable", "connect ECONNREFUSED"),
+    );
+
+    // Act.
+    const kinds = await pushedUpdates(
+      h,
+      (update) =>
+        update.case === "diagnostics" && update.value.health.case === "unhealthy"
+          ? update.value.health.value.faults.map((fault) => fault.kind.case)
+          : undefined,
+      async () => {
+        await reannouncedLiveWork(h);
+      },
+    );
+
+    // Assert.
+    expect(kinds.flat()).toContain("storeUnreachable");
+  });
+});
+
+/**
+ * The same class, on the StartSession reconciliation's read of the same book.
+ *
+ * Reconciliation opens no fault, but it warned "the book could not be read" on
+ * every first watch of a brand-new workspace. It is not a lost book: it is a
+ * book with nothing in it yet.
+ */
+describe("reconciling when the store holds no rows for this agent yet", () => {
+  /** A session started against a store that refuses this agent's book. */
+  async function startWithBookRefused(error: PersistenceError): Promise<number> {
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.openError = error;
+    const before = logCursor();
+    await started(h);
+    return before;
+  }
+
+  it("states the empty book below warning level", async () => {
+    // Arrange & Act.
+    const before = await startWithBookRefused(
+      new PersistenceError("unknown_agent", 'agent "82d48acc" names no book of this store'),
+    );
+
+    // Assert.
+    expect(logLevelFor(before, "reconciliation describes live work from an empty book")).toBe(
+      "debug",
+    );
+  });
+
+  it("still warns when the book could not be read at all", async () => {
+    // Arrange & Act.
+    const before = await startWithBookRefused(
+      new PersistenceError("store_unavailable", "connect ECONNREFUSED"),
+    );
+
+    // Assert.
+    expect(logLevelFor(before, "the book could not be read for reconciliation")).toBe("warn");
+  });
+});
