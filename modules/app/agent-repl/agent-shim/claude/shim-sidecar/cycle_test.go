@@ -1396,7 +1396,7 @@ func TestSignalUnwedgesTheCycleFromAnInFlightWrite(t *testing.T) {
 			if elapsed := time.Since(start); elapsed >= rpcTimeout {
 				t.Fatalf("shutdown took %s, want well under rpcTimeout %s", elapsed, rpcTimeout)
 			}
-			const record = "shutdown interrupted a write; it will replay"
+			const record = "shutdown interrupted a write that had not answered within"
 			if got := strings.Contains(h.logText(), record); got != tc.wantRecord {
 				t.Fatalf("log contains %q = %v, want %v; log: %s", record, got, tc.wantRecord, h.logText())
 			}

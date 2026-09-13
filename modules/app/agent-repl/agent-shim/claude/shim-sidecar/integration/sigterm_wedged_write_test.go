@@ -14,15 +14,21 @@ import (
 // The cycle runs on one goroutine, so a sidecar stopped inside WriteBatch could
 // not read its signal channel until the call returned. With a store that
 // accepted the write and then stopped answering, that was rpcTimeout — 30s of a
-// process that had been asked to leave. The signal now cancels the context every
-// store rpc derives from, so the wedged call returns at once and the cycle exits
-// through its ordinary shutdown record. Nothing is lost: the cancelled write
-// committed nothing, its cursor never advanced, and the next boot re-reads the
-// same durable bytes into the same deterministic write ids.
+// process that had been asked to leave. The signal now ends the wedged call
+// after a short settle (cycle.go, shutdownSettle) rather than waiting out the
+// timeout, so the cycle exits through its ordinary shutdown record.
+//
+// NOTHING IS LOST, AND NOT BECAUSE THE WRITE WAS UNDONE. A write already on the
+// wire cannot be recalled: the store may commit it after this process is gone.
+// What makes that safe is that records and cursor ride ONE transaction, so the
+// store ends up holding both or neither, and the next boot resumes from
+// whichever cursor it holds — re-reading the same durable bytes into the same
+// deterministic write ids either way.
 
 // wedgedShutdownBudget bounds a shutdown that must not wait out rpcTimeout. A
-// healthy signalled sidecar leaves in milliseconds; 3s is a wide multiple of
-// that and an order of magnitude below the 30s this subject exists to forbid.
+// healthy signalled sidecar leaves in milliseconds and a wedged one just past
+// the 250ms settle it gives a sent write; 3s is a wide multiple of that and an
+// order of magnitude below the 30s this subject exists to forbid.
 const wedgedShutdownBudget = 3 * time.Second
 
 // anyBatch gates the first write of any shape — this subject cares only that
@@ -78,9 +84,11 @@ func TestSigtermLeavesAWedgedStoreWritePromptly(t *testing.T) {
 	t.Logf("the wedged sidecar left %s after SIGTERM", elapsed)
 }
 
-// TestAWedgedShutdownStatesTheReplay asserts the record: the interrupted write
-// is not swallowed, it is stated as a write that will replay.
-func TestAWedgedShutdownStatesTheReplay(t *testing.T) {
+// TestAWedgedShutdownStatesTheInterruptedWrite asserts the record: the
+// interrupted write is not swallowed, it is stated — as a write whose outcome
+// this process never learned, which is the honest thing to say about a batch
+// already on the wire when the settle window ran out.
+func TestAWedgedShutdownStatesTheInterruptedWrite(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -100,7 +108,7 @@ func TestAWedgedShutdownStatesTheReplay(t *testing.T) {
 	signalAndTime(t, proc, wedgedShutdownBudget)
 
 	// Assert.
-	const record = "shutdown interrupted a write; it will replay"
+	const record = "shutdown interrupted a write that had not answered within"
 	got := awaitLog(ctx, t, proc.LogPath, record, func(r logRecord) bool {
 		return r.Operation == "shutdown" && strings.Contains(r.Message, record)
 	})
