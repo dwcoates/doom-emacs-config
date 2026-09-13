@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- realtest harness: a `C-g` pressed at a standing minibuffer read is judged by the ring again (`wsActQuit.MarkFree` false, `wsActDismissNotDelivered`), because the read records it (realtests 6-8 named nobody for three keys that never arrived)
+
 - realtest harness: the chord-credit check reads `(recent-keys)` in Emacs's own spelling (`Chord.Recorded`, `SpellRecorded`), so `SPC TAB n` and `SPC TAB f` are credited against `<tab>` rather than `TAB` (realtests 5 and 7 called their own prompts uncreditable)
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12

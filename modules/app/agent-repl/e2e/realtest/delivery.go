@@ -30,30 +30,33 @@ import (
 //
 // Neither mark, and an ordinary key never entered Emacs's input at all.
 //
-// AND THE QUIT CHARACTER IS NOT AN ORDINARY KEY. This file used to apply the
-// rule above to `C-g` as well, and the rule is FALSE for it, in both halves:
+// AND THE QUIT CHARACTER IS AN ORDINARY KEY WHEREVER A READ IS STANDING. This
+// file spent one sweep believing the opposite, and the correction is worth
+// carrying in full because both readings are half right.
 //
-//   - `kbd_buffer_store_buffered_event` hands a `quit_char` to
-//     `handle_interrupt` INSTEAD of storing it as an event, so `read_char`
-//     never returns it and `record_char` never records it. `(recent-keys)`
-//     cannot grow for a `C-g`, arriving or not.
-//   - `handle_interrupt` arms `quit-flag`, and on the NS build (`keyboard.c`
-//     guards `quit_throw_to_read_char` with `#ifndef HAVE_NS`) the flag is
-//     taken by the very read that is standing — the minibuffer the `C-g` is
-//     pressed at — microseconds later, far inside one poll interval. By the
-//     time this side reads it, `quit-flag` is down.
+// WHERE EMACS IS BUSY, with no key read standing,
+// `kbd_buffer_store_buffered_event` hands a `quit_char` to `handle_interrupt`
+// INSTEAD of storing it as an event, so `read_char` never returns it and
+// `record_char` never records it; the `quit-flag` it arms is taken by whatever
+// eventually notices, and on the NS build (`keyboard.c` guards
+// `quit_throw_to_read_char` with `#ifndef HAVE_NS`) that is normally sooner
+// than this side can read it. Such a press leaves neither mark.
 //
-// So a `C-g` that arrives AND WORKS PERFECTLY leaves neither mark, which is
-// precisely the reading this file called a dropped key. The 2026-09-13 sweep
-// (rt-run12) reported six of them that way, every one with a helper receipt
-// reading `frontmost=yes focusedApplication=yes focusedWindow=yes posted`, in
-// runs where every ordinary key of the same sequences — `<escape>`, `SPC`,
-// `TAB`, `n`, `f`, `o`, `C-n` — did leave its mark. The oracle was wrong, not
-// the key driver.
+// WHERE A MINIBUFFER READ IS STANDING — which is the ONLY moment a realtest
+// presses `C-g` — it is read by `read_key_sequence` like any other key and
+// dispatched to `abort-minibuffers` / `minibuffer-keyboard-quit`. It is
+// recorded, and `(recent-keys)` grows.
 //
-// SUCH A CHORD SAYS SO (`Chord.MarkFree`) AND IS JUDGED BY ITS EFFECT. Where
-// the caller supplies a DeliveryEffect the effect settles it; where it does
-// not, the delivery is UNDETERMINED and blamed on nobody.
+// THE 2026-09-13 11:10 SWEEP SHOWS BOTH IN ONE RUN. Realtest 5's ring ends
+// `... SPC <tab> n C-g <escape>` for a `C-g` that closed its prompt; realtests
+// 6, 7 and 8 gained nothing for three presses whose prompts stayed up. Under
+// the mark-free reading all four were reported as unreadable and named against
+// nobody, which buried three keys that never arrived. So the chord pressed at a
+// prompt is NOT mark-free, and its silence is an absence again.
+//
+// A CHORD THAT IS GENUINELY MARK-FREE SAYS SO (`Chord.MarkFree`) AND IS JUDGED
+// BY ITS EFFECT. Where the caller supplies a DeliveryEffect the effect settles
+// it; where it does not, the delivery is UNDETERMINED and blamed on nobody.
 //
 // AND THE READING HAS ONE AMBIGUITY, WHICH IS NAMED RATHER THAN IGNORED.
 // `recent-keys` is a ring of the last `lossage-size` keys, and a run adopts a

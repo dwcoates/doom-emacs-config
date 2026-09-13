@@ -369,3 +369,62 @@ func TestSpellRecordedDiffersFromTheTypedSpellingOnlyWhereEmacsDoes(t *testing.T
 		t.Errorf("the typed spelling a reader sees is %q, not the `SPC TAB n` the plan and the notes use", typed)
 	}
 }
+
+// THE QUIT CHORD IS NOT MARK-FREE, BECAUSE OF WHERE IT IS PRESSED.
+//
+// `wsActQuit` has exactly one caller, `wsActAbortMinibuffer`, and it presses it
+// at a minibuffer read this side just opened. `read_key_sequence` reads a `C-g`
+// at a standing read as an ordinary key sequence bound to `abort-minibuffers`,
+// so the read records it: an unchanged `(recent-keys)` is an absence, not an
+// unreadable press. Declaring it mark-free named nobody for three keys that
+// never arrived (realtests 6, 7 and 8 of the 2026-09-13 11:10 sweep).
+
+func TestTheQuitChordIsJudgedByItsMarkLikeAnyOtherKey(t *testing.T) {
+	// Arrange / Act / Assert
+	if wsActQuit.MarkFree {
+		t.Errorf("`%s` is pressed only at a standing minibuffer read, where it IS recorded, so declaring it "+
+			"mark-free reads three undelivered keys as unreadable ones", wsActQuit.Emacs)
+	}
+}
+
+func TestAQuitThatLeftNoMarkIsAnAbsence(t *testing.T) {
+	// Arrange.
+	before := InputMark{Keys: "SPC <tab> C-n"}
+	after := InputMark{Keys: "SPC <tab> C-n"}
+
+	// Act.
+	verdict, reason := judgeDelivery(wsActQuit, before, after)
+
+	// Assert.
+	if verdict != DeliveryAbsent {
+		t.Errorf("a `C-g` posted at a standing read whose ring did not grow never arrived; the verdict was "+
+			"%v (%s)", verdict, reason)
+	}
+}
+
+func TestAQuitTheRingRecordedIsAnArrival(t *testing.T) {
+	// Arrange.
+	before := InputMark{Keys: "SPC <tab> n"}
+	after := InputMark{Keys: "SPC <tab> n C-g"}
+
+	// Act.
+	verdict, reason := judgeDelivery(wsActQuit, before, after)
+
+	// Assert.
+	if verdict != DeliveryArrived {
+		t.Errorf("realtest 5's own ring ends `... SPC <tab> n C-g`, so a ring that gained the quit character "+
+			"is an arrival; the verdict was %v (%s)", verdict, reason)
+	}
+}
+
+func TestTheQuitChordIsRetriedWhenItIsAbsent(t *testing.T) {
+	// Arrange / Act / Assert
+	//
+	// The mark-free reading suppressed the retry as a side effect: an
+	// UNDETERMINED verdict breaks the attempt loop where an ABSENT one posts
+	// again, and the quit is repeatable precisely so it can be.
+	if !wsActQuit.Repeatable {
+		t.Errorf("`%s` returns the editor to rest, so a dropped one must be re-posted rather than reported "+
+			"after a single attempt", wsActQuit.Emacs)
+	}
+}
