@@ -743,4 +743,21 @@ the query's own death, and nothing reached the vendor here — so whether the ar
 belongs in that oneof at all is a modelling decision, and modelling decisions
 are the owner's.
 
+### `CreateWorkspaceOneShotPolicyMissing`, the repository's own policy
+
+`CreateWorkspaceError.cause` gains `one_shot_policy_missing = 12`, carrying
+`repository_root`, `policy_dir` and the repeated `missing_files`.
+
+USER-RULED, 2026-09-12 (`docs/REALTEST-JUDGEMENT-CALLS.md`, "one-shot policy is
+the repository's"): a repository defines its one-shot policy through files in
+its tree, this module's `prompts/` corpus is the policy of exactly one
+repository, and a repository with no such config does NOT inherit it. The
+daemon detects the absence at create time and Emacs surfaces the refusal; the
+arm is the carrier for that, and it names the directory to write rather than
+only describing it.
+
+It does not disturb `brief_missing`, which keeps its own meaning: a brief
+absent from the policy source that WAS chosen. The two are distinct faults —
+no policy source at all, versus a hole in the one there is.
+
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
