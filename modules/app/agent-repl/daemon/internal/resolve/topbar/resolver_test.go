@@ -76,12 +76,21 @@ func (h *harness) ready(t *testing.T) {
 		ConfigDir: "/Users/dev/.claude",
 	})
 	h.r.OnSessionStarted(testWS, sessionStarted("vend-1", "claude-opus-5"))
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 	h.r.OnSessionUpdate(testWS, contextUsage(142_300, 200_000, 71, "claude-opus-5"))
 	// The two client hops of connectivity truth are up too: a serving shim
 	// link alone is not a connected workspace (daemon.md invariant 11), so a
 	// test that wants one hop down states that hop itself.
 	h.r.SetParticipants(testWS, true, true)
+}
+
+// testAccount is the account cell almost every test wants: the one root the
+// fixture spends from, offered as the only option and marked current.
+func testAccount(email string) Account {
+	return Account{
+		Email:   email,
+		Options: []AccountOption{{ConfigDir: "/Users/dev/.claude", Email: email, Current: true}},
+	}
 }
 
 // view is the workspace's last published view, failing when none exists.
@@ -196,7 +205,7 @@ func TestNothingIsPublishedBeforeEveryRequiredFact(t *testing.T) {
 	// Act: everything but the context usage.
 	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
 	h.r.OnSessionStarted(testWS, sessionStarted("vend-1", "claude-opus-5"))
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Assert
 	if _, ok := h.r.Topic(testWS).Latest(); ok {
@@ -243,7 +252,7 @@ func TestAnIdenticalRepublishIsDeduplicated(t *testing.T) {
 	first := h.view(t)
 
 	// Act
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Assert
 	if h.view(t) != first {
@@ -502,7 +511,7 @@ func TestALoggedOutRootIsADrawnWarningRatherThanABlank(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetAccount(testWS, "")
+	h.r.SetAccount(testWS, testAccount(""))
 
 	// Assert
 	if h.view(t).GetAccount().GetLoggedOut() == nil {
@@ -608,7 +617,7 @@ func TestStatusFactsCarriesTheSessionsOwnFacts(t *testing.T) {
 			Mode: &conversationv1.AgentPermissionMode_Plan{Plan: &conversationv1.AgentPermissionModePlan{}},
 		},
 	})
-	r.SetAccount(ws, "someone@example.com")
+	r.SetAccount(ws, testAccount("someone@example.com"))
 
 	// Act.
 	facts, ok := r.StatusFacts(ws)
@@ -733,7 +742,7 @@ func TestAParkedWorkspacePublishesTheHibernatedView(t *testing.T) {
 	// exactly what a hibernated workspace looks like after a daemon boot.
 	h := newHarness(t)
 	h.r.SetNaming(testWS, Naming{Title: "fix-flaky-reconnect", ConfigDir: "/root"})
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act
 	h.r.SetParked(testWS, true)
@@ -843,7 +852,7 @@ func TestAColdGatedWorkspacePublishesTheColdGateView(t *testing.T) {
 	// answered `cold` and no session was ever created.
 	h := newHarness(t)
 	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
@@ -918,7 +927,7 @@ func TestTheTopbarReturnsToTheFullViewWhenTheColdGateIsAnswered(t *testing.T) {
 	// order — the shim refuses the start, and only the answer opens a session.
 	h := newHarness(t)
 	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
 
 	// Act: the answer retires the gate and the re-opened session states its
@@ -942,7 +951,7 @@ func TestTheColdGateOutranksHibernation(t *testing.T) {
 	// and the park is waiting on nothing, so the strip names the gate.
 	h := newHarness(t)
 	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 	h.r.SetParked(testWS, true)
 
 	// Act
@@ -963,7 +972,7 @@ func TestTheParkIsStillDrawnOnceTheColdGateIsAnswered(t *testing.T) {
 	// retire it — the workspace really is still stood down.
 	h := newHarness(t)
 	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 	h.r.SetParked(testWS, true)
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
 
@@ -981,7 +990,7 @@ func TestTheColdGateTopbarIsRecordedAtInfoWithItsCost(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
-	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
@@ -1015,5 +1024,86 @@ func TestTheReturnToTheFullViewIsRecordedAtInfo(t *testing.T) {
 	}
 	if last.Message != "the topbar returned to the full view after the cold gate" {
 		t.Fatalf("message = %q, want the return named", last.Message)
+	}
+}
+
+func TestTheAccountCellOffersEveryRootWithTheCurrentOneMarked(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetAccount(testWS, Account{
+		Email: "dev@example.com",
+		Options: []AccountOption{
+			{ConfigDir: "/Users/dev/.claude", Email: "dev@example.com", Current: true},
+			{ConfigDir: "/Users/dev/.claude-work", Email: "work@example.com"},
+		},
+	})
+
+	// Assert
+	options := h.view(t).GetAccount().GetOptions()
+	if len(options) != 2 {
+		t.Fatalf("options = %d, want both roots the daemon knows", len(options))
+	}
+	if options[0].GetConfigDir() != "/Users/dev/.claude" || !options[0].GetCurrent() {
+		t.Fatalf("option[0] = %+v, want the current root marked", options[0])
+	}
+	if options[1].GetCurrent() {
+		t.Fatalf("option[1] = %+v, want the other root unmarked", options[1])
+	}
+}
+
+func TestALoggedOutOptionCarriesTheLoggedOutArm(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetAccount(testWS, Account{
+		Email: "dev@example.com",
+		Options: []AccountOption{
+			{ConfigDir: "/Users/dev/.claude", Email: "dev@example.com", Current: true},
+			{ConfigDir: "/Users/dev/.claude-work"},
+		},
+	})
+
+	// Assert
+	options := h.view(t).GetAccount().GetOptions()
+	if options[1].GetLoggedOut() == nil {
+		t.Fatalf("option[1] = %+v, want the logged-out arm", options[1])
+	}
+}
+
+func TestALoggedInOptionCarriesItsEmail(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetAccount(testWS, Account{
+		Email:   "dev@example.com",
+		Options: []AccountOption{{ConfigDir: "/Users/dev/.claude", Email: "dev@example.com", Current: true}},
+	})
+
+	// Assert
+	options := h.view(t).GetAccount().GetOptions()
+	if got := options[0].GetLoggedIn().GetEmail(); got != "dev@example.com" {
+		t.Fatalf("option email = %q, want the root's own address", got)
+	}
+}
+
+func TestAOneRootMachineStillOffersThatOneOption(t *testing.T) {
+	// Arrange — the dropdown is a one-row list rather than nothing at all
+	// (owner ruling, 2026-09-13).
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
+
+	// Assert
+	if got := len(h.view(t).GetAccount().GetOptions()); got != 1 {
+		t.Fatalf("options = %d on a one-root machine, want 1", got)
 	}
 }
