@@ -228,7 +228,7 @@ func TestRealtestCreateWorkDeleteAWorkspace(t *testing.T) {
 	registered, ok := wsActWorkspaceByDir(afterRegister, scratch)
 	if !ok {
 		t.Fatalf("the scratch repository %s was registered but the state database never gained a workspace for it, "+
-			"so `SPC TAB n` has no repository to create in", scratch)
+			"so the editor has nowhere to stand and `SPC TAB n` would derive no repository", scratch)
 	}
 	t.Logf("bootstrap: the scratch repository registered as workspace %s (%s)", registered.ID, registered.Name)
 
