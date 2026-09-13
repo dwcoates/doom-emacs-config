@@ -264,3 +264,10 @@ capital `SPC TAB O`, which was free in the same map. Nothing loses a binding.
 The three `SPC j` one-shot bindings (`o`, `O`, `C-o`) go with their commands.
 
 Surfaced for the owner to overrule if re-open should keep the lowercase key.
+
+## The idle sweep's no-live-session directive: skip plus typed state, not a level change alone (2026-09-12, agent)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-12 | Whether to stop the sweep selecting a workspace with no addressable shim, or leave the selection and merely record the directive's failure at debug | Both, in that order: `drain.Stand.Serving` skips it before the directive, and `drain.ErrNoLiveSession` covers the race that remains | A skip alone still errors when the session goes away between the selection and the call; a level change alone leaves the sweep making a round trip per pass that can only fail. The error arm is untouched for a shim that WAS there | Drop the `Serving` call in `internal/drain/sweep.go` to go back to selecting every idle non-terminal session |
+| 2026-09-12 | Whether the new drain tests should be table-driven per the brief, against the package's one-test-per-case style | One test per edge case in `internal/drain`, table-driven in `internal/workspace` | Every existing sweep test is a single AAA case and the surrounding file reads as one; the fleet's `Serving` predicate genuinely has three arms (never installed, reaped, live) and is a table there | Rewrite the four sweep cases as one table |
