@@ -11,6 +11,16 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon boot: every OPEN workspace with no adopted client has its session started at boot through the same path `OpenWorkspace` takes, except hibernated ones and those whose lock probe could not tell; failures are per workspace and one `daemon.boot.bring_up` INFO summary states the counts (owner ruling 1, second batch, 2026-09-13)
+
+- daemon workspace: `SelectWorkspace` and `OpenWorkspace` revive a hibernated workspace through `Sessions.Start` and lift the sweep's park from the topbar and the footer; the cold gate still asks (owner ruling 1, second batch, 2026-09-13)
+
+- daemon topbar: a parked workspace is gated on the naming and the account alone and publishes the hibernated view (title, connectivity, account, `hibernated`), instead of holding the whole strip back for session facts that will never arrive (owner ruling 1, second batch, 2026-09-13)
+
+- daemon topbar / webapp: the topbar's incomplete-view record is INFO with its outstanding gates named, and `topbar.mount` is INFO like `feed.mount`, so a blank strip is diagnosable at the default level (owner ruling 1, second batch, 2026-09-13)
+
+- webapp topbar: `TopbarView.hibernated` draws the literal word "hibernated" with a client-ticked age in the strip's right-hand group, taking the fast-mode cell's own declarations (owner ruling 1, second batch, 2026-09-13)
+
 - webapp hold tray: an empty tray draws nothing — `drawDaemonHoldTray` answers `null`, the mount empties the host, and `#hold-tray:empty` collapses the region; the "nothing held" line is gone (owner ruling 3, 2026-09-13)
 
 - webapp hold tray: the `held (N)` heading is no longer drawn — the daemon still composes `DaemonHoldTray.heading` and the tray still requires it, but nothing puts it on screen (owner ruling 2, 2026-09-13)
