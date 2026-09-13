@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/wsm"
 )
@@ -66,6 +67,18 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	if err != nil {
 		global.Error(opCreate, "the repository directory cannot be normalized", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create: repository %q: %w", spec.RepoDir, err)
+	}
+
+	// A ONE-SHOT RUNS THE REPOSITORY'S OWN POLICY, so the policy is resolved
+	// and required HERE — before the id is minted, before the creation job is
+	// recorded, before git is touched. A repository that states none is
+	// refused with nothing built and nothing minted.
+	var policy prompts.Source
+	if spec.OneShot {
+		policy, err = v.requireOneShotPolicy(global, repoDir, spec.Finish)
+		if err != nil {
+			return wsm.Workspace{}, err
+		}
 	}
 
 	// The workspace id is minted HERE, before anything is named: it is the
@@ -227,7 +240,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		return wsm.Workspace{}, fmt.Errorf("create %q: start the session: %w", branch, err)
 	}
 
-	if err := v.submitInitialPrompt(ctx, log, record, spec); err != nil {
+	if err := v.submitInitialPrompt(ctx, log, record, spec, policy); err != nil {
 		return wsm.Workspace{}, err
 	}
 
@@ -390,14 +403,14 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 // submitInitialPrompt sends the workspace's first message down the ONE delivery
 // path, with origin WORKSPACE_CREATED. A one-shot prompt is DECORATED first:
 // the autonomous preamble, the user's words, and the success-gated wrap-up.
-func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec) error {
+func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec, policy prompts.Source) error {
 	if strings.TrimSpace(spec.InitialPrompt) == "" {
 		log.Debug(opCreate, "created without an initial prompt", nil)
 		return nil
 	}
 	text := spec.InitialPrompt
 	if spec.OneShot {
-		decorated, err := v.decorateOneShot(text, spec.Finish)
+		decorated, err := v.decorateOneShot(text, spec.Finish, policy)
 		if err != nil {
 			log.Error(opCreate, "could not compose the one-shot prompt", dlog.Context{"cause": err.Error()})
 			return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)
