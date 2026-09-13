@@ -1056,3 +1056,12 @@ Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
 | 2026-09-13 | A failed start walked away from the vendor child it had opened. Leave it (out of scope) or close it? | Close it, and guard a released query's loop end | The retry would otherwise be a SECOND child on one conversation — two writers on one transcript — and the closed query's loop end would report `query_died` and a permanent fault for a session that had merely refused a start | Delete the orphan-close block in the catch and `isStaleLoop` |
 | 2026-09-13 | Why does THIS session id resume silently while its sibling under the same account does not? | Not answered here, and no shim-side cause was found | The transcript is structurally sound: 86 lines, no `summary`, no compact boundary, a consistent `parentUuid` chain, `cwd` matching the workspace, and a tail that is 12 keep-alive turns and a trailing `mode` record. The vendor emitted its hook and stopped; everything after that is inside the CLI | Nothing to reverse — reopen if the fixed start path reports a vendor `result` or stderr naming a cause |
 
+
+## Owner ruling: webapp-side failures reach the footer (2026-09-13, owner)
+
+Exception to "the daemon composes, the webapp draws": when the webapp
+cannot talk to the daemon it knows that itself and draws it: footer
+status DISCONNECTED (detached), substatus "daemon unreachable", and the
+activity line an ad-hoc message about the nature/context of the missing
+connection. More generally every webapp-side failure gets a footer status
+(disconnected, unless the lead argues otherwise), substatus and activity.
