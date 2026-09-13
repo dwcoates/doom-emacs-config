@@ -1615,3 +1615,60 @@ func TestADeadLinkWithNoStandDownStillRaisesItsFault(t *testing.T) {
 		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultDead)
 	}
 }
+
+// ---- a severing states what the daemon knows about the peer ----
+
+// TestASeveringNamesALivingShim covers the case the log could not previously
+// tell from any other: the shim is UP and ended one stream of several.
+//
+// MEASURED, realtest run 2026-09-13T16:03:25. Adopted shim pid 3031 ended
+// workspace 2b81f45a724642ef's agent stream with EOF; its session stream
+// stayed open, the process was alive enough for the teardown eleven seconds
+// later to kill it, and the shim's own log recorded nothing. The daemon's
+// record said only "agent stream ended while the session was live", which is
+// equally true of a shim that had simply died -- and the two are remediated in
+// different systems.
+func TestASeveringNamesALivingShim(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: the main agent stream ends with the session live and nothing asked.
+	h.main.Close()
+
+	// Assert.
+	h.awaitRecord(t, "error", "daemon.sessionwatcher.watch_agent")
+	got := h.recordContext(t, "error", "daemon.sessionwatcher.watch_agent")
+	if got["shim_reaped"] != false {
+		t.Fatalf("shim_reaped = %v, want false: the shim is still running", got["shim_reaped"])
+	}
+	if got["stream"] != "agent" {
+		t.Fatalf("stream = %v, want the agent stream named", got["stream"])
+	}
+	if got["shim_pid"] != 4242 {
+		t.Fatalf("shim_pid = %v, want the peer's pid on the record", got["shim_pid"])
+	}
+}
+
+// TestASeveringNamesADeadShim is the other half of the same distinction: when
+// the peer HAS been reaped, the record says so and carries the exit, because
+// that is a session to bring back rather than a watch the shim dropped.
+func TestASeveringNamesADeadShim(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 9})
+
+	// Act.
+	h.main.Close()
+
+	// Assert.
+	h.awaitRecord(t, "error", "daemon.sessionwatcher.watch_agent")
+	got := h.recordContext(t, "error", "daemon.sessionwatcher.watch_agent")
+	if got["shim_reaped"] != true {
+		t.Fatalf("shim_reaped = %v, want true: the shim was reaped", got["shim_reaped"])
+	}
+	if got["shim_exit_code"] != 9 {
+		t.Fatalf("shim_exit_code = %v, want 9", got["shim_exit_code"])
+	}
+}
