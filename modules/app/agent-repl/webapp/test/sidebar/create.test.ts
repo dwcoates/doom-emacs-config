@@ -408,6 +408,11 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   baseRefUnresolved: { ref: "origin/nope" },
   worktreeCreationFailed: { detail: "index.lock exists" },
   spawnFailed: { detail: "the shim would not come up" },
+  oneShotPolicyMissing: {
+    repositoryRoot: "/src/p",
+    policyDir: "/src/p/.agent-repl/prompts",
+    missingFiles: ["oneshot-success-suffix.md"],
+  },
 };
 
 describe("CreateWorkspace's typed refusal", () => {
@@ -444,6 +449,32 @@ describe("CreateWorkspace's typed refusal", () => {
         value: { detail: "the shim would not come up" },
       } as never),
     ).toContain("the shim would not come up");
+  });
+
+  it("names the policy directory a repository stating no one-shot policy must write", () => {
+    expect(
+      createWorkspaceRefusal({
+        case: "oneShotPolicyMissing",
+        value: {
+          repositoryRoot: "/src/p",
+          policyDir: "/src/p/.agent-repl/prompts",
+          missingFiles: ["oneshot-success-suffix.md"],
+        },
+      } as never),
+    ).toContain("oneshot-success-suffix.md in /src/p/.agent-repl/prompts");
+  });
+
+  it("names the policy directory alone when the arm lists no files", () => {
+    expect(
+      createWorkspaceRefusal({
+        case: "oneShotPolicyMissing",
+        value: {
+          repositoryRoot: "/src/p",
+          policyDir: "/src/p/.agent-repl/prompts",
+          missingFiles: [],
+        },
+      } as never),
+    ).toContain("write /src/p/.agent-repl/prompts");
   });
 
   it("refuses an arm this build does not know", () => {
