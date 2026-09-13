@@ -216,10 +216,6 @@ type Deps struct {
 	// DrainRefusals records each submission the drain lease refused or held.
 	// The controller rate-limits its own record; the queue only reports.
 	DrainRefusals RefusalNoter
-	// OneShotFinish is the turn-terminal hook for a one-shot workspace's
-	// finish action. It is a function because internal/workspace imports this
-	// package, so this package cannot import it back.
-	OneShotFinish FinishHook
 	// StripSentinels removes the host's metaprompt sentinel spans from the
 	// MIRRORED text; the full text stays on the durable record and on the
 	// prompt the shim receives. nil is the identity.
@@ -304,10 +300,6 @@ type RefusalNoter interface {
 	// drain lease.
 	NoteRefusal(ws ids.WorkspaceID)
 }
-
-// FinishHook is the one-shot workspace's turn-terminal finish action.
-// workspace.Verbs.OnOneShotTurnConcluded satisfies it.
-type FinishHook func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 
 // New builds the queue.
 func New(deps Deps) (Queue, error) {

@@ -51,12 +51,16 @@
                  agent-repl-merge-queue-evict))
     (should (commandp cmd))))
 
-(ert-deftest agent-repl-test-keybindings-oneshot-commands-are-defined ()
-  "Both one-shot finish arms have a command behind them."
+(ert-deftest agent-repl-test-keybindings-oneshot-command-is-defined ()
+  "The ONE one-shot command exists: there is no finish to choose between."
+  (should (commandp 'agent-repl-create-oneshot)))
+
+(ert-deftest agent-repl-test-keybindings-oneshot-finish-commands-are-gone ()
+  "The per-finish one-shot commands died with the finish choice."
   (dolist (cmd '(agent-repl-create-oneshot-self-merge
                  agent-repl-create-oneshot-open-pr
                  agent-repl-create-oneshot-open-pr-reviewed))
-    (should (commandp cmd))))
+    (should-not (fboundp cmd))))
 
 (ert-deftest agent-repl-test-keybindings-canned-prompt-commands-are-defined ()
   "The SPC j prompt families all exist."

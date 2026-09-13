@@ -781,3 +781,30 @@ via `subjectForClientLog`, and the arm is a forwarder's cue to stop sending for
 that workspace id and keep the rest of its records locally.
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+### The one-shot's `finish` oneof, and the two arms that policed it, RETIRE
+
+`CreateWorkspaceOneShot` loses its `finish` oneof: tags 2 and 3
+(`self_merge`, `open_pr`) are reserved, and the messages
+`CreateWorkspaceOneShotSelfMerge` and `CreateWorkspaceOneShotOpenPr` are
+deleted. `CreateWorkspaceError.cause` loses `finish_required` (tag 3) and
+`finish_not_one_shot` (tag 4), both reserved, and their two empty messages go
+with them.
+
+USER-RULED, 2026-09-12 (`docs/REALTEST-JUDGEMENT-CALLS.md`, "Owner rulings:
+dynamic creation design questions"): THERE IS NO "OPEN PR" OPTION AND NO FINISH
+CHOICE AT ALL. A repository states, in one canonical plain-English file, what
+is to be done on completion; the daemon concatenates it to the one-shot's
+initial prompt behind the literal sentence "when you're all done, please do the
+following postprocessing directive: " and the AGENT carries it out. The daemon
+performs no finish action programmatically.
+
+So a one-shot form is its prompt and nothing else, and both retired error arms
+described a fault — a missing finish, a misplaced finish — that is no longer
+representable.
+
+`one_shot_policy_missing` and `brief_missing` are untouched.
+`CreateWorkspaceOneShotPolicyMissing.missing_files` now always names the same
+two required files, since no finish varies the set.
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4

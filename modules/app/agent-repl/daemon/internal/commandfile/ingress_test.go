@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -137,9 +138,9 @@ func TestApplyFileMapsCreateOntoTheCreationVerb(t *testing.T) {
 	}
 }
 
-func TestApplyFileOneShotCreateCarriesTheSelfMergeFinish(t *testing.T) {
-	// Arrange: the channel carries no finish field, and the self-merge one-shot
-	// is the flow it has always dispatched.
+func TestApplyFileOneShotCreateDispatchesTheOneShotFormAlone(t *testing.T) {
+	// Arrange: the channel names no finish, and neither does the spec — what
+	// happens on completion is the repository's own directive.
 	f := newFixture(t)
 	path := f.write(t, "workspace_commands_c.json",
 		`[{"type":"create","git_root":"/repo","prompt":"do a thing","one_shot":true}]`)
@@ -150,9 +151,9 @@ func TestApplyFileOneShotCreateCarriesTheSelfMergeFinish(t *testing.T) {
 	}
 
 	// Assert.
-	spec := f.verbs.calls[0].Spec
-	if !spec.OneShot || spec.Finish == nil || !spec.Finish.SelfMerge {
-		t.Fatalf("create spec = %+v, want a one-shot with the self-merge finish", spec)
+	want := workspace.CreateSpec{RepoDir: "/repo", InitialPrompt: "do a thing", OneShot: true}
+	if got := f.verbs.calls[0].Spec; !reflect.DeepEqual(got, want) {
+		t.Fatalf("create spec = %+v, want %+v", got, want)
 	}
 }
 
