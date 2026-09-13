@@ -33,17 +33,11 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // The tray, resolved by the daemon and pushed on EVERY change. An empty
 // items list is a meaningful value (the tray is empty), not an absent one.
 message DaemonHoldTray {
-  // The tray's heading, composed by the daemon (e.g. "held (3)").
-  DaemonHoldHeading heading = 1;
+  // Tag 1 is RETIRED: the "held (N)" heading died with the drawing. The cards
+  // say what is held, so a counter over the visible cards is a second answer
+  // to a question the cards already answer (owner ruling 5, 2026-09-13).
   // The held things, in display order.
   repeated DaemonHoldItem items = 2;
-}
-
-// The tray's heading.
-message DaemonHoldHeading {
-  // The heading line, composed by the daemon. Drawn verbatim; a client never
-  // assembles a count or a summary of its own from the items below.
-  string text = 1;
 }
 
 // One held thing. THE ARM IS THE KIND.

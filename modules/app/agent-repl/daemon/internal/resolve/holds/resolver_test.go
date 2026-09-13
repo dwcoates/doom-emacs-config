@@ -34,25 +34,28 @@ func TestNewRefusesWithoutLogSurfaces(t *testing.T) {
 	}
 }
 
-func TestTrayComposesItsHeading(t *testing.T) {
+// The "held (N)" heading is RETIRED from the proto (owner ruling 5,
+// 2026-09-13). What the counter used to state — an offer is a held thing and
+// is counted alongside the prompts — is now stated by the items list itself.
+func TestTrayCountsAnOfferAmongItsItems(t *testing.T) {
 	tests := []struct {
 		name  string
 		held  []wsm.HeldPrompt
 		offer *frontendv1.HeldOffer
-		want  string
+		want  int
 	}{
-		{name: "empty", want: "held (0)"},
-		{name: "one prompt", held: []wsm.HeldPrompt{hold("t1", "one")}, want: "held (1)"},
+		{name: "empty", want: 0},
+		{name: "one prompt", held: []wsm.HeldPrompt{hold("t1", "one")}, want: 1},
 		{
 			name: "two prompts",
 			held: []wsm.HeldPrompt{hold("t1", "one"), hold("t2", "two")},
-			want: "held (2)",
+			want: 2,
 		},
 		{
 			name:  "an offer counts as a held thing",
 			held:  []wsm.HeldPrompt{hold("t1", "one")},
 			offer: testMergeDequeueOffer(),
-			want:  "held (2)",
+			want:  2,
 		},
 	}
 	for _, tc := range tests {
@@ -65,8 +68,8 @@ func TestTrayComposesItsHeading(t *testing.T) {
 			r.SetOffer(testWS, tc.offer)
 
 			// Assert.
-			if got := latest(t, r).GetHeading().GetText(); got != tc.want {
-				t.Fatalf("heading = %q, want %q", got, tc.want)
+			if got := len(latest(t, r).GetItems()); got != tc.want {
+				t.Fatalf("tray items = %d, want %d", got, tc.want)
 			}
 		})
 	}
@@ -159,11 +162,11 @@ func TestTrayRepublishesWhenTheHoldsChange(t *testing.T) {
 	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one")})
 
 	// Assert.
-	if got := (<-ch).GetHeading().GetText(); got != "held (0)" {
-		t.Fatalf("first push heading = %q", got)
+	if got := len((<-ch).GetItems()); got != 0 {
+		t.Fatalf("first push items = %d, want 0", got)
 	}
-	if got := (<-ch).GetHeading().GetText(); got != "held (1)" {
-		t.Fatalf("second push heading = %q", got)
+	if got := len((<-ch).GetItems()); got != 1 {
+		t.Fatalf("second push items = %d, want 1", got)
 	}
 }
 
@@ -181,8 +184,8 @@ func TestTrayDoesNotRepublishAnIdenticalRender(t *testing.T) {
 	r.SetHeldPrompts(testWS, nil)
 
 	// Assert: the duplicate never reached the wire, so the next value is the change.
-	if got := (<-ch).GetHeading().GetText(); got != "held (0)" {
-		t.Fatalf("next delivery = %q, want the change — a duplicate render reached the wire", got)
+	if got := len((<-ch).GetItems()); got != 0 {
+		t.Fatalf("next delivery held %d items, want the change (0) — a duplicate render reached the wire", got)
 	}
 }
 

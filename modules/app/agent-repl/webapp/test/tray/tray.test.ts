@@ -100,18 +100,19 @@ const offerItem = (): DaemonHoldItem =>
     },
   });
 
-const tray = (items: DaemonHoldItem[], heading = "held (2)"): DaemonHoldTray =>
-  create(DaemonHoldTraySchema, { heading: { text: heading }, items });
+const tray = (items: DaemonHoldItem[]): DaemonHoldTray =>
+  create(DaemonHoldTraySchema, { items });
 
 /** Let the stream's first push reach the mount. */
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("drawDaemonHoldTray", () => {
-  it("draws no heading node at all", () => {
-    // Arrange / Act
-    const drawn = drawDaemonHoldTray(tray([promptItem("t1")], "held (3)"), trayContext());
+  it("accepts a tray carrying no heading and draws no counter", () => {
+    // Arrange / Act: the heading is RETIRED from the proto (owner ruling 5).
+    const drawn = drawDaemonHoldTray(tray([promptItem("t1")]), trayContext());
     // Assert
-    expect(drawn?.textContent).not.toContain("held (3)");
+    expect(drawn).not.toBeNull();
+    expect(drawn?.textContent).not.toContain("held (");
   });
 
   it("draws nothing at all for an empty tray", () => {
@@ -144,10 +145,6 @@ describe("drawDaemonHoldTray", () => {
     expect(drawn?.querySelector(".hold-tray-items")?.classList.contains("list-rows")).toBe(true);
   });
 
-  it("refuses a tray with no heading", () => {
-    const bare = create(DaemonHoldTraySchema, { items: [] });
-    expect(() => drawDaemonHoldTray(bare, trayContext())).toThrow(MalformedView);
-  });
 });
 
 describe("drawDaemonHoldItem", () => {

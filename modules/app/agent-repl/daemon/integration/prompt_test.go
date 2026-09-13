@@ -978,8 +978,8 @@ func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCou
 	})
 
 	// Assert: the heading reads the composed count for the one standing item.
-	if got := tray.GetHeading().GetText(); got != "held (1)" {
-		t.Fatalf("tray heading with one standing offer = %q, want %q", got, "held (1)")
+	if got := len(tray.GetItems()); got != 1 {
+		t.Fatalf("tray with one standing offer carried %d items, want 1", got)
 	}
 
 	// Act: the OPERATOR path evicts the queued merge directly, never through
@@ -998,8 +998,8 @@ func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCou
 	if mergeDequeueOffer(got) != nil {
 		t.Fatalf("held tray after UpdateMergeQueue{evict} = %v, want the dequeue offer gone", got)
 	}
-	if gotText := got.GetHeading().GetText(); gotText != "held (0)" {
-		t.Fatalf("tray heading after the evict = %q, want %q", gotText, "held (0)")
+	if n := len(got.GetItems()); n != 0 {
+		t.Fatalf("tray after the evict carried %d items, want 0", n)
 	}
 }
 
