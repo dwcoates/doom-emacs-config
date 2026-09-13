@@ -12,6 +12,11 @@ describe("formatTokens", () => {
     { n: 999_949, want: "999.9k" },
     { n: 999_950, want: "1M" },
     { n: 1_200_000, want: "1.2M" },
+    { n: 1_049, want: "1k" },
+    { n: 1_050, want: "1.1k" },
+    { n: 10_113, want: "10.1k" },
+    { n: 142_300, want: "142.3k" },
+    { n: 1_000_000, want: "1M" },
   ] as const;
 
   for (const c of cases) {
