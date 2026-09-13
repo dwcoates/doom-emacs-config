@@ -17,6 +17,48 @@ message WriteBatchRequest {
   string producer = 1;
   // The records, and the reader position that becomes durable with them.
   EntryBatch batch = 2;
+  // THE SHAPE CATALOG OF EVERYTHING THIS BATCH DID NOT STORE. A producer that
+  // classified a line as residue and then did not persist it contributes the
+  // line's SHAPE here instead, so the vendor's API stays discoverable from the
+  // store alone after the bytes stop being kept (owner ruling 2026-09-13,
+  // docs/REALTEST-JUDGEMENT-CALLS.md "the unmodelled-line shape catalog").
+  //
+  // IT RIDES THE SAME TRANSACTION as the records and the cursor advance. A
+  // shape observed while reading bytes whose cursor advance commits here must
+  // become durable with that advance, or the re-read that would have observed
+  // it again never happens and the shape is lost for good.
+  //
+  // The producer DEDUPES WITHIN THE BATCH by shape_hash and keeps the first
+  // example it saw, so one batch carries at most one observation per hash; the
+  // store folds each into the catalog (count += 1, last_seen = max, the first
+  // example kept from the first insert).
+  repeated ShapeObservation shapes = 3;
+}
+
+// One distinct key structure a producer observed on a line it did not store.
+//
+// THE SHAPE IS THE PAYLOAD, NOT THE VALUES. key_structure is a canonical
+// rendering of the JSON's key names and scalar TYPES with every value dropped,
+// so the catalog says what the vendor's API looks like without becoming a
+// second copy of the conversation. first_example is the one exception and is
+// deliberate: one verbatim line per distinct shape is what makes the shape
+// readable by a human, and it is written once, on the first insert.
+message ShapeObservation {
+  // SHA-256, lowercase hex, over key_structure. The catalog's primary key.
+  string shape_hash = 1;
+  // The residue kind this shape was observed under — the producer's own kind
+  // string ("attachment/hook_success", "unparsed", ...). Descriptive, and the
+  // ListResidueShapes filter; never switched on.
+  string kind = 2;
+  // The canonical rendering the hash was taken over, kept verbatim so a reader
+  // sees the structure without re-deriving it.
+  string key_structure = 3;
+  // The RAW LINE BYTES of the first line seen with this shape, verbatim and
+  // uninterpreted. Ignored on every observation after the row exists.
+  bytes first_example = 4;
+  // When the producer observed it, unix millis. Sets first_seen_ms on the
+  // insert and raises last_seen_ms on every later observation.
+  int64 seen_ms = 5;
 }
 
 // Durable, or nothing.
