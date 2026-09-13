@@ -5891,7 +5891,14 @@ body.draining #composer-input::placeholder {
    that would promise a click. */
 /* THE HIBERNATED CELL takes the same declarations, deliberately: it is
    another read-only label in the same strip, and a style of its own would be
-   a second answer to a question this rule already answers. */
+   a second answer to a question this rule already answers. THE SAME GOES FOR
+   THE COLD-GATE CELL, and for the same reason both are drawn INTO THE RIGHT
+   GROUP (owner ruling 4, 2026-09-13): a whole-view state replaces the strip's
+   session-scoped controls, so it stands where they stood — at the strip's
+   right edge, in the right group's box treatment, behind the same edge
+   padding — and never reads as something spilled out of the centered title.
+   The box below is that treatment minus the two declarations that would
+   promise a click, which is the one difference these cells are entitled to. */
 .topbar-fast,
 .topbar-hibernated,
 .topbar-cold-gate {

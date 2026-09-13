@@ -468,3 +468,36 @@ describe("the account cell", () => {
     ]).toEqual(["session", null]);
   });
 });
+
+describe("the whole-view states", () => {
+  // RULING 4. A state that replaces the session-scoped controls stands where
+  // they stood: the LAST cell of the right group, at the strip's right edge.
+  it("draws the hibernated cell as the right group's own content", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const right = drawTopbarView(hibernatedView(), tc).querySelector(".topbar-right");
+    // ASSERT
+    expect([...(right?.children ?? [])].map((el) => el.className)).toEqual(["topbar-hibernated"]);
+  });
+
+  it("draws the cold-gate cell as the right group's own content", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const right = drawTopbarView(coldGateView(), tc).querySelector(".topbar-right");
+    // ASSERT
+    expect([...(right?.children ?? [])].map((el) => el.className)).toEqual(["topbar-cold-gate"]);
+  });
+
+  // ...and in the right cells' box, so the reader sees the right group's
+  // content rather than a stray label.
+  it("boxes both state cells exactly as the strip's other right-hand cells", () => {
+    expect(declaration(".topbar-fast,\n.topbar-hibernated,\n.topbar-cold-gate", "padding")).toBe(
+      declaration(
+        ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-warning-chip",
+        "padding",
+      ),
+    );
+  });
+});

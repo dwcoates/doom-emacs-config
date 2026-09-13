@@ -1,9 +1,12 @@
-// topbar.proto — THE TOPBAR: one THIN strip. Left, tight: account label,
-// connectivity dot. Center: the title, and ALL free width flexes around it
-// — the flank groups never spread. Right, tight, in order: model selector,
-// context chip, warning chip at the far edge.
+// topbar.proto — THE TOPBAR: one THIN strip, edge to edge. Left, tight: the
+// connectivity dot and, right beside it, the account label it qualifies —
+// one cell. Center: the title, centered on ITS OWN content against the whole
+// strip, with all free width split evenly either side of it — the flank
+// groups never spread and never push it. Right, tight, in order: model
+// selector, context chip, warning chip at the far edge. The strip stands off
+// the window's edges exactly as far as its cells stand off each other.
 //
-//   │ dodge@…com ●        DWC/fix-flaky-reconnect   haiku 4.5 ▾  142.3k  ⚠ 2 │
+//   │● dodge@…com          DWC/fix-flaky-reconnect     haiku 4.5 ▾  142.3k  ⚠ 2│
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
 // options, the context chip's usage breakdown, the warning dropdown and
