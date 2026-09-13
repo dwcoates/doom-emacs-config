@@ -2367,6 +2367,17 @@ func awaitLog(ctx context.Context, t *testing.T, path string, what string, match
 // after this point is steady state, not backlog: the reader was already running
 // when it appeared, so its stale conditions are stated per file rather than
 // summarized as catch-up.
+// awaitCatchupEnd blocks until the sidecar states that its startup catch-up
+// window has closed. A subject that asserts a STEADY-STATE per-item record
+// waits here rather than on the first production cycle: between the two, the
+// boot walk is still draining the corpus and its records are leveled to DEBUG.
+func awaitCatchupEnd(ctx context.Context, t *testing.T, path string) logRecord {
+	t.Helper()
+	return awaitLog(ctx, t, path, "the end of startup catch-up", func(r logRecord) bool {
+		return r.Operation == "catchup-end"
+	})
+}
+
 func awaitFirstProductionCycle(ctx context.Context, t *testing.T, path string) logRecord {
 	t.Helper()
 	return awaitLog(ctx, t, path, "the first production cycle", func(r logRecord) bool {
