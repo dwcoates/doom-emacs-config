@@ -94,7 +94,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--with-deferred-quit "core")
-(declare-function agent-repl--deferred-quit-arm-delivery "core" (context))
+(declare-function agent-repl--deferred-quit-arm-audit "core" (context))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
