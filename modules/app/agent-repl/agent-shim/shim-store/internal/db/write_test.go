@@ -2,7 +2,9 @@ package db
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -861,4 +863,67 @@ func TestWriteBatchCommitsNoLedgerRowWhenTheBatchFails(t *testing.T) {
 	if got := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger`); got != 0 {
 		t.Fatalf("write_ledger rows after a failed batch = %d, want 0", got)
 	}
+}
+
+// ---- what a slow write_batch record blames ----
+
+func TestWriteBatchReportsTheLockWaitInsideItsMeasuredDuration(t *testing.T) {
+	// Arrange: a store that reports every batch, so the record is reachable
+	// without contriving a slow one. The batch's clock starts BEFORE its
+	// transaction, and every transaction here is BEGIN IMMEDIATE, so the wait
+	// to begin is part of what the record calls the statement's duration —
+	// which is exactly why it is also reported on its own.
+	s, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+	d, err := OpenWithOptions(path, log, Options{
+		Now:       func() int64 { return testNow },
+		SlowQuery: time.Nanosecond,
+		// The bulk budget has to come down with the interactive threshold, or
+		// the shipped 250ms base swallows a healthy in-process batch and the
+		// record under test is never written.
+		BulkBase:   time.Nanosecond,
+		BulkPerRow: time.Nanosecond,
+	})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+
+	// Act
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Assert
+	wait, duration := slowQueryTiming(t, s, StatementWriteBatch)
+	if wait < 0 {
+		t.Fatalf("lock_wait_ms = %v, want a non-negative wait", wait)
+	}
+	if wait > duration {
+		t.Fatalf("lock_wait_ms = %v exceeds duration_ms = %v; the wait is a COMPONENT of the duration, not a second clock", wait, duration)
+	}
+}
+
+// slowQueryTiming reads the lock wait and total duration off the one
+// slow-query record naming this statement family.
+func slowQueryTiming(t *testing.T, s *sink, statement string) (wait, duration float64) {
+	t.Helper()
+	for _, record := range s.records(t) {
+		if record["operation"] != SlowQueryOperation {
+			continue
+		}
+		context, _ := record["context"].(map[string]any)
+		if context["statement"] != statement {
+			continue
+		}
+		waitMs, ok := context["lock_wait_ms"].(float64)
+		if !ok {
+			t.Fatalf("the slow-query record carries no lock_wait_ms: %v", context)
+		}
+		durationMs, ok := context["duration_ms"].(float64)
+		if !ok {
+			t.Fatalf("the slow-query record carries no duration_ms: %v", context)
+		}
+		return waitMs, durationMs
+	}
+	t.Fatalf("no %s record for statement %q; log was:\n%s", SlowQueryOperation, statement, s.file.String())
+	return 0, 0
 }
