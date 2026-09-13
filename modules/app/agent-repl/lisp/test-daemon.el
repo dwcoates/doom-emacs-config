@@ -171,6 +171,7 @@ a scenario names which pids are alive rather than depending on the host.")
          (agent-repl-test-daemon--logs nil)
          (agent-repl-test-daemon--displayed nil)
          (agent-repl--frontend-daemon-process nil)
+         (agent-repl-daemon--exit-requested nil)
          (agent-repl-daemon-build-failure nil)
          ;; A scenario that boots into a timeout or a refused launch SETS
          ;; this, and without the reset it stood for the rest of the run --
@@ -1147,6 +1148,112 @@ the spawn, called the daemon booted, and linked to a refused port."
       (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
     ;; Assert
     (should (file-exists-p agent-repl-test-daemon--addr-file))))
+
+
+;;;; ---- The level of an exit follows who asked for it ----
+
+(ert-deftest agent-repl-test-daemon-a-requested-exit-is-recorded-at-info ()
+  "The daemon obeying a shutdown this editor asked for is not a warning."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: the editor asks, and the daemon accepts.
+    (agent-repl-frontend-daemon-stop)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.exited status=0 event=finished requested=t"))))
+
+(ert-deftest agent-repl-test-daemon-a-requested-exit-raises-no-warning ()
+  "The requested exit is recorded ONCE, and not also at WARN."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-frontend-daemon-stop)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should-not (agent-repl-test-daemon--logged-p :warn "elisp.daemon.exited"))))
+
+(ert-deftest agent-repl-test-daemon-an-unrequested-clean-exit-stays-a-warning ()
+  "A daemon leaving on its own stopped work this editor believed was served."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: nothing asked.
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :warn "elisp.daemon.exited status=0 event=finished requested=nil"))))
+
+(ert-deftest agent-repl-test-daemon-an-unrequested-failed-exit-is-an-error ()
+  "A non-zero status is the daemon reporting its own failure."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 2)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "exited abnormally\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :error "elisp.daemon.exited status=2 event=exited abnormally requested=nil"))))
+
+(ert-deftest agent-repl-test-daemon-a-request-excuses-only-the-exit-it-ordered ()
+  "The order is CONSUMED, so the next departure is heard in full."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: one requested exit has already been recorded.
+    (agent-repl-frontend-daemon-stop)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Act: a second daemon goes away with nothing having asked.
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :warn "elisp.daemon.exited status=0 event=finished requested=nil"))))
+
+(ert-deftest agent-repl-test-daemon-a-refused-stop-withdraws-the-request ()
+  "A shutdown the daemon refused excuses no later departure."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--shutdown-answer
+          (list :response (list :arm :error :value nil)))
+    (agent-repl-frontend-daemon-stop)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :warn "elisp.daemon.exited status=0 event=finished requested=nil"))))
+
+(ert-deftest agent-repl-test-daemon-an-undelivered-stop-withdraws-the-request ()
+  "A shutdown that never reached the daemon excuses no later departure."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--shutdown-answer
+          (list :failure (list :detail "the link went away")))
+    (agent-repl-frontend-daemon-stop)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :warn "elisp.daemon.exited status=0 event=finished requested=nil"))))
+
+(ert-deftest agent-repl-test-daemon-a-new-daemon-inherits-no-shutdown-order ()
+  "An order given to a predecessor does not excuse its successor's death."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: an order stands, and a fresh daemon is then spawned.
+    (setq agent-repl-daemon--exit-requested t
+          agent-repl-test-daemon--address nil)
+    (agent-repl-daemon-ensure)
+    ;; Act / Assert
+    (should-not agent-repl-daemon--exit-requested)))
 
 (ert-deftest agent-repl-test-daemon-a-foreign-daemons-exit-removes-no-address-file ()
   "Emacs retires only the address of the daemon it started itself."

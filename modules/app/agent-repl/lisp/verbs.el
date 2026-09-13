@@ -66,6 +66,8 @@
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
 (declare-function agent-repl--pseudo-workspace-name-p "agent-repl-core" (ws))
+(declare-function agent-repl--log-note-workspace-departing "agent-repl-core" (ws))
+(declare-function agent-repl--log-forget-workspace-departure "agent-repl-core" (ws))
 (declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl--kill-one-workspace "agent-repl-workspace" (ws &optional preserve))
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
@@ -433,11 +435,22 @@ front of it can still say why."
 (defun agent-repl-verb-nuke (ws)
   "Destroy WS: its session, its worktree and its branch.  Unrecoverable."
   (let ((ref (agent-repl-verbs--ref ws)))
+    ;; The worktree goes as soon as the daemon acts, which is BEFORE the
+    ;; answer arrives and well before the tab teardown; records written in
+    ;; between are attributed to a workspace whose registered directory has
+    ;; already gone.  The order is what explains that, so the order is
+    ;; declared at the moment it is given rather than when it completes.
+    (agent-repl--log-note-workspace-departing ws)
     (agent-repl-verbs--send
      #'agent-repl-rpc-nuke-workspace (agent-repl-verbs--conn ws)
      (list :workspace ref)
      :ws ws :op "nuke"
-     :on-success (lambda (_) (agent-repl-verbs--teardown-tab ws "nuke")))))
+     :on-success (lambda (_) (agent-repl-verbs--teardown-tab ws "nuke"))
+     ;; A REFUSED nuke destroyed nothing, so the order above is withdrawn and
+     ;; the arm is left unclaimed for the generic refusal handling.
+     :on-error (lambda (_value)
+                 (agent-repl--log-forget-workspace-departure ws)
+                 nil))))
 
 (defun agent-repl-verb-open (ref)
   "Open the closed workspace named by REF.  Any revival is the daemon's.
