@@ -805,9 +805,17 @@ func wsActProveChord(ctx context.Context, t *testing.T, client *Client, driver *
 	if !reached {
 		where, _ := client.ReadString(ctx, `(format "buffer=%s evil-state=%s major-mode=%s"
         (buffer-name) (or (bound-and-true-p evil-state) "none") major-mode)`)
+		// WHICH SYSTEM THIS NAMES IS READ OFF THE RING, not assumed. The
+		// sequence is preceded by this run's own `<escape>`, so a ring that
+		// ends with the sequence but carries something else in the escape's
+		// place is carrying input the run did not send — and that key ate the
+		// leader. chordring.go carries the reading and the sweep that made it
+		// necessary.
+		reading, foreign := readChordRing(keys, wsActEscape.recorded(), SpellRecorded(sequence))
 		note := fmt.Sprintf("CHORD DID NOT REACH ITS COMMAND: `%s` should have put %q up and the "+
-			"minibuffer holds %q instead. Emacs's own (recent-keys) ends with: %s. It was pressed at %s",
-			wsActSpell(sequence), wantPrompt, prompt, tail(keys, 120), where)
+			"minibuffer holds %q instead. Emacs's own (recent-keys) ends with: %s. It was pressed at %s. %s",
+			wsActSpell(sequence), wantPrompt, prompt, tail(keys, 120), where,
+			wsActRingNote(reading, foreign, wsActSpell(sequence), wsActEscape.Emacs))
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
 	} else {
