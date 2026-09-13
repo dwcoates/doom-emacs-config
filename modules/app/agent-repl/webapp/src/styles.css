@@ -4061,15 +4061,6 @@ body.draining #composer-input::placeholder {
   margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
 }
 
-/* The tray's own heading, composed daemon-side. Quiet: it labels a region the
-   reader is scrolling past, not a section they came for. */
-.hold-tray-heading {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--muted);
-  letter-spacing: 0.03em;
-  padding: 0.4rem 0 0.3rem;
-}
 /* The items list. Delimited by the one shared `.list-rows` rule, so a held
    prompt is separated from the next exactly as a footer panel's rows are. */
 .hold-tray-items > * + * { padding-top: 0.5rem; }

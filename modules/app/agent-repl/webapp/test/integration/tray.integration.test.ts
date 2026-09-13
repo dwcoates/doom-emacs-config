@@ -79,21 +79,13 @@ describe("arm coverage", () => {
 });
 
 describe("the heading", () => {
-  it("draws the served heading verbatim", async () => {
+  it("draws no heading, though the daemon still composes one", async () => {
     // Arrange / Act
     await withTray({});
     // Assert
-    expect(harness.$('[data-component="hold-tray"]')?.textContent).toContain(HOLD_TRAY_HEADING);
-  });
-
-  it("draws a replaced heading on the next push", async () => {
-    // Arrange
-    await withTray({});
-    // Act
-    harness.fake.setTray(WORKSPACE_ID, holdTray({ heading: "queued for you" }));
-    await harness.settle();
-    // Assert
-    expect(harness.$('[data-component="hold-tray"]')?.textContent).toContain("queued for you");
+    expect(harness.$('[data-component="hold-tray"]')?.textContent).not.toContain(
+      HOLD_TRAY_HEADING,
+    );
   });
 });
 
@@ -419,13 +411,6 @@ describe("an empty tray", () => {
     await withTray({ items: [] });
     // Assert
     expect(harness.$$("[data-held-turn]")).toHaveLength(0);
-  });
-
-  it("still draws the heading", async () => {
-    // Arrange / Act
-    await withTray({ items: [] });
-    // Assert
-    expect(harness.$('[data-component="hold-tray"]')?.textContent).toContain(HOLD_TRAY_HEADING);
   });
 });
 

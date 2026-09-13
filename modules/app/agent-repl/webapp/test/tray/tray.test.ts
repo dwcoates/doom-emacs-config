@@ -107,9 +107,11 @@ const tray = (items: DaemonHoldItem[], heading = "held (2)"): DaemonHoldTray =>
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("drawDaemonHoldTray", () => {
-  it("draws the daemon's heading verbatim", () => {
-    const drawn = drawDaemonHoldTray(tray([], "held (3)"), trayContext());
-    expect(drawn.querySelector(".hold-tray-heading")?.textContent).toBe("held (3)");
+  it("draws no heading node at all", () => {
+    // Arrange / Act
+    const drawn = drawDaemonHoldTray(tray([promptItem("t1")], "held (3)"), trayContext());
+    // Assert
+    expect(drawn?.textContent).not.toContain("held (3)");
   });
 
   it("draws the empty tray as a value rather than a gap", () => {
