@@ -43,6 +43,7 @@ import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict
 import type { SidebarContext } from "./context.js";
 import { armBreathes, armSpins, rosterArmMark, type RosterStatusCase } from "./tones.js";
 import { guardMalformed } from "../rpc/guard.js";
+import { clampReveal } from "../topbar/clamp.js";
 import { buildSelectWorkspaceRequest, drawRowMenu, runVerb, type VerbTarget } from "./verbs.js";
 
 /**
@@ -424,11 +425,68 @@ function drawExpandChevron(
       operation: "sidebar.row.detail-toggle",
       context: { workspace: workspaceId, open },
     });
+    // The panel is fixed-positioned, so it is placed the moment it is shown,
+    // measured where it now stands rather than where the last draw left it.
+    if (open) placeRowDetail(ws);
     sync();
   });
 
   sync();
   return chevron;
+}
+
+/**
+ * Where an OPEN row's detail panel lands.
+ *
+ * THE PANEL LEAVES THE RAIL (owner ruling 3, 2026-09-13). It may extend past
+ * the sidebar's width into the feed to gain room, and it must never be cut off
+ * by the window. `#ws-sidebar` clips its content (`overflow: hidden`) and its
+ * scroller clips it again, so an in-flow panel could only ever be as wide as
+ * the rail and was cropped at the rail's bottom edge; `position: fixed` is the
+ * one positioning that escapes BOTH, since neither ancestor is transformed.
+ *
+ * Placing it is then arithmetic over rectangles, and it is the topbar reveals'
+ * arithmetic — `clampReveal`, which puts a panel under its anchor, slides it
+ * left only as far as the right edge demands, and caps its height at what is
+ * left below it so it scrolls inside itself instead of running off the bottom.
+ * A second implementation of "stay inside the window" is exactly the drift the
+ * reveals' helper exists to prevent.
+ */
+export function placeRowDetail(ws: HTMLElement): void {
+  const line = ws.querySelector<HTMLElement>(":scope > .row");
+  const detail = ws.querySelector<HTMLElement>(":scope > .detail");
+  if (line === null || detail === null) return;
+  const placement = clampReveal(line.getBoundingClientRect(), detail.getBoundingClientRect(), {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+  log.debug("placing a row's detail panel", {
+    operation: "sidebar.row.detail-place",
+    verbosity: "verbose",
+    context: {
+      workspace: ws.getAttribute("data-roster-row"),
+      left: placement.left,
+      top: placement.top,
+      max_height: placement.maxHeight,
+    },
+  });
+  // Viewport coordinates, applied verbatim: a fixed box is positioned against
+  // the window, so there is no host box to translate them back into.
+  detail.style.left = `${placement.left}px`;
+  detail.style.top = `${placement.top}px`;
+  detail.style.maxHeight = `${placement.maxHeight}px`;
+}
+
+/**
+ * Re-place every open row's panel under ROOT.
+ *
+ * The rail calls it once after each draw — a detached tree measures as zeros,
+ * so a row drawn already-expanded can only be placed once it is on the page —
+ * and again whenever the window resizes or anything scrolls, because a fixed
+ * panel does not travel with the row that anchors it.
+ */
+export function placeOpenRowDetails(root: ParentNode): void {
+  for (const ws of root.querySelectorAll<HTMLElement>(".ws.open")) placeRowDetail(ws);
 }
 
 /** The "…" control that opens the verb menu, and the right-click's twin. */

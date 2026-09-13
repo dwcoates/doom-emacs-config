@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -8,8 +8,11 @@ import {
   drawRosterRow,
   drawRosterRowWhen,
   drawStatusMark,
+  placeOpenRowDetails,
+  placeRowDetail,
   toggleRowMenu,
 } from "../../src/sidebar/row.js";
+import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
 import { ROSTER_ARM_CLASS, ROSTER_STATUS_CASES } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
@@ -678,5 +681,141 @@ describe("the expand chevron is hover-only", () => {
     await click(chevronOf(drawn));
     // ASSERT
     expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+  });
+});
+
+describe("the detail panel leaves the rail and stays inside the window", () => {
+  // jsdom reports every rect as zero, so the rects this placement reads are
+  // staged on the prototype and the window's size is stubbed — the same
+  // arrangement the topbar reveal suite uses for the same reason.
+  const rects = new Map<Element, DOMRect>();
+  let original: typeof Element.prototype.getBoundingClientRect;
+
+  const rect = (init: { left: number; top: number; width: number; height: number }): DOMRect =>
+    ({
+      left: init.left,
+      top: init.top,
+      right: init.left + init.width,
+      bottom: init.top + init.height,
+      width: init.width,
+      height: init.height,
+      x: init.left,
+      y: init.top,
+      toJSON: () => ({}),
+    });
+
+  beforeEach(() => {
+    rects.clear();
+    // Captured to be ASSIGNED back in afterEach, never called off the reference.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- see above
+    original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
+      return rects.get(this) ?? rect({ left: 0, top: 0, width: 0, height: 0 });
+    };
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = original;
+    vi.unstubAllGlobals();
+  });
+
+  /** An expanded row whose line and panel have the staged rects given. */
+  function expandedRow(line: DOMRect, panel: DOMRect): HTMLElement {
+    const prefs = memoryPrefs({ expanded: { "ws-1": true } });
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }),
+      sidebarContext(appContext(), prefs),
+      "R",
+    );
+    rects.set(drawn.querySelector(":scope > .row") as Element, line);
+    rects.set(drawn.querySelector(":scope > .detail") as Element, panel);
+    return drawn;
+  }
+
+  const panelOf = (drawn: HTMLElement): HTMLElement =>
+    drawn.querySelector(":scope > .detail") as HTMLElement;
+
+  it("hangs the panel directly under the row's own line", () => {
+    // ARRANGE: a rail-width row at the window's left edge.
+    const drawn = expandedRow(
+      rect({ left: 8, top: 100, width: 190, height: 24 }),
+      rect({ left: 0, top: 0, width: 320, height: 90 }),
+    );
+    // ACT
+    placeRowDetail(drawn);
+    // ASSERT: the line's own left, and its bottom.
+    expect([panelOf(drawn).style.left, panelOf(drawn).style.top]).toEqual(["8px", "124px"]);
+  });
+
+  it("slides a panel that would run off the right edge back inside the window", () => {
+    // ARRANGE: a row near the right edge, with a panel wider than what is left.
+    const drawn = expandedRow(
+      rect({ left: 880, top: 100, width: 110, height: 24 }),
+      rect({ left: 0, top: 0, width: 320, height: 90 }),
+    );
+    // ACT
+    placeRowDetail(drawn);
+    // ASSERT: held one margin clear of the right edge, never cut off by it.
+    expect(panelOf(drawn).style.left).toBe(`${1000 - REVEAL_MARGIN_PX - 320}px`);
+  });
+
+  it("caps a panel near the bottom edge at the height the window leaves it", () => {
+    // ARRANGE: a row low in a short window, with a tall panel.
+    const drawn = expandedRow(
+      rect({ left: 8, top: 700, width: 190, height: 24 }),
+      rect({ left: 0, top: 0, width: 320, height: 400 }),
+    );
+    // ACT
+    placeRowDetail(drawn);
+    // ASSERT: it scrolls inside itself rather than running past the bottom.
+    expect(panelOf(drawn).style.maxHeight).toBe(`${800 - 724 - REVEAL_MARGIN_PX}px`);
+  });
+
+  it("places a row that was drawn already expanded, once it is on the page", () => {
+    // ARRANGE
+    const drawn = expandedRow(
+      rect({ left: 8, top: 40, width: 190, height: 24 }),
+      rect({ left: 0, top: 0, width: 320, height: 90 }),
+    );
+    const host = document.createElement("div");
+    host.appendChild(drawn);
+    // ACT
+    placeOpenRowDetails(host);
+    // ASSERT
+    expect(panelOf(drawn).style.top).toBe("64px");
+  });
+
+  it("leaves a closed row's panel unplaced", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    const host = document.createElement("div");
+    host.appendChild(drawn);
+    // ACT
+    placeOpenRowDetails(host);
+    // ASSERT
+    expect(panelOf(drawn).style.top).toBe("");
+  });
+
+  it("places the panel the moment the chevron opens it", async () => {
+    // ARRANGE: a resting row, expanded by the click rather than by the draw.
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }),
+      sidebarContext(),
+      "R",
+    );
+    rects.set(
+      drawn.querySelector(":scope > .row") as Element,
+      rect({ left: 8, top: 200, width: 190, height: 24 }),
+    );
+    rects.set(
+      drawn.querySelector(":scope > .detail") as Element,
+      rect({ left: 0, top: 0, width: 320, height: 90 }),
+    );
+    // ACT
+    await click(drawn.querySelector(".chev") as Element);
+    // ASSERT
+    expect(panelOf(drawn).style.top).toBe("224px");
   });
 });
