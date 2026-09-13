@@ -898,3 +898,18 @@ discovered later. The module AGENTS.md documents the catalog.
 | 2026-09-13 | Should the start gate look only at `SessionStart` hooks, or at any hook that blocks before `init`? | Any hook | The only hooks that can fire before the vendor announces the session ARE its `SessionStart` ones, so a matcher on the event name adds a way to be wrong and no discrimination | Add `hook_event === "SessionStart"` to `settleStartOnBlockingHook` |
 | 2026-09-13 | Does a `SessionStart` hook that merely FAILS — the owner's grounded case is the plugin's `powershell` arm with no interpreter on macOS — fail the start? | No. Only a hook with BLOCKING TEXT does | `hookBlockingText` is the settled reading of that difference and already governs how the hook is drawn; a failing hook gates nothing, and treating stderr as a refusal would fail every boot on a hook the vendor itself ignored | Make `hookBlockingText` return `stderr` when `output` is empty |
 | 2026-09-13 | Does a blocked start get its own `StartSession` failure arm? | No — `vendor_start_failed`, with the hook and its text in `detail` | The proto documents that arm as "the SDK did not get us to a first message", `detail` as "the shim's account, for a human and for logs; never switched on", and the daemon relays it by name. Nothing switches on a blocked-by-hook start, so a new arm would be a wire change with no reader | Add a `hook_blocked` arm to `shim.v1 StartSessionFailure` and the daemon's `OpenWorkspaceError` |
+
+## Owner rulings: topbar layout (2026-09-13, owner)
+
+- The topbar spans the full width, left edge to right edge, with edge
+  padding equal to the padding between cells.
+- All free width pads the CENTER section, which is centered on its CONTENT
+  against the full span (the middle character of "bob" sits at the exact
+  middle of the strip), never pushed by the left or right groups.
+- The connectivity glyph sits to the LEFT of the account label and close
+  to it: it is the account's status indicator, one element.
+- Ideally the center shows the workspace SUMMARY rather than the name, if
+  the vendor/SDK provides one (diagnosed: the vendor writes an `ai-title`
+  transcript line; not on our protos yet).
+- The whole-view state text ("cold context 101.1k 12m 13s") drawn in the
+  right group was noticed as not matching the described layout.
