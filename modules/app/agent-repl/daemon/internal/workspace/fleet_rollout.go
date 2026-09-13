@@ -520,7 +520,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 func (f *Fleet) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.HibernateResponse, error) {
 	client, ok := f.Client(ws)
 	if !ok {
-		return nil, fmt.Errorf("workspace: hibernate %q: the workspace has no live session", ws)
+		return nil, fmt.Errorf("workspace: hibernate %q: %w", ws, drain.ErrNoLiveSession)
 	}
 	response, err := client.Hibernate(ctx, &shimv1.HibernateRequest{})
 	if err != nil {
@@ -529,6 +529,16 @@ func (f *Fleet) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.Hibe
 	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Info(opFleetRollout,
 		"hibernated the workspace session", dlog.Context{"shim_pid": client.PID()})
 	return response, nil
+}
+
+// Serving reports whether this daemon holds a shim it can address for the
+// workspace. It is drain.Stand's selection predicate, and it answers off
+// Client so it cannot disagree with the directive it gates: a reaped client is
+// a row awaiting teardown, not a session, and a workspace whose bring-up has
+// not installed a client yet is not one either.
+func (f *Fleet) Serving(ws ids.WorkspaceID) bool {
+	_, ok := f.Client(ws)
+	return ok
 }
 
 // KillSession ends a workspace's session: it ASKS THE SHIM to end the session

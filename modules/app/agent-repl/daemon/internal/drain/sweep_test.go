@@ -3,6 +3,7 @@ package drain
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -965,4 +966,111 @@ func TestSweepNamesTheWorkspaceOnItsCentrallyRoutedRecords(t *testing.T) {
 		}
 	}
 	t.Fatalf("no sweep record named the unroutable workspace %q", record.Dir)
+}
+
+// TestSweepSkipsAWorkspaceItHoldsNoShimFor covers the selection invariant: a
+// workspace whose session this daemon cannot address -- a bring-up still in
+// flight, a close already under way, a durable row this process never adopted
+// -- is never sent a directive that cannot land.
+func TestSweepSkipsAWorkspaceItHoldsNoShimFor(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.standDown(ws)
+
+	// Act.
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 0 || len(h.stand.hibernated) != 0 {
+		t.Fatalf("hibernated = %v (directives %v), want no directive sent to a workspace with no shim",
+			hibernated, h.stand.hibernated)
+	}
+}
+
+// TestSweepRecordsTheSkippedWorkspaceAtDebug covers the skip's account: the
+// sweep says WHY it passed a workspace over, at the level a state deserves.
+// It cost an ERROR every five minutes forever when it did not.
+func TestSweepRecordsTheSkippedWorkspaceAtDebug(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.standDown(ws)
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert.
+	found := false
+	for _, r := range records(h.log, opSweep) {
+		if r.Level == "error" {
+			t.Fatalf("the skipped workspace was recorded at error: %+v", r)
+		}
+		if r.Level == "debug" && r.Message == "the workspace has no shim to address; skipping its hibernation" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the sweep skipped a workspace without recording why")
+	}
+}
+
+// TestSweepRecordsALostSessionDirectiveAtDebug covers the RACE the skip above
+// cannot close: the session went away between the selection and the call. The
+// typed state is an expected outcome, not a fault.
+func TestSweepRecordsALostSessionDirectiveAtDebug(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.hibernateErr[ws] = fmt.Errorf("workspace: hibernate %q: %w", ws, ErrNoLiveSession)
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert.
+	found := false
+	for _, r := range records(h.log, opSweep) {
+		if r.Level == "error" {
+			t.Fatalf("a session lost before the directive was recorded at error: %+v", r)
+		}
+		if r.Level == "debug" && r.Message == "the session went away before the hibernate directive; deferring the hibernation" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the sweep deferred a lost session without recording the state")
+	}
+}
+
+// TestSweepStillRecordsAGenuineDirectiveFailureAtError is the other side of
+// that narrowing: a directive that failed against a shim that WAS there is a
+// fault, and stays one.
+func TestSweepStillRecordsAGenuineDirectiveFailureAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.hibernateErr[ws] = errors.New("transport blew up")
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert.
+	found := false
+	for _, r := range records(h.log, opSweep) {
+		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the hibernation" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a genuine directive failure on a serving workspace was not recorded at error")
+	}
 }
