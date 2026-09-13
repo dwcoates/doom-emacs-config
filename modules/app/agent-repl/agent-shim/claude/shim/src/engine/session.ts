@@ -71,6 +71,7 @@ import {
 import type { Engine } from "./engine.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { SYNTHETIC_MODEL } from "../model.js";
+import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
 import { fastModeUpdate } from "../convert/session-updates.js";
 import { backupTranscript } from "./backup.js";
 import {
@@ -1305,6 +1306,43 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * WHAT A START THAT WAITED THE WHOLE BOUND OUT IN SILENCE SHOULD BE TOLD.
+   *
+   * The bound is for SILENCE, and silence has one grounded explanation and one
+   * grounded companion, both worth naming in the refusal because neither is
+   * visible anywhere else:
+   *
+   *   - THE VENDOR ANNOUNCES `system:init` ONLY ONCE A FIRST TURN REACHES IT.
+   *     Driven exactly as this shim drives it (`--input-format stream-json`),
+   *     claude 2.1.220 and 2.1.270 answer control requests within 300ms and
+   *     emit no `init` at all until an input message arrives; feeding one turn
+   *     produces `init` in ~600ms in the same directory. So a start that waits
+   *     for `init` before prompting waits forever, and the bound is what ends
+   *     it (grounded 2026-09-13, workspace 2b81f45a724642ef).
+   *   - AN UNTRUSTED WORKSPACE IS A DEGRADED ONE. It does not hang, but its
+   *     permission allowlists are dropped, so a reader here should confirm the
+   *     entry `trust.ts` writes is present.
+   *
+   * NAMED ONLY WHEN THE EVIDENCE FITS: a child that wrote to stderr, or that
+   * emitted anything beyond its `SessionStart` hooks, has a more specific story
+   * and this one would talk over it.
+   */
+  function silentStartReason(timeoutMs: number): string {
+    const bound = `the vendor did not send its init message within ${timeoutMs}ms`;
+    const onlyHooks = preInitKinds.every((kind) => kind.startsWith("system:hook_"));
+    if (!onlyHooks || preInitKindsDropped > 0 || vendorStderrTail.trim() !== "") return bound;
+    const configFile = `${deps.env.configDir}/${VENDOR_CONFIG_FILE}`;
+    const seen = preInitKinds.length === 0 ? "nothing at all" : "only its SessionStart hook events";
+    return (
+      `${bound}: it emitted ${seen} and wrote nothing to stderr. This vendor announces ` +
+      "`system:init` only once a first turn reaches it, so a start that waits for init before " +
+      `prompting cannot settle. Also confirm projects[${JSON.stringify(trustRoot(deps.env.cwd))}].` +
+      `${TRUST_KEY} is true in ${configFile}: an untrusted workspace still runs, but with its ` +
+      "permission allowlists silently dropped."
+    );
+  }
+
+  /**
    * A RESULT THAT IS AN ERROR, BEFORE THE SESSION EVER OPENED.
    *
    * The vendor answers an opening it cannot honour with a `result` carrying
@@ -1810,7 +1848,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       };
       if (timeout <= 0) return;
       const handle = setTimeout(() => {
-        initReject?.(new Error(`the vendor did not send its init message within ${timeout}ms`));
+        initReject?.(new Error(silentStartReason(timeout)));
       }, timeout);
       if (typeof (handle as { unref?: () => void }).unref === "function") {
         (handle as { unref: () => void }).unref();
@@ -2038,6 +2076,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           pre_init_messages: preInitKinds.length + preInitKindsDropped,
           pre_init_kinds: preInitKinds.join(","),
           vendor_stderr: vendorStderrTail.trim(),
+          // THE SPAWN'S OWN FACTS, on the one record a failed start always
+          // writes: which directory the vendor was pointed at, and which
+          // account root and trust key govern it. A reader chasing a silent
+          // start otherwise has to reconstruct both from the daemon's side.
+          config_dir: deps.env.configDir,
+          trust_root: trustRoot(deps.env.cwd),
         },
         "what the vendor emitted before the start failed",
       );
