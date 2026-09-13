@@ -113,6 +113,14 @@ func (c *client) branchExists(ctx context.Context, operation, repoDir, branch st
 	return in.exitCode == 0, nil
 }
 
+// BranchExists reports whether a LOCAL branch by that name exists. It is the
+// exported half of branchExists, for the naming call's collision probe: an
+// absent branch is the answer the probe wants, so it must not be recorded as
+// a failure the way a failed ResolveRef is.
+func (c *client) BranchExists(ctx context.Context, repoDir, branch string) (bool, error) {
+	return c.branchExists(ctx, "daemon.gitclient.branch_exists", repoDir, branch)
+}
+
 // ResolveRef resolves a ref to a full commit sha. The `^{commit}` peel means a
 // tag resolves to the commit it points at rather than to the tag object, and
 // `--verify` means an unknown ref fails loudly instead of being echoed back.

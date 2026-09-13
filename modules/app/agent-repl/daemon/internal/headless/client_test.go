@@ -74,8 +74,9 @@ func TestRunRefusesARequestWithNoSite(t *testing.T) {
 }
 
 func TestRunRefusesWhenTheGuardForbidsTheSite(t *testing.T) {
-	// Arrange.
-	c, seen := scripted(t, forbiddingGuard(t), "fake-claude", "ok", nil)
+	// Arrange: the DEFAULT binary, which is the only spelling the guard
+	// refuses — an explicit path is by definition not the real CLI.
+	c, seen := scripted(t, forbiddingGuard(t), DefaultBin, "ok", nil)
 
 	// Act.
 	_, err := c.Run(context.Background(), Request{Site: "workspace_naming", Prompt: "q"})
@@ -87,6 +88,24 @@ func TestRunRefusesWhenTheGuardForbidsTheSite(t *testing.T) {
 	}
 	if seen.Bin != "" {
 		t.Fatalf("the exec site ran %q, want a forbidden site never to compose argv", seen.Bin)
+	}
+}
+
+// TestRunPermitsAnExplicitBinaryUnderTheGuard pins login's rule, which every
+// headless call now shares: a named stand-in is not the real CLI, so a
+// forbidding guard does not refuse it and a test can drive the whole path.
+func TestRunPermitsAnExplicitBinaryUnderTheGuard(t *testing.T) {
+	// Arrange.
+	c, seen := scripted(t, forbiddingGuard(t), "/tmp/fake-claude", "ok", nil)
+
+	// Act.
+	if _, err := c.Run(context.Background(), Request{Site: "workspace_naming", Prompt: "q"}); err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+
+	// Assert.
+	if seen.Bin != "/tmp/fake-claude" {
+		t.Fatalf("the exec site ran %q, want the explicitly named stand-in", seen.Bin)
 	}
 }
 

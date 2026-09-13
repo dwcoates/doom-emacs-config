@@ -435,6 +435,12 @@ func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
 	return g.defaultBranch, nil
 }
 
+func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
+	g.record("branch_exists")
+	_, ok := g.refs["refs/heads/"+branch]
+	return ok, nil
+}
+
 func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 	g.record("resolve_ref")
 	if sha, ok := g.refs[ref]; ok {
