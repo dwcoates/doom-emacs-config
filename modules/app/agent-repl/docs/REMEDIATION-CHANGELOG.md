@@ -11,6 +11,9 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- webapp footer: the webapp draws its OWN link failures -- every failing site reports one `reportClientFailure(kind, context)` verdict and the footer composes a disconnected strip locally (substatus "daemon unreachable", the site's ad-hoc line as the activity), keeping the daemon's clock/tokens/chips and returning to its pushed view once a unary is answered or a stream reads again (owner ruling, webapp-side failures reach the footer, 2026-09-13)
+- webapp rpc: eleven sites that were silent now report -- `callUnary`'s transport catch, a standing stream that ended, a `source_ended` subscription, a failed `UnsubscribePage`, a `ClientLog` that could not be forwarded, the `daemon_unreachable` and `frame_undecodable` cards, and the four swallowed `OpenFeed` probe/tail/bubble paths (FOOTER-TOPOLOGY-AUDIT N2 rows 7-11 and N3 rows 12-15)
+
 - topbar account cell: clicking it opens a dropdown of every account root the daemon knows (email or "logged out", the current one marked), and picking one switches the workspace's session to it through SelectAccount and the restart verb's engine, opening that root's login when it has none; it is the pair's reveal, replacing the session line the cell used to open (owner ruling 2026-09-13: the logged-in cell did nothing)
 
 - shim start path: the init bound is for SILENCE only — an error `result`, an ended stream, an exited child or a throwing iterator settles StartSession at once as `vendor_start_failed` with the vendor's own text (its stderr appended), a failed start closes the query it opened, and the pre-`init` message kinds are logged at info (a resume emitted its `SessionStart:resume` hook, succeeded it in 12ms, then held the verb the full 45s twice with nothing in any log saying what it had emitted, 2026-09-13 18:17)
