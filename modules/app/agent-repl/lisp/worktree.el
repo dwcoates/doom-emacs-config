@@ -45,6 +45,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--with-deferred-quit "core")
 (declare-function agent-repl--deferred-quit-arm-audit "agent-repl-core" (context))
+(declare-function agent-repl--deferred-quit-hand-off "agent-repl-core" (context))
 
 (require 'cl-lib)
 (require 'subr-x)

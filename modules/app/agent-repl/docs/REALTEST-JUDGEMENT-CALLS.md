@@ -31,6 +31,14 @@ See `docs/REALTEST-PLAN.md` for run status.
 | 2026-09-13 | The probe's `condition-case` handled `error`, which does not catch `quit` | Handle `(quit error)` | A probe interrupted by the very key it is confirming must come back as a named probe failure, not unwind silently | Restore the bare `error` handler in `probeWrapper` |
 | 2026-09-13 | `DeliveryEffect.Observed` answered a bare bool, so a minibuffer probe the editor refused read as "the effect has not happened" | It answers `(bool, error)`, and a failed effect probe downgrades a marks-absence to undetermined (`judgeWithEffectProbe`) | Two accounts, one silent and one failed, name nobody; blaming the key driver on them is the same sin as blaming the editor | Revert `judgeWithEffectProbe` to `judgeDelivery` in `confirm` |
 
+## Deferred-quit requeue at a standing prompt, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Leaving `quit-flag` armed did not fix realtests 5-8: three prompts still lost the chord, while "Open workspace: " (no precreate pending, so no guarded section on the focus edge) arrived and was recorded | A quit deferred with a minibuffer standing is REQUEUED as the quit character on `unread-command-events`; with no minibuffer the flag is still left armed | The focus-in path does not return to `read_char`, it returns into more lisp, and the first QUIT check there signals a `quit` the recursive command loop prints as `Quit`. Requeued as a key it reaches the prompt's own binding, is recorded in `(recent-keys)`, and `abort-minibuffers` runs from inside the minibuffer where its `this_minibuffer_depth` check passes | Return `'armed` unconditionally from `agent-repl--deferred-quit-hand-off` (core.el) |
+| 2026-09-13 | Whether to hardcode `?\C-g` as the requeued key | Read it from `(nth 3 (current-input-mode))`, falling back to `?\C-g` | A user who moved their quit character must get back the key they pressed, not the one this module assumed | Replace `agent-repl--deferred-quit-char` with the literal |
+| 2026-09-13 | Whether the audit timer should requeue too | Yes: a still-owed quit goes through the same hand-off | A prompt can go up between the section ending and the zero-delay timer firing, and that quit is owed to it | Restore the audit's log-only branch |
+
 ## Deferred-quit drop in the editor, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
