@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- shim StartSession: a hook that blocks before the vendor's `init` refuses the start at once with the hook's own text, and the wait for `init` is bounded by the shim (45s, under the daemon's 60s) instead of being unbounded (`shim.convert.hooks` `SessionStart:resume` blocked, then all three boot bring-ups hanging to `daemon.workspace.bring_up` ERROR, 2026-09-13 17:14)
+
 - shim WatchAgent tail: the store ending a standing `WatchAgentSession` is no longer read as a conclusion — the tail re-opens from the last served pointer on the retry schedule, bounded by three barren ends, and every `WatchAgent` ending is named (concluded at info, an unasked one at error) (daemon `a standing stream ended without the session ending` + `link_fault` with the shim silent, workspace 2b81f45a724642ef, 2026-09-13 16:03)
 
 - elisp daemon exit: the shutdown order names the process it was given to, so a restart's ensure spawning the successor first no longer wipes it and the predecessor's orderly exit is recorded at info (`elisp.daemon.exited requested=nil` WARN x2 on `bin/deploy-all.sh`, 2026-09-13)

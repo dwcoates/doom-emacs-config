@@ -37,7 +37,7 @@ import { mainAgentId } from "../../src/convert/ids.js";
 // static binding is the file's one copy and cannot drift from the engine's.
 import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
-import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
+import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, hookResponse, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
   readonly engine: SessionEngine;
@@ -335,11 +335,16 @@ async function untilQuery(h: Harness, index: number): Promise<{ spec: QuerySpec;
   throw new Error(`no query was created at index ${index}`);
 }
 
+/** The pre-minted id a fresh binding carries. */
+function freshSessionId(spec: QuerySpec): string {
+  return spec.binding.kind === "fresh" ? spec.binding.sessionId : "";
+}
+
 /** Bring a fresh session up: start it, and answer the vendor's init. */
 async function started(h: Harness): Promise<shimv1.StartSessionResponse> {
   const pending = h.engine.startSession(freshRequest());
   const first = await untilQuery(h, 0);
-  const sessionId = first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
+  const sessionId = freshSessionId(first.spec);
   first.query.emit(initMessage({ sessionId }));
   return pending;
 }
@@ -4112,6 +4117,76 @@ describe("StartSession's remaining refusals", () => {
     const h = harness({ initTimeoutMs: 5 });
 
     expect(failureCause(await h.engine.startSession(freshRequest()))).toBe("vendorStartFailed");
+  });
+
+  it("names the bound it waited out when the vendor never sends its init", async () => {
+    // A HANG THAT ANSWERS SAYS WHY. The daemon relays this detail verbatim, so
+    // the bound that fired has to be in it.
+    const h = harness({ initTimeoutMs: 5 });
+
+    const response = await h.engine.startSession(freshRequest());
+
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      "did not send its init message within 5ms",
+    );
+  });
+
+  it("refuses at once when a hook blocks before the vendor's init", async () => {
+    // THE GROUNDED CASE: a blocking `SessionStart:resume` hook, after which the
+    // vendor says nothing more. Waiting out a bound for a refusal already in
+    // hand is what left every boot bring-up hanging.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+
+    expect(failureCause(await pending)).toBe("vendorStartFailed");
+  });
+
+  it("names the hook and its own reason when a hook blocks before the init", async () => {
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+
+    const response = await pending;
+
+    const detail = response.result.case === "failure" ? response.result.value.detail : "";
+    expect(detail).toContain("SessionStart:resume");
+    expect(detail).toContain("not today");
+  });
+
+  it("proceeds when a hook merely FAILS before the vendor's init", async () => {
+    // A hook that gates nothing — no interpreter on PATH is the grounded one —
+    // writes stderr and blocks nothing. The session opens as it always did.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.emit(hookResponse({ outcome: "error", output: "", stderr: "powershell: not found" }));
+    first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("proceeds when a hook SUCCEEDS with output before the vendor's init", async () => {
+    // A `SessionStart` hook's additional context is output, and output alone is
+    // not a refusal.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.emit(hookResponse({ outcome: "success", output: "extra context" }));
+    first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("leaves a hook that blocks AFTER the session opened to the turn it gates", async () => {
+    // The start gate is closed once `init` landed: a `PreToolUse` refusal later
+    // in the session is the turn's business, not the start's.
+    const h = harness();
+    await started(h);
+
+    h.queries[0]?.query.emit(hookResponse({ hook_name: "PreToolUse:one", outcome: "error", output: "no" }));
+
+    expect(h.exits).toEqual([]);
   });
 
   it("throws when StartSession reaches the engine with no source at all", async () => {
