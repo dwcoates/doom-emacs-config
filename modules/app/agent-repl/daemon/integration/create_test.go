@@ -518,12 +518,11 @@ func TestCreateWorkspaceOneShotDecoratesThePromptFromPrompts(t *testing.T) {
 		Repository: repository,
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
 			Prompt: said("add a health check endpoint"),
-			Finish: &agentreplv1.CreateWorkspaceOneShot_SelfMerge{SelfMerge: &agentreplv1.CreateWorkspaceOneShotSelfMerge{}},
 		}},
 	}))
 
-	// Assert: the sent prompt is the user's text PLUS the success-suffix
-	// brief spliced around it, never the bare text.
+	// Assert: the sent prompt is the user's text PLUS the preamble and the
+	// repository's completion directive, never the bare text.
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
 	}
@@ -534,8 +533,42 @@ func TestCreateWorkspaceOneShotDecoratesThePromptFromPrompts(t *testing.T) {
 	if !strings.Contains(got, "add a health check endpoint") {
 		t.Fatalf("the one-shot's decorated prompt = %q, want the user's prompt spliced in", got)
 	}
-	if !strings.Contains(strings.ToLower(got), "invoke") {
-		t.Fatalf("the one-shot's decorated prompt = %q, want the success-suffix brief spliced in", got)
+	if !strings.Contains(got, "when you're all done, please do the following postprocessing directive: ") {
+		t.Fatalf("the one-shot's decorated prompt = %q, want the completion directive's framing sentence", got)
+	}
+}
+
+func TestCreateWorkspaceOneShotCarriesTheRepositorysOwnDirective(t *testing.T) {
+	t.Parallel()
+	// Arrange: the repository states its own directive, and the daemon
+	// concatenates THAT text rather than anything of its own.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	directive := filepath.Join(repo.PolicyDir(), "oneshot-completion-directive.md")
+	if err := os.WriteFile(directive,
+		[]byte("<!-- used by: the daemon; placeholders: none -->\nfile a report in the ledger.\n"), 0o644); err != nil {
+		t.Fatalf("write the repository's completion directive: %v", err)
+	}
+	repository := createRepositoryRef(t, d, repo)
+
+	// Act
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+			Prompt: said("ship the fix"),
+		}},
+	}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
+	}
+	ws := resp.Msg.GetSuccess().GetWorkspace()
+	shim := d.Shim(ws)
+	shim.ExpectStartSession()
+	got := text(shim.ExpectStartTurn().GetSaid())
+	if !strings.Contains(got, "file a report in the ledger.") {
+		t.Fatalf("the one-shot's decorated prompt = %q, want the repository's own directive", got)
 	}
 }
 
@@ -556,7 +589,6 @@ func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T
 		Repository: repository,
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
 			Prompt: said("ship the fix"),
-			Finish: &agentreplv1.CreateWorkspaceOneShot_SelfMerge{SelfMerge: &agentreplv1.CreateWorkspaceOneShotSelfMerge{}},
 		}},
 	}))
 
@@ -571,15 +603,48 @@ func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T
 	if missing.GetPolicyDir() != repo.PolicyDir() {
 		t.Fatalf("policy_dir = %q, want %q", missing.GetPolicyDir(), repo.PolicyDir())
 	}
-	want := []string{"workspace-autonomous-preamble.md", "oneshot-success-suffix.md"}
+	want := []string{"workspace-autonomous-preamble.md", "oneshot-completion-directive.md"}
 	if strings.Join(missing.GetMissingFiles(), ",") != strings.Join(want, ",") {
 		t.Fatalf("missing_files = %v, want %v", missing.GetMissingFiles(), want)
 	}
 }
 
-func TestCreateWorkspaceOneShotSelfMergeEnqueuesOnCompletion(t *testing.T) {
+func TestCreateWorkspaceOneShotRefusesARepositoryMissingOnlyTheDirective(t *testing.T) {
 	t.Parallel()
-	// Arrange
+	// Arrange: a policy that states the preamble and no completion directive.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	if err := os.Remove(filepath.Join(repo.PolicyDir(), "oneshot-completion-directive.md")); err != nil {
+		t.Fatalf("remove the completion directive: %v", err)
+	}
+	repository := createRepositoryRef(t, d, repo)
+
+	// Act.
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+			Prompt: said("ship the fix"),
+		}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CreateWorkspace(one_shot) = error %v, want a typed refusal", err)
+	}
+	missing := resp.Msg.GetError().GetOneShotPolicyMissing()
+	if missing == nil {
+		t.Fatalf("CreateWorkspace(one_shot) = %v, want one_shot_policy_missing", resp.Msg)
+	}
+	got := missing.GetMissingFiles()
+	if len(got) != 1 || got[0] != "oneshot-completion-directive.md" {
+		t.Fatalf("missing_files = %v, want only the completion directive", got)
+	}
+}
+
+func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
+	t.Parallel()
+	// Arrange: the daemon performs no finish (owner ruling, 2026-09-12) — the
+	// agent carries the directive out itself.
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
@@ -587,141 +652,23 @@ func TestCreateWorkspaceOneShotSelfMergeEnqueuesOnCompletion(t *testing.T) {
 		Repository: repository,
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
 			Prompt: said("ship the fix"),
-			Finish: &agentreplv1.CreateWorkspaceOneShot_SelfMerge{SelfMerge: &agentreplv1.CreateWorkspaceOneShotSelfMerge{}},
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot, self_merge) = (%v, %v), want a success", resp, err)
+		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
 	}
 	ws := resp.Msg.GetSuccess().GetWorkspace()
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 	shim.ExpectStartTurn()
-	roster := d.WatchRoster()
 
 	// Act: the turn concludes with the ordinary success terminal.
 	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 
-	// Assert: the finish action fires — the workspace's merge is enqueued.
-	awaitRoster(t, d, roster, "the one-shot's self-merge enqueued on completion", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, ws.GetId())
-		return row != nil && (row.GetMergeQueued() != nil || row.GetMerging() != nil || row.GetMerged() != nil)
-	})
-	// The workspace was materialized through CreateWorkspace, so it carries
-	// real layout facts and the enqueue succeeds without internal/merge's
-	// no_layout_facts WARN; this repo is not the daemon's own checkout, so no
-	// test gate and no selfReload run either.
-}
-
-func TestCreateWorkspaceOneShotOpenPrRunsThePrPostPrompt(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	repository := createRepositoryRef(t, d, repo)
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
-			Finish: &agentreplv1.CreateWorkspaceOneShot_OpenPr{OpenPr: &agentreplv1.CreateWorkspaceOneShotOpenPr{}},
-		}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot, open_pr) = (%v, %v), want a success", resp, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	shim := d.Shim(ws)
-	shim.ExpectStartSession()
-	shim.ExpectStartTurn()
-
-	// Act: the turn concludes.
-	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: the finish action fires — a PR-opening post-prompt is submitted.
-	got := text(shim.ExpectStartTurn().GetSaid())
-	if !strings.Contains(got, "create-or-update-pr") {
-		t.Fatalf("the one-shot's post-prompt = %q, want the PR post-prompt referencing create-or-update-pr", got)
-	}
-}
-
-func TestCreateWorkspaceOneShotOpenPrPostPromptSplicesTheSelfCertifiedAndMergeQueueFlags(t *testing.T) {
-	t.Parallel()
-	// Arrange: both request-carried flags asked for.
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	repository := createRepositoryRef(t, d, repo)
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
-			Finish: &agentreplv1.CreateWorkspaceOneShot_OpenPr{OpenPr: &agentreplv1.CreateWorkspaceOneShotOpenPr{
-				SelfCertified:   true,
-				AddToMergeQueue: true,
-			}},
-		}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot, open_pr) = (%v, %v), want a success", resp, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	shim := d.Shim(ws)
-	shim.ExpectStartSession()
-	shim.ExpectStartTurn()
-
-	// Act: the turn concludes, firing the CICD-gated post-prompt.
-	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: both flags are spliced into the pr command the post-prompt
-	// TEXT names (internal/workspace/oneshot.go's createPrCommand, read back
-	// through openPrFollowup's own splice).
-	got := text(shim.ExpectStartTurn().GetSaid())
-	if !strings.Contains(got, "--self-certified") {
-		t.Fatalf("the one-shot's PR post-prompt = %q, want --self-certified spliced in", got)
-	}
-	if !strings.Contains(got, "--add-to-merge-queue") {
-		t.Fatalf("the one-shot's PR post-prompt = %q, want --add-to-merge-queue spliced in", got)
-	}
-}
-
-func TestOneShotSelfMergeFailureTerminalNeverEnqueuesTheMerge(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	repository := createRepositoryRef(t, d, repo)
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
-			Finish: &agentreplv1.CreateWorkspaceOneShot_SelfMerge{SelfMerge: &agentreplv1.CreateWorkspaceOneShotSelfMerge{}},
-		}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot, self_merge) = (%v, %v), want a success", resp, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	shim := d.Shim(ws)
-	shim.ExpectStartSession()
-	shim.ExpectStartTurn()
-
-	// Act: the turn concludes with a FAILURE terminal, never the success
-	// marker the finish hook gates on (internal/promptqueue/lifecycle.go's
-	// runFinishHook: `how != wsm.CloseCompleted` skips the hook entirely).
-	shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
-			Message: "boom",
-			Kind:    &conversationv1.ApiRequestFailed_Internal{Internal: &conversationv1.ApiInternal{}},
-		}},
-	}))
-
-	// Assert: the queue's own turn-ended handling has run to completion --
-	// this log fires only AFTER runFinishHook's decision is already made, so
-	// checking the merge's absence past this point is race-free rather than
-	// a timing guess.
+	// Assert: the queue's own turn-ended handling has run to completion, so
+	// reading the merge queue past this point is race-free rather than a
+	// timing guess — and no merge was ever enqueued.
 	d.AwaitWorkspaceLogOperation(ws.GetDir(), "daemon.promptqueue.turn_ended")
-
-	// Assert: no merge was ever enqueued for this workspace -- proven with a
-	// synchronous RPC read of current daemon state, not a probe window.
 	evict, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ws}},
 	}))
@@ -729,58 +676,8 @@ func TestOneShotSelfMergeFailureTerminalNeverEnqueuesTheMerge(t *testing.T) {
 		t.Fatalf("UpdateMergeQueue(evict) = error %v, want a success carrying no_such_queued_merge", err)
 	}
 	if evict.Msg.GetError().GetNoSuchQueuedMerge() == nil {
-		t.Fatalf("UpdateMergeQueue(evict) after a one-shot failure = %v, want no_such_queued_merge: the finish action must not fire on a failure terminal", evict.Msg)
+		t.Fatalf("UpdateMergeQueue(evict) after a one-shot conclusion = %v, want no_such_queued_merge: the daemon takes no finish action", evict.Msg)
 	}
-}
-
-func TestOneShotOpenPrFinishWithTheFollowupBriefRemovedAnswersBriefMissing(t *testing.T) {
-	t.Parallel()
-	// Arrange: the followup brief the finish hook reads at conclusion is
-	// removed from THE REPOSITORY'S OWN POLICY (a per-test tree, so deleting
-	// from it touches nothing else), and it is removed AFTER the create,
-	// because the create requires it up front for an open-pr one-shot.
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	repository := createRepositoryRef(t, d, repo)
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
-			Finish: &agentreplv1.CreateWorkspaceOneShot_OpenPr{OpenPr: &agentreplv1.CreateWorkspaceOneShotOpenPr{}},
-		}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot, open_pr) = (%v, %v), want a success", resp, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	shim := d.Shim(ws)
-	shim.ExpectStartSession()
-	shim.ExpectStartTurn()
-	if err := os.Remove(filepath.Join(repo.PolicyDir(), "oneshot-create-pr-then-close-followup.md")); err != nil {
-		t.Fatalf("remove the pr-followup brief: %v", err)
-	}
-
-	// Act: the turn concludes with the success marker, driving the finish
-	// hook straight into the now-missing followup brief.
-	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: `SubmitPromptError.brief_missing` is STILL an unlanded arm
-	// (daemon/ERROR-ARMS.md's own row for exactly this hook and this exact
-	// brief filename) -- the one-shot finish hook is not a live RPC a client
-	// awaits, so the intended arm surfaces only in the daemon's own log
-	// (internal/workspace/refusal.go's "daemon.refusal.typed") rather than as
-	// a response the client could read.
-	rec := d.AwaitWorkspaceLogOperation(ws.GetDir(), "daemon.refusal.typed")
-	if got := rec.Context["arm"]; got != "brief_missing" {
-		t.Fatalf("refusal arm = %v, want brief_missing", got)
-	}
-	if got := rec.Context["rpc"]; got != "SubmitPrompt" {
-		t.Fatalf("refusal rpc = %v, want SubmitPrompt (the one-shot finish hook's own rpc name per ERROR-ARMS.md)", got)
-	}
-	if reason, _ := rec.Context["reason"].(string); !strings.Contains(reason, "oneshot-create-pr-then-close-followup.md") {
-		t.Fatalf("refusal reason = %q, want it to name the missing brief file", reason)
-	}
-	d.ExpectWarnings("daemon.promptqueue.one_shot_finish")
 }
 
 // ---- Merge actions ----

@@ -50,6 +50,26 @@ func TestTheMigrationCreatesTheTableTheNewLayoutAdded(t *testing.T) {
 	}
 }
 
+func TestTheMigrationDropsTheColumnTheNewLayoutRetired(t *testing.T) {
+	// Arrange — a file whose creation_jobs still carries one_shot_finish.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[int](t, s,
+		`SELECT count(*) FROM pragma_table_info('creation_jobs') WHERE name = 'one_shot_finish'`)
+	if got != 0 {
+		t.Fatalf("creation_jobs still declares one_shot_finish %d times after the migration, want 0", got)
+	}
+}
+
 func TestTheMigrationLeavesThePreExistingRowsInPlace(t *testing.T) {
 	// Arrange — the user's workspace state, written under layout 3.
 	path := layout3Fixture(t)
