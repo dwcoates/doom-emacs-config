@@ -265,15 +265,37 @@ its own output, with the ids, for the owner to rule on.
 **The chord is real; the minibuffer answers are not.** A realtest prefers real
 keys, and where the plan names a binding the chord IS pressed as real key
 events — then the command's own first prompt is read back out of the minibuffer
-as the proof it arrived (`SPC TAB n` is the only thing that asks "Repository: "
-first), and a real `C-g` aborts it. **The abort has two channels since
+as the proof it arrived, and a real `C-g` aborts it. Since the owner's
+2026-09-12 creation ruling the first prompt is often SHARED: every dynamic mode
+— `SPC TAB n`, `SPC TAB c`, `SPC TAB f` — opens with "Initial prompt: ", and
+only the static create (`SPC TAB N`) asks "Repository: " at all. Where the
+prompt cannot identify the command on its own, Emacs's own `(recent-keys)` is
+asserted to carry the sequence as well, which is the only thing that says which
+key completed the chord. The re-open picker ("Open workspace: ") is `SPC TAB
+O`; the lowercase `o` is the one-shot create ("One-shot commission: "). **The abort has two channels since
 2026-09-12**, and the second one is always reported. The real `C-g` goes first,
 with a 3s bound; if the prompt still stands, an emacsclient eval schedules
 `abort-minibuffers` on a zero-delay timer instead — scheduled rather than
 called inline, so the throw unwinds the minibuffer's recursive edit rather than
 `server-process-filter` — for up to three attempts of 2s each. Taking the
-second channel is written into the manifest as a DEVIATION AND A FINDING and
-fails the test; it is not a fallback that quietly rescues a run. A prompt
+second channel is written into the manifest as a FINDING and fails the test; it
+is not a fallback that quietly rescues a run.
+
+**And the finding names one system, because the press is judged once.** The
+`C-g` is posted with the effect it is pressed for — this prompt closing —
+polled inside the helper's hold, and that one observation is the run's whole
+verdict. It has to be: the quit character leaves NO input mark on this build
+(`kbd_buffer_store_buffered_event` hands it to `handle_interrupt` instead of
+storing it, so `(recent-keys)` cannot grow, and the `quit-flag` it arms is taken
+by the standing read microseconds later), so the marks that confirm every other
+key say nothing about this one. The harness that judged it by them printed
+"HARNESS KEY DELIVERY FAILED, AND IT IS NOT A PRODUCT FINDING" and "DEVIATION,
+AND A PRODUCT FINDING" for the same press, six times in the 2026-09-13 sweep.
+The four outcomes now are: the prompt closed (the chord is proven); the helper
+could not post (a HARNESS finding); Emacs's marks did show the key arriving and
+the prompt still stood (a PRODUCT finding); or the key was posted and its
+arrival cannot be read (UNDETERMINED, named against neither system, with the
+helper's receipt beside it for the owner to rule on). A prompt
 neither channel can clear stops the run immediately, because every assertion
 after it would be about an editor no owner would be in. The single-channel
 version waited the 30s chord ceiling out per failed dismissal and then carried
