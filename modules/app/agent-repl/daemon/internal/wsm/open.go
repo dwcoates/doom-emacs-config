@@ -81,6 +81,14 @@ func Open(ctx context.Context, path string, opts ...Option) (DB, error) {
 		s.handle.Close()
 		return nil, err
 	}
+	// THE BOOT-TIME INVARIANT CHECK. The schema and the foreign_keys pragma
+	// above make a workspace whose repository is unregistered impossible to
+	// WRITE; this reports one that was already there, which only a handle
+	// opened without the pragma can have left. See repoinvariant.go.
+	if err := s.checkRepositoryInvariant(ctx); err != nil {
+		s.handle.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
