@@ -84,6 +84,14 @@ type Resolver interface {
 	// the indicator reports an absent session and never a broken one. It is
 	// lifted by the next link state of any kind.
 	SetParked(ws ids.WorkspaceID, parked bool)
+	// SetColdGate states that this workspace is standing at the COLD GATE: the
+	// shim answered `cold` to the session start, so there is no session and
+	// there will be none until the reader answers the gate. While it stands
+	// the topbar draws the workspace facts plus the gate's own state, exactly
+	// as a park does; answering the gate retires it. It is called from the
+	// same sites that raise and retire the feed's gate row and the footer's
+	// cold-gate status, so the three surfaces cannot disagree about one gate.
+	SetColdGate(ws ids.WorkspaceID, gate ColdGate)
 	// SetWorkspaceDir binds the workspace's directory, which is what resolves
 	// its durable log sink. The daemon calls it at registration, BEFORE any
 	// frame can arrive; a frame for an unbound workspace is an invariant
@@ -129,6 +137,18 @@ type Resolver interface {
 	// empty catalog is the daemon saying there is no MCP server here — a fact,
 	// not a missing one.
 	McpPanel(ws ids.WorkspaceID) *frontendv1.McpPanelView
+}
+
+// ColdGate is the standing cold-context gate as the topbar states it. It is
+// the footer's ColdGate fact seen from this strip: the footer says the
+// composer is owned, and this says the whole session-scoped half of the topbar
+// is not there to be drawn.
+type ColdGate struct {
+	// Standing reports whether a gate is open.
+	Standing bool
+	// ContextTokens is what the cold read would re-read at full price, as the
+	// shim's SessionCold stated it. Read only while Standing.
+	ContextTokens int64
 }
 
 // Option adjusts the resolver's injectable knobs.

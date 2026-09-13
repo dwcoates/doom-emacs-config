@@ -122,6 +122,13 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	apply(s)
 	view, err := r.render(s)
 	missing := s.missing()
+	// THE COLD-GATE EDGES ARE READ OFF THE VIEW ITSELF, under the same lock
+	// that built it, so the record cannot disagree with what was published.
+	coldPublished := view.GetColdGate() != nil
+	returnedToFull := view != nil && s.coldGatePublished && !coldPublished
+	if view != nil {
+		s.coldGatePublished = coldPublished
+	}
 	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
 	r.mu.Unlock()
@@ -142,6 +149,18 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 		// still waiting on are the whole content.
 		ctx["awaiting"] = strings.Join(missing, ",")
 		log.Info(operation, "the topbar took a fact and is not yet complete", ctx)
+	case coldPublished:
+		// AT INFO. A strip that has lost its model selector, its context chip
+		// and its permission picker is the loudest thing a reader can see,
+		// and "why" has to be answerable from the default level rather than
+		// from a reproduction — the same reason the incomplete record above
+		// sits at info.
+		ctx["context_tokens"] = s.coldGateTokens
+		log.Info(operation, "the topbar published the cold-gate view", ctx)
+		topic.Publish(view)
+	case returnedToFull:
+		log.Info(operation, "the topbar returned to the full view after the cold gate", ctx)
+		topic.Publish(view)
 	default:
 		log.Debug(operation, "the topbar took a fact and republished", ctx)
 		topic.Publish(view)
@@ -169,6 +188,24 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 	// IT RETURNS TO THE FULL VIEW ON ITS OWN. `OnLink` clears the park on the
 	// revival's first link state, so the next publication after a revive takes
 	// the branch below without anybody having to retract anything.
+	// THE COLD GATE OUTRANKS HIBERNATION, and the two are never both drawn.
+	// Both mean "no session", but a standing cold gate is waiting on THE
+	// READER — the feed is showing a card that has to be answered before this
+	// workspace can do anything — while hibernation is waiting on nothing and
+	// lifts itself on the next prompt. Naming the state that needs an answer
+	// is the whole job of the strip; the park is still remembered underneath
+	// and draws the moment the gate is answered without one.
+	if s.coldGate {
+		return &frontendv1.TopbarView{
+			Title:        &frontendv1.TopbarTitle{Text: r.title(s)},
+			Connectivity: connectivity,
+			Account:      r.account(s),
+			ColdGate: &frontendv1.TopbarColdGate{
+				ContextTokens: s.coldGateTokens,
+				SinceMs:       s.coldGateAtMs,
+			},
+		}, nil
+	}
 	if s.parked {
 		return &frontendv1.TopbarView{
 			Title:        &frontendv1.TopbarTitle{Text: r.title(s)},
@@ -477,6 +514,27 @@ func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 				s.parkedAtMs = r.opts.clock.Now().UnixMilli()
 			}
 			s.parked = parked
+		})
+}
+
+// SetColdGate installs, or retires, the standing cold gate — the same fact,
+// from the same call sites, that the feed's gate row and the footer's parked
+// status are drawn from.
+//
+// RAISING ONE STAMPS THE INSTANT, for the same reason a park does: the view's
+// age ticks client-side from it. Retiring one leaves the stamp and the token
+// count alone; nothing reads either while no gate stands, and the next gate
+// restates both.
+func (r *resolver) SetColdGate(ws ids.WorkspaceID, gate ColdGate) {
+	r.mutate(ws, "daemon.topbar.set_cold_gate", "the topbar took the cold gate",
+		dlog.Context{"standing": gate.Standing, "context_tokens": gate.ContextTokens}, func(s *wsState) {
+			if gate.Standing && !s.coldGate {
+				s.coldGateAtMs = r.opts.clock.Now().UnixMilli()
+			}
+			if gate.Standing {
+				s.coldGateTokens = gate.ContextTokens
+			}
+			s.coldGate = gate.Standing
 		})
 }
 
