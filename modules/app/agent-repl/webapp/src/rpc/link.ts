@@ -131,6 +131,19 @@ export function clearClientFailures(): void {
   publish();
 }
 
+/**
+ * Drop the standing verdict only if it is KIND's.
+ *
+ * The narrow clear, for the one failure a single event disproves BY ITSELF: a
+ * frame that decoded says nothing about a verb that never arrived, but it does
+ * say the last frame's undecodability is over. Everything else clears through
+ * `clearClientFailures`.
+ */
+export function clearClientFailure(kind: ClientFailureKind): void {
+  if (standing === null || standing.kind !== kind) return;
+  clearClientFailures();
+}
+
 /** The verdict the footer should draw, or null. */
 export function standingClientFailure(): ClientVerdict | null {
   return standing;

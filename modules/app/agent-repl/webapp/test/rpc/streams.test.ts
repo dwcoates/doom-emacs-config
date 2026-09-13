@@ -737,6 +737,30 @@ describe("watchStream and the client's link verdict", () => {
     expect(published).toEqual([null, "stream_ended", null, "stream_ended"]);
   });
 
+  it("clears an undecodable-frame verdict as soon as a frame decodes", async () => {
+    // Arrange: the run's first frame cannot be read, the second can.
+    reportClientFailure("frame_undecodable_card", "a frame could not be read");
+    const { client } = scriptedClient([[undecodablePush(), push()]]);
+    // Act
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    // Assert: the run ends after the good frame, so what stands is the
+    // ENDING's verdict -- the undecodable one was dropped by the decode.
+    expect(standingClientFailure()?.kind).toBe("stream_ended");
+  });
+
+  it("leaves a VERB's verdict standing when a frame decodes, which does not disprove it", async () => {
+    // A STANDING stream: it pushes and never ends, so nothing but the decode
+    // could have cleared the verdict.
+    reportClientFailure("unary_transport", "SubmitPrompt: unavailable");
+    const { client } = standingClient();
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    expect(standingClientFailure()?.kind).toBe("unary_transport");
+  });
+
   it("leaves a verdict standing while the stream is still down", async () => {
     reportClientFailure("unary_transport", "SubmitPrompt: unavailable");
     const { client } = scriptedClient([[]]);

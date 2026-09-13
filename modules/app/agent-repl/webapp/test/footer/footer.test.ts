@@ -591,13 +591,51 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     expect(host.querySelector(".footer-status")?.textContent).toBe("idle");
   });
 
-  it("publishes disconnected to the composer gate while the verdict stands", async () => {
-    const { footer } = mount();
+  it("does NOT close the composer gate, the retry being what lifts the verdict", async () => {
+    const { footer, h } = mount();
+    await settle();
+    h.tail.push(pushView(footerView()));
     await settle();
     const seen: string[] = [];
     footer.onStatus((statusCase) => seen.push(statusCase));
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(seen).toEqual(["disconnected"]);
+    expect(seen).toEqual(["idle"]);
+  });
+
+  it("keeps the daemon's last tokens cell beside the client's status cells", async () => {
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(footerView({ strip: strip({ tokens: { input: { text: "9.9k in" } } }) })));
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    expect(host.querySelector(".footer-tokens")?.textContent).toContain("9.9k in");
+  });
+
+  it("files an unreadable last view rather than throwing at whoever reported", async () => {
+    // ARRANGE: a push whose status sets no arm. It is skipped at the push, and
+    // the view it left behind cannot be redrawn either.
+    const { h } = mount();
+    await settle();
+    h.tail.push(
+      create(WatchFooterResponseSchema, {
+        footer: {
+          strip: create(FooterStripSchema, {
+            status: {},
+            clock: {},
+            tokens: { input: { text: "0 in" } },
+            liveWork: {},
+          }),
+          expanded: expanded(),
+        },
+      }),
+    );
+    await settle();
+    h.sink.reported.length = 0;
+    // ACT: clearing a verdict redraws, and the redraw hits the same view.
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    clearClientFailures();
+    // ASSERT
+    expect(h.sink.reported).toContain("frameUndecodable");
   });
 
   it("stops drawing verdicts once disposed", async () => {
