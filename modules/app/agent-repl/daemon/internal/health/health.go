@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -179,6 +180,18 @@ func (r *reporter) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, err
 	}
 	id, err := r.db.OpenFault(ctx, f)
 	if err != nil {
+		// A FAULT ABOUT A WORKSPACE THAT IS GONE HAS NOWHERE TO STAND, and
+		// that is an ordinary end for one: the link watcher and this reporter
+		// both outlive the registry row, so a shim dying after its workspace
+		// was forgotten arrives here about a row nothing can carry. The error
+		// is still returned -- the caller decides what a lost fault means to
+		// it -- but it is not this layer's ERROR.
+		if errors.Is(err, wsm.ErrNotFound) {
+			log.Debug(opOpenFault, "the fault names a workspace that is no longer registered", dlog.Context{
+				"kind": f.Kind, "cause": err.Error(),
+			})
+			return "", fmt.Errorf("health: open fault %q: %w", f.Kind, err)
+		}
 		log.Error(opOpenFault, "could not record the fault", dlog.Context{
 			"kind": f.Kind, "cause": err.Error(),
 		})

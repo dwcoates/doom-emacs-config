@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -20,6 +22,8 @@ type fakeReporter struct {
 	opened   []wsm.Fault
 	closed   []ids.FaultID
 	next     int
+	// openErr scripts the state client's refusal of an OpenFault.
+	openErr error
 }
 
 func (r *fakeReporter) Daemon(context.Context) (*agentreplv1.DaemonHealthResponse, error) {
@@ -31,6 +35,9 @@ func (r *fakeReporter) Session(context.Context, ids.WorkspaceID) (*agentreplv1.S
 }
 
 func (r *fakeReporter) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, error) {
+	if r.openErr != nil {
+		return "", r.openErr
+	}
 	r.next++
 	id := ids.FaultID(fmt.Sprintf("f%d", r.next))
 	f.ID = id
@@ -137,4 +144,55 @@ func TestADiagnosticsPushWithNoBoundReporterIsRecordedNotDropped(t *testing.T) {
 	// Act / Assert: an unbound forwarder must not panic; the boot-order defect
 	// is surfaced through the error record instead.
 	sink.OnSessionDiagnostics("ws-1", unhealthyDiagnostics())
+}
+
+// TestOnLinkFaultLevelsAForgottenWorkspaceAtDebug is the outermost layer of the
+// shim-death cascade. This sink outlives the registry row, so a shim dying
+// after its workspace was forgotten reaches it about a workspace nothing can
+// carry a fault for -- three ERRORs deep, once per death, for a condition with
+// nothing to remediate.
+func TestOnLinkFaultLevelsAForgottenWorkspaceAtDebug(t *testing.T) {
+	tests := []struct {
+		name      string
+		openErr   error
+		wantLevel string
+	}{
+		{
+			name:      "the workspace was forgotten",
+			openErr:   fmt.Errorf("health: open fault %q: %w", "shim_died", wsm.ErrNotFound),
+			wantLevel: "debug",
+		},
+		{
+			name:      "the state client failed",
+			openErr:   errors.New("disk is gone"),
+			wantLevel: "error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			sink := newDiagnosticsSink(t, &fakeReporter{openErr: tt.openErr})
+			log, ok := sink.log.(*dlog.TestLogger)
+			if !ok {
+				t.Fatalf("sink logger is %T, want *dlog.TestLogger", sink.log)
+			}
+
+			// Act.
+			sink.OnLinkFault("w1", sessionwatcher.LinkFault{
+				Kind: sessionwatcher.LinkFaultDead, Detail: "the shim process is gone",
+			})
+
+			// Assert.
+			var level string
+			for _, record := range log.Records() {
+				if record.Operation == "daemon.cmd.lifecycle" {
+					level = record.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("lifecycle record level = %q, want %q", level, tt.wantLevel)
+			}
+		})
+	}
 }
