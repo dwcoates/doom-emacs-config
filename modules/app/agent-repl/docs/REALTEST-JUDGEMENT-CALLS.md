@@ -245,3 +245,16 @@ this itself.
   (the same prompt the name is generated from) as:
   "when you're all done, please do the following postprocessing directive:
   <repo-specific-specification>". Doom's directive is the module corpus.
+
+## `SPC TAB o` was already taken, so re-open moved to `SPC TAB O` (2026-09-12, agent)
+
+The ruling above collapses the three one-shot commands into one and binds it at
+`SPC TAB o`. That key already held `agent-repl-open-workspace` ("re-open a
+closed workspace"), and dropping a binding to make room is not something a
+brief can silently authorize.
+
+Decision: the one-shot takes `SPC TAB o` as ruled, and re-open moves to the
+capital `SPC TAB O`, which was free in the same map. Nothing loses a binding.
+The three `SPC j` one-shot bindings (`o`, `O`, `C-o`) go with their commands.
+
+Surfaced for the owner to overrule if re-open should keep the lowercase key.
