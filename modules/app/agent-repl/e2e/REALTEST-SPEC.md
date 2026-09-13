@@ -361,6 +361,33 @@ Nothing reaches past a command into the verb layer: a test that called
 `agent-repl-verb-create` would be testing the wire call and saying nothing
 about the command the owner invokes.
 
+**THE QUIT PRESS CARRIES A DIAGNOSTIC CAPTURE, AND IT IS NOT A FIX.** As of the
+2026-09-13 sweeps the `C-g` pressed at a standing prompt in realtests 5 through
+8 is unsolved: it is posted with a clean helper receipt, twice, and Emacs's
+`(recent-keys)` never gains it, no quit reaches the command loop (a
+`command-error-function` installed for a solo realtest 5 run saw zero quit
+signals), and no deferred-quit record is written — while the SAME helper with
+the SAME arguments against the SAME Emacs, pressed by hand at a timer-raised
+`read-string`, dismisses the prompt and is recorded. Every reading the harness
+took was on the wrong side of wherever the key goes. So the press now brackets
+itself with two captures (`e2e/realtest/quitprobe.go`): one BEFORE it, with the
+prompt standing, and one taken by a single `emacsclient` eval IMMEDIATELY AFTER
+the quiet window — the first instant the editor may be spoken to without turning
+the key in flight into an interrupt, and before any other probe of this
+harness's own has run. Eighteen fields in ONE form, each wrapped on its own so a
+signal costs one field and not the capture: the `(recent-keys)` tail,
+`last-input-event`, `last-event-frame`, the selected frame's name and the `nil`
+frame's name, `(active-minibuffer-window)` with its frame,
+`(minibuffer-depth)`, `quit-flag`, `inhibit-quit`, `unread-command-events`,
+`(current-input-mode)`, `this-command`, `real-last-command`, the minibuffer
+contents, `(xwidget-webkit-current-session)` and whether the selected window is
+showing an xwidget buffer, and `(frame-focus-state)` per frame. Both go verbatim
+into `quit-probe.txt` in the run directory — appended, since each act realtest
+presses at more than one prompt over one shared run directory — and, where the
+chord did not visibly dismiss the prompt, verbatim into the failure note as
+well, because a path is not evidence. It changes nothing about how the press is
+made or judged.
+
 **A nuke deletes the log LINK, not the bytes.** A workspace's canonical sink is
 a symlink into the state root, so destroying the worktree leaves the records
 unreachable through the enumeration even though they still exist at the target.
@@ -784,6 +811,8 @@ e2e/realtest/
   gapscan.go                   the high-water mark and the between-sweeps report
   gapscan_driver_test.go       the pre-sweep scan and the end-of-sweep mark
   messages.go                  Emacs's own *Messages*, which has no timestamps
+  quitprobe.go                 the eighteen-field capture bracketing the quit
+                               press, for the unsolved C-g
   phases.go                    the markers and the measurements
   budgets.go                   the table, and why it ships unmeasured
   emacsclient.go               read-only elisp, JSON through a file

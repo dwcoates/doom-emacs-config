@@ -298,6 +298,20 @@ type DeliveryEffect struct {
 	// answered. An error here downgrades the verdict to undetermined
 	// (judgeWithEffectProbe) instead.
 	Observed func(context.Context) (bool, error)
+
+	// AfterQuietWindow, when it is set, is called EXACTLY ONCE immediately
+	// after the chord's quiet window and before the first mark or effect probe
+	// — at the instant the confirmation would otherwise have first spoken to
+	// the editor.
+	//
+	// IT IS A DIAGNOSTIC SEAM AND NOTHING ELSE. It exists for the unsolved
+	// `C-g` (quitprobe.go): the one capture of the editor's input state that
+	// has to be taken at that instant, since every reading before the quiet
+	// window is too early and every reading after the first probe is taken in
+	// an editor this harness has already started running lisp in. It decides
+	// nothing about the verdict, and a chord with no quiet window (every chord
+	// but the quit character) reaches it immediately.
+	AfterQuietWindow func(context.Context)
 }
 
 // recentKeysUniform says whether a rendered `recent-keys` is the same key over
