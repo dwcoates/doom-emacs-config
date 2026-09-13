@@ -22,7 +22,7 @@ import (
 // newBareClient builds a client with no process and no connection, for the
 // pieces that need neither.
 func newBareClient() *client {
-	return newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	return newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 }
 
 // TestOccupyRefusesASecondHolder asserts the occupancy guard admits one holder
@@ -844,7 +844,7 @@ func TestStandingDownIsFalseUntilAKillSessionIsAsked(t *testing.T) {
 func TestPublishExitRecordsAnAskedForCleanExitAsOrderly(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 	c.standDown.Store(true)
 
 	// Act.
@@ -865,7 +865,7 @@ func TestPublishExitRecordsAnAskedForCleanExitAsOrderly(t *testing.T) {
 func TestPublishExitRecordsAnUnaskedCleanExitAsADeath(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 
 	// Act.
 	c.publishExit(ExitInfo{PID: 4242, Code: 0})
@@ -882,7 +882,7 @@ func TestPublishExitRecordsAnUnaskedCleanExitAsADeath(t *testing.T) {
 func TestPublishExitRecordsAnAskedForNonzeroExitAsADeath(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 	c.standDown.Store(true)
 
 	// Act.
@@ -900,7 +900,7 @@ func TestPublishExitRecordsAnAskedForNonzeroExitAsADeath(t *testing.T) {
 func TestPublishExitRecordsAnAskedForSignalledExitAsADeath(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 	c.standDown.Store(true)
 
 	// Act.
@@ -958,7 +958,7 @@ func TestKillArmsTheStandDownLatchBeforeTheProcessIsEnded(t *testing.T) {
 			name: "an adopted client whose socket is already gone",
 			build: func(t *testing.T) *client {
 				return newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"),
-					filepath.Join(shortDir(t), "absent.sock"), defaultBackoff, nil)
+					filepath.Join(shortDir(t), "absent.sock"), defaultBackoff, nil, nil)
 			},
 		},
 	}
@@ -1020,7 +1020,7 @@ func TestAnAdoptedShimsDepartureIsLoudOnlyWhenNobodyAskedForIt(t *testing.T) {
 			// Arrange.
 			log := dlog.NewTestLogger()
 			c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff,
-				func(ids.WorkspaceID) (bool, error) { return true, nil })
+				func(ids.WorkspaceID) (bool, error) { return true, nil }, nil)
 			c.standDown.Store(tc.standDown)
 
 			// Act.
@@ -1045,7 +1045,7 @@ func TestAnAdoptedShimsDepartureIsLoudOnlyWhenNobodyAskedForIt(t *testing.T) {
 func TestPublishExitRecordsAnInferredDepartureInsideAStandDownAsOrderly(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 	c.standDown.Store(true)
 
 	// Act.
@@ -1063,7 +1063,7 @@ func TestPublishExitRecordsAnInferredDepartureInsideAStandDownAsOrderly(t *testi
 func TestPublishExitRecordsAnUnaskedInferredDepartureAsADeath(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 
 	// Act.
 	c.publishExit(ExitInfo{PID: 4242, Code: -1, Inferred: true})
@@ -1100,7 +1100,7 @@ func TestTheRedialLadderEndsLoudlyOnlyWhenNobodyAskedForTheTeardown(t *testing.T
 			// passed, and freeing the very lock the ladder was waiting on.
 			log := dlog.NewTestLogger()
 			c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"),
-				backoff{Initial: time.Millisecond, Max: 2 * time.Millisecond, Factor: 1}, nil)
+				backoff{Initial: time.Millisecond, Max: 2 * time.Millisecond, Factor: 1}, nil, nil)
 			c.lockProbe = func(ids.WorkspaceID) (bool, error) {
 				c.standDown.Store(tc.standDown)
 				return true, nil
@@ -1199,7 +1199,7 @@ func TestAUnaryCallInsideAnOrderedStandDownIsNotAFault(t *testing.T) {
 			// call fails at the transport exactly as a killed shim's does.
 			log := dlog.NewTestLogger()
 			c := newClient(log, ids.WorkspaceID("ws-1"),
-				filepath.Join(t.TempDir(), "absent.sock"), defaultBackoff, nil)
+				filepath.Join(t.TempDir(), "absent.sock"), defaultBackoff, nil, nil)
 			if tt.standDown {
 				c.standDown.Store(true)
 			}
@@ -1249,7 +1249,7 @@ func TestStandDownArmsTheLatchForTheDaemonsOwnTeardown(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+			c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 			if tt.detach {
 				c.Detach()
 			}
@@ -1297,7 +1297,7 @@ func TestStandingDownReadsTheDaemonsLatchToo(t *testing.T) {
 func TestPublishExitRecordsADepartureInsideTheDaemonsStandDownAsOrderly(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 	c.daemonStandDown = func() bool { return true }
 
 	// Act.
@@ -1316,7 +1316,7 @@ func TestPublishExitRecordsADepartureInsideTheDaemonsStandDownAsOrderly(t *testi
 func TestPublishExitOutsideTheDaemonsStandDownStaysADeath(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
 	c.daemonStandDown = func() bool { return false }
 
 	// Act.
@@ -1326,4 +1326,141 @@ func TestPublishExitOutsideTheDaemonsStandDownStaysADeath(t *testing.T) {
 	if !hasRecordAt(log, "error", "daemon.shimclient.exit") {
 		t.Fatal("an inferred departure outside any stand-down was not recorded as a death")
 	}
+}
+
+// ---- the daemon-wide latch on the adopted paths ----
+
+// TestTheRedialLadderEndsAtDebugInsideTheDaemonsStandDown is the ladder's half
+// of the measured shape: the client itself was never asked to stand down --
+// nothing named it -- and the daemon's latch is the only thing that says the
+// departure was ordered. Read only from the client's own latch, the ladder
+// ended with `daemon.shimclient.redial` WARN "redial stopped" four times over
+// one `UpdateShutdownSchedule{now}`.
+func TestTheRedialLadderEndsAtDebugInsideTheDaemonsStandDown(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"),
+		backoff{Initial: time.Millisecond, Max: 2 * time.Millisecond, Factor: 1},
+		func(ids.WorkspaceID) (bool, error) { return true, nil },
+		func() bool { return true })
+	frames := make(chan *shimv1.WatchSessionResponse)
+	errs := make(chan error, 1)
+	errs <- io.ErrUnexpectedEOF
+
+	// Act.
+	runMonitorToCompletion(t, c, frames, errs)
+
+	// Assert.
+	if hasRecordAt(log, "warn", "daemon.shimclient.redial") {
+		t.Fatal("the redial ladder warned inside a stand-down this daemon ordered")
+	}
+}
+
+// TestTheRedialLadderStillWarnsOutsideAnyStandDown is that rule's other half:
+// a daemon that ordered nothing still gets the loud record.
+func TestTheRedialLadderStillWarnsOutsideAnyStandDown(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"),
+		backoff{Initial: time.Millisecond, Max: 2 * time.Millisecond, Factor: 1},
+		func(ids.WorkspaceID) (bool, error) { return true, nil },
+		func() bool { return false })
+	frames := make(chan *shimv1.WatchSessionResponse)
+	errs := make(chan error, 1)
+	errs <- io.ErrUnexpectedEOF
+
+	// Act.
+	runMonitorToCompletion(t, c, frames, errs)
+
+	// Assert.
+	if !hasRecordSaying(log, "warn", "daemon.shimclient.redial", "redial stopped") {
+		t.Fatal("the redial ladder ended quietly with no stand-down behind it")
+	}
+}
+
+// TestTheExitRecordStatesTheDaemonsLatchToo pins the FIELD, not the level: a
+// reader of the measured log could see only `stand_down_asked: false`, which
+// says nothing about the question that actually decided the level.
+func TestTheExitRecordStatesTheDaemonsLatchToo(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil,
+		func() bool { return true })
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: -1, Inferred: true})
+
+	// Assert.
+	fields := recordFields(t, log, "daemon.shimclient.exit")
+	if fields["daemon_stand_down"] != true {
+		t.Fatalf("the exit record's daemon_stand_down = %v, want true", fields["daemon_stand_down"])
+	}
+}
+
+// TestTheExitRecordStatesTheClientsOwnLatchSeparately is the other field, and
+// the reason there are two: the adopted client of a shim the daemon ordered
+// away was never itself asked, and a record that folded the two into one could
+// not say so.
+func TestTheExitRecordStatesTheClientsOwnLatchSeparately(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil,
+		func() bool { return true })
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: -1, Inferred: true})
+
+	// Assert.
+	fields := recordFields(t, log, "daemon.shimclient.exit")
+	if fields["stand_down_asked"] != false {
+		t.Fatalf("the exit record's stand_down_asked = %v, want false", fields["stand_down_asked"])
+	}
+}
+
+// TestTheAdoptedWitnessReadsTheDaemonsLatch covers the witness itself: the
+// socket is gone and the lock is free, and the daemon's own latch is what says
+// the departure was ordered rather than suffered.
+func TestTheAdoptedWitnessReadsTheDaemonsLatch(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff,
+		func(ids.WorkspaceID) (bool, error) { return true, nil }, func() bool { return true })
+
+	// Act.
+	c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+	// Assert.
+	if hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("an adopted departure inside the daemon's own stand-down was recorded as a death")
+	}
+}
+
+// TestAnUnaskedAdoptedDeathIsStillLoud is the invariant's floor: with no latch
+// of either kind behind it, an adopted shim that went missing is a death.
+func TestAnUnaskedAdoptedDeathIsStillLoud(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff,
+		func(ids.WorkspaceID) (bool, error) { return true, nil }, func() bool { return false })
+
+	// Act.
+	c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+	// Assert.
+	if !hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("an adopted death nobody asked for was not recorded as a death")
+	}
+}
+
+// recordFields returns the context of the last record at one operation.
+func recordFields(t *testing.T, log *dlog.TestLogger, operation string) dlog.Context {
+	t.Helper()
+
+	for i := len(log.Records()) - 1; i >= 0; i-- {
+		if r := log.Records()[i]; r.Operation == operation {
+			return r.Context
+		}
+	}
+	t.Fatalf("no record at %q", operation)
+	return nil
 }
