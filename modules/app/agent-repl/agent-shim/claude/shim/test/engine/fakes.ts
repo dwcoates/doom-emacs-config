@@ -268,9 +268,22 @@ export class RecordingPersistence implements Persistence {
     this.producer = originalVendorSessionId;
   }
   clearProducer(): void {
+    if (this.wroteUnderProducer) {
+      // THE REAL WRITER THROWS HERE, so a caller that stopped asking first would
+      // pass against this fake and fail in production.
+      throw new Error(
+        `the producer ${JSON.stringify(this.producer)} has already written rows and cannot be un-named`,
+      );
+    }
     this.producer = undefined;
   }
+  /** Whether a row has been handed over since the writer was named. */
+  wroteUnderProducer = false;
+  producerHasWrittenRows(): boolean {
+    return this.wroteUnderProducer;
+  }
   writeDurable(entries: PersistEntry[]): Promise<void> {
+    this.wroteUnderProducer = true;
     this.durable.push(...entries);
     return Promise.resolve();
   }
@@ -278,6 +291,7 @@ export class RecordingPersistence implements Persistence {
   writeThrows: Error | undefined;
   write(entries: PersistEntry[]): void {
     if (this.writeThrows !== undefined) throw this.writeThrows;
+    this.wroteUnderProducer = true;
     this.buffered.push(...entries);
   }
   /** Every pointer a reading session was asked to conclude through. */

@@ -208,6 +208,19 @@ export interface Persistence {
    */
   clearProducer(): void;
   /**
+   * Whether any row has already been handed to the store under the current name.
+   *
+   * THE CALLER ASKS BEFORE IT ABANDONS. {@link Persistence.clearProducer} is
+   * legal only while the name is still free, and a failed StartSession cannot
+   * know from its own error whether the vendor emitted something that the
+   * converter persisted before the start was refused — a SessionStart hook that
+   * blocks the opening does exactly that. Asking first is what turns "the name
+   * is load-bearing now" from an exception escaping a typed verb into the
+   * decision it is: the identity STANDS, and the retry re-announces the same
+   * one.
+   */
+  producerHasWrittenRows(): boolean;
+  /**
    * Write these rows and resolve when the store says they are DURABLE.
    *
    * Rejects with a {@link PersistenceError} when the batch could not be landed
@@ -395,6 +408,7 @@ export function unavailablePersistence(): Persistence {
   return {
     setProducer: () => undefined,
     clearProducer: () => undefined,
+    producerHasWrittenRows: () => false,
     writeDurable: () => Promise.reject(refuse("writeDurable")),
     write: () => {
       throw refuse("write");

@@ -55,7 +55,7 @@ import {
   refusal,
   whileInFlight,
 } from "../cards/controls.js";
-import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
+import { callFailure, refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";
@@ -491,8 +491,13 @@ async function answer(
     ),
   );
   if ("failed" in answered) {
-    // callUnary already logged the transport failure once, as its owner.
-    actions.append(refusal("transport", "the daemon could not be reached"));
+    // callUnary already logged the failure once, as its owner. What is drawn
+    // here is the FEEDBACK AT THE CLICK: the buttons are already back (
+    // `whileInFlight` gives them up on a throw), so the gate stays answerable,
+    // and the line beside them says what actually happened rather than
+    // reporting an unreachable daemon that answered.
+    const said = callFailure(answered.failed);
+    actions.append(refusal(said.arm, said.text));
     return;
   }
   try {
