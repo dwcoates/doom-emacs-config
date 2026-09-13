@@ -51,11 +51,13 @@
 package discover
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/logging"
@@ -135,7 +137,16 @@ const (
 	// usually fixes itself within a rescan or two.
 	holdMetaAbsent = "meta_absent"
 	// holdMetaUnreadable — the meta is there but could not be read or parsed.
+	// This is the PERMANENT class: a corrupt file, a permission the process does
+	// not have, a shape that names no agent. It will not fix itself.
 	holdMetaUnreadable = "meta_unreadable"
+	// holdMetaReadDeferred — the meta is there and the READ ITSELF was refused
+	// for a resource the kernel had none of (EMFILE/ENFILE/EAGAIN) or was
+	// interrupted (EINTR). It is a different condition from an unreadable meta
+	// and gets its own reason: nothing about this file is wrong, the very next
+	// rescan retries the same read, and it clears on its own the moment the box
+	// has a descriptor to spare.
+	holdMetaReadDeferred = "meta_read_deferred"
 	// holdMetaNamesNoCall — the meta parsed as the WORKFLOW shape, but this
 	// transcript is not under a workflow directory, so there is no workflow run
 	// to attribute it to and no spawning call either.
@@ -371,6 +382,27 @@ func (d *Discoverer) withMeta(target Target) Target {
 	}
 	meta, err := ReadMeta(target.MetaPath)
 	if err != nil {
+		// A READ THE KERNEL DEFERRED IS NOT AN UNREADABLE FILE, and stating it
+		// as one was wrong twice over. The `error` level claims a fault this
+		// process owns: it asked to open one file, sequentially, and the kernel
+		// answered that the SYSTEM had no descriptor left — the sidecar holds no
+		// fd between reads and opens one at a time, so it is not what exhausted
+		// them. And the reason it was stated loudly ("unlike a missing file this
+		// one will not fix itself") is false for this class: the very next
+		// rescan retries the identical read and it succeeds as soon as the box
+		// has a descriptor to spare. On the owner's machine this wrote 38 ERROR
+		// records across 34 files in one afternoon, every one of them ENFILE.
+		//
+		// It stays a WARNING rather than dropping to info: the transcript IS
+		// held and its records ARE unattributed while it lasts, which is
+		// degraded-but-handled, and a host running out of descriptors is
+		// something an operator should see. It is held under its own reason, so
+		// a file that goes from deferred to genuinely unreadable still states
+		// the change.
+		if transientReadFailure(err) {
+			return d.holdTranscript(target, holdMetaReadDeferred, "warn",
+				"transcript held: the READ of its meta file was refused for a resource the system had none of, so the agent has no identity for now; the identical read is retried every rescan and clears on its own: %v", err)
+		}
 		// A meta file that is THERE but unreadable is held exactly as a missing
 		// one is: the agent has no identity either way, and naming it by its
 		// filename would mint a second book for one agent. Loud, because unlike
@@ -408,6 +440,23 @@ func (d *Discoverer) withMeta(target Target) Target {
 	target.AgentID = meta.ToolUseID
 	d.releaseTranscript(target, "the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
 	return target
+}
+
+// transientReadFailure reports that a read failed for a reason that says
+// nothing about the FILE: the system or the process had no descriptor to give
+// (ENFILE/EMFILE), the call was interrupted (EINTR), or the resource was
+// momentarily unavailable (EAGAIN). Every one of them is answered by doing the
+// same read again, which is what the next rescan does.
+//
+// THE ERRNO IS MATCHED, NEVER THE MESSAGE TEXT. "too many open files in system"
+// is one platform's rendering of ENFILE and is not a contract.
+func transientReadFailure(err error) bool {
+	for _, errno := range []syscall.Errno{syscall.ENFILE, syscall.EMFILE, syscall.EINTR, syscall.EAGAIN} {
+		if errors.Is(err, errno) {
+			return true
+		}
+	}
+	return false
 }
 
 // holdTranscript records that a transcript cannot be ingested yet, and states
