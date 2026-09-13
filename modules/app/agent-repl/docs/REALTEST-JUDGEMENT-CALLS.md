@@ -555,3 +555,21 @@ ordinary event, was lost in the deactivation while ordinary keys survived
 it. The deferred-quit fixes (deferral never dropped, requeue at a standing
 prompt) are kept: they were real defects the investigation exposed, and
 they are covered by tests.
+
+## Owner rulings, second batch (2026-09-13, owner)
+
+1. Boot brings up every open workspace's session. A hibernated workspace's
+   shim is brought back when the workspace is opened or switched to. While
+   hibernated, the topbar still draws and says the workspace is hibernated
+   (one topbar-level state, not per-cell arms). A session-less open
+   workspace is an invariant violation.
+2. The cold gate keeps asking after a revival, including after a
+   pre-compacted hibernation, until ruled otherwise.
+3. Sidebar row chevrons are hover-only (and shown on an expanded row). The
+   details popup may extend out of the sidebar into the feed for room, but
+   must never be clipped by the webapp window.
+4. The sidecar's aged-unowned-spool `hold-expired` record is INFO.
+5. `DaemonHoldTray.heading` (the "held (N)" counter text) is retired from
+   the proto.
+6. Store volume: not to be solved by narrowing discovery; analyze what is
+   written and stop storing what is never served (proposal owed).
