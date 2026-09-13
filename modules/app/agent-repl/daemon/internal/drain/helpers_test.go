@@ -202,6 +202,10 @@ type fakeStand struct {
 	wedgeKill bool
 	// wedgeKillOnWS wedges the stand-down of NAMED workspaces only.
 	wedgeKillOnWS map[ids.WorkspaceID]bool
+	// notServing names the workspaces this stand holds no addressable shim
+	// for. The zero value serves every workspace, so a test states the
+	// absence rather than every presence.
+	notServing map[ids.WorkspaceID]bool
 
 	hibernated []ids.WorkspaceID
 	killed     []killCall
@@ -221,8 +225,23 @@ func newFakeStand() *fakeStand {
 		hibernateErr:  make(map[ids.WorkspaceID]error),
 		killErr:       make(map[ids.WorkspaceID]error),
 		wedgeKillOnWS: make(map[ids.WorkspaceID]bool),
+		notServing:    make(map[ids.WorkspaceID]bool),
 		kills:         make(chan killCall, 16),
 	}
+}
+
+func (s *fakeStand) Serving(ws ids.WorkspaceID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.notServing[ws]
+}
+
+// standDown makes the stand hold no addressable shim for one workspace, the
+// way the fleet answers a session it never installed or has already torn down.
+func (s *fakeStand) standDown(ws ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notServing[ws] = true
 }
 
 func (s *fakeStand) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.HibernateResponse, error) {

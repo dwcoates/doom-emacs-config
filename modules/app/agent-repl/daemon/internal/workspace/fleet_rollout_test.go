@@ -10,6 +10,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/drain"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
@@ -584,5 +585,71 @@ func TestRememberOverAWatcherlessSessionClosesNothing(t *testing.T) {
 	// Assert.
 	if installed.closed {
 		t.Fatal("the newly installed watcher was closed")
+	}
+}
+
+// TestFleetServingAnswersWhatTheDirectiveCanReach covers the sweep's selection
+// predicate: it must answer exactly what Hibernate's own client lookup
+// answers, so a workspace the sweep selects is one the directive can land on.
+func TestFleetServingAnswersWhatTheDirectiveCanReach(t *testing.T) {
+	tests := []struct {
+		name    string
+		install func(*fleetFixture, ids.WorkspaceID)
+		want    bool
+	}{
+		{
+			name:    "a session this daemon never installed",
+			install: func(*fleetFixture, ids.WorkspaceID) {},
+			want:    false,
+		},
+		{
+			name: "a session whose shim has been reaped",
+			install: func(f *fleetFixture, ws ids.WorkspaceID) {
+				f.client.reaped = true
+				f.fleet.remember(ws, &live{client: f.client})
+			},
+			want: false,
+		},
+		{
+			name: "a session with a live shim",
+			install: func(f *fleetFixture, ws ids.WorkspaceID) {
+				f.fleet.remember(ws, &live{client: f.client})
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1").ID
+			tt.install(f, ws)
+
+			// Act.
+			serving := f.fleet.Serving(ws)
+
+			// Assert.
+			if serving != tt.want {
+				t.Fatalf("Serving(%q) = %v, want %v", ws, serving, tt.want)
+			}
+		})
+	}
+}
+
+// TestHibernateAnswersTheTypedNoLiveSessionState covers the sweep's other
+// half: the directive's refusal on a workspace with no shim is a STATE the
+// sweep matches on, not a message it reads.
+func TestHibernateAnswersTheTypedNoLiveSessionState(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1").ID
+
+	// Act.
+	_, err := f.fleet.Hibernate(context.Background(), ws)
+
+	// Assert.
+	if !errors.Is(err, drain.ErrNoLiveSession) {
+		t.Fatalf("Hibernate on a workspace with no session = %v, want drain.ErrNoLiveSession", err)
 	}
 }
