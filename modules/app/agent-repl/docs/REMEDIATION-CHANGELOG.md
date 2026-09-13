@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- webapp footer: the expanded section draws UNDER the strip (strip, one full-width `--border-strong` divider, then the panel) instead of over it (owner ruling, 2026-09-13)
+
 - daemon handover: an adopt call that reaches a joining successor BEFORE the incumbent's intent manifest arrives is held for the arm within the handover's own `AdoptionWindow` instead of refused, and a workspace an arrived manifest does not name is still refused at once (integration `no_transfer_announced` under contention, 2026-09-13)
 - realtest daemon stop: every harness-ordered daemon stop goes through the daemon's own `UpdateShutdownSchedule{now}` door (`TestOrderlyDaemonStop`), so its sessions are stood down and the successor stops reporting unaccounted-for bounces; SIGTERM survives only as a stated fallback when nothing answers (`daemon.rollout.reconcile` WARN x4, 2026-09-13 15:19/15:29)
 - store ledger: `write_ledger` rows are stamped with their batch's source file/offset and swept once they fall 16 MB behind that file's committed cursor — four times the sidecar's 4 MB boot rewind — by a bounded background sweep that releases the write slot between batches (735k rows / 204 MB, owner ruling 2026-09-13)
