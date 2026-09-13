@@ -584,3 +584,99 @@ describe("the row menu toggle", () => {
     expect(menu.hidden).toBe(true);
   });
 });
+
+describe("the expand chevron is hover-only", () => {
+  /** The row line, which is what the pointer and the focus are read from. */
+  const lineOf = (drawn: HTMLElement): HTMLElement =>
+    drawn.querySelector(":scope > .row") as HTMLElement;
+  const chevronOf = (drawn: HTMLElement): HTMLElement =>
+    drawn.querySelector(".chev") as HTMLElement;
+
+  it("is hidden on a resting row", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+  });
+
+  it("shows while the pointer is over the row", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // ACT
+    lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    // ASSERT
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
+  });
+
+  it("hides again when the pointer leaves the row", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    // ACT
+    lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+    // ASSERT
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+  });
+
+  it("shows while the keyboard focus is inside the row", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // ACT
+    lineOf(drawn).dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    // ASSERT
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
+  });
+
+  it("hides again when the focus leaves the row entirely", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    lineOf(drawn).dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    // ACT: nothing inside the row takes the focus next.
+    lineOf(drawn).dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: document.body }),
+    );
+    // ASSERT
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+  });
+
+  it("keeps showing while the focus moves BETWEEN the row's own controls", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    const line = lineOf(drawn);
+    line.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    // ACT: the verb control inside this same row takes the focus.
+    line.dispatchEvent(
+      new FocusEvent("focusout", {
+        bubbles: true,
+        relatedTarget: line.querySelector(".sb-more"),
+      }),
+    );
+    // ASSERT
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
+  });
+
+  it("shows on a row drawn with its details already expanded", () => {
+    const prefs = memoryPrefs({ expanded: { "ws-1": true } });
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(appContext(), prefs), "R");
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
+  });
+
+  it("stays shown after the pointer leaves a row the click expanded", async () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    // ACT
+    await click(chevronOf(drawn));
+    lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+    // ASSERT
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
+  });
+
+  it("hides again once the click has collapsed a row the pointer never entered", async () => {
+    // ARRANGE
+    const prefs = memoryPrefs({ expanded: { "ws-1": true } });
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(appContext(), prefs), "R");
+    // ACT
+    await click(chevronOf(drawn));
+    // ASSERT
+    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+  });
+});
