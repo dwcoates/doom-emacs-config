@@ -50,7 +50,16 @@ var migrations = []migration{
 	{To: 4, Name: "ported_prompts", DDL: portedPromptsDDL},
 	{To: 5, Name: "host_session_identity_backfill", DDL: hostSessionIdentityBackfillDDL},
 	{To: 6, Name: "creation_jobs_drop_one_shot_finish", DDL: creationJobsDropOneShotFinishDDL},
+	{To: 7, Name: "sessions_selected_config_dir", DDL: sessionsSelectedConfigDirDDL},
 }
+
+// sessionsSelectedConfigDirDDL adds the root the USER CHOSE for a workspace.
+// Every existing row is stamped '' by the column default, which is exactly
+// right: nobody had chosen anything before this build, so every one of them
+// keeps following the path routing.
+const sessionsSelectedConfigDirDDL = `
+ALTER TABLE sessions ADD COLUMN selected_config_dir TEXT NOT NULL DEFAULT '';
+`
 
 // creationJobsDropOneShotFinishDDL retires the creation job's recorded ONE-SHOT
 // FINISH ACTION. A one-shot no longer has one (owner ruling, 2026-09-12): what
