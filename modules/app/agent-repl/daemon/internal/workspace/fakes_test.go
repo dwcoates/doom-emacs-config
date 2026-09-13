@@ -47,12 +47,15 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
-	workspaces   map[ids.WorkspaceID]wsm.Workspace
-	byDir        map[string]wsm.Workspace
-	repositories []wsm.Repository
-	tasks        []wsm.Task
-	current      *ids.WorkspaceID
-	sessions     map[ids.WorkspaceID]wsm.Session
+	workspaces map[ids.WorkspaceID]wsm.Workspace
+	byDir      map[string]wsm.Workspace
+	// listWorkspacesErr fails the roster read, for the tests about what a
+	// republish does with a state client that would not answer.
+	listWorkspacesErr error
+	repositories      []wsm.Repository
+	tasks             []wsm.Task
+	current           *ids.WorkspaceID
+	sessions          map[ids.WorkspaceID]wsm.Session
 	// sessionErr makes every session read fail, which is the only way to
 	// reach the roster's session-read error branch: the fake's own map
 	// cannot fail.
@@ -194,6 +197,9 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 }
 
 func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	if d.listWorkspacesErr != nil {
+		return nil, d.listWorkspacesErr
+	}
 	out := make([]wsm.Workspace, 0, len(d.workspaces))
 	for _, ws := range d.workspaces {
 		out = append(out, ws)

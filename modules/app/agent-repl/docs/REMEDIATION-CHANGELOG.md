@@ -34,8 +34,6 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 - store: `store.db.slow-query` warns only when a statement FAMILY is persistently over budget (8 of its last 16), and an isolated over-budget sample is info carrying `over_budget_recent`/`over_budget_window` (log sweep, 15 warns in an hour for batches measured at 1-2ms on a copy of the same database)
 - store: `OpenPage`, `ReadPage` and `BashRun` open through `db.beginRead` (`ReadOnly: true`, a plain `BEGIN`), so a page repaint takes only its WAL snapshot instead of queueing for — and being refused by — the write lock (log sweep, two `store.db.open-page` errors "begin read transaction: database is locked (5) (SQLITE_BUSY)")
 - store: a statement whose context was canceled by its own caller is recorded at info as an abandoned call rather than at error as a storage failure, and the error still reaches the server unchanged (log sweep, `store.db.live-work` error "scanning live agents: context canceled")
@@ -43,15 +41,12 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - realtest harness: a sweep DECLINES when a previous sweep's registry rows are still standing, cleans its own from an EXIT trap that a failure, a panic or an interrupt cannot skip, and `bin/realtest.sh --clean-leftovers` clears an older sweep's (same complaint)
 - realtest harness: a sweep opens by scanning from the previous sweep's end to now — every harvest source plus the live editor's `*Messages*` and `*Warnings*` — and reports it under "## Between sweeps" with the same no-allowlist bar and a non-zero exit (same complaint: the warning the owner saw was written in a window nothing read)
 - elisp logging: a workspace whose REGISTERED directory is MISSING is a stale registry row and keeps the `:warning` popup at the warn rung; an unregistered or non-durable path is ordinary and records at `info` with no popup at all (same complaint: the docstring called both ordinary while both popped up)
-=======
-=======
+- daemon/boot+workspace: work abandoned by the daemon's own exit -- an adoption, a revival, a roster read -- is recorded at info rather than reported as a failure, the rule the state client's own read has always followed; every other refusal at those three sites keeps its error (2026-09-13 log sweep, 4 ERRORs)
 - daemon/dlog: the emergency echo -- the one write that fires when the durable sink itself failed -- is a single marshalled record carrying the unpersisted one in `unpersisted_record`, instead of two lines of prose no reader in the system could parse (2026-09-13 log sweep, all 24 non-records)
 - daemon/cmd+boot+shimclient: the three lifecycle events that are the mechanism WORKING record at info -- losing the boot claim, closing a workspace whose directory is gone (the owner's 2026-09-11 ruling), and sweeping a spawn that was still in flight at shutdown -- while every arm beside them keeps its warn and its error (2026-09-13 log sweep, 10 WARNs)
->>>>>>> a41d17e0a (fix(daemon): a mechanism working is not a warning)
 - daemon/create: a create naming a repository whose directory is gone is refused `unknown_repository` before git is touched, instead of running on to a bare `stat <repo>/.git` failure that cost an ERROR from the verb and a second from the rpc boundary (2026-09-13 log sweep, 12 ERRORs)
 - daemon/wsm+health+lifecycle: a fault about a workspace the registry no longer holds is a typed `ErrNotFound` refused inside the fault's own transaction and recorded at debug in all three layers, instead of `FOREIGN KEY constraint failed (787)` as an ERROR in each (2026-09-13 log sweep, 30 ERRORs from one shim death after its workspace was forgotten)
 - daemon: a cold gate is an answer, not a failure -- the bring-up's `parked behind a cold gate` record is info, carrying the cost facts the user is being asked to rule on (2026-09-13 log sweep, 31 WARNs)
->>>>>>> bb896fb54 (fix(daemon): a cold gate is an answer, and answers are not warnings)
 - daemon/workspace: a client is not a session -- the fleet records whether a shim actually holds a started session, so the idle sweep skips a cold-gated workspace instead of directing it every five minutes, and a stand-down of one stops the process without asking it to end a session it never began (2026-09-13 log sweep, 142 `the shim refused to hibernate` WARNs and 28 `the session kill did not answer` WARNs for one workspace)
 - store/realtest harness: `bin/store-reset.sh` boots the kept-alive services out and bootstraps them back from their installed plists instead of killing them and waiting for a pid launchd immediately replaces, and a realtest run no longer copies `events.db` aside (store growth investigation, three 180s reset timeouts and 4.6GB of `realtest-bak` clones)
 - sidecar: the process exit no longer waits without bound on the log forwarding queue — `CloseWithin` (5s) abandons a stuck drain, states one INFO `shutdown-drain` naming how many records were still queued and the daemon it was forwarding to, and exits (shutdown finding, `bin/store-reset.sh` stop unanswered for 180s)

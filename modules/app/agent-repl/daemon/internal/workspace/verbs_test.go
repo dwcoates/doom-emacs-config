@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/dlog"
@@ -123,5 +124,46 @@ func TestPromptSubmissionCarriesTheCreationOrigin(t *testing.T) {
 	// Assert.
 	if sub.WS != "w1" || sub.Turn != "t1" || sub.Target != nil {
 		t.Fatalf("submission = %+v, want the workspace and turn with no bubble target", sub)
+	}
+}
+
+// TestARepublishLevelsACancelledRosterReadAtInfo pins the level of a roster
+// read abandoned by the daemon's own exit. The serving context is cancelled
+// under whatever is in flight, and a roster nobody is left to receive is no
+// loss -- while every other refusal of the state client keeps its ERROR.
+func TestARepublishLevelsACancelledRosterReadAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		listErr   error
+		wantLevel string
+	}{
+		{name: "the read was cancelled", listErr: context.Canceled, wantLevel: "info"},
+		{name: "the state client refused", listErr: errors.New("the database is gone"), wantLevel: "error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.listWorkspacesErr = tt.listErr
+
+			// Act.
+			if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+
+			// Assert.
+			var level string
+			for _, r := range f.log.logger.Records() {
+				if strings.Contains(r.Message, "the workspaces for the roster") ||
+					strings.Contains(r.Message, "roster read ended") {
+					level = r.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("the roster-read record is %q, want %q", level, tt.wantLevel)
+			}
+		})
 	}
 }

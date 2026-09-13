@@ -323,6 +323,18 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			continue
 		}
 		if sv.err != nil {
+			// A CANCELLED ADOPTION IS THE BOOT BEING ABANDONED, not a shim
+			// that refused: the process is going away under the reconciliation
+			// and there is nothing to remediate about a survivor nobody will
+			// serve. The boot still fails -- the caller decides what an
+			// abandoned boot means -- but it does not report a defect.
+			if errors.Is(sv.err, context.Canceled) || errors.Is(sv.err, context.DeadlineExceeded) {
+				log.Info("daemon.boot.adopt", "the adoption ended when the boot's context was cancelled", dlog.Context{
+					"workspace_id": string(sv.ws.ID),
+					"error":        sv.err.Error(),
+				})
+				return nil, fmt.Errorf("boot: adopt the surviving shim of %s: %w", sv.ws.ID, sv.err)
+			}
 			log.Error("daemon.boot.adopt", "a surviving shim could not be adopted", dlog.Context{
 				"workspace_id": string(sv.ws.ID),
 				"error":        sv.err.Error(),
