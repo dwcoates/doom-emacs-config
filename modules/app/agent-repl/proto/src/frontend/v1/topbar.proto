@@ -59,6 +59,30 @@ message TopbarView {
   // stated no fast mode for this session yet — presence, never a bool that
   // would have to guess.
   TopbarFastMode fast_mode = 10;
+  // THE WHOLE-VIEW HIBERNATED STATE. Set means the idle sweep stood this
+  // workspace's session down on purpose: nothing is wired and nothing is
+  // wrong. While it is set the SESSION-SCOPED elements above — the model
+  // selector, the permission-mode picker, the context chip, fast mode, the
+  // warning strip and the session line — are ABSENT, because there is no
+  // session for the daemon to resolve them from; the account, the
+  // connectivity glyph and the title are still resolved and still drawn.
+  //
+  // PRESENCE, NOT A ONEOF OVER THE WHOLE VIEW. Every field of this view is
+  // already an element message, and an element the state suppresses is
+  // expressed by NOT SETTING it — which is exactly what a message field's
+  // presence says. Wrapping the strip's other nine fields in a oneof arm
+  // would restate that partition a second time, in a second place, for one
+  // state.
+  TopbarHibernated hibernated = 11;
+}
+
+// The topbar's hibernated state. Empty of everything but the instant: the
+// strip draws the literal word "hibernated" beside the age, and the age is
+// TICKED CLIENT-SIDE from this instant — a formatted duration on the wire is
+// stale the moment it arrives, and a topbar is not republished on a clock.
+message TopbarHibernated {
+  // When the session was stood down, epoch ms.
+  int64 since_ms = 1;
 }
 
 // The vendor's fast mode, as it stands. THE ARM IS THE STATE, carried by
