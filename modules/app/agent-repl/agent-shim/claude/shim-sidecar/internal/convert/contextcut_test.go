@@ -185,9 +185,13 @@ func TestAutomaticCompactionIsDistinguishedFromAManualOne(t *testing.T) {
 	}
 }
 
-func TestCompactionWithNoSummaryStillStatesTheCut(t *testing.T) {
-	// Arrange. The cut is REAL and a reader must see WHERE, even when the summary
-	// never arrived — but it is never silent (the branch logs at warning level).
+// TestCompactionWithNoSummaryStatesThePlaceholder pins what a reader is TOLD
+// when the vendor wrote no summary. The cut is REAL and must be drawn, and an
+// empty summary drew it as a hole — indistinguishable, from the feed, from a
+// summary this reader lost. The placeholder is the reader's own sentence about
+// the condition, never a summary of anything, and a real summary supersedes it.
+func TestCompactionWithNoSummaryStatesThePlaceholder(t *testing.T) {
+	// Arrange.
 	c := newTestConverter(t)
 	line := `{"type":"system","subtype":"compact_boundary","uuid":"b1","isSidechain":false,` +
 		`"timestamp":"` + ts1 + `","compactMetadata":{"trigger":"manual","preTokens":100,"postTokens":10}}`
@@ -200,8 +204,89 @@ func TestCompactionWithNoSummaryStillStatesTheCut(t *testing.T) {
 	if compacted == nil {
 		t.Fatal("a summary-less boundary must still produce the cut")
 	}
-	if got := compacted.GetSummary().GetMarkdown(); got != "" {
-		t.Fatalf("summary = %q, want empty rather than invented", got)
+	if got := compacted.GetSummary().GetMarkdown(); got != NoSummaryWritten {
+		t.Fatalf("summary = %q, want the stated placeholder %q", got, NoSummaryWritten)
+	}
+}
+
+// TestASummarylessCompactionIsStatedAtInfo follows the placeholder: the render
+// is no longer degraded, so the condition is an account of what the vendor did
+// rather than a defect of this reader's.
+func TestASummarylessCompactionIsStatedAtInfo(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+	line := `{"type":"system","subtype":"compact_boundary","uuid":"b1","isSidechain":false,` +
+		`"timestamp":"` + ts1 + `","compactMetadata":{"trigger":"manual","preTokens":100,"postTokens":10}}`
+
+	// Act.
+	convertLines(t, c, line)
+
+	// Assert.
+	if got := levelForMessage(t, sink, "carries no summary on the following line"); got != "info" {
+		t.Fatalf("the summary-less boundary was recorded at %q, want info", got)
+	}
+}
+
+// TestASummaryThatArrivesLaterSupersedesThePlaceholder is the shape the owner's
+// own transcript carries: a `system/scheduled_task_fire` between the boundary
+// and its summary, and the summary naming the boundary as its parent. The
+// boundary's one-record lookahead cannot see past the intervening line, so the
+// summary would otherwise be dropped by the branch that folds it into a cut it
+// never reached.
+func TestASummaryThatArrivesLaterSupersedesThePlaceholder(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	boundary := `{"type":"system","subtype":"compact_boundary","uuid":"b1","isSidechain":false,` +
+		`"timestamp":"` + ts1 + `","compactMetadata":{"trigger":"manual","preTokens":100,"postTokens":10}}`
+	between := `{"type":"system","subtype":"scheduled_task_fire","uuid":"s1","isSidechain":false,"timestamp":"` + ts1 + `","content":"resuming"}`
+	summary := `{"type":"user","uuid":"u1","parentUuid":"b1","isCompactSummary":true,"isSidechain":false,` +
+		`"timestamp":"` + ts2 + `","message":{"role":"user","content":"the story so far"}}`
+
+	// Act.
+	entries := convertLines(t, c, boundary, between, summary)
+
+	// Assert: ONE key, carrying the real summary — the later write supersedes
+	// the placeholder rather than standing a second cut beside it.
+	var cuts int
+	var carried string
+	for _, e := range entries {
+		compacted := frameOf(e).GetUpdate().GetContextCut().GetCompacted()
+		if compacted == nil {
+			continue
+		}
+		cuts++
+		carried = compacted.GetSummary().GetMarkdown()
+		if got := e.GetUpsertKey(); got != SessionKey("context_cut", "b1") {
+			t.Fatalf("the cut was written under %q, want the boundary's own key", got)
+		}
+	}
+	if cuts != 2 {
+		t.Fatalf("the file produced %d cut writes, want the placeholder and its supersession", cuts)
+	}
+	if carried != "the story so far" {
+		t.Fatalf("the superseding cut carries %q, want the summary that named the boundary", carried)
+	}
+}
+
+// TestASummaryNamingAnotherBoundaryDoesNotSupersedeThisCut keeps the late
+// attachment honest: distance is only safe because the summary NAMES its
+// boundary, so one that names something else must leave the placeholder alone.
+func TestASummaryNamingAnotherBoundaryDoesNotSupersedeThisCut(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	boundary := `{"type":"system","subtype":"compact_boundary","uuid":"b1","isSidechain":false,` +
+		`"timestamp":"` + ts1 + `","compactMetadata":{"trigger":"manual","preTokens":100,"postTokens":10}}`
+	between := `{"type":"system","subtype":"scheduled_task_fire","uuid":"s1","isSidechain":false,"timestamp":"` + ts1 + `","content":"resuming"}`
+	stray := `{"type":"user","uuid":"u1","parentUuid":"b-other","isCompactSummary":true,"isSidechain":false,` +
+		`"timestamp":"` + ts2 + `","message":{"role":"user","content":"someone else's history"}}`
+
+	// Act.
+	entries := convertLines(t, c, boundary, between, stray)
+
+	// Assert.
+	compacted := frameOf(entryByKey(t, entries, SessionKey("context_cut", "b1"))).GetUpdate().GetContextCut().GetCompacted()
+	if got := compacted.GetSummary().GetMarkdown(); got != NoSummaryWritten {
+		t.Fatalf("summary = %q, want the placeholder left standing", got)
 	}
 }
 
