@@ -11,9 +11,12 @@ import (
 	"claude-repld/internal/sessionlock"
 )
 
-// arm writes an intent manifest naming one workspace with the given expected
-// participants, then Joins — the joining daemon's whole boot half.
-func arm(t *testing.T, h *harness, ws ids.WorkspaceID, expected Participants) {
+// writeHandoverManifest writes the incumbent's intent manifest naming one
+// workspace with the given expected participants. It is separate from `arm`
+// because the manifest's ARRIVAL is an edge in its own right: the incumbent
+// announces the successor's address before it writes the manifest, so a test
+// that forces that ordering has to place the write itself.
+func writeHandoverManifest(t *testing.T, h *harness, ws ids.WorkspaceID, expected Participants) {
 	t.Helper()
 	record, err := h.db.Workspace(context.Background(), ws)
 	if err != nil {
@@ -35,6 +38,13 @@ func arm(t *testing.T, h *harness, ws ids.WorkspaceID, expected Participants) {
 	}); err != nil {
 		t.Fatalf("writeManifest: %v", err)
 	}
+}
+
+// arm writes an intent manifest naming one workspace with the given expected
+// participants, then Joins — the joining daemon's whole boot half.
+func arm(t *testing.T, h *harness, ws ids.WorkspaceID, expected Participants) {
+	t.Helper()
+	writeHandoverManifest(t, h, ws, expected)
 	if err := h.c.Join(context.Background()); err != nil {
 		t.Fatalf("Join: %v", err)
 	}
@@ -738,5 +748,100 @@ func TestAnAdoptionOutLivesTheCallerThatCompletedIt(t *testing.T) {
 	}
 	if got := h.publishedWorkspaces(); len(got) != 1 || got[0] != ws {
 		t.Fatalf("published views = %v, want the adoption to have finished for %q", got, ws)
+	}
+}
+
+// TestAnAdoptCallThatArrivesBeforeTheManifestWaitsForTheArm is the ordering
+// the shutdown announcement makes reachable: `Handover` announces the
+// successor's address FIRST and writes the intent manifest afterwards
+// (handover.go, `ShutdownAnnounced` then `writeManifest`), so a participant
+// that dials the announced address at once can reach a successor that has been
+// told nothing yet. The call is HELD for the arm, the way adoption is held for
+// the incumbent's serving release one step later — not refused.
+func TestAnAdoptCallThatArrivesBeforeTheManifestWaitsForTheArm(t *testing.T) {
+	// Arrange: a successor in joining mode whose incumbent has announced but
+	// has not written the manifest yet.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.c.Join(context.Background()); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	held := h.clock.armedSignal(manifestPoll)
+
+	// Act: the host participant adopts on the address it was just handed.
+	done := make(chan error, 1)
+	go func() { done <- h.c.AdoptHost(context.Background(), ws) }()
+
+	// Assert: the call is held on the arm poll rather than answered.
+	select {
+	case err := <-done:
+		t.Fatalf("AdoptHost answered %v before the incumbent armed the rendezvous, want the call held for the arm", err)
+	case <-held:
+	}
+
+	// Act: the incumbent's manifest lands and the successor's next poll comes
+	// round.
+	writeHandoverManifest(t, h, ws, Participants{Host: true})
+	h.clock.Fire(manifestPoll)
+
+	// Assert: the held call completes the rendezvous and adopts.
+	if err := <-done; err != nil {
+		t.Fatalf("AdoptHost after the manifest arrived = %v, want success", err)
+	}
+	if got := h.fleet.Adoptions(); len(got) != 1 || got[0] != ws {
+		t.Fatalf("adoptions = %v, want %q adopted once the manifest armed it", got, ws)
+	}
+}
+
+// TestAnAdoptCallPastTheAdoptionWindowIsStillRefused is the other side of the
+// same bound: the wait is the handover's own AdoptionWindow, and a manifest
+// that never arrives still answers no_transfer_announced.
+func TestAnAdoptCallPastTheAdoptionWindowIsStillRefused(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.c.Join(context.Background()); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	bounded := h.clock.armedSignal(adoptionWindow)
+
+	// Act
+	done := make(chan error, 1)
+	go func() { done <- h.c.AdoptHost(context.Background(), ws) }()
+	select {
+	case err := <-done:
+		t.Fatalf("AdoptHost answered %v before its bound was armed, want the call held", err)
+	case <-bounded:
+	}
+	h.clock.Fire(adoptionWindow)
+
+	// Assert
+	if err := <-done; !errors.Is(err, ErrNoTransferAnnounced) {
+		t.Fatalf("AdoptHost after the adoption window = %v, want no_transfer_announced", err)
+	}
+}
+
+// TestAnAdoptCallForAWorkspaceAnArrivedManifestDoesNotNameIsRefusedAtOnce
+// keeps the wait from swallowing the ordinary answer: once the manifest is in
+// hand the transfer set is known, so a workspace it does not name is refused
+// immediately rather than held for a bound.
+func TestAnAdoptCallForAWorkspaceAnArrivedManifestDoesNotNameIsRefusedAtOnce(t *testing.T) {
+	// Arrange: the manifest arrived and names a DIFFERENT workspace.
+	h := newHarness(t)
+	transferred, _ := h.workspace(t)
+	untouched, _ := h.workspace(t)
+	arm(t, h, transferred, Participants{Host: true})
+
+	// Act
+	err := h.c.AdoptWeb(context.Background(), untouched)
+
+	// Assert
+	if !errors.Is(err, ErrNoTransferAnnounced) {
+		t.Fatalf("AdoptWeb answered %v, want no_transfer_announced", err)
+	}
+	for _, waited := range h.clock.Waits() {
+		if waited == adoptionWindow {
+			t.Fatalf("the refusal armed the %s adoption window, want it answered at once", adoptionWindow)
+		}
 	}
 }
