@@ -975,6 +975,123 @@ func TestStartSurfacesANonColdStartFailure(t *testing.T) {
 	}
 }
 
+// A REFUSED START IS A FAULT, NOT ONLY A LOG LINE. Grounded 2026-09-13: one
+// workspace's StartSession was refused on every boot, `daemon.boot.bring_up`
+// logged and counted it, and every surface a user reads drew the workspace as
+// merely idle.
+func TestStartFilesAFaultWhenTheShimRefusesTheStart(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+			Detail: "the vendor binary is missing",
+		}},
+	}
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if got := faultKinds(f.db.dbFaults); len(got) != 1 || got[0] != health.KindResumeFailed {
+		t.Fatalf("faults = %v, want exactly one %s", got, health.KindResumeFailed)
+	}
+}
+
+func TestTheRefusedStartFaultCarriesTheShimsOwnAccount(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+			Detail: "the vendor binary is missing",
+		}},
+	}
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert. The cause evidence is what the typed `resume_failed` arm renders.
+	if len(f.db.dbFaults) != 1 || !strings.Contains(f.db.dbFaults[0].Evidence["cause"], "the vendor binary is missing") {
+		t.Fatalf("fault evidence = %+v, want the shim's own detail", f.db.dbFaults)
+	}
+}
+
+func TestStartFilesAFaultWhenTheStartSessionCallItselfFails(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.startErr = errors.New("the shim hung up")
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if got := faultKinds(f.db.dbFaults); len(got) != 1 || got[0] != health.KindResumeFailed {
+		t.Fatalf("faults = %v, want exactly one %s", got, health.KindResumeFailed)
+	}
+}
+
+func TestAColdGateFilesNoRefusedStartFault(t *testing.T) {
+	// A DESIGNED PRODUCT STATE IS NOT A FAULT: the gate is the user's to
+	// answer, and a fault beside it would report a broken workspace.
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if got := faultKinds(f.db.dbFaults); len(got) != 0 {
+		t.Fatalf("faults = %v, want none behind a cold gate", got)
+	}
+}
+
+func TestAStandDownFilesNoRefusedStartFault(t *testing.T) {
+	// A teardown this daemon ordered is not a session that would not start.
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.startErr = fmt.Errorf("start: %w", shimclient.ErrStandDownOrdered)
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if got := faultKinds(f.db.dbFaults); len(got) != 0 {
+		t.Fatalf("faults = %v, want none under a stand-down this daemon ordered", got)
+	}
+}
+
+func TestAStartedSessionRetractsTheRefusedStartFault(t *testing.T) {
+	// Arrange. An earlier boot's refusal is standing when this one succeeds.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	workspace := ws.ID
+	if _, err := f.db.OpenFault(context.Background(), wsm.Fault{
+		Workspace: &workspace,
+		Kind:      health.KindResumeFailed,
+		Detail:    "the shim refused to start this workspace's session",
+	}); err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+
+	// Assert.
+	if got := faultKinds(f.db.dbFaults); len(got) != 0 {
+		t.Fatalf("faults = %v, want the refused-start fault retracted by a started session", got)
+	}
+}
+
 func TestStartIsIdempotentForALiveSession(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -1805,6 +1922,27 @@ func TestResumeColdSurfacesAShimRefusal(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("ResumeCold() = nil error, want the failed re-open surfaced")
+	}
+}
+
+// THE COLD-GATE ANSWER'S RE-OPEN IS THE SECOND PLACE A REFUSED START HID.
+// Grounded 2026-09-13: the owner answered a gate with `clear`, the re-open was
+// refused, `daemon.workspace.answer_cold_gate` logged "the re-open with the
+// remediation failed" -- and nothing else said so anywhere.
+func TestResumeColdFilesAFaultWhenTheReopenIsRefused(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.startErr = errors.New("the link is gone")
+
+	// Act.
+	_ = f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	if got := faultKinds(f.db.dbFaults); len(got) != 1 || got[0] != health.KindResumeFailed {
+		t.Fatalf("faults = %v, want exactly one %s", got, health.KindResumeFailed)
 	}
 }
 
