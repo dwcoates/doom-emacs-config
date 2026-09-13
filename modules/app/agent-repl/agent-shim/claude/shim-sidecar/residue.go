@@ -22,13 +22,35 @@ import (
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
+	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
 // residueHandler turns whatever it is given into unparsed residue.
+//
+// IT STILL OWES A STOPPED RUN ITS TERMINAL. Ingesting a spool as residue is a
+// statement about what could be made of the BYTES; it is not a statement that
+// the run is unknown. A spool reaches this handler because no spawning call had
+// claimed it when its hold expired — and the launch line naming that call is
+// very often read afterwards, from a transcript the reader is still catching up
+// on, which is exactly the ordinary shape of a restart with a backlog. From
+// that moment the reader knows the run and its owner, and a person's stop
+// arriving next is a fact this handler CAN spell: the terminal's identities all
+// come from the reader, and its output is the run's bytes verbatim, which this
+// handler holds because it is the spool's sole reader.
+//
+// SPELLING IT DOES NOT MAKE THIS A CONVERTER. The terminal is minted through
+// the SAME handler.RunOutput every other handler mints one through, and nothing
+// here parses, classifies, or models the bytes it carries — the entries this
+// handler mints from the file itself are still envelope-level residue and
+// nothing else.
 type residueHandler struct {
+	// RunOutput holds the run's bytes and file coordinates and spells the
+	// reader-concluded terminals, so a run stopped while its spool was residue
+	// settles with the identical frame a shell spool's would.
+	*handler.RunOutput
 	// reason names why conversion could not be selected, so the stored record
 	// says what a human needs to know without anyone reading the log.
 	reason string
@@ -36,19 +58,39 @@ type residueHandler struct {
 }
 
 func newResidueHandler(reason string, log *logging.Bound) *residueHandler {
-	return &residueHandler{reason: reason, log: log}
+	return &residueHandler{RunOutput: handler.NewRunOutput(log), reason: reason, log: log}
 }
 
 // Handle implements tail.Handler.
 func (h *residueHandler) Handle(frames []tail.Frame, ctx *tail.Context) []*storev1.StoreEntry {
+	// The coordinates are remembered on EVERY batch, empty or not, for the same
+	// reason the shell handler remembers them: a terminal built with no file id
+	// and no offset digests one write identity for every such terminal in the
+	// process, and the store absorbs all but the first as a replay.
+	h.RememberCoords(ctx)
 	out := make([]*storev1.StoreEntry, 0, len(frames))
 	for _, frame := range frames {
+		// The bytes are accumulated verbatim and bounded, so a stop arriving
+		// later settles the run carrying what it actually said rather than
+		// claiming not_observed for a spool this process read in full.
+		h.Remember(ctx, frame.Raw)
 		out = append(out, residueEntry(ctx.FileID, ctx.Path, frame.Offset, h.reason, frame.Raw))
 		h.log.With(logging.Context{
 			Operation: "residue", Path: ctx.Path, TaskID: ctx.TaskID, Offset: logging.Off(frame.Offset),
 		}).LogVerbose("ingested %d byte(s) as residue: %s", len(frame.Raw), h.reason)
 	}
 	return out
+}
+
+// CancelTerminal implements the reader's cancelTerminalSink: a person's stop,
+// spelled as the run's terminal.
+//
+// IT REFUSES ONLY WHAT RunOutput REFUSES — a stop naming no spawning call,
+// which would key the frame on a row no reader of the conversation can join to
+// the call. Everything else settles, because a run left open is the one outcome
+// a stop must never produce.
+func (h *residueHandler) CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry {
+	return h.RunOutput.Cancelled(taskID, run, ownerAgentID, settledAtMs)
 }
 
 // declaredResidueHandler ingests a file whose kind IS recognized but whose
