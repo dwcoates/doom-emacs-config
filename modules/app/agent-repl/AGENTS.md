@@ -1133,3 +1133,20 @@ sweep, the gap since the previous sweep is scanned and its findings recorded
 in the run's manifest; a run leaves the owner's state exactly as it found
 it, and a leftover it cannot clean fails the run by name. Never allowlist,
 never dismiss, never let a popup stand unexplained.
+
+## Zero warnings, zero errors, in every system's logs — standing order
+
+The owner wants NO warnings and NO errors in the logs of ANY agent-repl
+system: daemon, shim, store, sidecar, webapp, Emacs. Not "acceptable",
+not "known", not "benign". A warning is remediated in exactly one of two
+ways: FIX the condition that raised it, or, ONLY when it is genuinely
+miscategorized (an expected, ordinary outcome that carries no defect),
+re-level it to info or debug with the reasoning in the commit. Fixing is
+the strong default; re-leveling is the exception that has to be argued.
+
+"PRE-EXISTING" IS NOT A CATEGORY. Never describe a warning or error as
+pre-existing, historical, inherited, out of scope, or unrelated to the
+change at hand. If it is in a log, it is a defect that needs fixing now,
+whoever introduced it and whenever. Sweeping all logs for warnings and
+errors and remediating every one of them is ordinary work, not an
+extra.
