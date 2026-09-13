@@ -1395,15 +1395,6 @@ func wsActCleanupCreated(ctx context.Context, t *testing.T, client *Client, dbPa
 // generous past what a chord's own prompt normally takes.
 const wsActForgetCeiling = 30 * time.Second
 
-// wsActCommandFileGlobPrefix and wsActCommandFileGlobSuffix must bracket every
-// name this layer writes into the ingress directory, so the daemon's own
-// glob (`workspace_commands_*.json`, daemon/internal/stateroot/stateroot.go
-// CommandFileGlob) claims it.
-const (
-	wsActCommandFileGlobPrefix = "workspace_commands_realtest-forget-"
-	wsActCommandFileGlobSuffix = ".json"
-)
-
 // wsActForgetCommandFile writes a one-entry command file asking the daemon to
 // forget `id`, and answers the path it wrote.
 //
