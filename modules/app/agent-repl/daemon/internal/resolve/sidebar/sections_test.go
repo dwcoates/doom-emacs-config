@@ -3,6 +3,8 @@ package sidebar_test
 import (
 	"testing"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -218,5 +220,82 @@ func TestRosterRecordsAWorkspaceAssignedToAnUnregisteredTask(t *testing.T) {
 	// Assert.
 	if !hasError(surfaces.Records(), "daemon.sidebar.task_view") {
 		t.Fatal("a workspace assigned to an unregistered task was not recorded")
+	}
+}
+
+// dirsInRoster walks the roster exactly as the sidecar's log forwarder does --
+// the repository sections, the task sections and the recently-merged section,
+// each row and its children -- and answers every workspace directory it can
+// resolve a ref for.
+func dirsInRoster(roster *frontendv1.WorkspaceRoster) map[string]bool {
+	out := map[string]bool{}
+	var walk func([]*frontendv1.RosterRow)
+	walk = func(rows []*frontendv1.RosterRow) {
+		for _, row := range rows {
+			if ref := row.GetWorkspace().GetWorkspace(); ref.GetId() != "" && ref.GetDir() != "" {
+				out[ref.GetDir()] = true
+			}
+			walk(row.GetChildren())
+		}
+	}
+	for _, section := range roster.GetRepository().GetSections() {
+		walk(section.GetRows().GetRows())
+	}
+	for _, section := range roster.GetTask().GetSections() {
+		walk(section.GetRows().GetRows())
+	}
+	walk(roster.GetRecentlyMerged().GetRows().GetRows())
+	return out
+}
+
+// TestEveryRegisteredWorkspaceIsResolvableFromTheRoster pins the guarantee the
+// LOG PLANE rests on. The sidecar resolves a record's workspace by walking the
+// delivered roster, and a registered workspace the roster does not name is one
+// whose file-scoped records fall back to the global sink with
+// `forward_undelivered`. So the roster's completeness is not a rendering
+// nicety: every registry row must be findable there, whatever state it is in.
+func TestEveryRegisteredWorkspaceIsResolvableFromTheRoster(t *testing.T) {
+	task := wsm.Task{ID: ids.TaskID("task-1"), Title: "the task", CreatedAt: epoch}
+	assign := func(ws wsm.Workspace) wsm.Workspace {
+		id := task.ID
+		ws.Task = &id
+		return ws
+	}
+	close := func(ws wsm.Workspace) wsm.Workspace {
+		ws.Closed = true
+		return ws
+	}
+	merge := func(ws wsm.Workspace) wsm.Workspace {
+		at := epoch
+		ws.MergedAt = &at
+		return ws
+	}
+
+	tests := []struct {
+		name string
+		ws   wsm.Workspace
+	}{
+		{name: "an ordinary open workspace", ws: workspace("w-open", "open")},
+		{name: "a workspace assigned to no task", ws: workspace("w-unassigned", "unassigned")},
+		{name: "a workspace assigned to a task", ws: assign(workspace("w-assigned", "assigned"))},
+		{name: "a closed workspace", ws: close(workspace("w-closed", "closed"))},
+		{name: "a merged workspace", ws: merge(workspace("w-merged", "merged"))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(tt.ws)
+			reg.Tasks = []wsm.Task{task}
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert.
+			if !dirsInRoster(latest(t, r))[tt.ws.Dir] {
+				t.Fatalf("the roster names no ref for %q; its records cannot be forwarded file-scoped", tt.ws.Dir)
+			}
+		})
 	}
 }
