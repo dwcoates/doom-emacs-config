@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/account"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/resolve/topbar"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -255,6 +256,17 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 		if canceled(err) {
 			log.Info(opRegister, "the announced workspace's revival ended when its context was cancelled", dlog.Context{
 				"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID, "cause": err.Error(),
+			})
+			return
+		}
+		// A DAEMON THAT IS STANDING DOWN IS THE SAME ANSWER, reached from the
+		// other side: the bring-up refused before it spawned because nothing
+		// would be left to own the shim. It is not a conversation that failed
+		// to come back -- the successor revives it from the same record --
+		// so it is recorded as the departure it is.
+		if errors.Is(err, shimclient.ErrStandingDown) {
+			log.Info(opRegister, "the announced workspace's revival stopped because this daemon is standing down", dlog.Context{
+				"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID,
 			})
 			return
 		}

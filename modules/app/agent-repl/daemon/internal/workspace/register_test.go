@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -662,6 +663,15 @@ func TestRegisterLevelsACancelledRevivalAtInfo(t *testing.T) {
 			name:      "the shim would not spawn",
 			startErr:  errors.New("the shim would not spawn"),
 			wantLevel: "error",
+		},
+		{
+			// The same answer reached from the other side: the bring-up
+			// refused before it spawned because this daemon is standing down.
+			// Measured at realtest 2026-09-13T18:32:16, where it was recorded
+			// as a conversation that did not come back up.
+			name:      "this daemon is standing down",
+			startErr:  shimclient.ErrStandingDown,
+			wantLevel: "info",
 		},
 	}
 
