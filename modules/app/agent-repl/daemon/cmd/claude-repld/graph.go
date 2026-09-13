@@ -121,6 +121,13 @@ type graph struct {
 	// promptqueue.Queue.Drain states: both read and write that client off their
 	// own goroutine.
 	DrainQueue func(bound time.Duration) bool
+	// DrainStarts is the BOUNDED wait for the session starts that run off a
+	// caller's goroutine -- the register's revival of an announced
+	// workspace's conversation. It ENDS them first and then joins them, and
+	// `run` calls it BEFORE the state client closes, for the same reason
+	// DrainQueue is called there: a start reads and writes that client from
+	// its own goroutine.
+	DrainStarts func(bound time.Duration) bool
 	// DrainMerges is the BOUNDED wait for merge runs that have reached their
 	// terminal. `run` calls it BEFORE the watchers close and before the state
 	// client does: a SIGTERM landing mid-terminal used to close the store
@@ -739,6 +746,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		},
 		CloseWatchers: fleet.CloseWatchers,
 		DrainQueue:    queue.Drain,
+		DrainStarts:   fleet.DrainStarts,
 		DrainMerges:   mergeOrchestrator.Drain,
 	}, nil
 }
