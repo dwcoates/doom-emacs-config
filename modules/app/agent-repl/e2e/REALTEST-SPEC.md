@@ -71,6 +71,62 @@ That is no longer the policy.
   is the correct outcome and the old "focus is exactly where it started"
   assertion would fail every phase.
 
+## The editor the owner gets back (defect found 2026-09-13)
+
+A run leaves the owner's state exactly as it found it. The editor was the one
+exception, and the owner's own logs caught it: the sweep launches Emacs with
+`AGENT_REPL_FORBID_VENDOR_CALLS=1`, the sweep left the last such editor
+standing, and from that moment the owner's day-to-day editor WAS the guarded
+one. Every daemon it spawned, and every daemon `bin/deploy-all.sh` restarted
+through it, inherited the guard, so the owner's real workspaces were talking to
+the fake vendor — `shim.fake.query: fake vendor session STARTED` at 14:19:04 in
+the shim log of a workspace the owner does real work in.
+
+The editor is now handed back the way focus is, from the same EXIT trap and
+after the focus handback, so a failure, a panic and an interrupt all reach it.
+`bin/realtest.sh -run <one realtest>` behaves identically.
+
+- **The guard question is asked of the KERNEL.** The pid comes from
+  `(emacs-pid)` over `emacsclient`, and `ps -Eww` prints the copy of that
+  process's environment — the same reading the preflight's vendor-guard refusal
+  takes of the daemon and of every listening shim.
+- **A GUARDED editor is quit**, through `quit_standing_emacs` — the same
+  consented takeover path the sweep already uses. An editor this run started
+  needs no further answer; one that was already standing needs
+  `AGENT_REPL_REALTEST_TAKEOVER=1`, and without it the guarded editor is left
+  and that is stated loudly, with the remedy.
+- **A GUARD-FREE editor is left exactly alone.** There is nothing to restore,
+  and quitting the owner's own editor to launch an identical one would be a
+  disturbance of its own.
+- **A GUARDED DAEMON is part of the handback**, and it is stopped BEFORE the
+  replacement editor is launched: a guard-free Emacs ADOPTS an answering daemon
+  rather than spawning one, so a guarded daemon left up makes the new editor a
+  fake vendor's editor exactly as before. Stopping it ends every live session it
+  holds, which is why it runs under the consent that already covers that,
+  `AGENT_REPL_REALTEST_STOP_DAEMON=1`. Without that consent the daemon is LEFT
+  and the run says so loudly and names the pid. SIGTERM only, never SIGKILL, for
+  the same reason realtest 3's world does not escalate.
+- **A normal editor is cold-started**, `open -gj -a Emacs` with the guard
+  removed from the launch's environment by `env -u` — guard-free by
+  construction rather than by the absence of an export somewhere above.
+  `-gj` neither brings it to the front nor makes it the active application, so
+  the launch does not take the desktop back off the application the focus
+  handback just returned it to.
+- **The run says what it did**, both before and after. Before the first
+  realtest: *when this run ends the owner gets a GUARD-FREE editor back*. At the
+  end: *the owner's editor was restored: guarded Emacs pid N quit, guarded
+  daemon pid M stopped, a guard-free Emacs launched*.
+- **None of this changes the sweep's verdict**, for the reason the focus
+  handback does not: it is the owner's desktop, not a finding about the module,
+  and letting it overwrite a realtest's exit status would lose the finding the
+  sweep exists for.
+
+`bin/deploy-all.sh` holds the other half of the same invariant: it REFUSES to
+restart the daemon through an Emacs that carries the guard, because the restart
+is made BY that editor and the incoming daemon would inherit it. The refusal
+names the guard and the remedy (quit that editor, start a normal one), and
+`AGENT_REPL_REALTEST_TAKEOVER=1` is the one answer that goes ahead anyway.
+
 ## The entry point: `bin/realtest.sh`
 
 The only supported way in, because the preflight is the part that cannot be
