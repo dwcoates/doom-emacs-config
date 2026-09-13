@@ -760,4 +760,24 @@ It does not disturb `brief_missing`, which keeps its own meaning: a brief
 absent from the policy source that WAS chosen. The two are distinct faults —
 no policy source at all, versus a hole in the one there is.
 
+### `ClientLogUnknownWorkspace`, a late log line after a close
+
+`ClientLogError` gains its FIRST arm: `cause.unknown_workspace = 1`, an empty
+`ClientLogUnknownWorkspace`, shaped like the thirty-one sibling
+`<Rpc>UnknownWorkspace` arms — all of which are empty, because the request
+already names the workspace the refusal is about.
+
+OWN ACCORD, 2026-09-12 (realtest 8, finding E): the daemon already REFUSED this
+state, through `server.UnlandedArm` at WARN under
+`daemon.refusal.unlanded_arm`, so the arm was intended and merely unlanded.
+`ClientLogError` was "EMPTY ON PURPOSE: arms DERIVED at the wave" and this is
+that derivation.
+
+The condition is ORDINARY TRAFFIC, not a fault: a forwarder learns its
+workspace is gone only by being told, and records it already wrote keep
+arriving meanwhile (measured: a forgotten scratch repo drew a ClientLog
+eighteen seconds after the forget). So the daemon records the refusal at INFO
+via `subjectForClientLog`, and the arm is a forwarder's cue to stop sending for
+that workspace id and keep the rest of its records locally.
+
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
