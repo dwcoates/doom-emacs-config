@@ -26,6 +26,7 @@ import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import type { Grouping, SidebarContext, SidebarPrefs } from "./context.js";
 import { drawWorkspaceRoster } from "./roster.js";
+import { placeOpenRowDetails } from "./row.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -164,6 +165,17 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   const head = drawRailHead(prefs, body);
   host.replaceChildren(head, body);
 
+  // A FIXED PANEL DOES NOT TRAVEL WITH ITS ROW. It is anchored to the row's
+  // rectangle at the moment it was placed, so anything that moves that
+  // rectangle -- a resized window, the rail's own scroller, the feed's, any
+  // scroller on the page -- has to place it again. Captured, because a scroll
+  // inside a nested scroller does not bubble to the window.
+  const replace = (): void => {
+    placeOpenRowDetails(body);
+  };
+  window.addEventListener("resize", replace);
+  window.addEventListener("scroll", replace, true);
+
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
@@ -179,6 +191,10 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       const drawn = drawWorkspaceRoster(roster, sc);
       attention.endPass();
       body.replaceChildren(drawn);
+      // A detail panel is fixed-positioned so it can leave the rail, which
+      // means it can only be measured once it is ON the page: a row drawn
+      // already-expanded is placed here, after the draw is in the document.
+      placeOpenRowDetails(body);
       // THE FIRST PUSH REVEALS THE RAIL, and nothing else ever does.
       host.hidden = false;
     },
@@ -188,6 +204,8 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     dispose(): void {
       log.debug("disposing the workspaces rail", { operation: "sidebar.dispose" });
       stream.cancel();
+      window.removeEventListener("resize", replace);
+      window.removeEventListener("scroll", replace, true);
       clear();
       attention.dispose();
       host.replaceChildren();

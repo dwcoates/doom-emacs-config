@@ -125,6 +125,10 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   fire-and-forget click handler goes through it, so a `MalformedView` is logged
   once and filed as `frame_undecodable` instead of escaping as an unhandled
   rejection.
+- **ONE VIEWPORT CLAMP.** `clampReveal` (src/topbar/clamp.ts). Any panel that
+  must hang under an anchor and stay inside the window places itself through
+  it — the topbar reveals and the sidebar row's detail panel both do — rather
+  than growing a second set of edge rules.
 - **ONE TOKEN FORMATTER.** `formatTokens` (src/format.ts), mirroring the
   daemon's `format.go`: below 1000 unscaled; at or above it, k or M with
   exactly one fractional digit, a trailing ".0" trimmed, and the unit chosen by
