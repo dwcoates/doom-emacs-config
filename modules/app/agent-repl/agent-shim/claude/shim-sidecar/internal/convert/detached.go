@@ -224,14 +224,14 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 	taskType := str(pick(result, "task_type", "taskType"))
 	if taskID == "" {
 		// BENIGN UNATTRIBUTABLE — debug, not warn. A TaskStop that names no task
-		// carries nothing to attribute the stop to; it is stored whole as
+		// carries nothing to attribute the stop to; it is classified whole as
 		// residue, which is the correct outcome, not data loss. It recurs across
 		// history and would flood a cold re-scan's strict harvest at warn. The
-		// residue record stays; only the severity drops. (An agent TaskStop that
+		// classification stays; only the severity drops. (An agent TaskStop that
 		// DOES name a task but whose launch this stream never opened stays warn
 		// below — that is a pointier "expected-but-absent launch" signal.)
 		c.log.With(at.ctxFor("task-stop")).
-			LogVerbose("TaskStop result names no task; the stop cannot be attributed and the record is stored as vendor_specific")
+			LogVerbose("TaskStop result names no task; the stop cannot be attributed and the record is classified as vendor_specific residue")
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unattributed", result)}
 	}
 
@@ -250,26 +250,35 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		run, launched := c.spawnedRuns[taskID]
 		if !launched {
 			// AN ABSENT LAUNCH IS ONLY A SIGNAL IF THE LAUNCH COULD HAVE BEEN
-			// SEEN. This converter learns a task's spawning call from a launch
-			// result it read on this same stream, so a converter that RESUMED
-			// mid-file — at the cursor the store already holds — has no way to
-			// have seen a launch that lies behind that cursor. That is the
-			// ordinary shape of a restart, not a gap: on the owner's machine
-			// five of these landed in one millisecond at offset ~50 MB of a
-			// transcript a freshly-started reader had joined minutes earlier,
-			// stopping five agents whose launches a previous process had already
-			// converted and committed.
+			// SEEN, and there are TWO ways it could not have been.
 			//
-			// A converter that read the file FROM BYTE 0 and still has no launch
-			// for the task IS looking at a gap, and keeps the warning. The
-			// residue is identical either way; only the severity moves, and the
+			// THE LAUNCH WAS WRITTEN TO A DIFFERENT FILE. The vendor's
+			// background agents outlive the transcript that launched them: a
+			// `/clear` rotates the session id and opens a new file while the
+			// harness keeps every running agent, so the first thing the new
+			// file says about such a run is the stop that settles it. The
+			// vendor states where the launch lives — the run's spool sits under
+			// the LAUNCHING session's directory — and foreignspawn.go reads
+			// that off the notifications this stream did carry.
+			//
+			// THE LAUNCH LIES BEHIND THIS READER'S CURSOR. A converter that
+			// RESUMED mid-file has no way to have seen a launch before its
+			// window; that is the ordinary shape of a restart.
+			//
+			// A converter that read the file FROM BYTE 0, with no foreign owner
+			// on record, IS looking at a gap and keeps the warning. The residue
+			// is identical in all three cases; only the severity moves, and the
 			// record names which case it is.
-			if c.resumedMidFile() {
+			switch owner, foreign := c.foreignSpawns[taskID]; {
+			case foreign:
+				c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID}).
+					LogVerbose("TaskStop names an agent task session %s launched, so its launch was written to that session's transcript and never to this one; the spawn unit it settles cannot be identified here and the record is classified as vendor_specific residue", owner)
+			case c.resumedMidFile():
 				c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, Offset: logging.Off(c.joinedOffset)}).
-					LogVerbose("TaskStop names an agent task whose launch lies before this reader joined the file, so the spawn unit it settles cannot be identified here and the record is stored as vendor_specific")
-			} else {
+					LogVerbose("TaskStop names an agent task whose launch lies before this reader joined the file, so the spawn unit it settles cannot be identified here and the record is classified as vendor_specific residue")
+			default:
 				c.log.With(at.ctxWarn("task-stop")).With(logging.Context{TaskID: taskID}).
-					Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is stored as vendor_specific")
+					Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is classified as vendor_specific residue")
 			}
 			return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unlaunched", result)}
 		}
