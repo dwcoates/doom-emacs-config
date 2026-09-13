@@ -528,6 +528,23 @@ exactly one repository and is never a fallback for another."
           :missing-files (agent-repl-wire-verbs--decode-repeated-string
                        message 'missingFiles json))))
 
+(defun agent-repl-wire-decode-create-workspace-naming-failed (json)
+  "Decode CreateWorkspaceNamingFailed from JSON into a plist
+(`:model\=' `:cause\=' `:attempts\=' `:answer\=').
+EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL, and this
+create supplied no name and the naming call could not mint one.  There
+is no word-truncation fallback, so the create is refused: `answer\=' is
+the last thing the model said, when it said anything at all."
+  (let ((message "CreateWorkspaceNamingFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(model cause attempts answer))
+    (list :model (agent-repl-wire-verbs--decode-string
+                       message 'model json)
+          :cause (agent-repl-wire-verbs--decode-string
+                       message 'cause json)
+          :attempts (agent-repl-wire--decode-uint32 message 'attempts json)
+          :answer (agent-repl-wire-verbs--decode-string
+                       message 'answer json))))
+
 (defun agent-repl-wire-decode-create-workspace-error-ungated-without-consent (json)
   "Decode CreateWorkspaceError's `ungated_without_consent' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-ungated-without-consent json))
@@ -578,12 +595,16 @@ JSON."
   "Decode CreateWorkspaceError's `one_shot_policy_missing' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-one-shot-policy-missing json))
 
+(defun agent-repl-wire-decode-create-workspace-error-naming-failed (json)
+  "Decode CreateWorkspaceError's `naming_failed' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-naming-failed json))
+
 (defun agent-repl-wire-decode-create-workspace-error (json)
   "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug finishRequired finishNotOneShot forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug finishRequired finishNotOneShot forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -598,7 +619,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'baseRefUnresolved :base-ref-unresolved #'agent-repl-wire-decode-create-workspace-error-base-ref-unresolved)
          (list 'worktreeCreationFailed :worktree-creation-failed #'agent-repl-wire-decode-create-workspace-error-worktree-creation-failed)
          (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-create-workspace-error-spawn-failed)
-         (list 'oneShotPolicyMissing :one-shot-policy-missing #'agent-repl-wire-decode-create-workspace-error-one-shot-policy-missing))))))
+         (list 'oneShotPolicyMissing :one-shot-policy-missing #'agent-repl-wire-decode-create-workspace-error-one-shot-policy-missing)
+         (list 'namingFailed :naming-failed #'agent-repl-wire-decode-create-workspace-error-naming-failed))))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."

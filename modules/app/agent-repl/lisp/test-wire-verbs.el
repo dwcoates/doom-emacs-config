@@ -1284,12 +1284,35 @@ at."
                    (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
                   :type 'agent-repl-wire-error)))
 
+(ert-deftest agent-repl-test-wire-verbs-create-error-naming-failed-arm ()
+  "CreateWorkspaceError's `naming_failed' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"namingFailed\":{\"model\":\"haiku\",\"cause\":\"invalid_answer\",\"attempts\":2,\"answer\":\"Fix The Login\"}}"))
+                   '(:cause (:arm :naming-failed
+                                  :value (:model "haiku" :cause "invalid_answer"
+                                          :attempts 2 :answer "Fix The Login")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-naming-failed-with-no-answer ()
+  "A naming call that never answered decodes with an empty `answer'."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get
+                    (plist-get (plist-get (agent-repl-wire-decode-create-workspace-error
+                                           (agent-repl-test-wire-verbs--parse
+                                            "{\"namingFailed\":{\"model\":\"haiku\",\"cause\":\"timeout\",\"attempts\":2}}"))
+                                          :cause)
+                               :value)
+                    :answer)
+                   ""))))
+
 (ert-deftest agent-repl-test-wire-verbs-create-error-arms-pinned ()
   "CreateWorkspaceError's arm set is exactly what the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "finishRequired" "finishNotOneShot" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "finishRequired" "finishNotOneShot" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-spawn-failed-arm ()
