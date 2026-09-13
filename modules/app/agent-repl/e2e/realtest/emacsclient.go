@@ -72,6 +72,36 @@ const probeBound = 5 * time.Second
 // file back immediately, so a name is free to be reused a few probes later.
 const probeRingSize = 8
 
+// probeWrapper is the elisp one probe is evaluated as.
+//
+// Its own function so the two things that keep an answer honest — the `seq`
+// stamp and the handler that catches a `quit` — are testable without a running
+// editor. Both were absent, and their absence is what a dropped `C-g` hid
+// behind.
+func probeWrapper(answer string, seq int, form string) string {
+	// `json-encode` rather than `json-serialize`: it accepts any lisp value at
+	// top level, where `json-serialize` requires an object or array, and every
+	// probe here legitimately answers a bare string or number.
+	//
+	// THE HANDLER CATCHES `quit` AS WELL AS `error`, and that is not tidiness.
+	// A `C-g` that lands while this form is running is handed to
+	// `handle_interrupt` rather than stored as a key, and the `quit-flag` it
+	// arms is taken by whatever runs next — which, while a realtest is
+	// confirming a press, is this probe. `error` does not catch `quit`, so the
+	// old form let that press vanish: the probe unwound, wrote nothing, and the
+	// caller read the ring slot's previous occupant. Caught here it comes back
+	// as a named probe failure, which is a reading nobody is blamed on.
+	return fmt.Sprintf(`(progn
+  (require 'json)
+  (with-temp-file %q
+    (insert (condition-case err
+                (json-encode (list (cons 'ok t) (cons 'seq %d) (cons 'value (progn %s))))
+              ((quit error)
+               (json-encode (list (cons 'ok :json-false) (cons 'seq %d)
+                                  (cons 'error (error-message-string err))))))))
+  t)`, answer, seq, form, seq)
+}
+
 // Client is a read-only connection to a running Emacs.
 type Client struct {
 	// Socket is the server socket path (`--socket-name`). On this machine it
@@ -90,10 +120,45 @@ func probeAnswerPath(scratch string, seq int) string {
 }
 
 // probeResult is the envelope every probe answers in.
+//
+// `Seq` IS WHAT MAKES THE ANSWER THIS PROBE'S ANSWER. The file names cycle
+// through `probeRingSize` slots, so the file a probe is about to read already
+// exists with somebody else's answer in it; a probe whose form never finished
+// writing therefore reads the answer of the probe `probeRingSize` earlier and
+// cannot tell. That is not a hypothetical: a `C-g` posted into an Emacs that is
+// executing a probe's own elisp is handed to `handle_interrupt` and quits the
+// probe (delivery.go), the `with-temp-file` never writes, and the caller reads a
+// stale `(recent-keys)` as a fresh one — which is exactly the reading behind
+// the 2026-09-13 12:13 sweep's six "C-g DID NOT REACH EMACS" findings. The
+// stamp is carried in the answer and checked against the probe that asked for
+// it, so a stale file is a probe failure and never a reading.
 type probeResult struct {
 	OK    bool            `json:"ok"`
+	Seq   int             `json:"seq"`
 	Value json.RawMessage `json:"value"`
 	Error string          `json:"error"`
+}
+
+// checkProbeAnswer reads one answer file's bytes as the answer to probe `seq`.
+//
+// A pure function so the staleness check is testable without a running editor,
+// which is the whole reason the previous version of it — no check at all —
+// survived as long as it did.
+func checkProbeAnswer(seq int, form string, body []byte) (json.RawMessage, error) {
+	var res probeResult
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("decode the answer to probe %s (%q): %w", summarize(form), string(body), err)
+	}
+	if res.Seq != seq {
+		return nil, fmt.Errorf("the answer file for probe %d (%s) carries the stamp of probe %d, so probe %d "+
+			"never wrote it and this is the answer of an earlier probe that happened to land in the same ring "+
+			"slot: the probe was interrupted before it could write, and its reading says nothing about the "+
+			"editor now", seq, summarize(form), res.Seq, seq)
+	}
+	if !res.OK {
+		return nil, fmt.Errorf("probe %s signalled in emacs: %s", summarize(form), res.Error)
+	}
+	return res.Value, nil
 }
 
 // Alive reports whether the server answers at all.
@@ -117,19 +182,17 @@ func (c *Client) Alive(ctx context.Context) bool {
 // message travels with it.
 func (c *Client) Read(ctx context.Context, form string) (json.RawMessage, error) {
 	c.seq++
-	answer := probeAnswerPath(c.Scratch, c.seq)
+	seq := c.seq
+	answer := probeAnswerPath(c.Scratch, seq)
 
-	// `json-encode` rather than `json-serialize`: it accepts any lisp value at
-	// top level, where `json-serialize` requires an object or array, and every
-	// probe here legitimately answers a bare string or number.
-	wrapper := fmt.Sprintf(`(progn
-  (require 'json)
-  (with-temp-file %q
-    (insert (condition-case err
-                (json-encode (list (cons 'ok t) (cons 'value (progn %s))))
-              (error (json-encode (list (cons 'ok :json-false)
-                                        (cons 'error (error-message-string err))))))))
-  t)`, answer, form)
+	// THE SLOT IS EMPTIED BEFORE IT IS ASKED FOR. The stamp below catches a
+	// stale answer on its own, but leaving the previous occupant of the slot on
+	// disk means a probe that dies can be followed by one that reads bytes
+	// nobody wrote for it; removing it first makes the ordinary failure a
+	// MISSING file, which says plainly that the probe never answered.
+	_ = os.Remove(answer)
+
+	wrapper := probeWrapper(answer, seq, form)
 
 	callCtx, cancel := context.WithTimeout(ctx, probeBound)
 	defer cancel()
@@ -145,14 +208,7 @@ func (c *Client) Read(ctx context.Context, form string) (json.RawMessage, error)
 	if err != nil {
 		return nil, fmt.Errorf("read the answer to probe %s: %w", summarize(form), err)
 	}
-	var res probeResult
-	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("decode the answer to probe %s (%q): %w", summarize(form), string(body), err)
-	}
-	if !res.OK {
-		return nil, fmt.Errorf("probe %s signalled in emacs: %s", summarize(form), res.Error)
-	}
-	return res.Value, nil
+	return checkProbeAnswer(seq, form, body)
 }
 
 // ReadString is Read for a probe that answers a string.

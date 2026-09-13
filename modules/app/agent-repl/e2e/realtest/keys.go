@@ -110,6 +110,35 @@ type Chord struct {
 	// MarkFreeWhy says why this chord leaves no mark, so a reader of a finding
 	// can check the judgement rather than take it.
 	MarkFreeWhy string
+	// Interrupting says this chord is the QUIT CHARACTER, whose meaning
+	// depends on what Emacs is doing at the instant it lands.
+	//
+	// THE HARNESS IS THE THING MOST LIKELY TO BE MAKING EMACS BUSY. Every
+	// other key is queued while Emacs executes lisp and read as a key when it
+	// next looks; a `quit_char` is not queued at all —
+	// `kbd_buffer_store_buffered_event` hands it to `handle_interrupt`, so it
+	// never reaches `read_key_sequence`, never reaches
+	// `minibuffer-keyboard-quit`, and never reaches `record_char`. The prompt
+	// stays up and the ring does not grow, which is indistinguishable from a
+	// key that was dropped by the window server.
+	//
+	// AND THE CONFIRMATION USED TO BE WHAT MADE EMACS BUSY. `confirm` opened
+	// its first emacsclient probe within a millisecond of the post and then
+	// re-probed every 50ms, twice per turn once an effect was supplied, so the
+	// editor was executing this harness's own lisp for most of the window in
+	// which it had to read the key. A press of the same chord, to the same
+	// pid, with nothing talking to Emacs, was recorded and dismissed the
+	// prompt; six presses inside the 2026-09-13 12:13 sweep were not. The
+	// difference was the probe traffic, and it is ours.
+	//
+	// So an interrupting chord gets a QUIET WINDOW: the editor is left alone
+	// after the post for long enough to turn its run loop and read the key,
+	// and re-read at a slower cadence afterwards. The hold is what keeps the
+	// target's key window open across it (keydriver.swift).
+	Interrupting bool
+	// InterruptingWhy says why, so a reader of a finding can check the
+	// judgement rather than take it.
+	InterruptingWhy string
 	// Recorded is how `(key-description (recent-keys))` SPELLS this chord
 	// after Emacs has read it, where that is not `Emacs`.
 	//
@@ -413,12 +442,38 @@ func (d *KeyDriver) confirm(ctx context.Context, chord Chord, before InputMark,
 	effect *DeliveryEffect) (DeliveryVerdict, string, InputMark, bool) {
 	deadline := time.Now().Add(keyDeliveryConfirmCeiling)
 	var after InputMark
+	effectFailure := ""
+
+	// THE QUIET WINDOW COMES FIRST, AND ONLY FOR A CHORD THAT NEEDS IT. Probing
+	// an editor that is about to read an ordinary key costs nothing; probing
+	// one that is about to read a quit character turns that key into an
+	// interrupt (Chord.Interrupting). So the editor is left alone for exactly
+	// as long as reading the key takes it, and no chord that does not need it
+	// pays a millisecond.
+	if delay := confirmFirstProbeDelay(chord); delay > 0 {
+		select {
+		case <-ctx.Done():
+			return DeliveryUndetermined, "the press was cancelled before the editor was read", after, false
+		case <-time.After(delay):
+		}
+	}
+
 	for {
-		if effect != nil && effect.Observed != nil && effect.Observed(ctx) {
-			return DeliveryArrived, "the key's own effect happened: " + effect.What, after, true
+		if effect != nil && effect.Observed != nil {
+			happened, err := effect.Observed(ctx)
+			switch {
+			case err != nil:
+				// NOT SWALLOWED. An effect probe that would not answer has said
+				// nothing about the key, and reading its silence as "the effect
+				// has not happened" is how a press that could not be judged
+				// came back as one that was judged absent.
+				effectFailure = err.Error()
+			case happened:
+				return DeliveryArrived, "the key's own effect happened: " + effect.What, after, true
+			}
 		}
 		after = ReadInputMark(ctx, d.Client)
-		verdict, reason := judgeDelivery(chord, before, after)
+		verdict, reason := judgeWithEffectProbe(chord, before, after, effectFailure)
 		if verdict == DeliveryArrived {
 			return verdict, reason, after, false
 		}
@@ -437,7 +492,7 @@ func (d *KeyDriver) confirm(ctx context.Context, chord Chord, before InputMark,
 		select {
 		case <-ctx.Done():
 			return verdict, reason, after, false
-		case <-time.After(keyDeliveryPollInterval):
+		case <-time.After(confirmPollInterval(chord)):
 		}
 	}
 }
