@@ -13,6 +13,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- store: a statement whose context was canceled by its own caller is recorded at info as an abandoned call rather than at error as a storage failure, and the error still reaches the server unchanged (log sweep, `store.db.live-work` error "scanning live agents: context canceled")
 - store/realtest harness: `bin/store-reset.sh` boots the kept-alive services out and bootstraps them back from their installed plists instead of killing them and waiting for a pid launchd immediately replaces, and a realtest run no longer copies `events.db` aside (store growth investigation, three 180s reset timeouts and 4.6GB of `realtest-bak` clones)
 - sidecar: the process exit no longer waits without bound on the log forwarding queue — `CloseWithin` (5s) abandons a stuck drain, states one INFO `shutdown-drain` naming how many records were still queued and the daemon it was forwarding to, and exits (shutdown finding, `bin/store-reset.sh` stop unanswered for 180s)
 - launchd: both agent plists state `ExitTimeOut` (20s) explicitly, so a service that is stuck somewhere it has no bound of its own is killed instead of held (shutdown finding)

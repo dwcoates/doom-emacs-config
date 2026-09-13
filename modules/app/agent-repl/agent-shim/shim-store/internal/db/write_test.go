@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-store/internal/logging"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -926,4 +928,54 @@ func slowQueryTiming(t *testing.T, s *sink, statement string) (wait, duration fl
 	}
 	t.Fatalf("no %s record for statement %q; log was:\n%s", SlowQueryOperation, statement, s.file.String())
 	return 0, 0
+}
+
+// TestRefuseRecordsACanceledCallerAsAbandoned pins the class boundary the
+// live store crossed: a GetLiveWork the caller hung up on left a
+// `store.db.live-work` ERROR record behind, and nothing had gone wrong.
+func TestRefuseRecordsACanceledCallerAsAbandoned(t *testing.T) {
+	tests := []struct {
+		name      string
+		cause     error
+		wantLevel string
+		wantText  string
+	}{
+		{
+			name:      "a caller that hung up is abandoned, not failed",
+			cause:     context.Canceled,
+			wantLevel: "info",
+			wantText:  "abandoned",
+		},
+		{
+			name:      "an rpc past its deadline is abandoned, not failed",
+			cause:     context.DeadlineExceeded,
+			wantLevel: "info",
+			wantText:  "abandoned",
+		},
+		{
+			name:      "a real driver failure is still the store's own error",
+			cause:     errors.New("disk I/O error"),
+			wantLevel: "error",
+			wantText:  "refused",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			s, log := newSink(t)
+			d := &DB{log: log}
+			err := storagef(test.cause, "scanning live agents")
+
+			// Act
+			got := d.refuse(logging.Fields{Operation: "store.db.live-work", Table: "agent"}, err)
+
+			// Assert: the error reaches the caller unchanged whatever it was
+			// recorded as — the level is a reading of the cause, never a
+			// weakening of what the server is told.
+			if !errors.Is(got, test.cause) {
+				t.Fatalf("refuse returned %v, want it to wrap %v", got, test.cause)
+			}
+			s.assertLogged(t, test.wantLevel, test.wantText)
+		})
+	}
 }
