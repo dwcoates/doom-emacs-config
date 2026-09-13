@@ -542,3 +542,16 @@ rule allows.
 | 2026-09-13 | Whether one signalling field may cost the capture | No: every one of the eighteen is wrapped in its own `condition-case` | Nobody yet knows which reading is the interesting one, so losing seventeen over one is losing the evidence | Wrap the whole `concat` once |
 | 2026-09-13 | Whether the failure note carries the capture or a path to it | The whole capture, verbatim, and the path beside it | The note is what a reader of a failing run sees; the plan's bar for this loop is evidence verbatim, and a path is not evidence | Print only the path |
 | 2026-09-13 | Whether a press whose prompt DID close gets the note | No note, but the captures are still filed | Eighteen fields per healthy press would bury the presses that vanished; the comparison between a press that worked and one that did not is exactly what the next sweep needs on disk | Always append the note |
+
+## The vanishing C-g, resolved (2026-09-13 13:31, lead)
+
+Sweep 132xxx under the new focus policy (one steal per sweep, one
+hand-back) passed all eight realtests, and every quit press dismissed its
+prompt and was recorded. The quit diagnostic capture shows a clean picture
+before and after. The cause was the per-press focus hand-back: the helper
+posted the quit character and deactivated Emacs at once, and the quit
+character, which the NS port handles specially rather than queueing as an
+ordinary event, was lost in the deactivation while ordinary keys survived
+it. The deferred-quit fixes (deferral never dropped, requeue at a standing
+prompt) are kept: they were real defects the investigation exposed, and
+they are covered by tests.
