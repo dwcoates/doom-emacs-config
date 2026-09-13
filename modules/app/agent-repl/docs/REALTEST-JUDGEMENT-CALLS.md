@@ -573,3 +573,15 @@ they are covered by tests.
    the proto.
 6. Store volume: not to be solved by narrowing discovery; analyze what is
    written and stop storing what is never served (proposal owed).
+
+## Owner ruling: the cold gate has a floor (2026-09-13, owner)
+
+No cold gate when the context the cold read would re-read is under
+70,000 tokens: the session continues automatically. At or above 70,000
+the gate asks as today. Applies to every lapse (hibernation revival,
+daemon restart, resume after the TTL); a model change is unaffected by
+the floor only if its own rule says so (the cache is per model, so a
+switch re-reads everything regardless; the same floor applies there too
+unless the owner rules otherwise).
+Also ruled: hook attachments and total-token reminders are not stored
+(docs/STORE-VOLUME-PROPOSAL.md item 1, first two kinds).
