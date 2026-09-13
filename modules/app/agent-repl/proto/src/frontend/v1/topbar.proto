@@ -74,6 +74,39 @@ message TopbarView {
   // would restate that partition a second time, in a second place, for one
   // state.
   TopbarHibernated hibernated = 11;
+  // THE WHOLE-VIEW COLD-GATE STATE. Set means this workspace is STANDING AT
+  // THE COLD GATE: the shim answered `cold` to the session start, so no
+  // session was ever created and the daemon refused to re-read the context at
+  // full price until the reader answers the gate the feed is showing. While
+  // it is set the SESSION-SCOPED elements above are ABSENT for the same
+  // reason they are absent under `hibernated` — there is no session to
+  // resolve them from — and the account, the connectivity glyph and the title
+  // are still resolved and still drawn.
+  //
+  // THE TOPBAR IS NEVER OPTIONAL, which is the whole reason this field
+  // exists. Without it a cold-gated workspace resolved nothing at all: no
+  // `session_started`, no context usage, so the readiness gate never passed
+  // and the strip stayed BLANK for as long as the gate stood.
+  //
+  // AT MOST ONE OF `hibernated` AND `cold_gate` IS EVER SET, and when both
+  // states hold at once the daemon states THIS one: a cold gate is waiting on
+  // the reader, while hibernation waits on nothing and lifts itself on the
+  // next prompt.
+  TopbarColdGate cold_gate = 12;
+}
+
+// The topbar's cold-gate state. It carries the two facts the daemon already
+// holds from the shim's `SessionCold` — what a resume would cost, and when
+// the gate rose — and nothing else: the CHOICE is the feed's gate card, and
+// restating its menu here would be a second place to answer one question.
+message TopbarColdGate {
+  // How many context tokens the cold read would re-read at full price. The
+  // client formats the figure; the daemon never composes a number as text.
+  int64 context_tokens = 1;
+  // When the gate rose, epoch ms. The age is TICKED CLIENT-SIDE from this
+  // instant, for the same reason `TopbarHibernated.since_ms` is: a topbar is
+  // republished on facts, never on a clock.
+  int64 since_ms = 2;
 }
 
 // The topbar's hibernated state. Empty of everything but the instant: the
