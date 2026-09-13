@@ -913,3 +913,18 @@ discovered later. The module AGENTS.md documents the catalog.
   transcript line; not on our protos yet).
 - The whole-view state text ("cold context 101.1k 12m 13s") drawn in the
   right group was noticed as not matching the described layout.
+
+## Owner rulings: topbar contract and account cell (2026-09-13, owner)
+
+- The topbar schema and organization are FIXED, no exceptions. The
+  whole-view hibernated and cold-gate states are reversed; cells that lack
+  a session fact are optional by presence and draw empty in place, and the
+  context chip and warning strip are always present.
+- The title is the workspace SUMMARY from the vendor's `ai-title` line
+  when present, else the name.
+- Clicking the account cell presents a dropdown of the login options (every
+  known account root, the current one marked); one option is presented as
+  a one-row dropdown.
+- The gns-cowork plugin's PowerShell SessionStart hooks (unguarded on macOS
+  in 9.10.0, the latest) were stripped locally from the installed copy with
+  a backup beside it; upstream still carries them.
