@@ -502,6 +502,26 @@ way a refusal does.
    `TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding` is what holds
    this: it drives a real turn and stop, then reads the store's own shutdown
    record for `outstanding_tokens=0`.
+5. **A STANDING STREAM MAY END ONLY BECAUSE SOMEBODY ASKED IT TO, AND EVERY
+   ENDING IS NAMED.** The store's `WatchAgentSession` has no failure arm and no
+   natural end, and its handler returns a CLEAN end of stream when the store is
+   shutting down. `store/reader.ts` used to read that as "the store closed, so
+   stop": the engine's `for await` fell out, `WatchAgent` returned normally, and
+   `service/routes.ts` recorded `completed` at DEBUG — so the daemon opened a
+   `link_fault` for a standing stream that ended while the session lived, and
+   the shim's log held nothing at any level it runs at (workspace
+   2b81f45a724642ef, 2026-09-13).
+   - An unasked end now takes the refused token's own recovery: re-open from
+     the LAST SERVED POINTER, on the read half's retry schedule, so a store
+     restart under a live shim does not sever every consumer's tail. It is
+     bounded by `UNASKED_END_BUDGET` consecutive ends that delivered nothing,
+     after which the tail throws `store_unavailable` rather than spinning.
+   - `engine/turn.ts` names how EVERY `WatchAgent` ended: `concluded` (the
+     teardown's, at info), the consumer's own departure or a throw the route
+     already recorded (debug), and a tail that simply ran out — the daemon's
+     severed link, seen from this side — at ERROR. The handler learns of a
+     conclusion by observing it on the `AgentPageSession` it registers with the
+     session, which is what the teardown concludes through.
 
 ## Validation and errors
 
