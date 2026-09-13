@@ -425,17 +425,17 @@ func rt7ProveForkChord(ctx context.Context, t *testing.T, client *Client, driver
 		t.Errorf("read Emacs's own (recent-keys) to tell `SPC TAB f` from `SPC TAB n`: %v", err)
 		return
 	}
-	spelled := wsActSpell(sequence)
-	if !strings.Contains(keys, spelled) {
+	spelled, recorded := wsActSpell(sequence), SpellRecorded(sequence)
+	if !strings.Contains(keys, recorded) {
 		note := fmt.Sprintf("`%s` put the fork command's prompt up, but Emacs's own (recent-keys) does not "+
 			"contain %q, so the prompt cannot be credited to this chord: `SPC TAB n` and `SPC TAB c` ask the same first "+
-			"question. recent-keys ends with: %s", spelled, spelled, tail(keys, 120))
+			"question. recent-keys ends with: %s", spelled, recorded, tail(keys, 120))
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
 		return
 	}
 	note := fmt.Sprintf("`%s` is confirmed as the FORK command and not the create command: Emacs's own "+
-		"(recent-keys) contains %q and the prompt it raised was the fork command's", spelled, spelled)
+		"(recent-keys) contains %q and the prompt it raised was the fork command's", spelled, recorded)
 	manifest.Notes = append(manifest.Notes, note)
 	t.Logf("%s", note)
 }
