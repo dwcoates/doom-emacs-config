@@ -1,8 +1,11 @@
 package dlog
 
 import (
+	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -131,4 +134,70 @@ func TestLoggerSurvivesAPoisonedDestination(t *testing.T) {
 	// Act, Assert: the emitter must not panic; the failure goes to the one
 	// permitted emergency output instead.
 	log.Error("daemon.pkg.verb", "m", nil)
+}
+
+// TestTheEmergencyOutputIsItselfARecord pins the shape of the LAST RESORT.
+// Every reader in the system parses a log line as a record, so two lines of
+// prose -- "LOG SINK FAILURE: <cause>" and "unpersisted record: <the json>" --
+// made the one output that fires when everything else has failed the one
+// output nothing could read: 24 unparseable lines in the 2026-09-13 sweep,
+// each carrying a real record nobody could group, level or attribute.
+func TestTheEmergencyOutputIsItselfARecord(t *testing.T) {
+	tests := []struct {
+		name            string
+		line            []byte
+		wantUnpersisted string
+	}{
+		{
+			name:            "a record the sink refused",
+			line:            []byte("{\"message\":\"the original\"}\n"),
+			wantUnpersisted: "{\"message\":\"the original\"}",
+		},
+		{
+			name: "a failure with no record to carry",
+			line: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("os.Pipe: %v", err)
+			}
+			saved := os.Stderr
+			os.Stderr = w
+			t.Cleanup(func() { os.Stderr = saved; r.Close() })
+
+			// Act.
+			s.emergency(RuntimeDaemon, io.ErrClosedPipe, tt.line)
+			w.Close()
+
+			// Assert.
+			raw, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("read the emergency output: %v", err)
+			}
+			lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+			if len(lines) != 1 {
+				t.Fatalf("the emergency output is %d lines, want exactly one: %q", len(lines), string(raw))
+			}
+			var rec struct {
+				Level     string            `json:"level"`
+				Operation string            `json:"operation"`
+				Context   map[string]string `json:"context"`
+			}
+			if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+				t.Fatalf("the emergency output is not a record: %v (%q)", err, lines[0])
+			}
+			if rec.Operation != "daemon.dlog.sink_failure" || rec.Level != LevelError {
+				t.Fatalf("emergency record = %s/%s, want daemon.dlog.sink_failure/error", rec.Level, rec.Operation)
+			}
+			if rec.Context["unpersisted_record"] != tt.wantUnpersisted {
+				t.Fatalf("unpersisted_record = %q, want %q", rec.Context["unpersisted_record"], tt.wantUnpersisted)
+			}
+		})
+	}
 }
