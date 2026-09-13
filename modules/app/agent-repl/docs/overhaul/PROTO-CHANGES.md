@@ -829,3 +829,25 @@ representable.
 two required files, since no finish varies the set.
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+### `TopbarView.hibernated` — the strip's one whole-view state
+
+`TopbarView` gains `TopbarHibernated hibernated = 11`, and the new message
+`TopbarHibernated { int64 since_ms = 1; }`.
+
+USER-RULED, 2026-09-13 (`docs/REALTEST-JUDGEMENT-CALLS.md`, "Owner rulings,
+second batch", item 1): while a workspace is hibernated the topbar is still
+published, as ONE topbar-level state rather than per-cell arms. When the field
+is set the session-scoped elements — model selector, permission-mode picker,
+context chip, fast mode, warning strip, session line — are absent, because a
+stood-down session states none of them; the account, the connectivity glyph
+and the title are still resolved and still drawn.
+
+A MESSAGE FIELD WITH PRESENCE, NOT A ONEOF OVER THE WHOLE VIEW: every field of
+this view is already an element message, so an element the state suppresses is
+expressed by not setting it, and wrapping the other nine fields in a oneof arm
+would restate that partition a second time for one state. The message carries
+only the instant, because the age ticks client-side — the topbar is
+republished on facts, never on a clock.
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4

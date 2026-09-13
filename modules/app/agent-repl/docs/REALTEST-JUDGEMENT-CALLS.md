@@ -573,3 +573,16 @@ they are covered by tests.
    the proto.
 6. Store volume: not to be solved by narrowing discovery; analyze what is
    written and stop storing what is never served (proposal owed).
+
+## Judgement calls implementing owner ruling 1, second batch (2026-09-13)
+
+| date | question | call | why | rejected |
+|---|---|---|---|---|
+| 2026-09-13 | Which shape carries the topbar's hibernated state, the oneof or the message field the ruling offered | `TopbarHibernated hibernated = 11`, a message field with presence | The file's own header rule is that every field of the view is an element message, so an element the state suppresses is expressed by not setting it; a oneof over the whole view would restate that partition a second time for one state | A `oneof state` wrapping the other nine fields |
+| 2026-09-13 | Which readiness gates a PARKED workspace's topbar keeps | The naming and the account | Those two are workspace facts (WSM's and the config root's); the other three are session facts a stood-down session will never state, so gating on them is the blank strip the hibernated view exists to replace | Publish the hibernated view with no gate at all |
+| 2026-09-13 | Whether the warning strip is drawn while hibernated | No — it is session-scoped | Every arm of it (accounting, unmodeled tools, session faults, degraded windows) is resolved from session facts, so a parked workspace has none to state | Keep publishing an empty strip |
+| 2026-09-13 | Which set the boot's bring-up walks: "not adopted", or "client-less" | Client-less, the set `adopt` already answers | `adopt` answers three sets, and UNDETERMINED — the lock or socket probe could not tell — is never read as free anywhere in that sequence; spawning a second shim onto a conversation a survivor may still own is the exact loss that discipline prevents | Start every open row with no adopted client |
+| 2026-09-13 | Where in the boot sequence the bring-up runs | Last, after the merges are recovered | Every earlier step reconciles state a freshly spawned session would race: the orphaned turns are closed, the holds are restored, the merges are recovered | Immediately after `adopt`, as the ruling's wording reads |
+| 2026-09-13 | What a failed session-record read does to the bring-up of that workspace | Counts as a bring-up failure, at ERROR, and the next workspace is still started | "Could not tell" is never the benign answer here either: reading it as "not hibernated" would spawn over a deliberate sleep, and reading it as hibernated would leave a workspace session-less with nobody able to say why | Treat an unreadable record as not parked |
+| 2026-09-13 | Whether Select's revival failure fails the select | Yes | A selected workspace with no session is the state this ruling abolishes, and answering success would hide it | Log and carry on with the selection |
+| 2026-09-13 | Whether the relaunch integration test's assertion or its arrangement moved | Its arrangement: the shim profile is written before the successor starts | The successor now brings sessions up during its own boot, so a fixture written after `StartDaemon` returned is read by nothing. No assertion changed | Relax the page assertion, or delay the boot bring-up |
