@@ -72,6 +72,11 @@ type Profile struct {
 	// daemon's very first request: a test that queued the answer over the
 	// control socket would be racing the spawn it is scripting.
 	LiveWork [][]byte `json:"live_work,omitempty"`
+	// HangStartSession makes StartSession never answer, waiting out the
+	// caller's context instead. It is a PROFILE rather than a scripted answer
+	// because the daemon's boot bring-up sends StartSession as its very first
+	// request, which a control-socket script would race.
+	HangStartSession bool `json:"hang_start_session,omitempty"`
 	// ResumeHistory is the conversation a RESUMED session already holds: each
 	// element is one binary-encoded conversation.v1 HistoryEntry, stated
 	// NEWEST FIRST as a producer serves a page, and every WatchAgent stream of
