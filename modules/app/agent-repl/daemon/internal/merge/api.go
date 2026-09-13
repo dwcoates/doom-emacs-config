@@ -138,6 +138,14 @@ type Deps struct {
 	// Prompts reads the briefs at use time. The field holds the directory,
 	// not a cached brief, because a brief is never cached across a use.
 	PromptsDir string
+	// CheckoutRoot is the agent-repl module checkout the daemon was deployed
+	// from. It decides whether a repository's merge policy is the daemon's
+	// corpus or the repository's own `.agent-repl/prompts`.
+	CheckoutRoot string
+	// Policy probes a repository's policy directory for the `merge-before`
+	// and `merge-after` briefs it may state. nil means the real filesystem
+	// (prompts.OnDisk).
+	Policy prompts.Files
 	// Briefs loads and splices one brief by name at USE time. It is injected
 	// rather than called directly so the orchestrator's tests fake a brief
 	// without a prompts directory on disk; the production value is BriefsFrom.
