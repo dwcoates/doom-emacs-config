@@ -49,7 +49,20 @@ type migration struct {
 var migrations = []migration{
 	{To: 4, Name: "ported_prompts", DDL: portedPromptsDDL},
 	{To: 5, Name: "host_session_identity_backfill", DDL: hostSessionIdentityBackfillDDL},
+	{To: 6, Name: "creation_jobs_drop_one_shot_finish", DDL: creationJobsDropOneShotFinishDDL},
 }
+
+// creationJobsDropOneShotFinishDDL retires the creation job's recorded ONE-SHOT
+// FINISH ACTION. A one-shot no longer has one (owner ruling, 2026-09-12): what
+// happens on completion is the repository's own directive, appended to the
+// commission and carried out by the agent, so the daemon performs no finish and
+// has nothing to record or spend.
+//
+// Like the layout-5 step this one introduces NO SHAPE, so there is no
+// fresh-file DDL for it to reuse — the fresh-file table simply no longer
+// declares the column. Dropping it is lossless in the only sense that matters:
+// nothing left in this build reads the value, and a recorded finish this build
+// would decline to take is worse kept than dropped.
 
 // hostSessionIdentityBackfillDDL heals the DURABLE RESIDUE of a build that
 // filed a session row before minting its host identity: the creation path
@@ -76,6 +89,10 @@ var migrations = []migration{
 const hostSessionIdentityBackfillDDL = `
 UPDATE sessions SET host_session_id = lower(hex(randomblob(8)))
 WHERE host_session_id IS NULL OR host_session_id = '';
+`
+
+const creationJobsDropOneShotFinishDDL = `
+ALTER TABLE creation_jobs DROP COLUMN one_shot_finish;
 `
 
 // planMigrations answers the steps that carry a file stamped with from up to

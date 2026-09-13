@@ -441,9 +441,9 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   target the parent's worktree; fork ports the parent's transcript (the
   fake transcript file appears under the child's config root project dir)
   and StartSession(resume) is sent
-- one-shot: prompt decorated from prompts/ (assert the splice), finish
-  action recorded; self_merge enqueues on completion; open_pr runs the PR
-  post-prompt
+- one-shot: prompt decorated from the repository's policy (assert the
+  preamble, the commission and the completion directive); no finish action is
+  recorded and none is taken on completion
 - merge_actions recorded and read back by a later merge
 - ungated permission mode without allow_ungated refused
 
@@ -532,15 +532,17 @@ audit's charge can be reconciled against the files.
   prompt needing classification is HELD with `classification_error` and an
   ERROR naming "classifier"; `OpenLogin` is refused naming "login".
 - SELF-RELOAD NEEDS BOTH HALVES: a sibling worktree of the self repository runs
-  the Emacs method but triggers no deploy, and a one-shot self-merge on any
+  the Emacs method but triggers no deploy, and a one-shot's merge on any
   other repository triggers none either.
 - NUKEWORKSPACE KILLS BEFORE IT REMOVES: `KillSession` reaches the shim with no
   `worktree remove` yet recorded by the scripted git, and a scripted failure of
   that removal answers `git_failed{detail}`.
 - CLOSEWORKSPACE IS BLOCKED BY LIVE DETACHED WORK even with no turn open.
-- ONE-SHOT FINISH: the `self_certified` and `add_to_merge_queue` flags are
-  spliced into the PR post-prompt text, a FAILURE terminal fires no finish, and
-  a missing `oneshot-create-pr-then-close-followup.md` reaches `brief_missing`.
+- ONE-SHOT COMPLETION DIRECTIVE: the decorated prompt carries the framing
+  sentence and the REPOSITORY'S own directive text, a repository missing only
+  the directive is refused with `one_shot_policy_missing` naming just that
+  file, and a concluded one-shot turn enqueues NO merge — the daemon takes no
+  finish action at all.
 - THE ROSTER'S STATUS ARMS ARE ASSERTED ONE PER TEST, never inside a
   disjunction: `submitting`, `clearing`, `compacting`, `interrupted`,
   `degraded`, `vendor_blocked` and `merge_failed`, each driven from its own

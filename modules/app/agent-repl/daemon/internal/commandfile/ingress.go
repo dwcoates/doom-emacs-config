@@ -282,9 +282,9 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 }
 
 // applyCreate maps a create entry onto the ordinary creation verb. A one-shot
-// create from this channel is the SELF-MERGE form: the channel carries no
-// finish field, and the self-merge one-shot is the flow this channel has always
-// dispatched.
+// create from this channel carries no finish field because NO one-shot does:
+// what happens on completion is the repository's own directive, appended to the
+// commission by the daemon and carried out by the agent.
 func (i *ingress) applyCreate(ctx context.Context, entry Entry) error {
 	spec := workspace.CreateSpec{
 		RepoDir:       entry.GitRoot,
@@ -292,9 +292,6 @@ func (i *ingress) applyCreate(ctx context.Context, entry Entry) error {
 		Name:          entry.Name,
 		BaseRef:       entry.BaseRef,
 		OneShot:       entry.OneShot,
-	}
-	if entry.OneShot {
-		spec.Finish = &workspace.OneShotFinish{SelfMerge: true}
 	}
 	_, err := i.deps.Verbs.Create(ctx, spec)
 	return err

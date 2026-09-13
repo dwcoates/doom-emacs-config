@@ -938,7 +938,7 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 	}
 }
 
-func TestOneShotSelfMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
+func TestAOneShotMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 	t.Parallel()
 	// Arrange: a daemon whose self repo is a DISTINCT repository from the
 	// one-shot's own -- the other-repo method entirely (emacsRepo=false),
@@ -951,11 +951,10 @@ func TestOneShotSelfMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 		Repository: repository,
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
 			Prompt: said("ship the fix"),
-			Finish: &agentreplv1.CreateWorkspaceOneShot_SelfMerge{SelfMerge: &agentreplv1.CreateWorkspaceOneShotSelfMerge{}},
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot, self_merge) = (%v, %v), want a success", resp, err)
+		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
 	}
 	ws := resp.Msg.GetSuccess().GetWorkspace()
 	shim := d.Shim(ws)
@@ -963,14 +962,17 @@ func TestOneShotSelfMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 	shim.ExpectStartTurn()
 	roster := d.WatchRoster()
 
-	// Act: the turn concludes successfully, firing the one-shot's own
-	// self-merge finish action.
+	// Act: the turn concludes, and the merge is asked for the way the agent
+	// carrying the completion directive asks for it — the ordinary merge verb.
 	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("MergeWorkspace(one_shot) = error %v, want the merge enqueued", err)
+	}
 
 	// Assert: the merge lands (the other-repo method has nothing between the
 	// two configured prompts, so a clean run with neither reaches "merged"
 	// straight away).
-	awaitRoster(t, d, roster, "the one-shot's self-merge landed", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the one-shot's merge landed", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, ws.GetId())
 		return row != nil && row.GetMerged() != nil
 	})

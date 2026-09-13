@@ -48,8 +48,8 @@ const (
 //  1. validate the form, including the ungated-mode consent check;
 //  2. derive the slug (supplied name, else the initial prompt by the naming
 //     rule), the branch, the worktree directory and the resolved base ref;
-//  3. record the CREATION JOB — merge geometry, configured actions, one-shot
-//     finish and consent — BEFORE anything is materialized, so a crash leaves
+//  3. record the CREATION JOB — merge geometry, configured actions and
+//     consent — BEFORE anything is materialized, so a crash leaves
 //     evidence of what was being built rather than an unexplained worktree;
 //  4. materialize the worktree through git;
 //  5. REGISTER only once the worktree exists;
@@ -75,7 +75,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	// refused with nothing built and nothing minted.
 	var policy prompts.Source
 	if spec.OneShot {
-		policy, err = v.requireOneShotPolicy(global, repoDir, spec.Finish)
+		policy, err = v.requireOneShotPolicy(global, repoDir)
 		if err != nil {
 			return wsm.Workspace{}, err
 		}
@@ -145,7 +145,6 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		BaseRef:              baseRef,
 		Materialized:         false,
 		OneShot:              spec.OneShot,
-		Finish:               finishOrigin(spec.Finish),
 		InitialPrompt:        spec.InitialPrompt,
 		ConsentedUngatedMode: spec.ConsentedUngatedMode,
 		CreatedAt:            v.now(),
@@ -156,8 +155,8 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	}
 	global.Debug(opCreate, "recorded the creation job before materialization", dlog.Context{
 		"branch": branch, "worktree_dir": worktreeDir, "target_dir": targetDir,
-		"base_ref": baseRef, "finish": finishOrigin(spec.Finish),
-		"parent": parentID(parent),
+		"base_ref": baseRef,
+		"parent":   parentID(parent),
 	})
 
 	if err := v.deps.Git.CreateWorktree(ctx, repoDir, branch, baseRef, worktreeDir); err != nil {
@@ -254,16 +253,6 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 // validateCreate refuses the forms that cannot be built, before anything is
 // minted or written.
 func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
-	if spec.OneShot && spec.Finish == nil {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "spec.OneShot && spec.Finish == nil"})
-		return refuse(log, "CreateWorkspace", ArmFinishRequired,
-			"a one-shot creation must name a finish action", false)
-	}
-	if !spec.OneShot && spec.Finish != nil {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!spec.OneShot && spec.Finish != nil"})
-		return refuse(log, "CreateWorkspace", ArmFinishNotOneShot,
-			"a finish action belongs only to the one-shot form", false)
-	}
 	if spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == \"\""})
 		return refuse(log, "CreateWorkspace", ArmNoSlug,
@@ -402,7 +391,8 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 
 // submitInitialPrompt sends the workspace's first message down the ONE delivery
 // path, with origin WORKSPACE_CREATED. A one-shot prompt is DECORATED first:
-// the autonomous preamble, the user's words, and the success-gated wrap-up.
+// the autonomous preamble, the user's words, and the repository's completion
+// directive.
 func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec, policy prompts.Source) error {
 	if strings.TrimSpace(spec.InitialPrompt) == "" {
 		log.Debug(opCreate, "created without an initial prompt", nil)
@@ -410,7 +400,7 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 	}
 	text := spec.InitialPrompt
 	if spec.OneShot {
-		decorated, err := v.decorateOneShot(text, spec.Finish, policy)
+		decorated, err := v.decorateOneShot(text, policy)
 		if err != nil {
 			log.Error(opCreate, "could not compose the one-shot prompt", dlog.Context{"cause": err.Error()})
 			return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)

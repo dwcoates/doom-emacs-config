@@ -91,47 +91,6 @@ func TestOnTurnEndedLeavesAHoldADaemonConditionStillHolds(t *testing.T) {
 	}
 }
 
-func TestOnTurnEndedTakesTheOneShotFinishAtASuccessfulConclusion(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	running(t, h, "running-turn", "the running work")
-	// Act
-	h.watcher.idle()
-	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
-	// Assert
-	if got := h.finishes(); len(got) != 1 || got[0] != "running-turn" {
-		t.Fatalf("finishes = %v, want the concluded turn", got)
-	}
-}
-
-func TestOnTurnEndedTakesNoFinishOnAFailedTurn(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	running(t, h, "running-turn", "the running work")
-	// Act
-	h.watcher.idle()
-	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseFailed)
-	// Assert
-	if got := h.finishes(); len(got) != 0 {
-		t.Fatalf("finishes = %v, want none: the wrap-up is success-gated", got)
-	}
-}
-
-func TestOnTurnEndedSurvivesAFailingFinishHook(t *testing.T) {
-	// Arrange: the finish hook's failure is recorded, and the queue still pops.
-	h := newHarness(t)
-	h.finishErr = errors.New("the brief is missing")
-	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
-	// Act
-	h.watcher.idle()
-	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
-	// Assert
-	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
-		t.Fatalf("started = %v, want the queue to keep popping", started)
-	}
-}
-
 func TestOnLeaseChangedStampsANewHoldOnEveryStandingPrompt(t *testing.T) {
 	// Arrange: a prompt held for the running turn, then a drain lease arrives.
 	h := newHarness(t)
