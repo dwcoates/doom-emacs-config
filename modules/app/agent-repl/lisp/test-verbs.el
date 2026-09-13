@@ -665,22 +665,32 @@ branch -- so a `read-string' here would be a question the ruling removed."
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
               ((symbol-function 'read-string)
                (lambda (&rest _) (error "a dynamic create asks nothing but its prompt"))))
-      (agent-repl-create-workspace nil)
+      (agent-repl-create-workspace)
       (let ((standard (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
                                  :value)))
         (should-not (plist-get standard :name))
         (should-not (plist-get standard :base-ref))))))
 
-(ert-deftest agent-repl-verbs-create-command-prefix-arg-sets-the-parent ()
-  "A prefix argument makes the new workspace a CHILD of the current one."
+(ert-deftest agent-repl-verbs-child-create-command-sends-the-parent ()
+  "`agent-repl-create-child-workspace\=' makes the new workspace a CHILD."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
               ((symbol-function 'read-string) (lambda (&rest _) "")))
-      (agent-repl-create-workspace t)
+      (agent-repl-create-child-workspace)
       (should (equal (plist-get (agent-repl-test-verbs--request :create) :parent)
                      (list :workspace (agent-repl-test-verbs--ref)))))))
+
+(ert-deftest agent-repl-verbs-create-command-sends-no-parent ()
+  "`SPC TAB n\=' is never a child: it sends no parent at all."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
+              ((symbol-function 'read-string) (lambda (&rest _) "")))
+      (agent-repl-create-workspace)
+      (should-not (plist-get (agent-repl-test-verbs--request :create) :parent)))))
 
 (ert-deftest agent-repl-verbs-fork-command-sets-fork-inside-the-parent ()
   "A fork lives INSIDE the parent: a fork without a parent is unrepresentable."
@@ -705,7 +715,7 @@ branch -- so a `read-string' here would be a question the ruling removed."
                 ((symbol-function 'completing-read)
                  (lambda (&rest _) (error "a dynamic create must not ask for a repository"))))
         ;; Act.
-        (agent-repl-create-workspace nil)
+        (agent-repl-create-workspace)
         ;; Assert.
         (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
                        (agent-repl-test-verbs--repo-ref)))))))
@@ -725,7 +735,7 @@ branch -- so a `read-string' here would be a question the ruling removed."
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
       (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing")))
         ;; Act.
-        (agent-repl-create-workspace nil)
+        (agent-repl-create-workspace)
         ;; Assert.
         (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
                        (agent-repl-test-verbs--repo-ref)))))))
@@ -738,7 +748,7 @@ branch -- so a `read-string' here would be a question the ruling removed."
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
       (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
         ;; Act / Assert.
-        (should-error (agent-repl-create-workspace nil) :type 'user-error)
+        (should-error (agent-repl-create-workspace) :type 'user-error)
         (should-not agent-repl-test-verbs--sent)))))
 
 (ert-deftest agent-repl-verbs-fork-command-asks-no-repository ()
@@ -809,7 +819,7 @@ branch -- so a `read-string' here would be a question the ruling removed."
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
       ;; Act.
-      (agent-repl-create-workspace-static nil)
+      (agent-repl-create-workspace-static)
       ;; Assert.
       (let ((request (agent-repl-test-verbs--request :create)))
         (should (equal (plist-get request :repository) (agent-repl-test-verbs--repo-ref)))
@@ -826,7 +836,7 @@ branch -- so a `read-string' here would be a question the ruling removed."
                (lambda (_p) (error "a static create asks for no prompt")))
               ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
       ;; Act.
-      (agent-repl-create-workspace-static nil)
+      (agent-repl-create-workspace-static)
       ;; Assert.
       (should-not (plist-get (plist-get (plist-get (agent-repl-test-verbs--request :create)
                                                    :form)
@@ -841,21 +851,38 @@ branch -- so a `read-string' here would be a question the ruling removed."
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'read-string) (lambda (&rest _) "   ")))
       ;; Act / Assert.
-      (should-error (agent-repl-create-workspace-static nil) :type 'user-error)
+      (should-error (agent-repl-create-workspace-static) :type 'user-error)
       (should-not agent-repl-test-verbs--sent))))
 
-(ert-deftest agent-repl-verbs-static-create-prefix-arg-sets-the-parent ()
-  "The static create takes the same CHILD prefix the dynamic one does."
+(ert-deftest agent-repl-verbs-child-static-create-sends-the-parent-and-the-name ()
+  "`agent-repl-create-child-workspace-static\=' names a child, and asks no prompt."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'agent-repl-verbs--read-prompt)
+               (lambda (_p) (error "a static create asks for no prompt")))
+              ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
+      ;; Act.
+      (agent-repl-create-child-workspace-static)
+      ;; Assert.
+      (let ((request (agent-repl-test-verbs--request :create)))
+        (should (equal (plist-get request :parent)
+                       (list :workspace (agent-repl-test-verbs--ref))))
+        (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
+                       "named-one"))))))
+
+(ert-deftest agent-repl-verbs-static-create-sends-no-parent ()
+  "`SPC TAB N\=' is never a child: it sends no parent at all."
   ;; Arrange.
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
       ;; Act.
-      (agent-repl-create-workspace-static t)
+      (agent-repl-create-workspace-static)
       ;; Assert.
-      (should (equal (plist-get (agent-repl-test-verbs--request :create) :parent)
-                     (list :workspace (agent-repl-test-verbs--ref)))))))
+      (should-not (plist-get (agent-repl-test-verbs--request :create) :parent)))))
 
 ;;;; ---- Create: standing on what was just created ----
 
@@ -871,7 +898,7 @@ the create selects it the same way registering a directory does."
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       ;; Act.
-      (agent-repl-create-workspace nil)
+      (agent-repl-create-workspace)
       (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
       ;; Assert.
       (should (equal agent-repl-test-verbs--selected
@@ -914,7 +941,7 @@ opened over the new workspace\'s panel shows up here as a magit call."
                    (push dir agent-repl-test-verbs--selected)
                    (agent-repl--ws-switch-project-display dir))))
         ;; Act.
-        (agent-repl-create-workspace nil)
+        (agent-repl-create-workspace)
         (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
         ;; Assert.
         (should agent-repl-test-verbs--selected)

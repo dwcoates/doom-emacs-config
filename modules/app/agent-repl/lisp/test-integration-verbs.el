@@ -53,6 +53,7 @@
 (declare-function agent-repl-merge-queue-pause "verbs")
 (declare-function agent-repl-merge-queue-resume "verbs")
 (declare-function agent-repl-create-workspace "verbs")
+(declare-function agent-repl-create-child-workspace "verbs")
 (declare-function agent-repl-fork-workspace "verbs")
 (declare-function agent-repl-create-oneshot-self-merge "verbs")
 (declare-function agent-repl-create-oneshot-open-pr "verbs")
@@ -1908,9 +1909,9 @@ Mirrors pause's refusal exactly, on the other admin verb."
 ;;;; ---- #53: the interactive create family
 
 ;; audit-3 #53(a)
-(ert-deftest agent-repl-itest-verbs-create-workspace-interactive-without-a-prefix-omits-parent ()
-  "`agent-repl-create-workspace' with NO prefix argument omits `parent' entirely.
-Pins fanout §9 \"the interactive create family (prefix arg = child)\": a
+(ert-deftest agent-repl-itest-verbs-create-workspace-interactive-omits-parent ()
+  "`agent-repl-create-workspace' omits `parent' entirely.
+Pins fanout §9 \"the interactive create family\": a
 plain create is a TOP-LEVEL workspace, never implicitly parented onto the
 workspace the command was invoked from.  No git/gh boundary is reached by
 this command -- the daemon owns creation -- so only the two Emacs readers
@@ -1935,14 +1936,14 @@ are stubbed."
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _) (ignore prompt initial) "")))
           ;; Act.
-          (agent-repl-create-workspace nil)
+          (agent-repl-create-workspace)
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
           (should-not (assq 'parent (agent-repl-itest-verbs--body daemon "CreateWorkspace"))))))))
 
 ;; audit-3 #53(b)
-(ert-deftest agent-repl-itest-verbs-create-workspace-interactive-with-a-prefix-names-the-parent-without-a-fork ()
-  "A PREFIX ARGUMENT makes the new workspace a CHILD, with no fork.
+(ert-deftest agent-repl-itest-verbs-create-child-workspace-interactive-names-the-parent-without-a-fork ()
+  "`agent-repl-create-child-workspace' makes the new workspace a CHILD, no fork.
 Pins fanout §9: `parent.workspace.id' must echo the CURRENT workspace's
 ref verbatim, and `fork' must stay absent -- a plain child conversation is
 fresh, not a resumed one."
@@ -1966,7 +1967,7 @@ fresh, not a resumed one."
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _) (ignore prompt initial) "")))
           ;; Act.
-          (agent-repl-create-workspace t)
+          (agent-repl-create-child-workspace)
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
           (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
