@@ -760,4 +760,26 @@ It does not disturb `brief_missing`, which keeps its own meaning: a brief
 absent from the policy source that WAS chosen. The two are distinct faults —
 no policy source at all, versus a hole in the one there is.
 
+### `CreateWorkspaceNamingFailed`, the naming call that could not answer
+
+`CreateWorkspaceError.cause` gains `naming_failed = 13`, carrying `model`,
+`cause`, `attempts` and `answer`.
+
+USER-RULED, 2026-09-12 (`docs/REALTEST-JUDGEMENT-CALLS.md`, "the workspace
+name is a headless haiku call"): every dynamically created workspace whose
+client supplied no name is named by a headless Haiku call the daemon makes
+inside `Create`, and the word-truncation path (`workspace.Slug`) is DELETED
+rather than kept as a fallback. A failed call is therefore an error back to
+the caller, not a degraded name, and the arm is the carrier for it.
+
+`cause` is a STRING, not an enum — the owner's shape, read off the failure:
+`guard_refused`, `no_binary`, `timeout`, `exit_status`, `unreadable_envelope`
+or `invalid_answer`. `answer` is the last thing the model said, and is the
+only field in this endpoint's vocabulary carrying model-authored text; it is
+what diagnoses a bad brief.
+
+`no_slug` SURVIVES, with exactly one site left: a one-shot creation carrying
+no prompt, which is argument validation and not a naming failure. The two are
+distinct — nothing to name from, versus a naming call that could not answer.
+
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4

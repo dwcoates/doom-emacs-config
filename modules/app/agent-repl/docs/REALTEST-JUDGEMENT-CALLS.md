@@ -245,3 +245,29 @@ this itself.
   (the same prompt the name is generated from) as:
   "when you're all done, please do the following postprocessing directive:
   <repo-specific-specification>". Doom's directive is the module corpus.
+
+## Lead call: where the "naming the workspace" phase is announced (2026-09-12, lead)
+
+The owner wanted the phase message; where it is issued was not ruled on, and
+the shape of `CreateWorkspace` decided it.
+
+`CreateWorkspace` is a UNARY rpc with no progress channel, and the design
+forbids adding a streaming one for this. So Emacs messages
+`agent-repl: naming the workspace...` in `agent-repl-verb-create`
+(`lisp/verbs.el`) immediately BEFORE the rpc is issued, and only when the
+create supplies no name — a create with a name makes no naming call and so
+announces none. The daemon-side fact is its own record, `daemon.workspace.naming`
+at INFO, with the model, the attempt, the duration and the chosen name.
+
+The consequence to know: the message is announced OPTIMISTICALLY, before the
+daemon has confirmed it is making the call. A create refused for something
+earlier in `Create` (an unknown repository, a missing one-shot policy) will
+have said "naming the workspace..." first. The refusal's own message follows
+immediately and overwrites it, so the wrong word is on screen for the length
+of one round trip.
+
+To reverse: either drop the message from `agent-repl-verb-create` and leave
+the phase to the daemon log alone, or give `CreateWorkspace` a progress
+stream and issue the phase from the daemon when the call actually starts —
+which the design rejected on the grounds that the create's answer is what
+carries the minted `WorkspaceRef` Emacs selects on.
