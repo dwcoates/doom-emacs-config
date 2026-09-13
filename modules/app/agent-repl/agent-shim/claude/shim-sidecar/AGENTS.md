@@ -1285,6 +1285,78 @@ for nothing.
   inferred batches, which name no file, are summarized under their own record. A
   file that withheld nothing states nothing.
 
+### The residue shape catalog
+
+Owner ruling 2026-09-13 (`docs/REALTEST-JUDGEMENT-CALLS.md`, "the
+unmodelled-line shape catalog"). Withholding a residue line takes its bytes out
+of the store and, with them, the only evidence the vendor emits that line at
+all. THE SHAPE IS WHAT SURVIVES: one row per distinct recursive key structure,
+so the vendor's API stays discoverable at a cost bounded by the number of shapes
+rather than by traffic.
+
+`internal/convert/shape.go` renders and hashes it; `cycle.go withholdResidue`
+contributes one observation per withheld line, at the same door that withholds
+it. The rows live in the store's `residue_shapes` table and are read back with
+`ListResidueShapes` (see that module's AGENTS.md).
+
+**THE CANONICAL RENDERING, AND EVERY CLAUSE IS TESTED**
+(`internal/convert/shape_test.go`):
+
+- an OBJECT renders as `{key:shape,...}` with its keys SORTED and recursed, so
+  the shape does not depend on the order the vendor serialized them in;
+- an ARRAY renders as `[shape]` where the element shape is the MERGE of every
+  element — the union of their keys — so a list of ten near-identical content
+  blocks is one shape and not ten. An always-empty array renders `[]`;
+- a SCALAR contributes only its JSON TYPE (`string`, `number`, `bool`, `null`)
+  and never its value, which is what makes two lines differing only in what they
+  say one shape;
+- a position that took SEVERAL forms renders them all, sorted and joined with
+  `|`, so a union is stated rather than resolved by picking a winner.
+
+**THE ID WILDCARD, AND IT IS THE LOAD-BEARING CLAUSE.** An object key that looks
+like a GENERATED ID is replaced by the single key `*`, and several id keys in one
+map MERGE under it exactly as an array's elements do. Without it a map keyed by
+tool-call id mints a brand-new structure per line, which is the one failure mode
+that turns a bounded catalog back into a copy of the corpus. A key is an id when
+it is:
+
+- a uuid in the canonical 8-4-4-4-12 hex form;
+- `toolu_`-prefixed or `msg_`-prefixed with something after the prefix — the
+  vendor's own two spellings;
+- a hex run of SIXTEEN characters or more. Shorter runs are excluded on purpose:
+  `deadbeef` is also a word;
+- nothing but digits, which is an array-shaped map's index.
+
+Everything else is a vocabulary key and is kept VERBATIM. The rule is narrow
+deliberately: a shape whose key names have been guessed away describes no API.
+
+**THE HASH** is SHA-256 over the rendering, lowercase hex, and it is the
+catalog's primary key.
+
+**WHAT ELSE THE OBSERVATION CARRIES.** The `kind` is the withheld tally's own
+label (`ResidueLabel`), so a `--kind` filter matches what the summary said. The
+`first_example` is the residue arm's own payload: for `unparsed` that IS the
+vendor's bytes, and for `vendor_specific`/`unknown` it is the decoded payload
+re-serialized as COMPACT JSON — this door sits above the converter, so the
+frame's original bytes are no longer in hand and the example agrees with the
+vendor's line in every key and value while differing in key order and
+whitespace. Bytes that are not JSON at all have no key structure and share the
+one `<unparsable>` row, whose example says why the parse failed.
+
+**DEDUP AND DELIVERY.** Observations are deduped WITHIN the batch by hash, first
+example kept, because a boot walk reads thousands of lines of one shape and one
+observation per line would send the catalog the very volume it exists to avoid
+storing. They ride the same `WriteBatchRequest` as the records and the cursor
+advance, so an observation taken from bytes that advance consumes commits with
+it or not at all. A BATCH OF ONLY RESIDUE IS THEREFORE SENT — carrying no
+entries and only its observations — because an observation dropped for looking
+like an empty batch is a shape no re-read ever observes again. A batch with no
+entries, no cursor advance and no shapes is still not sent.
+
+**THE SUMMARY.** The per-file `residue-drop-summary` states `new_shapes`: how
+many hashes THIS PROCESS saw for the first time. A shape seen in an earlier
+batch still rides the wire (the store's count must rise) but is not news.
+
 ### Keep-alive
 
 A user prompt whose first text block BEGINS with
