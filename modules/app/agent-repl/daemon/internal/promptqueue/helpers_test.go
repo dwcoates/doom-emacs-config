@@ -666,7 +666,6 @@ type harness struct {
 	drain   *noteRecorder
 	log     *dlog.TestSurfaces
 
-
 	// parked records every parked route, and parkedErr fails it.
 	parked    []*conversationv1.UserSaid
 	parkedErr error
@@ -725,8 +724,8 @@ func newHarness(t *testing.T) *harness {
 			return "guidance-turn", h.parkedErr
 		},
 		DrainRefusals: h.drain,
-		Now: func() time.Time { return instant },
-		Log: h.log,
+		Now:           func() time.Time { return instant },
+		Log:           h.log,
 	})
 	if err != nil {
 		t.Fatalf("newQueue: %v", err)
