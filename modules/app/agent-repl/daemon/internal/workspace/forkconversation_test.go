@@ -20,7 +20,7 @@ func forkFixture(t *testing.T, parentPrompts []wsm.PortedPrompt) (*fixture, ids.
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
 	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
 	f.db.conversations = map[ids.WorkspaceID][]wsm.PortedPrompt{parent.ID: parentPrompts}
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.ForkFrom = &id
 	return f, parent.ID, spec

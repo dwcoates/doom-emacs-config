@@ -299,3 +299,51 @@ func TestEveryRegisteredWorkspaceIsResolvableFromTheRoster(t *testing.T) {
 		})
 	}
 }
+
+// The remediation the roster's assertion names is the one the state store's
+// own boot check names. A person who meets the violation in either log is told
+// the same thing to do about it.
+func TestTheRosterAssertionNamesTheSameRemedyAsTheStore(t *testing.T) {
+	// Arrange.
+	r, surfaces := newResolver(t)
+	stray := workspace("w-stray", "stray")
+	stray.Repo = ids.RepoID("repo-missing")
+
+	// Act.
+	r.SetRegistry(registry(stray))
+
+	// Assert.
+	const want = "re-register the workspace's directory, which mints its repository row, or forget the workspace"
+	for _, rec := range surfaces.Records() {
+		if rec.Operation != "daemon.sidebar.repository_view" || rec.Level != "error" {
+			continue
+		}
+		if rec.Context["remediation"] != want {
+			t.Fatalf("remediation = %v, want %q", rec.Context["remediation"], want)
+		}
+		return
+	}
+	t.Fatal("the roster recorded no repository-invariant assertion")
+}
+
+// With the invariant held, the repo grouping DRAWS EVERY WORKSPACE and records
+// nothing. It is the positive half of the assertion above: the drop the
+// assertion reports is a defect, so a good registry must never take one.
+func TestTheRepoGroupingDrawsEveryWorkspaceOfAGoodRegistry(t *testing.T) {
+	// Arrange.
+	r, surfaces := newResolver(t)
+	one, two, three := workspace("w-1", "one"), workspace("w-2", "two"), workspace("w-3", "three")
+
+	// Act.
+	r.SetRegistry(registry(one, two, three))
+
+	// Assert.
+	got := rowNames(repoRows(t, latest(t, r)))
+	// The order is the roster's own; the subject is that nothing is MISSING.
+	if !equal(got, []string{"one", "three", "two"}) {
+		t.Fatalf("repo grouping rows = %v, want every workspace", got)
+	}
+	if hasError(surfaces.Records(), "daemon.sidebar.repository_view") {
+		t.Fatal("a good registry recorded a repository-invariant assertion")
+	}
+}

@@ -35,6 +35,11 @@ CREATE TABLE tasks (
 
 CREATE TABLE workspaces (
   id               TEXT PRIMARY KEY,
+  -- A WORKSPACE WHOSE REPOSITORY IS UNREGISTERED IS AN INVARIANT VIOLATION and
+  -- must be impossible (owner ruling, 2026-09-13). This reference is where
+  -- SQLite holds it; the layout-3 fixture carries the same declaration, so no
+  -- migration adds it and no migration may rebuild the table without it. See
+  -- repoinvariant.go for the other three layers and the boot-time report.
   repo_id          TEXT NOT NULL REFERENCES repositories(id),
   dir              TEXT NOT NULL UNIQUE,
   name             TEXT NOT NULL,
