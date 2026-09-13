@@ -253,3 +253,65 @@ func TestNukeAbandonsTheWorkspacesWaitingMerge(t *testing.T) {
 		t.Fatalf("merges told of the nuke = %v, want exactly the nuked workspace", f.merge.closed)
 	}
 }
+
+// TestKillArmsTheStandDownLatchBeforeTheForcedKill covers the order the
+// unconditional process stop depends on: the stop after a kill that did not
+// answer is a teardown this daemon ordered, and the latch is what says so to
+// every side that later sees the shim go.
+func TestKillArmsTheStandDownLatchBeforeTheForcedKill(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Kill(context.Background(), "w1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	// Assert.
+	if !f.shim.standDownBeforeKill {
+		t.Fatal("the stand-down latch was not armed before the forced KillSession")
+	}
+}
+
+// TestKillRecordsTheUnansweredSessionKillByWhoOrderedIt covers the record: an
+// unanswered kill inside a stand-down this daemon ordered is the escalation
+// working and is INFO, while one outside such a stand-down -- a DETACHED
+// client, whose process is the successor daemon's -- stays a WARN.
+func TestKillRecordsTheUnansweredSessionKillByWhoOrderedIt(t *testing.T) {
+	tests := []struct {
+		name      string
+		refused   bool
+		wantLevel string
+	}{
+		{name: "the daemon ordered this stand-down", refused: false, wantLevel: "info"},
+		{name: "the kill is outside a stand-down this daemon ordered", refused: true, wantLevel: "warn"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.shim.standDownRefused = tt.refused
+			f.shim.killSessionErr = errors.New("the shim never answered")
+
+			// Act.
+			if err := f.verbs.Kill(context.Background(), "w1"); err != nil {
+				t.Fatalf("Kill: %v", err)
+			}
+
+			// Assert.
+			for _, record := range f.log.logger.Records() {
+				if record.Message != "the forced KillSession did not answer" {
+					continue
+				}
+				if record.Level != tt.wantLevel {
+					t.Fatalf("the unanswered kill was recorded at %q, want %q", record.Level, tt.wantLevel)
+				}
+				return
+			}
+			t.Fatalf("records = %+v, want the unanswered kill recorded at %s", f.log.logger.Records(), tt.wantLevel)
+		})
+	}
+}

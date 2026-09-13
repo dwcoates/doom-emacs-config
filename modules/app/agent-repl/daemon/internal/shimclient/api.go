@@ -167,6 +167,20 @@ type Client interface {
 	// The latch is one-way: a shim asked to end its session is never asked to
 	// un-end it, and a revival is a new process with a new client.
 	StandingDown() bool
+	// StandDown ARMS the latch for a teardown this daemon is ordering, and
+	// answers whether it was armed.
+	//
+	// It exists because the ask does not always reach the shim: a
+	// `KillSession` that never answers is escalated to a process stop by the
+	// daemon itself, and the escalation is the ordered teardown. Arming it
+	// here, BEFORE the escalation, is what lets the exit watcher, the redialer
+	// and the adopted-death witness read that departure as ordinary rather
+	// than as a shim that died on its own.
+	//
+	// A DETACHED CLIENT ARMS NOTHING and answers false: that process belongs
+	// to the successor daemon, so this daemon is ordering no teardown of it.
+	// The latch is one-way, so arming an already-armed client is a no-op.
+	StandDown() bool
 	// Kill stops the process, recording who asked and why. ctx bounds the
 	// call's WAITS -- the SIGTERM grace and the wait for the exit decode --
 	// and never the reap itself, which runs on the client's own goroutine. A

@@ -1734,6 +1734,9 @@ func (a *shimAdapter) StopBash(ctx context.Context, work *conversationv1.Detache
 	return nil
 }
 
+// StandDown arms the client's stand-down latch. See Shim.StandDown.
+func (a *shimAdapter) StandDown() bool { return a.client.StandDown() }
+
 func (a *shimAdapter) KillSession(ctx context.Context, force bool) error {
 	response, err := a.client.KillSession(ctx, &shimv1.KillSessionRequest{Force: force})
 	if err != nil {

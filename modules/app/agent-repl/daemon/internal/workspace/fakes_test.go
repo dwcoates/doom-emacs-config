@@ -869,6 +869,13 @@ type fakeShim struct {
 	answerErr      error
 	killedSession  []bool
 	killSessionErr error
+	// standDownRefused makes StandDown answer false, the shape a DETACHED
+	// client has: this daemon is ordering no teardown of that process.
+	standDownRefused bool
+	// stoodDown counts the stand-down latch arms, and standDownBeforeKill
+	// records whether the latch was armed before KillSession was asked.
+	stoodDown           int
+	standDownBeforeKill bool
 }
 
 type killedTurn struct {
@@ -913,7 +920,17 @@ func (s *fakeShim) Answer(_ context.Context, agent *conversationv1.AgentId, answ
 	return nil
 }
 
+// StandDown arms the fake's stand-down latch, answering whether it armed.
+func (s *fakeShim) StandDown() bool {
+	if s.standDownRefused {
+		return false
+	}
+	s.stoodDown++
+	return true
+}
+
 func (s *fakeShim) KillSession(_ context.Context, force bool) error {
+	s.standDownBeforeKill = s.stoodDown > 0
 	if s.killSessionErr != nil {
 		return s.killSessionErr
 	}
