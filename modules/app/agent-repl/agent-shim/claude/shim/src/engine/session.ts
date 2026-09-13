@@ -33,6 +33,7 @@ import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
+import { hookBlockingText } from "../convert/hooks.js";
 import { terminalUpsertKey } from "../store/keys.js";
 import { PersistenceError } from "../store/persistence.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
@@ -229,6 +230,24 @@ interface OpenBashWatcher {
 const WATCHER_CONCLUSION_BUDGET_MS = 1_000;
 
 /**
+ * How long StartSession waits for the vendor's own `system:init`.
+ *
+ * STARTSESSION ALWAYS ANSWERS. The verb is unsettled until `init` arrives, and
+ * exactly three things settle it: `init` itself, a hook that BLOCKS before it
+ * (which has blocked the session's own opening), or this bound. Without the
+ * bound a vendor that goes quiet after its `SessionStart` hooks held the verb
+ * open forever — the grounded case, where a blocking `SessionStart:resume` hook
+ * left every boot bring-up hanging until the DAEMON's 60s bound fired and named
+ * the shim instead of the hook.
+ *
+ * Sized under that daemon bound on purpose: the shim knows WHY the start failed
+ * and the daemon does not, so the shim must be the one that answers first. The
+ * slowest thing before `init` is the vendor's MCP fan-out, which this leaves
+ * ample room for.
+ */
+const INIT_TIMEOUT_MS = 45_000;
+
+/**
  * The component name the log sink's own fault and degraded window carry.
  *
  * PERMANENT BY NATURE. Nothing restores a lost record, so this component has
@@ -363,6 +382,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let accountUsageHandle: unknown;
   let cadence: KeepaliveCadence | undefined;
   let initResolve: ((message: SdkMessage) => void) | undefined;
+  /** Settles the same pending start as {@link initResolve}, with a named reason. */
+  let initReject: ((reason: Error) => void) | undefined;
+  /** The pending start's own bound, cleared by whatever settles the start first. */
+  let initTimer: ReturnType<typeof setTimeout> | undefined;
   let loop: Promise<void> | undefined;
   /** Rows the store never acked by the time the teardown finished. */
   let lostRowsAtStandDown = 0;
@@ -1111,6 +1134,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   async function onSdkMessage(message: SdkMessage): Promise<void> {
     noteIdentityFacts(message);
+    settleStartOnBlockingHook(message);
     noteDetachedWork(message);
     converterDefectThisMessage = false;
     const output = deps.fold.onSdkMessage(message, foldContext());
@@ -1162,7 +1186,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         void rotate(message.session_id);
       }
       initResolve?.(message);
-      initResolve = undefined;
       return;
     }
     if (message.type === "result") {
@@ -1555,19 +1578,78 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   // -- StartSession ---------------------------------------------------------
 
+  /**
+   * The pending start, and the three things that settle it.
+   *
+   * `init` resolves it, {@link settleStartOnBlockingHook} rejects it with the
+   * hook's own refusal text, and this bound rejects it with the bound named.
+   * Whichever lands first clears BOTH slots and the timer, so the losers are
+   * inert rather than settling a start that a later attempt owns.
+   */
   function awaitInit(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      initResolve = () => resolve();
-      const timeout = deps.initTimeoutMs;
-      if (timeout === undefined || timeout <= 0) return;
+      const timeout = deps.initTimeoutMs ?? INIT_TIMEOUT_MS;
+      initResolve = () => {
+        clearPendingStart();
+        resolve();
+      };
+      initReject = (reason) => {
+        clearPendingStart();
+        reject(reason);
+      };
+      if (timeout <= 0) return;
       const handle = setTimeout(() => {
-        initResolve = undefined;
-        reject(new Error(`the vendor did not send its init message within ${timeout}ms`));
+        initReject?.(new Error(`the vendor did not send its init message within ${timeout}ms`));
       }, timeout);
       if (typeof (handle as { unref?: () => void }).unref === "function") {
         (handle as { unref: () => void }).unref();
       }
+      initTimer = handle;
     });
+  }
+
+  /** Disarm the pending start: whichever of the three settled it, the losers go. */
+  function clearPendingStart(): void {
+    initResolve = undefined;
+    initReject = undefined;
+    if (initTimer !== undefined) {
+      clearTimeout(initTimer);
+      initTimer = undefined;
+    }
+  }
+
+  /**
+   * A HOOK THAT BLOCKS BEFORE `init` HAS BLOCKED THE SESSION'S OWN OPENING.
+   *
+   * The only hooks that can fire before the vendor announces the session are
+   * its `SessionStart` ones, and the vendor gives a blocked one no further
+   * answer — no `init`, no result, nothing. So the blocking text IS the start's
+   * failure reason, and relaying it at once is what turns a sixty-second hang
+   * into a prompt refusal that names the hook the user actually configured.
+   *
+   * A hook that merely FAILED, or that only printed a system message or extra
+   * context, gates nothing: {@link hookBlockingText} is the single reading of
+   * that difference, shared with the converter that draws the same hook.
+   */
+  function settleStartOnBlockingHook(message: SdkMessage): void {
+    if (initReject === undefined) return;
+    if (message.type !== "system" || message.subtype !== "hook_response") return;
+    const blockingText = hookBlockingText(message);
+    if (blockingText === undefined) return;
+    LOGGER.error(
+      {
+        hook: message.hook_name,
+        hook_event: message.hook_event,
+        hook_id: message.hook_id,
+        detail: blockingText,
+      },
+      "a hook blocked the session's opening; the start is refused with the hook's own reason",
+    );
+    initReject(
+      new Error(
+        `the vendor's ${message.hook_name} hook blocked the session from opening: ${blockingText}`,
+      ),
+    );
   }
 
   async function startSession(
@@ -1706,6 +1788,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     effectiveModel = requestedModel;
     try {
       const initialized = awaitInit();
+      // The start can be settled by a blocking hook BEFORE `startQuery` has
+      // even returned, and a rejection nobody is awaiting yet is an unhandled
+      // one. This attaches the handler now; `await initialized` below still
+      // throws the same reason.
+      initialized.catch(() => undefined);
       await startQuery(
         brandNew || clearedTo !== undefined
           ? { kind: "fresh", sessionId: inForce }

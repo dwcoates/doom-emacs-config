@@ -129,6 +129,18 @@ means the daemon and this build disagree about the contract.
   shim refuse every session on Linux. `shim-lock` exit 3 is the distinct
   "another process holds it" answer, and anything else is a hard failure —
   never `conversation_owned`.
+- **`StartSession` ALWAYS ANSWERS.** The verb is unsettled from the moment the
+  query is created until the vendor's `system:init` lands, and exactly three
+  things settle it: `init` itself; a hook that comes back BLOCKING before it
+  (the only hooks that can fire that early are the vendor's `SessionStart`
+  ones, and a blocked one gets no further answer, so its blocking text IS the
+  start's failure reason); or `INIT_TIMEOUT_MS`, the shim's own bound, sized
+  UNDER the daemon's bring-up bound so the shim — which knows why — answers
+  before the daemon, which does not. All three end as
+  `StartSession{vendor_start_failed}` with the reason in `detail`.
+  Blocking-versus-merely-failing has ONE reading, `convert/hooks.ts`
+  `hookBlockingText`, shared by the gate and the drawn hook row so they cannot
+  drift.
 - **Signals**: SIGTERM is the one authorized shutdown and takes the
   `KillSession{force:true}` path, then exits 0 (nonzero if the stand-down
   failed). SIGINT is REFUSED and logged at error — an attached terminal's Ctrl-C

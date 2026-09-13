@@ -180,6 +180,41 @@ export function initMessage(overrides: Partial<{ sessionId: string; model: strin
   };
 }
 
+/**
+ * A `hook_response`, as the vendor spells one.
+ *
+ * Defaults to the grounded shape: a `SessionStart:resume` firing on a resume,
+ * which is the one that can land BEFORE the vendor's init.
+ */
+export function hookResponse(
+  overrides: Partial<{
+    hook_id: string;
+    hook_name: string;
+    hook_event: string;
+    output: string;
+    stdout: string;
+    stderr: string;
+    exit_code: number;
+    outcome: "success" | "error" | "cancelled";
+    uuid: string;
+  }> = {},
+): SdkMessage {
+  return {
+    type: "system",
+    subtype: "hook_response",
+    hook_id: overrides.hook_id ?? "hook-1",
+    hook_name: overrides.hook_name ?? "SessionStart:resume",
+    hook_event: overrides.hook_event ?? "SessionStart",
+    output: overrides.output ?? "",
+    stdout: overrides.stdout ?? "",
+    stderr: overrides.stderr ?? "",
+    exit_code: overrides.exit_code ?? 0,
+    outcome: overrides.outcome ?? "success",
+    uuid: overrides.uuid ?? "33333333-3333-4333-8333-333333333333",
+    session_id: "session-1",
+  } as SdkMessage;
+}
+
 /** A turn terminal. */
 export function resultMessage(uuid = "22222222-2222-4222-8222-222222222222"): SdkMessage {
   return {
