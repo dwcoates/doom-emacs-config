@@ -18,6 +18,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - sidecar: an `unrecorded` identity resolution (the R9 resume default, an absence of evidence) never moves a watched file off a book real evidence gave it, so a link file that stops answering for one pass no longer flip-flops the book (log sweep, 2 spurious `identity-rekey` warns 2.4s apart, out and back)
 - sidecar: a meta read the kernel DEFERRED (ENFILE/EMFILE/EINTR/EAGAIN) is held under its own `meta_read_deferred` reason at WARN and retried every rescan, instead of being stated as an unreadable file at ERROR; a permission or parse failure keeps the error (log sweep, 38 `discover-meta` errors across 34 files, every one ENFILE)
 - sidecar: a TaskStop whose launch lies BEFORE the offset this converter joined the file at is recorded at debug naming that offset, while one on a converter that read from byte 0 keeps its warn — an absent launch is a signal only if the launch could have been seen (log sweep, 5 `task-stop` warns at offset ~50 MB after a restart)
+- sidecar: an unmodelled assistant CONTENT BLOCK is recorded at debug like the unmodelled LINE arm one level up, closing the one forward-compat record 23f26d5e2 missed (log sweep, `assistant-block` warn on `type="fallback"`)
 - sidecar: an observed vendor `api_error` is recorded at INFO, not WARN — the request was the vendor's and this conversion succeeded whole (log sweep, 80 `api-error` warns)
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
