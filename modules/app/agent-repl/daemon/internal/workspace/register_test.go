@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/wsm"
@@ -639,5 +640,54 @@ func TestRegisterSurfacesAFailedReopen(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatalf("Register answered success though the re-open failed")
+	}
+}
+
+// TestRegisterLevelsACancelledRevivalAtInfo is the other side of the test
+// above: a bring-up that ended because the DAEMON'S OWN CONTEXT was cancelled
+// is the process leaving, not a session that failed to come up. Nothing is
+// left to serve the revived conversation, and the next boot revives it again.
+func TestRegisterLevelsACancelledRevivalAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		startErr  error
+		wantLevel string
+	}{
+		{
+			name:      "the bring-up was cancelled",
+			startErr:  context.Canceled,
+			wantLevel: "info",
+		},
+		{
+			name:      "the shim would not spawn",
+			startErr:  errors.New("the shim would not spawn"),
+			wantLevel: "error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			dir, _ := registeredWithAConversation(t, f, nil)
+			f.fleet.startErr = tt.startErr
+
+			// Act.
+			if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+				t.Fatalf("Register = %v, want the roster row despite the revival", err)
+			}
+
+			// Assert.
+			var level string
+			for _, r := range f.log.logger.Records() {
+				if r.Operation == opRegister && strings.Contains(r.Message, "revival") ||
+					r.Operation == opRegister && strings.Contains(r.Message, "did not come back up") {
+					level = r.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("the revival record is %q, want %q: %+v", level, tt.wantLevel, f.log.logger.Records())
+			}
+		})
 	}
 }

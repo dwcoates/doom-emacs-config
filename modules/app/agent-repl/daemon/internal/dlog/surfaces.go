@@ -524,7 +524,7 @@ func (s *surfaces) scanOnce() {
 func (s *surfaces) reportShimMarked(ws *workspaceSinks, sk *sink, size int64) {
 	log, err := s.Workspace(ws.dir)
 	if err != nil {
-		emergency(err, nil)
+		s.emergency(RuntimeDaemon, err, nil)
 		return
 	}
 	log.Info("daemon.dlog.shim_rotation_marked", "marked shim.log to rotate with the workspace's next shim process", Context{
@@ -535,7 +535,7 @@ func (s *surfaces) reportShimMarked(ws *workspaceSinks, sk *sink, size int64) {
 func (s *surfaces) reportShimHardCeiling(ws *workspaceSinks, sk *sink, size int64) (Logger, error) {
 	log, err := s.Workspace(ws.dir)
 	if err != nil {
-		emergency(err, nil)
+		s.emergency(RuntimeDaemon, err, nil)
 		return nil, fmt.Errorf("bind the hard-ceiling record to workspace %q: %w", ws.dir, err)
 	}
 	log.Error("daemon.dlog.shim_hard_ceiling", "shim.log reached its hard ceiling; forcing a shim roll at the next free turn boundary", Context{
@@ -576,11 +576,11 @@ func (s *surfaces) reportSinkFailure(ws *workspaceSinks, name string, cause erro
 	daemonSink := ws.sinks["daemon"]
 	s.mu.Unlock()
 	if daemonSink == nil {
-		emergency(cause, line)
+		s.emergency(RuntimeDaemon, cause, line)
 		return
 	}
 	if err := daemonSink.write(line); err != nil {
-		emergency(err, line)
+		s.emergency(RuntimeDaemon, err, line)
 	}
 }
 

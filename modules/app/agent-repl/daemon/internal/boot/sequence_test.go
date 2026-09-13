@@ -910,3 +910,70 @@ func TestAClosedMissingDirectoryIsNeverAdopted(t *testing.T) {
 		t.Fatalf("report.MissingDirClosed = %v, want [%v]", report.MissingDirClosed, ws.ID)
 	}
 }
+
+// TestTheRuledAutomaticCloseIsRecordedAtInfo pins the LEVEL of the ruling
+// above. The owner ruled the close automatic on 2026-09-11, so a close that
+// happened is the ruling being carried out and not a condition to remediate;
+// the arms beside it -- a stat that failed for any other reason, and a close
+// that could not be written -- keep their WARN and their ERROR.
+func TestTheRuledAutomaticCloseIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dir := t.TempDir()
+	h.register(t, dir, sessionlock.StateFree)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.boot.close_missing_dir") {
+		t.Fatalf("the ruled automatic close was recorded at warn: %v", h.log.Records())
+	}
+	if !h.hasRecord("info", "daemon.boot.close_missing_dir") {
+		t.Fatalf("no info record named the close: %v", h.log.Records())
+	}
+}
+
+// TestABootAbandonedMidAdoptionRecordsAtInfo pins the level of an adoption
+// that ended because the BOOT'S OWN CONTEXT was cancelled. The process is
+// going away under the reconciliation, so there is nothing to remediate about
+// a survivor nobody will serve; a shim that genuinely refused keeps its ERROR.
+// The boot still fails either way -- the caller decides what an abandoned boot
+// means -- it just stops reporting a defect that is not one.
+func TestABootAbandonedMidAdoptionRecordsAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		adoptErr  error
+		wantLevel string
+	}{
+		{name: "the boot was abandoned", adoptErr: context.Canceled, wantLevel: "info"},
+		{name: "the shim refused the dial", adoptErr: errors.New("connection refused"), wantLevel: "error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.supervisor.err = tt.adoptErr
+			h.register(t, t.TempDir(), sessionlock.StateHeld)
+
+			// Act.
+			if _, err := h.seq.Run(context.Background()); err == nil {
+				t.Fatal("Run = nil, want the failed adoption to fail the boot")
+			}
+
+			// Assert.
+			if !h.hasRecord(tt.wantLevel, "daemon.boot.adopt") {
+				t.Fatalf("no %s record under daemon.boot.adopt: %v", tt.wantLevel, h.log.Records())
+			}
+			if tt.wantLevel == "info" && h.hasRecord("error", "daemon.boot.adopt") {
+				t.Fatalf("an abandoned boot was reported at error: %v", h.log.Records())
+			}
+		})
+	}
+}

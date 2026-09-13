@@ -856,3 +856,37 @@ func TestTheWithdrawalIsRecordedAtInfo(t *testing.T) {
 		t.Fatal("no INFO daemon.cmd.exit record, want the withdrawal recorded")
 	}
 }
+
+// TestTheClaimLoserRecordsAtInfo pins the LEVEL of the exclusivity ruling's
+// losing side. Emacs spawns a daemon whenever it cannot tell that one is
+// already serving, so losing the claim is the mechanism working: the incumbent
+// keeps serving, its advertisement is untouched, and this process exits having
+// written nothing. A WARN said a defect had occurred on every such boot.
+func TestTheClaimLoserRecordsAtInfo(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	incumbent, err := daemonaddr.Bind(filepath.Join(root, "daemon.addr"), 0)
+	if err != nil {
+		t.Fatalf("the incumbent could not bind: %v", err)
+	}
+	defer incumbent.Close()
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("ReadFile daemon.run.log: %v", err)
+	}
+	if hasRunLogLevel(t, raw, "daemon.cmd.claim", dlog.LevelWarn) {
+		t.Fatalf("the claim loser was recorded at warn: %q", string(raw))
+	}
+	if !hasRunLogLevel(t, raw, "daemon.cmd.claim", dlog.LevelInfo) {
+		t.Fatalf("daemon.run.log = %q, want an INFO daemon.cmd.claim record", string(raw))
+	}
+}
