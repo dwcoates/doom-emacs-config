@@ -183,6 +183,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		})
 		return nil, err
 	}
+	// THE START BOUND, on the same contract and for the same reason: the
+	// integration suite's subject includes a shim that accepts a start and
+	// never answers, and waiting out the production window to observe it would
+	// cost that test a minute.
+	startBound, err := resolveStartBound(os.Getenv(envStartSessionBound))
+	if err != nil {
+		log.Error(graphOperation, "the session start bound was refused", dlog.Context{
+			"cause": err.Error(),
+		})
+		return nil, err
+	}
 
 	paths, err := resolvePaths(p.Opts)
 	if err != nil {
@@ -402,6 +413,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ShimBuildSHA: paths.ShimBuildSHA,
 		Fake:         p.Contracts.Fake() || fakeShims(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
+		StartBound:   startBound,
 		Log:          p.Surfaces,
 	})
 	if err != nil {
@@ -1139,6 +1151,28 @@ func adoptedDeathWitness(probe func(string) (sessionlock.State, error)) func(str
 		}
 		return state == sessionlock.StateFree, nil
 	}
+}
+
+// envStartSessionBound overrides workspace.DefaultStartSessionBound. It exists
+// for the integration suite, whose subject includes a shim that accepts the
+// start and never answers it.
+const envStartSessionBound = "AGENT_REPL_START_SESSION_BOUND"
+
+// resolveStartBound reads the start bound's override. Empty is
+// workspace.DefaultStartSessionBound; a malformed or non-positive value is a
+// REFUSAL, on the same reasoning resolveAdoptBound states.
+func resolveStartBound(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return workspace.DefaultStartSessionBound, nil
+	}
+	bound, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envStartSessionBound, value, err)
+	}
+	if bound <= 0 {
+		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envStartSessionBound, value)
+	}
+	return bound, nil
 }
 
 // envBootAdoptBound overrides boot.DefaultAdoptBound. It exists for the

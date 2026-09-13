@@ -2291,3 +2291,93 @@ func TestABringUpStandDownIsNotAFailedStartSession(t *testing.T) {
 		})
 	}
 }
+
+// ---- a start that never answers ----
+
+// TestAStartSessionThatNeverAnswersEndsAtItsBound pins the bound itself. A
+// shim that accepts the start and goes quiet used to hold the call, and the
+// workspace's start gate with it, until the process died.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34: workspace 2b81f45a724642ef's
+// shim logged `shim.convert.hooks: a hook blocked the gated action` on
+// `SessionStart:resume` and never answered. Three daemon generations sat in
+// that call for 35s, 3m30s and 8m30s, each ended only by the NEXT deploy's
+// SIGTERM, with nothing in the daemon's log saying what it was waiting on.
+func TestAStartSessionThatNeverAnswersEndsAtItsBound(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-quiet-shim")
+	f.fleet.startBound = 10 * time.Millisecond
+	f.client.startHold = make(chan struct{}) // never closed: only the bound ends it.
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start answered success though the shim never answered StartSession")
+	}
+	if !strings.Contains(err.Error(), "did not answer StartSession") {
+		t.Fatalf("Start = %v, want an error naming the unanswered StartSession", err)
+	}
+}
+
+// TestAnUnansweredStartNamesWhatItWasWaitingOn is the log half. "context
+// deadline exceeded" says nothing about which step spent the bound, and this
+// step is the difference between a shim that is not there and a shim that took
+// the request and went quiet — two states with two different remediations.
+func TestAnUnansweredStartNamesWhatItWasWaitingOn(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-quiet-shim")
+	f.fleet.startBound = 10 * time.Millisecond
+	f.client.startHold = make(chan struct{})
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	var found bool
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opBringUp && strings.Contains(r.Message, "did not answer inside its bound") {
+			found = true
+			if r.Level != "error" {
+				t.Fatalf("the unanswered start is recorded at %q, want error", r.Level)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no record names the unanswered start: %+v", f.log.logger.Records())
+	}
+}
+
+// TestTheStartBoundDoesNotSpeakForTheCallersOwnCancellation is the edge that
+// keeps the bound honest: when it is the CALLER that went away, the shim was
+// never given its bound to answer in, and saying it went quiet would blame the
+// shim for the daemon's own exit.
+func TestTheStartBoundDoesNotSpeakForTheCallersOwnCancellation(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-caller-left")
+	f.fleet.startBound = time.Minute
+	entered := make(chan struct{})
+	f.client.entered = entered
+	f.client.startHold = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	settled := make(chan error, 1)
+	go func() { settled <- f.fleet.Start(ctx, ws.ID) }()
+	<-entered
+
+	// Act.
+	cancel()
+
+	// Assert.
+	if err := <-settled; err == nil {
+		t.Fatal("Start answered success though its caller was cancelled")
+	}
+	for _, r := range f.log.logger.Records() {
+		if strings.Contains(r.Message, "did not answer inside its bound") {
+			t.Fatalf("a cancelled caller was reported as a shim that went quiet: %+v", r)
+		}
+	}
+}
