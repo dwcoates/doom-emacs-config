@@ -425,6 +425,14 @@ func logProcessExit(logf *logging.Bound, err *error) {
 // sink now rolls at a byte cap with a fixed number of generations, and the
 // terminal keeps only the sink-emergency record it is the last channel for.
 func openLogger(storeSocket, stateDir, logPath string) (*logging.Bound, func(), error) {
+	return openLoggerTo(os.Stderr, storeSocket, stateDir, logPath)
+}
+
+// openLoggerTo is openLogger with the launcher's terminal named explicitly, so
+// a test can prove that a normal run writes NOTHING there. The terminal under
+// launchd is an append-only file nobody rolls, and "the durable sink is the only
+// copy" is a property worth a test rather than a comment.
+func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*logging.Bound, func(), error) {
 	level, err := sharedlogging.ParseLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"))
 	if err != nil {
 		return nil, nil, bootstrapError{err}
@@ -437,10 +445,13 @@ func openLogger(storeSocket, stateDir, logPath string) (*logging.Bound, func(), 
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
 	forwarder := daemonclient.New(stateDir)
-	logf := logging.NewForwardingDurableOnlyAtLevel(os.Stderr, file, level, forwarder).
+	logf := logging.NewForwardingDurableOnlyAtLevel(terminal, file, level, forwarder).
 		With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
 	return logf, func() {
-		logf.Close()
+		// BOUNDED, BECAUSE LAUNCHD IS WAITING. The drain dials the daemon once
+		// per queued record; with the daemon gone and a boot's backlog queued,
+		// an unbounded wait held one stop past three minutes.
+		logf.CloseWithin(logging.DefaultShutdownDrain)
 		_ = file.Close()
 	}, nil
 }
