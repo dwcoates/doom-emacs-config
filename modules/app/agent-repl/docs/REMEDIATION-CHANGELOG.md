@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- store ledger sweep: the prune delete is driven from `cursor` through `write_ledger_source` instead of scanning the whole ledger index per batch (3.7ms against 111ms on the owner's 318k-row store), and the write path's statements and the sweep's are now pinned by their EXPLAIN plans plus 600k-row latency budgets (gap scan 2026-09-13 18:05:36, `store.db.slow-query` write_batch)
+
 - topbar account cell: clicking it opens a dropdown of every account root the daemon knows (email or "logged out", the current one marked), and picking one switches the workspace's session to it through SelectAccount and the restart verb's engine, opening that root's login when it has none; it is the pair's reveal, replacing the session line the cell used to open (owner ruling 2026-09-13: the logged-in cell did nothing)
 
 - footer tokens: swept every footer token-count site against the one-format ruling — all already route through `figures.Tokens`/`formatTokens` — and added the ruled boundary cases (1049, 1050, 10113, 142300, 1000000) to both formatters' tests (owner ruling, token-count format, 2026-09-13)
