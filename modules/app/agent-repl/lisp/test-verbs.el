@@ -1783,3 +1783,60 @@ came back CLOSED left behind."
       (agent-repl-verbs--pending-landing-fire))
     ;; Assert.
     (should (equal (plist-get agent-repl-verbs--pending-landing :id) "kept"))))
+
+;;;; ---- The arrival reason a verb leaves for the roster (owner ruling #6) ----
+
+(ert-deftest agent-repl-verbs-create-claims-its-arrival-as-created ()
+  "A create leaves `created' for the tab it is about to be given."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                  (agent-repl-test-verbs--ref "made" "/tmp/made"))
+      ;; Act.
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+      ;; Assert.
+      (should (equal (agent-repl--panels-take-arrival-reason "made") "created")))))
+
+(ert-deftest agent-repl-verbs-fork-claims-its-arrival-as-forked ()
+  "A fork leaves `forked', so its panels open naming the verb that asked."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                  (agent-repl-test-verbs--ref "child" "/tmp/child"))
+      ;; Act.
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                              :parent (agent-repl-test-verbs--ref) :fork t)
+      ;; Assert.
+      (should (equal (agent-repl--panels-take-arrival-reason "child") "forked")))))
+
+(ert-deftest agent-repl-verbs-one-shot-claims-its-arrival-though-it-never-selects ()
+  "A one-shot never stands on its workspace, and still opens its panels."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                  (agent-repl-test-verbs--ref "shot" "/tmp/shot"))
+      ;; Act.
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot :prompt "go")
+      ;; Assert.
+      (should (equal (agent-repl--panels-take-arrival-reason "shot") "created")))))
+
+(ert-deftest agent-repl-verbs-open-claims-its-arrival-as-reopened ()
+  "Re-opening a closed workspace leaves `reopened' for its returning tab."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with nil
+      ;; Act.
+      (agent-repl-verb-open (agent-repl-test-verbs--ref "back" "/tmp/back"))
+      ;; Assert.
+      (should (equal (agent-repl--panels-take-arrival-reason "back") "reopened")))))
+
+(ert-deftest agent-repl-verbs-a-refused-create-claims-no-arrival ()
+  "A create the daemon refused mints nothing, so it claims no arrival."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with
+        (list (cons :create (list :failure (list :arm :error :value nil))))
+      ;; Act.
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+      ;; Assert.
+      (should (equal (agent-repl--panels-take-arrival-reason "ws-id-1") "arrived")))))
