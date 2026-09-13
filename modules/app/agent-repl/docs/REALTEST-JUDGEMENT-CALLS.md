@@ -15,6 +15,13 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Hold tray rulings 1, 2 and 3, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Ruling 1 says the held prompt card is right-aligned "like the user prompt bubbles they will become"; `.queued-card` carried the alignment inline beside its parked frame | The rail moves to its own class, `held-right`, applied by `holdCardClass` to every held prompt and keyed in the hold tray's CSS section; `.queued-card` keeps the frame and loses `max-width`/`margin-left`/`margin-right` | Two rules cannot both own the rail without one silently overriding the other, and the class is what a jsdom test can assert — a CSS rule is not observable in the unit suite | Restore the three alignment declarations on `.queued-card` and drop `held-right` from `holdCardClass` (webapp/src/tray/held-prompt.ts) |
+| 2026-09-13 | Ruling 1 leaves offers alone "unless they share the card class" | Offers are untouched: `drawHeldOffer` builds `merge-dequeue held-offer` and shares no class with `.queued-card`, so they keep their current alignment | The condition the ruling attached the exception to is simply not met | n/a |
+
 ## Forgetting a live workspace, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |

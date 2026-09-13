@@ -86,6 +86,7 @@ and are contract on the same terms:
 | `data-attention` | the cold gate row the model picker routed to | `coldGate` | 10 |
 | `data-footer-notice` | the footer notice drawn when no cold gate row is on the page | `coldGate` | 10 |
 | `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` (absent on every settled, failed, interrupted or turnless prompt) | int-fix-bubble-wave |
+| `.held-right` class | every held-prompt card in the hold tray | — (the rail: a held prompt hangs where the `.bubble.user` it will become hangs) | owner ruling 1, 2026-09-13 |
 
 ## Commands
 
