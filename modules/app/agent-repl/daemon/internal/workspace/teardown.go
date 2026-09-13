@@ -33,11 +33,24 @@ func (v *verbs) Kill(ctx context.Context, ws ids.WorkspaceID) error {
 // kill is Kill's body, shared with Nuke, which kills before it destroys.
 func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
 	if shim, live := v.deps.Shim(ws); live {
+		// THE LATCH IS ARMED BEFORE THE ASK, and therefore before the
+		// unconditional process stop the ask's failure leads to: the stop is a
+		// teardown this daemon ordered, and every side that later sees the
+		// departure has to read it as one. See Shim.StandDown.
+		ordered := shim.StandDown()
 		if err := shim.KillSession(ctx, true); err != nil {
 			// A shim that will not answer is not a reason to leave the
 			// workspace alive: the process stop below is unconditional, and the
-			// refusal is evidence.
-			log.Warn(opKill, "the forced KillSession did not answer", dlog.Context{"cause": err.Error()})
+			// refusal is evidence. It is INFO when this daemon ordered the
+			// stand-down -- the escalation is the mechanism working -- and WARN
+			// only for a kill outside one, which is a DETACHED client, whose
+			// process belongs to the successor daemon.
+			evidence := dlog.Context{"cause": err.Error()}
+			if ordered {
+				log.Info(opKill, "the forced KillSession did not answer", evidence)
+			} else {
+				log.Warn(opKill, "the forced KillSession did not answer", evidence)
+			}
 		} else {
 			log.Debug(opKill, "the session was killed forcefully", nil)
 		}

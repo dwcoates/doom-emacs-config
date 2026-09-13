@@ -40,6 +40,16 @@ type fakeClient struct {
 	// standDown is the fixture's shared step order, appended to on the shim's
 	// own KillSession.
 	standDown *[]string
+	// stoodDown records that the stand-down latch was armed, and
+	// standDownBeforeKill that it was armed BEFORE the KillSession ask.
+	stoodDown           bool
+	standDownBeforeKill bool
+	// standDownRefused is the DETACHED shape: the latch arms nothing, because
+	// that process belongs to the successor daemon.
+	standDownRefused bool
+	// killSessionErr makes the session directive fail, which is what sends the
+	// verb down its escalation path.
+	killSessionErr error
 	// reaped makes the supervised process ALREADY GONE, which is how a test
 	// reaches the split between a session row and a live shim.
 	reaped bool
@@ -77,9 +87,20 @@ func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionR
 	return c.response, nil
 }
 
+// StandDown arms the fake's stand-down latch. It answers false for the
+// detached shape, exactly as the real client does.
+func (c *fakeClient) StandDown() bool {
+	c.stoodDown = true
+	return !c.standDownRefused
+}
+
 func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
+	c.standDownBeforeKill = c.stoodDown
 	if c.standDown != nil {
 		*c.standDown = append(*c.standDown, "shim.KillSession")
+	}
+	if c.killSessionErr != nil {
+		return nil, c.killSessionErr
 	}
 	return &shimv1.KillSessionResponse{
 		Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{}},

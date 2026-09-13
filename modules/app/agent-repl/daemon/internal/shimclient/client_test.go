@@ -1229,3 +1229,41 @@ func TestAUnaryCallInsideAnOrderedStandDownIsNotAFault(t *testing.T) {
 		})
 	}
 }
+
+// TestStandDownArmsTheLatchForTheDaemonsOwnTeardown covers the ask that never
+// reaches the shim. A KillSession that does not answer is escalated to a
+// process stop by the daemon itself, and arming the latch is what lets the
+// exit watcher, the redialer and the adopted-death witness read that departure
+// as ordinary. A DETACHED client arms nothing: that process is the successor
+// daemon's, so this one is ordering no teardown of it.
+func TestStandDownArmsTheLatchForTheDaemonsOwnTeardown(t *testing.T) {
+	tests := []struct {
+		name      string
+		detach    bool
+		wantArmed bool
+	}{
+		{name: "this daemon is ordering the teardown", detach: false, wantArmed: true},
+		{name: "the process belongs to the successor daemon", detach: true, wantArmed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+			if tt.detach {
+				c.Detach()
+			}
+
+			// Act.
+			armed := c.StandDown()
+
+			// Assert.
+			if armed != tt.wantArmed {
+				t.Fatalf("StandDown() = %v, want %v", armed, tt.wantArmed)
+			}
+			if c.StandingDown() != tt.wantArmed {
+				t.Fatalf("StandingDown() = %v, want %v", c.StandingDown(), tt.wantArmed)
+			}
+		})
+	}
+}
