@@ -656,3 +656,16 @@ Also ruled: hook attachments and total-token reminders are not stored
    with and logged every healthy teardown as unaccepted. The check is
    TIGHTENED, not dropped: the accepted arm is matched by name, so a
    `(:arm :not-restarted ...)` refusal still reports.
+
+## Judgement calls for the cold-gate topbar (2026-09-13)
+
+| date | question | call | why | rejected |
+|---|---|---|---|---|
+| 2026-09-13 | Which state the strip names when a cold gate stands on a workspace the idle sweep has also parked | The cold gate | A standing gate is waiting on the READER — the feed is showing a card that must be answered before the workspace can do anything — while hibernation waits on nothing and lifts itself on the next prompt; the park is remembered underneath and draws again the moment the gate is answered | Hibernation wins because the park is the older fact; or drawing both cells |
+| 2026-09-13 | Whether the topbar's cold-gate cell restates the gate's menu (pay, clear, compact) | No — the label, the context figure and the age only | The feed's gate card is where the gate is answered, and a second place to answer one question is exactly what the strip must not become | Mirror the card's buttons into the strip |
+| 2026-09-13 | How the cold-gate state reaches the topbar resolver | A `SetColdGate(ws, ColdGate)` seam called from the SAME sites that raise the feed row and the footer status (`Fleet.raiseColdGate`, `verbs.AnswerColdGate`) | One gate must not become three answers; the footer's own `SetColdGate` established the shape | Have the topbar read the fleet's `ColdGate` for itself |
+| 2026-09-13 | Whether the two sessionless exemptions from the readiness gate are written twice | No — both run through one `wsState.sessionless()` predicate | A third session-scoped gate added to one state and forgotten in the other is the drift the single predicate makes impossible | Repeat `s.parked || s.coldGate` at each of the four sites |
+| 2026-09-13 | Which log level the cold-gate publication and the return to the full view take | Info, both | Same reason the incomplete-topbar record was raised to info the same day: a strip missing its whole session-scoped half must be diagnosable without a reproduction | Debug, as the ordinary republication is |
+| 2026-09-13 | Whether the webapp validates the cold gate's token count itself | No — it calls the feed gate card's own `tokenCountOf` | Two validators for one count is the drift a shared reader prevents; a negative or unsafe count is a `MalformedView` wherever it lands | A second bounds check in the topbar module |
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4

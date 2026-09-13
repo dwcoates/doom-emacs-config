@@ -836,3 +836,184 @@ func TestTheIncompleteTopbarIsRecordedAtInfoWithItsGatesNamed(t *testing.T) {
 		t.Fatalf("awaiting = %v, want every outstanding gate named", last.Context["awaiting"])
 	}
 }
+
+func TestAColdGatedWorkspacePublishesTheColdGateView(t *testing.T) {
+	// Arrange: the two workspace facts are in hand and NO session fact is —
+	// exactly what a workspace standing at the cold gate has, because the shim
+	// answered `cold` and no session was ever created.
+	h := newHarness(t)
+	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
+	h.r.SetAccount(testWS, "dev@example.com")
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
+
+	// Assert
+	view := h.view(t)
+	if view.GetColdGate() == nil {
+		t.Fatalf("view = %+v, want the cold-gate state set", view)
+	}
+	if got, want := view.GetColdGate().GetContextTokens(), int64(142_300); got != want {
+		t.Fatalf("context_tokens = %d, want %d", got, want)
+	}
+	if got, want := view.GetColdGate().GetSinceMs(), instant.UnixMilli(); got != want {
+		t.Fatalf("since_ms = %d, want %d", got, want)
+	}
+}
+
+func TestTheColdGateViewCarriesNoSessionScopedElement(t *testing.T) {
+	// Arrange: a fully resolved workspace, so every session-scoped element HAS
+	// been resolved and could have been carried through.
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 1})
+
+	// Assert
+	view := h.view(t)
+	for _, tc := range []struct {
+		element string
+		present bool
+	}{
+		{"model_selector", view.GetModelSelector() != nil},
+		{"permission_mode_picker", view.GetPermissionModePicker() != nil},
+		{"context", view.GetContext() != nil},
+		{"fast_mode", view.GetFastMode() != nil},
+		{"warnings", view.GetWarnings() != nil},
+		{"session_line", view.GetSessionLine() != nil},
+	} {
+		if tc.present {
+			t.Errorf("%s is present in the cold-gate view, want absent", tc.element)
+		}
+	}
+}
+
+func TestTheColdGateViewStillCarriesTheWorkspaceElements(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 1})
+
+	// Assert
+	view := h.view(t)
+	for _, tc := range []struct {
+		element string
+		present bool
+	}{
+		{"title", view.GetTitle() != nil},
+		{"connectivity", view.GetConnectivity() != nil},
+		{"account", view.GetAccount() != nil},
+	} {
+		if !tc.present {
+			t.Errorf("%s is absent from the cold-gate view, want drawn", tc.element)
+		}
+	}
+}
+
+func TestTheTopbarReturnsToTheFullViewWhenTheColdGateIsAnswered(t *testing.T) {
+	// Arrange: the gate stood before any session fact, which is the real
+	// order — the shim refuses the start, and only the answer opens a session.
+	h := newHarness(t)
+	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
+	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
+
+	// Act: the answer retires the gate and the re-opened session states its
+	// own facts.
+	h.r.SetColdGate(testWS, ColdGate{Standing: false})
+	h.r.OnSessionStarted(testWS, sessionStarted("vend-1", "claude-opus-5"))
+	h.r.OnSessionUpdate(testWS, contextUsage(142_300, 200_000, 71, "claude-opus-5"))
+
+	// Assert
+	view := h.view(t)
+	if view.GetColdGate() != nil {
+		t.Fatalf("view = %+v, want the cold-gate state cleared by the answer", view)
+	}
+	if view.GetModelSelector() == nil || view.GetContext() == nil {
+		t.Fatalf("view = %+v, want the session-scoped elements back", view)
+	}
+}
+
+func TestTheColdGateOutranksHibernation(t *testing.T) {
+	// Arrange: both signals stand at once. The gate is waiting on the reader
+	// and the park is waiting on nothing, so the strip names the gate.
+	h := newHarness(t)
+	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
+	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetParked(testWS, true)
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
+
+	// Assert
+	view := h.view(t)
+	if view.GetColdGate() == nil {
+		t.Fatalf("view = %+v, want the cold-gate state set", view)
+	}
+	if view.GetHibernated() != nil {
+		t.Fatalf("view = %+v, want the hibernated state absent while a gate stands", view)
+	}
+}
+
+func TestTheParkIsStillDrawnOnceTheColdGateIsAnswered(t *testing.T) {
+	// Arrange: the park outlives the gate, so retiring the gate must not
+	// retire it — the workspace really is still stood down.
+	h := newHarness(t)
+	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
+	h.r.SetAccount(testWS, "dev@example.com")
+	h.r.SetParked(testWS, true)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: false})
+
+	// Assert
+	view := h.view(t)
+	if view.GetHibernated() == nil {
+		t.Fatalf("view = %+v, want the hibernated state back once the gate is gone", view)
+	}
+}
+
+func TestTheColdGateTopbarIsRecordedAtInfoWithItsCost(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
+	h.r.SetAccount(testWS, "dev@example.com")
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
+
+	// Assert: a strip that has lost its session-scoped half is diagnosable at
+	// the default level.
+	records := h.log.Records()
+	last := records[len(records)-1]
+	if last.Level != "info" {
+		t.Fatalf("level = %q, want info for the cold-gate view", last.Level)
+	}
+	if last.Context["context_tokens"] != int64(142_300) {
+		t.Fatalf("context_tokens = %v, want the gate's cost", last.Context["context_tokens"])
+	}
+}
+
+func TestTheReturnToTheFullViewIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 142_300})
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: false})
+
+	// Assert
+	records := h.log.Records()
+	last := records[len(records)-1]
+	if last.Level != "info" {
+		t.Fatalf("level = %q, want info for the return to the full view", last.Level)
+	}
+	if last.Message != "the topbar returned to the full view after the cold gate" {
+		t.Fatalf("message = %q, want the return named", last.Message)
+	}
+}

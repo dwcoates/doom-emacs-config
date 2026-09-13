@@ -1106,6 +1106,10 @@ type fixture struct {
 	headless *fakeHeadless
 	// topbarParked is every park state the topbar seam was handed, in order.
 	topbarParked []bool
+	// topbarColdGates is every cold-gate state the topbar seam was handed, in
+	// order. The STRIP has its own cold-gate state, and it is retired by the
+	// same answer that retires the footer's.
+	topbarColdGates []topbar.ColdGate
 
 	// running is what the freeness probe answers.
 	running Running
@@ -1153,7 +1157,7 @@ func newFixture(t *testing.T) *fixture {
 
 	verbs, err := New(Deps{
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Sessions: f.fleet,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -1287,8 +1291,16 @@ type stubTopbar struct {
 	topbar.Resolver
 	// parked records every park state the verbs installed or lifted, in order.
 	parked *[]bool
+	// coldGates records every cold-gate state the verbs stated, in order.
+	coldGates *[]topbar.ColdGate
 }
 type stubHolds struct{ holds.Resolver }
+
+func (s stubTopbar) SetColdGate(_ ids.WorkspaceID, gate topbar.ColdGate) {
+	if s.coldGates != nil {
+		*s.coldGates = append(*s.coldGates, gate)
+	}
+}
 
 func (s stubTopbar) SetParked(_ ids.WorkspaceID, parked bool) {
 	if s.parked != nil {
