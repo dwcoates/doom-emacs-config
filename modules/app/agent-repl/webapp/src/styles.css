@@ -5801,7 +5801,11 @@ body.draining #composer-input::placeholder {
    not a control: nothing on the contract sets fast mode, so it takes the
    button padding for alignment but neither the cursor nor the hover border
    that would promise a click. */
-.topbar-fast {
+/* THE HIBERNATED CELL takes the same declarations, deliberately: it is
+   another read-only label in the same strip, and a style of its own would be
+   a second answer to a question this rule already answers. */
+.topbar-fast,
+.topbar-hibernated {
   padding: 0.15rem 0.45rem;
   border: 1px solid transparent;
   border-radius: 3px;

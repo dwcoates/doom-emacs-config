@@ -90,6 +90,12 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.recoverMerges(ctx, log, workspaces, &report); err != nil {
 			return Report{}, err
 		}
+		// THE BRING-UP GOES LAST, after every reconciliation the sessions it
+		// starts would otherwise race: the orphaned turns are closed, the
+		// holds are restored, the merges are recovered. A session spawned
+		// before those would answer for state this boot had not finished
+		// reading.
+		s.bringUp(ctx, log, clientless, &report)
 	}
 	if err := s.join(ctx, log); err != nil {
 		return Report{}, err
@@ -97,6 +103,9 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 
 	log.Debug("daemon.boot.run", "the boot reconciliation is complete", dlog.Context{
 		"adopted":            len(report.Adopted),
+		"brought_up":         len(report.BroughtUp),
+		"hibernated_left":    len(report.HibernatedLeft),
+		"bring_up_failed":    len(report.BringUpFailed),
 		"undetermined":       len(report.Undetermined),
 		"orphans_closed":     len(report.Orphaned),
 		"missing_dir_closed": len(report.MissingDirClosed),
@@ -541,4 +550,72 @@ var _ = []rollout.DispositionKind{
 	rollout.DispositionRolled,
 	rollout.DispositionDied,
 	rollout.DispositionUnknown,
+}
+
+// bringUp starts the session of every open, client-less workspace, EXCEPT the
+// hibernated ones.
+//
+// AN OPEN WORKSPACE IS NEVER SESSION-LESS (owner ruling, 2026-09-13). A
+// daemon that outlived its shims came back with rows the user had left open
+// and nothing behind them: the tab was there, the topbar was blank, and the
+// session only appeared once something submitted a prompt. The start goes
+// through the same path OpenWorkspace takes, so a boot-started session and a
+// user-started one are the same session in every respect, faults included.
+//
+// THE SET IS THE CLIENT-LESS ONE, WHICH IS NARROWER THAN "NOT ADOPTED".
+// `adopt` answers three sets, not two: adopted, client-less, and
+// UNDETERMINED — the workspaces whose lock or socket probe could not tell.
+// "Could not tell" is never read as free anywhere in this sequence, and
+// spawning a second shim onto a conversation a survivor may still own is the
+// exact loss that discipline exists to prevent. So an undetermined workspace
+// is left alone here too, as it is by the orphan close beside it.
+//
+// A HIBERNATED WORKSPACE IS LEFT ASLEEP. Hibernation is the memory knob: the
+// sweep spent a stand-down to reclaim ~500MB from a workspace nobody had
+// touched for six hours, and a boot that woke it would spend it straight back
+// for no one. Its topbar says so (the hibernated view), and opening or
+// switching to it revives it.
+//
+// EVERY FAILURE IS PER WORKSPACE. One workspace's start failing does not stop
+// the next, and it does not fail the boot: `Fleet.Start` already raises the
+// workspace's own start-failed fault and states the dead link on every
+// surface, which is the same evidence a failed open leaves. The boot's own
+// summary counts it.
+func (s *sequence) bringUp(ctx context.Context, log dlog.Logger, clientless []wsm.Workspace, report *Report) {
+	for _, ws := range clientless {
+		fields := dlog.Context{
+			dlog.KeyWorkspaceID:  string(ws.ID),
+			dlog.KeyWorkspaceDir: ws.Dir,
+		}
+		session, exists, err := s.deps.DB.Session(ctx, ws.ID)
+		if err != nil {
+			fields["error"] = err.Error()
+			log.Error("daemon.boot.bring_up", "a workspace's session record could not be read; it is not brought up", fields)
+			report.BringUpFailed = append(report.BringUpFailed, ws.ID)
+			continue
+		}
+		if exists && session.Hibernated() {
+			log.Debug("daemon.boot.bring_up", "a hibernated workspace is left asleep", fields)
+			report.HibernatedLeft = append(report.HibernatedLeft, ws.ID)
+			continue
+		}
+		if err := s.deps.StartSession(ctx, ws.ID); err != nil {
+			fields["error"] = err.Error()
+			log.Error("daemon.boot.bring_up", "an open workspace's session did not come up; the boot goes on", fields)
+			report.BringUpFailed = append(report.BringUpFailed, ws.ID)
+			continue
+		}
+		log.Debug("daemon.boot.bring_up", "an open workspace's session was started", fields)
+		report.BroughtUp = append(report.BroughtUp, ws.ID)
+	}
+	// ONE SUMMARY, AT INFO. The per-workspace records above are DEBUG because
+	// they are a loop body; what a person asks about after a bounce is how
+	// many sessions this daemon brought back, so that count is stated once at
+	// the level a person reads.
+	log.Info("daemon.boot.bring_up", "the boot brought the open workspaces' sessions up", dlog.Context{
+		"adopted":         len(report.Adopted),
+		"started":         len(report.BroughtUp),
+		"hibernated_left": len(report.HibernatedLeft),
+		"failed":          len(report.BringUpFailed),
+	})
 }

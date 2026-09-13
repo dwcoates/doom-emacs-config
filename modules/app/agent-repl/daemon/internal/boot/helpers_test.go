@@ -204,6 +204,10 @@ type harness struct {
 	socketProbes map[string]shimsocket.State
 	// socketProbeErrs is the scripted socket-probe error per socket path.
 	socketProbeErrs map[string]error
+	// started records every workspace the bring-up started, in order.
+	started []ids.WorkspaceID
+	// startErrs is the scripted start failure per workspace.
+	startErrs map[ids.WorkspaceID]error
 }
 
 // newHarness builds a boot sequence over a REAL WSM store in the test's temp
@@ -247,6 +251,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 
 		socketProbes:    map[string]shimsocket.State{},
 		socketProbeErrs: map[string]error{},
+		startErrs:       map[ids.WorkspaceID]error{},
 	}
 	h.deps = Deps{
 		Layout:     layout,
@@ -280,6 +285,10 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 			h.installed = append(h.installed, ws)
 			return nil
 		},
+		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
+			h.started = append(h.started, ws)
+			return h.startErrs[ws]
+		},
 		Now: func() time.Time { return instant },
 		Log: log,
 	}
@@ -303,6 +312,23 @@ func (h *harness) register(t *testing.T, dir string, state sessionlock.State) ws
 	}
 	h.probes[ws.Dir] = state
 	return ws
+}
+
+// hibernate records the idle sweep's own terminal on a workspace's session,
+// which is what makes it read as asleep to everything that asks.
+func (h *harness) hibernate(t *testing.T, ws wsm.Workspace) {
+	t.Helper()
+	ctx := context.Background()
+	if err := h.db.PutSession(ctx, wsm.Session{
+		Workspace: ws.ID, HostSessionID: "host-" + string(ws.ID), StartedAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession(%s): %v", ws.ID, err)
+	}
+	if err := h.db.SetSessionTerminal(ctx, ws.ID, wsm.SessionTerminal{
+		Kind: wsm.TerminalHibernated, Detail: "idle past the cutoff", At: instant,
+	}); err != nil {
+		t.Fatalf("SetSessionTerminal(%s): %v", ws.ID, err)
+	}
 }
 
 // userSaid composes a one-block text submission.
