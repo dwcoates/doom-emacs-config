@@ -83,18 +83,25 @@ type Chord struct {
 	// chord, so the absence of both marks says nothing about whether it
 	// arrived.
 	//
-	// The quit character is the one that has this shape on this build, and it
-	// is not a special case anybody chose: `kbd_buffer_store_buffered_event`
-	// hands a `quit_char` to `handle_interrupt` INSTEAD of storing it, so
-	// `read_char` never returns it and `record_char` never records it —
-	// `(recent-keys)` cannot grow. `handle_interrupt` arms `quit-flag`, and on
-	// the NS build (`keyboard.c` guards `quit_throw_to_read_char` with
-	// `#ifndef HAVE_NS`) the flag is taken by the very read that is standing,
-	// microseconds later and far inside one poll interval — so `quit-flag`
-	// reads down. A working `C-g` therefore leaves NEITHER mark, which is
-	// exactly the reading delivery.go used to call a dropped key: the
-	// 2026-09-13 sweep reported six `C-g` presses as undelivered while the
-	// helper's own receipt said frontmost, focused, key window, posted.
+	// IT IS A PROPERTY OF THE CHORD AND THE MOMENT, NOT OF THE CHORD ALONE,
+	// and the quit character is the whole reason the field exists. Where a
+	// `C-g` lands while Emacs is BUSY — inside a command, with no key read
+	// standing — `kbd_buffer_store_buffered_event` hands the `quit_char` to
+	// `handle_interrupt` instead of storing it, so `read_char` never returns
+	// it and `record_char` never records it, and the `quit-flag` it arms is
+	// taken by whatever eventually notices. That press leaves no mark and can
+	// only be judged by its effect.
+	//
+	// WHERE A KEY READ IS STANDING IT IS AN ORDINARY KEY, and this field must
+	// be false for it. Inside a minibuffer read, `read_key_sequence` reads the
+	// `C-g` as a key sequence like any other and dispatches it to
+	// `abort-minibuffers` / `minibuffer-keyboard-quit`, so `record_char`
+	// records it and `(recent-keys)` grows. The 2026-09-13 11:10 sweep proves
+	// it from both sides in one run: realtest 5's ring ends
+	// `... SPC <tab> n C-g <escape>` for a `C-g` that closed the prompt, while
+	// realtests 6, 7 and 8 reported "the quit character leaves NO mark" for
+	// three presses whose rings gained nothing at all — which, on the corrected
+	// model, is a key that never arrived.
 	//
 	// A mark-free chord is judged by its EFFECT instead (DeliveryEffect), and
 	// where no effect is supplied its delivery is UNDETERMINED and blamed on
