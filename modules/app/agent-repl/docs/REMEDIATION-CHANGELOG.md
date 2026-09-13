@@ -13,6 +13,10 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 - proto hold tray: `DaemonHoldTray.heading` tag 1 is RETIRED and `DaemonHoldHeading` is deleted; the daemon composes no heading and the webapp requires none (owner ruling 5, 2026-09-13)
 - sidecar: the aged-unowned-spool `hold-expired` record is INFO, not WARN — the total-ingestion mandate working is not a fault (owner ruling 4, 2026-09-13)
+- webapp sidebar: an open row's detail panel is fixed-positioned out of the rail — it grows into the feed as its content asks and is placed under its row by the topbar reveals' own `clampReveal`, so the sidebar's overflow and the window edges can no longer clip it (owner ruling 3, 2026-09-13)
+
+- webapp sidebar: the row's expand chevron is hover-only — invisible at rest, shown while the pointer is over the row, while the keyboard focus is inside it, or while the row's details are open, and it keeps its layout slot either way (`data-shown`, owner ruling 3, 2026-09-13)
+
 - webapp hold tray: an empty tray draws nothing — `drawDaemonHoldTray` answers `null`, the mount empties the host, and `#hold-tray:empty` collapses the region; the "nothing held" line is gone (owner ruling 3, 2026-09-13)
 - webapp hold tray: the `held (N)` heading is no longer drawn — the daemon still composes `DaemonHoldTray.heading` and the tray still requires it, but nothing puts it on screen (owner ruling 2, 2026-09-13)
 

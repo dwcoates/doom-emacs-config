@@ -721,7 +721,14 @@ body::after {
   border-radius: 4px;
   flex: 0 0 auto;
   transition: transform 0.12s;
+  /* HOVER-ONLY (owner ruling 3, 2026-09-13). `visibility`, never `display`:
+     the glyph keeps its slot, so the name beside it does not jump sideways
+     the moment the pointer arrives. `data-shown` is set by row.ts from the
+     one predicate -- pointer over the row, keyboard focus inside it, or the
+     row's details already open -- so the appearance has a single source. */
+  visibility: hidden;
 }
+#ws-sidebar .row .chev[data-shown] { visibility: visible; }
 #ws-sidebar .row .chev:hover { background: var(--code-bg); }
 #ws-sidebar .ws.open > .row .chev { transform: rotate(90deg); }
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
@@ -770,18 +777,34 @@ body::after {
 #ws-sidebar .ws-merge-note.error { color: var(--err); }
 #ws-sidebar .ws-merge-note { font-style: italic; }
 
-/* Expanded detail panel under a row. */
+/* Expanded detail panel under a row.
+
+   IT LEAVES THE RAIL (owner ruling 3, 2026-09-13): it may extend past the
+   sidebar's width into the feed for room, and may never be cut off by the
+   window. `#ws-sidebar` clips its content and `.sb-scroll` clips it again, so
+   an in-flow panel could only ever be rail-wide and was cropped at the rail's
+   bottom edge. `position: fixed` is the one positioning that escapes both --
+   no ancestor here is transformed -- and row.ts's `placeRowDetail` sets the
+   left, top and max-height through the topbar reveals' own `clampReveal`, so
+   the panel lands under its row and stays inside the viewport. `width:
+   max-content` is what lets it grow into the feed only as far as its own
+   content asks; the max-width is the window's own last word on that. */
 #ws-sidebar .detail { display: none; }
 #ws-sidebar .ws.open > .detail {
   display: block;
-  margin: 0.15rem 0.7rem 0.45rem 2rem;
+  position: fixed;
+  z-index: 40;
+  width: max-content;
+  min-width: 12rem;
+  max-width: min(34rem, calc(100vw - 1rem));
+  overflow-y: auto;
+  margin: 0;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.5rem 0.6rem;
   font-size: 0.78rem;
 }
-#ws-sidebar .kids .ws.open > .detail { margin-left: 1.6rem; }
 #ws-sidebar .detail dl {
   margin: 0;
   display: grid;

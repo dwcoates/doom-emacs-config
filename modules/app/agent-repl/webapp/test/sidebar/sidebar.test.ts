@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -392,5 +392,123 @@ describe("a row's remembered expansion", () => {
       [PREFS_KEY]: JSON.stringify({ expanded: { "ws-2": true } }),
     });
     expect(createSidebarPrefs(storage).isExpanded("ws-1")).toBe(false);
+  });
+});
+
+describe("an open row's detail panel, placed by the rail", () => {
+  // The panel is fixed-positioned, so where it lands is arithmetic over rects
+  // jsdom reports as zeros; they are staged on the prototype exactly as the
+  // topbar reveal suite stages its own.
+  let original: typeof Element.prototype.getBoundingClientRect;
+  const rects = new Map<Element, DOMRect>();
+
+  const rect = (init: { left: number; top: number; width: number; height: number }): DOMRect =>
+    ({
+      left: init.left,
+      top: init.top,
+      right: init.left + init.width,
+      bottom: init.top + init.height,
+      width: init.width,
+      height: init.height,
+      x: init.left,
+      y: init.top,
+      toJSON: () => ({}),
+    });
+
+  beforeEach(() => {
+    rects.clear();
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- reassigned in afterEach
+    original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
+      return rects.get(this) ?? rect({ left: 0, top: 0, width: 0, height: 0 });
+    };
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = original;
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * Mount a rail holding one row remembered as expanded, and stage its rects.
+   *
+   * The host is put IN the document, because a captured `scroll` reaches the
+   * window only by propagating down to a target the window can see — which is
+   * where the real rail always is.
+   */
+  async function mountExpanded(host: HTMLElement, lineRect: DOMRect): Promise<HTMLElement> {
+    document.body.appendChild(host);
+    hosts.push(host);
+    const handle = mountSidebar(
+      host,
+      ctxFor([roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })]),
+      {
+        storage: memoryStorage({ [PREFS_KEY]: JSON.stringify({ expanded: { "ws-1": true } }) }),
+        timers: fakeTimers(),
+      },
+    );
+    mounted.push(handle);
+    await settle();
+    const ws = host.querySelector("[data-roster-row='ws-1']") as HTMLElement;
+    rects.set(ws.querySelector(":scope > .row") as Element, lineRect);
+    rects.set(
+      ws.querySelector(":scope > .detail") as Element,
+      rect({ left: 0, top: 0, width: 320, height: 90 }),
+    );
+    return ws;
+  }
+
+  const mounted: Array<{ dispose(): void }> = [];
+  const hosts: HTMLElement[] = [];
+  afterEach(() => {
+    for (const handle of mounted.splice(0)) handle.dispose();
+    for (const host of hosts.splice(0)) host.remove();
+  });
+
+  it("is placed by the draw, so a remembered expansion is not left at the window's origin", async () => {
+    // ARRANGE: the rects are staged AFTER the first draw, so the draw's own
+    // placement read zeros; the next push is what has real geometry to read.
+    const host = document.createElement("nav");
+    const ws = await mountExpanded(host, rect({ left: 8, top: 120, width: 190, height: 24 }));
+    // ACT
+    window.dispatchEvent(new Event("resize"));
+    // ASSERT: hanging under the row's own line.
+    expect((ws.querySelector(":scope > .detail") as HTMLElement).style.top).toBe("144px");
+  });
+
+  it("follows the row when a scroller moves it, because a fixed panel does not", async () => {
+    // ARRANGE
+    const host = document.createElement("nav");
+    const ws = await mountExpanded(host, rect({ left: 8, top: 120, width: 190, height: 24 }));
+    window.dispatchEvent(new Event("resize"));
+    // ACT: the rail scrolls the row up, and the scroll is captured at window.
+    rects.set(
+      ws.querySelector(":scope > .row") as Element,
+      rect({ left: 8, top: 60, width: 190, height: 24 }),
+    );
+    (host.querySelector(".sb-scroll") as HTMLElement).dispatchEvent(
+      new Event("scroll", { bubbles: false }),
+    );
+    // ASSERT
+    expect((ws.querySelector(":scope > .detail") as HTMLElement).style.top).toBe("84px");
+  });
+
+  it("stops being placed once the rail is disposed", async () => {
+    // ARRANGE
+    const host = document.createElement("nav");
+    const ws = await mountExpanded(host, rect({ left: 8, top: 120, width: 190, height: 24 }));
+    const detail = ws.querySelector(":scope > .detail") as HTMLElement;
+    window.dispatchEvent(new Event("resize"));
+    // ACT
+    for (const handle of mounted.splice(0)) handle.dispose();
+    rects.set(
+      ws.querySelector(":scope > .row") as Element,
+      rect({ left: 8, top: 300, width: 190, height: 24 }),
+    );
+    window.dispatchEvent(new Event("resize"));
+    // ASSERT: the panel the disposed rail drew is nobody's to move any more.
+    expect(detail.style.top).toBe("144px");
   });
 });
