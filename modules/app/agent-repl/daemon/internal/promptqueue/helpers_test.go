@@ -666,10 +666,6 @@ type harness struct {
 	drain   *noteRecorder
 	log     *dlog.TestSurfaces
 
-	// finished records every one-shot finish hook call.
-	finishedMu sync.Mutex
-	finished   []ids.TurnID
-	finishErr  error
 
 	// parked records every parked route, and parkedErr fails it.
 	parked    []*conversationv1.UserSaid
@@ -729,12 +725,6 @@ func newHarness(t *testing.T) *harness {
 			return "guidance-turn", h.parkedErr
 		},
 		DrainRefusals: h.drain,
-		OneShotFinish: func(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) error {
-			h.finishedMu.Lock()
-			h.finished = append(h.finished, turn)
-			h.finishedMu.Unlock()
-			return h.finishErr
-		},
 		Now: func() time.Time { return instant },
 		Log: h.log,
 	})
@@ -759,15 +749,6 @@ func newHarnessWithoutRevival(t *testing.T) *harness {
 	}
 	h.q = q
 	return h
-}
-
-// finishes reads back the one-shot finish hook's calls.
-func (h *harness) finishes() []ids.TurnID {
-	h.finishedMu.Lock()
-	defer h.finishedMu.Unlock()
-	out := make([]ids.TurnID, len(h.finished))
-	copy(out, h.finished)
-	return out
 }
 
 // lease installs an occupancy lease with a policy.

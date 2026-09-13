@@ -318,9 +318,6 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		if err := validateUserSaid("one_shot.prompt", oneShot.GetPrompt()); err != nil {
 			return err
 		}
-		if oneShot.GetFinish() == nil {
-			return invalid("one_shot.finish", "a one-shot creation names a finish action")
-		}
 	}
 	if parent := req.GetParent(); parent != nil {
 		if err := validateWorkspaceRef("parent.workspace", parent.GetWorkspace()); err != nil {
