@@ -88,6 +88,7 @@ and are contract on the same terms:
 | `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` (absent on every settled, failed, interrupted or turnless prompt) | int-fix-bubble-wave |
 | `.held-right` class | every held-prompt card in the hold tray | — (the rail: a held prompt hangs where the `.bubble.user` it will become hangs) | owner ruling 1, 2026-09-13 |
 | `data-shown` | a sidebar row's expand chevron (`.chev`) | — (present exactly while the pointer is over the row, the keyboard focus is inside it, or the row's details are open; the chevron is `visibility: hidden` without it) | owner ruling 3, 2026-09-13 |
+| `data-client-verdict` | the `.pfooter` dock, while a client link verdict stands | the verdict's kind (`unary_transport`, `stream_ended`, `subscription_source_ended`, `unsubscribe_failed`, `client_log_failed`, `daemon_unreachable_card`, `frame_undecodable_card`, `feed_not_tailing`) — absent whenever the daemon's pushed view is the one drawn | webapp/footer-client-states |
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 
 ## Commands
@@ -112,6 +113,22 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   arithmetic, no ANSI parsing, no per-tool knowledge. Whole-view pushes replace
   their unit whole; feed rows upsert by `FeedId`; nothing accumulates across
   pushes.
+- **THE ONE EXCEPTION TO IT: THE CLIENT'S LINK VERDICT** (owner ruling,
+  2026-09-13, `docs/REALTEST-JUDGEMENT-CALLS.md`, "webapp-side failures reach
+  the footer"). When a call to the daemon fails at THIS end, no daemon can push
+  the fact — the footer is written over the link that just failed, and
+  `FooterStatusDisconnected` describes the daemon→shim link, not this one. So
+  the webapp draws it: every failing site reports
+  `reportClientFailure(kind, context)` (`src/rpc/link.ts`), and while a verdict
+  stands the footer composes its three status cells itself — status
+  `disconnected`, the kind's substatus ("daemon unreachable"; "feed not
+  tailing" for an `OpenFeed` the daemon ANSWERED and refused; "frame
+  unreadable" for a frame that would not decode), and the reporting site's own
+  ad-hoc line as the activity. The clock, tokens and chips stay the daemon's
+  last pushed ones, the composer gate is NOT closed by a verdict (the retry is
+  what lifts it), and a push does NOT lift one: only a unary the daemon
+  answered, or a stream that reads again, does. Nothing else in the webapp
+  composes a footer cell, and no new arm was added to the proto for it.
 - **TYPED ARMS, NO FALLBACKS.** Every oneof is switched exhaustively. An unset
   oneof, an unset non-optional message field, or an unknown arm is a
   `MalformedView` — never a default, never something else drawn instead. An
