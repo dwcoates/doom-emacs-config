@@ -80,7 +80,7 @@ import {
   contextCutFailed,
   readAmbient,
 } from "./compaction.js";
-import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, type TranscriptFacts } from "./cold.js";
+import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, underColdGateFloor, type TranscriptFacts } from "./cold.js";
 import { ForegroundUnitTable } from "./foreground.js";
 import { LiveWorkTable, type LiveWorkEntry } from "./detached.js";
 import {
@@ -2392,7 +2392,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       facts !== undefined &&
       model.name !== effectiveModel &&
       BigInt(facts.contextTokens) > request.coldThresholdTokens &&
-      request.coldRemediation === undefined
+      request.coldRemediation === undefined &&
+      // THE FLOOR APPLIES HERE TOO, under the caller's own threshold: the
+      // owner ruled the gate off below it for a model change as much as for a
+      // lapse, so a caller asking for a threshold of 0 still gets a small
+      // switch through rather than a refusal.
+      !underColdGateFloor(facts, deps.nowMs(), "model_switch")
     ) {
       LOGGER.debug(
         { model: model.name, context_tokens: facts.contextTokens },
