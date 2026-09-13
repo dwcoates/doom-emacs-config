@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- elisp tab bar: the selection underline covers exactly the workspace name — the leading separator, `[N]`, the gap, the badge run, the width fill and the terminator are all drawn un-underlined (owner ruling 4)
+
 - elisp tab bar: exactly one space separates `[N]` from the workspace name — the gap is emitted by `agent-repl--render-tab` (name trimmed, the padding format's leading space stripped) and a blank priority label no longer forms a badge run (owner ruling 1, `[3]    test-workspace`)
 
 - elisp: a quit deferred out of an `agent-repl--with-deferred-quit` section is left armed for the command loop and only AUDITED afterwards (`agent-repl--deferred-quit-audit`, core.el), because the old delivery timer cleared `quit-flag` and then called `abort-minibuffers` from a non-minibuffer buffer, whose `Not in a minibuffer` error `timer-event-handler` swallowed (realtests 5-8, `C-g` neither dismissing the prompt nor reaching `(recent-keys)`)
