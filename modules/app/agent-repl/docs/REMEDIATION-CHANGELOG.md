@@ -17,6 +17,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - sidecar: a claimed w* workflow spool mints a stopped run's cancelled terminal through the same `handler.RunOutput` every other spool uses, so the last converter that could not be asked for one is closed (log sweep, the `declaredResidueHandler` case e9381b182 left open)
 - sidecar: an `unrecorded` identity resolution (the R9 resume default, an absence of evidence) never moves a watched file off a book real evidence gave it, so a link file that stops answering for one pass no longer flip-flops the book (log sweep, 2 spurious `identity-rekey` warns 2.4s apart, out and back)
 - sidecar: a meta read the kernel DEFERRED (ENFILE/EMFILE/EINTR/EAGAIN) is held under its own `meta_read_deferred` reason at WARN and retried every rescan, instead of being stated as an unreadable file at ERROR; a permission or parse failure keeps the error (log sweep, 38 `discover-meta` errors across 34 files, every one ENFILE)
+- sidecar: a TaskStop whose launch lies BEFORE the offset this converter joined the file at is recorded at debug naming that offset, while one on a converter that read from byte 0 keeps its warn — an absent launch is a signal only if the launch could have been seen (log sweep, 5 `task-stop` warns at offset ~50 MB after a restart)
 - sidecar: an observed vendor `api_error` is recorded at INFO, not WARN — the request was the vendor's and this conversion succeeded whole (log sweep, 80 `api-error` warns)
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12

@@ -77,6 +77,27 @@ func convertLines(t *testing.T, c *Converter, lines ...string) []*storev1.StoreE
 	return out
 }
 
+// convertLinesFrom is convertLines with the reader JOINING THE FILE at
+// startOffset — the cursor a restarted reader resumes from. A converter that
+// starts at byte 0 saw the whole file; one that starts anywhere else did not,
+// and several branches turn on that difference.
+func convertLinesFrom(t *testing.T, c *Converter, startOffset int64, lines ...string) []*storev1.StoreEntry {
+	t.Helper()
+	records := make([]map[string]any, len(lines))
+	for i, line := range lines {
+		records[i] = decode(t, line)
+	}
+	var out []*storev1.StoreEntry
+	for i, record := range records {
+		var next map[string]any
+		if i+1 < len(records) {
+			next = records[i+1]
+		}
+		out = append(out, c.Line(record, testAttribution(startOffset+int64(i*1000)), next)...)
+	}
+	return out
+}
+
 // ---- readers, so an assertion reads as a claim about the produced shape ----
 
 func pageLine(e *storev1.StoreEntry) *storev1.StorePageLine {
