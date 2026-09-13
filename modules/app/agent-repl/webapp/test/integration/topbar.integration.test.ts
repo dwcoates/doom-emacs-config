@@ -5,9 +5,11 @@
  * drawing. The pickers are RPC echoes: a model pick echoes the served
  * `AgentModel` and a mode pick echoes the option's own `mode` string, because
  * the client must never construct an identity it was handed. And the account
- * chip is the door to the login pty, whose whole lifecycle (OpenLogin,
- * WatchLoginTerminal's scrollback, SendLoginInput's two arms, `closed`,
- * CloseLogin) is asserted end to end.
+ * cell is the door to the login pty — by way of its OPTIONS dropdown, since a
+ * pick is what calls SelectAccount and a picked root with no login is what
+ * opens OpenLogin (owner ruling, 2026-09-13) — whose whole lifecycle
+ * (OpenLogin, WatchLoginTerminal's scrollback, SendLoginInput's two arms,
+ * `closed`, CloseLogin) is asserted end to end.
  *
  * Reveals open BELOW the strip by ruling, so the geometry is asserted too, not
  * just the presence of the element.
@@ -27,6 +29,8 @@ import { startHarness, type Harness } from "./harness";
 import { MODEL_PLACEHOLDER } from "../../src/topbar/model";
 import { isKnownTone, RENDER_COLORS } from "./vocab";
 import {
+  ACCOUNT_CONFIG_DIR,
+  OTHER_ACCOUNT_CONFIG_DIR,
   PERMISSION_MODES,
   TOPBAR_ACCOUNT_ARMS,
   TOPBAR_WARNING_ARMS,
@@ -698,17 +702,46 @@ describe("the degraded-window detail", () => {
 });
 
 describe("the login terminal", () => {
-  /** Boot logged out and open the overlay from the account chip. */
+  /**
+   * Boot logged out and open the overlay THE WAY A READER NOW DOES.
+   *
+   * THE CELL'S CLICK IS THE LOGIN OPTIONS, not OpenLogin (owner ruling,
+   * 2026-09-13, `src/topbar/account.ts`): the cell opens the dropdown of every
+   * root the daemon knows, and PICKING one is the rpc. A root with no login is
+   * still a successful pick — `SelectAccountSuccess.logged_in` false is the
+   * client's cue to open that root's login flow behind it, which is what puts
+   * the terminal on screen. These scenarios assert the login pty end to end,
+   * so they take the one route that reaches it.
+   */
   const openLogin = async (): Promise<void> => {
     await withTopbar({ account: "loggedOut" });
     await harness.click(".topbar-account");
+    await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
   };
 
-  it("calls OpenLogin when the logged-out chip is clicked", async () => {
+  it("calls OpenLogin when a root with no login is picked", async () => {
     // Arrange / Act
     await openLogin();
     // Assert
     expect(harness.fake.calls("openLogin")).toHaveLength(1);
+  });
+
+  it("calls no OpenLogin for the cell's own click", async () => {
+    // Arrange: the cell opens the CHOICE; the pick is what calls anything.
+    await withTopbar({ account: "loggedOut" });
+    // Act
+    await harness.click(".topbar-account");
+    // Assert
+    expect(harness.fake.calls("openLogin")).toHaveLength(0);
+  });
+
+  it("opens the options dropdown from the cell's own click", async () => {
+    // Arrange
+    await withTopbar({ account: "loggedOut" });
+    // Act
+    await harness.click(".topbar-account");
+    // Assert
+    expect(harness.$(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`)).not.toBeNull();
   });
 
   it("opens the overlay", async () => {
@@ -718,13 +751,47 @@ describe("the login terminal", () => {
     expect(harness.$('[data-component="login-overlay"]')?.hidden).toBe(false);
   });
 
-  it("does not open the overlay from a logged-in chip", async () => {
-    // Arrange
+  it("does not open the overlay for a root that holds a login", async () => {
+    // Arrange: a picked root that IS logged in needs no login flow.
     await withTopbar({ account: "loggedIn" });
-    // Act
     await harness.click(".topbar-account");
+    // Act
+    await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
     // Assert
     expect(harness.fake.calls("openLogin")).toHaveLength(0);
+  });
+
+  it("echoes the picked root's config dir verbatim", async () => {
+    // Arrange
+    await withTopbar({
+      account: "loggedIn",
+      accountOptions: [
+        { configDir: ACCOUNT_CONFIG_DIR, email: "dev@example.test", current: true },
+        { configDir: OTHER_ACCOUNT_CONFIG_DIR },
+      ],
+    });
+    await harness.click(".topbar-account");
+    // Act
+    await harness.click(`[data-account-option="${OTHER_ACCOUNT_CONFIG_DIR}"]`);
+    // Assert
+    const [request] = harness.fake.calls<{ configDir: string }>("selectAccount");
+    expect(request.configDir).toBe(OTHER_ACCOUNT_CONFIG_DIR);
+  });
+
+  it("opens the login flow for a picked root that holds none", async () => {
+    // Arrange
+    await withTopbar({
+      account: "loggedIn",
+      accountOptions: [
+        { configDir: ACCOUNT_CONFIG_DIR, email: "dev@example.test", current: true },
+        { configDir: OTHER_ACCOUNT_CONFIG_DIR },
+      ],
+    });
+    await harness.click(".topbar-account");
+    // Act
+    await harness.click(`[data-account-option="${OTHER_ACCOUNT_CONFIG_DIR}"]`);
+    // Assert
+    expect(harness.fake.calls("openLogin")).toHaveLength(1);
   });
 
   it("attaches the terminal stream for the workspace", async () => {
@@ -746,6 +813,7 @@ describe("the login terminal", () => {
     });
     // Act
     await harness.click(".topbar-account");
+    await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
     await harness.fake.awaitStream("watchLoginTerminal");
     await harness.settle();
     // Assert
@@ -934,8 +1002,11 @@ describe("the warning strip's omission", () => {
 describe("the login terminal's transport death", () => {
   /** Boot logged out, open the overlay, and kill the pty stream mid-flight. */
   const killTerminal = async (): Promise<void> => {
+    // The cell opens the options; picking the logged-out root is what opens
+    // the login flow (owner ruling, 2026-09-13 — see the helper above).
     await withTopbar({ account: "loggedOut" });
     await harness.click(".topbar-account");
+    await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
     await harness.fake.awaitStream("watchLoginTerminal");
     harness.fake.endStream("watchLoginTerminal", WORKSPACE_ID);
     await harness.tick(1_000);
@@ -970,6 +1041,7 @@ describe("the login terminal's transport death", () => {
     // Arrange
     await withTopbar({ account: "loggedOut" });
     await harness.click(".topbar-account");
+    await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
     await harness.fake.awaitStream("watchLoginTerminal");
     // Act: `closed` is the legitimate end.
     harness.fake.closeLoginTerminal(WORKSPACE_ID);
