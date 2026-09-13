@@ -9,7 +9,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { backupDir, backupName, backupTranscript, pruneBackups } from "../../src/engine/backup.js";
 
 function scratch(): string {
@@ -25,6 +25,17 @@ function transcript(contents = "one line\n"): string {
 
 const WORKSPACE = "abc12345";
 
+/** The levels of the records this module wrote, read off the stderr mirror. */
+function levels(written: readonly string[]): string[] {
+  return written.flatMap((line) => {
+    try {
+      return [(JSON.parse(line) as { level: string }).level];
+    } catch {
+      return [];
+    }
+  });
+}
+
 describe("the backup name", () => {
   it("carries the conversation and the instant", () => {
     expect(backupName("v-1", 42)).toBe("v-1-42.jsonl");
@@ -39,6 +50,51 @@ describe("taking a copy", () => {
     backupTranscript({ transcript: file, stateDir: state, workspaceKey: WORKSPACE, vendorSessionId: "v-1", atMs: 1 });
 
     expect(readFileSync(path.join(backupDir(state, WORKSPACE), "v-1-1.jsonl"), "utf8")).toBe("hello\n");
+  });
+
+  it("calls a transcript that was never written nothing to copy, not a failed backup", () => {
+    // Arrange: the id a session rotates away from at its very start, which the
+    // vendor never wrote a file for.
+    const state = scratch();
+    const written: string[] = [];
+    const terminal = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    // Act.
+    backupTranscript({
+      transcript: path.join(scratch(), "missing.jsonl"),
+      stateDir: state,
+      workspaceKey: WORKSPACE,
+      vendorSessionId: "v-1",
+      atMs: 1,
+    });
+    terminal.mockRestore();
+
+    // Assert.
+    expect(levels(written)).toEqual(["info"]);
+  });
+
+  it("still WARNS about a copy that could have been made and was not", () => {
+    // Arrange: the source exists; the target's own directory is a file, so the
+    // copy fails for a reason nothing here can explain away.
+    const state = scratch();
+    const file = transcript("hello\n");
+    mkdirSync(path.dirname(backupDir(state, WORKSPACE)), { recursive: true });
+    writeFileSync(backupDir(state, WORKSPACE), "not a directory", "utf8");
+    const written: string[] = [];
+    const terminal = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    // Act.
+    backupTranscript({ transcript: file, stateDir: state, workspaceKey: WORKSPACE, vendorSessionId: "v-1", atMs: 1 });
+    terminal.mockRestore();
+
+    // Assert.
+    expect(levels(written)).toEqual(["warn"]);
   });
 
   it("does not throw when the transcript is missing", () => {
