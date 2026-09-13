@@ -705,3 +705,15 @@ Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
 | 2026-09-13 | The shutdown record said the interrupted write "will replay", and two subjects asserted that wording | The record now says the outcome is unknown and states why nothing is lost either way; `cycle_test.go` and `sigterm_wedged_write_test.go` match on the new prefix | The old sentence asserted as fact something the process cannot know, and it is the sentence that made an ordinary torn read look like data loss to everyone who read the failure | Restore the "it will replay" wording in `storeWrite` and both test constants |
 | 2026-09-13 | Which read order does each direction of the subject need? | "No record ahead of the cursor" reads the BOOK first; "no cursor past unstored records" reads the CURSOR first. `terminateMidIngest` takes the order as an argument rather than picking one for both | Each direction must read the half that can only GROW last, or a write committing between the two rpcs spells a violation the store never held. Neither ordering weakens the subject: a real advance past unstored records is permanent and both reads see it | Drop the `readOrder` argument and read the book first for both |
 | 2026-09-13 | `shutdownSettle` is 500ms | Kept at 500ms | A healthy WriteBatch answers in single-digit milliseconds, so this is two orders of magnitude of headroom, and it is an order of magnitude below the 3s a signalled sidecar's shutdown is held to by `wedgedShutdownBudget` | Change the constant in cycle.go |
+
+## Owner rulings, third batch (2026-09-13, owner)
+
+- Stop storing `queue-operation` and `file-history-snapshot` residue too.
+- Raw-bytes residue storage is fine if it is not lossy.
+- Do NOT narrow sidecar discovery; it would only hide inefficiency.
+- The store gets a separate read connection pool (reads never queue on writes).
+- A workspace whose repository is unregistered is an INVARIANT VIOLATION:
+  it must be impossible, not drawn in a special section.
+- Fix the handover race only if it can be reproduced and verified, not
+  speculated.
+- Docker Desktop: reset/reinstall freely; nothing there matters.
