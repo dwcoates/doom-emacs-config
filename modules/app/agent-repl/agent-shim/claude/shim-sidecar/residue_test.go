@@ -4,6 +4,7 @@ import (
 	"io"
 	"testing"
 
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -148,6 +149,99 @@ func TestResidueHandlerOnAnEmptyBatch(t *testing.T) {
 	// Assert.
 	if len(got) != 0 {
 		t.Fatalf("entries = %d, want none", len(got))
+	}
+}
+
+// ---- a residue spool still owes a stopped run its terminal ----
+
+// residueHandlerHavingRead answers a residue handler that has ingested one
+// spool batch, which is the state it is in when a stop reaches it.
+func residueHandlerHavingRead(t *testing.T, output string) *residueHandler {
+	t.Helper()
+	h := residueHandlerFor(t)
+	ctx := &tail.Context{Path: "/private/tmp/b1.output", FileID: "16777232:777", BytesObserved: int64(len(output))}
+	h.Handle([]tail.Frame{{Raw: []byte(output), Offset: 0}}, ctx)
+	return h
+}
+
+func TestResidueHandlerSpellsAStoppedRunsTerminal(t *testing.T) {
+	// Arrange. Reading a spool as residue is a statement about its BYTES, never
+	// that the run is unknown: the reader supplies every identity the terminal
+	// names, so a stop must settle rather than leave the run open.
+	h := residueHandlerHavingRead(t, "partial work\n")
+
+	// Act.
+	got := h.CancelTerminal("b1", "toolu_run", "agent-1", 1700000000000)
+
+	// Assert.
+	if len(got) != 1 {
+		t.Fatalf("entries = %d, want the run's one terminal", len(got))
+	}
+	cut := got[0].GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
+	if cut.GetByUser() == nil {
+		t.Fatalf("cause = %v, want by_user: a stop is a person's decision", cut.GetCause())
+	}
+}
+
+func TestResidueHandlerTerminalCarriesTheBytesItIngested(t *testing.T) {
+	// Arrange. The handler is the spool's sole reader, so the run's output
+	// exists nowhere else and the terminal owes it verbatim.
+	h := residueHandlerHavingRead(t, "partial work\n")
+
+	// Act.
+	got := h.CancelTerminal("b1", "toolu_run", "agent-1", 1700000000000)
+
+	// Assert.
+	stdout := got[0].GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput().GetText().GetStdout()
+	if stdout != "partial work\n" {
+		t.Fatalf("stdout = %q, want the bytes the residue handler ingested", stdout)
+	}
+}
+
+func TestResidueHandlerTerminalIsKeyedOnTheRunLikeAnyOther(t *testing.T) {
+	// Arrange. The terminal must land on the SAME row the other converters'
+	// does, or the run settles in a book no consumer joins to the call.
+	h := residueHandlerHavingRead(t, "partial work\n")
+
+	// Act.
+	got := h.CancelTerminal("b1", "toolu_run", "agent-1", 1700000000000)
+
+	// Assert.
+	if key := got[0].GetUpsertKey(); key != convert.BashTerminalKey("toolu_run") {
+		t.Fatalf("upsert key = %q, want the run's terminal key %q", key, convert.BashTerminalKey("toolu_run"))
+	}
+}
+
+func TestResidueHandlerRefusesATerminalForAStopNamingNoRun(t *testing.T) {
+	// Arrange. A terminal keyed on nothing upserts no row, and the vendor task
+	// id is not a row any reader of the conversation can join to the call.
+	h := residueHandlerHavingRead(t, "partial work\n")
+
+	// Act.
+	got := h.CancelTerminal("b1", "", "agent-1", 1700000000000)
+
+	// Assert.
+	if len(got) != 0 {
+		t.Fatalf("entries = %d, want the terminal refused rather than keyed on a guess", len(got))
+	}
+}
+
+func TestResidueHandlerTerminalIsIdentifiedByTheFileItRead(t *testing.T) {
+	// Arrange. Two runs settled from attributions carrying no file coordinates
+	// digest ONE write id, and the store absorbs the second as a replay — so one
+	// of the two runs would have no terminal at all.
+	first := residueHandlerHavingRead(t, "one\n")
+	second := residueHandlerFor(t)
+	second.Handle([]tail.Frame{{Raw: []byte("two\n"), Offset: 0}},
+		&tail.Context{Path: "/private/tmp/b2.output", FileID: "16777232:778", BytesObserved: 4})
+
+	// Act.
+	a := first.CancelTerminal("b1", "toolu_a", "agent-1", 1700000000000)
+	b := second.CancelTerminal("b2", "toolu_b", "agent-1", 1700000000000)
+
+	// Assert.
+	if a[0].GetWriteId() == b[0].GetWriteId() {
+		t.Fatal("two residue spools' terminals share one write id; the store would swallow the second")
 	}
 }
 
