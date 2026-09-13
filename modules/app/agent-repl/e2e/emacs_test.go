@@ -150,6 +150,11 @@ const (
 	teardownStopBound      = 10 * time.Second
 )
 
+// daemonStopAcceptedArm is how the accepted outcome reads inside the `%S` the
+// form above prints: `agent-repl-frontend-daemon-stop` hands its on-done
+// callback the arm plist `(:arm :accepted)`.
+const daemonStopAcceptedArm = ":accepted (:arm :accepted)"
+
 // emacsExitBound is how long EMACS AND ITS PROCESS GROUP may take to be gone
 // after Emacs has been asked to exit with `(kill-emacs)'.
 //
@@ -1632,10 +1637,14 @@ func (e *Emacs) askDaemonToStop() {
 		e.t.Logf("emacs was asked to stop its daemon and did not answer: %v", err)
 	}
 	// The OUTCOME, not merely the transport. `agent-repl-frontend-daemon-stop`
-	// answers its callback with nil on a REFUSAL as well as on a transport
-	// failure, and a refused stop is exactly the case whose leaked tree the
-	// reaper below then reports with no cause attached.
-	if outcome := strings.TrimSpace(out); !strings.Contains(outcome, ":accepted t") {
+	// answers its callback with an ARM -- `(:arm :accepted)` on acceptance,
+	// `(:arm :not-restarted :reason STRING)` on a refusal, a missing link or
+	// a transport failure -- and a refused stop is exactly the case whose
+	// leaked tree the reaper below then reports with no cause attached. The
+	// accepted arm is matched by NAME rather than by truthiness: the callback
+	// used to be handed a bare boolean, and reading the arm plist as one
+	// silently reported every healthy teardown as unaccepted.
+	if outcome := strings.TrimSpace(out); !strings.Contains(outcome, daemonStopAcceptedArm) {
 		e.t.Logf("emacs's daemon stop was not accepted: %s", outcome)
 	}
 }
