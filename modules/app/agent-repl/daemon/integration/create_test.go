@@ -539,6 +539,44 @@ func TestCreateWorkspaceOneShotDecoratesThePromptFromPrompts(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T) {
+	t.Parallel()
+	// Arrange: a repository with no `.agent-repl/prompts` of its own. The
+	// daemon's corpus is the policy of the daemon's OWN repository and is
+	// never a fallback for this one (owner ruling, 2026-09-12).
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	if err := os.RemoveAll(repo.PolicyDir()); err != nil {
+		t.Fatalf("remove the repository policy: %v", err)
+	}
+	repository := createRepositoryRef(t, d, repo)
+
+	// Act.
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+			Prompt: said("ship the fix"),
+			Finish: &agentreplv1.CreateWorkspaceOneShot_SelfMerge{SelfMerge: &agentreplv1.CreateWorkspaceOneShotSelfMerge{}},
+		}},
+	}))
+
+	// Assert: the arm carries the directory to write and the files it needs.
+	if err != nil {
+		t.Fatalf("CreateWorkspace(one_shot) = error %v, want a typed refusal", err)
+	}
+	missing := resp.Msg.GetError().GetOneShotPolicyMissing()
+	if missing == nil {
+		t.Fatalf("CreateWorkspace(one_shot) = %v, want one_shot_policy_missing", resp.Msg)
+	}
+	if missing.GetPolicyDir() != repo.PolicyDir() {
+		t.Fatalf("policy_dir = %q, want %q", missing.GetPolicyDir(), repo.PolicyDir())
+	}
+	want := []string{"workspace-autonomous-preamble.md", "oneshot-success-suffix.md"}
+	if strings.Join(missing.GetMissingFiles(), ",") != strings.Join(want, ",") {
+		t.Fatalf("missing_files = %v, want %v", missing.GetMissingFiles(), want)
+	}
+}
+
 func TestCreateWorkspaceOneShotSelfMergeEnqueuesOnCompletion(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -698,12 +736,10 @@ func TestOneShotSelfMergeFailureTerminalNeverEnqueuesTheMerge(t *testing.T) {
 func TestOneShotOpenPrFinishWithTheFollowupBriefRemovedAnswersBriefMissing(t *testing.T) {
 	t.Parallel()
 	// Arrange: the followup brief the finish hook reads at conclusion is
-	// removed from this daemon's OWN prompts directory (a per-test copy, so
-	// deleting from it touches nothing else).
+	// removed from THE REPOSITORY'S OWN POLICY (a per-test tree, so deleting
+	// from it touches nothing else), and it is removed AFTER the create,
+	// because the create requires it up front for an open-pr one-shot.
 	d := newDaemon(t, harness.Opts{})
-	if err := os.Remove(filepath.Join(d.PromptsDir, "oneshot-create-pr-then-close-followup.md")); err != nil {
-		t.Fatalf("remove the pr-followup brief: %v", err)
-	}
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
@@ -720,6 +756,9 @@ func TestOneShotOpenPrFinishWithTheFollowupBriefRemovedAnswersBriefMissing(t *te
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 	shim.ExpectStartTurn()
+	if err := os.Remove(filepath.Join(repo.PolicyDir(), "oneshot-create-pr-then-close-followup.md")); err != nil {
+		t.Fatalf("remove the pr-followup brief: %v", err)
+	}
 
 	// Act: the turn concludes with the success marker, driving the finish
 	// hook straight into the now-missing followup brief.
