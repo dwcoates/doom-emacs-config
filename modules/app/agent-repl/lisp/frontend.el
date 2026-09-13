@@ -49,7 +49,7 @@
 (require 'url-parse)
 
 (declare-function agent-repl--with-deferred-quit "agent-repl-core")
-(declare-function agent-repl--deferred-quit-arm-delivery "agent-repl-core" (context))
+(declare-function agent-repl--deferred-quit-arm-audit "agent-repl-core" (context))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-live-p "agent-repl-workspace" (ws))
@@ -422,11 +422,12 @@ foreign directory the xwidget session inherited at creation."
   ;; makes a quit that arrived here indistinguishable, from the log alone,
   ;; from a quit that never arrived.
   ;;
-  ;; It is NOT what the 2026-09-12 "a real C-g did not dismiss the prompt"
-  ;; finding turned out to be.  That was the harness posting a synthetic
-  ;; `C-g' Emacs never received; core.el's commentary carries the Emacs
-  ;; source that settles it, and this mount logged no deferral in any of
-  ;; those runs.
+  ;; It is NOT what the 2026-09-12 / 2026-09-13 "a real C-g did not dismiss
+  ;; the prompt" finding turned out to be.  That was the module's own quit
+  ;; DELIVERY timer clearing `quit-flag' and then failing to abort; the guard
+  ;; itself only ever left the flag armed, and this mount logged no deferral
+  ;; in any of those runs.  core.el's commentary carries the Emacs source
+  ;; that settles it.
   (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
          (buf (if (buffer-live-p existing)
                   (progn
