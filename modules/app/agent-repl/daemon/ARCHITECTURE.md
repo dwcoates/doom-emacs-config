@@ -72,7 +72,10 @@ daemon/
       holds/       hold-tray resolver
     prompthandler/ SubmitPrompt body (command recognition, mirror, forward to queue)
     promptqueue/   the one delivery path; holds; classifier call; interject; parked ledger; drain on turn end
-    classifier/    headless vendor run (guarded) + -fake keyword heuristic
+    classifier/    the routing question, asked through headless/ + -fake keyword heuristic
+    headless/      the ONE exec site for the daemon's own `claude -p` calls:
+                   the classifier's routing question and the workspace naming
+                   call. Guard, binary resolution, stdin discipline, deadline
     merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate, briefs, ledger)
     drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive)
     rollout/       self-reload trigger consumer: daemon handover, adopt rendezvous, shim relaunch engine,
@@ -360,6 +363,13 @@ type Queue interface {
   RestoreHolds(ctx) error                                          // boot: all-or-nothing
 }
 ```
+Headless: `headless.Client.Run(ctx, Request) (Response, error)` — the daemon's
+own one-shot vendor run, `claude -p` with the question on STDIN so it never
+rides an argv. Two callers: the classifier (site `classifier`, plain text) and
+the workspace naming call (site `workspace_naming`, `--model haiku`, the JSON
+envelope). `headless.ResolveBin` never answers empty, which is what the
+classifier's old empty-binary hole was.
+
 Classifier: `classifier.Judge(ctx, running, incoming) (Verdict, error)`;
 guarded by `envc.VendorGuard.Check("classifier")`; `-fake` uses the keyword
 heuristic; the explicit-interrupt fast path ("stop", "abort", "cancel",

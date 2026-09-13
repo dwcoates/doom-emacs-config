@@ -192,9 +192,11 @@ func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch s
 		}
 		// A BRANCH IS A FACT ABOUT THE REPOSITORY, not about the registry: a
 		// stale branch left by a nuked workspace collides just as hard.
-		// ResolveRef answering is the branch existing; its failure is the
-		// branch being free, which is what a create needs.
-		if _, err := v.deps.Git.ResolveRef(ctx, repoDir, "refs/heads/"+candidate); err == nil {
+		exists, err := v.deps.Git.BranchExists(ctx, repoDir, candidate)
+		if err != nil {
+			return "", fmt.Errorf("probe the branch %q: %w", candidate, err)
+		}
+		if exists {
 			continue
 		}
 		if suffix > 1 {

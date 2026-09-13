@@ -363,8 +363,9 @@ type fakeGit struct {
 
 	resolveErr error
 	// existingBranches are the branches this repository already holds, which
-	// is what the naming call's collision probe reads through ResolveRef.
+	// is what the naming call's collision probe asks for.
 	existingBranches map[string]bool
+	branchExistsErr  error
 
 	created   []createdWorktree
 	createErr error
@@ -379,15 +380,11 @@ func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 	if g.resolveErr != nil {
 		return "", g.resolveErr
 	}
-	// A `refs/heads/…` ref is the collision probe asking whether a BRANCH
-	// exists, which is a different question from resolving a base ref: only
-	// the branches this fake was told about resolve.
-	if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
-		if !g.existingBranches[branch] {
-			return "", fmt.Errorf("fake git: no branch %q", branch)
-		}
-	}
 	return "sha-of-" + ref, nil
+}
+
+func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
+	return g.existingBranches[branch], g.branchExistsErr
 }
 
 func (g *fakeGit) CommonDir(context.Context, string) (string, error) {

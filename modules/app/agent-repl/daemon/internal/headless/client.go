@@ -40,8 +40,16 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	if req.Site == "" {
 		return Response{}, fmt.Errorf("headless: a run must name its vendor-guard site")
 	}
-	if err := c.guard.Check(req.Site); err != nil {
-		return Response{}, &Error{Cause: CauseGuardRefused, Detail: err.Error()}
+	// THE GUARD AND THE BINARY ARE ONE RULE, and it is login's, stated once
+	// here for every headless call: the guard refuses only the DEFAULT
+	// `claude` on PATH, because an explicitly named binary is by definition
+	// not a call to the real CLI. That is what lets a test point
+	// AGENT_REPL_CLAUDE_BIN at a scripted stand-in and still exercise the
+	// whole call path, and what makes a run with no binary named refuse.
+	if c.bin == DefaultBin {
+		if err := c.guard.Check(req.Site); err != nil {
+			return Response{}, &Error{Cause: CauseGuardRefused, Detail: err.Error()}
+		}
 	}
 	if c.bin == "" {
 		return Response{}, &Error{Cause: CauseNoBinary, Detail: "no vendor binary is configured"}

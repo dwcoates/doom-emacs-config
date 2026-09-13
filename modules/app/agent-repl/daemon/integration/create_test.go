@@ -1054,6 +1054,12 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneSpawnsAFakeShim(t *testing.T) {
 		Repository: repository,
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
 			InitialPrompt: said("fix the flaky reconnect test"),
+			// A NAME IS SUPPLIED SO THE SUBJECT STAYS THE SHIM. This daemon is
+			// started without AGENT_REPL_CLAUDE_BIN on purpose, so the
+			// headless naming call a nameless create makes would be refused by
+			// the very guard this test is about — and the create would never
+			// reach the spawn it is asserting on.
+			Name: strPtr("guarded-spawn"),
 		}},
 	}))
 
@@ -1086,6 +1092,9 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneStartsTheSession(t *testing.T) {
 		Repository: repository,
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
 			InitialPrompt: said("fix the flaky reconnect test"),
+			// See the sibling test: the name is supplied so the guarded
+			// naming call is never made and the subject stays the session.
+			Name: strPtr("guarded-session"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
