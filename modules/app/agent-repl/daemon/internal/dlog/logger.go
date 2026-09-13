@@ -1,8 +1,8 @@
 package dlog
 
 import (
-	"fmt"
 	"os"
+	"strings"
 )
 
 // destination is one durable sink a logger writes to: a workspace sink or the
@@ -63,7 +63,7 @@ func (l *logger) emit(level, operation, message string, ctx Context) {
 func (l *logger) deliver(rec record) {
 	line := rec.marshal()
 	if err := l.dest.write(line); err != nil {
-		emergency(err, line)
+		l.s.emergency(l.runtime, err, line)
 	}
 	if status := l.s.mirror.enqueue(line); !status.ok() {
 		l.reportMirror(status)
@@ -87,13 +87,29 @@ func (l *logger) reportMirror(status mirrorStatus) {
 		merge(l.base, ctx), l.s.pid)
 	line := rec.marshal()
 	if err := l.dest.write(line); err != nil {
-		emergency(err, line)
+		l.s.emergency(l.runtime, err, line)
 	}
 }
 
 // emergency is the one permitted exception to "every record goes to its
-// durable sink": the canonical sink cannot record its own failure. It writes
-// the failure and the record it could not persist to stderr.
-func emergency(cause error, line []byte) {
-	fmt.Fprintf(os.Stderr, "agent-repl daemon: LOG SINK FAILURE: %v\nunpersisted record: %s", cause, line)
+// durable sink": the canonical sink cannot record its own failure, so the
+// failure and the record it could not persist go to stderr.
+//
+// IT IS ITSELF A RECORD, on ONE line. It used to be two lines of prose --
+// "LOG SINK FAILURE: <cause>" and "unpersisted record: <the json>" -- and
+// every reader in the system parses a log line as a record, so the LAST
+// RESORT was the one output nothing could read: 24 unparseable lines in the
+// 2026-09-13 sweep, each carrying a real record nobody could group, level or
+// attribute. The record it could not persist travels whole, as a string in
+// `unpersisted_record`, so nothing of it is lost.
+func (s *surfaces) emergency(runtime string, cause error, line []byte) {
+	ctx := Context{"cause": cause.Error()}
+	if len(line) > 0 {
+		ctx["unpersisted_record"] = strings.TrimSuffix(string(line), "\n")
+	}
+	rec := newRecord(s.now(), runtime, LevelError,
+		"daemon.dlog.sink_failure",
+		"the durable sink refused a record; it is echoed here because its own sink cannot carry the news",
+		ctx, s.pid)
+	_, _ = os.Stderr.Write(rec.marshal())
 }
