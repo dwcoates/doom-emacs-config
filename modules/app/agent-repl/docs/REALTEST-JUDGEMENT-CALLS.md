@@ -201,8 +201,13 @@ prompt, name and base ref for every mode, which is the mismatch.
 The owner's creation-modes ruling names four modes but no keys. The new
 static create needed a binding to be reachable at all, so the lead chose
 `SPC TAB N` — the shifted neighbour of `SPC TAB n`, the dynamic create it
-sits beside — with the description "New named workspace (no prompt; C-u =
-child)". No existing binding was moved, renamed, or reused.
+sits beside — with the description "New named workspace (no prompt)". No
+existing binding was moved, renamed, or reused.
+
+SUPERSEDED IN PART by the owner's ruling of 2026-09-12 that the child
+variants are their own bindings rather than a `C-u` prefix: `SPC TAB N`
+keeps the static create and loses its prefix handling, and the child
+variants took `SPC TAB c` and `SPC TAB C`.
 
 THIS ONE WAS MADE WITHOUT THE OWNER. To change it, edit the single `map!`
 entry in `lisp/keybindings.el` under the `SPC TAB` prefix; nothing else
