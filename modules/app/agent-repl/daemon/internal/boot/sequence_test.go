@@ -910,3 +910,31 @@ func TestAClosedMissingDirectoryIsNeverAdopted(t *testing.T) {
 		t.Fatalf("report.MissingDirClosed = %v, want [%v]", report.MissingDirClosed, ws.ID)
 	}
 }
+
+// TestTheRuledAutomaticCloseIsRecordedAtInfo pins the LEVEL of the ruling
+// above. The owner ruled the close automatic on 2026-09-11, so a close that
+// happened is the ruling being carried out and not a condition to remediate;
+// the arms beside it -- a stat that failed for any other reason, and a close
+// that could not be written -- keep their WARN and their ERROR.
+func TestTheRuledAutomaticCloseIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dir := t.TempDir()
+	h.register(t, dir, sessionlock.StateFree)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.boot.close_missing_dir") {
+		t.Fatalf("the ruled automatic close was recorded at warn: %v", h.log.Records())
+	}
+	if !h.hasRecord("info", "daemon.boot.close_missing_dir") {
+		t.Fatalf("no info record named the close: %v", h.log.Records())
+	}
+}

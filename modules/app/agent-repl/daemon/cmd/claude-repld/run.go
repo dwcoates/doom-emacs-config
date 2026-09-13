@@ -191,7 +191,12 @@ func run(ctx context.Context, opts options, h hooks) error {
 	claim, err := bindClaim(layout.DaemonAddr(), 0)
 	if err != nil {
 		if errors.Is(err, daemonaddr.ErrClaimed) {
-			log.Warn("daemon.cmd.claim", "another daemon holds the boot claim; exiting without disturbing it", dlog.Context{
+			// THE MECHANISM WORKING. Emacs spawns a daemon whenever it cannot
+			// tell that one is already serving, so a loser is an ORDINARY
+			// outcome of the boot claim and not a condition to remediate --
+			// the incumbent keeps serving, its advertisement is untouched, and
+			// this process exits having written nothing.
+			log.Info("daemon.cmd.claim", "another daemon holds the boot claim; exiting without disturbing it", dlog.Context{
 				"addr_path":  layout.DaemonAddr(),
 				"claim_wait": h.ClaimWait.String(),
 			})
