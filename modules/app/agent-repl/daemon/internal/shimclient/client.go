@@ -155,6 +155,28 @@ type client struct {
 	// courtesy for the SUPERVISOR's own stream, which nothing was telling.
 	standDown atomic.Bool
 
+	// daemonStandDown reads the SUPERVISOR's own stand-down latch, and it is
+	// the second half of the same signal `standDown` above is the first half
+	// of. A latch armed per CLIENT only ever covers the clients a teardown
+	// walk can name, and an immediate shutdown reaches processes no walk names:
+	//
+	//   MEASURED, realtest run 2026-09-13T18:31:58. A bring-up whose
+	//   StartSession refused left its spawned shim serving (that is the
+	//   INERT SURVIVOR the next bring-up adopts), so ONE process ended up
+	//   with TWO clients -- the supervisor's spawn record and the fleet's
+	//   adopted one. `UpdateShutdownSchedule{now}` swept the spawn record,
+	//   which armed ITS latch and recorded the exit at INFO; the adopted
+	//   client, armed by nothing, witnessed the very same departure as
+	//   `daemon.shimclient.exit` ERROR "shim died" plus
+	//   `daemon.shimclient.redial` WARN "redial stopped", eight times over
+	//   the run.
+	//
+	// So the question every consumer asks is not "was THIS client stood
+	// down" but "did THIS DAEMON order the departure", and the supervisor's
+	// latch is what answers it for every client it ever handed out. Nil for a
+	// client built outside a supervisor, which orders nothing.
+	daemonStandDown func() bool
+
 	monitorCtx    context.Context
 	cancelMonitor context.CancelFunc
 
@@ -236,7 +258,17 @@ var ErrStandDownOrdered = errors.New("the shim was stood down by this daemon")
 // StandingDown answers the stand-down latch. It is the shim's own record that
 // THIS DAEMON asked it to end its session, and it is read by every consumer
 // that must tell a teardown it ordered from one that happened to it.
-func (c *client) StandingDown() bool { return c.standDown.Load() }
+//
+// IT IS THE DAEMON'S LATCH TOO, not only this client's: see daemonStandDown.
+// A daemon that has begun standing down is ending EVERY shim it holds, so a
+// departure that lands after that moment is one it ordered whether or not the
+// teardown walk reached this particular client.
+func (c *client) StandingDown() bool {
+	if c.standDown.Load() {
+		return true
+	}
+	return c.daemonStandDown != nil && c.daemonStandDown()
+}
 
 // StandDown arms the stand-down latch for a teardown this daemon is ordering,
 // answering whether it was armed. See Client.StandDown.
@@ -769,7 +801,7 @@ func (c *client) publishExit(info ExitInfo) {
 		ctx["actor"] = info.Attribution.Actor
 		ctx["reason"] = info.Attribution.Reason
 		c.log.Info("daemon.shimclient.exit", "supervised shim stopped as asked", ctx)
-	} else if c.standDown.Load() && (info.Inferred || (info.Code == 0 && info.Signal == "")) {
+	} else if c.StandingDown() && (info.Inferred || (info.Code == 0 && info.Signal == "")) {
 		// THE SHIM ENDS ITS OWN PROCESS ON KillSession. Every graceful
 		// stand-down in this daemon asks before it signals, so the ordinary
 		// case is that the shim is already gone by the time anything would
@@ -792,7 +824,7 @@ func (c *client) publishExit(info ExitInfo) {
 		// it, it is still a death and still loud.
 		c.log.Info("daemon.shimclient.exit", "the shim left after the stand-down it was asked for", ctx)
 	} else {
-		ctx["stand_down_asked"] = c.standDown.Load()
+		ctx["stand_down_asked"] = c.StandingDown()
 		c.log.Error("daemon.shimclient.exit", "shim died", ctx)
 	}
 
@@ -1042,7 +1074,7 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 		if c.exitedAlready() || ctx.Err() != nil {
 			return
 		}
-		if c.standDown.Load() {
+		if c.StandingDown() {
 			// THE DAEMON ASKED FOR THIS. A stand-down was requested of this
 			// shim, so the liveness stream ending is the answer to it and not
 			// a fault: redialing here reaches a process that is on its way
@@ -1064,7 +1096,7 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 			// ladder ends on a process the daemon itself just ended; without
 			// this second read that ordered ending is a WARN, and the realtest
 			// harvest fails a run on every one of them.
-			if c.standDown.Load() {
+			if c.StandingDown() {
 				c.log.Debug("daemon.shimclient.redial", "the redial ladder ended after a stand-down was asked of this shim", dlog.Context{
 					"uds": c.udsPath, "error": err.Error(),
 				})
@@ -1108,7 +1140,7 @@ func (c *client) witnessAdoptedDeath(dialErr error) bool {
 	evidence := dlog.Context{
 		"workspace_id": string(c.ws), "uds": c.udsPath, "error": dialErr.Error(),
 	}
-	if c.standDown.Load() {
+	if c.StandingDown() {
 		c.log.Debug("daemon.shimclient.exit", "the adopted shim's socket is gone after the stand-down it was asked for", evidence)
 	} else {
 		c.log.Error("daemon.shimclient.exit", "adopted shim is gone: socket refused and workspace lock free", evidence)

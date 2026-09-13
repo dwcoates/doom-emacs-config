@@ -11,6 +11,14 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon bring-up: adopting an inert survivor (lock free, socket live) is recorded at INFO, matching the boot's own copy of the branch, and the adoption record names the shim pid (gap scan 2026-09-13T18:18:41, finding 3)
+
+- daemon open: `OpenWorkspace` relays a bring-up refused by the daemon's own stand-down at INFO instead of `daemon.workspace.open` ERROR "the session did not come up" (gap scan 2026-09-13T18:32:16, finding 2)
+
+- daemon bring-up: a bring-up on a daemon that has begun standing down refuses BEFORE it probes or spawns -- an INFO typed refusal carrying `shimclient.ErrStandingDown`, no fault, no footer failure line -- and the register relays that sentinel at INFO instead of `daemon.workspace.register` ERROR (gap scan 2026-09-13T18:32:16, finding 2)
+
+- daemon stand-down: the stand-down latch every shim client reads is the SUPERVISOR's as well as the client's own, and an immediate shutdown raises it BEFORE it walks the sessions -- so a client no walk can name (an adopted survivor of a refused StartSession) records the daemon's own teardown at INFO instead of `daemon.shimclient.exit` ERROR "shim died" plus `daemon.shimclient.redial` WARN "redial stopped" (gap scan 2026-09-13T18:31:58, finding 1)
+
 - topbar account cell: clicking it opens a dropdown of every account root the daemon knows (email or "logged out", the current one marked), and picking one switches the workspace's session to it through SelectAccount and the restart verb's engine, opening that root's login when it has none; it is the pair's reveal, replacing the session line the cell used to open (owner ruling 2026-09-13: the logged-in cell did nothing)
 
 - shim start path: the init bound is for SILENCE only — an error `result`, an ended stream, an exited child or a throwing iterator settles StartSession at once as `vendor_start_failed` with the vendor's own text (its stderr appended), a failed start closes the query it opened, and the pre-`init` message kinds are logged at info (a resume emitted its `SessionStart:resume` hook, succeeded it in 12ms, then held the verb the full 45s twice with nothing in any log saying what it had emitted, 2026-09-13 18:17)
