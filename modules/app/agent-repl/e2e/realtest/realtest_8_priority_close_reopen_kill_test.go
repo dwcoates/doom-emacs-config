@@ -648,7 +648,7 @@ func rt8AssertReopenRestoresTheSameWorkspace(ctx context.Context, t *testing.T, 
 			"it: the order is %v", ws.ID, ws.Name, tabs)
 	} else {
 		manifest.Notes = append(manifest.Notes,
-			fmt.Sprintf("`SPC TAB o` restored %q under the same id %s, with its tab back", ws.Name, ws.ID))
+			fmt.Sprintf("`SPC TAB O` restored %q under the same id %s, with its tab back", ws.Name, ws.ID))
 		t.Logf("the tab bar draws %q again; the order is %v", ws.Name, tabs)
 	}
 }
