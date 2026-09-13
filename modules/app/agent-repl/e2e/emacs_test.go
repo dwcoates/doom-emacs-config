@@ -482,6 +482,22 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	t.Cleanup(e.reapStrays)
 
 	e.writeSettings(opts)
+	// THE VENDOR STAND-IN THE DAEMON'S OWN CALLS EXEC.
+	//
+	// A create that supplies no name is named by a headless `claude -p` call
+	// the daemon makes inside Create, and a naming call that cannot answer
+	// REFUSES the create (daemon/internal/workspace/namecall.go). This layer
+	// exports AGENT_REPL_FORBID_VENDOR_CALLS=1, so with nothing naming a
+	// binary the guard refuses the spawn outright and every nameless create
+	// in this layer fails with `naming_failed`.
+	//
+	// So the same fake the daemon's integration harness writes is staged
+	// here too, and named EXPLICITLY -- which is also what makes the spawn
+	// legal under the guard, since an explicit path is by definition not a
+	// call to the real CLI. Its naming answer is the deterministic
+	// harness.FakeClaudeMintedName, so a scenario may assert on the name a
+	// nameless create produced.
+	fakeClaude := harness.NewFakeClaude(t, filepath.Join(root, "fakebin"))
 	prewarmTrampolines(t, box)
 	staged := time.Now()
 	e.stageEmacsDir()
@@ -516,6 +532,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_E2E_SETTINGS=" + e.settingsPath(),
 		"AGENT_REPL_STATE_DIR=" + e.StateDir,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		"AGENT_REPL_CLAUDE_BIN=" + fakeClaude,
 		"MULTI_REPO_ROOT=" + e.MultiRepoRoot,
 		// A tty frame needs a terminal that can position the cursor, and
 		// `dumb` by definition cannot: it has no `cup` capability, so Emacs

@@ -573,3 +573,17 @@ they are covered by tests.
    the proto.
 6. Store volume: not to be solved by narrowing discovery; analyze what is
    written and stop storing what is never served (proposal owed).
+
+## Agent judgement calls (2026-09-13, sandboxed Emacs layer creates)
+
+1. The Emacs e2e layer's daemon gets the SAME fake vendor binary the daemon's
+   own integration harness writes (`harness.NewFakeClaude`), named explicitly
+   on `AGENT_REPL_CLAUDE_BIN`. The layer already exported
+   `AGENT_REPL_FORBID_VENDOR_CALLS=1` and named no binary, so every nameless
+   create's headless naming call was refused by the guard. The naming call is
+   NOT weakened and the guard is NOT relaxed: an explicitly named binary is
+   already the documented legal spawn (`daemon/AGENTS.md`), and it is what the
+   Go worlds have always done (`e2e/SPEC.md` seam 2). Reusing the harness's
+   fake rather than writing a second one keeps the naming contract in one
+   place, so the slug a nameless create produces is the same
+   `harness.FakeClaudeMintedName` in both layers.
