@@ -7,6 +7,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/resolve/topbar"
 )
 
 // permissionAnswer composes one permission answer around a built decision.
@@ -478,6 +480,29 @@ func TestAnswerColdGateRetiresTheStandingGate(t *testing.T) {
 	}
 	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetResolved() == nil {
 		t.Fatalf("synthesized rows = %v, want one resolved gate row", f.feed.synthesized)
+	}
+}
+
+func TestAnswerColdGateRetiresTheStripsGateToo(t *testing.T) {
+	// Arrange: the strip has its own cold-gate state, and the answer's
+	// re-opened session is what fills the full view back in.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	answer := &frontendv1.FeedColdGateResolved{
+		Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}},
+	}
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert.
+	want := []topbar.ColdGate{{Standing: false}}
+	if len(f.topbarColdGates) != len(want) || f.topbarColdGates[0] != want[0] {
+		t.Fatalf("topbar cold gates = %v, want %v", f.topbarColdGates, want)
 	}
 }
 

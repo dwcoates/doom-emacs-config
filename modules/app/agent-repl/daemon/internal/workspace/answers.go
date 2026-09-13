@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/topbar"
 )
 
 // AnswerPermission delivers a permission card's verdict to the agent that
@@ -226,6 +227,10 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	// session is parked, both in the same beat as the re-open.
 	v.deps.Feed.UpsertSynthesized(ws, rootFeed(), coldGateRow(ws, served.VendorSessionID, answer))
 	v.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: false})
+	// AND THE STRIP STOPS SAYING IT TOO. The re-open starts a session, so the
+	// topbar's own session facts arrive on its heels and the full view
+	// returns; retiring the gate here is what lets them.
+	v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
 
 	log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": coldChoiceName(answer)})
 	return nil
