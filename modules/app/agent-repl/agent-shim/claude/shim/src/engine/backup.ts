@@ -14,6 +14,10 @@
  * A FAILED BACKUP NEVER FAILS A TURN. It is recorded at `warn` and the turn
  * ends normally: refusing to conclude a turn because a copy could not be made
  * would trade the conversation for the copy of it.
+ *
+ * A TRANSCRIPT THAT WAS NEVER WRITTEN IS NOT A FAILED BACKUP. It is recorded,
+ * at `info`, as the nothing-to-copy it is; only a copy that could have been
+ * made and was not is a warning.
  */
 import { copyFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -60,6 +64,20 @@ export function backupTranscript(options: {
       "backed up the vendor transcript",
     );
   } catch (err) {
+    // THERE IS NOTHING TO COPY IS NOT A FAILED COPY. A vendor session id whose
+    // transcript file was never written — the id a session ROTATES AWAY FROM at
+    // its very start, before the vendor has taken a single turn under it — has
+    // no bytes to lose, and every rotation announced one of these as a defect.
+    // Matched on the SOURCE path specifically: the target's directory is
+    // created recursively one line above, so a `ENOENT` naming anything else is
+    // still the unexplained failure this record exists for.
+    if (missingSource(err, options.transcript)) {
+      LOGGER.info(
+        { transcript: options.transcript, vendor_session_id: options.vendorSessionId },
+        "no transcript exists under this vendor session id, so there is nothing to back up",
+      );
+      return;
+    }
     // warn: a defect because the transcript backup failed while the turn continued.
     LOGGER.warn(
       {
@@ -72,6 +90,13 @@ export function backupTranscript(options: {
     return;
   }
   pruneBackups(directory, options.keep ?? BACKUP_KEEP);
+}
+
+/** Whether a copy failed only because the transcript it names does not exist. */
+function missingSource(err: unknown, transcript: string): boolean {
+  if (!(err instanceof Error)) return false;
+  const failure = err as NodeJS.ErrnoException;
+  return failure.code === "ENOENT" && failure.path === transcript;
 }
 
 /**

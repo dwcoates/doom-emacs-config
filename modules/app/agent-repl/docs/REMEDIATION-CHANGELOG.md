@@ -16,6 +16,11 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - realtest harness: a `C-g` pressed at a standing minibuffer read is judged by the ring again (`wsActQuit.MarkFree` false, `wsActDismissNotDelivered`), because the read records it (realtests 6-8 named nobody for three keys that never arrived)
 
 - realtest harness: the chord-credit check reads `(recent-keys)` in Emacs's own spelling (`Chord.Recorded`, `SpellRecorded`), so `SPC TAB n` and `SPC TAB f` are credited against `<tab>` rather than `TAB` (realtests 5 and 7 called their own prompts uncreditable)
+## Log sweep (shim, webapp, elisp), 2026-09-13
+
+- shim: a write onto an h2c stream the peer has already destroyed is recorded at info as the peer's departure, naming the rpc, and only an exception this side cannot account for stays the `no handler anticipated` error — the caller still gets `Internal` with its detail (log sweep, 9 `shim.service.route` errors, live at 2026-09-12T15:27)
+- shim: the stderr mirror's retirement is an info record — a shim outlives its daemon by design and the durable sink it writes that record to is the copy that mattered (log sweep, 13 `shim.logging.stderr-mirror` warns, 3 today)
+- shim: a vendor session id whose transcript file was never written is recorded at info as nothing to copy, and only a copy that could have been made and was not stays a `transcript backup FAILED` warn (log sweep, `shim.engine.backup` ENOENT at the start-of-session rotation)
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
