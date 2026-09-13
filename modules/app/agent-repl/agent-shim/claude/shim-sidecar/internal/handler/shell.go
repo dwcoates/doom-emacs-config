@@ -1,10 +1,11 @@
 package handler
 
-// shell.go — the detached shell spool: unstructured bytes with exactly TWO
-// structured things in them, both terminators — the `EXIT=<code>` line our own
-// harness scripts append, and the `[exited with code N]` line the vendor's
-// background-shell wrapper appends. Either one ends the run; when both are
-// present the harness's is the command's verdict and wins.
+// shell.go — the detached shell spool: unstructured bytes with exactly THREE
+// structured things in them, all terminators — the `EXIT=<code>` line our own
+// harness scripts append, and the `[exited with code N]` and `[killed]` lines
+// the vendor's background-shell wrapper appends. Any one of them ends the run;
+// when a harness marker sits above a wrapper line the harness's is the
+// command's verdict and wins.
 //
 // So the handler does two things: append the bytes to the run as a DELTA carrying
 // the offset they start at, and END the run when the marker arrives. Completion is
@@ -42,6 +43,24 @@ var exitMarkerPrefix = []byte("EXIT=")
 // three runs whose spools end `[exited with code 0]` were each written up as
 // `went_silent`.
 var wrapperExitPrefix = []byte("[exited with code ")
+
+// wrapperKilledLine is the THIRD terminator, and the one this reader did not
+// know: the vendor's wrapper writes it, alone on the spool's final line, for a
+// run that was killed and never reported a status.
+//
+// NOT KNOWING IT WAS A DEFECT WITH A MEASURED COST. Across the task spools of
+// one machine (2026-09-13), 121 `b*` spools end on this line against 765 ending
+// on `[exited with code N]` — every one of those 121 a run that plainly ended
+// and that this reader left open for its silence window to conclude LOST
+// instead. The realtest harvest caught exactly that: `bpth8pp8m.output`, 27
+// bytes ending `[killed]`, written at 16:21:33 and concluded
+// `went_silent` at 16:51:47, thirty minutes to the second later.
+//
+// A KILL IS ITS OWN ENDING, NOT AN EXIT CODE. `AgentBashTermination` draws the
+// two apart on purpose ("an exit code and a kill are different endings and only
+// one of them has a number"), so this settles on the `killed` arm rather than
+// inventing a status the shell never reported.
+var wrapperKilledLine = []byte("[killed]")
 
 // maxExitMarkerDigits bounds the digits accepted after `EXIT=`. A shell exit code
 // is 0-255, so anything longer is not the harness's marker.
@@ -129,7 +148,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	// exactly the count the consumer must already hold for this run.
 	entries := []*storev1.StoreEntry{h.Conv().BashDelta(at, run, output.String(), frames[0].Offset)}
 
-	code, ok := trailingExitCode(frames[0].Raw, atLineStart)
+	end, ok := trailingTerminator(frames[0].Raw, atLineStart)
 	if !ok {
 		h.log.With(handleCtx("shell-handle", ctx)).
 			LogVerbose("no terminal exit marker in batch entries=%d", len(entries))
@@ -139,7 +158,11 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	// marker arrives on a later poll than its output would otherwise settle
 	// carrying only the last chunk while claiming to carry the whole.
 	seen, omitted := h.Seen()
-	entries = append(entries, h.Conv().BashExited(at, run, seen, omitted, code))
+	if end.killed {
+		entries = append(entries, h.Conv().BashKilled(at, run, seen, omitted))
+	} else {
+		entries = append(entries, h.Conv().BashExited(at, run, seen, omitted, end.code))
+	}
 	if h.onTerminal != nil {
 		// A RUN THAT ENDED ON ITS OWN MARKER CAN NEVER BE LOST. Telling the
 		// reader here is what stops the staleness policy restating a finished
@@ -167,8 +190,17 @@ func (h *ShellOutputHandler) observe(raw []byte) {
 	h.endedOnNewline = len(raw) > 0 && raw[len(raw)-1] == '\n'
 }
 
-// trailingExitCode reads the `EXIT=<code>` terminator off the END of a raw spool
-// batch, returning the code and whether the marker was found.
+// spoolEnd is HOW a spool's terminator said the run ended: with a status the
+// shell reported, or with a kill that reported none. The two are different
+// endings, so the reader carries the difference rather than flattening a kill
+// into a code nobody wrote.
+type spoolEnd struct {
+	killed bool
+	code   int
+}
+
+// trailingTerminator reads a terminator off the END of a raw spool batch,
+// returning how the run ended and whether any terminator was found.
 //
 // The matching is deliberately strict, because `EXIT=` is COMMON as ordinary
 // command output. Measured over the SHELL spools this parser actually reads
@@ -196,7 +228,8 @@ func (h *ShellOutputHandler) observe(raw []byte) {
 // be the batch's last line, it must start a line, the text between the prefix and
 // the closing bracket must be nothing but at most maxExitMarkerDigits digits, and
 // the bracket must close the line. A run that merely PRINTS that sentence
-// mid-stream therefore does not end here.
+// mid-stream therefore does not end here. The wrapper's `[killed]` line is held
+// to the same rule: the batch's last line and nothing else on it.
 //
 // WHEN BOTH TERMINATORS ARE PRESENT, `EXIT=` WINS. The bracket reports the
 // WRAPPER's exit — it reads `[exited with code 0]` above a harness `EXIT=77`,
@@ -206,24 +239,32 @@ func (h *ShellOutputHandler) observe(raw []byte) {
 // A marker split across two polls is NOT matched and is left to the staleness
 // policy, which is the pre-existing behavior of the shell spools carrying no
 // terminator at all — not a new silent failure mode.
-func trailingExitCode(raw []byte, batchAtLineStart bool) (int, bool) {
+func trailingTerminator(raw []byte, batchAtLineStart bool) (spoolEnd, bool) {
 	before, line, ok := finalLine(raw, batchAtLineStart)
 	if !ok {
-		return 0, false
+		return spoolEnd{}, false
 	}
 	if code, ok := parseExitMarker(line); ok {
-		return code, true
+		return spoolEnd{code: code}, true
+	}
+	if bytes.Equal(line, wrapperKilledLine) {
+		// A kill reports no status, so a harness marker above it is the only
+		// status there is — the same precedence the exit line below follows.
+		if inner, ok := parseExitMarker(lastLineOf(before, batchAtLineStart)); ok {
+			return spoolEnd{code: inner}, true
+		}
+		return spoolEnd{killed: true}, true
 	}
 	code, ok := parseWrapperExit(line)
 	if !ok {
-		return 0, false
+		return spoolEnd{}, false
 	}
 	// The wrapper's own line ends the run, but the wrapped command's verdict
 	// beats the wrapper's whenever the harness recorded one right above it.
 	if inner, ok := parseExitMarker(lastLineOf(before, batchAtLineStart)); ok {
-		return inner, true
+		return spoolEnd{code: inner}, true
 	}
-	return code, true
+	return spoolEnd{code: code}, true
 }
 
 // finalLine splits a newline-terminated batch into everything before its last
