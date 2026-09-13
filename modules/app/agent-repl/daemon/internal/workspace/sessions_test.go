@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -97,9 +98,15 @@ type fakeSupervisor struct {
 	// it out.
 	adoptDeadline    time.Time
 	adoptHadDeadline bool
+	// onSpawn runs at the top of Spawn, so a test can hold a start open while
+	// it drives a second one at the same workspace.
+	onSpawn func()
 }
 
 func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimclient.Client, error) {
+	if s.onSpawn != nil {
+		s.onSpawn()
+	}
 	if s.spawnErr != nil {
 		return nil, s.spawnErr
 	}
@@ -2071,5 +2078,56 @@ func TestTheColdGateIsRecordedAtInfo(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no cold-gate record was written")
+	}
+}
+
+// TestTwoStartsOfOneWorkspaceSpawnOneShim pins the start gate.
+//
+// The liveness check cannot serialize starts: a session is remembered only
+// after its shim is up, so two starts that overlap both read "not live". The
+// second one then reached the workspace's socket, found the first one's shim
+// listening behind a lock its StartSession had not taken yet, and attached to
+// it as an INERT SURVIVOR — a warning about a race rather than a session. It
+// stopped being hypothetical when the boot's bring-up moved beside the accept
+// loop: a relaunch has Emacs announcing its workspaces while the boot is still
+// starting their sessions.
+func TestTwoStartsOfOneWorkspaceSpawnOneShim(t *testing.T) {
+	// Arrange: the first start is held open inside its spawn.
+	f := newFleetFixture(t)
+	ws := f.workspace("w-race")
+	spawning := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	f.supervisor.onSpawn = func() {
+		// ONCE, so a SECOND spawn — the defect this test is about — reports
+		// itself as the count below rather than as a panic on a closed
+		// channel.
+		once.Do(func() { close(spawning) })
+		<-release
+	}
+	first := make(chan error, 1)
+	go func() { first <- f.fleet.Start(context.Background(), ws.ID) }()
+	<-spawning
+
+	// Act: a second start of the SAME workspace, while the first is still
+	// inside its spawn.
+	second := make(chan error, 1)
+	entered := make(chan struct{})
+	go func() {
+		close(entered)
+		second <- f.fleet.Start(context.Background(), ws.ID)
+	}()
+	<-entered
+	close(release)
+
+	// Assert: both callers got a session, and only one shim was spawned.
+	if err := <-first; err != nil {
+		t.Fatalf("the first Start = %v, want the session started", err)
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("the second Start = %v, want the session the first one brought up", err)
+	}
+	if len(f.supervisor.spawns) != 1 {
+		t.Fatalf("spawns = %d, want exactly one shim for one workspace", len(f.supervisor.spawns))
 	}
 }

@@ -15,6 +15,16 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The boot's bring-up and the health bound, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The bring-up must leave the reconciliation; does it become a goroutine inside `sequence.Run` or a step the CALLER runs? | A caller-run step: `Run` names the set in `Report.PendingBringUp` and `cmd/claude-repld/run.go` calls `Sequence.BringUp` on its own goroutine after the bindings and the opening views | A goroutine inside `Run` would start sessions before `built.Bind`/`built.Prime` have built the surfaces they push into, which is a dropped push; the caller is the only place that knows when the daemon is ready to be pushed at | Move the `BringUp` call into `sequence.Run` behind a `go` (internal/boot/sequence.go) |
+| 2026-09-13 | Where does the bring-up goroutine sit relative to `h.Serve`? | Immediately before it, and joined with the background loops on `loopJoinBound` | Before `Serve` the accept loop has not started, so a start placed after it would never run until the daemon stopped serving; joining it is what stops an orderly exit closing the state client under a session start in flight | Start it after `h.Serve` returns, or drop the `loops.Add(1)` (cmd/claude-repld/run.go) |
+| 2026-09-13 | With the bring-up beside the accept loop, an orderly exit can land inside a session start; cancel it or finish it? | Finish it: each start runs under `context.WithoutCancel`, and the loop stops before the NEXT workspace once the serving lifetime ends | A start cut halfway is a half-written session record, a shim stopped between spawn and attach, and a fault the daemon could not record because the same cancellation refused its transaction — the class the merge drain and the watcher joins already exist to prevent | Pass `ctx` straight to `StartSession` in `BringUp` (internal/boot/sequence.go) |
+| 2026-09-13 | A relaunch now runs the boot's bring-up and Emacs's announce at once, and the second start attached to the first's shim as an inert survivor | `Fleet.Start` takes a per-workspace start gate; the waiter re-reads liveness under it and answers the session the winner brought up | The liveness check is a check-then-act — a session is remembered only after its shim is up — so nothing but a lock can make "one start per workspace at a time" true, and the alternative was declaring a warning about a race as expected | Drop the `startGate` lock at the top of `Fleet.Start` (internal/workspace/sessions.go) |
+| 2026-09-13 | `Report` carried `BroughtUp`, `HibernatedLeft` and `BringUpFailed`, which the reconciliation can no longer know | They move to a `BringUpReport` the new step returns; `Report` keeps only `PendingBringUp` | A boot report that still carried those counts would be stating an outcome that had not happened yet, and every reader of it would be reading zeroes | Fold the three fields back into `Report` and have `BringUp` write through a pointer (internal/boot/api.go) |
+
 ## The editor a run hands back, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |

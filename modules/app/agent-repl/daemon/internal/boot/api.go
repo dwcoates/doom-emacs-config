@@ -86,20 +86,13 @@ type Report struct {
 	HoldsRestored int
 	// MergesRecovered are the in-flight merges resumed.
 	MergesRecovered []ids.WorkspaceID
-	// BroughtUp are the open, client-less workspaces whose session this boot
-	// STARTED. An open workspace is never session-less (owner ruling,
-	// 2026-09-13), so a survivor that did not survive is brought back here.
-	BroughtUp []ids.WorkspaceID
-	// HibernatedLeft are the open, client-less workspaces this boot left
-	// asleep. Hibernation is the memory knob and it is deliberate: bringing
-	// one back at boot would spend the ~500MB the sweep reclaimed, for a
-	// workspace nobody has asked for.
-	HibernatedLeft []ids.WorkspaceID
-	// BringUpFailed are the workspaces whose start this boot could not
-	// complete. A failure is PER WORKSPACE — the next one is still started —
-	// and it raises the same fault an open's failed start raises, so the
-	// failure is on every surface and not only in this count.
-	BringUpFailed []ids.WorkspaceID
+	// PendingBringUp are the open, client-less workspaces whose sessions the
+	// bring-up will start. THE RECONCILIATION ONLY NAMES THEM; it does not
+	// start them, because starting them is what a session start costs and the
+	// daemon does not answer a single unary until the reconciliation has
+	// returned. The caller runs `BringUp` over this set once the listener is
+	// accepting. See BringUp for the invariant.
+	PendingBringUp []wsm.Workspace
 	// Undetermined are the workspaces whose kernel lock probe could not tell.
 	// They are neither adopted nor orphan-closed: "could not tell" is never
 	// read as free, and this record is the only place that says so.
@@ -107,6 +100,27 @@ type Report struct {
 	// Dispositions is the intent manifest's reconciliation, one record per
 	// session. PRESERVED, ROLLED, DIED and UNKNOWN are never collapsed.
 	Dispositions []rollout.Disposition
+}
+
+// BringUpReport is what the bring-up step did. It is separate from Report
+// because the step runs AFTER the reconciliation has been reported and the
+// daemon is already serving: a boot report that carried these counts would be
+// stating an outcome it could not yet know.
+type BringUpReport struct {
+	// BroughtUp are the open, client-less workspaces whose session was
+	// STARTED. An open workspace is never session-less (owner ruling,
+	// 2026-09-13), so a survivor that did not survive is brought back here.
+	BroughtUp []ids.WorkspaceID
+	// HibernatedLeft are the open, client-less workspaces left asleep.
+	// Hibernation is the memory knob and it is deliberate: bringing one back
+	// at boot would spend the ~500MB the sweep reclaimed, for a workspace
+	// nobody has asked for.
+	HibernatedLeft []ids.WorkspaceID
+	// BringUpFailed are the workspaces whose start could not complete. A
+	// failure is PER WORKSPACE — the next one is still started — and it raises
+	// the same fault an open's failed start raises, so the failure is on every
+	// surface and not only in this count.
+	BringUpFailed []ids.WorkspaceID
 }
 
 // Sequence runs the boot.
@@ -117,6 +131,23 @@ type Sequence interface {
 	// step that cannot complete fails the boot LOUDLY rather than starting
 	// degraded.
 	Run(ctx context.Context) (Report, error)
+	// BringUp starts the session of every workspace in Report.PendingBringUp.
+	//
+	// THE LISTENER ANSWERS FIRST. The boot claim and daemon.addr are published
+	// before the reconciliation runs and `http.Server.Serve` is not reached
+	// until after it, so every instant a boot step spends is an instant no
+	// unary is answered — and `DaemonHealth` is the unary Emacs recognizes a
+	// replacement daemon by, under a 3s bound it does not lengthen. A bring-up
+	// inside the reconciliation put N shim spawns in front of that bound and
+	// the deploy reported the replacement as never observed, though the
+	// daemon had come up and started both sessions (2026-09-13,
+	// `elisp.services.runtime-await-failed elapsed=6.377`).
+	//
+	// So this is the one boot step that DOES NOT GATE READINESS: the caller
+	// runs it on its own goroutine once the daemon is serving. It still logs
+	// its per-workspace records and its one summary, and every failure is
+	// still per workspace and still raises that workspace's own fault.
+	BringUp(ctx context.Context, pending []wsm.Workspace) BringUpReport
 	// Joining reports whether this daemon was started with -joining, in which
 	// case it takes ownership workspace by workspace from the incumbent and
 	// publishes daemon.addr only once it owns every one.

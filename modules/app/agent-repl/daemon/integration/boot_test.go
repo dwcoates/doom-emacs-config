@@ -1161,3 +1161,81 @@ func TestBootCountsTheMissingDirectoryCloseInItsReport(t *testing.T) {
 			r.Context["missing_dir_closed"] == float64(1)
 	})
 }
+
+// healthAnswerBound is how long the EDITOR gives a replacement daemon to say
+// who it is. lisp/services.el dials DaemonHealth under a 3s bound and reports
+// `runtime-await-failed` when it expires, and that bound is not lengthened:
+// the daemon answers within it or the deploy declares the replacement
+// unobserved. The test asserts the daemon's side of exactly that number.
+const healthAnswerBound = 3 * time.Second
+
+// TestBootAnswersHealthWhileTheOpenWorkspacesSessionsComeUp is the
+// 2026-09-13 deploy regression, end to end.
+//
+// The boot brings every open workspace's session up, and while that ran INSIDE
+// the reconciliation the daemon answered nothing: the listener is bound and
+// daemon.addr published before the reconciliation, and `http.Server.Serve` is
+// not reached until after it. The replacement came up and started both its
+// sessions, and `bin/deploy-all.sh` still reported `replacement identity was
+// not observed: DaemonHealth timed out after 3.0s`.
+//
+// The successor's shim here WITHHOLDS its readiness, so its bring-up is still
+// in flight — provably, by its summary not having landed — at the instant the
+// identity query is answered.
+func TestBootAnswersHealthWhileTheOpenWorkspacesSessionsComeUp(t *testing.T) {
+	t.Parallel()
+	// Arrange: one open workspace, then the daemon that served it stands down.
+	f := newOpened(t, harness.Opts{})
+	expectSessionKillRecords(f.d)
+	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: drainReasonOperator("the replacement under test"),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{now} = %v, want the immediate shutdown accepted", err)
+	}
+	f.d.AwaitExit()
+
+	// Arrange: the successor's shim withholds its opening diagnostics, so the
+	// session start its boot runs does not finish on its own. The profile is
+	// written BEFORE the successor starts, because the successor's own boot is
+	// what spawns the shim that reads it.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
+	d2 := harness.StartDaemon(t, harness.Opts{
+		StateDir:   f.d.StateDir,
+		ProfileDir: f.d.ProfileDir,
+		ExtraArgs:  []string{"--default-config-dir", f.d.DefaultConfigDir},
+	})
+
+	// Act: the identity query Emacs recognizes a replacement by, under the
+	// bound Emacs gives it.
+	ctx, cancel := context.WithTimeout(d2.Ctx(), healthAnswerBound)
+	defer cancel()
+	if _, err := d2.Client().DaemonHealth(ctx, healthRequest()); err != nil {
+		t.Fatalf("DaemonHealth within %s = %v, want the replacement to answer while its sessions come up", healthAnswerBound, err)
+	}
+
+	// Assert: the bring-up had NOT finished when that answer was given, which
+	// is what makes the answer evidence of the split rather than of a fast
+	// machine.
+	if rec, found := bringUpSummary(d2); found {
+		t.Fatalf("the bring-up summary %v had already landed, want the health answer to have overtaken a bring-up still in flight", rec)
+	}
+
+	// Assert: and the bring-up still lands its summary once the shim reports
+	// itself healthy.
+	d2.Shim(f.ws).PushHealthyWhenSubscribed()
+	d2.AwaitLogRecord(d2.RunLogPath(), "the boot's bring-up summary", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.boot.bring_up" && r.Level == "info"
+	})
+}
+
+// bringUpSummary answers the boot's one INFO bring-up summary if it has landed.
+func bringUpSummary(d *harness.Daemon) (harness.LogRecord, bool) {
+	for _, r := range d.RunLog() {
+		if r.Operation == "daemon.boot.bring_up" && r.Level == "info" {
+			return r, true
+		}
+	}
+	return harness.LogRecord{}, false
+}
