@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/shimclient"
 )
 
 // Open brings a registered workspace's session up. MOUNTING A PARKED
@@ -57,7 +58,15 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID) error {
 	if v.deps.Sessions.Live(ws) {
 		log.Debug(opOpen, "the session is already live", nil)
 	} else if err := v.deps.Sessions.Start(ctx, ws); err != nil {
-		log.Error(opOpen, "the session did not come up", dlog.Context{"cause": err.Error()})
+		// A DEPARTING DAEMON IS NOT A SESSION THAT FAILED TO COME UP. The
+		// bring-up refused before it spawned because nothing would be left to
+		// own the shim, and the successor opens the workspace from the same
+		// record; the caller still gets the refusal, which is what it acts on.
+		if errors.Is(err, shimclient.ErrStandingDown) {
+			log.Info(opOpen, "the session was not brought up: this daemon is standing down", nil)
+		} else {
+			log.Error(opOpen, "the session did not come up", dlog.Context{"cause": err.Error()})
+		}
 		return fmt.Errorf("open %q: start the session: %w", ws, err)
 	}
 	if asleep {
