@@ -86,14 +86,52 @@
     (agent-repl--kickoff-prompt-summary "ws-one" "a reasonably long prompt to summarize")
     (should-not (assq :last-prompt-summary-pending agent-repl-test-ps--state))))
 
-(ert-deftest agent-repl-ps-refusal-is-reported-once ()
-  "The refusal is a standing configuration fact, so it is warned about once."
+(defvar agent-repl-test-ps--info nil
+  "Lines the stubbed info rung recorded, newest first.")
+
+(defvar agent-repl-test-ps--warn nil
+  "Lines the stubbed warn rung recorded, newest first.")
+
+(defmacro agent-repl-test-ps--capturing-rungs (&rest body)
+  "Run BODY with the info and warn rungs captured instead of logged."
+  (declare (indent 0))
+  `(let ((agent-repl-test-ps--info nil)
+         (agent-repl-test-ps--warn nil))
+     (cl-letf (((symbol-function 'agent-repl--info)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-ps--info)))
+               ((symbol-function 'agent-repl--warn)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-ps--warn))))
+       ,@body)))
+
+(ert-deftest agent-repl-ps-refusal-is-recorded-at-info ()
+  "The configured refusal is a record at INFO, naming the environment variable."
   (agent-repl-test-ps--with
-    (setenv agent-repl--prompt-summary-forbid-env "1")
-    (should (agent-repl--prompt-summary-forbidden-p "ws-one"))
-    (should agent-repl--prompt-summary-forbid-warned)
-    ;; Still forbidden on the second ask, and still only warned once.
-    (should (agent-repl--prompt-summary-forbidden-p "ws-one"))))
+    (agent-repl-test-ps--capturing-rungs
+      (setenv agent-repl--prompt-summary-forbid-env "1")
+      (should (agent-repl--prompt-summary-forbidden-p "ws-one"))
+      (should (equal (list (format "elisp.prompt-summary.vendor-calls-forbidden env=%s -- prompt summaries are disabled for this process"
+                                   agent-repl--prompt-summary-forbid-env))
+                     agent-repl-test-ps--info)))))
+
+(ert-deftest agent-repl-ps-refusal-uses-no-warn-rung ()
+  "The expected configuration never reaches the warn rung."
+  (agent-repl-test-ps--with
+    (agent-repl-test-ps--capturing-rungs
+      (setenv agent-repl--prompt-summary-forbid-env "1")
+      (should (agent-repl--prompt-summary-forbidden-p "ws-one"))
+      (should-not agent-repl-test-ps--warn))))
+
+(ert-deftest agent-repl-ps-refusal-is-recorded-once ()
+  "The refusal is a standing configuration fact, so it is recorded once."
+  (agent-repl-test-ps--with
+    (agent-repl-test-ps--capturing-rungs
+      (setenv agent-repl--prompt-summary-forbid-env "1")
+      (should (agent-repl--prompt-summary-forbidden-p "ws-one"))
+      ;; Still forbidden on the second ask, and still only recorded once.
+      (should (agent-repl--prompt-summary-forbidden-p "ws-one"))
+      (should (= 1 (length agent-repl-test-ps--info))))))
 
 (ert-deftest agent-repl-ps-not-forbidden-without-the-variable ()
   "With the variable unset the guard permits the call."
