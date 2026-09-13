@@ -727,3 +727,112 @@ func TestAFastModeStateStandsUntilTheNextOne(t *testing.T) {
 			h.view(t).GetFastMode().GetState())
 	}
 }
+
+func TestAParkedWorkspacePublishesTheHibernatedView(t *testing.T) {
+	// Arrange: the two workspace facts are in hand and NO session fact is —
+	// exactly what a hibernated workspace looks like after a daemon boot.
+	h := newHarness(t)
+	h.r.SetNaming(testWS, Naming{Title: "fix-flaky-reconnect", ConfigDir: "/root"})
+	h.r.SetAccount(testWS, "dev@example.com")
+
+	// Act
+	h.r.SetParked(testWS, true)
+
+	// Assert
+	view := h.view(t)
+	if view.GetHibernated() == nil {
+		t.Fatalf("view = %+v, want the hibernated state set", view)
+	}
+	if got, want := view.GetHibernated().GetSinceMs(), instant.UnixMilli(); got != want {
+		t.Fatalf("since_ms = %d, want %d", got, want)
+	}
+}
+
+func TestTheHibernatedViewCarriesNoSessionScopedElement(t *testing.T) {
+	// Arrange: a fully resolved workspace, so every session-scoped element
+	// HAS been resolved and could have been carried through.
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetParked(testWS, true)
+
+	// Assert
+	view := h.view(t)
+	for _, tc := range []struct {
+		element string
+		present bool
+	}{
+		{"model_selector", view.GetModelSelector() != nil},
+		{"permission_mode_picker", view.GetPermissionModePicker() != nil},
+		{"context", view.GetContext() != nil},
+		{"fast_mode", view.GetFastMode() != nil},
+		{"warnings", view.GetWarnings() != nil},
+		{"session_line", view.GetSessionLine() != nil},
+	} {
+		if tc.present {
+			t.Errorf("%s is present in the hibernated view, want absent", tc.element)
+		}
+	}
+}
+
+func TestTheHibernatedViewStillCarriesTheWorkspaceElements(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetParked(testWS, true)
+
+	// Assert
+	view := h.view(t)
+	for _, tc := range []struct {
+		element string
+		present bool
+	}{
+		{"title", view.GetTitle() != nil},
+		{"connectivity", view.GetConnectivity() != nil},
+		{"account", view.GetAccount() != nil},
+	} {
+		if !tc.present {
+			t.Errorf("%s is absent from the hibernated view, want drawn", tc.element)
+		}
+	}
+}
+
+func TestTheTopbarReturnsToTheFullViewOnRevival(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetParked(testWS, true)
+
+	// Act: the reviving spawn's own link state is what lifts the park.
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+
+	// Assert
+	view := h.view(t)
+	if view.GetHibernated() != nil {
+		t.Fatalf("view = %+v, want the hibernated state cleared by the revival", view)
+	}
+	if view.GetModelSelector() == nil || view.GetContext() == nil {
+		t.Fatalf("view = %+v, want the session-scoped elements back", view)
+	}
+}
+
+func TestTheIncompleteTopbarIsRecordedAtInfoWithItsGatesNamed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
+
+	// Assert: a blank topbar has to be diagnosable at the default level.
+	records := h.log.Records()
+	last := records[len(records)-1]
+	if last.Level != "info" {
+		t.Fatalf("level = %q, want info for an incomplete topbar", last.Level)
+	}
+	if last.Context["awaiting"] != "session_started,account,permission_mode_picker,context_usage" {
+		t.Fatalf("awaiting = %v, want every outstanding gate named", last.Context["awaiting"])
+	}
+}

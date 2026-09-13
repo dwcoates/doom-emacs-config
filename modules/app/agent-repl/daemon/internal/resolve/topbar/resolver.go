@@ -134,8 +134,14 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 		ctx["cause"] = err.Error()
 		log.Error(operation, "the topbar could not be resolved and nothing was published", ctx)
 	case view == nil:
+		// AT INFO, WITH THE GATES NAMED. A topbar that never completes is a
+		// BLANK STRIP the reader stares at, and while this sat at DEBUG the
+		// only diagnosis of one was to raise the level and reproduce it. The
+		// record fires on an ordinary bring-up too, which is what INFO is for
+		// (AGENTS.md: lifecycle a person would ask about); the gates it is
+		// still waiting on are the whole content.
 		ctx["awaiting"] = strings.Join(missing, ",")
-		log.Debug(operation, "the topbar took a fact and is not yet complete", ctx)
+		log.Info(operation, "the topbar took a fact and is not yet complete", ctx)
 	default:
 		log.Debug(operation, "the topbar took a fact and republished", ctx)
 		topic.Publish(view)
@@ -152,6 +158,24 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 	}
 	if !s.ready() {
 		return nil, nil
+	}
+	// THE HIBERNATED VIEW IS ONE TOPBAR-LEVEL STATE, not a partial view. The
+	// session-scoped elements — the model selector, the permission-mode
+	// picker, the context chip, fast mode, the warning strip and the session
+	// line — are ABSENT because a stood-down session states none of them, and
+	// the `hibernated` field is what says so. The account, the connectivity
+	// glyph and the title are workspace facts and are drawn as ever.
+	//
+	// IT RETURNS TO THE FULL VIEW ON ITS OWN. `OnLink` clears the park on the
+	// revival's first link state, so the next publication after a revive takes
+	// the branch below without anybody having to retract anything.
+	if s.parked {
+		return &frontendv1.TopbarView{
+			Title:        &frontendv1.TopbarTitle{Text: r.title(s)},
+			Connectivity: connectivity,
+			Account:      r.account(s),
+			Hibernated:   &frontendv1.TopbarHibernated{SinceMs: s.parkedAtMs},
+		}, nil
 	}
 	return &frontendv1.TopbarView{
 		Title:                &frontendv1.TopbarTitle{Text: r.title(s)},
@@ -442,9 +466,18 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 }
 
 // SetParked installs, or lifts, the idle sweep's park.
+//
+// INSTALLING ONE STAMPS THE INSTANT, because the hibernated view's whole
+// content is the age the strip ticks from it. Lifting one leaves the stamp
+// alone: nothing reads it while the park is off, and the next park restamps.
 func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 	r.mutate(ws, "daemon.topbar.set_parked", "the topbar took the idle sweep's park",
-		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
+		dlog.Context{"parked": parked}, func(s *wsState) {
+			if parked && !s.parked {
+				s.parkedAtMs = r.opts.clock.Now().UnixMilli()
+			}
+			s.parked = parked
+		})
 }
 
 // SetParticipants states the liveness of this workspace's host and web

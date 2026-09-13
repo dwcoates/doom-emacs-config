@@ -74,3 +74,62 @@ func TestSummingTwoFingerprintsAddsEveryBucket(t *testing.T) {
 		t.Fatalf("addUsage = %+v, want %+v", got, want)
 	}
 }
+
+func TestReadinessGatesAParkedWorkspaceOnTheWorkspaceFactsAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state func(*wsState)
+		want  bool
+	}{
+		{
+			name:  "the naming and the account are in hand",
+			state: func(s *wsState) { s.namingSet, s.accountSet = true, true },
+			want:  true,
+		},
+		{
+			name:  "the naming has not arrived",
+			state: func(s *wsState) { s.accountSet = true },
+			want:  false,
+		},
+		{
+			name:  "the account has not been read",
+			state: func(s *wsState) { s.namingSet = true },
+			want:  false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s := newWSState()
+			s.parked = true
+			tc.state(s)
+
+			// Act
+			got := s.ready()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("ready() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAParkedWorkspaceIsNeverReportedAsAwaitingASessionFact(t *testing.T) {
+	// Arrange
+	s := newWSState()
+	s.parked = true
+
+	// Act
+	got := s.missing()
+
+	// Assert
+	want := []string{"naming", "account"}
+	if len(got) != len(want) {
+		t.Fatalf("missing() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("missing() = %v, want %v", got, want)
+		}
+	}
+}
