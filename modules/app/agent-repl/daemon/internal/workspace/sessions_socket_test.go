@@ -330,3 +330,59 @@ func faultKinds(faults []wsm.Fault) []string {
 	}
 	return out
 }
+
+// TestAnInertSurvivorsAdoptionIsNotWarnedAbout pins the LEVEL of the same
+// branch. The shim takes its conversation locks INSIDE StartSession, so
+// free-and-listening is what an inert shim looks like by contract, and the
+// boot's own copy of this branch has recorded it at INFO since
+// `TestAnInertSurvivorIsNotWarnedAbout` (internal/boot/socket_test.go). One
+// condition recorded at two levels by two callers is drift, and the realtest's
+// four WARNs at 2026-09-13T18:18:41 followed a `vendor_start_failed` on the
+// very shim being adopted -- the designed recovery, working.
+func TestAnInertSurvivorsAdoptionIsNotWarnedAbout(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.probeState = sessionlock.StateFree
+	f.socketState = shimsocket.StateLive
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "warn" {
+			t.Fatalf("adopting an inert survivor recorded %q at WARN; it is the ordinary state of a shim with no session", r.Message)
+		}
+	}
+}
+
+// TestAnInertSurvivorsAdoptionNamesTheShimPID is the other half of the record:
+// the probe sees a live socket and nothing else, so the adoption is the first
+// moment the daemon learns WHICH process it attached to -- and correlating a
+// survivor against the spawn that left it needs that pid.
+func TestAnInertSurvivorsAdoptionNamesTheShimPID(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.probeState = sessionlock.StateFree
+	f.socketState = shimsocket.StateLive
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	var named any
+	for _, r := range f.log.logger.Records() {
+		if r.Message == "adopted the running shim" {
+			named = r.Context["shim_pid"]
+		}
+	}
+	if named != f.client.pid {
+		t.Fatalf("the adoption record's shim_pid = %v, want %d", named, f.client.pid)
+	}
+}

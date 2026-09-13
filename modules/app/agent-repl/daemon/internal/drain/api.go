@@ -181,6 +181,12 @@ type SpawnSweep interface {
 	// in that set: the handover detached from it, which is what tells a
 	// transfer from an in-flight spawn.
 	StandDownEverySpawn(ctx context.Context, reason string) error
+	// BeginStandDown latches the supervisor's stand-down without sweeping,
+	// answering whether this call latched it. The immediate shutdown calls it
+	// BEFORE it walks the registered sessions: the latch is the one signal
+	// every shim client reads to tell a departure this daemon ordered from
+	// one that happened to it, and the walk itself causes departures.
+	BeginStandDown() bool
 }
 
 // Freeness answers a workspace's freeness and lets a caller WAIT for it

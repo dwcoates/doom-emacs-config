@@ -96,6 +96,16 @@ type Supervisor interface {
 	// case and must not call this: its shims are handed to a successor through
 	// Client.Detach, which takes them out of the registry this sweeps.
 	StandDownEverySpawn(ctx context.Context, reason string) error
+	// BeginStandDown latches the stand-down without sweeping anything, and
+	// answers whether this call was the one that latched it. The immediate
+	// shutdown calls it FIRST, so every client this supervisor handed out
+	// reads an ordered departure as one from the moment the shutdown begins
+	// rather than from the moment its sweep is reached.
+	BeginStandDown() bool
+	// StandingDown answers the latch. A bring-up reads it before it spawns:
+	// a daemon that is leaving must not start a process nothing will be left
+	// to stop.
+	StandingDown() bool
 }
 
 // Client is one shim connection. Every verb is mutex-guarded by the internal

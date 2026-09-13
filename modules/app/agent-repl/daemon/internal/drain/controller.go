@@ -295,6 +295,15 @@ func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainR
 		MintedAtMs: milliseconds(c.deps.Clock.Now()),
 	})
 	c.log.Info(opNow, "announced an immediate shutdown", nil)
+	// THE LATCH GOES UP BEFORE ANYTHING IS ENDED, and that is the ordering
+	// this line exists for. It used to be raised by the spawn sweep two lines
+	// down, which is AFTER the walk below has already stood every registered
+	// session down -- so every departure the walk itself caused landed while
+	// the latch still read false, and any client the walk could not name read
+	// this daemon's own teardown as a death. See supervisor.BeginStandDown.
+	if c.deps.Spawns.BeginStandDown() {
+		c.log.Debug(opNow, "latched the stand-down before any shim is ended", nil)
+	}
 	c.standEverySessionDown(ctx)
 	c.sweepInFlightSpawns(ctx)
 	if err := c.deps.Exit(ctx); err != nil {

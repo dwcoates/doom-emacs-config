@@ -336,10 +336,52 @@ type fakeSpawns struct {
 	witness func() int
 	// seen records that witness, once per call.
 	seen []int
+	// latched is the supervisor's stand-down latch, and latchedAt reads how
+	// many registered sessions had been stood down when it went up -- which
+	// is how the ORDER of the latch against the walk is asserted without a
+	// clock.
+	latched   bool
+	latchedAt int
 }
 
 func newFakeSpawns() *fakeSpawns {
 	return &fakeSpawns{calls: make(chan string, 16)}
+}
+
+// LatchedAt reads how many registered sessions had been stood down when the
+// stand-down latched.
+func (s *fakeSpawns) LatchedAt() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.latchedAt
+}
+
+// BeginStandDown latches the fake supervisor's stand-down, recording how far
+// the caller's session walk had got when it did.
+func (s *fakeSpawns) BeginStandDown() bool {
+	s.mu.Lock()
+	witness := s.witness
+	already := s.latched
+	s.latched = true
+	s.mu.Unlock()
+	if already {
+		return false
+	}
+	at := 0
+	if witness != nil {
+		at = witness()
+	}
+	s.mu.Lock()
+	s.latchedAt = at
+	s.mu.Unlock()
+	return true
+}
+
+// StandingDown answers the fake supervisor's latch.
+func (s *fakeSpawns) StandingDown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.latched
 }
 
 func (s *fakeSpawns) StandDownEverySpawn(ctx context.Context, reason string) error {

@@ -91,6 +91,42 @@ func (s *supervisor) holdLocked(c *client) {
 	}
 }
 
+// BeginStandDown latches the supervisor's stand-down WITHOUT sweeping
+// anything, and it is what an immediate shutdown calls FIRST -- before it
+// walks the registered sessions, not only when it reaches the spawn sweep.
+//
+// THE LATCH IS THE SIGNAL EVERY CLIENT READS, and the walk is only one of the
+// ways this daemon ends a shim. Latched by the sweep alone, every departure
+// the walk itself caused landed while the latch was still false, so a client
+// the walk did not reach -- an adopted survivor of a refused StartSession,
+// which no session row names -- read this daemon's own teardown as a death:
+// `daemon.shimclient.exit` ERROR "shim died" plus `daemon.shimclient.redial`
+// WARN "redial stopped", measured eight times over realtest run
+// 2026-09-13T18:31:58.
+//
+// It is IDEMPOTENT and it NEVER CLEARS: the process is exiting, and there is
+// no state after it in which a new spawn is wanted. It answers whether this
+// call was the one that latched it, so a caller can record the transition
+// rather than every re-statement of it.
+func (s *supervisor) BeginStandDown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.standingDown {
+		return false
+	}
+	s.standingDown = true
+	return true
+}
+
+// StandingDown answers the latch. Every client this supervisor handed out
+// reads it, and so does the workspace bring-up, which must not start a shim
+// nothing will be left to stop.
+func (s *supervisor) StandingDown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.standingDown
+}
+
 // heldNow is a snapshot of the registry. The sweep below takes its own under
 // the same lock that latches it; this is the read every other caller uses.
 func (s *supervisor) heldNow() []*client {
@@ -189,6 +225,7 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	log = log.With(dlog.Context{"workspace_id": string(spec.WorkspaceID)})
 
 	c := newClient(log, spec.WorkspaceID, spec.UDSPath, s.back, s.workspaceProbe(spec.WorkspaceDir))
+	c.daemonStandDown = s.StandingDown
 	c.grace = s.grace
 	c.stderr = newRing(stderrRingBytes)
 
@@ -223,7 +260,15 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	s.mu.Lock()
 	if s.standingDown {
 		s.mu.Unlock()
-		log.Warn("daemon.shimclient.spawn", "refused a spawn: this daemon is standing down", dlog.Context{
+		// IT IS INFO, NOT WARN. The refusal is the latch doing exactly what
+		// it exists for, and the caller gets ErrStandingDown to act on; the
+		// bring-up reads the latch before it ever asks (Fleet.bringUpClient),
+		// so reaching here at all is the narrow race between that read and
+		// this one -- an ordinary schedule, not a defect. Recorded as a
+		// warning it cost realtest run 2026-09-13T18:32:16 a WARN plus the
+		// two ERRORs its caller then raised, for a spawn the daemon was
+		// right to refuse.
+		log.Info("daemon.shimclient.spawn", "refused a spawn: this daemon is standing down", dlog.Context{
 			"node": spec.NodeBin, "uds": spec.UDSPath,
 		})
 		return nil, ErrStandingDown
@@ -275,6 +320,7 @@ func (s *supervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, workspaceDir
 	log = log.With(dlog.Context{"workspace_id": string(ws)})
 
 	c := newClient(log, ws, udsPath, s.back, s.workspaceProbe(workspaceDir))
+	c.daemonStandDown = s.StandingDown
 	c.grace = s.grace
 	c.stderr = newRing(stderrRingBytes)
 

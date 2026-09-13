@@ -966,3 +966,43 @@ func TestCancellingAScheduleRepublishesEveryHostView(t *testing.T) {
 		t.Fatalf("PublishHost calls = %v, want the released workspace %q republished", published, ws)
 	}
 }
+
+// TestShutdownNowLatchesTheStandDownBeforeTheSessionWalk is the ordering the
+// realtest's ERROR pair came from. The latch is the ONE signal every shim
+// client reads to tell a departure this daemon ordered from one that happened
+// to it, and the walk below it CAUSES departures -- so a latch raised only
+// when the spawn sweep is reached is raised after every one of them.
+func TestShutdownNowLatchesTheStandDownBeforeTheSessionWalk(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t, instant)
+	h.workspace(t, instant)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	if at := h.spawns.LatchedAt(); at != 0 {
+		t.Fatalf("the stand-down latched after %d session stand-downs, want it up before the walk begins", at)
+	}
+}
+
+// TestShutdownNowLeavesTheStandDownLatched is the latch's other half: it never
+// clears, because the process is exiting and there is no state after it in
+// which a new spawn is wanted.
+func TestShutdownNowLeavesTheStandDownLatched(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	if !h.spawns.StandingDown() {
+		t.Fatal("the supervisor does not read as standing down after an immediate shutdown")
+	}
+}
