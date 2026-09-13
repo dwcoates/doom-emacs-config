@@ -9,7 +9,10 @@
 // TWO CREATION FORMS, one request: the form arm IS the kind of create. A
 // STANDARD create is the ordinary workspace; a ONE-SHOT is a
 // fire-and-forget workspace whose whole sequence the daemon owns — naming,
-// worktree, prompt decoration, and the finish action (self-merge or PR).
+// worktree, and prompt decoration. THERE IS NO FINISH CHOICE: what happens
+// on completion is the REPOSITORY'S, stated once in its own completion
+// directive, which the daemon appends to the commission and the agent
+// carries out itself.
 
 syntax = "proto3";
 
@@ -71,30 +74,24 @@ message CreateWorkspaceStandard {
 
 // A one-shot: repo-pinned, off the repo's default branch, daemon-named —
 // the caller supplies only the prompt (and the shared facts outside the
-// form arm); the daemon owns decoration and the finish action.
+// form arm); the daemon owns decoration.
+//
+// THE CALLER CHOOSES NOTHING ABOUT COMPLETION (owner ruling, 2026-09-12). A
+// repository states, in ONE plain-English file of its own policy directory,
+// what is to be done when the work is done; the daemon concatenates that
+// file to the commission and the AGENT carries it out. The daemon performs
+// no finish action programmatically, so there is nothing here to select.
 message CreateWorkspaceOneShot {
+  // Tags 2-3 / `self_merge` / `open_pr` are RETIRED (owner ruling,
+  // 2026-09-12): the finish oneof named a daemon-performed finish action —
+  // a self-merge or a pull request — and there is no finish choice at all
+  // any more. Completion is the repository's own directive, appended to the
+  // commission and carried out by the agent.
+  reserved 2, 3;
+  reserved "self_merge", "open_pr";
+
   // The one-shot's commission. A one-shot IS its prompt — always set.
   conversation.v1.UserSaid prompt = 1;
-
-  // THE ARM IS THE FINISH ACTION — what happens when the work concludes.
-  oneof finish {
-    CreateWorkspaceOneShotSelfMerge self_merge = 2;
-    CreateWorkspaceOneShotOpenPr open_pr = 3;
-  }
-}
-
-// Finish by merging the one-shot back via the ordinary merge engine.
-message CreateWorkspaceOneShotSelfMerge {
-}
-
-// Finish by opening a pull request from the one-shot's branch.
-message CreateWorkspaceOneShotOpenPr {
-  // The PR is opened self-certified (no review round demanded). Default
-  // false.
-  bool self_certified = 1;
-  // The PR is added to the repository's merge queue after opening. Default
-  // false.
-  bool add_to_merge_queue = 2;
 }
 
 // The spawning parent and, optionally, a conversation fork from it.
@@ -145,15 +142,18 @@ message CreateWorkspaceSuccess {
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message CreateWorkspaceError {
+  // Tags 3-4 retired with the finish oneof (see the oneof comment).
+  reserved 3, 4;
+  reserved "finish_required", "finish_not_one_shot";
   oneof cause {
     // An ungated permission mode was asked for without the explicit consent.
     CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
     // No slug could be derived for the workspace's branch and dir.
     CreateWorkspaceNoSlug no_slug = 2;
-    // A one-shot form arrived with no finish action chosen.
-    CreateWorkspaceFinishRequired finish_required = 3;
-    // A finish action arrived on a form that is not one-shot.
-    CreateWorkspaceFinishNotOneShot finish_not_one_shot = 4;
+    // Tags 3-4 / `finish_required` / `finish_not_one_shot` are RETIRED
+    // (owner ruling, 2026-09-12): both refused a badly-placed finish
+    // action, and a one-shot no longer carries one — completion is the
+    // repository's own directive, so neither fault is representable.
     // A fork was asked for from a parent that has no conversation to fork.
     CreateWorkspaceForkParentHasNoConversation fork_parent_has_no_conversation = 5;
     // The named brief file is absent.
@@ -175,8 +175,6 @@ message CreateWorkspaceError {
 }
 message CreateWorkspaceUngatedWithoutConsent {}
 message CreateWorkspaceNoSlug {}
-message CreateWorkspaceFinishRequired {}
-message CreateWorkspaceFinishNotOneShot {}
 message CreateWorkspaceForkParentHasNoConversation {}
 message CreateWorkspaceBriefMissing {
   // The brief's name, as asked for.
@@ -217,7 +215,7 @@ message CreateWorkspaceOneShotPolicyMissing {
   // `<repository_root>/.agent-repl/prompts`.
   string policy_dir = 2;
   // The required policy files that directory does not hold, by file name.
-  // The PR follow-up brief is required only of an open-pr finish, so which
-  // files are required depends on the finish the create asked for.
+  // Every one-shot requires the same set: the autonomous preamble and the
+  // completion directive.
   repeated string missing_files = 3;
 }
