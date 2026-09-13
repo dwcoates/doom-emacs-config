@@ -3291,6 +3291,38 @@ async function pushedUpdates<T>(
   return seen;
 }
 
+describe("the vendor's own title for the conversation", () => {
+  /** Every title the engine states while starting a resume over LINES. */
+  async function titlesPushed(lines: unknown[]): Promise<string[]> {
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", lines);
+    return pushedUpdates(
+      h,
+      (update) => (update.case === "title" ? update.value.text : undefined),
+      async () => {
+        const pending = h.engine.startSession(resumeRequest("resume-1"));
+        (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+        await pending;
+      },
+    );
+  }
+
+  it("states the title the transcript already holds", async () => {
+    const titles = await titlesPushed([
+      assistantLine(),
+      { type: "ai-title", aiTitle: "Add SPC j keybinding support", sessionId: "resume-1" },
+    ]);
+
+    expect(titles).toEqual(["Add SPC j keybinding support"]);
+  });
+
+  it("states nothing when the vendor has written no title", async () => {
+    const titles = await titlesPushed([assistantLine()]);
+
+    expect(titles).toEqual([]);
+  });
+});
+
 describe("the context usage the vendor states, mapped field by field", () => {
   /** Every field of the vendor's answer populated, so each mapping is testable. */
   function fullUsage(overrides: Partial<ContextUsageLike> = {}): ContextUsageLike {

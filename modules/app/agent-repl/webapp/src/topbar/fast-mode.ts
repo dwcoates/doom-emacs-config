@@ -12,13 +12,16 @@
  * "not right now, and it will come back on its own". Drawing them the same
  * would invite a reader to go looking for a switch that cannot take effect.
  *
- * NOTHING IS DRAWN WHEN THE VENDOR HAS SAID NOTHING. `TopbarView.fast_mode`
+ * THE SLOT STAYS WHEN THE VENDOR HAS SAID NOTHING. `TopbarView.fast_mode`
  * unset means no fast-mode statement has been made for this session, which is
- * not the same as `off`; a cell would claim a fact nobody stated.
+ * not the same as `off` — so the cell draws the no-session dash rather than a
+ * label claiming a fact nobody stated, and rather than vanishing and shifting
+ * the cells beside it (topbar.proto, FIXED SCHEMA AND ORGANIZATION).
  */
 import type { TopbarFastMode } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { log } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
+import { drawNoSessionCell } from "./no-session.js";
 
 /** The label each state draws, and the tooltip behind it. */
 const FAST_MODE_LABELS = {
@@ -30,15 +33,10 @@ const FAST_MODE_LABELS = {
   },
 } as const;
 
-/**
- * The cell, or null when the vendor has stated no fast mode. A null is the
- * strip drawing nothing at all rather than a quiet placeholder.
- */
-export function drawTopbarFastMode(
-  u: TopbarFastMode | undefined,
-): HTMLElement | null {
+/** The cell: the state by name, or the dash when the vendor has stated none. */
+export function drawTopbarFastMode(u: TopbarFastMode | undefined): HTMLElement {
   const state = u?.state;
-  if (state === undefined || state.case === undefined) return null;
+  if (state === undefined || state.case === undefined) return drawNoSessionCell("fast");
 
   const cell = document.createElement("span");
   cell.className = "topbar-fast";

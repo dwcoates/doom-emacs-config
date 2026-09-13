@@ -82,6 +82,8 @@ import {
   readAmbient,
 } from "./compaction.js";
 import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, underColdGateFloor, type TranscriptFacts } from "./cold.js";
+import { TranscriptTitleTail } from "./title.js";
+import { sessionTitleUpdate } from "../convert/session-title.js";
 import { ForegroundUnitTable } from "./foreground.js";
 import { LiveWorkTable, type LiveWorkEntry } from "./detached.js";
 import {
@@ -596,6 +598,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   // -- session-level pushes the shim itself produces ------------------------
 
+  /** The transcript scan behind `pushSessionTitle`, minted on first use. */
+  let titleTail: TranscriptTitleTail | undefined;
+
   /** Arms this engine states itself; a fold-produced duplicate is dropped. */
   const OWNED_ARMS = new Set([
     "diagnostics",
@@ -608,6 +613,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     "queryDied",
     "compacting",
     "fastMode",
+    "title",
   ]);
 
   function pushModel(): void {
@@ -838,6 +844,32 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         }),
       },
     });
+  }
+
+  /**
+   * THE VENDOR'S OWN SUMMARY OF THIS CONVERSATION, when it has stated one.
+   *
+   * It is written to the transcript and NOWHERE ELSE — no SDK message
+   * announces it — so the shim reads it, incrementally, at the same two edges
+   * it reports the context usage at: the session's start and the end of every
+   * turn. Nothing is pushed until the vendor states a title, and nothing is
+   * pushed again until it states a DIFFERENT one; the tail is what decides
+   * both (engine/title.ts).
+   *
+   * THE TAIL IS PER TRANSCRIPT. A clear rotates the conversation to a new
+   * vendor session id and therefore to a new file, so a tail whose file is no
+   * longer the current one is replaced rather than read at a stale offset.
+   */
+  function pushSessionTitle(): void {
+    const current = identity;
+    if (current === undefined) return;
+    const file = transcriptPath(deps.env.configDir, deps.env.cwd, current.vendorSessionId);
+    if (titleTail === undefined || titleTail.file !== file) {
+      titleTail = new TranscriptTitleTail(file);
+    }
+    const title = titleTail.read();
+    if (title === undefined) return;
+    pushes.push(sessionTitleUpdate(title));
   }
 
   async function pushContextUsage(): Promise<void> {
@@ -1424,6 +1456,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
     }
     await pushContextUsage();
+    pushSessionTitle();
     if (identity !== undefined) {
       backupTranscript({
         transcript: transcriptPath(deps.env.configDir, deps.env.cwd, identity.vendorSessionId),
@@ -1892,6 +1925,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     pushModel();
     pushPermissionMode();
     await pushContextUsage();
+    pushSessionTitle();
     void pushAccountUsage();
     // The readiness signal, and the reason a consumer may open WatchSession
     // before anything else exists.

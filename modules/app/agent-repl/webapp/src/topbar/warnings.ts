@@ -100,7 +100,17 @@ export function drawWarningList(u: TopbarWarningStrip, tc: TopbarContext): HTMLE
   return list;
 }
 
-/** One warning row: its composed line, and the detail behind the click. */
+/**
+ * One warning row: its composed line, and the detail behind the click.
+ *
+ * A WARNING WITH NO DETAIL IS A STATEMENT, NOT A CONTROL. `TopbarWarning.detail`
+ * is unset for the workspace's own session-less state — "hibernated since
+ * 14:03", "cold context, awaiting your answer" — which the FIXED SCHEMA ruling
+ * put here when the whole-view states were retired. There is nothing further
+ * to reveal and, for the cold gate, nothing to answer HERE: the feed's gate
+ * card is the one place a gate is answered. So the row is drawn as text with
+ * no click rather than as a button that opens an empty overlay.
+ */
 export function drawTopbarWarning(
   u: TopbarWarning,
   tc: TopbarContext,
@@ -108,6 +118,7 @@ export function drawTopbarWarning(
   path: string,
 ): HTMLElement {
   const line = requireMessage(u.line, `${path}.line`);
+  if (u.detail.case === undefined) return drawTopbarWarningStatement(line.text);
   const detail = requireCase(u.detail, `${path}.detail`);
 
   const row = document.createElement("button");
@@ -125,6 +136,16 @@ export function drawTopbarWarning(
       drawWarningDetailOverlay(u, tc, strip, path),
     );
   });
+  return row;
+}
+
+/** A warning that only STATES something: the line, and no affordance. */
+export function drawTopbarWarningStatement(text: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "topbar-warning-row";
+  row.setAttribute("data-row", "");
+  row.setAttribute("data-statement", "");
+  row.textContent = text;
   return row;
 }
 

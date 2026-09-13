@@ -122,12 +122,14 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	apply(s)
 	view, err := r.render(s)
 	missing := s.missing()
-	// THE COLD-GATE EDGES ARE READ OFF THE VIEW ITSELF, under the same lock
-	// that built it, so the record cannot disagree with what was published.
-	coldPublished := view.GetColdGate() != nil
-	returnedToFull := view != nil && s.coldGatePublished && !coldPublished
+	// THE SESSION-LESS EDGE IS READ OFF THE VIEW ITSELF, under the same lock
+	// that built it, so the record cannot disagree with what was published. A
+	// view with no model selector is a strip drawn with dashes where its
+	// controls belong, which is exactly what the reader sees.
+	sessionlessPublished := view != nil && view.GetModelSelector() == nil
+	returnedToFull := view != nil && s.sessionlessPublished && !sessionlessPublished
 	if view != nil {
-		s.coldGatePublished = coldPublished
+		s.sessionlessPublished = sessionlessPublished
 	}
 	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
@@ -149,17 +151,19 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 		// still waiting on are the whole content.
 		ctx["awaiting"] = strings.Join(missing, ",")
 		log.Info(operation, "the topbar took a fact and is not yet complete", ctx)
-	case coldPublished:
-		// AT INFO. A strip that has lost its model selector, its context chip
-		// and its permission picker is the loudest thing a reader can see,
+	case sessionlessPublished:
+		// AT INFO. A strip whose model selector, permission picker and fast
+		// mode are all drawn as dashes is the loudest thing a reader can see,
 		// and "why" has to be answerable from the default level rather than
 		// from a reproduction — the same reason the incomplete record above
 		// sits at info.
-		ctx["context_tokens"] = s.coldGateTokens
-		log.Info(operation, "the topbar published the cold-gate view", ctx)
+		ctx["parked"] = s.parked
+		ctx["cold_gate"] = s.coldGate
+		ctx["started"] = s.started
+		log.Info(operation, "the topbar published the strip with no session facts", ctx)
 		topic.Publish(view)
 	case returnedToFull:
-		log.Info(operation, "the topbar returned to the full view after the cold gate", ctx)
+		log.Info(operation, "the topbar's session facts arrived and the strip is whole", ctx)
 		topic.Publish(view)
 	default:
 		log.Debug(operation, "the topbar took a fact and republished", ctx)
@@ -167,9 +171,15 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 }
 
-// render builds the whole view, or nil while the workspace is not ready. It
-// NEVER builds a partial view: the contract's non-optional fields are
-// semantically non-optional, and a push that left one empty would violate them.
+// render builds the whole view, or nil while the workspace is not ready.
+//
+// THE STRIP HAS ONE SHAPE (topbar.proto, FIXED SCHEMA AND ORGANIZATION; owner
+// ruling 2026-09-13). Every cell is stated on every publication and in the
+// same slot; there is no branch here that draws a different strip. A cell
+// whose SESSION fact is unknown says so IN ITS OWN SLOT: the three controls by
+// absence, which the client draws as a dash, and the context chip and warning
+// strip by their own content — the chip carrying the context the session held
+// with the reason in its hover, the strip carrying the state as one line.
 func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.parked))
 	if err != nil {
@@ -177,42 +187,6 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 	}
 	if !s.ready() {
 		return nil, nil
-	}
-	// THE HIBERNATED VIEW IS ONE TOPBAR-LEVEL STATE, not a partial view. The
-	// session-scoped elements — the model selector, the permission-mode
-	// picker, the context chip, fast mode, the warning strip and the session
-	// line — are ABSENT because a stood-down session states none of them, and
-	// the `hibernated` field is what says so. The account, the connectivity
-	// glyph and the title are workspace facts and are drawn as ever.
-	//
-	// IT RETURNS TO THE FULL VIEW ON ITS OWN. `OnLink` clears the park on the
-	// revival's first link state, so the next publication after a revive takes
-	// the branch below without anybody having to retract anything.
-	// THE COLD GATE OUTRANKS HIBERNATION, and the two are never both drawn.
-	// Both mean "no session", but a standing cold gate is waiting on THE
-	// READER — the feed is showing a card that has to be answered before this
-	// workspace can do anything — while hibernation is waiting on nothing and
-	// lifts itself on the next prompt. Naming the state that needs an answer
-	// is the whole job of the strip; the park is still remembered underneath
-	// and draws the moment the gate is answered without one.
-	if s.coldGate {
-		return &frontendv1.TopbarView{
-			Title:        &frontendv1.TopbarTitle{Text: r.title(s)},
-			Connectivity: connectivity,
-			Account:      r.account(s),
-			ColdGate: &frontendv1.TopbarColdGate{
-				ContextTokens: s.coldGateTokens,
-				SinceMs:       s.coldGateAtMs,
-			},
-		}, nil
-	}
-	if s.parked {
-		return &frontendv1.TopbarView{
-			Title:        &frontendv1.TopbarTitle{Text: r.title(s)},
-			Connectivity: connectivity,
-			Account:      r.account(s),
-			Hibernated:   &frontendv1.TopbarHibernated{SinceMs: s.parkedAtMs},
-		}, nil
 	}
 	return &frontendv1.TopbarView{
 		Title:                &frontendv1.TopbarTitle{Text: r.title(s)},
@@ -232,6 +206,9 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 // than defaulted to off, because "the vendor has not said" and "the vendor
 // said no" are different facts and only one of them is a claim.
 func fastMode(s *wsState) *frontendv1.TopbarFastMode {
+	if s.sessionless() {
+		return nil
+	}
 	switch state := s.fastMode.GetState().(type) {
 	case *conversationv1.SessionFastMode_On:
 		return &frontendv1.TopbarFastMode{
@@ -257,7 +234,16 @@ func fastMode(s *wsState) *frontendv1.TopbarFastMode {
 // branch is named by its name alone — the branch would say nothing — so the
 // comparison is what decides, never the branch's mere presence.
 func (r *resolver) title(s *wsState) string {
-	name := s.naming.Title
+	// THE TITLE IS THE WORKSPACE SUMMARY when the vendor has one (owner
+	// ruling, 2026-09-13). The vendor writes its own one-line summary of the
+	// conversation into the transcript and the shim states it; it answers
+	// "which conversation is this" far better than a directory's name, so it
+	// takes the name's place. The BRANCH is unaffected — it is a different
+	// fact, and the rule about when it is worth showing is unchanged.
+	name := s.sessionTitle
+	if name == "" {
+		name = s.naming.Title
+	}
 	if name == "" {
 		name = s.naming.Slug
 	}
@@ -284,6 +270,12 @@ func (r *resolver) sessionLine(s *wsState) string {
 // as an option of its own rather than dropped, which would render the button as
 // having no selection at all.
 func (r *resolver) modelSelector(s *wsState) *frontendv1.TopbarModelSelector {
+	// ABSENT WITH NO SESSION. A stood-down, cold-gated or unstarted workspace
+	// has no model in force, and serving the catalog with no selection would
+	// draw a picker offering a switch that would be refused.
+	if s.sessionless() {
+		return nil
+	}
 	out := &frontendv1.TopbarModelSelector{Options: s.catalog}
 	if s.model == "" {
 		return out
@@ -309,6 +301,11 @@ func (r *resolver) modelSelector(s *wsState) *frontendv1.TopbarModelSelector {
 // — it IS what is running — while staying absent from the options, so the
 // picker never offers a switch the daemon would refuse.
 func (r *resolver) permissionModePicker(s *wsState) *frontendv1.TopbarPermissionModePicker {
+	// ABSENT WITH NO SESSION, for the same reason the model selector is, and
+	// absent until the served set exists at all.
+	if s.sessionless() || s.picker == nil {
+		return nil
+	}
 	out := &frontendv1.TopbarPermissionModePicker{
 		Current: s.picker.GetCurrent(),
 		Options: s.picker.GetOptions(),
@@ -357,10 +354,51 @@ func displayMode(mode string) string {
 }
 
 // contextChip renders the chip and its always-populated hover content.
+//
+// ALWAYS DRAWN, SESSION OR NO SESSION. A workspace whose session is stood down
+// or standing at the cold gate still HELD a context, and that figure is the
+// one thing a reader wants from the chip in either state — what a revival
+// would carry, and what a cold read would re-read at full price. The reason
+// the figure is not live rides the hover, where it costs the strip no width.
 func (r *resolver) contextChip(s *wsState) *frontendv1.TopbarContextChip {
 	return &frontendv1.TopbarContextChip{
-		Text:      formatTokens(s.contextUsage.GetTotalTokens()),
+		Text:      formatTokens(contextTokens(s)),
 		Breakdown: r.tokenBreakdown(s),
+	}
+}
+
+// contextTokens is the figure the chip states.
+//
+// THE COLD GATE'S OWN COUNT WINS while a gate stands: it is what the shim read
+// off the transcript for THIS resume, whereas a remembered `context_usage` is
+// what some earlier session of this workspace last reported. Absent both, the
+// chip states 0 — the honest figure for a workspace that has held no context
+// yet, and never a blank, which reads as "loading".
+func contextTokens(s *wsState) int64 {
+	if s.coldGate && s.coldGateTokens > 0 {
+		return s.coldGateTokens
+	}
+	return s.contextUsage.GetTotalTokens()
+}
+
+// sessionlessReason is the sentence the session-less states are stated with —
+// the context chip's hover heading and the warning strip's line, WORD FOR
+// WORD the same in both, because they are one fact drawn in two places.
+//
+// THE COLD GATE OUTRANKS THE PARK when both hold. A standing gate is waiting
+// on THE READER — the feed is showing a card that has to be answered before
+// this workspace can do anything — while hibernation waits on nothing and
+// lifts itself on the next prompt.
+func sessionlessReason(s *wsState) string {
+	switch {
+	case s.coldGate:
+		return "cold context, awaiting your answer"
+	case s.parked:
+		return "hibernated since " + clockTime(s.parkedAtMs)
+	case !s.started:
+		return "no session yet"
+	default:
+		return ""
 	}
 }
 
@@ -700,6 +738,8 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 		}
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics", func(s *wsState) { r.applyDiagnostics(s, u.Diagnostics) }
+	case *conversationv1.SessionUpdate_Title:
+		return "title", func(s *wsState) { s.sessionTitle = u.Title.GetText() }
 	case *conversationv1.SessionUpdate_ContextUsage:
 		return "context_usage", func(s *wsState) { s.contextUsage = u.ContextUsage }
 	case *conversationv1.SessionUpdate_QueryDied:
