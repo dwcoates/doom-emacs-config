@@ -939,3 +939,10 @@ discovered later. The module AGENTS.md documents the catalog.
 - The gns-cowork plugin's PowerShell SessionStart hooks (unguarded on macOS
   in 9.10.0, the latest) were stripped locally from the installed copy with
   a backup beside it; upstream still carries them.
+
+## The shim's producer identity after a refused start, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | A `SessionStart` hook blocked the opening AFTER the vendor query was live, so the converter had already written rows under the name the attempt had just announced. Three ways out were open: announce nothing until the name is certain, let the store accept a same-name re-announce, or stop un-naming. Which? | Stop un-naming: when rows were written, the producer name AND the identity file stand, and the retry reuses them | The name is not the attempt's, it is the CONVERSATION's — write ids are derived from it, and the rows that carry it are real history on a real book. Deferring the announcement is not available (the converter writes the moment the query is live, which is before the start is settled), and a same-name re-announce was already idempotent, so the only thing left to fix was the abandonment claiming a name it no longer owned. The engine now ASKS (`Persistence.producerHasWrittenRows`) instead of learning by exception | Restore the unconditional `clearProducer()` + `identityStore.forget()` in `startSession`'s catch (`src/engine/session.ts`) and drop `producerHasWrittenRows` |
+| 2026-09-13 | Keeping the name means a `fresh` retry would re-key to a newly minted id. Mint anyway, or reuse? | Reuse the recorded id | A second mint keys the retry's rows to a book the first attempt's rows are not on, splitting one conversation at the failed start — the same split the re-key guard exists to prevent | Drop `recordedOriginalVendorSessionId` from `src/engine/session.ts` |
