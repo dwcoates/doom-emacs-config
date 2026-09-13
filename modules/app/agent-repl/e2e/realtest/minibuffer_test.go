@@ -112,32 +112,48 @@ func TestChordDismissCeilingIsFarBelowTheChordCeiling(t *testing.T) {
 	}
 }
 
-// ---- The C-g press is judged by the effect, not by the marks --------------
+// ---- The C-g press is judged by the ring AND the prompt -------------------
 //
-// The quit character leaves no input mark on this build, so every stage below
-// says which system it names and none of them may name two.
+// A `C-g` pressed at a standing minibuffer read is an ordinary key: the read
+// records it. So each stage below says which system it names, none of them may
+// name two, and the stage for a ring that did not grow names the harness.
 
-func TestDismissNoteBlamesTheHarnessWhenTheChordWasNeverPosted(t *testing.T) {
+func TestDismissNoteBlamesTheHarnessWhenTheChordNeverReachedEmacs(t *testing.T) {
 	// Arrange / Act
-	note := wsActDismissNote(wsActDismissNotPosted, "Initial prompt: ", 1)
+	note := wsActDismissNote(wsActDismissNotDelivered, "Initial prompt: ", 1)
 
 	// Assert
 	if !strings.Contains(note, "NOT A PRODUCT FINDING") || !strings.Contains(note, "key driver") {
-		t.Errorf("a `C-g` that was never posted is a defect in this harness's key driver and must say so "+
-			"rather than accuse the editor; it said %q", note)
+		t.Errorf("a `C-g` that never entered Emacs's input is a defect in this harness's key driver and must "+
+			"say so rather than accuse the editor; it said %q", note)
 	}
 }
 
-func TestDismissNoteForANeverPostedChordMakesNoProductClaim(t *testing.T) {
+func TestDismissNoteForAnUndeliveredChordMakesNoProductClaim(t *testing.T) {
 	// Arrange / Act
 	//
 	// The 2026-09-13 sweep printed this stage's note and the product note for
 	// the SAME press, so the absence of the product wording is the assertion.
-	note := wsActDismissNote(wsActDismissNotPosted, "Initial prompt: ", 1)
+	note := wsActDismissNote(wsActDismissNotDelivered, "Initial prompt: ", 1)
 
 	// Assert
 	if strings.Contains(note, "REACHED Emacs") {
-		t.Errorf("a key that never left this side cannot also have reached Emacs; it said %q", note)
+		t.Errorf("a key that never entered Emacs's input cannot also have reached Emacs; it said %q", note)
+	}
+}
+
+func TestDismissNoteForAnUndeliveredChordSaysWhyTheRingIsEvidence(t *testing.T) {
+	// Arrange / Act
+	//
+	// The reading this stage rests on is the one the 2026-09-13 correction got
+	// backwards, so the note carries its own derivation rather than leaving a
+	// reader to trust it.
+	note := wsActDismissNote(wsActDismissNotDelivered, "Initial prompt: ", 1)
+
+	// Assert
+	if !strings.Contains(note, "IS recorded") {
+		t.Errorf("the note must say that a `C-g` at a standing read is recorded, which is what makes an "+
+			"unchanged ring evidence of absence; it said %q", note)
 	}
 }
 
@@ -152,7 +168,7 @@ func TestDismissNoteKeepsTheProductFindingWhenTheChordArrived(t *testing.T) {
 	}
 }
 
-func TestDismissNoteNamesNobodyWhenTheQuitCharacterCannotBeConfirmed(t *testing.T) {
+func TestDismissNoteNamesNobodyWhenEmacsCannotAnswerForItsInput(t *testing.T) {
 	// Arrange / Act
 	note := wsActDismissNote(wsActDismissUndetermined, "One-shot commission: ", 1)
 
