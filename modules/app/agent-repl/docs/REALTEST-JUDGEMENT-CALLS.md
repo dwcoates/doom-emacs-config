@@ -958,3 +958,9 @@ established by an audit: every response vector from the daemon to the
 webapp (unary refusals, stream endings, transport failures, warnings,
 errors, progress) that is NOT reflected in the footer or the feed today
 is catalogued in a summary doc, then remediated.
+
+## Owner ruling: one token-count format (2026-09-13, owner)
+
+Every token count the footer shows (text mostly composed in the daemon)
+uses one standardized format: thousands with a `k` suffix and decimals,
+e.g. `10.1k`, never `10,113`.
