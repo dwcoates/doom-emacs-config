@@ -1563,3 +1563,17 @@ func (h *harness) sendSessionStarted(t *testing.T, started *conversationv1.Sessi
 		Frame: &shimv1.WatchSessionResponse_SessionStarted{SessionStarted: started},
 	})
 }
+
+// recordContext answers the context of the FIRST record at one level for one
+// operation, which is how a test asserts what a record NAMES rather than only
+// that it happened.
+func (h *harness) recordContext(t *testing.T, level, operation string) dlog.Context {
+	t.Helper()
+	for _, r := range h.log.Records() {
+		if r.Level == level && r.Operation == operation {
+			return dlog.Context(r.Context)
+		}
+	}
+	t.Fatalf("no %s/%s record was logged", level, operation)
+	return nil
+}

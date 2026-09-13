@@ -792,10 +792,43 @@ func (w *watcher) publishLinkLocked() {
 // severedLocked records a transport failure on a stream that should still have
 // been open. The link is not connected while a standing stream is down, whatever
 // the socket says: invariant 11 witnesses the hop by the stream's liveness.
-func (w *watcher) severedLocked(operation, detail string, err error) {
-	ctx := dlog.Context{"detail": detail}
+//
+// IT STATES WHAT THE DAEMON KNOWS ABOUT THE PEER, because the severing alone
+// does not say which of two very different things happened. A shim that DIED
+// takes every stream with it and is remediated by bringing a session back; a
+// shim that is ALIVE and ended one stream of several is a producer that
+// dropped a watch its consumer still needs, and is remediated in the shim.
+//
+// MEASURED, realtest run 2026-09-13T16:03:25. Adopted shim pid 3031 ended
+// workspace 2b81f45a724642ef's AGENT stream with EOF; its session stream
+// stayed open (the teardown eleven seconds later closed two streams for that
+// workspace), the process was alive enough to be killed by that teardown, and
+// the shim's own log recorded nothing at all. The daemon's three records --
+// this one, the link fault and the health fault -- named none of it, so the
+// event could not be told from a shim that had simply gone.
+// `extra` names the STREAM that ended, when the caller knows which one: a
+// severing whose record does not say which of the fleet's watches went is a
+// record nobody can act on.
+func (w *watcher) severedLocked(operation, detail string, err error, extra ...dlog.Context) {
+	ctx := dlog.Context{
+		"detail":           detail,
+		"shim_pid":         w.client.PID(),
+		"stand_down_asked": w.client.StandingDown(),
+	}
+	if info, reaped := w.client.Reaped(); reaped {
+		ctx["shim_reaped"] = true
+		ctx["shim_exit_code"] = info.Code
+		ctx["shim_exit_signal"] = info.Signal
+	} else {
+		ctx["shim_reaped"] = false
+	}
 	if err != nil {
 		ctx["error"] = err.Error()
+	}
+	for _, more := range extra {
+		for k, v := range more {
+			ctx[k] = v
+		}
 	}
 	w.log.Error("daemon.sessionwatcher."+operation, "a standing stream ended without the session ending", ctx)
 	w.degraded = true
@@ -1248,7 +1281,9 @@ func (w *watcher) streamEnded(gen uint64, kind, operation, key string, reaped fu
 		})
 		return
 	}
-	w.severedLocked(operation, kind+" stream ended while the session was live", err)
+	w.severedLocked(operation, kind+" stream ended while the session was live", err, dlog.Context{
+		"stream": kind, "key": key,
+	})
 }
 
 // shellStreamEnded handles one detached shell's stream ending. A shell whose
