@@ -7,7 +7,7 @@
  * `row.id` is what every one of these verbs echoes) is built once.
  */
 import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
+import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   AnswerPermissionResponseSchema,
@@ -40,13 +40,29 @@ export const ROW_ID = "ask-1";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
+/** The error a scripted failure throws: coded when the script names a code. */
+function scriptedFailure(script: AskScript): Error {
+  if (script.failCode === undefined) return new Error("no route to daemon");
+  return new ConnectError(script.failMessage ?? "no route to daemon", script.failCode);
+}
+
 /** What the scripted daemon answers, and what it was asked. */
 export interface AskScript {
   permission?: AnswerPermissionResponse;
   question?: AnswerQuestionResponse;
   coldGate?: AnswerColdGateResponse;
-  /** Throw instead of answering, standing in for a transport failure. */
+  /** Throw instead of answering, standing in for a call that did not land. */
   fail?: boolean;
+  /**
+   * The code the scripted throw carries.
+   *
+   * A plain `Error` becomes `internal` — a daemon that ANSWERED with a failure
+   * — which is not the same condition as a daemon that could not be reached,
+   * and the two are drawn differently.
+   */
+  failCode?: Code;
+  /** What the coded throw says; the daemon's own sentence reaches the client. */
+  failMessage?: string;
 }
 
 export interface AskCalls {
@@ -67,7 +83,7 @@ export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskH
     service(AgentRepl, {
       answerPermission: (req) => {
         calls.permission.push(req);
-        if (script.fail === true) throw new Error("no route to daemon");
+        if (script.fail === true) throw scriptedFailure(script);
         return (
           script.permission ??
           create(AnswerPermissionResponseSchema, { result: { case: "success", value: {} } })
@@ -75,7 +91,7 @@ export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskH
       },
       answerQuestion: (req) => {
         calls.question.push(req);
-        if (script.fail === true) throw new Error("no route to daemon");
+        if (script.fail === true) throw scriptedFailure(script);
         return (
           script.question ??
           create(AnswerQuestionResponseSchema, { result: { case: "success", value: {} } })
@@ -83,7 +99,7 @@ export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskH
       },
       answerColdGate: (req) => {
         calls.coldGate.push(req);
-        if (script.fail === true) throw new Error("no route to daemon");
+        if (script.fail === true) throw scriptedFailure(script);
         return (
           script.coldGate ??
           create(AnswerColdGateResponseSchema, { result: { case: "success", value: {} } })

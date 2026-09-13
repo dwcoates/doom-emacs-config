@@ -708,6 +708,109 @@ describe("StartSession, fresh", () => {
   });
 });
 
+/**
+ * A START THE VENDOR OPENED AND THEN REFUSED.
+ *
+ * GROUNDED, 2026-09-13: a `SessionStart:resume` hook that cannot run
+ * (`powershell` is not on this box's PATH) blocked the opening of every boot in
+ * one workspace. The query was already live, so the hook message went through
+ * the converter and landed rows under the producer this attempt had just named
+ * — and the abandonment path then tried to UN-NAME it, which the writer refuses
+ * outright. The refusal escaped `StartSession` as an unhandled `Internal`, on
+ * both the boot's start and the one a cold-gate answer re-opens with.
+ */
+describe("a start REFUSED after the vendor already wrote rows", () => {
+  /** A fold that records one row for the very message that blocks the start. */
+  function writesOnTheBlockingHook(h: Harness): void {
+    h.fold.entriesFor = (message) =>
+      message.type === "system" ? [foldEntry({ kind: "session_update", update: create(conversationv1.SessionUpdateSchema, {}) }, "hook")] : [];
+  }
+
+  /** Start fresh, let the vendor open, then have a hook block the opening. */
+  async function refusedAfterWriting(h: Harness): Promise<shimv1.StartSessionResponse> {
+    writesOnTheBlockingHook(h);
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+    return pending;
+  }
+
+  it("answers the typed refusal instead of throwing the writer's un-naming refusal", async () => {
+    const h = harness();
+
+    expect(failureCause(await refusedAfterWriting(h))).toBe("vendorStartFailed");
+  });
+
+  it("KEEPS the writer named, because rows already carry the name", async () => {
+    const h = harness();
+
+    await refusedAfterWriting(h);
+
+    expect(h.persistence.producer).toBe(freshSessionId(h.queries[0].spec));
+  });
+
+  it("KEEPS the identity file, because the rows are on the book it names", async () => {
+    const h = harness();
+
+    await refusedAfterWriting(h);
+
+    expect(existsSync(agentIdPath(h.stateDir, workspaceLockKey(h.cwd)))).toBe(true);
+  });
+
+  it("a retry reuses the identity the refused start recorded under", async () => {
+    // Minting a second id would key the retry's rows to a book the first
+    // attempt's rows are not on, splitting one conversation in two.
+    const h = harness();
+    await refusedAfterWriting(h);
+    const recorded = freshSessionId(h.queries[0].spec);
+
+    const pending = h.engine.startSession(freshRequest());
+    const retry = await untilQuery(h, 1);
+    retry.query.emit(initMessage({ sessionId: freshSessionId(retry.spec) }));
+    await pending;
+
+    expect(freshSessionId(retry.spec)).toBe(recorded);
+  });
+
+  it("the retry succeeds, rather than hitting the re-key guard", async () => {
+    const h = harness();
+    await refusedAfterWriting(h);
+
+    const pending = h.engine.startSession(freshRequest());
+    const retry = await untilQuery(h, 1);
+    retry.query.emit(initMessage({ sessionId: freshSessionId(retry.spec) }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("answers the typed refusal on a RESUME whose hook blocks the opening", async () => {
+    // The live case: a resumed workspace, blocked on every boot.
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    writesOnTheBlockingHook(h);
+
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+
+    expect(failureCause(await pending)).toBe("vendorStartFailed");
+  });
+
+  it("answers the typed refusal on the start a COLD-GATE answer re-opens with", async () => {
+    // The second live case: the owner answered the gate with `clear`, and the
+    // un-naming refusal came back through AnswerColdGate's transport.
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    writesOnTheBlockingHook(h);
+    const clear = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: { case: "clear", value: create(conversationv1.SessionColdClearSchema, {}) },
+    });
+
+    const pending = h.engine.startSession(resumeRequest("resume-1", clear));
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+
+    expect(failureCause(await pending)).toBe("vendorStartFailed");
+  });
+});
+
 describe("StartSession, resume", () => {
   it("refuses an id with no transcript in this workspace", async () => {
     const h = harness();
