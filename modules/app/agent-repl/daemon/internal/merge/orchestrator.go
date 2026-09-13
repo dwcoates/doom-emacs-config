@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
 
@@ -138,6 +139,9 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
+	if deps.Policy == nil {
+		deps.Policy = prompts.OnDisk{}
+	}
 	return &orchestrator{
 		deps:            deps,
 		lockDir:         filepath.Join(deps.StateDir, "merge-locks"),
@@ -262,6 +266,32 @@ func (o *orchestrator) repoKeyFor(ctx context.Context, job wsm.CreationJob) (wsm
 		return "", fmt.Errorf("merge: resolving the target repository of %s: %w", job.Layout.TargetDir, err)
 	}
 	return wsm.RepoKey(common), nil
+}
+
+// policyFor answers where a workspace's repository states its merge policy:
+// the daemon's own corpus for the ONE repository the daemon's checkout lives
+// in, and the repository's own `.agent-repl/prompts` for every other. The
+// corpus is never a fallback for another repository.
+//
+// The repository is the workspace's OWN, read off the registry, not the merge
+// TARGET: a child workspace targets its parent's worktree, and a repository's
+// policy belongs to the repository rather than to whichever tree a particular
+// merge lands in.
+func (o *orchestrator) policyFor(ctx context.Context, ws ids.WorkspaceID) (prompts.Source, error) {
+	record, err := o.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return prompts.Source{}, fmt.Errorf("merge: reading %s: %w", ws, err)
+	}
+	repositories, err := o.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		return prompts.Source{}, fmt.Errorf("merge: reading the repository registry: %w", err)
+	}
+	for _, repository := range repositories {
+		if repository.ID == record.Repo {
+			return prompts.SourceFor(repository.Dir, o.deps.CheckoutRoot, o.deps.PromptsDir), nil
+		}
+	}
+	return prompts.Source{}, fmt.Errorf("merge: workspace %s names repository %q, which is not registered", ws, record.Repo)
 }
 
 // layoutFor loads a workspace's recorded merge geometry, refusing the merge

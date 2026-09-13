@@ -561,6 +561,61 @@ daemon starts sending it, with no table to update here."
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
     (should (agent-repl-test-verbs--messaged-p "create refused: unknown-repository"))))
 
+(ert-deftest agent-repl-verbs-create-one-shot-policy-missing-names-the-directory ()
+  "A one-shot refused for want of a repository policy names the directory the
+user must write.  EMACS NEVER LOOKS AT THE FILESYSTEM FOR THIS: the daemon
+detects the absence and Emacs draws the refusal it sent."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error
+                               :value (:cause (:arm :one-shot-policy-missing
+                                               :value (:repository-root "/src/p"
+                                                       :policy-dir "/src/p/.agent-repl/prompts"
+                                                       :missing-files ("oneshot-success-suffix.md"))))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
+                            :prompt "ship it" :finish :self-merge)
+    (should (agent-repl-test-verbs--messaged-p
+             "create refused: /src/p states no one-shot policy -- write oneshot-success-suffix.md in /src/p/.agent-repl/prompts"))))
+
+(ert-deftest agent-repl-verbs-create-one-shot-policy-missing-is-recorded-as-a-warning ()
+  "The refusal is recorded at the WARNING rung, which is what a durable sweep
+for refused creates reads."
+  (let (levels)
+    (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+               (lambda (_ws level &rest _) (push level levels))))
+      (agent-repl-test-verbs--with
+          '((:create . (:response (:arm :error
+                                   :value (:cause (:arm :one-shot-policy-missing
+                                                   :value (:repository-root "/src/p"
+                                                           :policy-dir "/src/p/.agent-repl/prompts"
+                                                           :missing-files nil)))))))
+        (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
+                                :prompt "ship it" :finish :self-merge)))
+    (should (member "warn" levels))))
+
+(ert-deftest agent-repl-verbs-create-one-shot-policy-missing-with-no-files-names-the-directory-alone ()
+  "With no file list the directory is still the answer, and no empty list is
+drawn beside it."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error
+                               :value (:cause (:arm :one-shot-policy-missing
+                                               :value (:repository-root "/src/p"
+                                                       :policy-dir "/src/p/.agent-repl/prompts"
+                                                       :missing-files nil)))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
+                            :prompt "ship it" :finish :self-merge)
+    (should (agent-repl-test-verbs--messaged-p
+             "create refused: /src/p states no one-shot policy -- write /src/p/.agent-repl/prompts"))))
+
+(ert-deftest agent-repl-verbs-create-other-refusals-still-fall-through ()
+  "The one-shot policy handler CLAIMS only its own arm; every other create
+refusal still reaches the generic reporting."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error
+                               :value (:cause (:arm :base-ref-unresolved
+                                               :value (:ref "origin/main")))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+    (should (agent-repl-test-verbs--messaged-p "create refused: base-ref-unresolved"))))
+
 (ert-deftest agent-repl-verbs-missing-ref-refuses-before-sending ()
   "A workspace with no daemon identity cannot be addressed at all."
   (agent-repl-test-verbs--with nil

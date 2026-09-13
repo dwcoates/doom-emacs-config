@@ -374,6 +374,18 @@ and no narrative: the commit message holds the reasoning and
 It also carries a short "standing measurements to protect" section. Update those
 numbers when a measurement genuinely improves; never when it regresses.
 
+## A repository's one-shot policy is its own
+
+Owner ruling, 2026-09-12. A repository states its one-shot and merge policy in
+`.agent-repl/prompts/` at its main checkout root. This module's own `prompts/`
+corpus is the policy of exactly ONE repository — the one this checkout lives in
+— and is never a fallback for another. A repository that states none has its
+one-shot creates REFUSED by the daemon (`CreateWorkspaceError`'s
+`one_shot_policy_missing`), which Emacs draws as a warning; Emacs never reads
+the filesystem to decide it.
+
+`docs/ONE-SHOT-POLICY.md` is the reference for a repository's authors.
+
 ## Implementers do not judge proto design
 
 An implementation agent lands a proto shape that is already settled, or it lands
