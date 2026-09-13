@@ -129,14 +129,19 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// concurrent readers during a live tail; NORMAL sync is durable under WAL;
 	// busy_timeout guards the brief window a checkpoint holds the writer.
 	//
-	// _txlock=immediate makes every Begin() issue BEGIN IMMEDIATE. Both the
-	// write path and the read path need it: WriteBatch reads (MAX(write_seq),
-	// the write_id probe) before it writes, and OpenPage must take its watch
-	// pin in the SAME snapshot as the page it answers with. Under the DEFERRED
-	// default such a transaction takes a WAL READ snapshot and only later tries
-	// to upgrade to a writer — and SQLite refuses to run the busy handler for
-	// an upgrade, so a contending writer is an immediate SQLITE_BUSY rather
-	// than a wait. Taking the lock at BEGIN removes the upgrade entirely.
+	// _txlock=immediate makes every Begin() issue BEGIN IMMEDIATE, which is
+	// what the WRITE path needs: WriteBatch reads (MAX(write_seq), the write_id
+	// probe) before it writes, and under the DEFERRED default such a
+	// transaction takes a WAL READ snapshot and only later tries to upgrade to
+	// a writer — SQLite refuses to run the busy handler for an upgrade, so a
+	// contending writer is an immediate SQLITE_BUSY rather than a wait. Taking
+	// the lock at BEGIN removes the upgrade entirely.
+	//
+	// A PURE READ OPTS BACK OUT, through db.beginRead. _txlock is a property of
+	// the CONNECTION, so it reached the read path too and made a page repaint
+	// queue for the write lock a producer was holding — and be refused by it.
+	// See beginRead in read.go for why a deferred read still pins its watch in
+	// the page's own snapshot.
 	dsn := "file:" + path + "?" + url.Values{
 		"_pragma": {
 			"journal_mode(WAL)",

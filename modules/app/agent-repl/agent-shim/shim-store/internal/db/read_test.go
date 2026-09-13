@@ -1,9 +1,11 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -632,4 +634,73 @@ func TestLinesSinceReportsAStorageFailureOnAClosedDatabase(t *testing.T) {
 		t.Fatalf("error = %v, want ErrStorage", err)
 	}
 	s.assertLogged(t, "error", "refused")
+}
+
+// TestAReadIsAnsweredWhileAWriterHoldsTheWriteLock pins the reason the read
+// path begins DEFERRED. The owner's store answered two OpenAgentSession calls
+// with `store.db.open-page` ERROR "begin read transaction: database is locked
+// (5) (SQLITE_BUSY)": every transaction took the write lock at BEGIN, so a
+// page repaint could be refused outright because a producer happened to be
+// writing.
+//
+// THE BOUND IS 1s AND IT SEPARATES TWO OUTCOMES, not two speeds. A read that
+// takes only its WAL snapshot answers in under a millisecond however busy the
+// writer is; a read that queues for the write lock waits out the DSN's
+// busy_timeout(5000) and then fails. Anything between the two is the failure
+// this test exists to catch.
+func TestAReadIsAnsweredWhileAWriterHoldsTheWriteLock(t *testing.T) {
+	const bound = time.Second
+	tests := []struct {
+		name string
+		read func(d *DB, seeded []*storev1.StoreItemPointer) error
+	}{
+		{
+			name: "an opening page",
+			read: func(d *DB, _ []*storev1.StoreItemPointer) error {
+				_, err := d.OpenPage(context.Background(), "reader-book", 10, nil)
+				return err
+			},
+		},
+		{
+			name: "a page walk back",
+			read: func(d *DB, seeded []*storev1.StoreItemPointer) error {
+				_, err := d.ReadPage(context.Background(), "reader-book", 10, seeded[len(seeded)-1])
+				return err
+			},
+		},
+		{
+			name: "a bash run replay",
+			read: func(d *DB, _ []*storev1.StoreItemPointer) error {
+				_, err := d.BashRun(context.Background(), "no-such-run")
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: a book to read, and another connection holding the
+			// write lock for the whole of this test.
+			d, _ := newStore(t)
+			seeded := seedBook(t, d, "reader-book", 3)
+			writer, err := d.sql.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatalf("holding the write lock: %v", err)
+			}
+			defer writer.Rollback() //nolint:errcheck // the lock is released by the rollback
+
+			// Act
+			done := make(chan error, 1)
+			go func() { done <- test.read(d, seeded) }()
+
+			// Assert
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("read while a writer held the lock: %v", err)
+				}
+			case <-time.After(bound):
+				t.Fatalf("the read did not answer within %v — it is queueing for the write lock", bound)
+			}
+		})
+	}
 }

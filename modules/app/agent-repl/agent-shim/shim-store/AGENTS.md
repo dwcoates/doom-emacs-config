@@ -198,6 +198,20 @@ store process serves every live producer on its own pooled connection, which
 makes those collisions routine. Keep the DSN, and never add a read-then-write
 transaction that begins DEFERRED.
 
+**AND A PURE READ MUST NOT.** `_txlock` is per CONNECTION, so it applied to the
+read path too, and a page repaint therefore queued for — and could be REFUSED
+by — the write lock: the owner's store answered two `OpenAgentSession` calls
+with `store.db.open-page` ERROR "begin read transaction: database is locked (5)
+(SQLITE_BUSY)" because a producer was writing. WAL exists precisely so readers
+never contend with the writer. `OpenPage`, `ReadPage` and `BashRun` write
+nothing, so they have no upgrade to fear, and they all go through
+`db.beginRead`, which passes `sql.TxOptions{ReadOnly: true}` — the driver then
+issues a plain `BEGIN` and the transaction takes only a read snapshot. The
+watch pin is unaffected: a deferred transaction in WAL fixes its snapshot at
+its FIRST statement and holds it to the end, so the pin and the page it
+accompanies still come from one view of the database. Any NEW pure read opens
+through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
+
 ## Routing, orderings, pointers, tokens
 
 - **Pageability is the PRODUCER's decision**, read from exactly one place:
@@ -514,7 +528,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
   (budget purely per row), but a non-positive per-row budget is refused.
 - **`lock_wait_ms` SPLITS THE QUEUE OUT OF THE DURATION, and the record is
   unreadable without it.** A batch's clock starts BEFORE its transaction, and
-  every transaction here is `BEGIN IMMEDIATE` — reads included — so a write
+  every transaction that writes here is `BEGIN IMMEDIATE` — so a write
   queues behind whatever else holds the write lock for as long as
   `busy_timeout` allows, and behind the connection pool before that. Reported
   as one number, that queue read as a slow statement: the owner's store logged
