@@ -505,7 +505,7 @@ sentinel level, so a nil priority omits it from the request entirely."
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
                                              merge-actions
-                                             prompt finish self-certified add-to-merge-queue
+                                             prompt
                                              parent fork model priority allow-ungated
                                              select)
   "Create a workspace in REPOSITORY under FORM.
@@ -520,10 +520,10 @@ it, because a caller at a keybinding writes facts, not nested oneofs.
     name, no configured merge actions.  MERGE-ACTIONS is spelled in plain
     text too: `(:before-ws-merge TEXT :postprocessing-prompt TEXT)\',
     either half optional, each wrapped as a `UserSaid\' here.
-  `:one-shot\' takes PROMPT (required -- a one-shot IS its prompt) and
-    FINISH, itself a bare arm keyword: `:self-merge\', or `:open-pr\' with
-    SELF-CERTIFIED and ADD-TO-MERGE-QUEUE, two plain bools whose false is a
-    VALUE the daemon must receive.
+  `:one-shot\' takes PROMPT and nothing else (required -- a one-shot IS
+    its prompt).  THERE IS NO FINISH CHOICE: what happens on completion is
+    the repository\='s own directive, which the daemon appends to the
+    commission and the agent carries out.
 
 PARENT is the parent\'s `WorkspaceRef\' and FORK the presence-only fork
 fact, which lives INSIDE the parent by construction -- a fork without a
@@ -567,8 +567,7 @@ and the new workspace\'s tab arrives through the roster push."
          :form (agent-repl-verbs--create-form
                 form :initial-prompt initial-prompt :base-ref base-ref :name name
                 :merge-actions merge-actions
-                :prompt prompt :finish finish
-                :self-certified self-certified :add-to-merge-queue add-to-merge-queue)
+                :prompt prompt)
          :parent (when parent
                    (append (list :workspace parent) (when fork (list :fork fork))))
          :model model
@@ -751,8 +750,7 @@ workspace comes up through."
   (agent-repl-verbs-select-minted (plist-get success :workspace)))
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
-                                              merge-actions prompt finish
-                                              self-certified add-to-merge-queue)
+                                              merge-actions prompt)
   "Return the creation-form oneof for the bare arm keyword FORM.
 The two forms take disjoint facts, so each arm reads only its own."
   (pcase form
@@ -765,9 +763,7 @@ The two forms take disjoint facts, so each arm reads only its own."
                         :merge-actions (agent-repl-verbs--merge-actions merge-actions))))
     (:one-shot
      (list :arm :one-shot
-           :value (list :prompt (and prompt (agent-repl-verbs--said prompt))
-                        :finish (agent-repl-verbs--finish-arm
-                                 finish self-certified add-to-merge-queue))))
+           :value (list :prompt (and prompt (agent-repl-verbs--said prompt)))))
     (_ (user-error "agent-repl: unknown creation form %S" form))))
 
 (defun agent-repl-verbs--merge-actions (actions)
@@ -782,18 +778,6 @@ action -- never an empty message."
     (when (or before post)
       (list :before-ws-merge (and before (agent-repl-verbs--said before))
             :postprocessing-prompt (and post (agent-repl-verbs--said post))))))
-
-(defun agent-repl-verbs--finish-arm (finish self-certified add-to-merge-queue)
-  "Return the one-shot finish oneof for the bare arm keyword FINISH.
-`open_pr\'s two bools are stated explicitly, false included: they change
-what happens to the branch, so neither may ride as an absence."
-  (pcase finish
-    ('nil nil)
-    (:self-merge (list :arm :self-merge :value nil))
-    (:open-pr (list :arm :open-pr
-                    :value (list :self-certified (and self-certified t)
-                                 :add-to-merge-queue (and add-to-merge-queue t))))
-    (_ (user-error "agent-repl: unknown one-shot finish %S" finish))))
 
 ;;;; ---- The daemon-admin verbs -------------------------------------------
 
@@ -1175,16 +1159,19 @@ to work in the fork."
 ;;;; ---- One-shots --------------------------------------------------------
 ;;
 ;; ONE-SHOTS RIDE THE WIRE.  Emacs supplies the prompt, the model and the
-;; parentage; the DAEMON owns naming, the worktree, prompt decoration and
-;; the finish action.  Everything the old doom / explanation-engine
-;; one-shot commands did by hand is now one CreateWorkspace request whose
-;; form arm says one_shot.
+;; parentage; the DAEMON owns naming, the worktree and prompt decoration.
+;; Everything the old doom / explanation-engine one-shot commands did by
+;; hand is now one CreateWorkspace request whose form arm says one_shot.
+;;
+;; THERE IS ONE ONE-SHOT COMMAND, because there is no finish to choose
+;; between (owner ruling, 2026-09-12): the repository states in one file
+;; what is to be done on completion, and the agent carries it out.
 
 (defcustom agent-repl-oneshot-model-candidates '("opus" "sonnet" "haiku")
   "The models offered when creating a ONE-SHOT workspace, in order.
 One-shots ride the wire -- Emacs supplies prompt, model and parentage
 through the dedicated one-shot creation form and the daemon owns naming,
-the worktree, decoration and the merge/PR postprocessing -- so this list
+the worktree and decoration -- so this list
 is a picker's contents and nothing more.  It lives beside the one-shot
 commands that read it, which are its only consumer."
   :type '(repeat string)
@@ -1207,47 +1194,29 @@ which is what asks the daemon to choose.  A nil setting seeds nothing."
                  agent-repl-interactive-model))))
     (unless (string-empty-p value) value)))
 
-(cl-defun agent-repl-verbs--create-oneshot (finish &key model
-                                                   self-certified add-to-merge-queue)
-  "Create a one-shot whose FINISH arm says what happens when the work ends.
+(defun agent-repl-create-oneshot (&optional pick-model)
+  "Create a ONE-SHOT workspace for a commission read from the minibuffer.
 A one-shot is a DYNAMIC mode (owner ruling, 2026-09-12): it asks for its
 commission and nothing else -- the repository is the current workspace\='s,
-off that repo\='s main branch, and the daemon mints the name."
+off that repo\='s main branch, and the daemon mints the name.
+
+There is no finish to choose.  The repository states, in one plain-English
+file of its own policy directory, what is to be done when the work is
+done; the daemon appends that to the commission and the agent carries it
+out itself.
+
+A prefix argument PICK-MODEL asks for the model."
+  (interactive "P")
   (let ((repository (agent-repl-verbs--dynamic-repository "a one-shot"))
-        (prompt (agent-repl-verbs--read-prompt "One-shot commission: ")))
+        (prompt (agent-repl-verbs--read-prompt "One-shot commission: "))
+        (model (and pick-model (agent-repl-verbs--read-model))))
     (when (string-empty-p (string-trim prompt))
       (user-error "agent-repl: a one-shot IS its prompt"))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-one-shot mode=dynamic finish=%S model=%S" finish model)
+    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-one-shot mode=dynamic model=%S" model)
     (agent-repl-verb-create
      repository :one-shot
-     :prompt prompt :finish finish
-     :self-certified self-certified :add-to-merge-queue add-to-merge-queue
+     :prompt prompt
      :model model)))
-
-(defun agent-repl-create-oneshot-self-merge (&optional pick-model)
-  "Create a one-shot that MERGES itself back when the work concludes.
-A prefix argument asks for the model."
-  (interactive "P")
-  (agent-repl-verbs--create-oneshot
-   :self-merge
-   :model (and pick-model (agent-repl-verbs--read-model))))
-
-(defun agent-repl-create-oneshot-open-pr (&optional pick-model)
-  "Create a one-shot that opens a SELF-CERTIFIED PR added to the merge queue.
-A prefix argument asks for the model.  Both PR flags are stated
-explicitly, false included: they change what happens to the branch."
-  (interactive "P")
-  (agent-repl-verbs--create-oneshot
-   :open-pr :self-certified t :add-to-merge-queue t
-   :model (and pick-model (agent-repl-verbs--read-model))))
-
-(defun agent-repl-create-oneshot-open-pr-reviewed (&optional pick-model)
-  "Create a one-shot that opens a PR demanding a review round.
-Neither self-certified nor queued: the PR waits for a human."
-  (interactive "P")
-  (agent-repl-verbs--create-oneshot
-   :open-pr :self-certified nil :add-to-merge-queue nil
-   :model (and pick-model (agent-repl-verbs--read-model))))
 
 ;;;; ---- Shutdown and merge-queue commands --------------------------------
 

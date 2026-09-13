@@ -36,11 +36,6 @@ import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { fireVerb, type PriorityChoice } from "./verbs.js";
 
-/** The finish action a one-shot takes when its work concludes. */
-export type OneShotFinish =
-  | { case: "selfMerge" }
-  | { case: "openPr"; selfCertified: boolean; addToMergeQueue: boolean };
-
 /** What the form collected, before it becomes a request. */
 export interface CreateWorkspaceSpec {
   /** The repository's served token, echoed back untouched. */
@@ -59,7 +54,7 @@ export interface CreateWorkspaceSpec {
         /** The configured post-merge prompt. Blank = omitted. */
         postprocessingPrompt?: string;
       }
-    | { case: "oneShot"; prompt: string; finish: OneShotFinish };
+    | { case: "oneShot"; prompt: string };
   /** The spawning parent, and whether its conversation forks with it. */
   parent?: { workspace: WorkspaceRef; fork: boolean };
   /** The session model. Blank = the daemon's default. */
@@ -131,22 +126,10 @@ function creationForm(
       },
     };
   }
-  return {
-    case: "oneShot",
-    value: {
-      prompt: buildUserSaid(form.prompt),
-      finish:
-        form.finish.case === "selfMerge"
-          ? { case: "selfMerge", value: {} }
-          : {
-              case: "openPr",
-              value: {
-                selfCertified: form.finish.selfCertified,
-                addToMergeQueue: form.finish.addToMergeQueue,
-              },
-            },
-    },
-  };
+  // A one-shot IS its prompt and nothing else: what happens on completion is
+  // the repository's own directive, which the daemon appends and the agent
+  // carries out, so there is no finish for the form to collect.
+  return { case: "oneShot", value: { prompt: buildUserSaid(form.prompt) } };
 }
 
 /**
@@ -213,12 +196,6 @@ export function drawCreateWorkspaceForm(
   const oneShot = block(form, "sb-create-one-shot");
   oneShot.hidden = true;
   const oneShotPrompt = textarea(oneShot, "one_shot_prompt", "what it should do");
-  const finish = radioPair(oneShot, "finish", [
-    ["self_merge", "Self-merge"],
-    ["open_pr", "Open a PR"],
-  ]);
-  const selfCertified = check(oneShot, "self_certified", "self-certified");
-  const addToMergeQueue = check(oneShot, "add_to_merge_queue", "add to the merge queue");
 
   const shared = block(form, "sb-create-shared");
   const parent = check(shared, "parent", "spawn from this workspace");
@@ -260,9 +237,6 @@ export function drawCreateWorkspaceForm(
       beforeWsMerge: beforeWsMerge.value,
       postprocessingPrompt: postprocessing.value,
       oneShotPrompt: oneShotPrompt.value,
-      openPr: finish[1].checked,
-      selfCertified: selfCertified.checked,
-      addToMergeQueue: addToMergeQueue.checked,
       parent: parent.checked,
       fork: fork.checked,
       model: model.value,
@@ -311,10 +285,6 @@ export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
       return "this repository is ungated: tick the consent box to create here anyway";
     case "noSlug":
       return "the daemon could not derive a name for this workspace";
-    case "finishRequired":
-      return "a one-shot needs a finishing action";
-    case "finishNotOneShot":
-      return "a finishing action belongs to a one-shot, not to a standard workspace";
     case "forkParentHasNoConversation":
       return "the parent workspace has no conversation to fork";
     case "briefMissing":
@@ -357,9 +327,6 @@ interface RawForm {
   beforeWsMerge: string;
   postprocessingPrompt: string;
   oneShotPrompt: string;
-  openPr: boolean;
-  selfCertified: boolean;
-  addToMergeQueue: boolean;
   parent: boolean;
   fork: boolean;
   model: string;
@@ -382,17 +349,7 @@ export function collect(raw: RawForm): CreateWorkspaceSpec | null {
   const spec: CreateWorkspaceSpec = {
     repository: raw.repository,
     form: raw.oneShotMode
-      ? {
-          case: "oneShot",
-          prompt: raw.oneShotPrompt.trim(),
-          finish: raw.openPr
-            ? {
-                case: "openPr",
-                selfCertified: raw.selfCertified,
-                addToMergeQueue: raw.addToMergeQueue,
-              }
-            : { case: "selfMerge" },
-        }
+      ? { case: "oneShot", prompt: raw.oneShotPrompt.trim() }
       : {
           case: "standard",
           initialPrompt: trimmed(raw.initialPrompt),

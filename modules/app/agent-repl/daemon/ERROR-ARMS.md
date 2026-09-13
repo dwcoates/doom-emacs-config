@@ -32,7 +32,6 @@ landed arm.
 `CloseWorkspaceBlocked` gained its five fields in landing 7 (turn_in_flight,
 live_work, held_prompts, merge_queued, summary), and `internal/workspace`'s
 quiet check fills all five. The evidence is expressible; nothing is owed here.
-| SubmitPrompt (the one-shot finish hook) | `brief_missing` | `prompts/oneshot-create-pr-then-close-followup.md` is absent or will not splice when the one-shot's turn concludes | workspace |
 | Interrupt / AnswerPermission / AnswerQuestion | `not_deliverable` (landing 3, `UpdateAgentFailure.kind.not_deliverable`) | the SDK has no route to the addressed subagent; answered honestly, the control is not hidden this wave | workspace |
 | Interrupt / AnswerPermission / AnswerQuestion | `unknown_agent`, `no_open_ask`, `answer_mismatch`, `no_session` | the shim's own `UpdateAgentFailure` arm, propagated by NAME rather than collapsed into a sentence. `unknown_agent` is propagated only by a stop that ADDRESSED that agent — the fan-wide `all_agents` sweep names no agent, so it reads the arm as "this item is already gone" and skips it | workspace |
 | Interrupt | `unknown_work` | the shim's `StopBashFailure.unknown_work`: the ADDRESSED detached shell is stale. As with `unknown_agent`, the fan-wide `all_agents` sweep skips it instead | workspace |
@@ -182,3 +181,32 @@ What remains in `armlessSessionKinds` is armless BY DESIGN, not by debt: the
 reconciled bounce disposition, which is per-session accounting and never a
 standing condition a host view should draw. See
 `docs/overhaul/PROTO-CHANGES.md` for the arms and their tag numbers.
+
+## `ClientLogError.unknown_workspace` — LANDED (2026-09-12)
+
+Realtest 8 caught the daemon intending an arm `ClientLogError` did not carry:
+`server.UnlandedArm` warned `intended arm: ClientLogError.unknown_workspace: no
+workspace "2d96a41ec264416b" is registered` eighteen seconds after that
+workspace was forgotten. The arm landed the same day (`ClientLogUnknownWorkspace
+{}`, tag 1, `ClientLogError`'s first), so NOTHING IS OWED here — the row is kept
+only to record why the answer is not warned.
+
+A ClientLog for an unknown workspace is EXPECTED TRAFFIC. A forwarder learns
+its workspace is gone only by being told, and its already-written records keep
+arriving until it is. So `internal/server/admin.go`'s `subjectForClientLog`
+marks the refusal `Info`, and `s.refuse` records it at INFO under the rpc's own
+operation rather than at WARN. It is the ONLY per-rpc override of a resolveRef
+refusal's level, and it is deliberate: the same condition on any other rpc is a
+caller using a stale id, which is worth a louder line.
+## Arms retired with the one-shot finish choice, 2026-09-12
+
+`CreateWorkspaceError.finish_required` (tag 3) and `.finish_not_one_shot`
+(tag 4) are RETIRED, and both tags are reserved. There is no finish choice for
+a create to misplace: what happens on completion is the repository's own
+directive, appended to the commission by the daemon and carried out by the
+agent (owner ruling, `docs/REALTEST-JUDGEMENT-CALLS.md`).
+
+The `brief_missing` row for the one-shot finish hook went with it: the hook is
+gone, so that RPC no longer reads a brief at a turn's conclusion. A one-shot's
+briefs are read once, at create time, and their absence is
+`one_shot_policy_missing`.

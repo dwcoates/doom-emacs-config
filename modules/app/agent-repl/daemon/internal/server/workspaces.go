@@ -101,16 +101,6 @@ func (s *server) CreateWorkspace(
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
 		spec.InitialPrompt = s.saidText(s.log, "one_shot.prompt", oneShot.GetPrompt())
-		spec.Finish = &workspace.OneShotFinish{}
-		if oneShot.GetSelfMerge() != nil {
-			spec.Finish.SelfMerge = true
-		}
-		if pr := oneShot.GetOpenPr(); pr != nil {
-			spec.Finish.OpenPr = &workspace.OneShotOpenPr{
-				SelfCertified:   pr.GetSelfCertified(),
-				AddToMergeQueue: pr.GetAddToMergeQueue(),
-			}
-		}
 	}
 	if parent := req.Msg.GetParent(); parent != nil {
 		id := ids.WorkspaceID(parent.GetWorkspace().GetId())

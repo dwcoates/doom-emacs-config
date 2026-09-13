@@ -155,11 +155,6 @@ type CreationJob struct {
 	Materialized bool
 	// OneShot marks a one-shot workspace (created, prompted, merged, closed).
 	OneShot bool
-	// Finish is the one-shot's FINISH ACTION, recorded before materialization
-	// so the turn that concludes with the success marker can act on it even
-	// after a daemon restart. It is CLEARED once the action has been taken,
-	// which is what makes the finish happen exactly once.
-	Finish string
 	// InitialPrompt is the prompt the workspace was created with, empty when
 	// created without one.
 	InitialPrompt string
