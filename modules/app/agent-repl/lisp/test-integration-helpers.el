@@ -973,6 +973,14 @@ signals."
                 ;; own canonical link, so a record found is a record this
                 ;; scenario wrote.
                 (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+                ;; The arrival gate (panels.el) is a SCRATCH REGISTRY for the
+                ;; same reason as the tables above: it is armed by the first
+                ;; roster reconcile of a session, and left process-global the
+                ;; first scenario's reconcile would make every later
+                ;; scenario's first roster push open panels -- a background
+                ;; perspective switch that scenario never asked for.
+                (agent-repl--panels-arrivals-armed nil)
+                (agent-repl--panels-arrival-reasons (make-hash-table :test 'equal))
                 (agent-repl-itest--real-ws-put
                  (symbol-function 'agent-repl--ws-put))
                 (process-environment
