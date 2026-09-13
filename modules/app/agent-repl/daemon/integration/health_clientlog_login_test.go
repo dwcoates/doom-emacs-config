@@ -667,18 +667,18 @@ func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T
 	}
 }
 
-// TestClientLogOnAnUnknownWorkspaceIsRefused: ClientLogError carries NO arms
-// at all (endpoint_client_log.proto: "EMPTY ON PURPOSE"), so an unknown
-// workspace can only answer through server.UnlandedArm's transport error —
-// there is no in-band shape to settle onto.
+// TestClientLogOnAnUnknownWorkspaceIsRefused: `ClientLogError.unknown_workspace`
+// landed 2026-09-12 (realtest 8, finding E), so the refusal is now IN BAND — a
+// typed arm, no Connect error, and no unlanded-arm warning. It is also ordinary
+// traffic: a forwarder learns its workspace is gone only by being told, so the
+// daemon records the refusal at INFO and this test expects no warnings at all.
 func TestClientLogOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
-	d.ExpectWarnings("daemon.refusal.unlanded_arm")
 
 	// Act
-	_, err := d.Client().ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+	resp, err := d.Client().ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Workspace: &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
@@ -688,11 +688,11 @@ func TestClientLogOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 	}))
 
 	// Assert
-	if err == nil {
-		t.Fatalf("ClientLog(unknown) = success, want a refusal")
+	if err != nil {
+		t.Fatalf("ClientLog(unknown) = %v, want the typed refusal", err)
 	}
-	if connectCode(err) != connect.CodeNotFound {
-		t.Fatalf("ClientLog(unknown) = error %v, want CodeNotFound", err)
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("ClientLog(unknown) = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
 }
 

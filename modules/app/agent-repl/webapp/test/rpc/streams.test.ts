@@ -412,7 +412,7 @@ describe("watchStream: logging", () => {
   it("logs a skipped frame at error, so the evidence is not only a card", async () => {
     // ARRANGE
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const { client } = scriptedClient([[undecodablePush()]]);
     // ACT
     const handle = open(contextFor(client, new RecordingSink()), () => {});
@@ -426,7 +426,7 @@ describe("watchStream: logging", () => {
 
   it("logs a stream that ended at error", async () => {
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const { client } = scriptedClient([[]]);
     const handle = open(contextFor(client, new RecordingSink()), () => {});
     await settle();
@@ -438,7 +438,7 @@ describe("watchStream: logging", () => {
 
   it("logs the recovery, so a retraction is traceable", async () => {
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const { client } = scriptedClient([[], [push()]]);
     const handle = open(contextFor(client, new RecordingSink()), () => {});
     await settle();
@@ -674,7 +674,7 @@ describe("watchStream: quiescing a stream that was already cancelled", () => {
   it("says nothing about the move, the stream having already stopped", async () => {
     // ARRANGE
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const sink = new RecordingSink();
     const { client } = scriptedClient([[push()]]);
     const ctx = contextFor(client, sink);

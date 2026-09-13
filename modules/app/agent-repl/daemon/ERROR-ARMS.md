@@ -182,3 +182,20 @@ What remains in `armlessSessionKinds` is armless BY DESIGN, not by debt: the
 reconciled bounce disposition, which is per-session accounting and never a
 standing condition a host view should draw. See
 `docs/overhaul/PROTO-CHANGES.md` for the arms and their tag numbers.
+
+## `ClientLogError.unknown_workspace` — LANDED (2026-09-12)
+
+Realtest 8 caught the daemon intending an arm `ClientLogError` did not carry:
+`server.UnlandedArm` warned `intended arm: ClientLogError.unknown_workspace: no
+workspace "2d96a41ec264416b" is registered` eighteen seconds after that
+workspace was forgotten. The arm landed the same day (`ClientLogUnknownWorkspace
+{}`, tag 1, `ClientLogError`'s first), so NOTHING IS OWED here — the row is kept
+only to record why the answer is not warned.
+
+A ClientLog for an unknown workspace is EXPECTED TRAFFIC. A forwarder learns
+its workspace is gone only by being told, and its already-written records keep
+arriving until it is. So `internal/server/admin.go`'s `subjectForClientLog`
+marks the refusal `Info`, and `s.refuse` records it at INFO under the rpc's own
+operation rather than at WARN. It is the ONLY per-rpc override of a resolveRef
+refusal's level, and it is deliberate: the same condition on any other rpc is a
+caller using a stale id, which is worth a louder line.

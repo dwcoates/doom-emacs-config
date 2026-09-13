@@ -102,7 +102,7 @@ async function bootMain(): Promise<void> {
   // boot replaces it with the ClientLog-forwarding one, which is the only
   // logger that reaches the mocked client.
   logging.resetLoggingForTests();
-  logging.setLogger(new logging.ForwardingLogger(async () => {}, () => {}));
+  logging.setLogger(new logging.ForwardingLogger(async () => "accepted", () => {}));
   logging.bindLogContext({ connection_id: "test-connection" });
 
   // THE REAL CONTEXT, CAPTURED. `createAppContext` opens the page's one stream,

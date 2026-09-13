@@ -80,6 +80,17 @@ message ClientLogResponse {
 }
 // Written.
 message ClientLogSuccess {}
-// EMPTY ON PURPOSE: arms DERIVED at the wave, spelled per 3b.
+// Arms derived from the daemon's refusal sites.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message ClientLogError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry. ORDINARY TRAFFIC, not
+    // a fault: a client that has just been told its workspace closed can still
+    // have records in flight for it, and the record names the workspace it was
+    // written about, so the daemon has nowhere to file it. The daemon records
+    // the refusal at INFO; a forwarder that receives this arm STOPS sending for
+    // that workspace id and keeps the rest of its records locally.
+    ClientLogUnknownWorkspace unknown_workspace = 1;
+  }
 }
+message ClientLogUnknownWorkspace {}

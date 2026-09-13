@@ -1044,6 +1044,7 @@ function captureLogger(): LogHarness {
   const logger = new ForwardingLogger(
     async (record) => {
       sent.push(record);
+      return "accepted";
     },
     () => undefined,
   );
