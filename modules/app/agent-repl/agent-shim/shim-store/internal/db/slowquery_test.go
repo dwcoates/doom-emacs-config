@@ -83,6 +83,36 @@ func TestObserveQueryReportsAStatementOverTheThreshold(t *testing.T) {
 	s.assertContext(t, "rows", float64(12))
 }
 
+func TestObserveQueryReportsTheLockWaitApartFromTheTotal(t *testing.T) {
+	// Arrange: a batch that queued behind another writer for nearly all of its
+	// measured duration. Reported as one number it reads as a slow statement;
+	// the two numbers together say it never got to run.
+	s, log := newSink(t)
+	d := &DB{log: log, slowQuery: time.Nanosecond}
+
+	// Act
+	d.observeQuery(StatementWriteBatch, "entry",
+		logging.Fields{LockWait: 3800 * time.Millisecond}, time.Now().Add(-3822*time.Millisecond), 6)
+
+	// Assert
+	s.assertLogged(t, "warn", "lock_wait_ms=3800")
+	s.assertContext(t, "lock_wait_ms", float64(3800))
+}
+
+func TestObserveQueryReportsAZeroLockWaitRatherThanOmittingIt(t *testing.T) {
+	// Arrange: a statement with no wait to measure. Zero is a fact — "this one
+	// really did spend its time running" — and an omitted key would leave a
+	// reader unable to tell it from an older record that never measured.
+	s, log := newSink(t)
+	d := &DB{log: log, slowQuery: time.Nanosecond}
+
+	// Act
+	d.observeQuery(StatementOpenPage, "entry", logging.Fields{}, time.Now().Add(-time.Second), 3)
+
+	// Assert
+	s.assertContext(t, "lock_wait_ms", float64(0))
+}
+
 func TestObserveQuerySaysNothingAboutAFastStatement(t *testing.T) {
 	// Arrange: successful query timing is exactly the high-volume narration
 	// the verbose gate exists to keep out of a singleton global log.
