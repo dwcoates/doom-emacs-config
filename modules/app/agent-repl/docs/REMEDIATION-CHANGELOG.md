@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- realtest harness: the confirmation leaves the editor alone after a `C-g` (`Chord.Interrupting`, quiet window) and every probe answer carries the sequence of the probe that asked for it (`probeWrapper` seq stamp, slot cleared, `quit` caught), because the confirmation's own emacsclient traffic was turning the press into an interrupt and then reading a stale ring slot as proof it never arrived (realtests 5-8, six `C-g DID NOT REACH EMACS`)
+
 - realtest harness: a chord that did not reach its command is classified off Emacs's ring (`chordring.go`), so a leader eaten by input the run never sent names neither the binding nor the key driver (realtest 8's `SPC j m p`)
 
 - realtest harness: a `C-g` pressed at a standing minibuffer read is judged by the ring again (`wsActQuit.MarkFree` false, `wsActDismissNotDelivered`), because the read records it (realtests 6-8 named nobody for three keys that never arrived)
