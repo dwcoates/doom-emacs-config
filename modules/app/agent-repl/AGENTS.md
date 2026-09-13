@@ -1251,3 +1251,11 @@ change at hand. If it is in a log, it is a defect that needs fixing now,
 whoever introduced it and whenever. Sweeping all logs for warnings and
 errors and remediating every one of them is ordinary work, not an
 extra.
+
+## The webapp's integration suite is a gate, not an option
+
+Every change under webapp/ runs `npm run test:integration` beside
+`typecheck`, `lint` and `npm test` before it is reported. On 2026-09-13
+three topbar landings ran only the unit suite and left the integration
+suite red with 25 failures that a later agent then called "pre-existing".
+Neither the omission nor the label is acceptable.
