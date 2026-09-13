@@ -97,8 +97,9 @@ e2e and Emacs-layer suites stay.
   realtest 3 is asked for: the previous sweep's handback deliberately leaves
   the owner a guard-free daemon, so a sweep always opens against a daemon that
   cannot be adopted. With the consent the run quits the editor first and then
-  stops that daemon itself (SIGTERM, never SIGKILL) and says which pid it
-  stopped; without it the preflight declines and names the variable. THE SHIMS
+  stops that daemon itself through the daemon's own door
+  (`UpdateShutdownSchedule{now}`, with SIGTERM as a stated fallback and never
+  SIGKILL) and says which pid it stopped; without it the preflight declines and names the variable. THE SHIMS
   THAT DAEMON LEFT LISTENING GO WITH IT, under the same consent: a shim outlives
   the daemon that spawned it and the run's own daemon would adopt it, so after
   the daemon is gone each unguarded shim and `shim-lock` is SIGTERMed and stated
@@ -142,7 +143,9 @@ this; the runner is what gets out of their way.
 - **The daemon.** Realtest 3 needs none running, and stopping the owner's
   daemon is a consent of its own: `AGENT_REPL_REALTEST_STOP_DAEMON=1`. Without
   it realtest 3 is SKIPPED with the reason rather than run into its refusal.
-  SIGTERM only; a daemon that ignores it is a skip too.
+  The stop is the daemon's own `UpdateShutdownSchedule{now}`, so it stands its
+  sessions down on the way out; SIGTERM is the stated fallback when nothing
+  answers that door, and a daemon that ignores both is a skip too.
 - **The editor the owner gets back.** Every editor a realtest launches carries
   `AGENT_REPL_FORBID_VENDOR_CALLS`, so the one left standing at the end is never
   the one the owner should keep: until 2026-09-13 it was, and the owner's real
@@ -344,8 +347,8 @@ establishes both (see "Running a sweep"):
 - **3 — start with the daemon down** needs NO daemon running. The test still
   refuses and names the pid rather than stopping the owner's daemon. What
   changed is who may: with `AGENT_REPL_REALTEST_STOP_DAEMON=1` the runner quits
-  the editor, SIGTERMs the daemon and waits for it to go before realtest 3
-  starts, so it can be the third test of a sweep after all. Without that
+  the editor, stops the daemon through its own door and waits for it to go
+  before realtest 3 starts, so it can be the third test of a sweep after all. Without that
   consent it is skipped, and the manual route is unchanged — stop the daemon
   deliberately (`SPC o C-d`, or kill the pid) and run realtest 3 alone.
 
