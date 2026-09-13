@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -503,3 +504,52 @@ func hasOperation(records []dlog.Record, operation string) bool {
 
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s *stubSurfaces) Evict(_ string) error { return nil }
+
+// TestOpenFaultLevelsAForgottenWorkspaceAtDebug is the middle layer of the
+// shim-death cascade. A fault about a workspace the registry no longer holds
+// has nowhere to stand, and that is an ordinary end for one: this reporter
+// outlives the row, so a shim dying after its workspace was forgotten reaches
+// it about a row nothing can carry. The error still reaches the caller.
+func TestOpenFaultLevelsAForgottenWorkspaceAtDebug(t *testing.T) {
+	tests := []struct {
+		name      string
+		openErr   error
+		wantLevel string
+	}{
+		{
+			name:      "the workspace was forgotten",
+			openErr:   fmt.Errorf("wsm: fault workspace w1: %w", wsm.ErrNotFound),
+			wantLevel: "debug",
+		},
+		{
+			name:      "the state client failed",
+			openErr:   errors.New("disk is gone"),
+			wantLevel: "error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := newStubSurfaces()
+			r := newReporter(t, &stubDB{openErr: tt.openErr}, alwaysLive, log)
+
+			// Act.
+			_, err := r.OpenFault(context.Background(), wsm.Fault{Kind: "shim_died"})
+
+			// Assert.
+			if err == nil {
+				t.Fatal("OpenFault = nil error, want the refusal surfaced")
+			}
+			var level string
+			for _, record := range log.logger.Records() {
+				if record.Operation == "daemon.health.open_fault" {
+					level = record.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("open_fault record level = %q, want %q", level, tt.wantLevel)
+			}
+		})
+	}
+}

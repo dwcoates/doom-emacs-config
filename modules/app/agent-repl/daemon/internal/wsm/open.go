@@ -315,6 +315,16 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 		// The rollback is what makes a refusal mid-transaction leave nothing
 		// behind; its own failure never masks the cause.
 		_ = tx.Rollback()
+		// A WRITE ABOUT A RECORD THAT IS NOT THERE IS THE READ SIDE'S SHAPE,
+		// and it gets the read side's level. `read` has always answered
+		// ErrNotFound at DEBUG; a write that names a row the caller no longer
+		// owns -- a fault about a workspace that has since been forgotten --
+		// is the same statement of fact, and reporting it at ERROR made a
+		// single forgotten workspace cost three ERRORs per shim death.
+		if errors.Is(err, ErrNotFound) {
+			s.log.Debug(op, "the write named no such record", withError(fields, err))
+			return err
+		}
 		s.log.Error(op, "refused the write", withError(fields, err))
 		return err
 	}
