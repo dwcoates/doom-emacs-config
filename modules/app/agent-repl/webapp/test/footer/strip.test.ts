@@ -13,9 +13,11 @@ import {
   FOOTER_ALLOWANCE_STATUS_CASES,
   FOOTER_STATUS_CASES,
   allowanceStatusClass,
+  statusArmClass,
 } from "../../src/footer/tones.js";
 import {
   IDLE_CLOCK_LABEL,
+  drawClientDisconnectedStrip,
   drawFooterStrip,
   statusWords,
   subStatusWords,
@@ -918,5 +920,55 @@ describe("an arm this build has no case for", () => {
     expect(() =>
       drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
+  });
+});
+
+describe("drawClientDisconnectedStrip: the one strip this client composes", () => {
+  it("draws the status word disconnected", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
+    expect(row.querySelector(".footer-status")?.textContent).toBe("disconnected");
+  });
+
+  it("marks the status cell with the disconnected arm, as a pushed strip does", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
+    expect(row.querySelector(".footer-status")?.getAttribute("data-arm")).toBe("disconnected");
+  });
+
+  it("paints the status cell the disconnected tone from the shared vocabulary", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
+    expect(row.querySelector(".footer-status")?.className).toContain(statusArmClass("disconnected"));
+  });
+
+  it("draws the substatus it was handed", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
+    expect(row.querySelector(".footer-substatus")?.textContent).toBe("daemon unreachable");
+  });
+
+  it("draws the ad-hoc activity line it was handed", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
+    expect(row.querySelector(".footer-activity-client-verdict")?.textContent).toBe(
+      "AnswerColdGate: unavailable",
+    );
+  });
+
+  it("hovers the whole line, which the elastic cell ellipsizes", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "a very long ad-hoc line");
+    expect(row.querySelector<HTMLElement>(".footer-activity")?.title).toBe(
+      "a very long ad-hoc line",
+    );
+  });
+
+  it("draws NO clock, tokens or chips when nothing was ever pushed", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
+    expect(row.querySelectorAll(".footer-clock, .footer-tokens, .footer-chips")).toHaveLength(0);
+  });
+
+  it("keeps the last pushed tokens cell, the figures being the last ones and not untrue", () => {
+    const h = harness();
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
+      strip: strip({ tokens: { input: { text: "12.3k in" } } }),
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx) },
+    });
+    expect(row.querySelector(".footer-tokens")?.textContent).toContain("12.3k in");
   });
 });

@@ -35,6 +35,10 @@ import type { FailureSink } from "../../src/failure/sink.js";
 import { createTicker } from "../../src/clock.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import {
+  clearClientFailures,
+  standingClientFailure,
+} from "../../src/rpc/link.js";
 import { startPageStreams, type PageStreamsHandle } from "../../src/rpc/page-streams.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -138,6 +142,8 @@ interface FakeDaemon {
   endPageStream(): void;
   /** Refuse the next SubscribePage with this error. */
   refuseSubscribeWith(err: ConnectError | null): void;
+  /** Refuse every UnsubscribePage with this error. */
+  refuseUnsubscribeWith(err: ConnectError | null): void;
 }
 
 /**
@@ -155,6 +161,7 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
   let wake: (() => void) | null = null;
   let open = true;
   let refusal: ConnectError | null = null;
+  let unsubscribeRefusal: ConnectError | null = null;
 
   const state: FakeDaemon = {
     streamOpens,
@@ -170,6 +177,9 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
     },
     refuseSubscribeWith(err: ConnectError | null): void {
       refusal = err;
+    },
+    refuseUnsubscribeWith(err: ConnectError | null): void {
+      unsubscribeRefusal = err;
     },
   };
 
@@ -197,6 +207,7 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
       },
       unsubscribePage: (req) => {
         unsubscribes.push(req);
+        if (unsubscribeRefusal !== null) throw unsubscribeRefusal;
         return {};
       },
       // The dedicated streams a page must NOT open any more. Each records its
@@ -986,5 +997,68 @@ describe("the page's connection budget", () => {
     // stream a page is allowed to hold — is not among them.
     expect(guarded).toEqual([...expected].sort());
     expect(guarded).not.toContain("watchPage");
+  });
+});
+
+describe("the page mux and the client's link verdict", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  it("reports a subscription whose source finished, naming the subscription", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+    const controller = new AbortController();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+    })();
+    await settle();
+
+    // Act.
+    const subscription = daemon.subscribes[0].subscription;
+    daemon.send(ended(subscription, { case: "sourceEnded", value: {} }));
+    await settle();
+
+    // Assert.
+    expect(standingClientFailure()).toEqual({
+      kind: "subscription_source_ended",
+      substatus: "daemon unreachable",
+      activity: `the ${subscription} page subscription ended (source_ended)`,
+    });
+    ctx.quiesce();
+  });
+
+  it("reports an UnsubscribePage that could not be delivered", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+    daemon.refuseUnsubscribeWith(new ConnectError("no route", Code.Unavailable));
+    const controller = new AbortController();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+    })();
+    await settle();
+
+    // Act: the page drops the subscription, which sends the unsubscribe.
+    const subscription = daemon.subscribes[0].subscription;
+    controller.abort();
+    await settle();
+
+    // Assert.
+    expect(standingClientFailure()?.activity).toBe(
+      `UnsubscribePage ${subscription} could not be delivered`,
+    );
+    ctx.quiesce();
   });
 });
