@@ -226,3 +226,35 @@ func TestSystemLineWithNoSubtypeIsUnknown(t *testing.T) {
 		t.Fatalf("want unknown keyed on the missing subtype, got %v", unknown)
 	}
 }
+
+// TestAnObservedApiErrorIsRecordedAtInfo pins the SEVERITY of the api_error
+// trace, not its prose. The vendor recorded the failure; this converter's own
+// handling of it succeeded whole, so the record states an observed event rather
+// than accusing the sidecar of an owned fault.
+//
+// It is a table over the shapes the owner's log actually carried — a bare
+// connection drop and a typed vendor error — because the level must not depend
+// on which taxonomy arm the kind mapped onto.
+func TestAnObservedApiErrorIsRecordedAtInfo(t *testing.T) {
+	cases := []struct {
+		name   string
+		detail string
+	}{
+		{name: "connection drop with no vendor type", detail: `{"message":"Unable to connect to API (ECONNRESET)"}`},
+		{name: "typed vendor error", detail: `{"type":"overloaded_error","message":"overloaded"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c, sink := loggedConverter(t)
+
+			// Act.
+			convertLines(t, c, apiErrorLine("e1", tc.detail, ""))
+
+			// Assert.
+			if got := levelForMessage(t, sink, "vendor api_error recorded mid-turn"); got != "info" {
+				t.Fatalf("the observed api_error was recorded at %q, want info (the fault is the vendor's; this conversion succeeded)", got)
+			}
+		})
+	}
+}

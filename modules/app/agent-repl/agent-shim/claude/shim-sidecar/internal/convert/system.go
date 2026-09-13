@@ -64,7 +64,24 @@ func (c *Converter) apiError(record map[string]any, at Attribution, env envelope
 	failed := &conversationv1.ApiRequestFailed{Message: message}
 	setAPIKind(failed, apiErrorKind(detail, record))
 
-	c.log.With(at.ctxWarn("api-error")).With(logging.Context{UpsertKey: SessionKey("api_error", env.uuid)}).
+	// AN OBSERVED FAULT IS NOT AN OWNED ONE — info, not warn. This branch is the
+	// converter's ORDINARY, fully-modelled path for a record the vendor itself
+	// wrote: the request that failed was the vendor's, the failure was recorded
+	// by the vendor's own transcript writer, and everything this converter does
+	// with it succeeds — the line is read, its kind is mapped onto the taxonomy,
+	// and it lands on `AgentUpdate.api_error` as the page line a reader sees.
+	// Nothing here is degraded and nothing was refused, which is what AGENTS.md
+	// reserves `warn` for ("invariant violations and refusals are warn; owned
+	// failures are error"). Warning about it made the sidecar's log claim a
+	// sidecar defect for what was, on this machine, the owner's own DNS and
+	// connection drops (ENOTFOUND/ECONNRESET, 80 records).
+	//
+	// IT IS NOT DEMOTED TO DEBUG EITHER. Unlike the per-line conversion traces
+	// beside it, this fires only when the vendor recorded a real failure, and an
+	// operator correlating a stalled turn with the network wants it in a
+	// default-level log. `info` is the level that states an event without
+	// accusing this process of causing it.
+	c.log.With(at.ctxFor("api-error")).With(logging.Context{UpsertKey: SessionKey("api_error", env.uuid)}).
 		Log("vendor api_error recorded mid-turn: %s", message)
 
 	frame := updateFrame(agent, &conversationv1.AgentUpdate{

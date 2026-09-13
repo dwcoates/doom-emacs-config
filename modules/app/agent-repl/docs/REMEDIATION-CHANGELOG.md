@@ -21,6 +21,16 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - shim: a write onto an h2c stream the peer has already destroyed is recorded at info as the peer's departure, naming the rpc, and only an exception this side cannot account for stays the `no handler anticipated` error — the caller still gets `Internal` with its detail (log sweep, 9 `shim.service.route` errors, live at 2026-09-12T15:27)
 - shim: the stderr mirror's retirement is an info record — a shim outlives its daemon by design and the durable sink it writes that record to is the copy that mattered (log sweep, 13 `shim.logging.stderr-mirror` warns, 3 today)
 - shim: a vendor session id whose transcript file was never written is recorded at info as nothing to copy, and only a copy that could have been made and was not stays a `transcript backup FAILED` warn (log sweep, `shim.engine.backup` ENOENT at the start-of-session rotation)
+## Log sweep, sidecar (2026-09-13)
+
+- sidecar: a stop whose spawning call is not known yet is HELD at debug instead of refused at ERROR, and the launch that finally names the call applies it — a stopped run writes no more bytes, so the spool-batch retry edge alone never fired (log sweep, 31 `cancel-terminal` errors, 31 runs left open)
+- sidecar: a claimed w* workflow spool mints a stopped run's cancelled terminal through the same `handler.RunOutput` every other spool uses, so the last converter that could not be asked for one is closed (log sweep, the `declaredResidueHandler` case e9381b182 left open)
+- sidecar: an `unrecorded` identity resolution (the R9 resume default, an absence of evidence) never moves a watched file off a book real evidence gave it, so a link file that stops answering for one pass no longer flip-flops the book (log sweep, 2 spurious `identity-rekey` warns 2.4s apart, out and back)
+- sidecar: a meta read the kernel DEFERRED (ENFILE/EMFILE/EINTR/EAGAIN) is held under its own `meta_read_deferred` reason at WARN and retried every rescan, instead of being stated as an unreadable file at ERROR; a permission or parse failure keeps the error (log sweep, 38 `discover-meta` errors across 34 files, every one ENFILE)
+- sidecar: a TaskStop whose launch lies BEFORE the offset this converter joined the file at is recorded at debug naming that offset, while one on a converter that read from byte 0 keeps its warn — an absent launch is a signal only if the launch could have been seen (log sweep, 5 `task-stop` warns at offset ~50 MB after a restart)
+- sidecar: an unmodelled assistant CONTENT BLOCK is recorded at debug like the unmodelled LINE arm one level up, closing the one forward-compat record 23f26d5e2 missed (log sweep, `assistant-block` warn on `type="fallback"`)
+- sidecar: a write the SHUTDOWN withdrew is no longer reported as a store transport failure — `storeclient` states the per-call detail at debug and `applyStop` joins its two cycle.go siblings in returning quietly, leaving storeWrite's one INFO `shutdown` record as the single statement of the fact (log sweep, `storeclient-write-batch` error "canceled: context canceled" for 191 entries seconds before exit)
+- sidecar: an observed vendor `api_error` is recorded at INFO, not WARN — the request was the vendor's and this conversion succeeded whole (log sweep, 80 `api-error` warns)
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
