@@ -866,3 +866,30 @@ only the instant, because the age ticks client-side — the topbar is
 republished on facts, never on a clock.
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+### `TopbarView.cold_gate` — the strip's second whole-view state
+
+`TopbarView` gains `TopbarColdGate cold_gate = 12`, and the new message
+`TopbarColdGate { int64 context_tokens = 1; int64 since_ms = 2; }`.
+
+OWN ACCORD, 2026-09-13, under the owner's standing invariant that THE TOPBAR
+IS NEVER OPTIONAL. Observed live on workspace 0100059cb65649bc
+("explanation-engine"): the shim answers `SessionCold` to StartSession, so no
+session is created, `OnSessionStarted` never fires and no context-usage frame
+arrives — the topbar's five-gate readiness never passes, nothing is published,
+and the strip is BLANK for as long as the gate stands. The daemon log for that
+workspace reached only `daemon.topbar.on_link` ("not yet complete").
+
+THE SHAPE IS `hibernated`'s, FIELD FOR FIELD: a message field with presence on
+the view, the session-scoped elements absent while it is set, the account,
+connectivity and title still drawn, and the age ticked client-side from an
+instant rather than composed as a duration daemon-side. The two facts it
+carries are the ones the daemon already holds from `SessionCold` — the context
+a resume would re-read, and when the gate rose. The CHOICE is not restated
+here: the feed's gate card is where a gate is answered.
+
+AT MOST ONE OF `hibernated` AND `cold_gate` IS EVER SET, and the daemon states
+`cold_gate` when both hold, because a gate waits on the reader while a park
+waits on nothing.
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4

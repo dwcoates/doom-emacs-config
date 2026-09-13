@@ -31,6 +31,7 @@ import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarFastMode } from "./fast-mode.js";
 import { drawTopbarHibernated } from "./hibernated.js";
+import { drawTopbarColdGate } from "./cold-gate.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import {
   bindSessionReveal,
@@ -128,6 +129,17 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
 
   const right = document.createElement("div");
   right.className = "topbar-right";
+
+  // THE COLD-GATE STATE IS THE WHOLE RIGHT-HAND GROUP, for the same reason
+  // the hibernated one is: a workspace standing at the gate has no session,
+  // so the daemon sent no session-scoped element to draw. The daemon never
+  // sets both states at once and states this one when both hold, so the two
+  // branches cannot disagree about which strip the reader gets.
+  if (u.coldGate !== undefined) {
+    right.append(drawTopbarColdGate(u.coldGate, tc));
+    row.append(left, center, right);
+    return row;
+  }
 
   // THE HIBERNATED STATE IS THE WHOLE RIGHT-HAND GROUP. Every element it
   // replaces is session-scoped and the daemon sent none of them, so this is
