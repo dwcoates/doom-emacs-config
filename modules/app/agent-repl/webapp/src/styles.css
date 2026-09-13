@@ -226,6 +226,14 @@
      pickers outsize the sidebar's plain title, and the two dividers drift apart.
      Comfortably clears the 0.85rem select at any renderer's control metrics. */
   --topbar-h: 2.75rem;
+  /* THE STRIP'S ONE SPACING TOKEN (owner ruling 1, 2026-09-13). The gap
+     between two topbar cells and the padding at the strip's own left and right
+     edges are the SAME distance, so they are the same token: the strip runs
+     from the window's left edge to its right edge, and its first and last
+     cells stand off those edges exactly as far as they stand off each other.
+     Two numbers here is how the strip drifted into a wide inset that read as a
+     centered band inside the header. */
+  --topbar-cell-gap: 0.5rem;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -845,7 +853,10 @@ body::after {
      flush; horizontal padding only, with the height governing the vertical box.
      align-items: center keeps the pickers centered within it. */
   height: var(--topbar-h);
-  padding: 0 1rem;
+  /* NO EDGE INSET OF ITS OWN. `.topbar-row` inside carries the strip's single
+     `--topbar-cell-gap` padding, and a second inset here stacked on top of it
+     is what held the strip's content off the window's edges. */
+  padding: 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
   /* Positioning context for the absolute-centered #task-summary (§2.14). */
@@ -5278,35 +5289,69 @@ body.draining #composer-input::placeholder {
 
 /* ---- topbar (src/topbar) ------------------------------------------------ */
 
-/* THE STRIP. Left tight, center flexing, right tight — the flank groups never
-   spread, and all free width goes to the title. `position: relative` makes the
-   host the positioning context for the reveal layer, which is why the reveals
-   can be placed in the host's own coordinates. */
+/* THE STRIP. Left tight, center CONTENT-CENTERED, right tight — the flank
+   groups never spread, and all free width is split evenly on either side of
+   the title. `position: relative` makes the host the positioning context for
+   the reveal layer, which is why the reveals can be placed in the host's own
+   coordinates. */
 [data-component="topbar"] {
   position: relative;
 }
 
+/* THREE TRACKS, AND THE OUTER TWO ARE THE SAME SIZE (owner ruling 2,
+   2026-09-13). The title is centered on ITS OWN CONTENT against the whole
+   strip — the middle character of a three-letter title sits at the strip's
+   exact midpoint — rather than on whatever the left and right groups leave
+   over, which is what a flex row gives and what put the title off-center by
+   half the difference between the two groups.
+
+   `1fr` twice is the entire mechanism: two equal free tracks with the
+   content-sized title between them. The outer tracks keep their AUTO MINIMUM
+   deliberately, which is the overflow rule: a group is never squeezed, and a
+   title with less free space than it wants ellipsis-clips inside
+   `minmax(0, auto)` instead of overlapping either group. A title that outgrows
+   the free space therefore stops being centered before it ever collides —
+   losing the centering is the concession, never the collision.
+
+   Grid rather than an absolutely centered title layer: absolute positioning
+   cannot know either group's width, so it can only guess a max-width and
+   still overlap an asymmetric strip, where the tracks make non-overlap a
+   fact of the layout. The reveal layer is unaffected either way — it is the
+   row's SIBLING inside the host, not a descendant. */
 .topbar-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, auto) 1fr;
   align-items: center;
-  gap: 0.75rem;
+  /* ONE TOKEN, BOTH DISTANCES (owner ruling 1). The gap between cells and the
+     inset at the strip's edges are the same measure by definition, so a change
+     to one is a change to both and they cannot drift apart. */
+  gap: var(--topbar-cell-gap);
   height: var(--topbar-h);
-  padding: 0 1rem;
+  padding: 0 var(--topbar-cell-gap);
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
 }
-.topbar-left,
+/* Each group is a row of cells that hugs its OWN edge of its free track, so
+   the strip's first cell sits at the left edge of the strip and its last cell
+   at the right one. Written out per group rather than shared, because the one
+   declaration that differs is the whole point of the pair. */
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--topbar-cell-gap);
+  justify-self: start;
+}
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  flex: 0 0 auto;
+  gap: var(--topbar-cell-gap);
+  justify-self: end;
 }
-/* The one element that flexes. Ellipsis-clipped rather than wrapping: the
-   strip is one line high by definition, and the whole title is in the
-   tooltip. */
+/* THE MIDDLE TRACK. Sized to its content by the template above, so this rule
+   carries only what happens when the content does not fit: ellipsis rather
+   than wrapping, because the strip is one line high by definition and the
+   whole title is in the tooltip. */
 .topbar-title {
-  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5357,6 +5402,17 @@ body.draining #composer-input::placeholder {
   color: var(--muted);
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* THE ACCOUNT CELL: the connectivity glyph and the account label, in that
+   order, as ONE cell of the strip (owner ruling 3, 2026-09-13). The glyph is
+   the account's own status indicator, so it stands CLOSER to the label than
+   two cells of the strip stand to each other — half the strip's gap — and the
+   pair is what a session-line reveal hangs under. */
+.topbar-account-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--topbar-cell-gap) / 2);
 }
 
 /* The connectivity glyph is a different CHARACTER per state and those
@@ -5835,7 +5891,14 @@ body.draining #composer-input::placeholder {
    that would promise a click. */
 /* THE HIBERNATED CELL takes the same declarations, deliberately: it is
    another read-only label in the same strip, and a style of its own would be
-   a second answer to a question this rule already answers. */
+   a second answer to a question this rule already answers. THE SAME GOES FOR
+   THE COLD-GATE CELL, and for the same reason both are drawn INTO THE RIGHT
+   GROUP (owner ruling 4, 2026-09-13): a whole-view state replaces the strip's
+   session-scoped controls, so it stands where they stood — at the strip's
+   right edge, in the right group's box treatment, behind the same edge
+   padding — and never reads as something spilled out of the centered title.
+   The box below is that treatment minus the two declarations that would
+   promise a click, which is the one difference these cells are entitled to. */
 .topbar-fast,
 .topbar-hibernated,
 .topbar-cold-gate {
