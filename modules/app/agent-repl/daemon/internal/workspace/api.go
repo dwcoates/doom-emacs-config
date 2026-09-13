@@ -269,8 +269,17 @@ type Deps struct {
 	// Browser opens a clicked link in the pinned external browser.
 	Browser externalbrowser.Opener
 	// PromptsDir is where RequestCommandSupport reads its brief at use time.
+	// It is also the daemon's own prompt CORPUS, which is the one-shot policy
+	// of exactly one repository: the one the daemon's checkout lives in.
 	PromptsDir string
-	Log        dlog.Surfaces
+	// CheckoutRoot is the agent-repl module checkout the daemon was deployed
+	// from. It is what decides whether a repository's one-shot policy is the
+	// corpus or the repository's own `.agent-repl/prompts`.
+	CheckoutRoot string
+	// Policy probes a repository's policy directory. nil means the real
+	// filesystem (prompts.OnDisk).
+	Policy prompts.Files
+	Log    dlog.Surfaces
 
 	// Shim resolves the narrow slice of a workspace's shim client the verbs
 	// drive directly: the interrupt verbs, the permission and question
@@ -490,6 +499,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a served-card store")
 	case deps.PromptsDir == "":
 		return nil, missing("a prompts directory")
+	case deps.CheckoutRoot == "":
+		return nil, missing("a checkout root")
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
 	}
@@ -506,6 +517,9 @@ func New(deps Deps) (Verbs, error) {
 	now := deps.Now
 	if now == nil {
 		now = time.Now
+	}
+	if deps.Policy == nil {
+		deps.Policy = prompts.OnDisk{}
 	}
 	return &verbs{deps: deps, load: load, splice: splice, now: now}, nil
 }

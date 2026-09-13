@@ -1,9 +1,12 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
 )
 
@@ -59,13 +62,14 @@ func createPrCommand(pr *OneShotOpenPr) string {
 // Everything the user did not type is meta-wrapped, so the drawn bubble is the
 // user's words alone while the agent receives the whole composition verbatim.
 //
-// Every brief is read HERE, at use time, so editing one takes effect on the
-// next one-shot without a daemon bounce.
-func (v *verbs) decorateOneShot(raw string, finish *OneShotFinish) (string, error) {
+// Every brief is read HERE, at use time, from the REPOSITORY'S OWN POLICY
+// SOURCE, so editing one takes effect on the next one-shot without a daemon
+// bounce.
+func (v *verbs) decorateOneShot(raw string, finish *OneShotFinish, policy prompts.Source) (string, error) {
 	if finish == nil {
 		return "", fmt.Errorf("a one-shot workspace needs a finish action")
 	}
-	preamble, err := v.load(v.deps.PromptsDir, BriefAutonomousPreamble)
+	preamble, err := v.load(policy.Dir, BriefAutonomousPreamble)
 	if err != nil {
 		return "", fmt.Errorf("read the %s brief: %w", BriefAutonomousPreamble, err)
 	}
@@ -74,7 +78,7 @@ func (v *verbs) decorateOneShot(raw string, finish *OneShotFinish) (string, erro
 		return "", fmt.Errorf("splice the %s brief: %w", BriefAutonomousPreamble, err)
 	}
 
-	suffix, err := v.oneShotSuffix(finish)
+	suffix, err := v.oneShotSuffix(finish, policy)
 	if err != nil {
 		return "", err
 	}
@@ -84,8 +88,8 @@ func (v *verbs) decorateOneShot(raw string, finish *OneShotFinish) (string, erro
 // oneShotSuffix renders the finish action's success-gated wrap-up. The
 // self-merge finish is one gate (implementation, tests, commits); the open-pr
 // finish is two, the second gating on the pr flow's own CICD result.
-func (v *verbs) oneShotSuffix(finish *OneShotFinish) (string, error) {
-	success, err := v.load(v.deps.PromptsDir, BriefOneShotSuccessSuffix)
+func (v *verbs) oneShotSuffix(finish *OneShotFinish, policy prompts.Source) (string, error) {
+	success, err := v.load(policy.Dir, BriefOneShotSuccessSuffix)
 	if err != nil {
 		return "", fmt.Errorf("read the %s brief: %w", BriefOneShotSuccessSuffix, err)
 	}
@@ -150,8 +154,8 @@ func finishOrigin(finish *OneShotFinish) string {
 //
 // It is composed at CONCLUSION, not at creation, so an edited brief takes
 // effect on the very next one-shot that finishes.
-func (v *verbs) openPrFollowup(pr *OneShotOpenPr) (string, error) {
-	followup, err := v.load(v.deps.PromptsDir, BriefOneShotCreatePrFollowup)
+func (v *verbs) openPrFollowup(pr *OneShotOpenPr, policy prompts.Source) (string, error) {
+	followup, err := v.load(policy.Dir, BriefOneShotCreatePrFollowup)
 	if err != nil {
 		return "", fmt.Errorf("read the %s brief: %w", BriefOneShotCreatePrFollowup, err)
 	}
@@ -195,4 +199,77 @@ func parseFinishOrigin(recorded string) (*OneShotFinish, error) {
 	default:
 		return nil, fmt.Errorf("unknown finish action %q", recorded)
 	}
+}
+
+// opOneShotPolicySource is the operation every one-shot create records its
+// chosen policy source under. A one-shot's whole composition comes from that
+// directory, so which directory it was is the first thing an investigation of
+// a wrongly-decorated one-shot needs.
+const opOneShotPolicySource = "daemon.workspace.oneshot_policy_source"
+
+// oneShotPolicyBriefs are the briefs a one-shot's policy MUST hold, for the
+// finish it names. The preamble and the success suffix ride the opening
+// prompt of every one-shot; the pull-request follow-up is composed only when
+// an open-pr finish concludes, so only an open-pr create requires it.
+func oneShotPolicyBriefs(finish *OneShotFinish) []string {
+	briefs := []string{BriefAutonomousPreamble, BriefOneShotSuccessSuffix}
+	if finish != nil && finish.OpenPr != nil {
+		briefs = append(briefs, BriefOneShotCreatePrFollowup)
+	}
+	return briefs
+}
+
+// policySourceFor answers where repoDir's one-shot and merge policy is read
+// from: the daemon's corpus for the repository the daemon's own checkout lives
+// in, and the repository's own `.agent-repl/prompts` for every other. The
+// corpus is NEVER a fallback for another repository.
+func (v *verbs) policySourceFor(repoDir string) prompts.Source {
+	return prompts.SourceFor(repoDir, v.deps.CheckoutRoot, v.deps.PromptsDir)
+}
+
+// requireOneShotPolicy refuses a one-shot create whose repository states no
+// policy of its own, BEFORE anything is minted or materialized. The chosen
+// source is recorded for every one-shot create, refused or not.
+//
+// Owner ruling, 2026-09-12: the repository defines its one-shot policy through
+// files in its tree, the daemon detects the absence, and Emacs surfaces the
+// refusal. A repository with no such config does not inherit the daemon's own.
+func (v *verbs) requireOneShotPolicy(log dlog.Logger, repoDir string, finish *OneShotFinish) (prompts.Source, error) {
+	policy := v.policySourceFor(repoDir)
+	log.Info(opOneShotPolicySource, "chose the one-shot policy source", dlog.Context{
+		"repository_root": policy.RepositoryRoot,
+		"source":          policy.Kind,
+		"policy_dir":      policy.Dir,
+	})
+	if policy.Kind != prompts.SourceRepository {
+		return policy, nil
+	}
+	missing := v.deps.Policy.Missing(policy.Dir, oneShotPolicyBriefs(finish))
+	if len(missing) == 0 {
+		return policy, nil
+	}
+	return policy, refuseWith(log, "CreateWorkspace", ArmOneShotPolicyMissing,
+		fmt.Sprintf("the repository %q states no one-shot policy: %s holds none of %s",
+			policy.RepositoryRoot, policy.Dir, strings.Join(missing, ", ")),
+		false, map[string]any{
+			"repository_root": policy.RepositoryRoot,
+			"policy_dir":      policy.Dir,
+			"missing_files":   missing,
+		})
+}
+
+// repositoryRootOf answers a registered workspace's repository main checkout
+// root, which is what its policy source is derived from. The workspace record
+// names its repository by id; the registry holds the directory.
+func (v *verbs) repositoryRootOf(ctx context.Context, repo ids.RepoID) (string, error) {
+	repositories, err := v.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read the repository registry: %w", err)
+	}
+	for _, repository := range repositories {
+		if repository.ID == repo {
+			return repository.Dir, nil
+		}
+	}
+	return "", fmt.Errorf("no repository %q is registered", repo)
 }

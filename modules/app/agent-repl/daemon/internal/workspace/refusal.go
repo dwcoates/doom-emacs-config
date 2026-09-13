@@ -123,6 +123,11 @@ const (
 	ArmSpawnFailed = "spawn_failed"
 	// ArmBriefMissing is a composed brief the prompts directory does not hold.
 	ArmBriefMissing = "brief_missing"
+	// ArmOneShotPolicyMissing is a one-shot create in a repository that states
+	// no one-shot policy of its own. It is DISTINCT from ArmBriefMissing,
+	// which is a brief absent from the source that WAS chosen; this arm is the
+	// repository having no policy source at all.
+	ArmOneShotPolicyMissing = "one_shot_policy_missing"
 	// ArmInvalidUrl is an OpenExternal link that is not an absolute url.
 	ArmInvalidUrl = "invalid_url"
 	// ArmNoBrowserConfigured is an OpenExternal on a daemon that resolved no
