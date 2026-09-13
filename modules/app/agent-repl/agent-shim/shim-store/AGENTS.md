@@ -494,8 +494,8 @@ arms are derived from, and each one is logged once with `refusal_site`.
   class, which is the `info` above; owned failures are `error`.
   Slow queries are the
   one deliberate exception: a statement past its budget emits a normal-verbosity
-  `warn` at `store.db.slow-query` with `statement`, `duration_ms`, `rows` and
-  `threshold_ms`, because by the time an operator knows to look the stall is
+  `warn` at `store.db.slow-query` with `statement`, `duration_ms`,
+  `lock_wait_ms`, `rows` and `threshold_ms`, because by the time an operator knows to look the stall is
   over. The budget is NOT one fixed number. A point query's budget is the fixed
   `AGENT_REPL_STORE_SLOW_QUERY_MS` (default 250ms). A `write_batch` is bulk
   background I/O, not a point query — every write-path statement is fully
@@ -512,6 +512,20 @@ arms are derived from, and each one is logged once with `refusal_site`.
   statement would put session content into the global log. A malformed
   threshold or bulk-budget value aborts `db.Open`; a zero base is allowed
   (budget purely per row), but a non-positive per-row budget is refused.
+- **`lock_wait_ms` SPLITS THE QUEUE OUT OF THE DURATION, and the record is
+  unreadable without it.** A batch's clock starts BEFORE its transaction, and
+  every transaction here is `BEGIN IMMEDIATE` — reads included — so a write
+  queues behind whatever else holds the write lock for as long as
+  `busy_timeout` allows, and behind the connection pool before that. Reported
+  as one number, that queue read as a slow statement: the owner's store logged
+  `write_batch duration_ms=3822 rows=6` for six single indexed seeks, and the
+  record's own reasoning blamed index maintenance for time no index spent.
+  `duration_ms` and the budget still cover the TOTAL, because a batch nobody
+  can start is as slow to its caller as one that runs slowly; `lock_wait_ms` is
+  what tells the operator to look at what ELSE is writing rather than for a
+  missing index. It is emitted with every statement family, zero included — a
+  statement with no wait to measure reports `0`, which is a fact, not an
+  omission.
 
 Read store records and harvest run windows through `../../bin/logs.sh`; the
 full path, rotation, attribution, and level-switch table is in
