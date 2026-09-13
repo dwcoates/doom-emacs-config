@@ -271,3 +271,101 @@ func TestKeyDriverHeldReceiptCarriesTheReadinessReading(t *testing.T) {
 		}
 	}
 }
+
+// THE RECORDED SPELLING, ONE CHORD AT A TIME.
+//
+// The 2026-09-13 sweep asked whether `(recent-keys)` "contains SPC TAB n" and
+// reported the create chord as uncreditable because it does not: Emacs records
+// the physical tab key as `<tab>`. These say, per chord, what Emacs's own ring
+// spells it, so the next spelling that diverges is caught here rather than in a
+// sweep that then blames the binding.
+
+func TestChordRecordedSpellingIsEmacsOwnWhereItDiffers(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name  string
+		chord Chord
+		want  string
+	}{
+		{name: "the leader is recorded as typed", chord: wsActLeader, want: "SPC"},
+		{name: "the tab prefix is recorded as the function key symbol", chord: wsActTab, want: "<tab>"},
+		{name: "the escape is recorded as the function key symbol", chord: wsActEscape, want: "<escape>"},
+		{name: "the create key is recorded as typed", chord: wsActNewWorkspaceKey, want: "n"},
+		{name: "the fork key is recorded as typed", chord: rt7ForkKey, want: "f"},
+		{name: "the claude prefix is recorded as typed", chord: rt8ClaudePrefix, want: "j"},
+		{name: "the register key is recorded as typed", chord: wsActRegisterKey, want: "C-n"},
+		{name: "the shifted open key is recorded as its capital", chord: wsActOpenKey, want: "O"},
+		{name: "the quit character is recorded as typed", chord: wsActQuit, want: "C-g"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got := test.chord.recorded()
+
+			// Assert.
+			if got != test.want {
+				t.Errorf("%s is recorded by Emacs as %q and the chord table says %q",
+					test.chord.Emacs, test.want, got)
+			}
+		})
+	}
+}
+
+func TestSpellRecordedRendersTheSequenceEmacsWay(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name     string
+		sequence []Chord
+		want     string
+	}{
+		{
+			name:     "the dynamic create chord",
+			sequence: []Chord{wsActLeader, wsActTab, wsActNewWorkspaceKey},
+			want:     "SPC <tab> n",
+		},
+		{
+			name:     "the fork chord",
+			sequence: []Chord{wsActLeader, wsActTab, rt7ForkKey},
+			want:     "SPC <tab> f",
+		},
+		{
+			name:     "the re-open chord, whose last key is shifted",
+			sequence: []Chord{wsActLeader, wsActTab, wsActOpenKey},
+			want:     "SPC <tab> O",
+		},
+		{
+			name:     "a chord with no tab in it is spelled the way it is typed",
+			sequence: []Chord{wsActLeader, rt8ClaudePrefix, rt8ModifyPrefix, rt8PriorityKey},
+			want:     "SPC j m p",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got := SpellRecorded(test.sequence)
+
+			// Assert.
+			if got != test.want {
+				t.Errorf("Emacs's ring spells this sequence %q and SpellRecorded rendered %q", test.want, got)
+			}
+		})
+	}
+}
+
+func TestSpellRecordedDiffersFromTheTypedSpellingOnlyWhereEmacsDoes(t *testing.T) {
+	// Arrange.
+	sequence := []Chord{wsActLeader, wsActTab, wsActNewWorkspaceKey}
+
+	// Act.
+	typed, recorded := wsActSpell(sequence), SpellRecorded(sequence)
+
+	// Assert.
+	if typed == recorded {
+		t.Fatalf("the typed spelling %q and the recorded spelling are the same, so the credit check that "+
+			"reads the ring could be written against either and the 2026-09-13 mismatch could not be caught",
+			typed)
+	}
+	if typed != "SPC TAB n" {
+		t.Errorf("the typed spelling a reader sees is %q, not the `SPC TAB n` the plan and the notes use", typed)
+	}
+}

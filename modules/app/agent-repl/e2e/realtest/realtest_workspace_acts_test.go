@@ -103,8 +103,15 @@ var (
 		Why:       "Doom's leader key; on its own it only opens the leader map",
 	}
 	// wsActTab is the `TAB` of the `SPC TAB` workspace prefix.
+	//
+	// EMACS RECORDS IT AS `<tab>`, NOT `TAB`. The physical tab key on this GUI
+	// build arrives as the function key symbol `tab`, which
+	// `key-description` renders `<tab>`; only the ASCII character 9 that
+	// `(kbd "TAB")` produces renders "TAB". Chord.Recorded carries the
+	// difference and the sweep that made it necessary.
 	wsActTab = Chord{
 		Emacs:     "TAB",
+		Recorded:  "<tab>",
 		Keycode:   48,
 		Modifiers: nil,
 		Why:       "the workspace prefix of the leader map; on its own it only opens that prefix",

@@ -103,6 +103,49 @@ type Chord struct {
 	// MarkFreeWhy says why this chord leaves no mark, so a reader of a finding
 	// can check the judgement rather than take it.
 	MarkFreeWhy string
+	// Recorded is how `(key-description (recent-keys))` SPELLS this chord
+	// after Emacs has read it, where that is not `Emacs`.
+	//
+	// THE TWO SPELLINGS ARE NOT ALWAYS THE SAME KEY, and the 2026-09-13 sweep
+	// is what that costs. `kbd` reads "TAB" as the ASCII character 9, and
+	// `key-description` renders that character "TAB"; but the physical tab key
+	// on a GUI (NS) build does not arrive as character 9 at all — it arrives
+	// as the function key symbol `tab`, which `key-description` renders
+	// `<tab>`. So a run that pressed keycode 48 and then asked whether the
+	// ring "contains SPC TAB n" asked about a key sequence Emacs never
+	// records, and reported `SPC TAB n` as uncreditable in realtest 5 and
+	// `SPC TAB f` in realtest 7 while the ring plainly ended
+	// `<escape> <escape> SPC <tab> n`.
+	//
+	// The credit check therefore compares against EMACS'S OWN SPELLING
+	// (`SpellRecorded`) and the human-readable notes keep `Emacs`, which is
+	// the spelling a reader would type. A chord that says nothing here is
+	// recorded exactly as it is typed, which is the ordinary case.
+	Recorded string
+}
+
+// recorded is Recorded with the answer every chord that says nothing gives:
+// Emacs records it under the same name it is typed by.
+func (c Chord) recorded() string {
+	if c.Recorded != "" {
+		return c.Recorded
+	}
+	return c.Emacs
+}
+
+// SpellRecorded renders a chord sequence the way `(recent-keys)` renders it
+// once Emacs has read it.
+//
+// It is the ONLY spelling a `(recent-keys)` assertion may be written against.
+// wsActSpell renders the same sequence the way a reader types it, and the two
+// differ wherever a physical key arrives as a function key symbol rather than
+// as the ASCII character `kbd` reads its name as.
+func SpellRecorded(sequence []Chord) string {
+	parts := make([]string, 0, len(sequence))
+	for _, chord := range sequence {
+		parts = append(parts, chord.recorded())
+	}
+	return strings.Join(parts, " ")
 }
 
 // markFreeWhy is MarkFreeWhy with the answer every mark-free chord that says

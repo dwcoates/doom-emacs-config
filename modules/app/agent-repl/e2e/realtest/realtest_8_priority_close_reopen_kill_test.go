@@ -801,7 +801,7 @@ func rt8AssertNoShimSurvives(ctx context.Context, t *testing.T, stateDir string,
 func rt8PressAct(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver,
 	manifest *Manifest, sequence []Chord) {
 	t.Helper()
-	spelled := wsActSpell(sequence)
+	spelled, recorded := wsActSpell(sequence), SpellRecorded(sequence)
 	if driver == nil {
 		t.Fatalf("`%s` could not be pressed because the key driver is unavailable, and this act IS the "+
 			"keypress: the command it runs asks nothing, so there is nothing to enter instead. "+
@@ -822,14 +822,14 @@ func rt8PressAct(ctx context.Context, t *testing.T, client *Client, driver *KeyD
 				return false
 			}
 			keys = read
-			return strings.Contains(keys, spelled)
+			return strings.Contains(keys, recorded)
 		})
-	if !strings.Contains(keys, spelled) {
+	if !strings.Contains(keys, recorded) {
 		where, _ := client.ReadString(ctx, `(format "buffer=%s evil-state=%s major-mode=%s"
         (buffer-name) (or (bound-and-true-p evil-state) "none") major-mode)`)
-		t.Fatalf("pressed `%s` and Emacs's own (recent-keys) does not contain it, so the sequence never "+
+		t.Fatalf("pressed `%s` and Emacs's own (recent-keys) does not contain %q, so the sequence never "+
 			"reached its keymap and the act did not happen. recent-keys ends with: %s. It was pressed at %s",
-			spelled, tail(keys, 120), where)
+			spelled, recorded, tail(keys, 120), where)
 	}
 
 	prompt, err := wsActMinibufferPrompt(ctx, client)
