@@ -116,16 +116,24 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
 
   const left = document.createElement("div");
   left.className = "topbar-left";
+  // THE GLYPH AND THE LABEL ARE ONE CELL, in that order (owner ruling 3,
+  // 2026-09-13): the connectivity mark is the ACCOUNT'S status indicator, so
+  // it reads to the left of the label it qualifies and closer to it than to
+  // anything else in the strip. One element also means one reveal anchor —
+  // the session line hangs under the PAIR, not under half of it.
+  const accountCell = document.createElement("div");
+  accountCell.className = "topbar-account-cell";
   const account = drawTopbarAccount(requireMessage(u.account, "TopbarView.account"), tc);
+  accountCell.append(
+    drawTopbarConnectivity(requireMessage(u.connectivity, "TopbarView.connectivity")),
+    account,
+  );
   // The session line is the LOGGED-IN chip's reveal; a logged-out chip's click
   // is the login, and binding both would give one button two answers.
   if (account.getAttribute("data-arm") === "loggedIn") {
-    bindSessionReveal(account, u.sessionLine, tc);
+    bindSessionReveal(accountCell, u.sessionLine, tc);
   }
-  left.append(
-    account,
-    drawTopbarConnectivity(requireMessage(u.connectivity, "TopbarView.connectivity")),
-  );
+  left.append(accountCell);
 
   const center = drawTopbarTitle(requireMessage(u.title, "TopbarView.title"));
   // The title opens the session line too, in every account state.
