@@ -13,6 +13,8 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- realtest harness: the `C-g` that dismisses a standing minibuffer is confirmed by its EFFECT inside the helper's hold, not by input marks the quit character never leaves, so one press yields one verdict instead of a harness failure and a product finding at once (realtests 5-8, contradictory C-g lines)
+- realtest harness: realtests 5-8 ask the creation questions the 2026-09-12 ruling left — "Initial prompt:" for `SPC TAB n`/`SPC TAB f`, `SPC TAB O` for re-open, the repository derived from where the editor stands and asserted before each act (realtests 7 and 8, 30s stalls on stale prompts)
 - daemon: the idle sweep skips a workspace it holds no addressable shim for and records the skip at debug, the typed `no live session` state answered by a directive is debug too, and the error arm keeps every directive that failed against a shim that was there (realtest 7)
 - sidecar: a watched file getting its FIRST book is recorded at info naming its resolution source, and only a move between two non-empty books stays warn (realtest 5, identity-rekey)
 - daemon/elisp/webapp: a dynamically created workspace with no supplied name is named by a headless haiku call inside `Create`, word truncation is deleted, a collision takes a `-2`/`-3` suffix, and a failed call refuses with `naming_failed` (owner ruling, the workspace name is a headless haiku call)
