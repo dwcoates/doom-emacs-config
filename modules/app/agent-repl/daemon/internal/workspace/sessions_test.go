@@ -123,6 +123,11 @@ func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) er
 
 // fakeSupervisor records which bring-up path the lock probe selected.
 type fakeSupervisor struct {
+	// mu guards standingDown, which a test may latch from another goroutine.
+	mu sync.Mutex
+	// standingDown is the supervisor's stand-down latch.
+	standingDown bool
+
 	client   *fakeClient
 	spawns   []shimclient.Spec
 	adopts   []string
@@ -2054,6 +2059,25 @@ func TestStartRestampsTheRotatedIdentityOnAFreshRestart(t *testing.T) {
 // and still owns. These fakes spawn no process, so there is never one to
 // sweep.
 func (s *fakeSupervisor) StandDownEverySpawn(context.Context, string) error { return nil }
+
+// BeginStandDown latches the fake supervisor's stand-down, answering whether
+// this call was the one that latched it.
+func (s *fakeSupervisor) BeginStandDown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.standingDown {
+		return false
+	}
+	s.standingDown = true
+	return true
+}
+
+// StandingDown answers the fake supervisor's latch.
+func (s *fakeSupervisor) StandingDown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.standingDown
+}
 
 // TestStopTellsTheViewsTheLinkIsDeadEvenWhenTheKillFails covers the other path
 // out of Stop. A kill that reports a failure -- and Client.Kill can now report

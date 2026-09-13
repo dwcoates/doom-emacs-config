@@ -1267,3 +1267,63 @@ func TestStandDownArmsTheLatchForTheDaemonsOwnTeardown(t *testing.T) {
 		})
 	}
 }
+
+// TestStandingDownReadsTheDaemonsLatchToo is the invariant the immediate
+// shutdown needs: the question every consumer asks is whether THIS DAEMON
+// ordered the departure, not whether this particular client was the one
+// asked. A supervisor that has begun standing down is ending every shim it
+// holds, including the clients no teardown walk can name.
+func TestStandingDownReadsTheDaemonsLatchToo(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	daemon := false
+	c.daemonStandDown = func() bool { return daemon }
+
+	// Act.
+	daemon = true
+
+	// Assert.
+	if !c.StandingDown() {
+		t.Fatal("a client of a daemon that is standing down reports StandingDown() = false")
+	}
+}
+
+// TestPublishExitRecordsADeparturenInsideTheDaemonsStandDownAsOrderly is the
+// measured case: one shim ended up with two clients (the supervisor's spawn
+// record and the fleet's adopted one) after a refused StartSession left it
+// serving. The sweep armed the spawn record's own latch and recorded the exit
+// at INFO; the adopted client, armed by nothing, recorded the very same
+// departure as `daemon.shimclient.exit` ERROR "shim died".
+func TestPublishExitRecordsADepartureInsideTheDaemonsStandDownAsOrderly(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c.daemonStandDown = func() bool { return true }
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: -1, Inferred: true})
+
+	// Assert.
+	if hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("a departure inside the daemon's own stand-down was recorded as a death")
+	}
+}
+
+// TestPublishExitOutsideTheDaemonsStandDownStaysADeath is that rule's other
+// half, and the reason the latch is read rather than assumed: a daemon that is
+// NOT standing down has ordered nothing, so an inferred departure is still a
+// shim that went missing.
+func TestPublishExitOutsideTheDaemonsStandDownStaysADeath(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
+	c.daemonStandDown = func() bool { return false }
+
+	// Act.
+	c.publishExit(ExitInfo{PID: 4242, Code: -1, Inferred: true})
+
+	// Assert.
+	if !hasRecordAt(log, "error", "daemon.shimclient.exit") {
+		t.Fatal("an inferred departure outside any stand-down was not recorded as a death")
+	}
+}
