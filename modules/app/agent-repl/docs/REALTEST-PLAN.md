@@ -81,7 +81,10 @@ e2e and Emacs-layer suites stay.
   once per realtest: the copy is of the state as it was before the run began.
 - Refuse to run unless every deployed system is at master's HEAD (the
   readiness report is the judge) and no human is using Emacs.
-- After the run the owner's editor is left working and the stack untouched.
+- After the run the owner's editor is left working and the stack untouched —
+  and the REGISTRY untouched with it: every workspace the run created is closed
+  and forgotten through the daemon before the run directory goes away, and a
+  row that survives fails the run (see "Running a sweep", "The leftovers").
 
 ## Running a sweep
 
@@ -102,11 +105,34 @@ this; the runner is what gets out of their way.
   daemon is a consent of its own: `AGENT_REPL_REALTEST_STOP_DAEMON=1`. Without
   it realtest 3 is SKIPPED with the reason rather than run into its refusal.
   SIGTERM only; a daemon that ignores it is a skip too.
-- **What the exit status means.** 0 — everything asked for ran and passed. 78
-  — what ran passed, but at least one realtest never ran (each skip's reason is
-  printed). 77 — DECLINED, nothing ran at all. Anything else is a realtest
-  failing, and a failure does not stop the sweep: the rest still run, so one
+- **The leftovers.** A realtest that registers, creates or forks a workspace
+  puts a row in the OWNER'S registry naming a directory under the run
+  directory, and the row outlives the directory. A sweep therefore DECLINES at
+  its start when any row names a directory under `~/.claude-emacs/realtest/`
+  (listing them, with the one-line remedy `bin/realtest.sh --clean-leftovers`),
+  each act realtest ends by removing its own rows through the daemon and FAILS
+  for any that survive, and the sweep does the same over its whole run
+  directory from an EXIT trap — so a realtest that failed, a panic and an
+  interrupt all reach it. **The owner's state at the end of a run is the state
+  it was in at the start**; until 2026-09-13 it was not, and the owner watched
+  their editor report a stale registry row for hours afterwards.
+- **The gap between sweeps.** Each realtest harvests its own window, so
+  anything written while no realtest was running — a deploy restart, a boot
+  catch-up, the owner's own use of the editor — was read by nothing. A sweep
+  now opens by scanning from the previous sweep's end to now, across every
+  source the harvest already knows plus the live editor's `*Messages*` and
+  `*Warnings*` buffers, and writes what it finds verbatim into
+  `between-sweeps/MANIFEST.md` under "## Between sweeps". Those findings are
+  held to the SAME bar as an in-window finding — no allowlist — and make the
+  sweep exit non-zero. They do not block it: the realtests still run, so one
   run gathers every finding.
+- **What the exit status means.** 0 — everything asked for ran and passed, the
+  run left no registry row behind, and nothing was written between the sweeps.
+  78 — what ran passed, but at least one realtest never ran (each skip's reason
+  is printed). 77 — DECLINED, nothing ran at all. Anything else is a realtest
+  failing, a registry row the sweep could not remove, or a between-sweeps
+  finding; a failure does not stop the sweep: the rest still run, so one run
+  gathers every finding.
 
 ## The set
 

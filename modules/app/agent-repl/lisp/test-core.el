@@ -3363,10 +3363,11 @@ ladder made a debug line abort `doom-init-ui-hook'."
           ;; Act / Assert: a returned record, not a signal.
           (should (agent-repl--log "vanished-ws" "line after the worktree went away")))))))
 
-(ert-deftest agent-repl-test-deleted-worktree-records-the-central-fallback-at-debug ()
-  "A deleted worktree is an ordinary condition, announced at DEBUG."
+(ert-deftest agent-repl-test-deleted-worktree-records-the-central-fallback-at-warn ()
+  "A REGISTERED directory that is gone is a stale row, announced at WARN."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
+      ;; Arrange
       (let ((project (make-temp-file "agent-repl-vanished-record-" t))
             (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
         (agent-repl--ws-put "vanished-record-ws" :project-dir project)
@@ -3376,7 +3377,51 @@ ladder made a debug line abort `doom-init-ui-hook'."
           (agent-repl--log "vanished-record-ws" "line after the worktree went away"))
         ;; Assert
         (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
-          (should (equal (alist-get 'level record) "debug")))))))
+          (should (equal (alist-get 'level record) "warn")))))))
+
+(ert-deftest agent-repl-test-no-durable-home-records-the-central-fallback-at-info ()
+  "A workspace with no durable home of its own is ordinary, announced at INFO."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'display-warning) #'ignore))
+          ;; Act
+          (agent-repl--log "unregistered-record-ws" "line from a homeless workspace"))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (equal (alist-get 'level record) "info")))))))
+
+(ert-deftest agent-repl-test-stale-registration-is-classified-apart ()
+  "A registered directory that is GONE classifies as a stale registry row."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-class-stale-" t)))
+      (agent-repl--ws-put "class-stale-ws" :project-dir project)
+      (delete-directory project t)
+      ;; Act / Assert
+      (should (eq (agent-repl--central-log-fallback-class "class-stale-ws")
+                  'stale-registration)))))
+
+(ert-deftest agent-repl-test-unregistered-workspace-is-classified-as-homeless ()
+  "A name with no registration at all owns no durable home, and that is all."
+  (agent-repl-test--with-clean-state
+    ;; Arrange / Act / Assert
+    (should (eq (agent-repl--central-log-fallback-class "class-unregistered-ws")
+                'no-durable-home))))
+
+(ert-deftest agent-repl-test-present-directory-is-classified-as-homeless ()
+  "A registered directory that still EXISTS is never a stale registry row."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-class-present-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "class-present-ws" :project-dir project)
+            ;; Act / Assert
+            (should (eq (agent-repl--central-log-fallback-class "class-present-ws")
+                        'no-durable-home)))
+        (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-deleted-worktree-fallback-names-the-workspace ()
   "The announcement says WHICH workspace lost its sink."
@@ -3481,28 +3526,111 @@ its ERROR while an unavailable directory does not."
         (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
           (should (equal (alist-get 'level record) "error")))))))
 
-(ert-deftest agent-repl-test-unroutable-workspace-is-named-in-a-user-warning ()
-  "The routing failure is visible and names the workspace."
+(ert-deftest agent-repl-test-stale-registration-is-named-in-a-user-warning ()
+  "A registered directory that is GONE is visible and names the workspace."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
-      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-stale-named-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
             (warning nil))
+        (agent-repl--ws-put "stale-named-ws" :project-dir project)
+        (delete-directory project t)
         (cl-letf (((symbol-function 'display-warning)
                    (lambda (_type text &rest _) (setq warning text))))
-          (agent-repl--log "no-such-ws" "probe"))
-        (should (string-match-p "no-such-ws" warning))))))
+          ;; Act
+          (agent-repl--log "stale-named-ws" "probe"))
+        ;; Assert
+        (should (string-match-p "stale-named-ws" warning))))))
 
-(ert-deftest agent-repl-test-unroutable-workspace-warns-only-once ()
-  "Repeated routing failures record every time but display one warning."
+(ert-deftest agent-repl-test-stale-registration-warning-keeps-its-wording ()
+  "The one warning the user still sees is worded exactly as it always was."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-stale-wording-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (warning nil))
+        (agent-repl--ws-put "stale-wording-ws" :project-dir project)
+        (delete-directory project t)
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (_type text &rest _) (setq warning text))))
+          ;; Act
+          (agent-repl--log "stale-wording-ws" "probe"))
+        ;; Assert
+        (should (string-match-p "cannot host a durable log sink" warning))
+        (should (string-match-p "\\[MISSING\\]" warning))))))
+
+(ert-deftest agent-repl-test-stale-registration-warning-keeps-its-level ()
+  "The stale registry row keeps the `:warning' level it has always had."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-stale-level-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (level :unset))
+        (agent-repl--ws-put "stale-level-ws" :project-dir project)
+        (delete-directory project t)
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (_type _text &optional warning-level &rest _)
+                     (setq level warning-level))))
+          ;; Act
+          (agent-repl--log "stale-level-ws" "probe"))
+        ;; Assert
+        (should (eq level :warning))))))
+
+(ert-deftest agent-repl-test-stale-registration-warns-only-once ()
+  "Repeated records about one stale row record every time but warn once."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-stale-once-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (warnings 0))
+        (agent-repl--ws-put "stale-once-ws" :project-dir project)
+        (delete-directory project t)
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _) (cl-incf warnings))))
+          ;; Act
+          (dotimes (_ 5)
+            (agent-repl--log "stale-once-ws" "repeated probe")))
+        ;; Assert
+        (should (= warnings 1))))))
+
+(ert-deftest agent-repl-test-unregistered-workspace-raises-no-user-warning ()
+  "A name that owns no registration at all must not interrupt the user."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
       (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
             (warnings 0))
         (cl-letf (((symbol-function 'display-warning)
                    (lambda (&rest _) (cl-incf warnings))))
-          (dotimes (_ 5)
-            (agent-repl--log "no-such-ws" "repeated probe")))
-        (should (= warnings 1))))))
+          ;; Act
+          (agent-repl--log "no-such-ws" "probe"))
+        ;; Assert
+        (should (= warnings 0))))))
+
+(ert-deftest agent-repl-test-present-directory-without-a-sink-raises-no-warning ()
+  "A registered directory that still exists is ordinary, popup or not."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-present-nosink-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (warnings 0))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "present-nosink-ws" :project-dir project)
+              (cl-letf (((symbol-function 'agent-repl--ws-dir-hash-cached)
+                         (lambda (_ws) nil))
+                        ((symbol-function 'display-warning)
+                         (lambda (&rest _) (cl-incf warnings))))
+                ;; Act
+                (agent-repl--log "present-nosink-ws" "probe"))
+              ;; Assert
+              (should (= warnings 0)))
+          (delete-directory project t))))))
 
 (ert-deftest agent-repl-test-routable-workspace-still-uses-its-own-target ()
   "The hard routing invariant does not disturb a routable workspace."
