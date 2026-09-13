@@ -98,6 +98,15 @@ after the focus handback, so a failure, a panic and an interrupt all reach it.
 - **A GUARD-FREE editor is left exactly alone.** There is nothing to restore,
   and quitting the owner's own editor to launch an identical one would be a
   disturbance of its own.
+- **NOTHING ANSWERING IS NOT ALWAYS NOTHING OWED.** "No editor of this run's to
+  hand back" holds only for a run that never quit one. A run that quit the
+  owner's editor — including in the preflight, before any realtest ran, and
+  including a run that then DECLINED — owes them a cold, guard-free editor
+  however it ended, and launches one. The preflight carries its own EXIT trap
+  for exactly this window, because the sweep's trap is not installed yet when
+  the vendor-guard refusals run (owner complaint, 2026-09-13 15:2x: a sweep quit
+  the editor, stopped the daemon, declined over the shims, and left the desktop
+  empty).
 - **A GUARDED DAEMON is part of the handback**, and it is stopped BEFORE the
   replacement editor is launched: a guard-free Emacs ADOPTS an answering daemon
   rather than spawning one, so a guarded daemon left up makes the new editor a
@@ -192,7 +201,8 @@ worse than not running:
 | the plan would quit an editor the run did not start, and `AGENT_REPL_REALTEST_TAKEOVER=1` is not set | a cold start has to quit the standing editor, and that is the owner's editor with the owner's unsaved work in it. The script does not make that decision. The refusal states how many quits the plan holds, and that one answer covers all of them: an editor the run itself started is the run's own artifact, not the owner's session |
 | a daemon is running without the vendor guard in its environment, and `AGENT_REPL_REALTEST_STOP_DAEMON=1` is not set | Emacs ADOPTS an answering daemon and never kills one, so the new Emacs would inherit it and it would spawn shims with the real SDK reachable. The refusal names the pid and names the consent as the remedy. WITH that consent this is not a refusal at all: the run quits the standing editor first (under the takeover, so it cannot bring an unguarded daemon straight back up), then stops the daemon with SIGTERM inside the same bound realtest 3's world uses, and says "the owner's unguarded daemon pid N was stopped under AGENT_REPL_REALTEST_STOP_DAEMON so the realtest's Emacs spawns a guarded one". This is the ordinary case: every sweep's handback leaves the owner a guard-free daemon, so every sweep opens against one |
 | a workspace row in the owner's registry names a directory under `~/.claude-emacs/realtest/` | it belongs to a PREVIOUS sweep, and while it stands the owner's editor reports a stale registry row every time that workspace is touched. See "The leftovers a sweep must not leave" below. The refusal lists every row and ends with the one-line remedy, `bin/realtest.sh --clean-leftovers` |
-| a shim listening under the state directory's `sock/`, or a `shim-lock`, is running without the guard | the daemon ADOPTS a shim that is already listening rather than spawning a fresh one, so the guard on the daemon never reaches it. Realtest 1's first run proved the hole: a shim spawned the day before by an unguarded daemon kept submitting a keepalive prompt to the real vendor every four minutes for the whole run. Every such process is enumerated (`pgrep -f` for the shim's `dist/main.js` and for `shim-lock`, then `ps -Eww` per pid) and the refusal names each pid and its socket |
+| a shim listening under the state directory's `sock/`, or a `shim-lock`, is running without the guard, and `AGENT_REPL_REALTEST_STOP_DAEMON=1` is not set | the daemon ADOPTS a shim that is already listening rather than spawning a fresh one, so the guard on the daemon never reaches it. Realtest 1's first run proved the hole: a shim spawned the day before by an unguarded daemon kept submitting a keepalive prompt to the real vendor every four minutes for the whole run. Every such process is enumerated (`pgrep -f` for the shim's `dist/main.js` and for `shim-lock`, then `ps -Eww` per pid) and the refusal names each pid and its socket, and names the consent as the remedy |
+| the same, WITH `AGENT_REPL_REALTEST_STOP_DAEMON=1` | not a refusal. A DAEMON'S SHIMS OUTLIVE IT BY DESIGN, so stopping the unguarded daemon leaves them listening and the run's own daemon would adopt them — which is why a sweep that had just stopped the daemon under consent still declined here, with the owner's editor already quit. The consent that stops the daemon stands its sessions down too: after the daemon is gone (nothing left to respawn a shim behind the stop) each listed shim and `shim-lock` gets SIGTERM — never SIGKILL — and is given the same bound the daemon stop uses to exit and for its socket to disappear. Each one is stated by pid and socket: "the owner's unguarded shim pid N listening on S was stopped under AGENT_REPL_REALTEST_STOP_DAEMON so the realtest's daemon spawns a guarded one". The table is then re-read from the kernel, and a shim that came back declines |
 
 The backups come BEFORE the takeover refusal. An operator who is told to set the
 flag then re-runs against state that already has a copy.
@@ -202,7 +212,7 @@ Environment:
 | variable | effect |
 |---|---|
 | `AGENT_REPL_REALTEST_TAKEOVER=1` | authorizes quitting the running Emacs, for every quit in the run |
-| `AGENT_REPL_REALTEST_STOP_DAEMON=1` | authorizes stopping the daemon (SIGTERM only), for every stop in the run: realtest 3's world, the preflight's UNGUARDED daemon (the editor is quit first, then the daemon stopped), and the handback's guarded one. Without it realtest 3 is skipped, the preflight declines over an unguarded daemon, and the handback leaves a guarded one standing and says so |
+| `AGENT_REPL_REALTEST_STOP_DAEMON=1` | authorizes standing the owner's sessions down (SIGTERM only), for every stop in the run: realtest 3's world, the preflight's UNGUARDED daemon (the editor is quit first, then the daemon stopped, then the shims it left listening), and the handback's guarded one. Without it realtest 3 is skipped, the preflight declines over an unguarded daemon, and the handback leaves a guarded one standing and says so |
 | `AGENT_REPL_REALTEST_MEASURE=1` | the phase budgets are reported and NOT enforced (see "Budgets") |
 | `AGENT_REPL_REALTEST_OUT` | where the run directory lands |
 | `AGENT_REPL_REALTEST_EMACS_SOCKET` | the Emacs server socket, when it is not `$TMPDIR/emacs<uid>/server` |

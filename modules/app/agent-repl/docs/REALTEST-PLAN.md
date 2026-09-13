@@ -98,7 +98,12 @@ e2e and Emacs-layer suites stay.
   the owner a guard-free daemon, so a sweep always opens against a daemon that
   cannot be adopted. With the consent the run quits the editor first and then
   stops that daemon itself (SIGTERM, never SIGKILL) and says which pid it
-  stopped; without it the preflight declines and names the variable.
+  stopped; without it the preflight declines and names the variable. THE SHIMS
+  THAT DAEMON LEFT LISTENING GO WITH IT, under the same consent: a shim outlives
+  the daemon that spawned it and the run's own daemon would adopt it, so after
+  the daemon is gone each unguarded shim and `shim-lock` is SIGTERMed and stated
+  by pid and socket. Without the consent that refusal stands and names the
+  variable as the remedy.
 - After the run the owner is left with a GUARD-FREE editor and the stack
   untouched. A run's own editor forbids the vendor; the handback quits it and
   cold-starts a normal one in its place (see "Running a sweep", "The editor the
@@ -151,7 +156,10 @@ this; the runner is what gets out of their way.
   alone. The run names the editor the owner gets back before it starts and
   again at the end: *the owner's editor was restored: guarded Emacs pid N quit,
   guarded daemon pid M stopped, a guard-free Emacs launched*. None of it
-  changes the sweep's verdict. `bin/deploy-all.sh` holds the other half: it
+  changes the sweep's verdict. A run that quit the owner's editor and then
+  ENDED WITHOUT ONE ANSWERING — a preflight decline after the quit, most of all
+  — still cold-starts a guard-free editor: "nothing answering, nothing to hand
+  back" applies only to a run that never quit one. `bin/deploy-all.sh` holds the other half: it
   REFUSES to restart the daemon through a guarded Emacs (the incoming daemon
   would inherit the guard) unless `AGENT_REPL_REALTEST_TAKEOVER=1` says to.
 - **The leftovers.** A realtest that registers, creates or forks a workspace
