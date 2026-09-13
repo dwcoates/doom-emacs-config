@@ -44,6 +44,14 @@ export function startSessionCause(response: shimv1.StartSessionResponse): string
   return response.result.value.cause.case ?? "unset";
 }
 
+/** The refusal's own detail — the text the daemon relays verbatim. */
+export function startSessionDetail(response: shimv1.StartSessionResponse): string {
+  if (response.result.case !== "failure") {
+    throw new Error(`StartSession: expected a failure, got ${response.result.case ?? "an unset oneof"}`);
+  }
+  return response.result.value.detail;
+}
+
 /** The `cold` evidence a refusal carried. */
 export function startSessionCold(response: shimv1.StartSessionResponse): conversationv1.SessionCold {
   if (response.result.case !== "failure" || response.result.value.cause.case !== "cold") {
