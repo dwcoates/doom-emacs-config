@@ -585,3 +585,12 @@ switch re-reads everything regardless; the same floor applies there too
 unless the owner rules otherwise).
 Also ruled: hook attachments and total-token reminders are not stored
 (docs/STORE-VOLUME-PROPOSAL.md item 1, first two kinds).
+
+## Implementing the cold-gate floor (2026-09-13, lead)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Where the floor is enforced | In the shim, at both of its decision sites: `judgeCold` (the resume judgement) and `SetSessionModel`'s own per-model gate | The ruling covers a model change too, and `SetSessionModel` does not route through `judgeCold` — a floor in one place only would leave a switch at a threshold of 0 gating a 500-token context | Move the check into `judgeCold` alone |
+| 2026-09-13 | Whether the floor is a configuration knob | No: a `const COLD_GATE_FLOOR_TOKENS = 70_000` in `engine/cold.ts`, citing the ruling | The shim has no configuration surface for thresholds — every environment variable it reads is a refusal rather than a default — and the brief forbids inventing a flag | Add an env var and a default |
+| 2026-09-13 | What the wire carries | Nothing new: `SessionCold` already states `context_tokens`, and the floor only decides whether the message is sent | The daemon and webapp wording is unchanged, and `Fleet.RaiseColdGate` is a relay that decides nothing | Add a floor field to the proto |
+| 2026-09-13 | How the mocked vendor seeds a gate-tripping context | `!cold-seed` now states 90,000 tokens through a new `AssistantOptions.contextTokens`, instead of the mock's ordinary ~25,000 | Every cold-gate fixture sat under the new floor, so the whole area would have gone green while testing nothing | Raise the mock's default usage for every scenario |
