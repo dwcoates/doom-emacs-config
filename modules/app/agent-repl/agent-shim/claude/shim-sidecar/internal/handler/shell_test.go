@@ -1,11 +1,12 @@
 package handler
 
-// shell_test.go — the detached shell spool: deltas, the one structured byte it
-// carries, and the LOST terminal the reader asks for.
+// shell_test.go — the detached shell spool: deltas, the two terminators it can
+// carry, and the LOST terminal the reader asks for.
 
 import (
 	"testing"
 
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -419,5 +420,193 @@ func TestAFourDigitExitIsNotReadAsTheMarker(t *testing.T) {
 	}
 	if got := entries[0].GetUpsertKey(); got != convert.BashDeltaKey("toolu_run4", 0) {
 		t.Fatalf("upsert_key = %q, want the run's delta key", got)
+	}
+}
+
+// exitCodeOf returns the code of the completed terminal in entries, and whether
+// any terminal was minted at all.
+func exitCodeOf(t *testing.T, entries []*storev1.StoreEntry) (int32, bool) {
+	t.Helper()
+	for _, e := range entries {
+		success := e.GetAgentUpdate().GetBash().GetFrame().GetSuccess()
+		if success == nil || success.GetCompleted() == nil {
+			continue
+		}
+		return success.GetCompleted().GetTermination().GetExited().GetCode(), true
+	}
+	return 0, false
+}
+
+func TestTheWrapperExitLineEndsTheRunAsCompleted(t *testing.T) {
+	// Arrange. The vendor's own background-shell wrapper terminates a spool with
+	// `[exited with code N]`, and no harness `EXIT=` line is present at all. This
+	// reader used to see nothing there and let a silence window call the run LOST.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("kern.num_files: 11173\n\n[exited with code 0]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	code, ok := exitCodeOf(t, entries)
+	if !ok {
+		t.Fatalf("the wrapper's exit line did not end the run: keys=%v", allKeys(entries))
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
+func TestANonZeroWrapperExitIsStillCompleted(t *testing.T) {
+	// Arrange. The code is the wrapper's verdict on the run, never a failure of
+	// this call, so it takes the completed arm exactly as `EXIT=` does.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("work\n[exited with code 144]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	code, ok := exitCodeOf(t, entries)
+	if !ok {
+		t.Fatalf("a non-zero wrapper exit did not end the run: keys=%v", allKeys(entries))
+	}
+	if code != 144 {
+		t.Fatalf("exit code = %d, want 144", code)
+	}
+}
+
+func TestTheHarnessMarkerBeatsTheWrapperLineWhenBothArePresent(t *testing.T) {
+	// Arrange. The bracket reports the WRAPPER's exit and reads 0 above a harness
+	// `EXIT=77`, because the wrapper ran fine and the command did not. Taking the
+	// bracket's code there would report a failed command as a clean one.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("EXIT=77\n\n[exited with code 0]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	code, ok := exitCodeOf(t, entries)
+	if !ok {
+		t.Fatalf("the run did not end: keys=%v", allKeys(entries))
+	}
+	if code != 77 {
+		t.Fatalf("exit code = %d, want the command's own 77 rather than the wrapper's 0", code)
+	}
+}
+
+func TestALowercaseExitLineAboveTheWrapperIsNotTheHarnessMarker(t *testing.T) {
+	// Arrange. A real spool prints `exit=1` as ordinary script output above the
+	// wrapper's line. It is not the harness marker, so the wrapper's own code
+	// stands.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("exit=1\n\n[exited with code 0]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	code, ok := exitCodeOf(t, entries)
+	if !ok {
+		t.Fatalf("the run did not end: keys=%v", allKeys(entries))
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want the wrapper's 0: `exit=1` is output, not the marker", code)
+	}
+}
+
+func TestAMidLineWrapperSentenceIsNotReadAsTheTerminator(t *testing.T) {
+	// Arrange. A run that PRINTS the wrapper's sentence mid-line must not be
+	// ended by it, exactly as `BUILD_EXIT=0` does not end one.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("saw [exited with code 0]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	if _, ok := exitCodeOf(t, entries); ok {
+		t.Fatalf("a mid-line wrapper sentence must not terminate the run: keys=%v", allKeys(entries))
+	}
+}
+
+func TestAnUnclosedWrapperLineIsNotReadAsTheTerminator(t *testing.T) {
+	// Arrange. Without the closing bracket the line is prose, not the wrapper's
+	// terminator.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("[exited with code 0\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	if _, ok := exitCodeOf(t, entries); ok {
+		t.Fatalf("an unclosed wrapper line must not terminate the run: keys=%v", allKeys(entries))
+	}
+}
+
+func TestANonNumericWrapperCodeIsNotReadAsTheTerminator(t *testing.T) {
+	// Arrange. `[exited with code oops]` is not a code, and guessing one would
+	// put a number in the run's mouth.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("[exited with code oops]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	if _, ok := exitCodeOf(t, entries); ok {
+		t.Fatalf("a non-numeric wrapper code must not terminate the run: keys=%v", allKeys(entries))
+	}
+}
+
+func TestAFourDigitWrapperCodeIsNotReadAsTheTerminator(t *testing.T) {
+	// Arrange. The digits are bounded for the same reason `EXIT=1234` is refused:
+	// past three digits it is not an exit code being reported.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("[exited with code 1234]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	if _, ok := exitCodeOf(t, entries); ok {
+		t.Fatalf("a four-digit wrapper code must not terminate the run: keys=%v", allKeys(entries))
+	}
+}
+
+func TestAWrapperLineOpeningAMidLineBatchIsNotTrusted(t *testing.T) {
+	// Arrange. A batch resuming mid-line may be carrying the tail of a line that
+	// began in an earlier poll, so a wrapper line at its very start proves
+	// nothing.
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+	h.Handle(spoolFrames("no newline here", 0), ctx)
+
+	// Act.
+	entries := h.Handle(spoolFrames("[exited with code 0]\n", 15), ctx)
+
+	// Assert.
+	if _, ok := exitCodeOf(t, entries); ok {
+		t.Fatalf("a wrapper line opening a mid-line batch must not terminate the run: keys=%v", allKeys(entries))
+	}
+}
+
+func TestAWrapperLineEndingTheRunTellsTheReaderItCannotBeLost(t *testing.T) {
+	// Arrange. A run that ended on its own evidence must be taken out of the
+	// staleness policy's hands, or the finished spool going quiet is written up
+	// as LOST — which is exactly what realtest 2026-09-13 harvested.
+	h := NewShellOutputHandler(testLogger(t))
+	var toldPath, toldRun string
+	h.onTerminal = func(path, run string) { toldPath, toldRun = path, run }
+
+	// Act.
+	h.Handle(spoolFrames("done\n[exited with code 0]\n", 0),
+		spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	if toldPath != "/t/b1.output" || toldRun != "toolu_run1" {
+		t.Fatalf("onTerminal saw (%q, %q), want the spool and its run", toldPath, toldRun)
 	}
 }
