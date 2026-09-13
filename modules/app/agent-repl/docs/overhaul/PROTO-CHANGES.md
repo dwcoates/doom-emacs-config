@@ -712,7 +712,27 @@ four every per-workspace verb raises. Two shapes worth recording:
   than counted: `parent_id` is `ON DELETE SET NULL`, so the caller is owed the
   ids it must deal with first.
 
+### `FooterStatusActivityStartFailed`, the bring-up failure's own line
+
+`FooterStatusDisconnectedActivity.kind` gains `start_failed = 5`, carrying
+`detail` (the cause) and `dropped_prompts` (what the failure cost).
+
+The owner ruled on 2026-09-12 that a bring-up failure is FOOTER-ONLY, which
+settles the arm-in-the-feed question left open below: there is no feed row, so
+the footer's `start_failed` step is the whole account of the failure and needed
+a line to stand under it. The kind OUTRANKS `notification` — it is the line the
+step exists to explain — and it stands until the next successful link edge
+clears it.
+
+Neither field is new information: `detail` is composed from the very evidence
+the `shim_start_failed` fault already carries (`health.StartFailedDetail`, one
+site for both surfaces), and `dropped_prompts` counts the holds
+`dropRevivalHolds` already retires.
+
 ### Not landed: a bring-up failure as a feed row
+
+RULED ON 2026-09-12: the owner refused the feed row outright; the footer arm
+above is what landed instead. Kept for the record.
 
 Described in the report for the owner to rule on, deliberately unimplemented.
 A bring-up failure drops a held prompt and the tray shows standing holds only,
