@@ -180,46 +180,16 @@ form."
 
 ;;;; ---- CreateWorkspaceRequest: the one-shot form ----------------------
 
-(ert-deftest agent-repl-test-wire-verbs-create-one-shot-self-merge ()
-  "A one-shot finishing by self-merge encodes an empty `selfMerge' arm."
+(ert-deftest agent-repl-test-wire-verbs-create-one-shot-is-its-prompt-alone ()
+  "A one-shot encodes its prompt and NOTHING else: there is no finish arm."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :one-shot
-                                  :value (:prompt (:text "ship it")
-                                          :finish (:arm :self-merge :value nil)))))
+                                  :value (:prompt (:text "ship it")))))
            (one-shot (cdr (assq 'oneShot
                                 (agent-repl-wire-encode-create-workspace-request request)))))
       (should (equal (json-serialize one-shot)
-                     "{\"prompt\":{\"said\":\"ship it\"},\"selfMerge\":{}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-one-shot-open-pr-flags ()
-  "A one-shot's open-pr flags ride as `selfCertified' and `addToMergeQueue'."
-  (agent-repl-test-wire-verbs--with-common
-    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
-                          :form '(:arm :one-shot
-                                  :value (:prompt (:text "ship it")
-                                          :finish (:arm :open-pr
-                                                   :value (:self-certified t
-                                                           :add-to-merge-queue t))))))
-           (open-pr (cdr (assq 'openPr
-                               (cdr (assq 'oneShot
-                                          (agent-repl-wire-encode-create-workspace-request
-                                           request)))))))
-      (should (equal open-pr '((selfCertified . t) (addToMergeQueue . t)))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-one-shot-open-pr-false-explicit ()
-  "Unset open-pr flags are spelled explicitly false, never left ambiguous."
-  (agent-repl-test-wire-verbs--with-common
-    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
-                          :form '(:arm :one-shot
-                                  :value (:prompt (:text "ship it")
-                                          :finish (:arm :open-pr :value nil)))))
-           (open-pr (cdr (assq 'openPr
-                               (cdr (assq 'oneShot
-                                          (agent-repl-wire-encode-create-workspace-request
-                                           request)))))))
-      (should (equal (json-serialize open-pr)
-                     "{\"selfCertified\":false,\"addToMergeQueue\":false}")))))
+                     "{\"prompt\":{\"said\":\"ship it\"}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-one-shot-without-prompt-refused ()
   "A one-shot IS its prompt: a one-shot without one never reaches the wire."
@@ -227,16 +197,7 @@ form."
     (should-error
      (agent-repl-wire-encode-create-workspace-request
       (list :repository agent-repl-test-wire-verbs--repo
-            :form '(:arm :one-shot :value (:finish (:arm :self-merge :value nil)))))
-     :type 'agent-repl-wire-error)))
-
-(ert-deftest agent-repl-test-wire-verbs-create-one-shot-without-finish-refused ()
-  "The finish arm IS the finish action, so an unset finish oneof is refused."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error
-     (agent-repl-wire-encode-create-workspace-request
-      (list :repository agent-repl-test-wire-verbs--repo
-            :form '(:arm :one-shot :value (:prompt (:text "ship it")))))
+            :form '(:arm :one-shot :value nil)))
      :type 'agent-repl-wire-error)))
 
 
@@ -1076,13 +1037,13 @@ logging rung returns normally, and the typed signal follows it."
                        #'string<)
                  '("oneShot" "standard"))))
 
-(ert-deftest agent-repl-test-wire-verbs-one-shot-finish-arms-pinned ()
-  "CreateWorkspaceOneShot's finish oneof has exactly the two arms encoded here."
-  (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_create_workspace.pb.go"
-                        "CreateWorkspaceOneShot")
-                       #'string<)
-                 '("openPr" "selfMerge"))))
+(ert-deftest agent-repl-test-wire-verbs-one-shot-has-no-oneof-at-all ()
+  "CreateWorkspaceOneShot carries no oneof: the finish choice is retired, so
+the form is its prompt and nothing else."
+  (should (equal (agent-repl-test--generated-oneof-arms
+                  "agentrepl/v1/endpoint_create_workspace.pb.go"
+                  "CreateWorkspaceOneShot")
+                 nil)))
 
 (ert-deftest agent-repl-test-wire-verbs-close-cause-arms-pinned ()
   "CloseWorkspaceError's cause oneof has exactly the arms this codec decodes."
@@ -1179,22 +1140,6 @@ it carries."
                     (agent-repl-test-wire-verbs--parse "{\"noSlug\":{}}"))
                    '(:cause (:arm :no-slug :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-create-error-finish-required-arm ()
-  "CreateWorkspaceError's `finish_required' arm decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"finishRequired\":{}}"))
-                   '(:cause (:arm :finish-required :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-error-finish-not-one-shot-arm ()
-  "CreateWorkspaceError's `finish_not_one_shot' arm decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"finishNotOneShot\":{}}"))
-                   '(:cause (:arm :finish-not-one-shot :value nil))))))
-
 (ert-deftest agent-repl-test-wire-verbs-create-error-fork-parent-has-no-conversation-arm ()
   "CreateWorkspaceError's `fork_parent_has_no_conversation' arm decodes with
 everything it carries."
@@ -1250,11 +1195,11 @@ the files that directory does not hold."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-create-workspace-error
                     (agent-repl-test-wire-verbs--parse
-                     "{\"oneShotPolicyMissing\":{\"repositoryRoot\":\"/src/p\",\"policyDir\":\"/src/p/.agent-repl/prompts\",\"missingFiles\":[\"oneshot-success-suffix.md\"]}}"))
+                     "{\"oneShotPolicyMissing\":{\"repositoryRoot\":\"/src/p\",\"policyDir\":\"/src/p/.agent-repl/prompts\",\"missingFiles\":[\"oneshot-completion-directive.md\"]}}"))
                    '(:cause (:arm :one-shot-policy-missing
                              :value (:repository-root "/src/p"
                                      :policy-dir "/src/p/.agent-repl/prompts"
-                                     :missing-files ("oneshot-success-suffix.md"))))))))
+                                     :missing-files ("oneshot-completion-directive.md"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-one-shot-policy-missing-empty-file-list ()
   "The arm's `missing_files' is a repeated field, so an omitted one decodes as
@@ -1312,7 +1257,7 @@ carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "finishRequired" "finishNotOneShot" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-spawn-failed-arm ()

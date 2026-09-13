@@ -26,6 +26,6 @@ installResizeObserver();
  */
 beforeEach(() => {
   resetLoggingForTests();
-  setLogger(new ForwardingLogger(async () => {}, () => {}));
+  setLogger(new ForwardingLogger(async () => "accepted", () => {}));
   bindLogContext({ connection_id: "test-connection" });
 });

@@ -132,7 +132,8 @@ the module."
        :desc "New child workspace" "c" #'agent-repl-create-child-workspace
        :desc "New named child workspace (no prompt)" "C" #'agent-repl-create-child-workspace-static
        :desc "Fork workspace + fork the conversation" "f" #'agent-repl-fork-workspace
-       :desc "Re-open a closed workspace" "o" #'agent-repl-open-workspace
+       :desc "New one-shot workspace" "o" #'agent-repl-create-oneshot
+       :desc "Re-open a closed workspace" "O" #'agent-repl-open-workspace
        :desc "Merge current workspace (enqueue)" "M" #'agent-repl-merge-workspace
        :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace))
 
@@ -194,9 +195,6 @@ Doom\='s `global-map\=' numerals structurally; see the commentary above."
 (map! :leader
       (:prefix ("j" . "claude")
        :desc "Enqueue input as deferred prompt"    "RET" #'agent-repl-queue-deferred-prompt
-       :desc "One-shot: self-merge on success"     "o"   #'agent-repl-create-oneshot-self-merge
-       :desc "One-shot: PR, self-certified + queue" "O"  #'agent-repl-create-oneshot-open-pr
-       :desc "One-shot: PR, awaiting review"       "C-o" #'agent-repl-create-oneshot-open-pr-reviewed
        :desc "Close workspace (view only)"         "d"   #'agent-repl-close-workspace
        :desc "Update GitHub PR description"        "r"   #'agent-repl-update-pr
        :desc "Rebase branch onto origin/master"    "b"   #'agent-repl-rebase-onto-origin-master

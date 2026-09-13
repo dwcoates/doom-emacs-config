@@ -44,10 +44,6 @@ const (
 	// ArmNamingFailed is a creation that supplied no name and whose headless
 	// naming call could not mint one.
 	ArmNamingFailed = "naming_failed"
-	// ArmFinishRequired is a one-shot creation with no finish action.
-	ArmFinishRequired = "finish_required"
-	// ArmFinishNotOneShot is a finish action on a standard creation.
-	ArmFinishNotOneShot = "finish_not_one_shot"
 	// ArmForkParentHasNoConversation is a fork whose parent never had one.
 	ArmForkParentHasNoConversation = "fork_parent_has_no_conversation"
 	// ArmSessionDeleted is a bring-up of a session whose record is terminal by

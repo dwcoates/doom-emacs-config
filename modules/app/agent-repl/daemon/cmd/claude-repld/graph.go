@@ -430,14 +430,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return "", orchestrator.RouteParked(ctx, ws, said)
 		},
 		DrainRefusals: refusalNoter{ref: &drainController},
-		OneShotFinish: func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error {
-			verbs, ok := verbsRef.verbs()
-			if !ok {
-				return fmt.Errorf("claude-repld: a one-shot turn concluded before the workspace verbs existed")
-			}
-			return verbs.OnOneShotTurnConcluded(ctx, ws, turn)
-		},
-		Log: p.Surfaces,
+		Log:           p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the prompt queue: %w", err)

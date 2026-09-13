@@ -53,16 +53,16 @@ func (s *store) PutCreationJob(ctx context.Context, job CreationJob) error {
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after,
-			   base_ref, materialized, one_shot, one_shot_finish, initial_prompt, consented_ungated_mode, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			   base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(workspace_id) DO UPDATE SET
 			   source_branch = excluded.source_branch, source_dir = excluded.source_dir, target_dir = excluded.target_dir,
 			   layout_origin = excluded.layout_origin, actions_before = excluded.actions_before, actions_after = excluded.actions_after,
 			   base_ref = excluded.base_ref, materialized = excluded.materialized, one_shot = excluded.one_shot,
-			   one_shot_finish = excluded.one_shot_finish, initial_prompt = excluded.initial_prompt, consented_ungated_mode = excluded.consented_ungated_mode,
+			   initial_prompt = excluded.initial_prompt, consented_ungated_mode = excluded.consented_ungated_mode,
 			   created_at = excluded.created_at`,
 			job.Workspace, job.Layout.SourceBranch, job.Layout.SourceDir, job.Layout.TargetDir, job.Layout.Origin,
-			before, after, job.BaseRef, job.Materialized, job.OneShot, job.Finish, job.InitialPrompt, job.ConsentedUngatedMode,
+			before, after, job.BaseRef, job.Materialized, job.OneShot, job.InitialPrompt, job.ConsentedUngatedMode,
 			nanos(job.CreatedAt))
 		return err
 	})
@@ -83,10 +83,10 @@ func (s *store) CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, b
 		)
 		row := s.db().QueryRowContext(ctx,
 			`SELECT workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after,
-			        base_ref, materialized, one_shot, one_shot_finish, initial_prompt, consented_ungated_mode, created_at
+			        base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at
 			 FROM creation_jobs WHERE workspace_id = ?`, id)
 		err := row.Scan(&job.Workspace, &job.Layout.SourceBranch, &job.Layout.SourceDir, &job.Layout.TargetDir, &job.Layout.Origin,
-			&before, &after, &job.BaseRef, &job.Materialized, &job.OneShot, &job.Finish, &job.InitialPrompt, &job.ConsentedUngatedMode, &created)
+			&before, &after, &job.BaseRef, &job.Materialized, &job.OneShot, &job.InitialPrompt, &job.ConsentedUngatedMode, &created)
 		if errors.Is(err, sql.ErrNoRows) {
 			job, found = CreationJob{}, false
 			return nil

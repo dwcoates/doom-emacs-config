@@ -771,3 +771,46 @@ func TestNoHoldsMeansNoSummary(t *testing.T) {
 		t.Fatalf("hold summaries with nothing held = %d, want none", len(got))
 	}
 }
+
+// TestTheRootAccessorsReportTheGlobbedSpelling asserts each accessor answers
+// the SYMLINK-RESOLVED root, not the spelling the caller handed New.
+//
+// The accessors exist so the boot record can name what discovery actually
+// globs. A caller may pass `/tmp`, and the sidecar then globs `/private/tmp`
+// and stamps every discovered `path` that way; an accessor echoing the caller's
+// spelling would put a root in the boot record that prefixes none of the paths
+// logged under it.
+func TestTheRootAccessorsReportTheGlobbedSpelling(t *testing.T) {
+	// Arrange: a link whose target is the real root, so the two spellings
+	// genuinely differ on every platform rather than only on macOS.
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	link := filepath.Join(base, "link")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", real, err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("linking %s -> %s: %v", link, real, err)
+	}
+	want := Normalize(real)
+	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "discover-test"})
+
+	for _, tc := range []struct {
+		name string
+		got  func(*Discoverer) string
+	}{
+		{name: "config root", got: func(d *Discoverer) string { return d.ConfigRoots()[0] }},
+		{name: "spool root", got: func(d *Discoverer) string { return d.SpoolRoot() }},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			// Act: the link spelling is what the caller passes for BOTH roots.
+			d := New([]string{link}, link, log)
+
+			// Assert.
+			if got := tc.got(d); got != want {
+				t.Fatalf("%s = %q, want the resolved spelling %q (the caller passed %q)", tc.name, got, want, link)
+			}
+		})
+	}
+}

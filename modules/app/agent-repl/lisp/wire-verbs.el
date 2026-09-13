@@ -18,12 +18,11 @@
 ;; message's validation lives exactly once, plus one dedicated function per
 ;; NON-PRIMITIVE USE SITE (a message-typed field or a oneof arm) that
 ;; delegates to the child's base.  Primitives get no wrapper.  Where a use
-;; site's derived name would COLLIDE with the child's own base name (e.g.
-;; CreateWorkspaceOneShot's `self_merge' arm and the message
-;; CreateWorkspaceOneShotSelfMerge both spell
-;; `agent-repl-wire-{en,de}code-create-workspace-one-shot-self-merge'), the
-;; base IS the use-site function: the delegation would be the identity, and
-;; two definitions of one name are not possible.
+;; site's derived name would COLLIDE with the child's own base name (e.g. a
+;; message `Foo' reached through a `foo' arm of its own parent, where both
+;; spell `agent-repl-wire-{en,de}code-foo'), the base IS the use-site
+;; function: the delegation would be the identity, and two definitions of one
+;; name are not possible.
 ;;
 ;; WIRE SHAPE (binding, docs/overhaul/elisp-fanout.md §2).  Keys are
 ;; protojson lowerCamel symbols.  Bools are `t' / `:false'.  int64 is emitted
@@ -244,41 +243,20 @@ ENCODER).  An unset oneof and an unrecognized arm are contract breaches."
   "Encode CreateWorkspaceUngatedConsent.  Empty: presence IS the consent."
   nil)
 
-(defun agent-repl-wire-encode-create-workspace-one-shot-self-merge (_value)
-  "Encode CreateWorkspaceOneShotSelfMerge.  Empty: the arm is the whole fact.
-Also the `self_merge' arm's use-site encoder — the derived use-site name
-is this name, so the base serves both roles."
-  nil)
-
-(defun agent-repl-wire-encode-create-workspace-one-shot-open-pr (value)
-  "Encode CreateWorkspaceOneShotOpenPr from plist VALUE.
-VALUE is (:self-certified BOOL :add-to-merge-queue BOOL); both are plain
-proto3 bools with a `false' default and are spelled explicitly.  Also the
-`open_pr' arm's use-site encoder, whose derived name is this name."
-  (list (cons 'selfCertified
-              (agent-repl-wire-verbs--encode-bool (plist-get value :self-certified)))
-        (cons 'addToMergeQueue
-              (agent-repl-wire-verbs--encode-bool (plist-get value :add-to-merge-queue)))))
-
 (defun agent-repl-wire-encode-create-workspace-one-shot-prompt (said)
   "Encode CreateWorkspaceOneShot's `prompt' use site from SAID."
   (agent-repl-wire-encode-user-said said))
 
 (defun agent-repl-wire-encode-create-workspace-one-shot (value)
   "Encode CreateWorkspaceOneShot from plist VALUE.
-VALUE is (:prompt SAID :finish ONEOF).  A one-shot IS its prompt, so the
-prompt is required; the finish oneof is the finish action and an unset
-oneof is a breach."
+VALUE is (:prompt SAID).  A one-shot IS its prompt, so the prompt is
+required and it is the whole form: there is no finish choice, because what
+happens on completion is the REPOSITORY\='s own directive, which the daemon
+appends to the commission and the agent carries out."
   (let ((message "CreateWorkspaceOneShot"))
     (list (cons 'prompt
                 (agent-repl-wire-encode-create-workspace-one-shot-prompt
-                 (agent-repl-wire-verbs--require message "prompt" (plist-get value :prompt))))
-          (agent-repl-wire-verbs--encode-oneof
-           message "finish" (plist-get value :finish)
-           (list (list :self-merge 'selfMerge
-                       #'agent-repl-wire-encode-create-workspace-one-shot-self-merge)
-                 (list :open-pr 'openPr
-                       #'agent-repl-wire-encode-create-workspace-one-shot-open-pr))))))
+                 (agent-repl-wire-verbs--require message "prompt" (plist-get value :prompt)))))))
 
 (defun agent-repl-wire-encode-create-workspace-merge-actions-before-ws-merge (said)
   "Encode CreateWorkspaceMergeActions's `before_ws_merge' use site from SAID."
@@ -452,16 +430,6 @@ permission mode was asked for without the explicit consent."
 the workspace's branch and dir."
   (agent-repl-wire-verbs--decode-empty "CreateWorkspaceNoSlug" json))
 
-(defun agent-repl-wire-decode-create-workspace-finish-required (json)
-  "Decode CreateWorkspaceFinishRequired from JSON.  Empty: A one-shot form
-arrived with no finish action chosen."
-  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceFinishRequired" json))
-
-(defun agent-repl-wire-decode-create-workspace-finish-not-one-shot (json)
-  "Decode CreateWorkspaceFinishNotOneShot from JSON.  Empty: A finish action
-arrived on a form that is not one-shot."
-  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceFinishNotOneShot" json))
-
 (defun agent-repl-wire-decode-create-workspace-fork-parent-has-no-conversation (json)
   "Decode CreateWorkspaceForkParentHasNoConversation from JSON.  Empty: A fork
 was asked for from a parent that has no conversation to fork."
@@ -553,14 +521,6 @@ the last thing the model said, when it said anything at all."
   "Decode CreateWorkspaceError's `no_slug' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-no-slug json))
 
-(defun agent-repl-wire-decode-create-workspace-error-finish-required (json)
-  "Decode CreateWorkspaceError's `finish_required' cause arm from JSON."
-  (agent-repl-wire-decode-create-workspace-finish-required json))
-
-(defun agent-repl-wire-decode-create-workspace-error-finish-not-one-shot (json)
-  "Decode CreateWorkspaceError's `finish_not_one_shot' cause arm from JSON."
-  (agent-repl-wire-decode-create-workspace-finish-not-one-shot json))
-
 (defun agent-repl-wire-decode-create-workspace-error-fork-parent-has-no-conversation (json)
   "Decode CreateWorkspaceError's `fork_parent_has_no_conversation' cause arm
 from JSON."
@@ -604,14 +564,12 @@ JSON."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug finishRequired finishNotOneShot forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (list (list 'ungatedWithoutConsent :ungated-without-consent #'agent-repl-wire-decode-create-workspace-error-ungated-without-consent)
          (list 'noSlug :no-slug #'agent-repl-wire-decode-create-workspace-error-no-slug)
-         (list 'finishRequired :finish-required #'agent-repl-wire-decode-create-workspace-error-finish-required)
-         (list 'finishNotOneShot :finish-not-one-shot #'agent-repl-wire-decode-create-workspace-error-finish-not-one-shot)
          (list 'forkParentHasNoConversation :fork-parent-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-parent-has-no-conversation)
          (list 'briefMissing :brief-missing #'agent-repl-wire-decode-create-workspace-error-brief-missing)
          (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-create-workspace-error-unknown-repository)

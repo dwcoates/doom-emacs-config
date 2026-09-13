@@ -648,9 +648,14 @@ func (*ClientLogSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{9}
 }
 
-// EMPTY ON PURPOSE: arms DERIVED at the wave, spelled per 3b.
+// Arms derived from the daemon's refusal sites.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type ClientLogError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*ClientLogError_UnknownWorkspace
+	Cause         isClientLogError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -683,6 +688,74 @@ func (x *ClientLogError) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ClientLogError.ProtoReflect.Descriptor instead.
 func (*ClientLogError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ClientLogError) GetCause() isClientLogError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *ClientLogError) GetUnknownWorkspace() *ClientLogUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*ClientLogError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+type isClientLogError_Cause interface {
+	isClientLogError_Cause()
+}
+
+type ClientLogError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry. ORDINARY TRAFFIC, not
+	// a fault: a client that has just been told its workspace closed can still
+	// have records in flight for it, and the record names the workspace it was
+	// written about, so the daemon has nowhere to file it. The daemon records
+	// the refusal at INFO; a forwarder that receives this arm STOPS sending for
+	// that workspace id and keeps the rest of its records locally.
+	UnknownWorkspace *ClientLogUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+func (*ClientLogError_UnknownWorkspace) isClientLogError_Cause() {}
+
+type ClientLogUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClientLogUnknownWorkspace) Reset() {
+	*x = ClientLogUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClientLogUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClientLogUnknownWorkspace) ProtoMessage() {}
+
+func (x *ClientLogUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClientLogUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*ClientLogUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{11}
 }
 
 var File_agentrepl_v1_endpoint_client_log_proto protoreflect.FileDescriptor
@@ -718,8 +791,11 @@ const file_agentrepl_v1_endpoint_client_log_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.agentrepl.v1.ClientLogSuccessH\x00R\asuccess\x124\n" +
 	"\x05error\x18\x02 \x01(\v2\x1c.agentrepl.v1.ClientLogErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x12\n" +
-	"\x10ClientLogSuccess\"\x10\n" +
-	"\x0eClientLogErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x10ClientLogSuccess\"q\n" +
+	"\x0eClientLogError\x12V\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2'.agentrepl.v1.ClientLogUnknownWorkspaceH\x00R\x10unknownWorkspaceB\a\n" +
+	"\x05cause\"\x1b\n" +
+	"\x19ClientLogUnknownWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_client_log_proto_rawDescOnce sync.Once
@@ -733,39 +809,41 @@ func file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_client_log_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_client_log_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_agentrepl_v1_endpoint_client_log_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agentrepl_v1_endpoint_client_log_proto_goTypes = []any{
-	(*ClientLogRequest)(nil),        // 0: agentrepl.v1.ClientLogRequest
-	(*ClientLogRecord)(nil),         // 1: agentrepl.v1.ClientLogRecord
-	(*ClientLogRuntimeWebapp)(nil),  // 2: agentrepl.v1.ClientLogRuntimeWebapp
-	(*ClientLogRuntimeSidecar)(nil), // 3: agentrepl.v1.ClientLogRuntimeSidecar
-	(*ClientLogLevelDebug)(nil),     // 4: agentrepl.v1.ClientLogLevelDebug
-	(*ClientLogLevelInfo)(nil),      // 5: agentrepl.v1.ClientLogLevelInfo
-	(*ClientLogLevelWarn)(nil),      // 6: agentrepl.v1.ClientLogLevelWarn
-	(*ClientLogLevelError)(nil),     // 7: agentrepl.v1.ClientLogLevelError
-	(*ClientLogResponse)(nil),       // 8: agentrepl.v1.ClientLogResponse
-	(*ClientLogSuccess)(nil),        // 9: agentrepl.v1.ClientLogSuccess
-	(*ClientLogError)(nil),          // 10: agentrepl.v1.ClientLogError
-	(*v1.WorkspaceRef)(nil),         // 11: workspace.v1.WorkspaceRef
-	(*structpb.Struct)(nil),         // 12: google.protobuf.Struct
+	(*ClientLogRequest)(nil),          // 0: agentrepl.v1.ClientLogRequest
+	(*ClientLogRecord)(nil),           // 1: agentrepl.v1.ClientLogRecord
+	(*ClientLogRuntimeWebapp)(nil),    // 2: agentrepl.v1.ClientLogRuntimeWebapp
+	(*ClientLogRuntimeSidecar)(nil),   // 3: agentrepl.v1.ClientLogRuntimeSidecar
+	(*ClientLogLevelDebug)(nil),       // 4: agentrepl.v1.ClientLogLevelDebug
+	(*ClientLogLevelInfo)(nil),        // 5: agentrepl.v1.ClientLogLevelInfo
+	(*ClientLogLevelWarn)(nil),        // 6: agentrepl.v1.ClientLogLevelWarn
+	(*ClientLogLevelError)(nil),       // 7: agentrepl.v1.ClientLogLevelError
+	(*ClientLogResponse)(nil),         // 8: agentrepl.v1.ClientLogResponse
+	(*ClientLogSuccess)(nil),          // 9: agentrepl.v1.ClientLogSuccess
+	(*ClientLogError)(nil),            // 10: agentrepl.v1.ClientLogError
+	(*ClientLogUnknownWorkspace)(nil), // 11: agentrepl.v1.ClientLogUnknownWorkspace
+	(*v1.WorkspaceRef)(nil),           // 12: workspace.v1.WorkspaceRef
+	(*structpb.Struct)(nil),           // 13: google.protobuf.Struct
 }
 var file_agentrepl_v1_endpoint_client_log_proto_depIdxs = []int32{
-	11, // 0: agentrepl.v1.ClientLogRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	12, // 0: agentrepl.v1.ClientLogRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.ClientLogRequest.record:type_name -> agentrepl.v1.ClientLogRecord
 	4,  // 2: agentrepl.v1.ClientLogRecord.debug:type_name -> agentrepl.v1.ClientLogLevelDebug
 	5,  // 3: agentrepl.v1.ClientLogRecord.info:type_name -> agentrepl.v1.ClientLogLevelInfo
 	6,  // 4: agentrepl.v1.ClientLogRecord.warn:type_name -> agentrepl.v1.ClientLogLevelWarn
 	7,  // 5: agentrepl.v1.ClientLogRecord.error:type_name -> agentrepl.v1.ClientLogLevelError
-	12, // 6: agentrepl.v1.ClientLogRecord.context:type_name -> google.protobuf.Struct
+	13, // 6: agentrepl.v1.ClientLogRecord.context:type_name -> google.protobuf.Struct
 	2,  // 7: agentrepl.v1.ClientLogRecord.webapp:type_name -> agentrepl.v1.ClientLogRuntimeWebapp
 	3,  // 8: agentrepl.v1.ClientLogRecord.sidecar:type_name -> agentrepl.v1.ClientLogRuntimeSidecar
 	9,  // 9: agentrepl.v1.ClientLogResponse.success:type_name -> agentrepl.v1.ClientLogSuccess
 	10, // 10: agentrepl.v1.ClientLogResponse.error:type_name -> agentrepl.v1.ClientLogError
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	11, // 11: agentrepl.v1.ClientLogError.unknown_workspace:type_name -> agentrepl.v1.ClientLogUnknownWorkspace
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_client_log_proto_init() }
@@ -785,13 +863,16 @@ func file_agentrepl_v1_endpoint_client_log_proto_init() {
 		(*ClientLogResponse_Success)(nil),
 		(*ClientLogResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_client_log_proto_msgTypes[10].OneofWrappers = []any{
+		(*ClientLogError_UnknownWorkspace)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_client_log_proto_rawDesc), len(file_agentrepl_v1_endpoint_client_log_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

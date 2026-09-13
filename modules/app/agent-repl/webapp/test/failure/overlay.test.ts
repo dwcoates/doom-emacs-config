@@ -230,7 +230,7 @@ describe("mountFailureOverlay: refusals", () => {
 
   it("logs a foreign arm at error rather than swallowing it", () => {
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const overlay = mountFailureOverlay(host);
     overlay.report(
       create(FailureKindSchema, { kind: { case: "shimDegraded", value: { component: "stdout" } } }),

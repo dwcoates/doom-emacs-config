@@ -11,6 +11,7 @@ import {
   restampRecordIdentity,
   setLogger,
   type ClientLogLevel,
+  type ClientLogSink,
   type WebappLogRecord,
 } from "../src/log.js";
 
@@ -24,7 +25,7 @@ interface Harness {
 
 /** A logger whose sink resolves and whose console is captured. */
 function install(
-  sink?: (record: ClientLogRecord) => Promise<void>,
+  sink?: ClientLogSink,
   minimumLevel: ClientLogLevel = "debug",
 ): Harness {
   const sent: ClientLogRecord[] = [];
@@ -33,6 +34,7 @@ function install(
     sink ??
       (async (record) => {
         sent.push(record);
+        return "accepted";
       }),
     (level, line) => consoleLines.push([level, line]),
     {},
@@ -375,7 +377,7 @@ describe("the installation invariant", () => {
   });
 
   it("refuses a record with no connection id", () => {
-    setLogger(new ForwardingLogger(async () => {}, () => {}, {}, "debug"));
+    setLogger(new ForwardingLogger(async () => "accepted", () => {}, {}, "debug"));
     // A reset clears the bound context to the harness default; unbind it.
     bindLogContext({ connection_id: "" });
     expect(() => log.info("hello", { operation: "a" })).toThrow(/connection_id/);
@@ -534,7 +536,7 @@ describe("the default console, when no console function is injected", () => {
   it("routes an error record to console.error", () => {
     // ARRANGE
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const logger = new ForwardingLogger(async () => {});
+    const logger = new ForwardingLogger(async () => "accepted");
     // ACT
     logger.write(buildClientLogRecord(webappRecord("error")), '{"operation":"op"}');
     // ASSERT
@@ -544,7 +546,7 @@ describe("the default console, when no console function is injected", () => {
 
   it("routes a warn record to console.warn", () => {
     const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const logger = new ForwardingLogger(async () => {});
+    const logger = new ForwardingLogger(async () => "accepted");
     logger.write(buildClientLogRecord(webappRecord("warn")), '{"operation":"op"}');
     expect(spy).toHaveBeenCalledWith('{"operation":"op"}');
     spy.mockRestore();
@@ -552,7 +554,7 @@ describe("the default console, when no console function is injected", () => {
 
   it("routes an info record to console.log, the level having no console of its own", () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const logger = new ForwardingLogger(async () => {});
+    const logger = new ForwardingLogger(async () => "accepted");
     logger.write(buildClientLogRecord(webappRecord("info")), '{"operation":"op"}');
     expect(spy).toHaveBeenCalledWith('{"operation":"op"}');
     spy.mockRestore();
@@ -565,8 +567,72 @@ describe("the level a record must carry", () => {
     const h = install();
     // ACT / ASSERT
     expect(
-      () => new ForwardingLogger(async () => {}, () => {}, {}, "trace" as ClientLogLevel),
+      () => new ForwardingLogger(async () => "accepted", () => {}, {}, "trace" as ClientLogLevel),
     ).toThrow("webapp log record has invalid level trace");
     expect(h.sent).toHaveLength(0);
+  });
+});
+
+describe("a departed workspace stops the forwarder", () => {
+  it("sends nothing more once the daemon answers unknown_workspace", async () => {
+    // ARRANGE
+    const sent: ClientLogRecord[] = [];
+    const h = install(async (record) => {
+      sent.push(record);
+      return "workspace_departed";
+    });
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    log.info("the last one the daemon knew about", { operation: "test.op" });
+    await flushAndSettle(h);
+    // ACT
+    log.info("after the workspace departed", { operation: "test.op" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(sent).toHaveLength(1);
+  });
+
+  it("records the queued lines it dropped, at debug", async () => {
+    // ARRANGE
+    const h = install(async () => "workspace_departed");
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    log.info("the record that draws the refusal", { operation: "test.op" });
+    h.logger.flush();
+    // These queue behind the refusal, which has not settled yet: they are what
+    // the drop count is about.
+    log.info("queued behind it", { operation: "test.op" });
+    log.info("and another", { operation: "test.op" });
+    // ACT
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    // ASSERT
+    expect(debug).toHaveBeenCalledWith(expect.stringContaining("dropped 2 queued record(s)"));
+  });
+
+  it("keeps consoling every record after it has stopped forwarding", async () => {
+    // ARRANGE
+    const h = install(async () => "workspace_departed");
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    log.info("the record that draws the refusal", { operation: "test.op" });
+    await flushAndSettle(h);
+    // ACT
+    log.info("after the workspace departed", { operation: "test.op" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.console.filter(([, line]) => line.includes("after the workspace departed"))).toHaveLength(1);
+  });
+
+  it("leaves forwarding alone when the record is merely refused", async () => {
+    // ARRANGE
+    const sent: ClientLogRecord[] = [];
+    const h = install(async (record) => {
+      sent.push(record);
+      return "accepted";
+    });
+    log.info("one", { operation: "test.op" });
+    await flushAndSettle(h);
+    // ACT
+    log.info("two", { operation: "test.op" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(sent).toHaveLength(2);
   });
 });

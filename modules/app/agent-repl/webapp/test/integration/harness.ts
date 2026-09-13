@@ -473,6 +473,7 @@ async function mountApp(
     clientLogger = new ForwardingLogger(
       async (record) => {
         await client.clientLog({ workspace: ctx.workspace, record });
+        return "accepted";
       },
       () => {},
       {},
@@ -702,7 +703,7 @@ async function mountApp(
         // Stream cancellation below can itself log. Detach production's sink
         // only after it is drained so teardown diagnostics cannot address a
         // fake daemon that teardown has already stopped.
-        setLogger(new ForwardingLogger(async () => {}, () => {}));
+        setLogger(new ForwardingLogger(async () => "accepted", () => {}));
       }
       // A daemon this mount did not start is the caller's to stop; the fake
       // one it did start is stopped here.
