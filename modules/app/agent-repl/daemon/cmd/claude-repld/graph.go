@@ -711,6 +711,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			RunDir:         lockDir(),
 			JoiningAddress: p.Opts.joining,
 			Adopted:        fleet.Install,
+			StartSession:   fleet.Start,
 			AdoptBound:     adoptBound,
 			Log:            p.Surfaces,
 		},

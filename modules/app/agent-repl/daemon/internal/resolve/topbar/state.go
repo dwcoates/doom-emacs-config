@@ -158,6 +158,11 @@ type wsState struct {
 	// footer and the roster key their idle arms on. It is cleared by the next
 	// link state of any kind, which belongs to the revival's own spawn.
 	parked bool
+	// parkedAtMs is when the park was installed, epoch ms. It is the
+	// hibernated view's only content: the strip ticks the age from it, so the
+	// wire carries the instant and never a duration that would be stale on
+	// arrival.
+	parkedAtMs int64
 	// hostStream and webStream are the other two hops of connectivity truth
 	// (daemon.md invariant 11): the WatchHostWorkspace and WatchWebWorkspace
 	// streams' liveness, stated by the server on every open and close edge.
@@ -231,26 +236,38 @@ func (s *wsState) nextSeq() int {
 
 // ready reports whether every non-optional element of the view can be
 // resolved. See the package comment: these five are the whole gate.
+//
+// A PARKED WORKSPACE IS GATED ON TWO OF THEM, NOT FIVE. The other three are
+// SESSION facts, and a hibernated workspace has no session to state them —
+// waiting for them is waiting forever, which is exactly the blank topbar the
+// hibernated view exists to replace. The naming and the account are not
+// session facts (one is WSM's, one is the config root's), so the hibernated
+// view is still never a partial one: it states every element it declares.
 func (s *wsState) ready() bool {
+	if s.parked {
+		return s.namingSet && s.accountSet
+	}
 	return s.namingSet && s.started && s.accountSet && s.picker != nil && s.contextUsage != nil
 }
 
-// missing names what readiness is still waiting on, for the record.
+// missing names what readiness is still waiting on, for the record. It names
+// the gates of the view that WOULD be published, so a parked workspace is
+// never reported as awaiting the session facts it will never have.
 func (s *wsState) missing() []string {
 	var out []string
 	if !s.namingSet {
 		out = append(out, "naming")
 	}
-	if !s.started {
+	if !s.parked && !s.started {
 		out = append(out, "session_started")
 	}
 	if !s.accountSet {
 		out = append(out, "account")
 	}
-	if s.picker == nil {
+	if !s.parked && s.picker == nil {
 		out = append(out, "permission_mode_picker")
 	}
-	if s.contextUsage == nil {
+	if !s.parked && s.contextUsage == nil {
 		out = append(out, "context_usage")
 	}
 	return out

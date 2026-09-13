@@ -13,11 +13,10 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// TerminalHibernated is the session terminal the sweep records. It is
-// REHYDRATABLE — unlike "deleted", which refuses resurrection — because the
-// next mount of the workspace revives the session from the compacted
-// transcript the Hibernate directive left behind.
-const TerminalHibernated = "hibernated"
+// TerminalHibernated is the session terminal the sweep records. The value has
+// ONE author (wsm), because the boot's bring-up and the open and select verbs
+// all read it back to tell a deliberate sleep from a death.
+const TerminalHibernated = wsm.TerminalHibernated
 
 // Sweep runs one pass of the idle sweep and reports what it hibernated.
 //
