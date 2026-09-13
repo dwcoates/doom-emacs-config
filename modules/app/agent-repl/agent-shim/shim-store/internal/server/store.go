@@ -42,13 +42,14 @@ type (
 // sentinels below; the server maps the sentinel to a failure detail and logs it
 // exactly once.
 type Store interface {
-	WriteBatch(ctx context.Context, producer string, batch *storev1.EntryBatch) (WriteResult, error)
+	WriteBatch(ctx context.Context, producer string, batch *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error)
 	OpenPage(ctx context.Context, agentID string, pageSize uint32, knownThrough *storev1.StoreItemPointer) (OpenedPage, error)
 	ReadPage(ctx context.Context, agentID string, pageSize uint32, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error)
 	LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error)
 	BashRun(ctx context.Context, runID string) (BashRunReplay, error)
 	LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error)
 	Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorState, error)
+	ResidueShapes(ctx context.Context, kind *string, limit uint32, includeExample bool) ([]*storev1.ResidueShapeRow, error)
 	Close() error
 }
 

@@ -79,7 +79,7 @@ func TestPruneWriteLedgerNeverPrunesARowItCannotMeasure(t *testing.T) {
 			arrange: func(t *testing.T, d *DB) {
 				entry := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))
 				entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
-				if _, err := d.WriteBatch(ctx(), "test-producer", batch(entry)); err != nil {
+				if _, err := d.WriteBatch(ctx(), "test-producer", batch(entry), nil); err != nil {
 					t.Fatalf("WriteBatch: %v", err)
 				}
 				advanceCursor(t, d, "12:34", 5_000_000)
@@ -238,7 +238,7 @@ func TestASweepAndAProducerRunConcurrently(t *testing.T) {
 					<-start
 					id := fmt.Sprintf("probe-%d", i)
 					_, errs[i] = d.WriteBatch(ctx(), "test-producer", batch(
-						pageEntry(id, id, "agent-1", frameItem(activityFrame("agent-1", "act-"+id, prose())))))
+						pageEntry(id, id, "agent-1", frameItem(activityFrame("agent-1", "act-"+id, prose())))), nil)
 				}(i)
 			}
 			close(start)
@@ -332,7 +332,7 @@ func writeFileBatch(t *testing.T, d *DB, fileID string, offset int64, writeID, u
 	result, err := d.WriteBatch(ctx(), "test-sidecar", &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{entry},
 		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("WriteBatch: %v", err)
 	}
@@ -345,7 +345,7 @@ func advanceCursor(t *testing.T, d *DB, fileID string, offset int64) {
 	t.Helper()
 	if _, err := d.WriteBatch(ctx(), "test-sidecar", &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("advancing the cursor: %v", err)
 	}
 }
