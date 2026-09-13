@@ -205,6 +205,68 @@ type Fleet struct {
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
 	// whole start, which is why it is not mu itself.
 	startGates map[ids.WorkspaceID]*sync.Mutex
+
+	// detached counts the session starts running OFF a caller's goroutine, and
+	// detachedCtx is the context every one of them runs under. See
+	// StartDetached and DrainStarts: the pair is this fleet's own lifetime for
+	// work no request is waiting on, so the exit can end those starts and join
+	// them rather than close the state client under one.
+	detached    sync.WaitGroup
+	detachedCtx context.Context
+	endDetached context.CancelFunc
+}
+
+// StartDetached brings a workspace's session up WITHOUT the caller waiting for
+// it, reporting the outcome to `done` on the start's own goroutine.
+//
+// A SESSION START IS NOT PART OF AN ANNOUNCEMENT'S ANSWER. RegisterWorkspace
+// records a row; reviving the conversation that row names is work the row
+// occasions, not work the answer contains. Running it inline made the answer
+// wait for the start, and Start takes the workspace's start gate -- so a
+// register that arrived while the boot's own bring-up held that gate waited
+// for the WHOLE of the boot's start.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34: three daemon generations in a
+// row (pids 58458, 68787, 80526) had the boot bring-up's StartSession for
+// `2b81f45a724642ef` hang -- the shim never answered -- and Emacs's
+// re-announcement of that same workspace parked behind it on the gate. Emacs
+// timed RegisterWorkspace out at 10s all three times and reported
+// `link-up-register-failed` and then `call-on-closed-connection
+// SelectWorkspace`, for a row the daemon had already written: the register
+// answer was ready and the start was what was late.
+//
+// THE CONTEXT IS THE FLEET'S, NOT THE CALLER'S. The caller's dies with its
+// answer, which would cancel the very start being detached from it. The
+// fleet's own is ended by DrainStarts at the exit, so an in-flight start is
+// ended and joined rather than left writing into a closing state client.
+func (f *Fleet) StartDetached(ws ids.WorkspaceID, done func(error)) {
+	f.detached.Add(1)
+	go func() {
+		defer f.detached.Done()
+		err := f.Start(f.detachedCtx, ws)
+		if done != nil {
+			done(err)
+		}
+	}()
+}
+
+// DrainStarts ends every detached start and waits, bounded, for it to leave.
+// It answers false when one is still running at the bound, which is the
+// caller's cue to say so loudly: the state client closes next, and a start
+// still writing through it is a refused write on a path that owes no error.
+func (f *Fleet) DrainStarts(bound time.Duration) bool {
+	f.endDetached()
+	left := make(chan struct{})
+	go func() {
+		f.detached.Wait()
+		close(left)
+	}()
+	select {
+	case <-left:
+		return true
+	case <-time.After(bound):
+		return false
+	}
 }
 
 // startGate answers the gate that serializes one workspace's starts, minting
@@ -256,7 +318,10 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	if adoptBound <= 0 {
 		adoptBound = shimclient.DefaultAdoptBound
 	}
+	detachedCtx, endDetached := context.WithCancel(context.Background())
 	return &Fleet{
+		detachedCtx: detachedCtx,
+		endDetached: endDetached,
 		deps:        deps,
 		probe:       probe,
 		socketProbe: socketProbe,
