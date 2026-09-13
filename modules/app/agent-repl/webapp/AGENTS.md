@@ -87,6 +87,7 @@ and are contract on the same terms:
 | `data-footer-notice` | the footer notice drawn when no cold gate row is on the page | `coldGate` | 10 |
 | `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` (absent on every settled, failed, interrupted or turnless prompt) | int-fix-bubble-wave |
 | `.held-right` class | every held-prompt card in the hold tray | — (the rail: a held prompt hangs where the `.bubble.user` it will become hangs) | owner ruling 1, 2026-09-13 |
+| `data-shown` | a sidebar row's expand chevron (`.chev`) | — (present exactly while the pointer is over the row, the keyboard focus is inside it, or the row's details are open; the chevron is `visibility: hidden` without it) | owner ruling 3, 2026-09-13 |
 
 ## Commands
 
@@ -124,6 +125,10 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   fire-and-forget click handler goes through it, so a `MalformedView` is logged
   once and filed as `frame_undecodable` instead of escaping as an unhandled
   rejection.
+- **ONE VIEWPORT CLAMP.** `clampReveal` (src/topbar/clamp.ts). Any panel that
+  must hang under an anchor and stay inside the window places itself through
+  it — the topbar reveals and the sidebar row's detail panel both do — rather
+  than growing a second set of edge rules.
 - **ONE TOKEN FORMATTER.** `formatTokens` (src/format.ts), mirroring the
   daemon's `format.go`: below 1000 unscaled; at or above it, k or M with
   exactly one fractional digit, a trailing ".0" trimmed, and the unit chosen by
