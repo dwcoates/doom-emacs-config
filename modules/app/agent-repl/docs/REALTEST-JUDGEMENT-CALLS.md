@@ -15,6 +15,16 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The editor a run hands back, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The handback must quit the guarded editor; `quit_standing_emacs` demands `AGENT_REPL_REALTEST_TAKEOVER=1` when the editor was not started by this run | The handback goes through `quit_standing_emacs` unchanged, so a guarded editor the run did not start is LEFT and the refusal is printed with the remedy | The task names that function as the consented takeover path, and a handback that quietly closed an editor the operator never consented to close would be a new version of the defect it is fixing | Call `kill-emacs` directly from `restore_owner_editor` (bin/realtest.sh) |
+| 2026-09-13 | Should the handback launch a replacement editor when a guarded daemon was LEFT running for want of the stop consent? | Yes — the editor is launched, and the guarded daemon it will adopt is stated loudly with its pid and the remedy | Leaving the owner with no editor at all is a second disturbance, and the loud statement is what the invisible-action rule asks for; a silent fake-vendor daemon is the thing being ended | Return early from `restore_owner_editor` when `daemon_left` is non-empty |
+| 2026-09-13 | Should the handback launch an editor when NOTHING was standing at the end of the run? | No — the run says so and launches nothing | The run only restores what it disturbed; a sweep always leaves an editor standing, so an empty socket at the end means something else ended it and inventing an editor would not be a restoration | Drop the `emacs_answering` early return in `restore_owner_editor` |
+| 2026-09-13 | `bin/deploy-all.sh`'s refusal needs an exit status | 3, the code every other step-5 bounce failure already uses | A new code would have to be taught to every caller and reader for a failure that is one of the same family: the daemon was not restarted | Give the refusal its own status in `bin/deploy-all.sh` |
+| 2026-09-13 | The replacement launch could rely on `realtest.sh` never exporting the guard | `env -u AGENT_REPL_FORBID_VENDOR_CALLS` wraps the launch instead | Guard-free by construction, not by the absence of an export somewhere above; a sweep re-run from a shell that holds the variable would otherwise hand back another guarded editor | Drop the `env -u` prefix in `restore_owner_editor` |
+
 ## Hold tray rulings 1, 2 and 3, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |

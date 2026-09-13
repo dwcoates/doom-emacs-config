@@ -189,6 +189,13 @@ if [ "${EC_STUB_PROBE_ERROR:-0}" = "1" ]; then
     esac
 fi
 case "$*" in
+    # THE RUNNING EDITOR HAS A PID, because "does the Emacs that will restart
+    # the daemon carry the vendor guard" is a question about a process. The ps
+    # stub answers it from EC_STUB_GUARDED.
+    *"(emacs-pid)"*)
+        printf '%s\n' "${EC_STUB_PID:-31337}"
+        exit 0
+        ;;
     *artifact-root-same*|*artifact-root-changed*)
         echo \"\"${EC_STUB_ARTIFACT_ROOT_RESULT:-artifact-root-same}\"\"
         exit 0
@@ -250,7 +257,19 @@ case "$*" in
 esac
 EOF
 
-    chmod +x "$stubs"/make "$stubs"/go "$stubs"/launchctl "$stubs"/emacsclient "$stubs"/git
+    # `ps` is how deploy-all reads the KERNEL's copy of the running Emacs's
+    # environment. The default answer is an editor the owner started
+    # themselves; EC_STUB_GUARDED=1 makes it one bin/realtest.sh is driving.
+    cat > "$stubs/ps" <<'EOF'
+#!/usr/bin/env bash
+if [ "${EC_STUB_GUARDED:-0}" = "1" ]; then
+    printf '/Applications/Emacs.app/Contents/MacOS/Emacs AGENT_REPL_FORBID_VENDOR_CALLS=1\n'
+else
+    printf '/Applications/Emacs.app/Contents/MacOS/Emacs\n'
+fi
+EOF
+
+    chmod +x "$stubs"/make "$stubs"/go "$stubs"/launchctl "$stubs"/emacsclient "$stubs"/git "$stubs"/ps
 }
 
 # --- per-test runner --------------------------------------------------------
@@ -919,6 +938,46 @@ if [ "$RC" -eq 3 ] \
 else
     fail "a control-plane preload naming an absent file fails before any build or kickstart" \
          "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 34. a guarded Emacs must not be the one that restarts the daemon ------
+# bin/realtest.sh drives the editor under AGENT_REPL_FORBID_VENDOR_CALLS, and
+# the restart below is made BY the running Emacs, so a deploy through it hands
+# the owner a daemon whose shims answer from the FAKE vendor (owner's live
+# logs, 2026-09-13 14:19).
+d="$TMP/t34"; mkdir -p "$d"; RUN_ENV="EC_STUB_GUARDED=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && ! log_has 'runtime-restart' \
+   && ! log_has 'emacsclient --eval (load' \
+   && grep -q "REFUSING to restart the daemon: the running Emacs (pid 31337) carries AGENT_REPL_FORBID_VENDOR_CALLS" "$d/stderr" \
+   && grep -q "open -gj -a Emacs" "$d/stderr"; then
+    pass "a deploy REFUSES to restart the daemon through an Emacs that carries the vendor guard"
+else
+    fail "a deploy REFUSES to restart the daemon through an Emacs that carries the vendor guard" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 35. the realtest operator's own consent goes ahead --------------------
+d="$TMP/t35"; mkdir -p "$d"
+RUN_ENV="EC_STUB_GUARDED=1 AGENT_REPL_REALTEST_TAKEOVER=1" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && log_has 'runtime-restart' \
+   && grep -q "AGENT_REPL_REALTEST_TAKEOVER=1 — restarting through the guarded Emacs (pid 31337)" "$d/stdout"; then
+    pass "AGENT_REPL_REALTEST_TAKEOVER=1 lets a deploy restart through a guarded Emacs, and says so"
+else
+    fail "AGENT_REPL_REALTEST_TAKEOVER=1 lets a deploy restart through a guarded Emacs, and says so" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 36. a guard-free Emacs is restarted through without a word ------------
+d="$TMP/t36"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && log_has 'runtime-restart' \
+   && ! grep -q "REFUSING to restart the daemon" "$d/stderr"; then
+    pass "an Emacs that carries no vendor guard is restarted through as before"
+else
+    fail "an Emacs that carries no vendor guard is restarted through as before" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
 echo
