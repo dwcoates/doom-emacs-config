@@ -107,9 +107,10 @@ hard error. Both outcomes are recorded (`store.pprof.disabled` /
   otherwise — the `WatchBashRun` index, and the bash equivalent of
   `book_agent_id`), `top_level`, and `frame`, the serialized `StoreEntry` the
   store never opens beyond routing.
-- `write_ledger` — one row per write ever APPLIED (`write_id` PK, `upsert_key`,
-  `write_seq`, `applied_at_ms`), written in the same transaction as the row it
-  applied. **ABSORPTION ASKS THIS TABLE, NEVER `entry.write_id`.** `entry` holds
+- `write_ledger` — one row per write APPLIED AND STILL RE-READABLE (`write_id`
+  PK, `upsert_key`, `write_seq`, `applied_at_ms`, `source_file_id`,
+  `source_offset`), written in the same transaction as the row it applied and
+  swept once it falls past the retention window below. **ABSORPTION ASKS THIS TABLE, NEVER `entry.write_id`.** `entry` holds
   only the LATEST write applied to a row, so probing it answered "is this the
   write that currently owns the row?" — and a producer replaying w1 after w2
   settled the same `upsert_key` read as never-seen, overwrote the newer content
@@ -125,6 +126,56 @@ hard error. Both outcomes are recorded (`store.pprof.disabled` /
 filters and joins on them; `entry`'s frame stays a BLOB because activity
 vocabulary is content, and unpacking it would drag every `conversation.v1`
 change into DDL.
+
+### The write ledger is retained only as long as absorption can ask
+
+The ledger answers ONE question — "has this write_id already been applied?" —
+asked when a producer re-emits bytes it has already sent, so the store absorbs
+the replay instead of re-upserting the row, bumping `write_seq` and
+re-delivering a regression to every live watcher. It answered that for EVERY
+write the store had ever applied, forever: 735k rows and 204 MB with its indexes
+on the owner's box, almost none of which any producer could still ask about.
+
+**THE RULE: a ledger row whose source offset is more than
+`DefaultLedgerRetentionBytes` behind its file's COMMITTED cursor is removed.**
+
+The safety argument is the sidecar's own bounds, and the exact form of it lives
+in the comment at the top of `internal/db/prune.go`:
+
+- The sidecar mints a DETERMINISTIC `write_id` from `file_id` + `offset` +
+  discriminator, so only the same bytes at the same offset of the same file ever
+  mint the same id.
+- It re-reads sent bytes in exactly two ways. THE BOOT REWIND
+  (`tail.RewindToTurnStart`, once per file per boot) moves the restored cursor
+  back at most `tail.DefaultRewindWindow` — 4 MB — from the committed cursor, in
+  ONE bounded backward scan that cannot reach further. THE HOLD advances the
+  cursor short of what was read, and the held frame is by definition not yet
+  written.
+- So a row further behind than that window names bytes nothing will read again.
+
+`DefaultLedgerRetentionBytes` is **16 MB, four times the rewind window on
+purpose**: the two numbers live in different modules and are bumped by different
+people, and a margin is cheaper than a cross-module coupling.
+
+**WHAT IS NEVER SWEPT.** A row with no source file — every stream-plane write,
+and any file-plane batch that advanced no cursor — is stamped NULL and kept: the
+shim re-emits from an in-memory retry buffer whose bound the store cannot see,
+and there is no structural argument for a cutoff, so there is no cutoff. A row
+whose file has NO cursor row is kept too, because no cursor means that file is
+re-read FROM ZERO, which is exactly when the ledger is doing the most work.
+
+**THE SWEEP IS BOUNDED AND SHARES THE WRITE SLOT.** `DB.SweepWriteLedger` runs
+`PruneWriteLedger` every `DefaultLedgerSweepInterval` (and once at start), which
+deletes in transactions of `ledgerPruneBatch` rows, each taking and RELEASING
+the serialized write slot — so a producer's batch waits at most one batch of
+deletes, never a whole sweep. It is interruptible and commits as it goes; a
+sweep cut short by shutdown keeps what it removed and returns the caller's
+cancellation, not a storage failure. A sweep that removed rows is one info
+record with the counts; one that removed nothing is verbose. `main.go` stops it
+BEFORE closing the database.
+
+There is no `--` flag: the window is `Options.LedgerRetentionBytes`, which only
+a test sets, and a NEGATIVE value disables the sweep entirely.
 
 ### The store is NUKED, never migrated
 

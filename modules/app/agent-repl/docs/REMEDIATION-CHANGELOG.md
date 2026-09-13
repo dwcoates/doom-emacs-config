@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- store ledger: `write_ledger` rows are stamped with their batch's source file/offset and swept once they fall 16 MB behind that file's committed cursor — four times the sidecar's 4 MB boot rewind — by a bounded background sweep that releases the write slot between batches (735k rows / 204 MB, owner ruling 2026-09-13)
+
 - store reads: the store keeps a SEPARATE read pool (no `_txlock`, `query_only(true)`, write handle capped at one connection), so a page repaint can never reach the write lock rather than merely opting out of it per call site (owner ruling, 2026-09-13)
 
 - store writes: every write transaction goes through one process-wide slot (`beginWrite`), so a batch queues in-process and is never refused for a sibling's `SQLITE_BUSY`, and `lock_wait_ms` now measures that queue (gap scan `store.db.write-batch` x9 "database is locked (5)", 2026-09-13 14:02)

@@ -141,7 +141,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		// dressing the wait's end as a storage failure would tell the producer
 		// to retry a batch its own caller has already abandoned — and would
 		// write an error record for a healthy store.
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if isContextError(err) {
 			return WriteResult{}, d.refuse(base, err)
 		}
 		return WriteResult{}, d.refuse(base, storagef(err, "begin write transaction"))
@@ -212,7 +212,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		if err != nil {
 			return WriteResult{}, d.refuse(fields, err)
 		}
-		if err := d.recordApplied(ctx, tx, r, nextSeq, now); err != nil {
+		if err := d.recordApplied(ctx, tx, r, cursor, nextSeq, now); err != nil {
 			return WriteResult{}, d.refuse(fields, err)
 		}
 		if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
@@ -305,7 +305,7 @@ func (d *DB) refuse(fields logging.Fields, err error) error {
 	// RETURNED unchanged for the server to shape into its failure arm. An
 	// abandoned call that left no record at all would be indistinguishable
 	// from one that never arrived.
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if isContextError(err) {
 		fields.Level = "info"
 		d.log.Log(fields, "abandoned: the caller's context ended before the statement finished: %v", err)
 		return err
@@ -352,9 +352,24 @@ func (d *DB) absorbedBefore(ctx context.Context, tx *sql.Tx, writeID string) (bo
 // TRANSACTION as the row it applied. Split them and a crash between the two
 // would either lose the absorption fact (a replay regresses the row) or claim
 // one that never happened (a write is silently dropped).
-func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, writeSeq uint64, now int64) error {
-	const insertSQL = `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms) VALUES (?,?,?,?)`
-	if _, err := tx.ExecContext(ctx, insertSQL, r.writeID, r.upsertKey, writeSeq, now); err != nil {
+// THE ROW IS STAMPED WITH THE BATCH'S SOURCE POSITION WHERE THERE IS ONE, and
+// that stamp is the whole basis of the ledger's retention (see prune.go). It is
+// the batch's `cursor_advance` — the file these rows were read from and the
+// offset the producer's NEXT read starts at, which is strictly above every
+// offset the batch's own rows came from, so subtracting from it can only ever
+// keep a row too long. A FILE-plane entry in a batch that advanced no cursor,
+// and every STREAM-plane entry, are stamped NULL and are kept forever: neither
+// names a byte the store could measure a re-read against.
+func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, cursor *storev1.CursorState, writeSeq uint64, now int64) error {
+	const insertSQL = `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms, source_file_id, source_offset)
+	  VALUES (?,?,?,?,?,?)`
+	var sourceFile sql.NullString
+	var sourceOffset sql.NullInt64
+	if r.plane == planeFile && cursor != nil && cursor.GetFileId() != "" {
+		sourceFile = sql.NullString{String: cursor.GetFileId(), Valid: true}
+		sourceOffset = sql.NullInt64{Int64: cursor.GetOffset(), Valid: true}
+	}
+	if _, err := tx.ExecContext(ctx, insertSQL, r.writeID, r.upsertKey, writeSeq, now, sourceFile, sourceOffset); err != nil {
 		return storagef(err, "recording write_id %q in the write ledger", r.writeID)
 	}
 	return nil
