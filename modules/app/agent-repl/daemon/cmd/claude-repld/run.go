@@ -351,6 +351,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"orphans_closed":     len(report.Orphaned),
 		"missing_dir_closed": len(report.MissingDirClosed),
 		"holds_restored":     report.HoldsRestored,
+		"pending_bring_up":   len(report.PendingBringUp),
 	})
 
 	srv, err := h.Server(built.Server)
@@ -393,6 +394,27 @@ func run(ctx context.Context, opts options, h hooks) error {
 			loop.run(serving, log)
 		}(loop)
 	}
+	// THE BRING-UP IS THE ONE BOOT STEP THAT DOES NOT GATE READINESS, and it
+	// starts here: after the bindings and the opening views, because it starts
+	// SESSIONS and a session that pushed into a surface that did not exist
+	// would push into nothing — and before `h.Serve`, so the accept loop and
+	// the shim spawns run at the same time instead of one after the other.
+	//
+	// IT IS WHY DaemonHealth ANSWERS. Emacs recognizes a replacement daemon by
+	// a unary under a 3s bound, and on 2026-09-13 a bring-up INSIDE the
+	// reconciliation put two shim spawns in front of that bound: the daemon
+	// came up, started both sessions, and the deploy still reported
+	// `replacement identity was not observed`. Nothing in this step is allowed
+	// in front of the listener again.
+	//
+	// It joins with the background loops, so an orderly exit waits for a
+	// session start in flight on the same bound they get rather than closing
+	// the state client under it.
+	loops.Add(1)
+	go func() {
+		defer loops.Done()
+		sequence.BringUp(serving, report.PendingBringUp)
+	}()
 	defer joinBackgroundLoops(&loops, loopJoinBound, log)
 	// AND THE QUEUE'S OWN GOROUTINES, for the same reason and on the same
 	// bound: a classification verdict and a background revival each read and

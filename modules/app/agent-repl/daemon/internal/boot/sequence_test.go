@@ -987,17 +987,14 @@ func TestABootStartsANonAdoptedOpenWorkspace(t *testing.T) {
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
 
 	// Act.
-	report, err := h.seq.Run(context.Background())
+	_, brought := h.runAndBringUp(t)
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
 	if len(h.started) != 1 || h.started[0] != ws.ID {
 		t.Fatalf("started = %v, want [%v]", h.started, ws.ID)
 	}
-	if len(report.BroughtUp) != 1 || report.BroughtUp[0] != ws.ID {
-		t.Fatalf("report.BroughtUp = %v, want [%v]", report.BroughtUp, ws.ID)
+	if len(brought.BroughtUp) != 1 || brought.BroughtUp[0] != ws.ID {
+		t.Fatalf("BroughtUp = %v, want [%v]", brought.BroughtUp, ws.ID)
 	}
 }
 
@@ -1008,17 +1005,14 @@ func TestABootLeavesAHibernatedWorkspaceAsleep(t *testing.T) {
 	h.hibernate(t, ws)
 
 	// Act.
-	report, err := h.seq.Run(context.Background())
+	_, brought := h.runAndBringUp(t)
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
 	if len(h.started) != 0 {
 		t.Fatalf("started = %v, want none: hibernation is deliberate", h.started)
 	}
-	if len(report.HibernatedLeft) != 1 || report.HibernatedLeft[0] != ws.ID {
-		t.Fatalf("report.HibernatedLeft = %v, want [%v]", report.HibernatedLeft, ws.ID)
+	if len(brought.HibernatedLeft) != 1 || brought.HibernatedLeft[0] != ws.ID {
+		t.Fatalf("HibernatedLeft = %v, want [%v]", brought.HibernatedLeft, ws.ID)
 	}
 }
 
@@ -1030,17 +1024,14 @@ func TestOneFailedBringUpDoesNotStopTheNext(t *testing.T) {
 	h.startErrs[first.ID] = errBoom
 
 	// Act.
-	report, err := h.seq.Run(context.Background())
+	_, brought := h.runAndBringUp(t)
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+	if len(brought.BringUpFailed) != 1 || brought.BringUpFailed[0] != first.ID {
+		t.Fatalf("BringUpFailed = %v, want [%v]", brought.BringUpFailed, first.ID)
 	}
-	if len(report.BringUpFailed) != 1 || report.BringUpFailed[0] != first.ID {
-		t.Fatalf("report.BringUpFailed = %v, want [%v]", report.BringUpFailed, first.ID)
-	}
-	if len(report.BroughtUp) != 1 || report.BroughtUp[0] != second.ID {
-		t.Fatalf("report.BroughtUp = %v, want [%v]", report.BroughtUp, second.ID)
+	if len(brought.BroughtUp) != 1 || brought.BroughtUp[0] != second.ID {
+		t.Fatalf("BroughtUp = %v, want [%v]", brought.BroughtUp, second.ID)
 	}
 }
 
@@ -1053,17 +1044,14 @@ func TestABootStartsNoSessionForAClosedRow(t *testing.T) {
 	}
 
 	// Act.
-	report, err := h.seq.Run(context.Background())
+	_, brought := h.runAndBringUp(t)
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
 	if len(h.started) != 0 {
 		t.Fatalf("started = %v, want none for a closed row", h.started)
 	}
-	if len(report.BroughtUp) != 0 {
-		t.Fatalf("report.BroughtUp = %v, want none for a closed row", report.BroughtUp)
+	if len(brought.BroughtUp) != 0 {
+		t.Fatalf("BroughtUp = %v, want none for a closed row", brought.BroughtUp)
 	}
 }
 
@@ -1077,12 +1065,9 @@ func TestAnUndeterminedWorkspaceIsNeverStarted(t *testing.T) {
 	h.probeErrs[ws.Dir] = errBoom
 
 	// Act.
-	report, err := h.seq.Run(context.Background())
+	report, _ := h.runAndBringUp(t)
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
 	if len(h.started) != 0 {
 		t.Fatalf("started = %v, want none for an undetermined workspace", h.started)
 	}
@@ -1097,12 +1082,135 @@ func TestTheBringUpSummaryIsRecordedAtInfo(t *testing.T) {
 	h.register(t, t.TempDir(), sessionlock.StateFree)
 
 	// Act.
-	if _, err := h.seq.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	h.runAndBringUp(t)
 
 	// Assert.
 	if !h.hasRecord("info", "daemon.boot.bring_up") {
 		t.Fatalf("records = %+v, want an info bring-up summary", h.log.Records())
+	}
+}
+
+// TestTheReconciliationStartsNoSessionOfItsOwn pins the invariant the
+// 2026-09-13 deploy regression named: the daemon answers no unary until the
+// reconciliation has RETURNED, so a session start inside it is a shim spawn in
+// front of the editor's 3s DaemonHealth bound. Run therefore only NAMES the
+// workspaces to bring up.
+func TestTheReconciliationStartsNoSessionOfItsOwn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(h.started) != 0 {
+		t.Fatalf("started = %v, want none: the reconciliation must not spend a shim spawn before the daemon answers", h.started)
+	}
+	if len(report.PendingBringUp) != 1 || report.PendingBringUp[0].ID != ws.ID {
+		t.Fatalf("report.PendingBringUp = %v, want the client-less workspace %v", report.PendingBringUp, ws.ID)
+	}
+}
+
+// TestTheReconciliationDoesNotWaitOnASlowSessionStart is the same invariant
+// stated as the failure it prevents: N slow starts used to be N delays in
+// front of the first health answer. The start here never returns until the
+// test lets it, and the reconciliation still completes.
+func TestTheReconciliationDoesNotWaitOnASlowSessionStart(t *testing.T) {
+	// Arrange: three workspaces whose starts BLOCK until released.
+	release := make(chan struct{})
+	entered := make(chan ids.WorkspaceID, 3)
+	h := newHarness(t, func(deps *Deps, h *harness) {
+		deps.StartSession = func(_ context.Context, ws ids.WorkspaceID) error {
+			entered <- ws
+			<-release
+			return nil
+		}
+	})
+	defer close(release)
+	for i := 0; i < 3; i++ {
+		h.register(t, t.TempDir(), sessionlock.StateFree)
+	}
+
+	// Act: the reconciliation, with nothing released.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert: it returned, which is what lets the daemon serve.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.PendingBringUp) != 3 {
+		t.Fatalf("report.PendingBringUp = %v, want all three workspaces", report.PendingBringUp)
+	}
+	select {
+	case ws := <-entered:
+		t.Fatalf("the reconciliation started %v, want no start until the bring-up runs", ws)
+	default:
+	}
+}
+
+// TestABringUpStartsNothingFurtherOnceTheDaemonIsLeaving pins the half of the
+// split that the exit sees: the step now runs beside the accept loop, so a
+// shutdown can land in the middle of it, and the workspaces it has not reached
+// are simply not started.
+func TestABringUpStartsNothingFurtherOnceTheDaemonIsLeaving(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+	report, err := h.seq.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	leaving, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	brought := h.seq.BringUp(leaving, report.PendingBringUp)
+
+	// Assert.
+	if len(h.started) != 0 {
+		t.Fatalf("started = %v, want none once the daemon is leaving", h.started)
+	}
+	if len(brought.BroughtUp) != 0 {
+		t.Fatalf("BroughtUp = %v, want none once the daemon is leaving", brought.BroughtUp)
+	}
+}
+
+// TestAStartAlreadyBegunIsNotCutByTheExit pins the other half: a start that
+// has begun writes a session record, a spawned shim and — on a failure — a
+// fault, and an exit that cancelled it halfway left all three half-written.
+func TestAStartAlreadyBegunIsNotCutByTheExit(t *testing.T) {
+	// Arrange: the exit lands INSIDE the start, and the start reads its own
+	// context back afterwards.
+	leaving, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var startCtxErr error
+	h := newHarness(t, func(deps *Deps, h *harness) {
+		deps.StartSession = func(ctx context.Context, ws ids.WorkspaceID) error {
+			cancel()
+			startCtxErr = ctx.Err()
+			h.started = append(h.started, ws)
+			return nil
+		}
+	})
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+	report, err := h.seq.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Act.
+	brought := h.seq.BringUp(leaving, report.PendingBringUp)
+
+	// Assert.
+	if len(brought.BroughtUp) != 1 {
+		t.Fatalf("BroughtUp = %v, want the one workspace started", brought.BroughtUp)
+	}
+	if startCtxErr != nil {
+		t.Fatalf("the start ran under a context reading %v, want one the exit cannot cut", startCtxErr)
 	}
 }
