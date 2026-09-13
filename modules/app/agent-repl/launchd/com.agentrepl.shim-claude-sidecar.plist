@@ -65,6 +65,19 @@
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
+    <!--
+      A STOP THAT IS ASKED FOR IS A STOP THAT HAPPENS. Stated explicitly rather
+      than left to launchd's default, because a stop this service did not
+      complete is what made this key necessary: one teardown held past three
+      minutes while launchd waited, and `bin/store-reset.sh` waited with it. The
+      service's own shutdown is bounded well inside this (see
+      logging.DefaultShutdownDrain, 5s), so reaching this timeout means the
+      process is stuck somewhere it has no bound of its own and SIGKILL is the
+      right answer.
+    -->
+    <key>ExitTimeOut</key>
+    <integer>20</integer>
+
     <key>ProcessType</key>
     <string>Background</string>
 

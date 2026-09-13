@@ -130,6 +130,12 @@ func TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle(t *testing.T
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
+	// THE PER-ITEM DETAIL LIVES AT DEBUG DURING CATCH-UP. A restarted reader
+	// re-deriving a file that was already on disk is the boot walk, and
+	// `boot-rewind` is one of the six operations the startup catch-up window
+	// levels; this subject asserts the per-item record, so it reads the log at
+	// the threshold that record is written to.
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 	movedSlug := cwdSlug("/Users/dodgecoates/transcript-rename-resume-probe")
 	cut := 9
 

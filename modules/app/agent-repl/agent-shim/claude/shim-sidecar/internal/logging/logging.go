@@ -261,8 +261,21 @@ type Logger struct {
 	minimumLevel          sharedlogging.Level
 	poisoned              error
 	files                 map[string]Context
-	forwarder             Forwarder
-	lastForwardFailure    string
+	// The startup catch-up window. A restarted sidecar re-derives the owner's
+	// whole historical corpus from files, and the per-item records of that walk
+	// are a CONDITION OF THE BACKLOG rather than events worth an INFO line each
+	// — the same inverted pyramid the rescan-driven holds and the LOST tracker
+	// already level, arriving through the operations that read the corpus.
+	// While the window is open, an INFO record of a registered operation is
+	// stated at DEBUG and tallied; closing the window states one INFO
+	// `catchup-summary` per operation carrying the count. Nothing is silenced:
+	// the detail is still written, and the totals ride the summary.
+	catchupActive      bool
+	catchupOps         map[string]struct{}
+	catchupTally       map[string]int
+	catchupOrder       []string
+	forwarder          Forwarder
+	lastForwardFailure string
 	// lastForwardDeferred rate-limits the DEBUG startup-transient narration the
 	// same way lastForwardFailure rate-limits the WARN, per daemon address and
 	// boot window, so a slow boot does not narrate a rung per record.
@@ -381,22 +394,77 @@ func (b *Bound) With(ctx Context) *Bound {
 	return &Bound{logger: b.logger, context: mergeContext(b.context, ctx)}
 }
 
-// Close drains the forwarding queue and stops its worker. Ordinary log calls
-// never wait for ClientLog; shutdown is the one boundary that waits so a
-// process exit cannot strand diagnostics which were already accepted.
+// DefaultShutdownDrain bounds how long a process exit waits for the forwarding
+// queue to drain.
+//
+// WHY IT IS BOUNDED. A healthy teardown is sub-millisecond — the owner's log
+// puts 90µs between the `shutdown` record and the `exit` record, and the
+// replacement process starting 34ms later. An UNHEALTHY one is not slow, it is
+// STUCK: with the daemon gone, the closing forward loop still probes and dials
+// once per queued record, and one boot had 42,044 undelivered records queued.
+// That teardown ran past three minutes on the owner's machine while launchd
+// waited on a service it had already asked to stop. Five seconds is a large
+// multiple of every healthy teardown ever observed here and a small fraction of
+// launchd's exit timeout, so a stuck drain costs the operator a bounded pause
+// instead of a hung service.
+const DefaultShutdownDrain = 5 * time.Second
+
+// Close drains the forwarding queue and stops its worker, waiting as long as it
+// takes. Ordinary log calls never wait for ClientLog; shutdown is the one
+// boundary that waits so a process exit cannot strand diagnostics which were
+// already accepted.
+//
+// PRODUCTION USES CloseWithin. An unbounded wait is right for a test that owns
+// both ends of the forwarder and wrong for a service launchd is waiting on.
 func (l *Logger) Close() {
 	if l == nil || l.forwarder == nil {
 		return
 	}
+	done := l.beginClose()
+	<-done
+}
+
+// CloseWithin drains the forwarding queue and stops its worker, ABANDONING the
+// wait after d. It answers how many records were still queued when the bound
+// fired, and whether the queue drained.
+//
+// A bound that fires is STATED, never silent: the record names the count still
+// queued and the daemon address the loop was forwarding to, at INFO, through
+// the durable sink — the queue is closed by then, so nothing about this record
+// can re-enter it.
+func (l *Logger) CloseWithin(d time.Duration) (pending int, drained bool) {
+	if l == nil || l.forwarder == nil {
+		return 0, true
+	}
+	done := l.beginClose()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return 0, true
+	case <-timer.C:
+	}
 	l.forwardMu.Lock()
+	pending = len(l.forwardQueue)
+	l.forwardMu.Unlock()
+	address, _ := l.forwarder.Ready()
+	l.write(false, Context{Operation: "shutdown-drain"},
+		"the log forwarding queue did not drain within %s; abandoning it with %d record(s) still queued for the daemon at %s and exiting",
+		d, pending, addrOrUnresolved(address))
+	return pending, false
+}
+
+// beginClose latches the closing state exactly once and answers the channel the
+// forward loop closes when it stops.
+func (l *Logger) beginClose() chan struct{} {
+	l.forwardMu.Lock()
+	defer l.forwardMu.Unlock()
 	if !l.forwardClosing {
 		l.forwardClosing = true
 		close(l.forwardStop)
 		l.forwardReady.Broadcast()
 	}
-	done := l.forwardDone
-	l.forwardMu.Unlock()
-	<-done
+	return l.forwardDone
 }
 
 // Close drains the root logger's forwarding queue.
@@ -405,6 +473,14 @@ func (b *Bound) Close() {
 		panic("sidecar logging: Close called on nil Bound logger")
 	}
 	b.logger.Close()
+}
+
+// CloseWithin drains the root logger's forwarding queue under a bound.
+func (b *Bound) CloseWithin(d time.Duration) (int, bool) {
+	if b == nil {
+		panic("sidecar logging: CloseWithin called on nil Bound logger")
+	}
+	return b.logger.CloseWithin(d)
 }
 
 // RegisterFile binds proven workspace/session attribution to one normalized
@@ -441,6 +517,94 @@ func (b *Bound) LogVerbose(format string, args ...any) {
 		panic("sidecar logging: LogVerbose called on nil Bound logger")
 	}
 	b.logger.write(true, b.context, format, args...)
+}
+
+// BeginCatchup opens the startup catch-up window over the named operations.
+// Calling it again while the window is open is an invariant violation: the
+// boundary is the process's one boot walk, not a per-pass toggle.
+func (l *Logger) BeginCatchup(operations ...string) {
+	if l == nil {
+		panic("sidecar logging: BeginCatchup called on nil Logger")
+	}
+	if len(operations) == 0 {
+		panic("sidecar logging: BeginCatchup requires at least one operation")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.catchupActive {
+		panic("sidecar logging: the catch-up window is already open")
+	}
+	l.catchupActive = true
+	l.catchupOps = map[string]struct{}{}
+	l.catchupTally = map[string]int{}
+	l.catchupOrder = append([]string(nil), operations...)
+	for _, operation := range operations {
+		l.catchupOps[operation] = struct{}{}
+	}
+}
+
+// EndCatchup closes the window and states ONE `catchup-summary` INFO record per
+// operation that demoted anything, carrying the operation in `reason` and the
+// count in `repeat_count`. An operation that demoted nothing states nothing.
+// Closing a window that is not open is a no-op, so a shutdown that races the
+// first drained pass costs nothing.
+func (l *Logger) EndCatchup() {
+	if l == nil {
+		panic("sidecar logging: EndCatchup called on nil Logger")
+	}
+	l.mu.Lock()
+	if !l.catchupActive {
+		l.mu.Unlock()
+		return
+	}
+	l.catchupActive = false
+	tally, order := l.catchupTally, l.catchupOrder
+	l.catchupOps, l.catchupTally, l.catchupOrder = nil, nil, nil
+	l.mu.Unlock()
+	// Stated after the window is closed and the lock is released, so the
+	// summaries themselves are ordinary INFO records rather than candidates for
+	// the demotion they are reporting.
+	for _, operation := range order {
+		count := tally[operation]
+		if count == 0 {
+			continue
+		}
+		l.write(false, Context{
+			Operation: "catchup-summary", Level: "info",
+			Reason: operation, Repeat: Repeat(count),
+		}, "startup catch-up stated %d %s record(s) at debug; steady state states each one", count, operation)
+	}
+}
+
+// tallyCatchup reports whether this operation's INFO record belongs to the open
+// catch-up window, counting it when it does.
+func (l *Logger) tallyCatchup(operation string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.catchupActive {
+		return false
+	}
+	if _, registered := l.catchupOps[operation]; !registered {
+		return false
+	}
+	l.catchupTally[operation]++
+	return true
+}
+
+// BeginCatchup opens the root logger's startup catch-up window.
+func (b *Bound) BeginCatchup(operations ...string) {
+	if b == nil {
+		panic("sidecar logging: BeginCatchup called on nil Bound logger")
+	}
+	b.logger.BeginCatchup(operations...)
+}
+
+// EndCatchup closes the root logger's startup catch-up window.
+func (b *Bound) EndCatchup() {
+	if b == nil {
+		panic("sidecar logging: EndCatchup called on nil Bound logger")
+	}
+	b.logger.EndCatchup()
 }
 
 // contextMap renders the correlation vocabulary, omitting every key the caller
@@ -517,6 +681,13 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 	}
 	if (ctx.WorkspaceDir == "") != (ctx.WorkspaceID == "") {
 		panic("sidecar logging: workspace_dir and workspace_id must be set together")
+	}
+	// THE CATCH-UP WINDOW LEVELS THE CORPUS WALK. Only an INFO record of a
+	// registered operation is affected: a WARN or an ERROR raised during
+	// catch-up is a real conclusion and keeps its level.
+	if level == "info" && l.tallyCatchup(ctx.Operation) {
+		level = "debug"
+		verbose = true
 	}
 	if !l.minimumLevel.Allows(level) {
 		return

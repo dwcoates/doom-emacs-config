@@ -999,3 +999,230 @@ func TestAServingDaemonThatBecomesUnreachableIsWarned(t *testing.T) {
 		t.Fatalf("forward attempts = %d, want the whole ladder against a serving daemon", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The startup catch-up window.
+// ---------------------------------------------------------------------------
+
+// catchupSubject builds a debug-threshold logger with an open catch-up window
+// over the sidecar's six corpus-walk operations, so a subject can state one
+// record and read what the window did to it.
+func catchupSubject(t *testing.T) (*Logger, *bytes.Buffer) {
+	t.Helper()
+	l, _, file := sinks(t, true)
+	l.BeginCatchup("launch", "record-spawn", "hold-spool", "tail-pickup", "boot-rewind", "lost-policy")
+	return l, file
+}
+
+// Each of the six operations the boot walk restates wholesale is DEBUG while
+// the window is open. One case per operation: the registration of each is its
+// own edge, and a list that silently loses one is exactly the regression.
+func TestCatchupWindowStatesEachCorpusWalkOperationAtDebug(t *testing.T) {
+	for _, operation := range []string{"launch", "record-spawn", "hold-spool", "tail-pickup", "boot-rewind", "lost-policy"} {
+		t.Run(operation, func(t *testing.T) {
+			// Arrange.
+			l, file := catchupSubject(t)
+
+			// Act.
+			l.With(Context{Operation: operation}).Log("one backlog item")
+
+			// Assert.
+			got := decode(t, file.String())
+			if got.Level != "debug" {
+				t.Fatalf("%s during catch-up = level %q, want debug", operation, got.Level)
+			}
+		})
+	}
+}
+
+// NOTHING IS SILENCED: the demoted record is still written in full.
+func TestCatchupWindowStillWritesTheDemotedRecord(t *testing.T) {
+	// Arrange.
+	l, file := catchupSubject(t)
+
+	// Act.
+	l.With(Context{Operation: "boot-rewind", Path: "/corpus/a.jsonl"}).Log("rewound to the turn start")
+
+	// Assert.
+	got := decode(t, file.String())
+	if got.Message != "rewound to the turn start" || got.Context["path"] != "/corpus/a.jsonl" {
+		t.Fatalf("the demoted record lost its detail: %+v", got)
+	}
+}
+
+// An operation the window does not name is untouched: the leveling is a named
+// list, never a blanket quieting of the boot.
+func TestCatchupWindowLeavesAnUnregisteredOperationAtInfo(t *testing.T) {
+	// Arrange.
+	l, file := catchupSubject(t)
+
+	// Act.
+	l.With(Context{Operation: "start"}).Log("sidecar starting")
+
+	// Assert.
+	if got := decode(t, file.String()).Level; got != "info" {
+		t.Fatalf("unregistered operation = level %q, want info", got)
+	}
+}
+
+// A WARNING RAISED DURING CATCH-UP IS STILL A WARNING. Only INFO is the boot
+// walk restating itself; a conclusion the walk reaches is news at any hour.
+func TestCatchupWindowKeepsAWarningAtWarn(t *testing.T) {
+	// Arrange.
+	l, file := catchupSubject(t)
+
+	// Act.
+	l.With(Context{Operation: "launch", Level: "warn"}).Log("a spawning call named no task")
+
+	// Assert.
+	if got := decode(t, file.String()).Level; got != "warn" {
+		t.Fatalf("warning during catch-up = level %q, want warn", got)
+	}
+}
+
+// The window's end states the totals, one summary per operation, so the owner
+// still sees "6,172 boot-rewind records" without reading 6,172 lines.
+func TestEndCatchupStatesOneSummaryCarryingTheCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		items     int
+	}{
+		{name: "a single item", operation: "tail-pickup", items: 1},
+		{name: "a corpus walk", operation: "boot-rewind", items: 2464},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			l, file := catchupSubject(t)
+			for i := 0; i < test.items; i++ {
+				l.With(Context{Operation: test.operation}).Log("one backlog item")
+			}
+			file.Reset()
+
+			// Act.
+			l.EndCatchup()
+
+			// Assert.
+			got := decode(t, file.String())
+			if got.Operation != "catchup-summary" || got.Level != "info" {
+				t.Fatalf("summary = operation %q level %q, want catchup-summary at info", got.Operation, got.Level)
+			}
+			if got.Context["reason"] != test.operation {
+				t.Fatalf("summary reason = %v, want %q", got.Context["reason"], test.operation)
+			}
+			if count, _ := got.Context["repeat_count"].(float64); int(count) != test.items {
+				t.Fatalf("summary repeat_count = %v, want %d", got.Context["repeat_count"], test.items)
+			}
+		})
+	}
+}
+
+// AN EMPTY BACKLOG STATES NOTHING: an operation that demoted nothing gets no
+// summary, so a boot with no corpus is silent rather than six zero lines.
+func TestEndCatchupStatesNothingForAnOperationThatDemotedNothing(t *testing.T) {
+	// Arrange.
+	l, file := catchupSubject(t)
+	l.With(Context{Operation: "boot-rewind"}).Log("one backlog item")
+	file.Reset()
+
+	// Act.
+	l.EndCatchup()
+
+	// Assert: exactly one summary, for the one operation that tallied.
+	if lines := strings.Count(strings.TrimSpace(file.String()), "\n") + 1; lines != 1 {
+		t.Fatalf("EndCatchup wrote %d line(s), want one summary: %q", lines, file.String())
+	}
+}
+
+// STEADY STATE IS STATED PER ITEM. Once the window closes, the same operation
+// is INFO per record exactly as before — the leveling is the boot, not a policy.
+func TestAfterCatchupEndsTheSameOperationIsInfoAgain(t *testing.T) {
+	// Arrange.
+	l, file := catchupSubject(t)
+	l.With(Context{Operation: "tail-pickup"}).Log("backlog")
+	l.EndCatchup()
+	file.Reset()
+
+	// Act.
+	l.With(Context{Operation: "tail-pickup"}).Log("picked up 1 record(s)")
+
+	// Assert.
+	if got := decode(t, file.String()).Level; got != "info" {
+		t.Fatalf("post-catch-up record = level %q, want info", got)
+	}
+}
+
+// Closing a window that was never opened is a no-op: a shutdown that races the
+// first drained pass must not panic or invent a summary.
+func TestEndCatchupOnAClosedWindowStatesNothing(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, true)
+
+	// Act.
+	l.EndCatchup()
+
+	// Assert.
+	if file.Len() != 0 {
+		t.Fatalf("EndCatchup on a closed window wrote %q", file.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The bounded shutdown drain.
+// ---------------------------------------------------------------------------
+
+// A drain that cannot finish is ABANDONED AND STATED. This is the teardown that
+// held a launchd stop past three minutes: the daemon is gone, the queue is
+// deep, and the closing forward loop dials once per record forever.
+func TestCloseWithinAbandonsAStuckDrainAndStatesWhatItWaitedOn(t *testing.T) {
+	// Arrange: a forwarder that blocks inside Forward, and two queued records —
+	// the first wedges the loop, the second is what is still pending.
+	forwarder := &blockingForwarder{started: make(chan struct{}), release: make(chan struct{})}
+	l, _, global := forwardingSinks(t, false, forwarder)
+	scoped := Context{Operation: "tail-pickup", WorkspaceDir: "/w", WorkspaceID: "w1"}
+	l.With(scoped).Log("first")
+	<-forwarder.started
+	l.With(scoped).Log("second")
+	global.Reset()
+
+	// Act.
+	pending, drained := l.CloseWithin(20 * time.Millisecond)
+	defer close(forwarder.release)
+
+	// Assert.
+	if drained {
+		t.Fatal("CloseWithin reported a drained queue while the forward loop was wedged")
+	}
+	if pending != 1 {
+		t.Fatalf("pending = %d, want the one record still queued", pending)
+	}
+	got := decode(t, global.String())
+	if got.Operation != "shutdown-drain" || got.Level != "info" {
+		t.Fatalf("abandonment record = operation %q level %q, want shutdown-drain at info", got.Operation, got.Level)
+	}
+	if !strings.Contains(got.Message, "1 record(s) still queued") {
+		t.Fatalf("abandonment record does not name what it waited on: %q", got.Message)
+	}
+}
+
+// The healthy teardown is unaffected: the queue drains, the bound never fires,
+// and nothing is stated about it.
+func TestCloseWithinDrainsAHealthyQueueSilently(t *testing.T) {
+	// Arrange.
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123"}
+	l, _, global := forwardingSinks(t, false, forwarder)
+	l.With(Context{Operation: "tail-pickup", WorkspaceDir: "/w", WorkspaceID: "w1"}).Log("first")
+	global.Reset()
+
+	// Act.
+	pending, drained := l.CloseWithin(DefaultShutdownDrain)
+
+	// Assert.
+	if !drained || pending != 0 {
+		t.Fatalf("CloseWithin(healthy) = (%d, %t), want (0, true)", pending, drained)
+	}
+	if global.Len() != 0 {
+		t.Fatalf("a healthy drain stated %q, want silence", global.String())
+	}
+}

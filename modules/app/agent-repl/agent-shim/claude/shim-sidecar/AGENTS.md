@@ -439,6 +439,60 @@ leveled, arriving through three more paths.
   reset; the LOST tracker summarizes the backlog subset of each sweep inside
   `state`. An empty backlog states nothing.
 
+### The catch-up window levels the corpus walk itself
+
+The rules above level the CONCLUSIONS a restart re-derives. The WALK that
+re-derives them floods the same way: a restart rewinds every transcript, picks
+up every restored byte, re-reads every spawning call in those bytes, re-holds
+every unclaimed spool and re-concludes every dead run. One boot generation on
+the owner's machine held 9,337 `launch`, 9,337 `record-spawn`, 7,128
+`hold-spool`, 6,748 `tail-pickup`, 6,172 `boot-rewind` and 4,789 `lost-policy`
+INFO records and rolled the 64 MB durable log five times over.
+
+- THE WINDOW IS A PROCESS-WIDE PHASE, NOT A PER-ITEM TEST. These six operations
+  span four packages and none of them holds the item's own clock, so the
+  boundary is the boot walk rather than each file's mtime. `catchupOperations`
+  (`cycle.go`) names the six; `logging.Logger.BeginCatchup` opens the window
+  before any file is read.
+- ONLY INFO IS LEVELED. A WARN or an ERROR raised during the walk is a real
+  conclusion and keeps its level. An operation the window does not name is
+  untouched — this is a named list, never a blanket quieting of the boot.
+- THE WINDOW CLOSES ON THE FIRST DRAINED POLL PASS. `pollAll` latches
+  `drainedPass` only where it falls out of its loop having walked EVERY watcher;
+  an abandoned pass (a store outage, a shutdown) has not drained the corpus, so
+  the window stays open. Both latches are process-lifetime: a later store bounce
+  must not reopen a window whose summaries were already stated.
+- THE CLOSE STATES ITSELF. `EndCatchup` writes one INFO `catchup-summary` per
+  operation that demoted anything (`reason` names the operation, `repeat_count`
+  the total; an operation that demoted nothing states nothing), and `cycle.go`
+  then writes one INFO `catchup-end`. A subject asserting a STEADY-STATE
+  per-item record waits on `catchup-end` (`awaitCatchupEnd`), never on the first
+  production cycle — between the two the walk is still draining.
+- NOTHING IS SILENCED, HERE EITHER. The demoted record is written in full at
+  DEBUG, so a subject that asserts the per-item detail reads the log with
+  `AGENT_REPL_LOG_LEVEL=debug`.
+
+## Shutdown is bounded
+
+A stop that is asked for is a stop that happens.
+
+- THE LOG DRAIN IS THE ONE UNBOUNDED WAIT, AND IT IS NOW BOUNDED.
+  `logging.Logger.Close` waits for the forwarding queue to drain, and the
+  closing forward loop probes and dials the daemon ONCE PER QUEUED RECORD. With
+  the daemon gone and a boot's backlog queued (42,044 undelivered records in one
+  generation) that wait ran past three minutes while launchd waited on a service
+  it had already asked to stop. Production calls `CloseWithin`
+  (`logging.DefaultShutdownDrain`, 5s) — a large multiple of every healthy
+  teardown observed here, which is sub-millisecond from the `shutdown` record to
+  the `exit` record.
+- A BOUND THAT FIRES IS STATED. `CloseWithin` writes one INFO `shutdown-drain`
+  record naming how many records were still queued and the daemon address it was
+  forwarding to, through the durable sink, then exits.
+- LAUNCHD HAS ITS OWN CEILING. Both plists state `ExitTimeOut` (20s)
+  explicitly rather than leaving it to a default. The service's own bound sits
+  well inside it, so reaching launchd's timeout means the process is stuck
+  somewhere it has no bound of its own and SIGKILL is the right answer.
+
 ## The LOST policy
 
 `internal/stale`. LOST IS ITS OWN WORD: it means "we stopped seeing it", never

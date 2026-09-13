@@ -53,7 +53,7 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 	// appears while the reader is running is the per-file degradation this
 	// subject asserts.
 	startSidecar(t, opts)
-	awaitFirstProductionCycle(ctx, t, opts.LogPath)
+	awaitCatchupEnd(ctx, t, opts.LogPath)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte(payload))
 	awaitLog(ctx, t, opts.LogPath, "the spool being held", func(r logRecord) bool {
@@ -231,6 +231,12 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 	// The owner arrives well inside the window, which is the ordinary case: the
 	// launch line is written when the task starts.
 	opts.UnownedSpoolWindow = 30 * time.Second
+	// THE PER-ITEM DETAIL LIVES AT DEBUG DURING CATCH-UP. This record is one of
+	// the six corpus-walk operations the startup catch-up window levels (see
+	// "Startup catch-up"), and this subject asserts the per-item record rather
+	// than the summary, so it reads the log at the threshold the detail is
+	// written to.
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 
 	call := retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd)
 	result := retargetSession(t, decodeRecord(t, captured.Lines[10]), session, cwd)
