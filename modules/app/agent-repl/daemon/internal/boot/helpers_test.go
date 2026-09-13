@@ -388,3 +388,17 @@ func (d failingLease) Lease(context.Context, wsm.WorkspaceID) (wsm.Lease, bool, 
 // and still owns. These fakes spawn no process, so there is never one to
 // sweep.
 func (s *fakeSupervisor) StandDownEverySpawn(context.Context, string) error { return nil }
+
+// runAndBringUp runs the reconciliation and then the bring-up step over the
+// set it named, which is the order the daemon runs them in: the
+// reconciliation, then the listener, then the bring-up. It is a helper because
+// the two halves are one boot as far as every bring-up test is concerned; the
+// tests whose subject is the SPLIT itself call the two directly.
+func (h *harness) runAndBringUp(t *testing.T) (Report, BringUpReport) {
+	t.Helper()
+	report, err := h.seq.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return report, h.seq.BringUp(context.Background(), report.PendingBringUp)
+}

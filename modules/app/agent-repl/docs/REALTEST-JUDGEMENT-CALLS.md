@@ -15,6 +15,14 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The boot's bring-up and the health bound, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The bring-up must leave the reconciliation; does it become a goroutine inside `sequence.Run` or a step the CALLER runs? | A caller-run step: `Run` names the set in `Report.PendingBringUp` and `cmd/claude-repld/run.go` calls `Sequence.BringUp` on its own goroutine after the bindings and the opening views | A goroutine inside `Run` would start sessions before `built.Bind`/`built.Prime` have built the surfaces they push into, which is a dropped push; the caller is the only place that knows when the daemon is ready to be pushed at | Move the `BringUp` call into `sequence.Run` behind a `go` (internal/boot/sequence.go) |
+| 2026-09-13 | Where does the bring-up goroutine sit relative to `h.Serve`? | Immediately before it, and joined with the background loops on `loopJoinBound` | Before `Serve` the accept loop has not started, so a start placed after it would never run until the daemon stopped serving; joining it is what stops an orderly exit closing the state client under a session start in flight | Start it after `h.Serve` returns, or drop the `loops.Add(1)` (cmd/claude-repld/run.go) |
+| 2026-09-13 | `Report` carried `BroughtUp`, `HibernatedLeft` and `BringUpFailed`, which the reconciliation can no longer know | They move to a `BringUpReport` the new step returns; `Report` keeps only `PendingBringUp` | A boot report that still carried those counts would be stating an outcome that had not happened yet, and every reader of it would be reading zeroes | Fold the three fields back into `Report` and have `BringUp` write through a pointer (internal/boot/api.go) |
+
 ## The editor a run hands back, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
