@@ -32,6 +32,7 @@ import {
   drawUnreadableRefusal,
   type SentenceTable,
 } from "../rpc/refuse.js";
+import { drawNoSessionCell } from "./no-session.js";
 import { asAnchor } from "./strip.js";
 
 /** The causes only SetPermissionMode can answer with. */
@@ -44,9 +45,12 @@ export const SET_PERMISSION_MODE_CAUSES = {
 
 /** The picker: the mode in force, and the modes it may become. */
 export function drawTopbarPermissionModePicker(
-  u: TopbarPermissionModePicker,
+  u: TopbarPermissionModePicker | undefined,
   tc: TopbarContext,
 ): HTMLElement {
+  // ABSENT IS "NO SESSION HAS STATED A MODE", drawn as the dash in this cell's
+  // own slot; see `no-session.ts`.
+  if (u === undefined) return drawNoSessionCell("mode");
   const current = requireMessage(u.current, "TopbarPermissionModePicker.current");
   log.debug("drawing the permission-mode picker", {
     operation: "topbar.permission-mode",

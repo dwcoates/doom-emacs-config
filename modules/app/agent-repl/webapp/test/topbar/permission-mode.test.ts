@@ -273,3 +273,24 @@ describe("the pick", () => {
     expect(host.querySelector(".refusal")).toBeNull();
   });
 });
+
+describe("the permission-mode picker with no session behind it", () => {
+  it("draws the dash in its own slot rather than vanishing", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const cell = drawTopbarPermissionModePicker(undefined, tc);
+    // ASSERT
+    expect(cell.getAttribute("data-no-session")).toBe("mode");
+  });
+
+  it("offers no reveal, because there is nothing to pick", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarPermissionModePicker(undefined, tc));
+    // ACT
+    host.querySelector(".topbar-mode")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)).toBeNull();
+  });
+});

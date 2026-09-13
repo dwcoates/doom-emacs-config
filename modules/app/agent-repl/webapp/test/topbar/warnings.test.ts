@@ -60,6 +60,28 @@ describe("drawTopbarWarningStrip", () => {
     );
   });
 
+  // A WARNING WITH NO DETAIL IS A STATEMENT. The workspace's session-less
+  // state rides here since the whole-view states were retired: "hibernated
+  // since 14:03", "cold context, awaiting your answer". There is nothing
+  // behind it to reveal, and the gate is answered in the feed's card.
+  it("lists a warning with no detail as a statement row", () => {
+    const host = openList(strip(warning("cold context, awaiting your answer", undefined)));
+    const row = openPanel(host)?.querySelector(".topbar-warning-row");
+    expect(row?.getAttribute("data-statement")).toBe("");
+  });
+
+  it("draws a statement row as text rather than a button that opens nothing", () => {
+    const host = openList(strip(warning("hibernated since 14:03", undefined)));
+    expect(openPanel(host)?.querySelector(".topbar-warning-row")?.tagName).toBe("DIV");
+  });
+
+  it("still draws the statement's sentence verbatim", () => {
+    const host = openList(strip(warning("hibernated since 14:03", undefined)));
+    expect(openPanel(host)?.querySelector(".topbar-warning-row")?.textContent).toBe(
+      "hibernated since 14:03",
+    );
+  });
+
   it("refuses a warning carrying no line", () => {
     const { tc } = topbarContext();
     const bad = strip(create(TopbarWarningSchema, { detail: ACCOUNTING as never }));
