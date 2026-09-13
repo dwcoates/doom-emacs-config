@@ -522,6 +522,13 @@ record MEANS.
     terminal on a row no reader can join to the call is worse than none.
   - `CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry`
     — the same shape for a person's stop, carrying the bytes read so far.
+    EVERY SPOOL CONVERTER IMPLEMENTS IT, the residue one included. Reading a
+    spool as residue states what could be made of its BYTES and never that the
+    run is unknown: a restart with a transcript backlog routinely reads the
+    launch line naming a spool's spawning call AFTER that spool's hold expired,
+    and the demoted watcher is never rebuilt — so the reader knows the run, and
+    a stop that reached a handler unable to spell one left the run open in every
+    consumer (realtest 3, 21 runs in one pass).
   - `SetTerminalObserver(func(path, run string))` — the converter reports that
     it READ a run's own terminal off the file, and the reader untracks the run
     so the staleness sweep can never restate a finished run as LOST. The report
@@ -532,6 +539,13 @@ record MEANS.
   ordinary and recorded at verbose.
 - A converter that should have adopted one and did not is never a silent
   degradation: the reader states exactly what it could not hand over.
+- THE TERMINAL ITSELF IS ONE IMPLEMENTATION, `handler.RunOutput`: the bounded
+  output buffer, the file coordinates the write identity is digested from, the
+  attribution, and the `Cancelled`/`Lost` frames. A handler that can be asked
+  for a terminal EMBEDS it rather than accumulating its own. Two handlers
+  spelling "the same terminal" from two private accumulations is how the shapes
+  drift, and the difference is invisible until a consumer reads two runs settled
+  two different ways.
 
 ## Identity and keys
 
