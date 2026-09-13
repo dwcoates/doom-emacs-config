@@ -7,7 +7,7 @@
  * as pure functions and asserted directly; the end-to-end behavior of the built
  * bundle is the dist smoke's job.
  */
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -841,6 +841,28 @@ describe("queryFactory", () => {
     };
   }
 
+  it("writes the workspace's trust entry BEFORE the vendor is constructed", async () => {
+    // AN UNTRUSTED WORKSPACE RUNS WITH ITS PERMISSION ALLOWLISTS DROPPED, and
+    // the vendor says so on stderr and nowhere else. Every agent-repl workspace
+    // is a worktree no human ever opened interactively, so the shim grants the
+    // trust itself — synchronously, before the query exists, which is what this
+    // asserts by reading the file before the returned promise is awaited.
+    // Arrange.
+    const repo = mkdtempSync(path.join(os.tmpdir(), "shim-query-factory-repo-"));
+    mkdirSync(path.join(repo, ".git"));
+    const create = queryFactory(true, env, repo);
+
+    // Act.
+    const pending = create(spec());
+    const written = JSON.parse(readFileSync(path.join(configDir, ".claude.json"), "utf8")) as {
+      projects?: Record<string, Record<string, unknown>>;
+    };
+
+    // Assert.
+    expect(written.projects?.[repo]?.["hasTrustDialogAccepted"]).toBe(true);
+    await (await pending).interrupt?.();
+  });
+
   it("under --fake, builds a factory that constructs the mocked vendor", async () => {
     const create = queryFactory(true, env, cwd);
 
@@ -1331,8 +1353,11 @@ describe("queryFactory forwards the whole spec to the real query", () => {
     vi.resetModules();
   });
 
+  // A REAL DIRECTORY, because the factory now grants the workspace folder trust
+  // under this account root before it constructs anything, and a root that does
+  // not exist is a fault the shim raises rather than a session it runs degraded.
   const env: ShimEnvironment = {
-    claudeConfigDir: "/accounts/primary",
+    claudeConfigDir: mkdtempSync(path.join(os.tmpdir(), "shim-forwarding-config-")),
     stateDir: "/state",
     shimBuildSha: "abc1234",
     storeSocket: "/tmp/store.sock",

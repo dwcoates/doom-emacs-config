@@ -42,6 +42,7 @@ src/
                        each held by a spawned agent-shim/shim-lock child)
   vendor-guard.ts      the ONLY dynamic import of the SDK; the FORBID_VENDOR_CALLS gate
   metaprompt.ts        the canonical metaprompt append
+  trust.ts             the vendor's folder-trust entry, granted before any spawn
   proto.ts             THE single import site: shimv1 / storev1 / conversationv1 namespaces
   sdk/
     types.ts           the SDK boundary, aliased off sdk.d.ts; the upgrade canary's surface
@@ -140,6 +141,16 @@ means the daemon and this build disagree about the contract.
   shim's own bound, sized UNDER the daemon's bring-up bound so the shim — which
   knows why — answers before the daemon, which does not. All five end as
   `StartSession{vendor_start_failed}` with the reason in `detail`.
+  **THE VENDOR ANNOUNCES `system:init` ONLY ONCE A FIRST TURN REACHES IT** —
+  grounded 2026-09-13 against claude 2.1.220 AND 2.1.270, driven exactly as this
+  shim drives them (`--input-format stream-json`): the child answers control
+  requests (`supportedCommands`, `setPermissionMode`) within 300ms and emits no
+  `init` at all until an input message arrives, while feeding one turn produces
+  `init` in ~600ms in the same directory. Reproduced with the full option set
+  and with a bare one, fresh and resume, in three directories and three account
+  roots (a pristine one with no plugins or hooks included). A start that waits
+  for `init` before prompting therefore cannot settle, and the bound is what
+  ends it; the refusal's detail names this rather than the quiet.
   **THE BOUND IS FOR SILENCE ONLY.** Every conclusive answer settles the start
   at once; waiting the bound out on an answer already in hand is what lets the
   daemon's bound fire first and blame the shim. The vendor child's stderr is
@@ -155,6 +166,21 @@ means the daemon and this build disagree about the contract.
   `KillSession{force:true}` path, then exits 0 (nonzero if the stand-down
   failed). SIGINT is REFUSED and logged at error — an attached terminal's Ctrl-C
   must not end a live turn.
+- **THE WORKSPACE IS TRUSTED BEFORE THE VENDOR IS CONSTRUCTED.** The vendor
+  keeps a per-directory trust decision in `<config_root>/.claude.json` under
+  `projects.<dir>.hasTrustDialogAccepted`, and a directory it was never told to
+  trust is run with the workspace's `permissions.allow` entries DROPPED — said
+  once on the child's stderr and nowhere else. Neither the SDK (`Options` has no
+  such field) nor the CLI (no `--trust` flag) offers a supported switch, so the
+  key the vendor's own warning prescribes is what `trust.ts` writes:
+  read-modify-write of the whole file, its own indentation and mode kept, one
+  key touched, replaced by rename; a file that will not parse is left standing
+  and the failure raised. **The key is the REPOSITORY, not the worktree** —
+  grounded against claude 2.1.220: trusting a linked worktree's own path leaves
+  the warning standing, trusting its main repository silences it — and the main
+  repository is read out of the worktree's `.git` FILE, never by running git.
+  It happens in `queryFactory`, the one place any query is constructed, mocked
+  vendor included, so no spawn path can forget it.
 - **`--version`** prints `claude-shim <version>` and exits before any socket,
   lock, log fd or SDK import. It is a dependency-free smoke of the bundle.
 
