@@ -913,3 +913,9 @@ discovered later. The module AGENTS.md documents the catalog.
   transcript line; not on our protos yet).
 - The whole-view state text ("cold context 101.1k 12m 13s") drawn in the
   right group was noticed as not matching the described layout.
+
+## Judgement calls for the topbar layout (2026-09-13)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Which distance the ruling's single edge/gap token takes, the row's old 0.75rem inter-group gap or the groups' own 0.5rem cell gap | The CELL gap, 0.5rem, as `--topbar-cell-gap`, used for the row's padding AND every gap in the strip | The ruling words it as "edge padding equal to the padding between cells", and the cell gap is the distance between two cells; the row's 0.75rem was the distance between GROUPS, which the ruling does not name | Give `.topbar-row` its own gap again and leave the token to the groups |

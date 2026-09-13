@@ -226,6 +226,14 @@
      pickers outsize the sidebar's plain title, and the two dividers drift apart.
      Comfortably clears the 0.85rem select at any renderer's control metrics. */
   --topbar-h: 2.75rem;
+  /* THE STRIP'S ONE SPACING TOKEN (owner ruling 1, 2026-09-13). The gap
+     between two topbar cells and the padding at the strip's own left and right
+     edges are the SAME distance, so they are the same token: the strip runs
+     from the window's left edge to its right edge, and its first and last
+     cells stand off those edges exactly as far as they stand off each other.
+     Two numbers here is how the strip drifted into a wide inset that read as a
+     centered band inside the header. */
+  --topbar-cell-gap: 0.5rem;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -845,7 +853,10 @@ body::after {
      flush; horizontal padding only, with the height governing the vertical box.
      align-items: center keeps the pickers centered within it. */
   height: var(--topbar-h);
-  padding: 0 1rem;
+  /* NO EDGE INSET OF ITS OWN. `.topbar-row` inside carries the strip's single
+     `--topbar-cell-gap` padding, and a second inset here stacked on top of it
+     is what held the strip's content off the window's edges. */
+  padding: 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
   /* Positioning context for the absolute-centered #task-summary (§2.14). */
@@ -5289,9 +5300,12 @@ body.draining #composer-input::placeholder {
 .topbar-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  /* ONE TOKEN, BOTH DISTANCES (owner ruling 1). The gap between cells and the
+     inset at the strip's edges are the same measure by definition, so a change
+     to one is a change to both and they cannot drift apart. */
+  gap: var(--topbar-cell-gap);
   height: var(--topbar-h);
-  padding: 0 1rem;
+  padding: 0 var(--topbar-cell-gap);
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
 }
@@ -5299,7 +5313,7 @@ body.draining #composer-input::placeholder {
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--topbar-cell-gap);
   flex: 0 0 auto;
 }
 /* The one element that flexes. Ellipsis-clipped rather than wrapping: the
