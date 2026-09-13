@@ -402,9 +402,32 @@ for arg in "$@"; do
             printf 'killed\n' >> "${STUB_KILL_MARKER:?}"
             rm -f "$STUB_ALIVE_FLAG"
             ;;
+        # THE EDITOR HAS A PID, because the handback's question — does the
+        # editor this run leaves behind carry the guard — is a question about a
+        # process, and STUB_PROCS is where a case answers it. The default pid
+        # is in no case's process table, so an editor is guard-free unless the
+        # case puts a line in for it.
+        '(emacs-pid)')
+            printf '%s\n' "${STUB_EMACS_PID:-9101}"
+            exit 0
+            ;;
     esac
 done
 printf 'nil\n'
+STUB
+
+    # THE LAUNCHER IS A LOG. `open -gj -a Emacs` is how the owner gets a
+    # guard-free editor back, and a case asserts that it was reached and with
+    # what environment — STUB_OPEN_GUARD records whether the guard survived
+    # into the launch, which is the whole point of the `env -u`.
+    cat > "$dir/open" <<'STUB'
+#!/usr/bin/env bash
+printf '%s guard=%s\n' "$*" "${AGENT_REPL_FORBID_VENDOR_CALLS:-unset}" \
+    >> "${STUB_OPEN_MARKER:?the case must state an open marker path}"
+[ "${STUB_OPEN_FAIL:-}" = "1" ] && exit 1
+# The editor the launch brings up is answering, the same way the slot stub's is.
+[ -n "${STUB_ALIVE_FLAG:-}" ] && : > "$STUB_ALIVE_FLAG"
+exit 0
 STUB
 
     # THE PROCESS TABLE IS THE TEST'S. pgrep and ps answer out of STUB_PROCS,
@@ -532,7 +555,7 @@ done
 exit 0
 STUB
 
-    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp" "$dir/kill" "$dir/go"
+    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp" "$dir/kill" "$dir/go" "$dir/open"
     printf '%s' "$dir"
 }
 
@@ -574,6 +597,8 @@ run_script() {
     STUB_ALIVE_FLAG="${STUB_ALIVE_FLAG:-$SCRATCH/alive}" \
     AGENT_REPL_REALTEST_EMACSCLIENT="$dir/emacsclient" \
     AGENT_REPL_REALTEST_KILL="$dir/kill" \
+    AGENT_REPL_REALTEST_OPEN="$dir/open" \
+    STUB_OPEN_MARKER="${STUB_OPEN_MARKER:-$SCRATCH/open-reached}" \
     AGENT_REPL_REALTEST_OUT="$SCRATCH/out" \
     "$@" bash "$dir/realtest.sh" ${SCRIPT_ARGS[@]+"${SCRIPT_ARGS[@]}"} 2>&1
     local status=$?
@@ -585,7 +610,7 @@ prepare_home() {
     SCRIPT_ARGS=()
     rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed" \
         "${SCRATCH:?}/alive" "${SCRATCH:?}/kill-log" "${SCRATCH:?}/go-reached" \
-        "${SCRATCH:?}/focus-reached" "${SCRATCH:?}/focus-held"
+        "${SCRATCH:?}/focus-reached" "${SCRATCH:?}/focus-held" "${SCRATCH:?}/open-reached"
     : > "$SCRATCH/procs"
     mkdir -p "$SCRATCH/home/.claude-emacs" "$SCRATCH/home/.cache/agent-repl/store"
     printf 'workspaces' > "$SCRATCH/home/.claude-emacs/wsm.db"
@@ -710,8 +735,8 @@ test_runs_when_nothing_stands_in_the_way() {
         fail "$name" "the run does not state that the vendor is forbidden: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "the owner's editor is left running"; then
-        fail "$name" "the run does not state that the editor is left running: $out"
+    if ! printf '%s' "$out" | grep -q "which editor the owner is left with is settled at the end"; then
+        fail "$name" "the run does not say the editor it leaves behind is settled at the end: $out"
         return
     fi
     pass "$name"
@@ -1603,6 +1628,266 @@ test_clean_leftovers_refuses_to_also_run_a_realtest() {
     pass "$name"
 }
 
+# ---- the editor the owner gets back ---------------------------------------
+#
+# A RUN LEAVES THE OWNER'S STATE AS IT FOUND IT, and the editor used to be the
+# exception: every realtest launches Emacs under the vendor guard, the sweep
+# left the last one standing, and the owner's day-to-day editor was therefore
+# the one whose daemon and shims answered from the FAKE vendor. These cases are
+# about which editor is standing when the run is over.
+
+# guarded_emacs_line PID — an Emacs in the stub process table whose kernel
+# environment carries the vendor guard.
+guarded_emacs_line() {
+    printf '%s /Applications/Emacs.app/Contents/MacOS/Emacs AGENT_REPL_FORBID_VENDOR_CALLS=1\n' "$1"
+}
+
+# plain_emacs_line PID — an Emacs the owner started themselves.
+plain_emacs_line() {
+    printf '%s /Applications/Emacs.app/Contents/MacOS/Emacs\n' "$1"
+}
+
+test_a_guarded_editor_is_quit_at_the_end() {
+    local name="a guarded Emacs left standing at the end of a run is QUIT"
+    local dir out status=0
+    dir="$(scratch_bin handback-quit)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_emacs_line 7777 > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ ! -f "$SCRATCH/killed" ]; then
+        fail "$name" "the guarded editor was left running; output: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_guarded_editor_is_replaced_by_a_normal_one() {
+    local name="a run that quit a guarded Emacs cold-starts a guard-free one in its place"
+    local dir out status=0
+    dir="$(scratch_bin handback-relaunch)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_emacs_line 7777 > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ ! -f "$SCRATCH/open-reached" ]; then
+        fail "$name" "no editor was launched; output: $out"
+        return
+    fi
+    if ! grep -q -- '-gj -a Emacs' "$SCRATCH/open-reached"; then
+        fail "$name" "the launch was $(cat "$SCRATCH/open-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_replacement_editor_carries_no_guard() {
+    local name="the replacement editor is launched with the vendor guard REMOVED from its environment"
+    local dir out status=0
+    dir="$(scratch_bin handback-unguarded)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_emacs_line 7777 > "$SCRATCH/procs"
+
+    # THE GUARD IS IN THIS RUN'S OWN ENVIRONMENT, which is the case the `env -u`
+    # exists for: an operator who exported it, or a sweep re-run from a shell
+    # that still holds it, must not hand the owner another guarded editor.
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 AGENT_REPL_FORBID_VENDOR_CALLS=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if ! grep -q 'guard=unset' "$SCRATCH/open-reached"; then
+        fail "$name" "the launch carried the guard: $(cat "$SCRATCH/open-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_summary_names_the_editor_the_owner_gets_back() {
+    local name="the run's summary names the editor that was quit and the one the owner got back"
+    local dir out status=0
+    dir="$(scratch_bin handback-summary)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_emacs_line 7777 > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "the owner's editor was restored: guarded Emacs pid 7777 quit"; then
+        fail "$name" "the summary does not name what was done: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "a guard-free Emacs launched"; then
+        fail "$name" "the summary does not name the editor the owner got back: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_guard_free_editor_is_left_alone() {
+    local name="a guard-free Emacs left standing at the end is LEFT ALONE"
+    local dir out status=0
+    dir="$(scratch_bin handback-leave-alone)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    plain_emacs_line 7777 > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/killed" ]; then
+        fail "$name" "an editor that carries no guard was quit anyway; output: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/open-reached" ]; then
+        fail "$name" "a second editor was launched beside the owner's: $(cat "$SCRATCH/open-reached")"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "the owner keeps it, untouched"; then
+        fail "$name" "the run does not say the editor was left alone: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_guarded_daemon_is_stopped_under_its_consent() {
+    local name="the handback stops a guarded daemon under AGENT_REPL_REALTEST_STOP_DAEMON=1"
+    local dir out status=0
+    dir="$(scratch_bin handback-daemon-stop)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    { guarded_emacs_line 7777; guarded_daemon_line 4242 "$dir"; } > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 AGENT_REPL_REALTEST_STOP_DAEMON=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if ! grep -q '^4242$' "$SCRATCH/kill-log" 2>/dev/null; then
+        fail "$name" "the guarded daemon was not signalled; kill log: $(cat "$SCRATCH/kill-log" 2>/dev/null); output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "guarded daemon pid 4242 stopped"; then
+        fail "$name" "the summary does not say the daemon was stopped: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_guarded_daemon_is_left_without_the_consent() {
+    local name="the handback LEAVES a guarded daemon when its consent was not given, and says so"
+    local dir out status=0
+    dir="$(scratch_bin handback-daemon-left)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    { guarded_emacs_line 7777; guarded_daemon_line 4242 "$dir"; } > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if grep -q '^4242$' "$SCRATCH/kill-log" 2>/dev/null; then
+        fail "$name" "the daemon was stopped without the consent that covers it; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "THE DAEMON LEFT RUNNING (pid(s) 4242) CARRIES"; then
+        fail "$name" "the run did not say loudly that a fake-vendor daemon is still up: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "guarded daemon pid 4242 LEFT RUNNING"; then
+        fail "$name" "the summary does not carry the daemon that was left: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_run_of_one_realtest_hands_the_editor_back_too() {
+    local name="a -run of a single realtest hands the owner a guard-free editor back as a sweep does"
+    local dir out status=0
+    dir="$(scratch_bin handback-single)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_emacs_line 7777 > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(-run TestRealtestStartTheEditor)
+    out="$(STUB_EMACS_PID=7777 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ ! -f "$SCRATCH/killed" ] || [ ! -f "$SCRATCH/open-reached" ]; then
+        fail "$name" "the single run left the guarded editor standing; output: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_editor_handback_survives_a_failing_realtest() {
+    local name="the editor is handed back even when the realtest FAILED"
+    local dir out status=0
+    dir="$(scratch_bin handback-after-failure)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    guarded_emacs_line 7777 > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 STUB_SLOT_FAIL=TestRealtestStartTheEditor run_script "$dir")" || status=$?
+    if [ "$status" -eq 0 ]; then
+        fail "$name" "a failing realtest reported success; output: $out"
+        return
+    fi
+    if [ ! -f "$SCRATCH/open-reached" ]; then
+        fail "$name" "no guard-free editor was launched after the failure; output: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_run_states_which_editor_the_owner_gets_back_before_it_starts() {
+    local name="the run says BEFORE its first realtest which editor the owner will get back"
+    local dir out status=0
+    dir="$(scratch_bin handback-preflight)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    plain_emacs_line 7777 > "$SCRATCH/procs"
+
+    SCRIPT_ARGS=(1)
+    out="$(STUB_EMACS_PID=7777 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "when this run ends the owner gets a GUARD-FREE editor back"; then
+        fail "$name" "the preflight does not name the editor the owner gets back: $out"
+        return
+    fi
+    pass "$name"
+}
+
 # ---- run ------------------------------------------------------------------
 
 test_backup_copies_the_database
@@ -1662,6 +1947,16 @@ test_a_take_that_failed_does_not_stop_the_sweep
 test_clean_leftovers_runs_no_realtest
 test_clean_leftovers_reports_rows_it_could_not_remove
 test_clean_leftovers_refuses_to_also_run_a_realtest
+test_a_guarded_editor_is_quit_at_the_end
+test_a_guarded_editor_is_replaced_by_a_normal_one
+test_the_replacement_editor_carries_no_guard
+test_the_summary_names_the_editor_the_owner_gets_back
+test_a_guard_free_editor_is_left_alone
+test_a_guarded_daemon_is_stopped_under_its_consent
+test_a_guarded_daemon_is_left_without_the_consent
+test_a_run_of_one_realtest_hands_the_editor_back_too
+test_the_editor_handback_survives_a_failing_realtest
+test_a_run_states_which_editor_the_owner_gets_back_before_it_starts
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -141,6 +141,17 @@ readonly EMACS_APP=/Applications/Emacs.app
 EMACSCLIENT="${AGENT_REPL_REALTEST_EMACSCLIENT:-$EMACS_APP/Contents/MacOS/bin/emacsclient}"
 readonly VENDOR_GUARD_ENV=AGENT_REPL_FORBID_VENDOR_CALLS
 
+# THE LAUNCHER FOR THE EDITOR THE OWNER GETS BACK. `open -gj -a Emacs` starts a
+# normal editor without bringing it to the front and without making it the
+# active application, so the handback restores the owner's editor without
+# taking the desktop back off them a second time.
+#
+# AGENT_REPL_REALTEST_OPEN overrides it for bin/test-realtest.sh, the same
+# reason AGENT_REPL_REALTEST_EMACSCLIENT exists: the thing being asserted is
+# which editor the owner is left with, and launching a real one to find out
+# would be the failure.
+REALTEST_OPEN="${AGENT_REPL_REALTEST_OPEN:-/usr/bin/open}"
+
 # HOW LONG A HUMAN'S IDLE COUNTS AS PRESENT. Reported rather than acted on: the
 # refusal below does not depend on it, because a cold start quits the editor no
 # matter how idle it is and only the owner can consent to that. It is printed so
@@ -461,6 +472,21 @@ daemon_pids() {
     pgrep -f "$MODULE_ROOT/daemon/bin/claude-repld" 2>/dev/null || true
 }
 
+# standing_emacs_pid — the pid of the editor answering the socket, and nothing
+# on stdout when there is none or when it will not say. The pid is what makes
+# the guard question answerable: `process_carries_guard` reads the KERNEL's
+# copy of a process's environment, and a socket is not a process.
+# shellcheck disable=SC2329
+# Invoked from restore_owner_editor, which the EXIT trap reaches indirectly.
+standing_emacs_pid() {
+    local pid
+    pid="$("$EMACSCLIENT" --socket-name "$EMACS_SOCKET" --eval '(emacs-pid)' 2>/dev/null | tr -d '"'"'"'[:space:]')"
+    case "$pid" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+    printf '%s' "$pid"
+}
+
 DAEMON_PID="$(daemon_pids | head -n1)"
 if [ -n "$DAEMON_PID" ]; then
     note "a daemon is running as pid $DAEMON_PID; checking its environment for the vendor guard"
@@ -708,6 +734,12 @@ if [ "$PLANNED_QUITS" -gt 0 ]; then
     note "this run quits Emacs $PLANNED_QUITS time(s)"
 fi
 
+# WHICH EDITOR THE OWNER GETS BACK, said before the run rather than discovered
+# after it. Every editor a realtest launches carries the vendor guard, so the
+# one left standing at the end is never the one the owner should keep; the
+# handback in `sweep_end` quits it and cold-starts a normal Emacs in its place.
+note "when this run ends the owner gets a GUARD-FREE editor back: a standing Emacs that carries $VENDOR_GUARD_ENV is quit and a normal one is launched with 'open -gj -a Emacs'"
+
 # ---- realtest 3's world: the daemon stopped, under its own consent --------
 #
 # SEPARATE FROM THE TAKEOVER, because it costs something the takeover says
@@ -842,6 +874,137 @@ fi
 # the sweep — not only on the happy path. The alternative, a block after the
 # loop, is exactly the code that does not run on the paths where the cleanup
 # matters most.
+# ---- the editor the owner gets back ---------------------------------------
+#
+# A RUN LEAVES THE OWNER'S STATE EXACTLY AS IT FOUND IT, and the editor was the
+# one exception until the owner's live logs caught it (2026-09-13 14:19). Every
+# Emacs a realtest launches carries AGENT_REPL_FORBID_VENDOR_CALLS, and the
+# sweep left the last one standing, so from the end of a sweep the owner's
+# day-to-day editor WAS the guarded one: the daemon it spawned, and every
+# daemon bin/deploy-all.sh restarted through it, inherited the guard, and the
+# owner's real workspaces talked to the FAKE vendor —
+# "shim.fake.query: fake vendor session STARTED" against a workspace the owner
+# does real work in.
+#
+# So the editor is handed back the way focus is: whatever is standing at the
+# end is READ FROM THE KERNEL, and a guarded editor is quit and replaced with a
+# cold, guard-free one. A guard-free editor is left exactly alone — there is
+# nothing to restore, and quitting the owner's own editor to launch an
+# identical one would be a disturbance of its own.
+#
+# THE DAEMON IS PART OF THE HANDBACK, under the consent that already covers
+# stopping it. A guard-free Emacs ADOPTS an answering daemon rather than
+# spawning one, so a guarded daemon left running makes the new editor a fake
+# vendor's editor exactly as before. Without AGENT_REPL_REALTEST_STOP_DAEMON=1
+# it is left standing and that is said LOUDLY, because the whole defect this
+# closes is a fake vendor nobody was told about.
+#
+# NONE OF THIS CHANGES THE SWEEP'S VERDICT, for the same reason the focus
+# handback does not: it is the owner's desktop, not a finding about the module,
+# and letting it overwrite a realtest's exit status would lose the finding the
+# sweep exists for.
+# shellcheck disable=SC2329
+# Invoked indirectly, from the EXIT trap installed below.
+restore_owner_editor() {
+    local pid quit_pid="" launched=0
+    local -a stopped=()
+    local daemon_left=""
+
+    if ! emacs_answering; then
+        note "no Emacs is answering as this run ends; there is no editor of this run's to hand back"
+        return 0
+    fi
+    pid="$(standing_emacs_pid)"
+    if [ -z "$pid" ]; then
+        printf '[realtest] THE STANDING EMACS WOULD NOT SAY ITS PID, so this run cannot tell whether the editor\n' >&2
+        printf '[realtest] it leaves behind carries %s. Check it by hand: a guarded editor and every daemon\n' "$VENDOR_GUARD_ENV" >&2
+        printf '[realtest] and shim under it answer from the FAKE vendor.\n' >&2
+        return 0
+    fi
+    if ! process_carries_guard "$pid"; then
+        note "the Emacs left standing (pid $pid) does not carry $VENDOR_GUARD_ENV; the owner keeps it, untouched"
+        return 0
+    fi
+
+    note "the Emacs left standing (pid $pid) carries $VENDOR_GUARD_ENV; it is quit and a guard-free one takes its place"
+    if ! quit_standing_emacs; then
+        printf '[realtest] THE GUARDED EMACS (pid %s) IS STILL RUNNING (above), so the editor the owner is left\n' "$pid" >&2
+        printf '[realtest] with forbids the vendor and everything it spawns answers from the FAKE vendor. Quit it\n' >&2
+        printf '[realtest] by hand and start a normal one: open -gj -a Emacs\n' >&2
+        return 0
+    fi
+    quit_pid="$pid"
+
+    # THE DAEMON, SECOND AND BEFORE THE LAUNCH: a daemon stopped after the new
+    # editor came up would already have been adopted by it.
+    local dpid
+    local -a guarded=()
+    while IFS= read -r dpid; do
+        [ -n "$dpid" ] || continue
+        if process_carries_guard "$dpid"; then
+            guarded+=("$dpid")
+        fi
+    done < <(daemon_pids)
+    if [ "${#guarded[@]}" -gt 0 ]; then
+        if [ "${AGENT_REPL_REALTEST_STOP_DAEMON:-}" != "1" ]; then
+            daemon_left="${guarded[*]}"
+            printf '[realtest] THE DAEMON LEFT RUNNING (pid(s) %s) CARRIES %s, and the guard-free Emacs this\n' "${guarded[*]}" "$VENDOR_GUARD_ENV" >&2
+            printf '[realtest] run is about to launch will ADOPT it rather than spawn one, so the owner'"'"'s workspaces\n' >&2
+            printf '[realtest] keep answering from the FAKE vendor. Stopping it ends every live session it holds,\n' >&2
+            printf '[realtest] which this run was not given permission for: set AGENT_REPL_REALTEST_STOP_DAEMON=1\n' >&2
+            printf '[realtest] to let a run stop it, or stop it by hand now (kill %s).\n' "${guarded[*]}" >&2
+        else
+            note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the guarded daemon (pid(s) ${guarded[*]}) with SIGTERM so the new editor spawns a real one"
+            "$REALTEST_KILL" -TERM "${guarded[@]}" >/dev/null 2>&1 || true
+            local _i
+            for _i in $(seq 1 "$DAEMON_STOP_SECONDS"); do
+                if [ -z "$(daemon_pids)" ]; then
+                    break
+                fi
+                sleep 1
+            done
+            local left
+            left="$(daemon_pids | tr '\n' ' ')"
+            if [ -n "${left// /}" ]; then
+                # NO SIGKILL, for the same reason realtest 3's world does not
+                # escalate: forcing the owner's daemon is not this script's call.
+                daemon_left="${left% }"
+                printf '[realtest] THE GUARDED DAEMON (pid(s) %s) IS STILL RUNNING %ss after SIGTERM. This run does\n' "${left% }" "$DAEMON_STOP_SECONDS" >&2
+                printf '[realtest] not escalate to SIGKILL on the owner'"'"'s daemon, so the editor it launches will adopt\n' >&2
+                printf '[realtest] a FAKE-vendor daemon. Stop it by hand.\n' >&2
+            else
+                stopped=("${guarded[@]}")
+            fi
+        fi
+    fi
+
+    # `env -u`, rather than trusting that this shell never exported the guard:
+    # the editor the owner gets back must be guard-free by construction, not by
+    # the absence of an export somewhere above.
+    if env -u "$VENDOR_GUARD_ENV" "$REALTEST_OPEN" -gj -a Emacs >/dev/null 2>&1; then
+        launched=1
+    else
+        printf '[realtest] THE GUARD-FREE EMACS COULD NOT BE LAUNCHED (open -gj -a Emacs failed), so the owner has\n' >&2
+        printf '[realtest] no editor standing. Start one when you next want it.\n' >&2
+    fi
+
+    local summary="the owner's editor was restored: guarded Emacs pid $quit_pid quit"
+    if [ "${#stopped[@]}" -gt 0 ]; then
+        summary="$summary, guarded daemon pid ${stopped[*]} stopped"
+    elif [ -n "$daemon_left" ]; then
+        summary="$summary, guarded daemon pid $daemon_left LEFT RUNNING (stated above)"
+    else
+        summary="$summary, no guarded daemon was running"
+    fi
+    if [ "$launched" = "1" ]; then
+        summary="$summary, a guard-free Emacs launched"
+    else
+        summary="$summary, NO editor could be launched (stated above)"
+    fi
+    note "$summary"
+    return 0
+}
+
 REALTEST_MAIN_PID="${BASHPID:-$$}"
 SWEEP_STARTED=0
 SWEEP_ENDED=0
@@ -914,6 +1077,12 @@ sweep_end() {
             printf '[realtest] run found it. This does not change the sweep'"'"'s verdict.\n' >&2
         fi
     fi
+
+    # THE EDITOR HANDBACK IS AFTER THE FOCUS HANDBACK, and last of all. Every
+    # step above still needs the editor the run has been driving, and the
+    # replacement is launched with `-gj` so it does not take the desktop back
+    # off the application the focus handback just returned it to.
+    restore_owner_editor
     exit "$status"
 }
 trap sweep_end EXIT
@@ -1058,7 +1227,7 @@ if [ -n "$MANIFESTS" ]; then
 else
     printf '[realtest] no MANIFEST.md was written: no realtest reached its harvest.\n'
 fi
-printf '[realtest] the owner'"'"'s editor is left running.\n'
+printf '[realtest] which editor the owner is left with is settled at the end of this run, below.\n'
 
 # THE VERDICT. A failure outranks a skip (something is broken), and a run where
 # nothing ran at all is a DECLINE rather than an incomplete run — the same
