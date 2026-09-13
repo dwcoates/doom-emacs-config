@@ -13,6 +13,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- sidecar: the boot `start` record names the roots as discovery globs them (symlink-resolved) rather than the raw `--config-roots`/`--spool-root` flag spellings (realtest sweep 2026-09-12, finding D)
 - daemon/elisp/webapp: a repository states its own one-shot and merge policy in `.agent-repl/prompts/`, the daemon refuses a one-shot in a repository that states none, and Emacs draws the refusal as a warning naming the directory and files (owner ruling, one-shot policy is the repository's)
 - elisp: the child variants of the two creates are their own commands and bindings — `SPC TAB c` and `SPC TAB C` — and `SPC TAB n` / `SPC TAB N` no longer take a `C-u` child prefix (owner ruling, child creates get their own bindings)
 - footer: a failed session bring-up now stands a line of its own under `disconnected · start_failed`, naming the cause and how many held prompts the failure dropped (owner ruling, a bring-up failure is footer-only)
