@@ -636,3 +636,23 @@ Also ruled: hook attachments and total-token reminders are not stored
 | 2026-09-13 | What a failed session-record read does to the bring-up of that workspace | Counts as a bring-up failure, at ERROR, and the next workspace is still started | "Could not tell" is never the benign answer here either: reading it as "not hibernated" would spawn over a deliberate sleep, and reading it as hibernated would leave a workspace session-less with nobody able to say why | Treat an unreadable record as not parked |
 | 2026-09-13 | Whether Select's revival failure fails the select | Yes | A selected workspace with no session is the state this ruling abolishes, and answering success would hide it | Log and carry on with the selection |
 | 2026-09-13 | Whether the relaunch integration test's assertion or its arrangement moved | Its arrangement: the shim profile is written before the successor starts | The successor now brings sessions up during its own boot, so a fixture written after `StartDaemon` returned is read by nothing. No assertion changed | Relax the page assertion, or delay the boot bring-up |
+## Agent judgement calls (2026-09-13, sandboxed Emacs layer creates)
+
+1. The Emacs e2e layer's daemon gets the SAME fake vendor binary the daemon's
+   own integration harness writes (`harness.NewFakeClaude`), named explicitly
+   on `AGENT_REPL_CLAUDE_BIN`. The layer already exported
+   `AGENT_REPL_FORBID_VENDOR_CALLS=1` and named no binary, so every nameless
+   create's headless naming call was refused by the guard. The naming call is
+   NOT weakened and the guard is NOT relaxed: an explicitly named binary is
+   already the documented legal spawn (`daemon/AGENTS.md`), and it is what the
+   Go worlds have always done (`e2e/SPEC.md` seam 2). Reusing the harness's
+   fake rather than writing a second one keeps the naming contract in one
+   place, so the slug a nameless create produces is the same
+   `harness.FakeClaudeMintedName` in both layers.
+2. The teardown's daemon-stop acceptance check is matched against the arm
+   plist `(:arm :accepted)` rather than a bare `t`.
+   `agent-repl-frontend-daemon-stop` documents an arm for its on-done
+   callback, so the harness was reading a shape production no longer answers
+   with and logged every healthy teardown as unaccepted. The check is
+   TIGHTENED, not dropped: the accepted arm is matched by name, so a
+   `(:arm :not-restarted ...)` refusal still reports.

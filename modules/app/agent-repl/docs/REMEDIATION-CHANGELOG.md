@@ -27,6 +27,9 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - daemon topbar / webapp: the topbar's incomplete-view record is INFO with its outstanding gates named, and `topbar.mount` is INFO like `feed.mount`, so a blank strip is diagnosable at the default level (owner ruling 1, second batch, 2026-09-13)
 
 - webapp topbar: `TopbarView.hibernated` draws the literal word "hibernated" with a client-ticked age in the strip's right-hand group, taking the fast-mode cell's own declarations (owner ruling 1, second batch, 2026-09-13)
+- e2e emacs layer: the teardown reads the daemon stop's outcome as the `(:arm :accepted)` plist the on-done callback now carries, instead of the bare `t` it used to (`e2e/emacs_test.go`; every healthy teardown logged "was not accepted")
+
+- e2e emacs layer: the sandboxed Emacs stages the daemon integration harness's fake `claude` and names it explicitly on `AGENT_REPL_CLAUDE_BIN`, so a nameless create's headless naming call answers instead of being refused by the vendor guard (`e2e/emacs_test.go`; three red Emacs creates on 2026-09-13)
 
 - webapp hold tray: an empty tray draws nothing — `drawDaemonHoldTray` answers `null`, the mount empties the host, and `#hold-tray:empty` collapses the region; the "nothing held" line is gone (owner ruling 3, 2026-09-13)
 
