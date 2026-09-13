@@ -9,6 +9,7 @@ import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
 import {
   buildWatchFooterRequest,
   mountFooter,
+  type FooterHandle,
   panelStorageKey,
   readSelection,
   writeSelection,
@@ -22,6 +23,10 @@ import {
   strip,
   type Harness,
 } from "./harness.js";
+import {
+  clearClientFailures,
+  reportClientFailure,
+} from "../../src/rpc/link.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 
@@ -33,8 +38,17 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 afterEach(() => {
+  // EVERY MOUNT IS DISPOSED, because a footer subscribes to the page-wide
+  // client verdict (`src/rpc/link.ts`) and an undisposed one from an earlier
+  // test would still be redrawing -- off whatever view it last held, malformed
+  // ones included -- when a later test reports a failure. Production disposes
+  // its one footer; the suite does the same.
+  while (mounted.length > 0) mounted.pop()?.dispose();
   vi.useRealTimers();
 });
+
+/** Every footer this file mounted, disposed after the test that mounted it. */
+const mounted: FooterHandle[] = [];
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 40; i += 1) await vi.advanceTimersByTimeAsync(0);
@@ -44,7 +58,9 @@ async function settle(): Promise<void> {
 function mount(h: Harness = harness()) {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
-  return { host, h, footer: mountFooter(host, h.ctx, { revealRow: async () => true }) };
+  const footer = mountFooter(host, h.ctx, { revealRow: async () => true });
+  mounted.push(footer);
+  return { host, h, footer };
 }
 
 describe("buildWatchFooterRequest", () => {
@@ -499,5 +515,96 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
     } finally {
       teardown();
     }
+  });
+});
+
+describe("mountFooter: the client's own verdict overlays the daemon's view", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  it("draws the status disconnected under a unary transport failure", async () => {
+    const { host } = mount();
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    expect(host.querySelector(".footer-status")?.textContent).toBe("disconnected");
+  });
+
+  it("draws the substatus daemon unreachable under a unary transport failure", async () => {
+    const { host } = mount();
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    expect(host.querySelector(".footer-substatus")?.textContent).toBe("daemon unreachable");
+  });
+
+  it("draws the failing call's own line as the activity", async () => {
+    const { host } = mount();
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    expect(host.querySelector(".footer-activity-client-verdict")?.textContent).toBe(
+      "AnswerColdGate: unavailable",
+    );
+  });
+
+  it("draws a source_ended subscription's own line as the activity", async () => {
+    const { host } = mount();
+    await settle();
+    reportClientFailure("subscription_source_ended", "the footer-1 page subscription ended (source_ended)");
+    expect(host.querySelector(".footer-activity-client-verdict")?.textContent).toBe(
+      "the footer-1 page subscription ended (source_ended)",
+    );
+  });
+
+  it("names the reporting site on the dock, for the integration suite", async () => {
+    const { host } = mount();
+    await settle();
+    reportClientFailure("stream_ended", "WatchFooter stream ended (producer_ended)");
+    expect(host.querySelector(".pfooter")?.getAttribute("data-client-verdict")).toBe("stream_ended");
+  });
+
+  it("does NOT let a daemon push override a standing verdict", async () => {
+    const { host, h } = mount();
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    h.tail.push(pushView(footerView()));
+    await settle();
+    expect(host.querySelector(".footer-status")?.textContent).toBe("disconnected");
+  });
+
+  it("restores the daemon's view on the next push once the verdict is cleared", async () => {
+    const { host, h } = mount();
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    clearClientFailures();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    expect(host.querySelector(".footer-status")?.textContent).toBe("idle");
+  });
+
+  it("redraws the daemon's last view the moment the verdict is cleared", async () => {
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    clearClientFailures();
+    expect(host.querySelector(".footer-status")?.textContent).toBe("idle");
+  });
+
+  it("publishes disconnected to the composer gate while the verdict stands", async () => {
+    const { footer } = mount();
+    await settle();
+    const seen: string[] = [];
+    footer.onStatus((statusCase) => seen.push(statusCase));
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    expect(seen).toEqual(["disconnected"]);
+  });
+
+  it("stops drawing verdicts once disposed", async () => {
+    const { host, footer } = mount();
+    await settle();
+    footer.dispose();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    expect(host.querySelector(".footer-status")).toBeNull();
   });
 });

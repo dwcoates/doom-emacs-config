@@ -35,10 +35,11 @@ import type { Handle } from "../failure/overlay.js";
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
+import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { drawFooterExpanded, FOOTER_PANELS, type FooterPanel } from "./expanded.js";
-import { drawFooterStrip, footerStatusActivity } from "./strip.js";
+import { drawClientDisconnectedStrip, drawFooterStrip, footerStatusActivity } from "./strip.js";
 import { createStopControls } from "./stop.js";
 
 /** Where the open panel is remembered, per workspace. */
@@ -82,6 +83,16 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   let statusCase: string | null = null;
   let disposed = false;
 
+  // THE CLIENT'S OWN VERDICT OVERLAYS THE DAEMON'S (owner ruling, 2026-09-13).
+  // Subscribing here rather than polling in `draw` is what makes a verdict
+  // REACH the screen: nothing else redraws this component between pushes, and
+  // a link that is down produces no pushes by definition.
+  const unsubscribeFromVerdict = onClientVerdict(() => {
+    if (disposed) return;
+    draw();
+    publishStatus();
+  });
+
   const watch: StreamHandle = watchStream<WatchFooterResponse>(ctx, {
     name: "WatchFooter",
     schema: WatchFooterResponseSchema,
@@ -106,6 +117,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       if (disposed) return;
       disposed = true;
       log.info("disposing the footer", { operation: "footer.dispose", context: {} });
+      unsubscribeFromVerdict();
       watch.cancel();
       // Every clock this component started hangs off the host's subtree.
       stopTicking(host);
@@ -127,7 +139,25 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
    * or every push would leave one ticking against a detached element.
    */
   function draw(): void {
-    if (disposed || view === null) return;
+    if (disposed) return;
+    // WHILE A CLIENT VERDICT STANDS IT WINS, and the daemon's last pushed view
+    // is not drawn at all. A push landing under a standing verdict is not
+    // evidence the link is up -- the footer stream and the verb that failed are
+    // different calls -- so the verdict is lifted by `clearClientFailures`,
+    // never by a redraw. See `src/rpc/link.ts`.
+    const verdict = standingClientFailure();
+    if (verdict !== null) {
+      const dock = document.createElement("div");
+      dock.className = "pfooter";
+      dock.setAttribute("role", "status");
+      dock.setAttribute("aria-live", "polite");
+      dock.setAttribute("data-client-verdict", verdict.kind);
+      dock.appendChild(drawClientDisconnectedStrip(verdict.substatus, verdict.activity));
+      stopTicking(host);
+      host.replaceChildren(dock);
+      return;
+    }
+    if (view === null) return;
     const strip = requireMessage(view.strip, "FooterView.strip");
     const expanded = requireMessage(view.expanded, "FooterView.expanded");
 
@@ -173,6 +203,14 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
 
   /** Tell every subscriber which status arm this push carried. */
   function publishStatus(): void {
+    // R7's composer gate reads this, and a detached page must close its
+    // composer for the same reason a pushed `disconnected` does: the verb it
+    // would send cannot be delivered.
+    if (standingClientFailure() !== null) {
+      statusCase = "disconnected";
+      for (const fn of [...statusListeners]) fn(statusCase);
+      return;
+    }
     if (view === null) return;
     const strip = requireMessage(view.strip, "FooterView.strip");
     const status = requireMessage(strip.status, "FooterStrip.status");
