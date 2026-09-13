@@ -127,6 +127,32 @@ func (s *supervisor) StandingDown() bool {
 	return s.standingDown
 }
 
+// SpawnedFor answers whether this supervisor still owns a shim it STARTED for
+// this workspace, and the pid of the first one it finds.
+//
+// IT IS THE ADOPTION'S OWN GUARD. A shim this daemon spawned and still
+// supervises must never be adopted a second time by the same daemon: that is
+// ONE process with TWO clients, which is the duplicate-client shape measured
+// on 2026-09-13 (a `Fleet.Start` whose StartSession refused returned before
+// the client was remembered, left its shim serving, and the next bring-up
+// found "lock free, socket live" and adopted the very process the supervisor
+// was still holding). The registry is the only place that knows, because a
+// spawn reaches the fleet's session map only after StartSession answers.
+//
+// It reports the LIVE set and nothing else: a dead process leaves the registry
+// on its exit decode, and a transferred one leaves it at `Detach`, so a
+// successor daemon's adoption of a handed-over shim is not this case.
+func (s *supervisor) SpawnedFor(ws ids.WorkspaceID) (int, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for c := range s.held {
+		if c.ws == ws {
+			return c.PID(), true
+		}
+	}
+	return 0, false
+}
+
 // heldNow is a snapshot of the registry. The sweep below takes its own under
 // the same lock that latches it; this is the read every other caller uses.
 func (s *supervisor) heldNow() []*client {

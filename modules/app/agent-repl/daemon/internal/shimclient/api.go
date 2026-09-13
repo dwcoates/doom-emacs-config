@@ -102,6 +102,11 @@ type Supervisor interface {
 	// reads an ordered departure as one from the moment the shutdown begins
 	// rather than from the moment its sweep is reached.
 	BeginStandDown() bool
+	// SpawnedFor answers whether this supervisor still owns a shim it
+	// STARTED for that workspace, with its pid. The bring-up's adoption path
+	// reads it before it adopts: a shim this daemon spawned and still
+	// supervises must never become a SECOND client of the same process.
+	SpawnedFor(ws ids.WorkspaceID) (int, bool)
 	// StandingDown answers the latch. A bring-up reads it before it spawns:
 	// a daemon that is leaving must not start a process nothing will be left
 	// to stop.

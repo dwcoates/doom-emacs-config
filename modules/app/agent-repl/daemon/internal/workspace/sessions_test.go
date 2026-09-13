@@ -44,6 +44,10 @@ type fakeClient struct {
 	// standDownBeforeKill that it was armed BEFORE the KillSession ask.
 	stoodDown           bool
 	standDownBeforeKill bool
+	// standDownBeforeStop is the same question for the PROCESS stop, which is
+	// where a failed start's shim is ended: the latch has to be armed before
+	// the process goes, or the departure reads as a death nobody ordered.
+	standDownBeforeStop bool
 	// standDownRefused is the DETACHED shape: the latch arms nothing, because
 	// that process belongs to the successor daemon.
 	standDownRefused bool
@@ -59,6 +63,9 @@ type fakeClient struct {
 	// waiting for it. A nil startHold never waits.
 	entered   chan struct{}
 	startHold chan struct{}
+	// onKill is the supervisor's deregistration, armed by the fake spawn: the
+	// real client releases the supervisor's hold on its exit decode.
+	onKill func()
 }
 
 func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
@@ -118,6 +125,13 @@ func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) er
 		return c.killErr
 	}
 	c.kills = append(c.kills, attr)
+	c.standDownBeforeStop = c.stoodDown
+	// THE SUPERVISOR LETS GO WHEN THE PROCESS DOES, exactly as the real
+	// client's exit decode releases its hold: a spawn registry that still
+	// named a killed process would answer "ours" for a shim that is gone.
+	if c.onKill != nil {
+		c.onKill()
+	}
 	return nil
 }
 
@@ -128,9 +142,13 @@ type fakeSupervisor struct {
 	// standingDown is the supervisor's stand-down latch.
 	standingDown bool
 
-	client   *fakeClient
-	spawns   []shimclient.Spec
-	adopts   []string
+	client *fakeClient
+	spawns []shimclient.Spec
+	adopts []string
+	// spawned is the live spawn registry the real supervisor keeps: every
+	// process it started and still owns, by workspace, entered at the spawn
+	// and left at the kill.
+	spawned  map[ids.WorkspaceID]int
 	spawnErr error
 	adoptErr error
 	// adoptBlocks makes an adoption wait out the caller's context, which is a
@@ -166,6 +184,21 @@ func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimcli
 		return nil, s.spawnErr
 	}
 	s.spawns = append(s.spawns, spec)
+	if s.spawned == nil {
+		s.spawned = make(map[ids.WorkspaceID]int)
+	}
+	s.spawned[spec.WorkspaceID] = s.client.pid
+	// THE TEST'S OWN HOOK SURVIVES the supervisor's deregistration: a scenario
+	// that watches the socket go when the process does arms it before the
+	// spawn, and losing it here would make the socket outlive the shim in
+	// every one of them.
+	arranged := s.client.onKill
+	s.client.onKill = func() {
+		delete(s.spawned, spec.WorkspaceID)
+		if arranged != nil {
+			arranged()
+		}
+	}
 	return s.client, nil
 }
 
@@ -263,6 +296,11 @@ type fleetFixture struct {
 	// "the base is gone and generation 1 is live" — the shape a relaunched
 	// shim leaves behind for the next daemon.
 	socketStates map[string]shimsocket.State
+	// onSocketProbe runs on every socket probe, before it answers, so a
+	// scenario about a socket that CHANGES -- a shim binding it at the spawn,
+	// or letting it go a moment after the stop -- can drive the change from
+	// the probe itself rather than from a clock.
+	onSocketProbe func(path string)
 	// adoptBound is the fixture's adoption bound, generous by default so no
 	// ordinary scenario can trip it; a scenario about the give-up shortens it.
 	adoptBound time.Duration
@@ -352,6 +390,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		LockDir: t.TempDir(),
 		Probe:   func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
 		SocketProbe: func(path string) (shimsocket.State, error) {
+			if f.onSocketProbe != nil {
+				f.onSocketProbe(path)
+			}
 			if state, ok := f.socketStates[path]; ok {
 				return state, nil
 			}
@@ -2081,6 +2122,14 @@ func (s *fakeSupervisor) BeginStandDown() bool {
 	}
 	s.standingDown = true
 	return true
+}
+
+// SpawnedFor answers the fake supervisor's live spawn registry, which is what
+// the bring-up's adoption guard reads: a shim this daemon spawned and still
+// owns is never adopted a second time.
+func (s *fakeSupervisor) SpawnedFor(ws ids.WorkspaceID) (int, bool) {
+	pid, ok := s.spawned[ws]
+	return pid, ok
 }
 
 // StandingDown answers the fake supervisor's latch.

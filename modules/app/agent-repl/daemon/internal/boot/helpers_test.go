@@ -403,6 +403,10 @@ func (s *fakeSupervisor) BeginStandDown() bool {
 	return true
 }
 
+// SpawnedFor answers the supervisor's live spawn registry. These fakes spawn
+// no process, so this daemon owns no spawn for any workspace.
+func (s *fakeSupervisor) SpawnedFor(ids.WorkspaceID) (int, bool) { return 0, false }
+
 // StandingDown answers the fake supervisor's latch.
 func (s *fakeSupervisor) StandingDown() bool {
 	s.mu.Lock()

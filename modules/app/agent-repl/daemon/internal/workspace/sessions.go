@@ -190,6 +190,11 @@ type Fleet struct {
 	adoptBound time.Duration
 	// startBound bounds ONE StartSession; see DefaultStartSessionBound.
 	startBound time.Duration
+	// socketGoneBound bounds the wait for a stopped shim's socket to
+	// disappear; see stopFailedStart. It is shimclient.GracefulKillBound --
+	// the whole of a graceful stop's worst case -- and it is a field only so a
+	// scenario ABOUT the give-up need not wait one out.
+	socketGoneBound time.Duration
 
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
@@ -339,12 +344,14 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		now:         now,
 		adoptBound:  adoptBound,
 		startBound:  startBound,
-		sessions:    map[ids.WorkspaceID]*live{},
-		coldGates:   map[ids.WorkspaceID]ServedColdGate{},
-		lastCold:    map[ids.WorkspaceID]*conversationv1.SessionCold{},
-		generation:  map[ids.WorkspaceID]int{},
-		buildSHA:    map[ids.WorkspaceID]string{},
-		startGates:  map[ids.WorkspaceID]*sync.Mutex{},
+
+		socketGoneBound: shimclient.GracefulKillBound,
+		sessions:        map[ids.WorkspaceID]*live{},
+		coldGates:       map[ids.WorkspaceID]ServedColdGate{},
+		lastCold:        map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		generation:      map[ids.WorkspaceID]int{},
+		buildSHA:        map[ids.WorkspaceID]string{},
+		startGates:      map[ids.WorkspaceID]*sync.Mutex{},
 	}, nil
 }
 
@@ -669,10 +676,11 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// restamps and nothing carries a previous session's id forward.
 	log = stampSession(log, hostSessionID)
 
-	client, adopted, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID, src)
+	client, path, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID, src)
 	if err != nil {
 		return err
 	}
+	adopted := path == pathAdopted
 	// THE HEALTHY ATTACH CLOSES THE LOST-LINK FAULTS. Bring-up gates on the
 	// shim's first healthy diagnostics, so reaching here IS the repair of
 	// whatever shim_died or link_severed the previous attachment recorded. A
@@ -707,6 +715,17 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 
 	started, err := f.startSession(ctx, log, ws, client, src, session)
 	if err != nil {
+		// A START THAT FAILED LEAVES NO SHIM OF ITS OWN SERVING. The refusal
+		// returns before anything remembers this client, so nothing else in
+		// the daemon holds it -- while the process is still bound to the
+		// workspace socket, still holding ~95 MiB, and still there for the
+		// NEXT bring-up to find as an "inert survivor" and adopt, which is one
+		// process with two clients (2026-09-13T18:17:56 -> 18:18:41, shim pid
+		// 48170). A shim we ADOPTED is not ours to stop: it was serving before
+		// this start and its own daemon-or-none owns it.
+		if path == pathSpawned {
+			f.stopFailedStart(ctx, log, ws, client, udsPath, err)
+		}
 		return err
 	}
 	if started == nil {
@@ -872,11 +891,32 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	return f.sessionUp(ctx, log, ws, session.client, started, previous, configDir, hostSessionID)
 }
 
+// bringUpPath is WHICH of the three ways a client came up, and it is a
+// distinct answer from "was it adopted" because the caller has to act on the
+// third one. A shim THIS bring-up spawned is this daemon's to stop when the
+// start that follows fails: an error returned before the client is remembered
+// leaves nothing else holding it, and the shim keeps serving the workspace
+// socket for the next bring-up to find.
+type bringUpPath int
+
+const (
+	// pathNone is no client at all: the bring-up refused or failed.
+	pathNone bringUpPath = iota
+	// pathSpawned is a shim THIS bring-up started.
+	pathSpawned
+	// pathAdopted is a surviving shim that holds the workspace lock, and
+	// therefore already has its one session.
+	pathAdopted
+	// pathInert is a surviving shim that is LISTENING while holding no lock:
+	// it has no session yet, so it is attached to and then started.
+	pathInert
+)
+
 // bringUpClient probes the workspace lock and either ADOPTS the surviving shim
 // that holds it or SPAWNS a new one. A probe that could not tell is never read
 // as free: spawning a second shim onto one conversation is the failure the lock
 // exists to prevent.
-func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string, src source) (shimclient.Client, bool, error) {
+func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string, src source) (shimclient.Client, bringUpPath, error) {
 	// A DEPARTING DAEMON BRINGS NOTHING UP, and it says so BEFORE it probes or
 	// spawns. The supervisor already refuses the spawn -- that is the latch's
 	// backstop and it stays -- but reaching the refusal that way costs a
@@ -898,7 +938,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		log.Info(opBringUp, "no shim is brought up: this daemon is standing down", dlog.Context{
 			"workspace": string(ws), "socket": udsPath,
 		})
-		return nil, false, fmt.Errorf("%w: %w", shimclient.ErrStandingDown,
+		return nil, pathNone, fmt.Errorf("%w: %w", shimclient.ErrStandingDown,
 			refuse(log, "OpenWorkspace", ArmSpawnFailed, shimclient.ErrStandingDown.Error(), false))
 	}
 	lockPath := f.lockDir()
@@ -966,16 +1006,19 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		log.Error(opBringUp, "the shim socket probe could not tell", dlog.Context{
 			"socket": socketPath, "cause": errText(socketErr),
 		})
-		return nil, false, fmt.Errorf("start session for %q: the shim socket at %q could not be probed: %w", ws, socketPath, socketErr)
+		return nil, pathNone, fmt.Errorf("start session for %q: the shim socket at %q could not be probed: %w", ws, socketPath, socketErr)
 	}
 	if inert {
+		if err := f.refuseAdoptingOurOwnSpawn(ctx, log, ws, socketPath, "inert_survivor"); err != nil {
+			return nil, pathNone, err
+		}
 		client, err := f.adoptBounded(ctx, log, ws, dir, socketPath, "inert_survivor")
 		if err != nil {
 			log.Error(opBringUp, "could not attach to the inert survivor", dlog.Context{"cause": err.Error()})
 			f.noteStartFailed(ctx, log, ws, err)
-			return nil, false, fmt.Errorf("start session for %q: adopt: %w", ws, err)
+			return nil, pathNone, fmt.Errorf("start session for %q: adopt: %w", ws, err)
 		}
-		return client, false, nil
+		return client, pathInert, nil
 	}
 	switch state {
 	case sessionlock.StateHeld:
@@ -1001,11 +1044,14 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 				"socket": socketPath, "socket_state": socket.String(),
 			})
 			f.noteStartFailed(ctx, log, ws, unreachable)
-			return nil, false, unreachable
+			return nil, pathNone, unreachable
 		}
 		log.Info(opBringUp, "a surviving shim holds the workspace lock; adopting it", dlog.Context{
 			"lock_dir": lockPath, "socket": socketPath, "socket_state": socket.String(),
 		})
+		if err := f.refuseAdoptingOurOwnSpawn(ctx, log, ws, socketPath, "lock_held"); err != nil {
+			return nil, pathNone, err
+		}
 		client, err := f.adoptBounded(ctx, log, ws, dir, socketPath, "lock_held")
 		if err != nil {
 			log.Error(opBringUp, "could not adopt the surviving shim", dlog.Context{"cause": err.Error()})
@@ -1014,9 +1060,9 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			// stated no dead link, so the footer showed nothing at all while
 			// the queue dropped the prompt that was waiting on it.
 			f.noteStartFailed(ctx, log, ws, err)
-			return nil, false, fmt.Errorf("start session for %q: adopt: %w", ws, err)
+			return nil, pathNone, fmt.Errorf("start session for %q: adopt: %w", ws, err)
 		}
-		return client, true, nil
+		return client, pathAdopted, nil
 	case sessionlock.StateFree:
 		// THE CLASSIFIER ALREADY SETTLED FRESH-VERSUS-RESUME, transcript and
 		// all, before this probe ran: a resume reaching here names a
@@ -1037,12 +1083,12 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 				"socket": udsPath, "cause": clearErr.Error(),
 			})
 			f.noteStartFailed(ctx, log, ws, clearErr)
-			return nil, false, refuse(log, "OpenWorkspace", ArmSpawnFailed, clearErr.Error(), false)
+			return nil, pathNone, refuse(log, "OpenWorkspace", ArmSpawnFailed, clearErr.Error(), false)
 		}
 		sink, err := f.deps.Log.ShimSink(dir)
 		if err != nil {
 			log.Error(opBringUp, "could not borrow the shim log sink", dlog.Context{"cause": err.Error()})
-			return nil, false, fmt.Errorf("start session for %q: shim log sink: %w", ws, err)
+			return nil, pathNone, fmt.Errorf("start session for %q: shim log sink: %w", ws, err)
 		}
 		client, err := f.deps.Supervisor.Spawn(ctx, shimclient.Spec{
 			WorkspaceID:  ws,
@@ -1065,15 +1111,15 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			// what every OTHER surface reads, and without them a workspace
 			// whose shim will not start looks merely idle.
 			f.noteStartFailed(ctx, log, ws, err)
-			return nil, false, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
+			return nil, pathNone, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
 		}
-		return client, false, nil
+		return client, pathSpawned, nil
 	default:
 		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "default"})
 		log.Error(opBringUp, "the workspace lock probe could not tell", dlog.Context{
 			"lock": lockPath, "cause": errText(err),
 		})
-		return nil, false, fmt.Errorf("start session for %q: the workspace lock at %q could not be probed: %w", ws, lockPath, err)
+		return nil, pathNone, fmt.Errorf("start session for %q: the workspace lock at %q could not be probed: %w", ws, lockPath, err)
 	}
 }
 
