@@ -2,6 +2,7 @@ package drain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -63,6 +64,19 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the idle session is not free; deferring its hibernation", fields)
 			continue
 		}
+		// A DURABLE SESSION ROW IS NOT A SHIM. Hibernation is a directive to a
+		// running shim, so a workspace whose session this daemon cannot
+		// address has nothing to stand down: its bring-up is still in flight,
+		// its close already is, or the row outlived the process that served
+		// it. That is a STATE, and the sweep skips it here rather than sending
+		// a directive whose only possible answer is a failure -- which is what
+		// a registry row left behind by a removed worktree cost in the field:
+		// the same ERROR every five minutes, forever, for a session no daemon
+		// had ever held (realtest 7, 2026-09-12).
+		if !c.deps.Stand.Serving(ws.ID) {
+			log.Debug(opSweep, "the workspace has no shim to address; skipping its hibernation", fields)
+			continue
+		}
 		if c.hibernate(ctx, log, ws.ID, fields) {
 			hibernated = append(hibernated, ws.ID)
 		}
@@ -110,6 +124,16 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	answer, err := c.deps.Stand.Hibernate(directive, ws)
 	cancelDirective()
 	if err != nil {
+		// THE RACE, NOT A FAULT. The pass selected a serving workspace, and
+		// the session went away before the directive reached it. There is
+		// nothing to stand down and nothing to fix, so it is recorded as the
+		// state it is and deferred; the ERROR below still covers every
+		// directive that failed against a shim that WAS there.
+		if errors.Is(err, ErrNoLiveSession) {
+			log.Debug(opSweep, "the session went away before the hibernate directive; deferring the hibernation",
+				withCause(fields, err))
+			return false
+		}
 		log.Error(opSweep, "the hibernate directive failed; deferring the hibernation",
 			withCause(fields, err))
 		return false

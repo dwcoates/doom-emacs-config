@@ -144,9 +144,18 @@ type Deps struct {
 // Stand is how the drain controller reaches one workspace's shim: the
 // pre-hibernation directive, and the graceful stand-down that follows its ack.
 type Stand interface {
+	// Serving reports whether this daemon holds a shim it can address for the
+	// workspace RIGHT NOW: a session installed in the fleet whose client has
+	// not been reaped. It is the sweep's selection predicate, and it is the
+	// same answer the directive itself resolves, so a workspace whose session
+	// is not up — bring-up still in flight, a close already under way, a
+	// durable session row this process never adopted — is SKIPPED rather than
+	// sent a directive that cannot land.
+	Serving(ws ids.WorkspaceID) bool
 	// Hibernate sends the pre-hibernation directive and waits for the shim's
 	// answer. The REFUSAL is an answer, not an error: turn_in_flight simply
-	// defers the workspace to a later pass.
+	// defers the workspace to a later pass. It answers ErrNoLiveSession when
+	// the session went away between the selection above and the directive.
 	Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.HibernateResponse, error)
 	// KillSession stands the shim down. The SWEEP never forces: force is false
 	// on every call the idle sweep makes, because teardown never interrupts a
@@ -248,6 +257,18 @@ type ExitFunc func(ctx context.Context) error
 // ErrNothingScheduled is Cancel's refusal when no schedule is in force. It is
 // UpdateShutdownScheduleError.nothing_scheduled.
 var ErrNothingScheduled = errors.New("drain: nothing is scheduled to cancel")
+
+// ErrNoLiveSession is the stand's answer when the workspace has no shim this
+// daemon can address. It is a STATE, not a fault: nothing is up to stand down,
+// so the sweep defers the workspace at debug rather than reporting a failure
+// against a session that does not exist.
+//
+// The sweep skips such a workspace before it ever sends the directive
+// (Stand.Serving above), so this arm is the RACE — a session that went away
+// between the selection and the call. It is typed rather than matched on its
+// text because the sweep's other directive failures, a wedged shim and a dead
+// transport among them, must keep reaching the ERROR arm.
+var ErrNoLiveSession = errors.New("the workspace has no live session")
 
 // New builds the controller. It applies the
 // AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS override to the supplied cutoff, so the
