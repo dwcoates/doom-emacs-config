@@ -23,6 +23,7 @@ import (
 	"claude-repld/internal/externalbrowser"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/handover"
+	"claude-repld/internal/headless"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/imageorigin"
@@ -75,6 +76,11 @@ import (
 
 // graphOperation is the operation this file's own records carry.
 const graphOperation = "daemon.cmd.graph"
+
+// opHeadlessBinary is the boot record naming the vendor binary every headless
+// call — the classifier's routing question and the workspace naming call —
+// will exec.
+const opHeadlessBinary = "daemon.headless.binary"
 
 // unwired names every Deps field this composition root cannot supply. It is
 // EMPTY: every collaborator the wave-3 graph needs has a landed producer. The
@@ -210,7 +216,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	guard := envc.NewVendorGuard(p.Contracts)
-	judge, err := buildJudge(p.Contracts, guard, paths.PromptsDir)
+	// ONE RESOLVED VENDOR BINARY FOR EVERY HEADLESS CALL. It is recorded at
+	// boot because the alternative was invisible: buildJudge used to hand the
+	// classifier an empty binary, so every classification refused before it
+	// reached the model and nothing said so.
+	headlessClient := headless.New(guard, "")
+	log.Info(opHeadlessBinary, "resolved the vendor binary for the daemon's headless calls", dlog.Context{
+		"bin":    headlessClient.Bin(),
+		"source": headless.BinSource(""),
+	})
+	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the classifier: %w", err)
 	}
@@ -617,6 +632,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Holds:        holdsResolver,
 		Host:         relay,
 		Sessions:     fleet,
+		Headless:     headlessClient,
 		Browser:      browser,
 		PromptsDir:   paths.PromptsDir,
 		CheckoutRoot: paths.Checkout,
@@ -995,11 +1011,11 @@ func fakeShims() bool {
 // whole stack's fake mode, the vendor-backed one otherwise. The vendor guard
 // refuses the real one when vendor calls are forbidden, which is why it is
 // handed in rather than checked here.
-func buildJudge(contracts envc.Contracts, guard envc.VendorGuard, promptsDir string) (classifier.Judge, error) {
+func buildJudge(contracts envc.Contracts, guard envc.VendorGuard, runner headless.Runner, promptsDir string) (classifier.Judge, error) {
 	if contracts.Fake() {
 		return classifier.NewFake(), nil
 	}
-	return classifier.New(guard, "", promptsDir)
+	return classifier.New(guard, runner, promptsDir)
 }
 
 // refusalNoter carries the queue's drain refusals to the drain controller,
