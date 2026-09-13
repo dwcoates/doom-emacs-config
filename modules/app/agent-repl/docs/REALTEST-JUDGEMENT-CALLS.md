@@ -264,3 +264,11 @@ capital `SPC TAB O`, which was free in the same map. Nothing loses a binding.
 The three `SPC j` one-shot bindings (`o`, `O`, `C-o`) go with their commands.
 
 Surfaced for the owner to overrule if re-open should keep the lowercase key.
+
+## Realtest 5 — the identity-rekey warn
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-12 | Whether the `toolu_...` in the rekey's `vendor_session_id` slot was an identity-file writer defect | No writer defect: no `agent-id.json` under the live state dir holds anything but a uuid, and the id came from the OWNER INDEX (the spawning call's book, legitimately a subagent's `toolu_` id) echoed back by `identity.Resolve` as `unrecorded` | The shim's writer was never involved; only the record's wording claimed it was | Nothing to revert; re-open if an identity file is ever found holding a `toolu_` id |
+| 2026-09-12 | Whether a first attribution should keep the `identity-rekey` operation name | Kept, at info, with the resolution source in the message | Both arms are the same pass answering the same question, and splitting the operation would break every existing query for it | Give the info arm its own operation name in `rekeyRotations` |
+
