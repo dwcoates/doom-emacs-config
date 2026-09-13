@@ -368,18 +368,39 @@ func (r *resolver) contextChip(s *wsState) *frontendv1.TopbarContextChip {
 // logged-out root is a drawn warning, because a session whose root is logged
 // out cannot run a turn and a blank would read as "loading".
 func (r *resolver) account(s *wsState) *frontendv1.TopbarAccount {
+	out := &frontendv1.TopbarAccount{Options: accountOptions(s.accountOptions)}
 	if s.email == "" {
-		return &frontendv1.TopbarAccount{
-			State: &frontendv1.TopbarAccount_LoggedOut{
-				LoggedOut: &frontendv1.TopbarAccountLoggedOut{},
-			},
+		out.State = &frontendv1.TopbarAccount_LoggedOut{
+			LoggedOut: &frontendv1.TopbarAccountLoggedOut{},
 		}
+		return out
 	}
-	return &frontendv1.TopbarAccount{
-		State: &frontendv1.TopbarAccount_LoggedIn{
-			LoggedIn: &frontendv1.TopbarAccountLoggedIn{Email: s.email},
-		},
+	out.State = &frontendv1.TopbarAccount_LoggedIn{
+		LoggedIn: &frontendv1.TopbarAccountLoggedIn{Email: s.email},
 	}
+	return out
+}
+
+// accountOptions renders the cell's dropdown: every root the daemon knows, in
+// the order it served them, each on the same arm rule the cell itself takes —
+// a logged-out root is an answer, so it is a row the reader can pick and not a
+// row drawn blank.
+func accountOptions(options []AccountOption) []*frontendv1.TopbarAccountOption {
+	out := make([]*frontendv1.TopbarAccountOption, 0, len(options))
+	for _, option := range options {
+		row := &frontendv1.TopbarAccountOption{ConfigDir: option.ConfigDir, Current: option.Current}
+		if option.Email == "" {
+			row.State = &frontendv1.TopbarAccountOption_LoggedOut{
+				LoggedOut: &frontendv1.TopbarAccountLoggedOut{},
+			}
+		} else {
+			row.State = &frontendv1.TopbarAccountOption_LoggedIn{
+				LoggedIn: &frontendv1.TopbarAccountLoggedIn{Email: option.Email},
+			}
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // ContextPanel resolves the /context panel from the same fact the chip resolves
@@ -437,11 +458,14 @@ func (r *resolver) SetModelCatalog(ws ids.WorkspaceID, models []*conversationv1.
 		func(s *wsState) { s.catalog = models })
 }
 
-// SetAccount installs the account read from the config root.
-func (r *resolver) SetAccount(ws ids.WorkspaceID, email string) {
+// SetAccount installs the account cell: the root in force, and every root the
+// session may switch to.
+func (r *resolver) SetAccount(ws ids.WorkspaceID, account Account) {
 	r.mutate(ws, "daemon.topbar.set_account", "the topbar took the account",
-		dlog.Context{"logged_in": email != ""}, func(s *wsState) {
-			s.email = email
+		dlog.Context{"logged_in": account.Email != "", "options": len(account.Options)},
+		func(s *wsState) {
+			s.email = account.Email
+			s.accountOptions = account.Options
 			s.accountSet = true
 		})
 }
