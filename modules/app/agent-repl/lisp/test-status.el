@@ -250,127 +250,128 @@ reads distinctly from :idle orange and :thinking red."
 
 ;;;; ---- Tests: ws-display-state suppresses all coloring when panels closed ----
 
-;;;; ---- Tests: ready-view acknowledgment fades the tab name ----
+;;;; ---- Tests: the tab background extent is the panels-open fact ----
 ;;
-;; A `:ready' workspace shouts in full green until the user has actually
-;; stood in it for `agent-repl-ready-view-fade-delay' seconds; after that
-;; the name region falls back to the default face and only the [N] bracket
-;; stays green.
+;; Owner ruling 5 (2026-09-13): FULL (the whole `[N] <name>' entry carries
+;; the status color) IF AND ONLY IF the workspace's agent-repl panels are
+;; open; PARTIAL (only `[N]' carries it) IF AND ONLY IF they are not.
+;; Nothing else may suppress the full color — the ready-view dwell fade
+;; that used to is gone, apparatus and all.
 
-(ert-deftest agent-repl-test-ready-view-ack-absent-by-default ()
-  "A fresh workspace carries no ready-view acknowledgment."
+(ert-deftest agent-repl-test-display-state-full-when-panels-are-open ()
+  "Panels open: the render-state drives the whole entry."
+  ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
-    (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1"))))
-
-(ert-deftest agent-repl-test-ready-view-ack-unknown-ws-is-nil ()
-  "An unknown workspace answers nil rather than signalling at the boundary."
-  (agent-repl-test--with-clean-state
-    (should-not (agent-repl--ws-ready-view-acknowledged-p "never-registered"))))
-
-(ert-deftest agent-repl-test-ready-view-dwell-elapsed-without-stamp-is-nil ()
-  "A workspace never activated has no `:last-viewed-at' and so no dwell."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
-    (should-not (agent-repl--ws-ready-view-dwell-elapsed-p "ws1"))))
-
-(ert-deftest agent-repl-test-ready-view-dwell-elapsed-below-delay-is-nil ()
-  "A view younger than the fade delay has not dwelt long enough."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :last-viewed-at (current-time))
-    (should-not (agent-repl--ws-ready-view-dwell-elapsed-p "ws1"))))
-
-(ert-deftest agent-repl-test-ready-view-dwell-elapsed-past-delay-is-t ()
-  "A view older than the fade delay has dwelt long enough."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :last-viewed-at
-                        (time-subtract (current-time)
-                                       (1+ agent-repl-ready-view-fade-delay)))
-    (should (agent-repl--ws-ready-view-dwell-elapsed-p "ws1"))))
-
-(ert-deftest agent-repl-test-note-ready-view-dwell-waits-for-delay ()
-  "A :ready workspace viewed for less than the delay does not latch yet."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
-    (agent-repl--ws-put "ws1" :last-viewed-at (current-time))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-               (lambda () "ws1")))
-      (agent-repl--note-ready-view-dwell)
-      (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1")))))
-
-(ert-deftest agent-repl-test-note-ready-view-dwell-ignores-non-ready-state ()
-  "A long-viewed :thinking workspace never latches — the fade is :ready-only."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
-    (agent-repl--ws-put "ws1" :last-viewed-at
-                        (time-subtract (current-time)
-                                       (1+ agent-repl-ready-view-fade-delay)))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-               (lambda () "ws1")))
-      (agent-repl--note-ready-view-dwell)
-      (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1")))))
-
-(ert-deftest agent-repl-test-note-ready-view-dwell-ignores-unviewed-workspace ()
-  "A :ready workspace that is not the current one does not latch."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws2" :pushed-render-state :ready)
-    (agent-repl--ws-put "ws2" :last-viewed-at
-                        (time-subtract (current-time)
-                                       (1+ agent-repl-ready-view-fade-delay)))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-               (lambda () "ws1")))
-      (agent-repl--note-ready-view-dwell)
-      (should-not (agent-repl--ws-ready-view-acknowledged-p "ws2")))))
-
-(ert-deftest agent-repl-test-note-ready-view-dwell-no-current-workspace-noop ()
-  "With no current workspace the heartbeat check is a no-op."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-               (lambda () nil)))
-      (agent-repl--note-ready-view-dwell)
-      (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1")))))
-
-(ert-deftest agent-repl-test-note-ready-view-dwell-unknown-current-ws-noop ()
-  "A current persp the workspace hash does not know is not stub-created."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-               (lambda () "none")))
-      (agent-repl--note-ready-view-dwell)
-      (should-not (agent-repl--ws-known-p "none")))))
-
-(ert-deftest agent-repl-test-clear-ready-view-ack-on-non-ready-push ()
-  "A pushed state other than :ready clears the acknowledgment."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
-    (agent-repl--clear-ready-view-ack-on-state-change "ws1" :thinking :ready)
-    (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1"))))
-
-(ert-deftest agent-repl-test-clear-ready-view-ack-keeps-latch-on-ready-push ()
-  "A re-pushed :ready leaves the acknowledgment latched."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
-    (agent-repl--clear-ready-view-ack-on-state-change "ws1" :ready :ready)
-    (should (agent-repl--ws-ready-view-acknowledged-p "ws1"))))
-
-(ert-deftest agent-repl-test-clear-ready-view-ack-unknown-ws-noop ()
-  "Clearing for an unknown workspace does not stub-create an entry."
-  (agent-repl-test--with-clean-state
-    (agent-repl--clear-ready-view-ack-on-state-change "none" :thinking :ready)
-    (should-not (agent-repl--ws-known-p "none"))))
-
-(ert-deftest agent-repl-test-clear-ready-view-ack-registered-on-transition-hook ()
-  "The clear runs as a state-transition subscriber, not on an ad hoc call site."
-  (should (memq #'agent-repl--clear-ready-view-ack-on-state-change
-                agent-repl-ws-state-transition-functions)))
-
-(ert-deftest agent-repl-test-display-state-ready-acknowledged-renders-nil ()
-  "An acknowledged :ready workspace suppresses the state-colored name region."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
-    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
-    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+    (agent-repl--ws-put "ws1" :project-dir "/w/1")
+    (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+               (lambda (_ws) :ready))
+              ((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
-      (should-not (agent-repl--ws-display-state "ws1")))))
+      ;; Act / Assert
+      (should (eq (agent-repl--ws-display-state "ws1") :ready)))))
+
+(ert-deftest agent-repl-test-display-state-partial-when-panels-are-closed ()
+  "Panels closed: the full color is suppressed and only [N] keeps it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w/1")
+    (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+               (lambda (_ws) :ready))
+              ((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should-not (agent-repl--ws-display-state "ws1"))
+      (should (eq (agent-repl--ws-bracket-state "ws1") :ready)))))
+
+(ert-deftest agent-repl-test-display-state-full-for-a-long-viewed-ready-workspace ()
+  "A `:ready' workspace the user has stood in for ages still draws FULL.
+The dwell fade made this case partial with the panels open, which the
+IF AND ONLY IF forbids."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w/1")
+    (agent-repl--ws-put "ws1" :last-viewed-at (time-subtract (current-time) 3600))
+    (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+               (lambda (_ws) :ready))
+              ((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      ;; Act / Assert
+      (should (eq (agent-repl--ws-display-state "ws1") :ready)))))
+
+(ert-deftest agent-repl-test-ready-view-fade-apparatus-is-gone ()
+  "The ready-view latch no longer exists: the extent rule is panels alone."
+  (should-not (fboundp 'agent-repl--ws-ready-view-acknowledged-p))
+  (should-not (fboundp 'agent-repl--note-ready-view-dwell))
+  (should-not (boundp 'agent-repl-ready-view-fade-delay)))
+
+(ert-deftest agent-repl-test-tab-background-mode-flip-is-logged ()
+  "A tab whose background mode FLIPS writes one debug record naming the reason."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((records nil)
+          (agent-repl--tab-background-modes (make-hash-table :test 'equal)))
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records))))
+        (agent-repl--note-tab-background-mode "ws1" :full "panels-open")
+        ;; Act
+        (agent-repl--note-tab-background-mode "ws1" :partial "panels-closed")
+        ;; Assert
+        (should (equal (length records) 2))
+        (should (string-match-p "mode=:partial" (car records)))
+        (should (string-match-p "reason=panels-closed" (car records)))))))
+
+(ert-deftest agent-repl-test-tab-background-mode-steady-is-not-logged ()
+  "A mode that holds writes nothing: this runs inside tab-bar redisplay."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((records 0)
+          (agent-repl--tab-background-modes (make-hash-table :test 'equal)))
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (&rest _) (cl-incf records))))
+        (agent-repl--note-tab-background-mode "ws1" :full "panels-open")
+        ;; Act
+        (agent-repl--note-tab-background-mode "ws1" :full "panels-open")
+        ;; Assert
+        (should (equal records 1))))))
+
+(ert-deftest agent-repl-test-panel-change-repaints-on-a-flip ()
+  "Opening or closing a panel repaints the tab bar on that redisplay."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w/1")
+    (let ((repainted 0)
+          (agent-repl--tab-background-modes (make-hash-table :test 'equal)))
+      (puthash "ws1" :full agent-repl--tab-background-modes)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf repainted))))
+        ;; Act
+        (agent-repl--repaint-tab-on-panel-change)
+        ;; Assert
+        (should (equal repainted 1))))))
+
+(ert-deftest agent-repl-test-panel-change-does-not-repaint-without-a-flip ()
+  "A window-configuration change that leaves the mode alone repaints nothing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w/1")
+    (let ((repainted 0)
+          (agent-repl--tab-background-modes (make-hash-table :test 'equal)))
+      (puthash "ws1" :full agent-repl--tab-background-modes)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf repainted))))
+        ;; Act
+        (agent-repl--repaint-tab-on-panel-change)
+        ;; Assert
+        (should (equal repainted 0))))))
+
+(ert-deftest agent-repl-test-panel-change-hook-is-registered ()
+  "The repaint runs as a window-configuration subscriber, not an ad hoc call."
+  (should (memq #'agent-repl--repaint-tab-on-panel-change
+                window-configuration-change-hook)))
 
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
@@ -601,23 +602,17 @@ the bracket inherits :bg in the renderer for selected and unselected alike."
     (should (string-match-p "IMG" result))
     (should (string-match-p "ws1" result))))
 
-(ert-deftest agent-repl-test-render-tab-img-str-trailing-space-unfaced ()
-  "render-tab should place a single un-faced space between img-str and the name segment."
+(ert-deftest agent-repl-test-render-tab-img-str-one-space-before-the-name ()
+  "render-tab places EXACTLY ONE space between the badge run and the name.
+The badge run used to be wrapped in a space on each side and then met the
+name padding\='s own leading space, so a badged tab drew two."
   (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
          (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG"))
          (img-pos (string-match "IMG" result))
-         (gap-pos (+ img-pos 3))
          (name-pos (string-match "ws1" result)))
     (should img-pos)
-    (should name-pos)
-    ;; Exactly one un-faced space between IMG and the name-face padding's
-    ;; leading space (which is part of " ws1 ").
-    (should (equal (substring result gap-pos (1+ gap-pos)) " "))
-    (should-not (get-text-property gap-pos 'face result))
-    ;; The next character is the name-face's leading padding space.
-    (should (equal (substring result (1+ gap-pos) (+ gap-pos 2)) " "))
-    (should (eq (get-text-property (1+ gap-pos) 'face result)
-                '+workspace-tab-face))))
+    (should (= name-pos (+ img-pos 4)))
+    (should (equal (substring result (+ img-pos 3) name-pos) " "))))
 
 (ert-deftest agent-repl-test-render-tab-empty-name ()
   "render-tab should handle an empty name string."
@@ -652,16 +647,122 @@ right edge via `extend_face_to_end_of_line'."
     (should (equal (substring result last-idx) " "))
     (should-not (get-text-property last-idx 'face result))))
 
-(ert-deftest agent-repl-test-render-tab-penultimate-is-faced-name-padding ()
+(ert-deftest agent-repl-test-render-tab-penultimate-is-faced-name-fill ()
   "The character immediately before the unfaced terminator is the
-name-face's trailing padding space — confirms the terminator was
-appended *after* the faced padding, not merged into it."
+name-face's trailing padding fill — confirms the terminator was
+appended *after* the faced fill, not merged into it."
   (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
          (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
          (penultimate (- (length result) 2)))
     (should (equal (substring result penultimate (1+ penultimate)) " "))
     (should (eq (get-text-property penultimate 'face result)
                 '+workspace-tab-face))))
+
+;;;; ---- Tests: exactly one space between [N] and the name (owner ruling, 2026-09-13) ----
+;;
+;; One edge case per test.  The gap is measured off the rendered string
+;; itself: everything between the bracket's closing `]' and the first
+;; character of the name must be a single space.
+
+(defun agent-repl-test--tab-gap (rendered name)
+  "Return the substring of RENDERED between the bracket and NAME."
+  (let ((close (1+ (string-match "\\]" rendered)))
+        (name-pos (string-match (regexp-quote name) rendered)))
+    (substring rendered close name-pos)))
+
+(ert-deftest agent-repl-test-render-tab-plain-name-gap-is-one-space ()
+  "A plain name is separated from [N] by exactly one space."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3" '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
+
+(ert-deftest agent-repl-test-render-tab-leading-space-in-name-is-trimmed ()
+  "A name the daemon hands over with leading whitespace still draws one space."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "   ws1" spec "3" '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
+
+(ert-deftest agent-repl-test-render-tab-selected-gap-is-one-space ()
+  "A SELECTED tab (spec carrying :underline) draws the same single space."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold
+                :underline t)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3" '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
+
+(ert-deftest agent-repl-test-render-tab-unselected-gap-is-one-space ()
+  "An UNSELECTED tab draws the same single space as a selected one."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3" '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
+
+(ert-deftest agent-repl-test-render-tab-name-longer-than-the-fill-width ()
+  "A name wider than the padding format's fill still draws one space."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+        (agent-repl-tab-name-padding " %-8s "))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab
+                     "a-very-long-workspace-name" spec "3"
+                     '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "a-very-long-workspace-name")
+                     " ")))))
+
+(ert-deftest agent-repl-test-render-tab-name-shorter-than-the-fill-width ()
+  "A name NARROWER than the fill keeps the fill, and still one space before it."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+        (agent-repl-tab-name-padding " %-8s "))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3"
+                                            '+workspace-tab-face nil)))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " "))
+      (should (equal (substring-no-properties rendered) " [3] ws1       ")))))
+
+(ert-deftest agent-repl-test-tab-badge-str-drops-a-blank-priority-label ()
+  "A roster row whose priority label is blank contributes no badge run.
+A blank label used to join into a run of nothing but spaces, which the
+renderer then padded on both sides — the extra gap the owner saw."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+             (lambda (_ws) '(:priority (:label "  "))))
+            ((symbol-function 'agent-repl-status-tab-glyph)
+             (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--tab-badge-str "ws1" :ready))))
+
+(ert-deftest agent-repl-test-tab-badge-str-keeps-a-real-priority-label ()
+  "A non-blank priority label is still drawn."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+             (lambda (_ws) '(:priority (:label "p1"))))
+            ((symbol-function 'agent-repl-status-tab-glyph)
+             (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should (equal (agent-repl--tab-badge-str "ws1" :ready) "p1"))))
+
+(ert-deftest agent-repl-test-render-tab-blank-badge-run-draws-one-space ()
+  "A blank badge run reaching the renderer is treated as no badge at all."
+  ;; Arrange
+  (let ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold)))
+    ;; Act
+    (let ((rendered (agent-repl--render-tab "ws1" spec "3"
+                                            '+workspace-tab-face "  ")))
+      ;; Assert
+      (should (equal (agent-repl-test--tab-gap rendered "ws1") " ")))))
 
 ;;;; ---- Tests: bracket label is the index alone ----
 
@@ -1137,7 +1238,7 @@ differently do not thrash each other's identity."
   "The drawn string differs by CONTENT, not only by face, across an arm change.
 Same workspaces, same toggle, same selection; only the roster arm moved.
 If the two strings were `equal' the tab bar would keep painting the old
-arm until the dwell heartbeat's next tick."
+arm until the repaint heartbeat's next tick."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((persp-names-cache '("ws1"))
@@ -1266,18 +1367,26 @@ purpose is the alternating-space cache-bust."
   (let ((wconf '((buffer "*scratch*"))))
     (should-not (agent-repl--wconf-has-agent-p wconf))))
 
-(ert-deftest agent-repl-test-wconf-has-agent-gui-webview ()
-  "A BACKGROUND gui workspace's saved layout counts as agent-open.
-This is the half of the fix that reaches every tab the user is not
-currently looking at: the webview is genuinely present in the saved
-window config, it simply was not recognized."
-  (let ((wconf '((buffer "*agent-frontend-my-ws*"))))
+(ert-deftest agent-repl-test-wconf-has-agent-both-panels ()
+  "A BACKGROUND workspace's saved layout carrying BOTH panels is agent-open.
+This is the half of the rule that reaches every tab the user is not
+currently looking at."
+  (let ((wconf '((buffer "*agent-frontend-my-ws*")
+                 (child ((buffer "*agent-panel-input-my-ws*"))))))
     (should (agent-repl--wconf-has-agent-p wconf))))
 
-(ert-deftest agent-repl-test-wconf-has-agent-gui-webview-nested ()
-  "The gui webview is found however deep the saved layout nests it."
-  (let ((wconf '((child ((child ((buffer "*agent-frontend-my-ws*"))))))))
+(ert-deftest agent-repl-test-wconf-has-agent-both-panels-nested ()
+  "Both panels are found however deep the saved layout nests them."
+  (let ((wconf '((child ((child ((buffer "*agent-frontend-my-ws*"))
+                                ((buffer "*agent-panel-input-my-ws*"))))))))
     (should (agent-repl--wconf-has-agent-p wconf))))
+
+(ert-deftest agent-repl-test-wconf-has-agent-gui-webview-only ()
+  "A layout holding ONLY the webapp panel is NOT agent-open.
+Owner ruling 5 (2026-09-13): the full background belongs to a workspace
+whose webapp panel AND input window are open."
+  (let ((wconf '((buffer "*agent-frontend-my-ws*"))))
+    (should-not (agent-repl--wconf-has-agent-p wconf))))
 
 (ert-deftest agent-repl-test-wconf-has-agent-gui-input-only ()
   "A gui layout holding ONLY the input panel is not a workspace showing its agent."
@@ -1336,12 +1445,39 @@ Emacs 30 native-compiled callers pass the ALL-FRAMES slot explicitly
 without it, the test fails with `wrong-number-of-arguments' under AOT
 native-comp."
   (agent-repl-test--with-temp-buffer "*agent-frontend-aabbccdd*"
-    (let ((test-buf (current-buffer)))
+    (let ((view-buf (current-buffer)))
+      (agent-repl-test--with-temp-buffer "*agent-panel-input-aabbccdd*"
+        (let ((input-buf (current-buffer)))
+          (cl-letf (((symbol-function 'buffer-list)
+                     (lambda () (list view-buf input-buf)))
+                    ((symbol-function 'get-buffer-window)
+                     (lambda (_buf &optional _all-frames) 'fake-window)))
+            (should (agent-repl--agent-visible-in-current-ws-p))))))))
+
+(ert-deftest agent-repl-test-agent-visible-in-current-ws-view-without-input ()
+  "A visible webapp panel with NO visible input window is not panels-open.
+Owner ruling 5 (2026-09-13) asks for both."
+  ;; Arrange
+  (agent-repl-test--with-temp-buffer "*agent-frontend-aabbccdd*"
+    (let ((view-buf (current-buffer)))
       (cl-letf (((symbol-function 'buffer-list)
-                 (lambda () (list test-buf)))
+                 (lambda () (list view-buf)))
                 ((symbol-function 'get-buffer-window)
                  (lambda (_buf &optional _all-frames) 'fake-window)))
-        (should (agent-repl--agent-visible-in-current-ws-p))))))
+        ;; Act / Assert
+        (should-not (agent-repl--agent-visible-in-current-ws-p))))))
+
+(ert-deftest agent-repl-test-agent-visible-in-current-ws-input-without-view ()
+  "A visible input window with NO visible webapp panel is not panels-open."
+  ;; Arrange
+  (agent-repl-test--with-temp-buffer "*agent-panel-input-aabbccdd*"
+    (let ((input-buf (current-buffer)))
+      (cl-letf (((symbol-function 'buffer-list)
+                 (lambda () (list input-buf)))
+                ((symbol-function 'get-buffer-window)
+                 (lambda (_buf &optional _all-frames) 'fake-window)))
+        ;; Act / Assert
+        (should-not (agent-repl--agent-visible-in-current-ws-p))))))
 
 ;;;; ---- Tests: agent-in-saved-wconf-p ----
 
@@ -1359,7 +1495,8 @@ native-comp."
 (ert-deftest agent-repl-test-agent-in-saved-wconf-with-claude ()
   "agent-in-saved-wconf-p should return t when saved wconf contains an agent buffer."
   (let ((fake-persp (list 'fake-persp-struct))
-        (fake-wconf '((buffer "*agent-frontend-ab12cd34*"))))
+        (fake-wconf '((buffer "*agent-frontend-ab12cd34*")
+                      (child ((buffer "*agent-panel-input-ab12cd34*"))))))
     (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) fake-persp))
               ((symbol-function 'persp-window-conf) (lambda (_persp) fake-wconf)))
       (should (agent-repl--agent-in-saved-wconf-p "ws1")))))
@@ -2977,16 +3114,15 @@ bracket-only paint, which is the blessed treatment."
         ;; Act / Assert
         (should (null (agent-repl--ws-display-state "alpha")))))))
 
-(ert-deftest agent-repl-test-status-display-state-is-nil-once-ready-is-acknowledged ()
-  "The ready shout fades after the dwell: the other local modifier."
+(ert-deftest agent-repl-test-status-display-state-is-the-arm-while-panels-are-open ()
+  "Panels open is the ONLY thing the extent asks about: the arm comes through."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "alpha" :project-dir "/w/1")
-    (agent-repl--ws-put "alpha" :ready-view-acknowledged t)
     (agent-repl-test-status--with-arm "alpha" :ready
       (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
         ;; Act / Assert
-        (should (null (agent-repl--ws-display-state "alpha")))))))
+        (should (eq (agent-repl--ws-display-state "alpha") :ready))))))
 
 (ert-deftest agent-repl-test-status-bracket-state-ignores-panel-visibility ()
   "The bracket keeps the arm's colour even with the panels dismissed."
@@ -3032,12 +3168,11 @@ bracket-only paint, which is the blessed treatment."
 ;;;; ---- The heartbeat ---------------------------------------------------
 
 (ert-deftest agent-repl-test-status-the-dwell-tick-repaints ()
-  "The whole heartbeat: latch the dwell and repaint.  Nothing is polled."
+  "The whole heartbeat: repaint.  Nothing is polled and nothing is written."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((repainted 0))
-      (cl-letf (((symbol-function 'agent-repl--note-ready-view-dwell) #'ignore)
-                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+      (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw)
                  (lambda () (cl-incf repainted))))
         ;; Act
         (agent-repl--status-dwell-tick)
@@ -3214,16 +3349,88 @@ green stays green and blue stays blue across the extent change."
 ;; background: it never touches the panels-open (full) background or the
 ;; connection color, so all three axes stay independent.
 
-(ert-deftest agent-repl-test-render-tab-selected-underlines-the-bracket ()
-  "A selected spec draws the [N] bracket `:underline t' while keeping its color."
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-bracket ()
+  "A selected spec leaves the [N] bracket un-underlined, color intact.
+Owner ruling 4 (2026-09-13): the marker is under the NAME alone."
   (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
          (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
          (pos (string-match "\\[" result))
          (face (get-text-property pos 'face result)))
-    (should (eq t (plist-get face :underline)))
-    ;; The bracket still carries the state color, so the underline did not
-    ;; replace the color — it was layered on top.
+    (should-not (plist-get face :underline))
+    ;; The bracket still carries the state color: only the underline went.
     (should (equal (plist-get face :background) "#1a7a1a"))))
+
+(ert-deftest agent-repl-test-render-tab-selected-underline-covers-exactly-the-name ()
+  "The underlined run is exactly the name's character range, nothing else.
+Every position outside `ws1' — the leading separator, the bracket, the
+space between, the trailing fill and the terminator — is un-underlined."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (start (string-match "ws1" result))
+         (end (+ start 3)))
+    ;; Act / Assert
+    (dotimes (i (length result))
+      (let* ((face (get-text-property i 'face result))
+             (marked (and (listp face) (member '(:underline t) face) t)))
+        (if (and (>= i start) (< i end))
+            (should marked)
+          (should-not marked))))))
+
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-gap ()
+  "The one space between [N] and the name carries no underline."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (gap (1- (string-match "ws1" result)))
+         (face (get-text-property gap 'face result)))
+    ;; Act / Assert
+    (should (equal (substring result gap (1+ gap)) " "))
+    (should-not (and (listp face) (member '(:underline t) face)))))
+
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-fill ()
+  "The padding format's trailing width fill carries no underline."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (agent-repl-tab-name-padding " %-8s ")
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (fill (+ (string-match "ws1" result) 3))
+         (face (get-text-property fill 'face result)))
+    ;; Act / Assert
+    (should (equal (substring result fill (1+ fill)) " "))
+    (should-not (and (listp face) (member '(:underline t) face)))))
+
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-badge ()
+  "The badge run between [N] and the name carries no underline."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready "IMG"))
+         (pos (string-match "IMG" result))
+         (face (get-text-property pos 'face result)))
+    ;; Act / Assert
+    (should-not (and (listp face) (member '(:underline t) face)))))
+
+(ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-separator ()
+  "The entry's own leading separator space carries no underline."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready nil))
+         (face (get-text-property 0 'face result)))
+    ;; Act / Assert
+    (should (equal (substring result 0 1) " "))
+    (should-not (plist-get face :underline))))
+
+(ert-deftest agent-repl-test-render-tab-unselected-entry-carries-no-underline-anywhere ()
+  "An UNSELECTED entry carries no underline at any position."
+  ;; Arrange
+  (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready "IMG")))
+    ;; Act / Assert
+    (dotimes (i (length result))
+      (let ((face (get-text-property i 'face result)))
+        (should-not (and (listp face) (member '(:underline t) face)))
+        (should-not (and (listp face) (keywordp (car face))
+                         (plist-get face :underline)))))))
 
 (ert-deftest agent-repl-test-render-tab-selected-underlines-the-name ()
   "A selected spec layers `:underline t' over the name face."

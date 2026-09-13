@@ -629,6 +629,38 @@ jq -s 'group_by([.level, .source, .operation])
   | sort_by(-.count)' HARVEST-FULL.jsonl
 ```
 
+## Tab-bar vocabulary: full, partial, and the extent rule
+
+A workspace's tab is `[N] <workspace-name>`, and the status color reaches it
+with one of two EXTENTS. The words are the owner's (ruling 5, 2026-09-13); use
+them in code, comments, tests and prose.
+
+- **full** — the whole `[N] <workspace-name>` entry carries the status color.
+- **partial** — only `[N]` carries it; the name region falls back to the bar's
+  own ground (`agent-repl-tab-unarmed`).
+
+**THE RULE IS AN IF AND ONLY IF.** A tab is full exactly when that workspace's
+agent-repl panels — the webapp panel AND the input window — are open, and
+partial exactly when they are not. Nothing else may decide it: not selection,
+not how long the user has looked at the workspace, not the arm. A local
+ready-view dwell latch used to fade a viewed `:ready` workspace to partial with
+its panels wide open, and that is precisely what the rule forbids.
+
+Where it is executable: `agent-repl--ws-agent-open-p` (status.el) is the
+panels-open fact, `agent-repl--ws-display-state` applies the rule and returns
+nil for partial, `agent-repl--ws-bracket-state` answers the orthogonal question
+of what color `[N]` carries either way, and `agent-repl--tab-spec-bracket-only`
+builds the partial appearance. A flip between the two extents is recorded once,
+at DEBUG, by `agent-repl--note-tab-background-mode`, with the reason.
+
+The three axes on a tab are independent, and each says one thing:
+
+| axis | what it says | how it is drawn |
+|---|---|---|
+| color | the connection/lifecycle state | the arm's hue |
+| extent | are the panels open | full vs partial |
+| selection | which workspace the user is standing in | an underline under the NAME alone |
+
 ## Purple means the vendor, blue means the local environment, teal means nothing is wrong
 
 Every surface that carries color here — the Emacs tab-bar, the sidebar dots,

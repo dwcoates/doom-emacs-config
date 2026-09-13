@@ -9,6 +9,8 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--agent-view-buffer-name-p "core")
 (declare-function agent-repl--agent-view-buffer-p "core")
+(declare-function agent-repl--agent-input-buffer-name-p "core")
+(declare-function agent-repl--agent-input-buffer-p "core")
 (declare-function agent-repl--cancel-timer-key "core")
 (declare-function agent-repl--error "core")
 (declare-function agent-repl--info "core")
@@ -64,7 +66,13 @@ This logging-boundary helper emits no record because doing so would recurse."
   :group 'agent-repl)
 
 (defcustom agent-repl-tab-name-padding " %s "
-  "Format string for tab workspace name padding."
+  "Format string for tab workspace name padding.
+
+Only the TRAILING half of this format survives as written: it is a width
+fill drawn after the name.  Any LEADING whitespace is stripped by
+`agent-repl--render-tab', which emits the one space between `[N]' and the
+name itself, so the gap is exactly one space whatever this format and the
+badge run do (owner ruling, 2026-09-13)."
   :type 'string
   :group 'agent-repl)
 
@@ -1114,8 +1122,8 @@ Keys in the returned plist: :bg :fg :bracket-fg :underline :weight."
 Pulls bracket-bg/bracket-fg/weight from STATE's palette row and leaves
 :bg/:fg unspecified so the separator and name region inherit defaults.
 Used wherever `agent-repl--ws-display-state' suppresses the full-tab
-color — panels dismissed, or a `:ready' workspace the user has already
-viewed — so the bracket retains the state's color and the workspace's
+color — that is, whenever the workspace's panels are not open — so the
+bracket retains the state's color and the workspace's
 state stays visible while the rest of the tab falls back to the default
 appearance.
 
@@ -1186,7 +1194,7 @@ background work (yellow).")
 The arms that take no lifecycle color — `:none', `:inactive' and the
 terminal merge arms — plus a workspace the roster has not spoken about
 yet, and one whose full-tab color is suppressed because its panels are
-dismissed or its `:ready' view has been acknowledged.
+dismissed.
 
 IT INHERITS `tab-bar', deliberately and only for its background: an
 unselected tab is the same color as the bar it sits in, so it takes that
@@ -1264,17 +1272,30 @@ SPEC is a plist with keys :bg :fg :bracket-fg :underline :weight (see
 `agent-repl--tab-palette' docstring).  NAME-FACE is applied to the
 workspace-name portion.  LABEL is the bracket content (the tab number).
 IMG-STR, when non-nil, is the badge run (priority label and glyph)
-inserted between bracket and name with a single un-faced space on each
-side so it does not butt up against the name's background.
+inserted between bracket and name with a single space on each side so it
+does not butt up against the name's background.  A blank IMG-STR is
+treated as no badge at all.
 
-SELECTION IS AN UNDERLINE, not a background.  When SPEC carries
-`:underline', the SELECTED tab's separator, bracket and name runs are all
-drawn `:underline t' — a subtle, distinct marker that says which
+EXACTLY ONE SPACE SEPARATES [N] FROM THE NAME, always (owner ruling,
+2026-09-13).  The gap is emitted HERE, as one space carrying the name's
+own face, and never by `agent-repl-tab-name-padding': that format's
+leading whitespace is stripped, so a padding format and a badge run can
+no longer each contribute a space and draw `[3]   ws'.  The name itself
+is trimmed too, so a daemon-supplied leading space cannot widen the gap
+either.  Whatever TRAILING whitespace the padding format adds is a width
+FILL and is kept, drawn in the name's face, after the name.
+
+SELECTION IS AN UNDERLINE UNDER THE NAME, AND UNDER NOTHING ELSE.  When
+SPEC carries `:underline', exactly the workspace name's own characters are
+drawn `:underline t' — not the leading separator, not `[N]', not the space
+between them, not the badge run, not the padding fill, not the terminator
+(owner ruling, 2026-09-13; the marker used to run under the separator and
+the bracket too).  It is a subtle, distinct marker that says which
 workspace the user is standing in without touching the background the way
 the panels-open EXTENT and the connection COLOR do.  `:underline t' draws
-in each run's own foreground, so it reads on every state color and on the
-bar alike.  The underline is layered OVER NAME-FACE (a symbol or a
-list of faces) so the name keeps its arm color and gains the marker.
+in the run's own foreground, so it reads on every state color and on the
+bar alike, and it is layered OVER NAME-FACE (a symbol or a list of faces)
+so the name keeps its arm color and gains the marker.
 
 The string ends with an un-faced trailing space so each entry
 self-terminates.  Emacs's `display_tab_bar_line' calls
@@ -1288,18 +1309,25 @@ whenever an entry landed at a wrap (or the final row's) end."
          (bracket-fg (or (plist-get spec :bracket-fg) 'unspecified))
          (weight     (or (plist-get spec :weight)     'normal))
          (underline  (plist-get spec :underline))
-         (separator-face `(:background unspecified :foreground ,fg :weight ,weight
-                           ,@(when underline (list :underline t))))
-         (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight
-                           ,@(when underline (list :underline t))))
+         (separator-face `(:background unspecified :foreground ,fg :weight ,weight))
+         (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight))
          (name-face*     (if underline
                              (cons '(:underline t)
                                    (if (listp name-face) name-face (list name-face)))
-                           name-face)))
+                           name-face))
+         (badge          (and img-str
+                              (not (string-blank-p img-str))
+                              img-str))
+         (padded         (string-trim-left
+                          (format agent-repl-tab-name-padding (string-trim name))))
+         (text           (string-trim-right padded))
+         (fill           (substring padded (length text))))
     (concat (propertize " " 'face separator-face)
             (propertize (format agent-repl-tab-bracket-format label) 'face bracket-face)
-            (when img-str (concat " " img-str " "))
-            (propertize (format agent-repl-tab-name-padding name) 'face name-face*)
+            (when badge (concat " " badge))
+            (propertize " " 'face name-face)
+            (propertize text 'face name-face*)
+            (propertize fill 'face name-face)
             " ")))
 
 (defun agent-repl--tab-face (state _selected)
@@ -1358,120 +1386,89 @@ Two things live there, in this order: the roster's PRIORITY BADGE label
 resolver's and this is only the label) and the arm's glyph
 \(the merge pipeline's, the inactive question mark, or the attention
 marker).  Both are absent far more often than present, so the whole run
-is nil in the ordinary case and the tab is name and bracket alone."
+is nil in the ordinary case and the tab is name and bracket alone.
+
+A BLANK PART IS NO PART.  A roster row can carry a priority label that is
+present but empty, and joining that into the run produced a run made of
+nothing but spaces — which the renderer then padded on both sides and drew
+as extra gap between `[N]' and the name.  Blank parts are dropped, and a
+run left with no parts is nil."
   (let* ((row (and (fboundp 'agent-repl-roster-row-for-ws)
                    (agent-repl-roster-row-for-ws name)))
          (badge (and row (agent-repl-roster-row-priority-label row)))
          (glyph (agent-repl-status-tab-glyph name arm))
-         (parts (delq nil (list badge glyph))))
+         (parts (seq-remove #'string-blank-p
+                            (delq nil (list badge glyph)))))
     (when parts
       (string-join parts " "))))
 
-;;; Ready-view acknowledgment
+;;; The tab-bar repaint heartbeat
 ;;
-;; A `:ready' workspace paints its whole tab green so it can be found from
-;; across the tab-bar.  Once the user has actually stood in that workspace
-;; for a beat, the shout has done its job: the green name region is telling
-;; them something they just looked at.  After
-;; `agent-repl-ready-view-fade-delay' seconds of viewing, the tab drops back
-;; to the default name background and keeps the green on the [N] bracket
-;; alone, so the state stays legible without competing with the workspaces
-;; that still need attention.
+;; THERE IS NO READY-VIEW FADE ANY MORE.  A `:ready' workspace used to
+;; paint its whole tab green until the user had stood in it for a couple
+;; of seconds, after which a local latch dropped it to the bracket-only
+;; paint.  Owner ruling 5 (2026-09-13) states the extent rule outright:
+;; a tab is FULL if and only if that workspace's agent-repl panels are
+;; open, and PARTIAL if and only if they are not.  A dwell latch made a
+;; panels-OPEN workspace draw partial, which is the one thing the rule
+;; forbids, so the latch, its dwell clock, its state-transition clear and
+;; its fade-delay knob are all gone.
 ;;
-;; The acknowledgment is a LATCH, not a live predicate: it survives leaving
-;; the workspace (that is the whole point — the faded tab is what the user
-;; sees once they move on) and is cleared the moment the daemon pushes a
-;; render-state other than `:ready', so the next `:ready' shouts again.
+;; What survives is the heartbeat they rode on, because the tab bar needs
+;; something to repaint it on a clock (see
+;; `agent-repl--force-tab-bar-redraw').  It polls nothing and writes no
+;; state.
 
-(defcustom agent-repl-ready-view-fade-delay 2.0
-  "Seconds of viewing after which a `:ready' workspace's tab name fades.
-Measured from `:last-viewed-at' — the stamp
-`agent-repl--record-workspace-history' writes at every perspective
-activation — for the workspace that is currently on screen.  Once the
-delay elapses the workspace is latched as ready-view-acknowledged
-\(`agent-repl--ws-ready-view-acknowledged-p'), which suppresses the
-state-colored name region and leaves only the [N] bracket green."
-  :type 'number
-  :group 'agent-repl)
+(defconst agent-repl--tab-repaint-interval-seconds 2.0
+  "Seconds between tab-bar repaint heartbeats.
+Inherited unchanged from the ready-view fade delay this heartbeat used to
+pace, so the repaint cadence is exactly what it has always been.")
 
-(defun agent-repl--ws-ready-view-acknowledged-p (ws)
-  "Return non-nil when WS's `:ready' tab has been viewed long enough to fade.
-Reads the `:ready-view-acknowledged' latch that
-`agent-repl--note-ready-view-dwell' sets and
-`agent-repl--clear-ready-view-ack-on-state-change' clears.
 
-UI-boundary tolerance: unknown WS answers nil (see
-`--ws-display-state' docstring for the rationale)."
-  (and (agent-repl--ws-known-p ws)
-       (agent-repl--ws-get ws :ready-view-acknowledged)
-       t))
+(defvar agent-repl--tab-background-modes (make-hash-table :test 'equal)
+  "Workspace -> the tab background mode (`:full' or `:partial') last drawn.
+Only `agent-repl--note-tab-background-mode' reads or writes it, and only
+so a FLIP can be recorded once instead of on every redisplay.")
 
-(defun agent-repl--ws-ready-view-dwell-elapsed-p (ws)
-  "Return non-nil when WS was last activated at least the fade delay ago.
-The dwell clock is `:last-viewed-at'; a workspace that has never been
-activated has no stamp and has therefore never been viewed."
-  (let ((viewed-at (agent-repl--ws-get ws :last-viewed-at)))
-    (and viewed-at
-         (>= (float-time (time-since viewed-at))
-             agent-repl-ready-view-fade-delay))))
+(defun agent-repl--note-tab-background-mode (ws mode reason)
+  "Record that WS's tab background is now MODE, because of REASON.
+MODE is `:full' (the whole `[N] <name>' entry carries the status color)
+or `:partial' (only `[N]' does).  Writes a DEBUG record the first time a
+workspace resolves to a mode and on every flip afterwards, and nothing at
+all while the mode holds — this runs inside tab-bar redisplay, which is
+one of the hottest paths in the module.
 
-(defun agent-repl--note-ready-view-dwell ()
-  "Latch the ready-view acknowledgment for the workspace on screen.
-Rides the dwell heartbeat (`agent-repl--status-dwell-tick'),
-which is the same tick that repaints the tab-bar, so the fade lands on
-the first repaint at or after the delay rather than needing a timer of
-its own.  Idempotent: the latch is written once and re-checking a
-latched workspace costs one plist read.
-
-Only the CURRENT workspace can dwell: a workspace nobody is looking at
-is not being viewed, whatever its `:last-viewed-at' says."
-  (let ((ws (agent-repl--ws-current-name)))
-    (when (and ws
-               (agent-repl--ws-known-p ws)
-               (not (agent-repl--ws-get ws :ready-view-acknowledged))
-               (eq (agent-repl--ws-render-status ws) :ready)
-               (agent-repl--ws-ready-view-dwell-elapsed-p ws))
-      (agent-repl--ws-put ws :ready-view-acknowledged t)
-      (agent-repl--log
-       ws
-       "ready-view-ack: latched ws=%s state=:ready dwell>=%.1fs — tab name falls back to default, [N] keeps green"
-       ws agent-repl-ready-view-fade-delay))))
-
-(defun agent-repl--clear-ready-view-ack-on-state-change (ws new _previous)
-  "Clear WS's ready-view acknowledgment when NEW is not `:ready'.
-Subscriber for `agent-repl-ws-state-transition-functions'.  The latch
-describes one visit to one `:ready' state; the moment the daemon pushes
-anything else the acknowledgment is stale, and the next `:ready' must
-shout with the full green name region again."
-  (when (and (not (eq new :ready))
-             (agent-repl--ws-known-p ws)
-             (agent-repl--ws-get ws :ready-view-acknowledged))
-    (agent-repl--ws-put ws :ready-view-acknowledged nil)
-    (agent-repl--log
-     ws "ready-view-ack: cleared ws=%s state=%s — tab returns to the full state color"
-     ws new)))
-
-(add-hook 'agent-repl-ws-state-transition-functions
-          #'agent-repl--clear-ready-view-ack-on-state-change)
+An extent that changes with no visible cause is exactly the invisible
+action the module's logging rule forbids, so the flip says which mode it
+went to and which fact decided it."
+  (let ((previous (gethash ws agent-repl--tab-background-modes 'none)))
+    (unless (eq previous mode)
+      (puthash ws mode agent-repl--tab-background-modes)
+      (agent-repl--log-verbose
+       ws "tab-background: ws=%s mode=%s previous=%s reason=%s"
+       ws mode previous reason))))
 
 (defun agent-repl--ws-display-state (ws)
   "Return the palette display key for WS.
 Delegates to `agent-repl--ws-render-status' (the single source of
-truth for visual state across the tab-bar and project
-picker), then layers two suppressions on top, both of which hand the
-tab to the bracket-only appearance (`agent-repl--tab-spec-bracket-only'
-plus the default name face):
+truth for visual state across the tab-bar and project picker), then
+layers exactly ONE suppression on top, which hands the tab to the
+bracket-only appearance (`agent-repl--tab-spec-bracket-only' plus the
+default name face):
 
-1. Panel visibility — when the render-state is non-nil AND no agent
-   panel is present in WS's live-or-saved window layout, returns nil
-   regardless of state, suppressing full-tab coloring (the
-   state-colored name region) for workspaces whose panels the user has
-   dismissed.
-2. Ready-view acknowledgment — when the render-state is `:ready' AND
-   WS has been viewed for `agent-repl-ready-view-fade-delay' seconds
-   \(`agent-repl--ws-ready-view-acknowledged-p'), returns nil so a
-   ready workspace the user has already stood in stops painting its
-   whole name region green.
+- Panel visibility — when the render-state is non-nil AND WS's
+  agent-repl panels are not both open in its live-or-saved window
+  layout (`agent-repl--ws-agent-open-p'), returns nil regardless of
+  state, suppressing the full-tab color for a workspace whose panels
+  the user has dismissed.
+
+THE EXTENT RULE IS AN IF AND ONLY IF (owner ruling 5, 2026-09-13): the
+tab is FULL — the whole `[N] <name>' entry carries the status color —
+exactly when the panels are open, and PARTIAL — only `[N]' carries it —
+exactly when they are not.  Nothing else may suppress here.  A local
+ready-view dwell latch used to, which made a panels-OPEN `:ready'
+workspace draw partial; it is gone.
+
 `:agent-state' is preserved on the plist so the original color
 reappears the next time the user reopens panels.  The nil-state
 shortcut avoids calling `agent-repl--ws-agent-open-p' on
@@ -1494,11 +1491,12 @@ the bracket keeps its color when panels are closed."
     (let ((state (agent-repl--ws-render-status ws)))
       (cond
        ((null state) nil)
-       ((not (agent-repl--ws-agent-open-p ws)) nil)
-       ((and (eq state :ready)
-             (agent-repl--ws-ready-view-acknowledged-p ws))
+       ((not (agent-repl--ws-agent-open-p ws))
+        (agent-repl--note-tab-background-mode ws :partial "panels-closed")
         nil)
-       (t state)))))
+       (t
+        (agent-repl--note-tab-background-mode ws :full "panels-open")
+        state)))))
 
 (defun agent-repl--ws-bracket-state (ws)
   "Return WS's render-state for [N]-bracket coloring.
@@ -1520,7 +1518,7 @@ the name face.  The appearance spec is resolved via `agent-repl--tab-spec'
 when display-state is non-nil; when display-state is nil but
 `agent-repl--ws-bracket-state' returns an arm (panels dismissed for a
 workspace the roster does report on, or a `:ready' workspace whose
-ready-view acknowledgment has latched), the spec is built via
+panels are not open), the spec is built via
 `agent-repl--tab-spec-bracket-only' so only the [N] bracket keeps the
 arm's color.  The bracket label is the tab's 1-based INDEX and nothing
 else: state reaches the bracket as COLOR.
@@ -2695,19 +2693,34 @@ notification while dropping the leading workspace list."
 ;;; Agent panel visibility ---------------------------------------------------
 
 ;; Walk saved window-configuration tree to find agent buffers.
-(defun agent-repl--wconf-has-agent-p (wconf)
-  "Return non-nil if WCONF (a `window-state-get' tree) shows a workspace's agent.
-The agent view is the webview buffer — see
-`agent-repl--agent-view-buffer-name-p'.  Excludes input buffers: presence
-of only the input panel in a saved config (e.g. from a placeholder layout)
-should not count as agent open."
+(defun agent-repl--wconf-has-buffer-p (wconf name-p)
+  "Return non-nil if WCONF (a `window-state-get' tree) shows a NAME-P buffer.
+NAME-P is a predicate over a buffer NAME, because a saved window state
+carries buffers only as their names."
   (when (and wconf (proper-list-p wconf))
     (let ((buf-entry (alist-get 'buffer wconf)))
-      (if (and buf-entry
-               (agent-repl--agent-view-buffer-name-p (car-safe buf-entry)))
+      (if (and buf-entry (funcall name-p (car-safe buf-entry)))
           t
-        (cl-some #'agent-repl--wconf-has-agent-p
+        (cl-some (lambda (child) (agent-repl--wconf-has-buffer-p child name-p))
                  (cl-remove-if-not #'proper-list-p wconf))))))
+
+(defun agent-repl--wconf-has-agent-p (wconf)
+  "Return non-nil if WCONF (a `window-state-get' tree) shows BOTH agent panels.
+A workspace's agent-repl PANELS are the webapp panel
+\(`agent-repl--agent-view-buffer-name-p') and the input window
+\(`agent-repl--agent-input-buffer-name-p'), and this answers the question
+the tab bar's extent rule asks: are they open?
+
+BOTH, not either.  Owner ruling 5 (2026-09-13) states the full background
+belongs to a workspace whose webapp panel AND input window are open; this
+predicate used to accept the view alone, so a layout carrying the webapp
+panel with the composer dismissed drew a full tab the rule calls partial.
+A layout carrying only the input panel still does not count, exactly as
+before."
+  (and (agent-repl--wconf-has-buffer-p
+        wconf #'agent-repl--agent-view-buffer-name-p)
+       (agent-repl--wconf-has-buffer-p
+        wconf #'agent-repl--agent-input-buffer-name-p)))
 
 (defun agent-repl--visible-agent-buffer-p (buf)
   "Return non-nil if BUF is a live, visible agent VIEW buffer.
@@ -2716,10 +2729,18 @@ The view is the webview buffer — see `agent-repl--agent-view-buffer-p'."
        (agent-repl--agent-view-buffer-p buf)
        (get-buffer-window buf)))
 
+(defun agent-repl--visible-input-buffer-p (buf)
+  "Return non-nil if BUF is a live, visible agent INPUT composer buffer."
+  (and (buffer-live-p buf)
+       (agent-repl--agent-input-buffer-p buf)
+       (get-buffer-window buf)))
+
 (defun agent-repl--agent-visible-in-current-ws-p ()
-  "Return non-nil if an agent buffer is visible in the current workspace."
-  (cl-some #'agent-repl--visible-agent-buffer-p
-           (buffer-list)))
+  "Return non-nil if BOTH agent panels are visible in the current workspace.
+The webapp panel and the input window, per owner ruling 5 — the live-frame
+half of `agent-repl--wconf-has-agent-p'."
+  (and (cl-some #'agent-repl--visible-agent-buffer-p (buffer-list))
+       (cl-some #'agent-repl--visible-input-buffer-p (buffer-list))))
 
 (defun agent-repl--agent-in-saved-wconf-p (ws-name)
   "Return non-nil if background workspace WS-NAME has an agent buffer in
@@ -2729,7 +2750,10 @@ its saved config."
     (agent-repl--wconf-has-agent-p wconf)))
 
 (defun agent-repl--ws-agent-open-p (ws-name)
-  "Return non-nil if workspace WS-NAME has an agent buffer in its window layout.
+  "Return non-nil if workspace WS-NAME has BOTH agent panels in its layout.
+The webapp panel and the input window (owner ruling 5, 2026-09-13).  This
+is the panels-open fact the tab bar's full-vs-partial background keys on,
+and the only fact it keys on.
 For the current workspace, checks live windows.
 For background workspaces, inspects the saved persp window configuration."
   (if (equal ws-name (agent-repl--ws-current-name))
@@ -2754,7 +2778,7 @@ For background workspaces, inspects the saved persp window configuration."
 ;; workspace plist beyond the latch the dwell itself owns.
 
 (defun agent-repl--arm-state-poll-timer ()
-  "Arm the ready-view dwell heartbeat under the `:state-poll' key.
+  "Arm the tab-bar repaint heartbeat under the `:state-poll' key.
 Idempotent: `agent-repl--register-timer' cancels and replaces any timer
 already held under the key, so any number of re-loads of this file leave
 exactly one heartbeat running.  Returns the timer.
@@ -2764,15 +2788,16 @@ names the JOB the tab bar depends on — a heartbeat that repaints it —
 and that job survives even though everything it used to poll does not."
   (agent-repl--register-timer
    :state-poll
-   (run-with-timer agent-repl-ready-view-fade-delay
-                   agent-repl-ready-view-fade-delay
+   (run-with-timer agent-repl--tab-repaint-interval-seconds
+                   agent-repl--tab-repaint-interval-seconds
                    #'agent-repl--status-dwell-tick)))
 
 (defun agent-repl--status-dwell-tick ()
-  "Latch the ready-view dwell for the workspace on screen and repaint.
-The whole heartbeat: no workspace is polled, and the only state written
-is the dwell's own latch."
-  (agent-repl--note-ready-view-dwell)
+  "Repaint the tab bar.
+The whole heartbeat: no workspace is polled and no state is written.
+The name is unchanged because `agent-repl--required-timer-keys' and the
+suites name this function; the dwell it used to latch is gone with the
+ready-view fade."
   (agent-repl--force-tab-bar-redraw))
 
 (agent-repl--arm-state-poll-timer)
@@ -2797,6 +2822,29 @@ what already arrived."
      "elisp.status.frame-focus: not focused")))
 
 (add-function :after after-focus-change-function #'agent-repl--on-frame-focus)
+
+(defun agent-repl--repaint-tab-on-panel-change ()
+  "Repaint the tab bar when the current workspace's panels open or close.
+The tab's background EXTENT is the panels-open fact
+\(`agent-repl--ws-agent-open-p'), so opening or dismissing a panel changes
+what the tab should draw with nothing else to announce it.  The repaint
+heartbeat would get there within its interval; this makes the flip land on
+the redisplay that caused it.
+
+It fires only on an actual flip: the mode the renderer last drew is
+recorded (`agent-repl--tab-background-modes'), and a window-configuration
+change that leaves it alone costs one hash lookup.  A workspace the
+renderer has not resolved a mode for yet has nothing to flip."
+  (let ((ws (agent-repl--ws-current-name)))
+    (when (and ws (agent-repl--ws-known-p ws))
+      (let ((recorded (gethash ws agent-repl--tab-background-modes))
+            (mode (if (agent-repl--ws-agent-open-p ws) :full :partial)))
+        (when (and recorded (not (eq recorded mode)))
+          (agent-repl--force-tab-bar-redraw))))))
+
+(add-hook 'window-configuration-change-hook
+          #'agent-repl--repaint-tab-on-panel-change)
+
 
 (provide 'agent-repl-status)
 ;;; status.el ends here
