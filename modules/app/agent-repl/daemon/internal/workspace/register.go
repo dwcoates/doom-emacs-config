@@ -200,6 +200,18 @@ const (
 // A failed revival is REPORTED, never absorbed and never fatal to the
 // announcement: the roster row is a durable fact that must land regardless,
 // and the workspace's next mount takes the bring-up again.
+//
+// AND IT IS NOT PART OF THE ANSWER. The start runs on its OWN goroutine
+// through Sessions.StartDetached, because Sessions.Start takes the workspace's
+// start gate and can wait behind a start that is already in flight -- the
+// boot's own bring-up, on a relaunched daemon, for exactly the workspaces
+// Emacs is re-announcing. Held inline, that wait was the register's: realtest
+// run 2026-09-13T16:20:34 timed RegisterWorkspace out at Emacs's 10s bound for
+// all three open workspaces across three daemon generations, each time for a
+// roster row the daemon had already written. Everything this function decides
+// before the start -- the terminals, the liveness read, the session record --
+// stays on the answer's goroutine, so a workspace that is NOT revived is
+// settled before the register returns and only the start itself is detached.
 func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger, record wsm.Workspace, created bool) {
 	if created || record.Closed {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "created || record.Closed"})
@@ -229,7 +241,13 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 	log.Info(opRegister, "the announcement revives the workspace's recorded conversation", dlog.Context{
 		"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID,
 	})
-	if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
+	v.deps.Sessions.StartDetached(record.ID, func(err error) {
+		if err == nil {
+			log.Debug(opRegister, "the announced workspace's recorded conversation is back up", dlog.Context{
+				"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID,
+			})
+			return
+		}
 		// A CANCELLED BRING-UP IS THE DAEMON LEAVING, not a session that
 		// failed to come up. Nothing is left to serve the revived
 		// conversation, and the next boot revives it again.
@@ -242,7 +260,7 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 		log.Error(opRegister, "the announced workspace's recorded conversation did not come back up", dlog.Context{
 			"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID, "cause": err.Error(),
 		})
-	}
+	})
 }
 
 // bindResolvers binds one workspace's directory on every resolver that needs

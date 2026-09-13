@@ -787,6 +787,11 @@ type fakeSessions struct {
 	// is the refusal it answers with instead.
 	resumes   []ColdResume
 	resumeErr error
+	// detachEntered is closed when a detached start begins and detachHold is
+	// what it then waits on, for the one test whose subject is that the caller
+	// does NOT wait. A nil detachHold runs the start inline.
+	detachEntered chan struct{}
+	detachHold    chan struct{}
 }
 
 type stopCall struct {
@@ -805,6 +810,31 @@ func (s *fakeSessions) Start(_ context.Context, ws ids.WorkspaceID) error {
 	s.started = append(s.started, ws)
 	s.live[ws] = true
 	return nil
+}
+
+// StartDetached runs the start INLINE and reports its outcome, which is what
+// keeps a test's assertions deterministic: the fake stands for the fleet's
+// contract (the caller does not wait on the answer), not for its goroutine.
+// The one test whose subject IS the detachment drives the real Fleet.
+func (s *fakeSessions) StartDetached(ws ids.WorkspaceID, done func(error)) {
+	if s.detachHold == nil {
+		err := s.Start(context.Background(), ws)
+		if done != nil {
+			done(err)
+		}
+		return
+	}
+	hold, entered := s.detachHold, s.detachEntered
+	go func() {
+		if entered != nil {
+			close(entered)
+		}
+		<-hold
+		err := s.Start(context.Background(), ws)
+		if done != nil {
+			done(err)
+		}
+	}()
 }
 
 func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) error {

@@ -292,6 +292,10 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	if err := s.enter(ctx, RPCStartSession, req.Msg); err != nil {
 		return nil, err
 	}
+	if s.profile.HangStartSession {
+		<-ctx.Done()
+		return nil, connect.NewError(connect.CodeDeadlineExceeded, ctx.Err())
+	}
 	if s.profile.ExitOn == "start_session" {
 		s.exit(s.profile.ExitCode, s.profile.Stderr)
 	}

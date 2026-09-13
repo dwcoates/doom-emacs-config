@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,12 @@ type fakeClient struct {
 	// reaped makes the supervised process ALREADY GONE, which is how a test
 	// reaches the split between a session row and a live shim.
 	reaped bool
+	// entered is closed by StartSession on its first call and startHold is
+	// what it then waits on, which is how a test holds a start open for as
+	// long as it needs to observe something about the caller that is NOT
+	// waiting for it. A nil startHold never waits.
+	entered   chan struct{}
+	startHold chan struct{}
 }
 
 func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
@@ -51,8 +58,19 @@ func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
 	return shimclient.ExitInfo{PID: c.pid, Signal: "SIGKILL"}, true
 }
 
-func (c *fakeClient) StartSession(_ context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
+func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
 	c.requests = append(c.requests, req)
+	if c.entered != nil {
+		close(c.entered)
+		c.entered = nil
+	}
+	if c.startHold != nil {
+		select {
+		case <-c.startHold:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if c.startErr != nil {
 		return nil, c.startErr
 	}
@@ -2129,5 +2147,237 @@ func TestTwoStartsOfOneWorkspaceSpawnOneShim(t *testing.T) {
 	}
 	if len(f.supervisor.spawns) != 1 {
 		t.Fatalf("spawns = %d, want exactly one shim for one workspace", len(f.supervisor.spawns))
+	}
+}
+
+// ---- a start nobody is waiting for ----
+
+// TestStartDetachedDoesNotHoldItsCaller is the contract RegisterWorkspace
+// depends on: the caller hands the fleet a workspace to bring up and gets its
+// goroutine back, whatever the start is doing.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34: the register's revival ran
+// inline, `Fleet.Start` took the workspace's start gate behind the boot's own
+// bring-up, and the shim never answered that bring-up's StartSession. Emacs
+// timed the register out at its 10s bound on three consecutive daemon
+// generations for a roster row the daemon had already written.
+func TestStartDetachedDoesNotHoldItsCaller(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-detached")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	f.client.entered = entered
+	f.client.startHold = release
+	settled := make(chan error, 1)
+
+	// Act.
+	f.fleet.StartDetached(ws.ID, func(err error) { settled <- err })
+	<-entered
+
+	// Assert.
+	select {
+	case err := <-settled:
+		t.Fatalf("the detached start settled (%v) while its StartSession was still in flight", err)
+	default:
+	}
+	close(release)
+	if err := <-settled; err != nil {
+		t.Fatalf("the detached start = %v, want the session up", err)
+	}
+}
+
+// TestDrainStartsEndsAnInFlightStartAndJoinsIt covers the exit. A start nobody
+// waits for still reads and writes the state client, so the teardown ends it
+// and joins it BEFORE that client closes — the same rule the prompt queue's
+// background work is drained under.
+func TestDrainStartsEndsAnInFlightStartAndJoinsIt(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-drained")
+	entered := make(chan struct{})
+	f.client.entered = entered
+	f.client.startHold = make(chan struct{}) // never closed: only the drain ends it.
+	settled := make(chan error, 1)
+	f.fleet.StartDetached(ws.ID, func(err error) { settled <- err })
+	<-entered
+
+	// Act.
+	left := f.fleet.DrainStarts(time.Minute)
+
+	// Assert.
+	if !left {
+		t.Fatal("DrainStarts = false, want the in-flight start ended and joined")
+	}
+	if err := <-settled; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the drained start = %v, want a cancellation", err)
+	}
+}
+
+// TestDrainStartsReportsAStartThatOutlivesItsBound is the other half: the
+// drain answers false rather than waiting forever, so the exit can say loudly
+// that it is tearing down under a start instead of hanging.
+func TestDrainStartsReportsAStartThatOutlivesItsBound(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-stuck")
+	entered := make(chan struct{})
+	stuck := make(chan struct{})
+	t.Cleanup(func() { close(stuck) })
+	f.client.entered = entered
+	// The START finishes; what outlives the drain is the SETTLEMENT, which
+	// blocks on `stuck` and never looks at a context at all.
+	f.fleet.StartDetached(ws.ID, func(error) { <-stuck })
+	<-entered
+
+	// Act.
+	left := f.fleet.DrainStarts(10 * time.Millisecond)
+
+	// Assert.
+	if left {
+		t.Fatal("DrainStarts = true, want false for a start still running at the bound")
+	}
+}
+
+// TestABringUpStandDownIsNotAFailedStartSession is the fleet's half of the
+// same distinction the shim client draws. A StartSession that came back
+// because THIS DAEMON killed the shim it was asking is the teardown arriving,
+// not a session that would not come up, and the bring-up says so.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34: `daemon.workspace.bring_up: the
+// StartSession call failed` at ERROR on three consecutive daemon generations,
+// each one milliseconds after the same process's own
+// `daemon.shimclient.standdown` for the same shim.
+func TestABringUpStandDownIsNotAFailedStartSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		startErr  error
+		wantLevel string
+	}{
+		{
+			name:      "the daemon stood the shim down under the start",
+			startErr:  fmt.Errorf("%w: unavailable: unexpected EOF", shimclient.ErrStandDownOrdered),
+			wantLevel: "info",
+		},
+		{
+			name:      "the shim link broke on its own",
+			startErr:  errors.New("unavailable: unexpected EOF"),
+			wantLevel: "error",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-stood-down")
+			f.client.startErr = tt.startErr
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("Start answered success though StartSession failed")
+			}
+			var level string
+			for _, r := range f.log.logger.Records() {
+				if r.Operation == opBringUp && strings.Contains(r.Message, "StartSession call") {
+					level = r.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("the StartSession failure is recorded at %q, want %q: %+v", level, tt.wantLevel, f.log.logger.Records())
+			}
+		})
+	}
+}
+
+// ---- a start that never answers ----
+
+// TestAStartSessionThatNeverAnswersEndsAtItsBound pins the bound itself. A
+// shim that accepts the start and goes quiet used to hold the call, and the
+// workspace's start gate with it, until the process died.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34: workspace 2b81f45a724642ef's
+// shim logged `shim.convert.hooks: a hook blocked the gated action` on
+// `SessionStart:resume` and never answered. Three daemon generations sat in
+// that call for 35s, 3m30s and 8m30s, each ended only by the NEXT deploy's
+// SIGTERM, with nothing in the daemon's log saying what it was waiting on.
+func TestAStartSessionThatNeverAnswersEndsAtItsBound(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-quiet-shim")
+	f.fleet.startBound = 10 * time.Millisecond
+	f.client.startHold = make(chan struct{}) // never closed: only the bound ends it.
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start answered success though the shim never answered StartSession")
+	}
+	if !strings.Contains(err.Error(), "did not answer StartSession") {
+		t.Fatalf("Start = %v, want an error naming the unanswered StartSession", err)
+	}
+}
+
+// TestAnUnansweredStartNamesWhatItWasWaitingOn is the log half. "context
+// deadline exceeded" says nothing about which step spent the bound, and this
+// step is the difference between a shim that is not there and a shim that took
+// the request and went quiet — two states with two different remediations.
+func TestAnUnansweredStartNamesWhatItWasWaitingOn(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-quiet-shim")
+	f.fleet.startBound = 10 * time.Millisecond
+	f.client.startHold = make(chan struct{})
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	var found bool
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opBringUp && strings.Contains(r.Message, "did not answer inside its bound") {
+			found = true
+			if r.Level != "error" {
+				t.Fatalf("the unanswered start is recorded at %q, want error", r.Level)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no record names the unanswered start: %+v", f.log.logger.Records())
+	}
+}
+
+// TestTheStartBoundDoesNotSpeakForTheCallersOwnCancellation is the edge that
+// keeps the bound honest: when it is the CALLER that went away, the shim was
+// never given its bound to answer in, and saying it went quiet would blame the
+// shim for the daemon's own exit.
+func TestTheStartBoundDoesNotSpeakForTheCallersOwnCancellation(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-caller-left")
+	f.fleet.startBound = time.Minute
+	entered := make(chan struct{})
+	f.client.entered = entered
+	f.client.startHold = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	settled := make(chan error, 1)
+	go func() { settled <- f.fleet.Start(ctx, ws.ID) }()
+	<-entered
+
+	// Act.
+	cancel()
+
+	// Assert.
+	if err := <-settled; err == nil {
+		t.Fatal("Start answered success though its caller was cancelled")
+	}
+	for _, r := range f.log.logger.Records() {
+		if strings.Contains(r.Message, "did not answer inside its bound") {
+			t.Fatalf("a cancelled caller was reported as a shim that went quiet: %+v", r)
+		}
 	}
 }
