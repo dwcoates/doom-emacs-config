@@ -430,8 +430,16 @@ note "every listening shim carries $VENDOR_GUARD_ENV"
 # lib-realtest-backup.sh for why an existing backup is never overwritten, why
 # the copy is a clone rather than a full copy, and why it is pruned after.
 
+# THE WORKSPACE STATE IS COPIED; THE STORE IS NOT. The store is a cache and
+# during development it needs no retention (owner ruling 2026-09-13): every
+# record in events.db is re-derivable, which is why bin/store-reset.sh answers
+# a store that has outgrown its host by deleting the file. Its per-run copies
+# were not a copy of anything irreplaceable and were not read by the harvest --
+# they were 4.6GB of disk across three runs, because a clone diverges as the
+# live database is written and starts costing real blocks. The workspace state
+# has no such property: wsm.db is the owner's workspaces, branches, selections
+# and held prompts, and nothing re-derives it.
 WSM_DB="$HOME/.claude-emacs/wsm.db"
-EVENTS_DB="$HOME/.cache/agent-repl/store/events.db"
 
 # A clone still needs a floor of real free space for its own metadata and for
 # the -wal/-shm plain-copy fallback; this is a cheap sanity floor, not the
@@ -442,16 +450,11 @@ if [ -n "$BACKUP_FREE_KIB" ] && [ "$BACKUP_FREE_KIB" -lt "$BACKUP_FREE_FLOOR_KIB
     decline "only ${BACKUP_FREE_KIB}KiB free on the volume backing \$HOME; a backup needs headroom even as a clone, and this run stops before touching anything with less than 2GiB free"
 fi
 
-note "backing up the owner's live state, stamp $RUN_STAMP"
+note "backing up the owner's workspace state, stamp $RUN_STAMP"
 BACKUPS=""
 if ! BACKUPS="$(realtest_backup_database "$WSM_DB" "$RUN_STAMP")"; then
     decline "the workspace state database could not be backed up; nothing is run against state that has no copy"
 fi
-if ! EVENT_BACKUPS="$(realtest_backup_database "$EVENTS_DB" "$RUN_STAMP")"; then
-    decline "the store's events database could not be backed up; nothing is run against state that has no copy"
-fi
-BACKUPS="$BACKUPS
-$EVENT_BACKUPS"
 
 printf '[realtest] backups taken:\n'
 printf '%s\n' "$BACKUPS" | while IFS= read -r path; do
@@ -463,15 +466,13 @@ printf '%s\n' "$BACKUPS" > "$RUN_DIR/backups.txt"
 # decline over a failed backup must not first destroy an older one that a
 # human might still need to fall back to.
 BACKUP_KEEP="${AGENT_REPL_REALTEST_BACKUP_KEEP:-3}"
-note "pruning backups, keeping the $BACKUP_KEEP most recent set per database"
-PRUNED="$(realtest_prune_backups "$WSM_DB" "$BACKUP_KEEP")
-$(realtest_prune_backups "$EVENTS_DB" "$BACKUP_KEEP")"
+note "pruning backups, keeping the $BACKUP_KEEP most recent sets"
+PRUNED="$(realtest_prune_backups "$WSM_DB" "$BACKUP_KEEP")"
 if [ -n "$(printf '%s' "$PRUNED" | tr -d '[:space:]')" ]; then
     printf '[realtest] backups pruned:\n'
     # `[ -n "$path" ] && printf` leaves the loop's exit status at 1 whenever the
-    # last line read is empty (PRUNED carries a blank line between the two
-    # databases' output), which under `set -e` would abort the whole run right
-    # here. `|| true` keeps a cosmetic print from ending the run.
+    # last line read is empty, which under `set -e` would abort the whole run
+    # right here. `|| true` keeps a cosmetic print from ending the run.
     printf '%s\n' "$PRUNED" | while IFS= read -r path; do
         [ -n "$path" ] && printf '  %s\n' "$path"
     done || true
