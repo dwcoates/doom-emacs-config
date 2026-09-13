@@ -415,10 +415,13 @@ func TestCreateDecoratesTheOneShotPrompt(t *testing.T) {
 	}
 }
 
-func TestCreateRefusesAOneShotWhenABriefIsMissing(t *testing.T) {
-	// Arrange: a brief is never defaulted, so its absence refuses the creation.
+func TestCreateRefusesAOneShotWhenACorpusBriefIsMissing(t *testing.T) {
+	// Arrange: the daemon's OWN repository, whose policy is the corpus. A
+	// brief is never defaulted, so its absence from the corpus refuses the
+	// creation at decoration.
 	f := newFixture(t)
 	spec := standardSpec(t)
+	f.ownRepository(t, spec.RepoDir)
 	spec.OneShot = true
 	spec.Finish = &OneShotFinish{SelfMerge: true}
 
@@ -427,6 +430,130 @@ func TestCreateRefusesAOneShotWhenABriefIsMissing(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmBriefMissing)
+}
+
+func TestCreateRefusesAOneShotInARepositoryThatStatesNoPolicy(t *testing.T) {
+	// Arrange: an ordinary repository, whose policy is its own tree and which
+	// holds none of it. The corpus is not a fallback for it.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	delete(f.briefs, BriefAutonomousPreamble)
+	delete(f.briefs, BriefOneShotSuccessSuffix)
+	spec := standardSpec(t)
+	spec.OneShot = true
+	spec.Finish = &OneShotFinish{SelfMerge: true}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmOneShotPolicyMissing)
+	want := []string{BriefAutonomousPreamble + prompts.Suffix, BriefOneShotSuccessSuffix + prompts.Suffix}
+	got, _ := refusal.Fields["missing_files"].([]string)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("missing_files = %v, want %v", got, want)
+	}
+}
+
+func TestCreateNamesTheRepositoryPolicyDirectoryInTheRefusal(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t)
+	spec.OneShot = true
+	spec.Finish = &OneShotFinish{SelfMerge: true}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert: the arm carries the directory the user must write, not only a
+	// sentence about it.
+	refusal := asRefusal(t, err, ArmOneShotPolicyMissing)
+	if got := refusal.Fields["policy_dir"]; got != prompts.PolicyDir(spec.RepoDir) {
+		t.Fatalf("policy_dir = %v, want %v", got, prompts.PolicyDir(spec.RepoDir))
+	}
+	if got := refusal.Fields["repository_root"]; got != spec.RepoDir {
+		t.Fatalf("repository_root = %v, want %v", got, spec.RepoDir)
+	}
+}
+
+func TestCreateRequiresThePullRequestFollowupOnlyOfAnOpenPrOneShot(t *testing.T) {
+	// Arrange: every policy brief but the pull-request follow-up.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	delete(f.briefs, BriefOneShotCreatePrFollowup)
+	spec := standardSpec(t)
+	spec.OneShot = true
+	spec.Finish = &OneShotFinish{SelfMerge: true}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert: a self-merge one-shot never composes the follow-up, so its
+	// absence is not this create's business.
+	if err != nil {
+		t.Fatalf("Create(one_shot, self_merge) = %v, want a success", err)
+	}
+}
+
+func TestCreateRefusesAnOpenPrOneShotMissingOnlyTheFollowupBrief(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	delete(f.briefs, BriefOneShotCreatePrFollowup)
+	spec := standardSpec(t)
+	spec.OneShot = true
+	spec.Finish = &OneShotFinish{OpenPr: &OneShotOpenPr{}}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmOneShotPolicyMissing)
+	got, _ := refusal.Fields["missing_files"].([]string)
+	if len(got) != 1 || got[0] != BriefOneShotCreatePrFollowup+prompts.Suffix {
+		t.Fatalf("missing_files = %v, want only the pull-request follow-up", got)
+	}
+}
+
+func TestCreateMintsNothingWhenTheRepositoryStatesNoPolicy(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t)
+	spec.OneShot = true
+	spec.Finish = &OneShotFinish{SelfMerge: true}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert: no creation job, no worktree, no registration.
+	if err == nil {
+		t.Fatal("Create = nil error, want the policy refusal")
+	}
+	if len(f.db.jobs) != 0 {
+		t.Fatalf("recorded creation jobs = %v, want none", f.db.jobs)
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("created worktrees = %v, want none", f.git.created)
+	}
+}
+
+func TestCreateOfAOneShotInTheDaemonsOwnRepositoryIsNeverPolicyRefused(t *testing.T) {
+	// Arrange: the corpus IS this repository's policy, and the fixture's
+	// corpus holds every brief.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	spec := standardSpec(t)
+	f.ownRepository(t, spec.RepoDir)
+	spec.OneShot = true
+	spec.Finish = &OneShotFinish{OpenPr: &OneShotOpenPr{}}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Create in the daemon's own repository = %v, want a success", err)
+	}
 }
 
 func TestCreateRecordsTheOneShotFinishInTheCreationJob(t *testing.T) {

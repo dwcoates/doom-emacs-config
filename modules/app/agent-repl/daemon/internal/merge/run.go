@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
 
@@ -53,6 +54,10 @@ type run struct {
 	// rather than a sibling worktree of it. Only the checkout itself triggers
 	// the self-reload.
 	selfCheckout bool
+	// policy is where this workspace's repository states its merge policy.
+	// The DIRECTORY is resolved at admission; the briefs in it are read at
+	// use time, so editing one takes effect on the next merge.
+	policy prompts.Source
 	// startedMS is the head's running clock.
 	startedMS int64
 	// displaced is the user turn this merge displaced, captured at admission
@@ -220,6 +225,16 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	r.emacsRepo = same
 	r.selfCheckout = same && sameDir(job.Layout.TargetDir, o.deps.SelfRepoDir)
 
+	// THE REPOSITORY MAY STATE ITS OWN MERGE ACTIONS. Which directory those
+	// come from is a fact about the workspace's repository, so it is resolved
+	// once here rather than re-derived by each phase.
+	policy, err := o.policyFor(ctx, ws)
+	if err != nil {
+		r.abort(ctx, fmt.Sprintf("could not resolve the repository's merge policy: %v", err))
+		return err
+	}
+	r.policy = policy
+
 	if release, ok, err := o.deps.Occupy(ws, holderMerge); err != nil {
 		r.abort(ctx, fmt.Sprintf("could not take the session's occupancy: %v", err))
 		return err
@@ -378,11 +393,44 @@ func (r *run) emacsMethod(ctx context.Context) (outcome, error) {
 	return outcome{landed: commit, commits: commits}, nil
 }
 
+// actions answers the prompts one merge phase submits: the ones the CREATION
+// recorded, and otherwise the repository's own policy brief when it states
+// one.
+//
+// A WIRE-SUPPLIED ACTION WINS. The repository's file fills an EMPTY slot; it
+// never overrides an action a create configured, because the create's actions
+// are that workspace's own statement and the file is the repository's default
+// for workspaces that made none.
+//
+// An ABSENT policy brief is not an error — it is what every repository looked
+// like before this policy existed. A brief that is present and will not load
+// IS one: a stated policy that cannot run is a fault, never a silent skip.
+func (r *run) actions(configured []string, brief string) ([]string, error) {
+	if len(configured) > 0 {
+		return configured, nil
+	}
+	if r.policy.Dir == "" {
+		return nil, nil
+	}
+	if len(r.o.deps.Policy.Missing(r.policy.Dir, []string{brief})) > 0 {
+		return nil, nil
+	}
+	text, err := r.o.deps.Policy.Text(r.policy.Dir, brief)
+	if err != nil {
+		return nil, fmt.Errorf("merge: reading the repository's %s policy in %s: %w", brief, r.policy.Dir, err)
+	}
+	return []string{text}, nil
+}
+
 // prePrompt runs the configured before-merge prompts. THEIR FAILURE FAILS THE
 // RUN: they are the workspace's own precondition for merging, so merging past
 // one would land work its author said was not ready.
 func (r *run) prePrompt(ctx context.Context) error {
-	for _, name := range r.job.Actions.Before {
+	actions, err := r.actions(r.job.Actions.Before, prompts.PolicyMergeBefore)
+	if err != nil {
+		return err
+	}
+	for _, name := range actions {
 		round := r.openTab(ctx, TabPrePrompt)
 		r.address(TabPrePrompt, round)
 		r.upsert(TabPrePrompt, round, promptTab(TabPrePrompt, &frontendv1.FeedMergeTabLive{}, 0, ""))
@@ -406,7 +454,11 @@ func (r *run) prePrompt(ctx context.Context) error {
 // THE RUN — every commit has landed by now, so there is nothing left to refuse
 // — and rides the terminal status instead.
 func (r *run) postPrompt(ctx context.Context) (bool, error) {
-	for _, name := range r.job.Actions.After {
+	actions, err := r.actions(r.job.Actions.After, prompts.PolicyMergeAfter)
+	if err != nil {
+		return false, err
+	}
+	for _, name := range actions {
 		round := r.openTab(ctx, TabPostPrompt)
 		r.address(TabPostPrompt, round)
 		r.upsert(TabPostPrompt, round, promptTab(TabPostPrompt, &frontendv1.FeedMergeTabLive{}, 0, ""))

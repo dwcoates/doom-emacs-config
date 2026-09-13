@@ -81,7 +81,16 @@ func (v *verbs) OnOneShotTurnConcluded(ctx context.Context, ws ids.WorkspaceID, 
 		return nil
 
 	case finish.OpenPr != nil:
-		text, err := v.openPrFollowup(finish.OpenPr)
+		// THE FOLLOW-UP IS THE REPOSITORY'S POLICY TOO. It is composed at
+		// conclusion, from the same source the opening prompt was decorated
+		// from, resolved again here because a repository's policy is read at
+		// use time rather than captured at creation.
+		repoRoot, err := v.repositoryRootOf(ctx, record.Repo)
+		if err != nil {
+			log.Error(opOneShotFinish, "could not resolve the workspace's repository", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("one-shot finish on %q: %w", ws, err)
+		}
+		text, err := v.openPrFollowup(finish.OpenPr, v.policySourceFor(repoRoot))
 		if err != nil {
 			// ONE RECORD, NOT TWO: the refusal below carries this very
 			// reason, and a second record of the same fact at ERROR would

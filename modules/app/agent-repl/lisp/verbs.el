@@ -569,7 +569,33 @@ and the new workspace\'s tab arrives through the roster push."
    (lambda (success)
      (message "agent-repl: workspace requested")
      (when select
-       (agent-repl-verbs--select-created success)))))
+       (agent-repl-verbs--select-created success)))
+   :on-error #'agent-repl-verbs--create-policy-refusal))
+
+(defun agent-repl-verbs--create-policy-refusal (value)
+  "Draw a `one_shot_policy_missing\=' refusal of a create from VALUE.
+Answers non-nil when it claimed the arm, so every other arm still falls
+through to the generic refusal handling.
+
+A ONE-SHOT RUNS ITS REPOSITORY\='S OWN POLICY, and the daemon detects a
+repository that states none -- Emacs never looks at the filesystem for
+this.  The refusal is drawn as the WARNING it is, naming the directory
+the user must write and the files it needs, because the user\='s next
+move is to write exactly those."
+  (let ((refusal (agent-repl-verbs--refusal-arm value)))
+    (when (eq (plist-get refusal :arm) :one-shot-policy-missing)
+      (let* ((missing (plist-get refusal :value))
+             (dir (plist-get missing :policy-dir))
+             (files (plist-get missing :missing-files)))
+        (agent-repl--warn
+         '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
+         "elisp.verbs.create-refused arm=%S fields=%S" :one-shot-policy-missing missing)
+        (message "create refused: %s states no one-shot policy -- write %s"
+                 (plist-get missing :repository-root)
+                 (if files
+                     (format "%s in %s" (string-join files ", ") dir)
+                   dir)))
+      t)))
 
 (defun agent-repl-verbs-select-minted (ref)
   "Stand on the workspace REF names, once the daemon has minted it.
