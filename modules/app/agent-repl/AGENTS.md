@@ -629,6 +629,44 @@ jq -s 'group_by([.level, .source, .operation])
   | sort_by(-.count)' HARVEST-FULL.jsonl
 ```
 
+## The topbar's schema and organization are FIXED
+
+Owner ruling, 2026-09-13, no exceptions. **The strip has one shape and only
+one.** Every cell `frontend.v1 TopbarView` names is present on every
+publication and in the same slot. There is no whole-view state that replaces,
+suppresses or rearranges the strip, and none may be added — two such states,
+`hibernated` and `cold_gate`, were landed and reversed the same day, and their
+tags are reserved in `topbar.proto` against a revival.
+
+A cell whose SESSION fact is unknown — hibernated, standing at the cold gate,
+or simply not started yet — states that IN ITS OWN SLOT:
+
+- `model_selector`, `permission_mode_picker` and `fast_mode` are ABSENT.
+  Absence is how "no session has stated this" is said, and the webapp draws a
+  dash in the slot rather than omitting the cell.
+- `context` is ALWAYS SET. A session-less workspace's chip states the context
+  the session HELD — a hibernated conversation's size, or what a cold read
+  would re-read — and 0 when none is known, never a blank (a blank reads as
+  "loading", the one thing it is not). The reason the figure is not live is
+  the FIRST section of the chip's hover breakdown.
+- `warnings` is ALWAYS SET, and it carries the state as one warning LINE:
+  "hibernated since 14:03", "cold context, awaiting your answer". That line is
+  the one warning with no overlay behind it — it is a statement, not a
+  control, and a cold gate is answered in the feed's gate card and nowhere
+  else. An EMPTY list still means nothing is wrong and still draws no chip.
+
+**The readiness gate is the workspace facts and nothing else** — the naming
+(WSM's) and the account (the config root's). No session fact gates the
+publication; they fill in as they arrive. Gating on one is what left the strip
+BLANK for as long as a session-less state stood.
+
+**The title is the workspace SUMMARY when the vendor has one.** The vendor
+writes an `ai-title` line into the session transcript; the shim reads it
+(`convert/session-title.ts`, `engine/title.ts`) and states it as
+`conversation.v1 SessionUpdate.title`, and the resolver composes
+`TopbarTitle.text` from it in preference to the workspace name. The branch
+suffix is a different fact and its rule is unchanged.
+
 ## Tab-bar vocabulary: full, partial, and the extent rule
 
 A workspace's tab is `[N] <workspace-name>`, and the status color reaches it

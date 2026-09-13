@@ -16,6 +16,9 @@ import (
 // list.
 func (r *resolver) warningStrip(s *wsState) *frontendv1.TopbarWarningStrip {
 	collected := make([]warning, 0, 8)
+	if w, ok := r.sessionlessWarning(s); ok {
+		collected = append(collected, w)
+	}
 	if w, ok := r.accountingWarning(s); ok {
 		collected = append(collected, w)
 	}
@@ -34,6 +37,38 @@ func (r *resolver) warningStrip(s *wsState) *frontendv1.TopbarWarningStrip {
 		out.Warnings = append(out.Warnings, w.detail())
 	}
 	return out
+}
+
+// sessionlessWarning is the workspace's session-less state, as a LINE.
+//
+// THE FACT MUST NOT BE LOST. The whole-view `hibernated` and `cold_gate`
+// states were retired by the FIXED SCHEMA ruling (2026-09-13), and this is
+// where the fact they carried went: the strip is one shape, so a state that
+// used to replace it is now a sentence in the list of things a reader should
+// know. The same sentence heads the context chip's hover, because it is one
+// fact drawn in two places.
+//
+// IT CARRIES NO OVERLAY. There is nothing further to reveal and, for the cold
+// gate, nothing to answer HERE: the feed's gate card is the one place a gate
+// is answered, and a second place to answer one question is exactly what the
+// strip must not become.
+//
+// SEQ 0, SO IT SORTS LAST. The dropdown draws the newest observation first,
+// and a standing state is the OLDEST thing in the list — it was true before
+// anything that is wrong right now went wrong.
+func (r *resolver) sessionlessWarning(s *wsState) (warning, bool) {
+	line := sessionlessReason(s)
+	if line == "" {
+		return warning{}, false
+	}
+	return warning{
+		kind: warnSessionless, key: "sessionless", seq: 0, line: line,
+		detail: func() *frontendv1.TopbarWarning {
+			return &frontendv1.TopbarWarning{
+				Line: &frontendv1.TopbarWarningLine{Text: truncate(line, DefaultLineWidth)},
+			}
+		},
+	}, true
 }
 
 // accountingWarning is the SESSION-level reconciliation's own verdict. It is
