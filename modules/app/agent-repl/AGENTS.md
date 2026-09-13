@@ -505,6 +505,28 @@ workspace attribution, severity, or `AGENT_REPL_LOG_LEVEL` behavior; use
 `bin/readiness-report.sh` to compare them with the source tree and running
 artifacts.
 
+### Resetting the record store
+
+`bin/store-reset.sh` throws `events.db` away and brings the store and the
+sidecar back up. The store holds nothing that is not re-derivable, and during
+development it needs no retention (owner ruling 2026-09-13), so this is the
+answer to a database that has outgrown its host — not pruning, and not a
+migration.
+
+```sh
+AGENT_REPL_STORE_RESET=1 modules/app/agent-repl/bin/store-reset.sh
+```
+
+It refuses unless `AGENT_REPL_STORE_RESET` is exactly `1`. `--keep-down`
+removes the files and leaves both services stopped. The sidecar stops first and
+starts last (its cursors live in the file being removed), and the store's socket
+is waited on in between — the same recorded safe order `bin/deploy-all.sh` uses.
+The rest of the rules live in `agent-shim/shim-store/AGENTS.md`.
+
+AFTER A RESET THE SIDECAR RE-READS THE WHOLE CORPUS from offset zero, which is
+hours of ingestion and a database that grows straight back. That is the cost of
+the reset, not a defect of it.
+
 To harvest the realtest remediation window, record RFC3339 instants immediately
 before and after the run, then ask for every warning and error across every
 daemon-known workspace and central sink:

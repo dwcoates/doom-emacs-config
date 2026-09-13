@@ -144,6 +144,38 @@ handle, removes the file with its siblings, and reopens onto an empty one. The
 mismatch is recorded ONCE, as a warn from `Open`, naming the found version and
 table set and saying the file was removed.
 
+### Throwing the database away on purpose: `bin/store-reset.sh`
+
+THE STORE NEEDS NO RETENTION DURING DEVELOPMENT (owner ruling 2026-09-13), and
+everything in `events.db` is re-derivable — the sidecar re-reads the vendor's
+transcripts from offset zero once its `cursor` rows are gone, and the shim
+re-observes the live stream. So a store that has grown past what its host wants
+to carry is THROWN AWAY, never pruned: `../../bin/store-reset.sh` stops the
+sidecar and the store, removes `events.db` with its `-wal`/`-shm` siblings, then
+starts the store, waits for `store.sock`, and starts the sidecar.
+
+- **THE SIDECAR GOES DOWN FIRST AND COMES UP LAST**, which is `deploy-all.sh`'s
+  recorded safe order. The sidecar's reader positions live in the `cursor` table
+  IN THIS FILE: one left running across the unlink writes into a deleted inode
+  and holds positions for a database that never saw the records they claim.
+- **THE STOP POLLS UNTIL LAUNCHD REPORTS NO PID.** `launchctl kill` returns when
+  the signal is delivered, and unlinking the file out from under a store still
+  draining a transaction is the race the script exists to avoid. A service that
+  will not exit fails the reset with nothing removed.
+- **THE GUARD IS `AGENT_REPL_STORE_RESET=1`, AN EXACT MATCH.** The intent is
+  stated twice — the script must be asked AND the environment must say yes —
+  because this deletes every stored record and the re-read afterwards is the
+  owner's whole corpus. `0` and `no` are somebody saying no, which a truthiness
+  test would read as yes.
+- A DIRECTORY AT THE DATABASE PATH IS REPORTED, NEVER REMOVED — the same guard
+  `db.Open` applies before it unlinks, for the same reason. An ABSENT database
+  is not an error: the reset's postcondition already holds.
+- `--keep-down` removes the files and leaves both services stopped.
+- The hermetic harness is `../../bin/test-store-reset.sh` (suite
+  `store-reset-harness` in `bin/test-all.sh`); it drives a `launchctl` stub
+  through `AGENT_REPL_LAUNCHCTL` and a fixture `XDG_CACHE_HOME`, so no test run
+  can ever reach the live launchd or the live database.
+
 **A `--db` FILE THAT IS NOT A DATABASE IS IN THE WAY, SO IT GOES** — the same
 answer, because the store holds a cache of what the vendor and the shim already
 know how to produce again, and refusing to boot would wedge the service on bytes
@@ -462,8 +494,8 @@ arms are derived from, and each one is logged once with `refusal_site`.
   class, which is the `info` above; owned failures are `error`.
   Slow queries are the
   one deliberate exception: a statement past its budget emits a normal-verbosity
-  `warn` at `store.db.slow-query` with `statement`, `duration_ms`, `rows` and
-  `threshold_ms`, because by the time an operator knows to look the stall is
+  `warn` at `store.db.slow-query` with `statement`, `duration_ms`,
+  `lock_wait_ms`, `rows` and `threshold_ms`, because by the time an operator knows to look the stall is
   over. The budget is NOT one fixed number. A point query's budget is the fixed
   `AGENT_REPL_STORE_SLOW_QUERY_MS` (default 250ms). A `write_batch` is bulk
   background I/O, not a point query — every write-path statement is fully
@@ -480,6 +512,20 @@ arms are derived from, and each one is logged once with `refusal_site`.
   statement would put session content into the global log. A malformed
   threshold or bulk-budget value aborts `db.Open`; a zero base is allowed
   (budget purely per row), but a non-positive per-row budget is refused.
+- **`lock_wait_ms` SPLITS THE QUEUE OUT OF THE DURATION, and the record is
+  unreadable without it.** A batch's clock starts BEFORE its transaction, and
+  every transaction here is `BEGIN IMMEDIATE` — reads included — so a write
+  queues behind whatever else holds the write lock for as long as
+  `busy_timeout` allows, and behind the connection pool before that. Reported
+  as one number, that queue read as a slow statement: the owner's store logged
+  `write_batch duration_ms=3822 rows=6` for six single indexed seeks, and the
+  record's own reasoning blamed index maintenance for time no index spent.
+  `duration_ms` and the budget still cover the TOTAL, because a batch nobody
+  can start is as slow to its caller as one that runs slowly; `lock_wait_ms` is
+  what tells the operator to look at what ELSE is writing rather than for a
+  missing index. It is emitted with every statement family, zero included — a
+  statement with no wait to measure reports `0`, which is a fact, not an
+  omission.
 
 Read store records and harvest run windows through `../../bin/logs.sh`; the
 full path, rotation, attribution, and level-switch table is in
