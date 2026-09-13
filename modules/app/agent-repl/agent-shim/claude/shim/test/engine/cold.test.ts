@@ -9,10 +9,12 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import {
   CACHE_TTL_1H_MS,
   CACHE_TTL_5M_MS,
+  COLD_GATE_FLOOR_TOKENS,
   cwdSlug,
   judgeCold,
   readTranscriptFacts,
@@ -131,8 +133,11 @@ describe("reading the transcript's facts", () => {
   });
 });
 
+// ABOVE THE COLD-GATE FLOOR ON PURPOSE. The gate does not ask below 70,000
+// tokens, so a fixture under it would make every judging case below read
+// "warm" for the floor's reason rather than the one it is testing.
 const FACTS = {
-  contextTokens: 1000,
+  contextTokens: 100_000,
   lastRequestAtMs: 1_000_000,
   cacheTtlMs: CACHE_TTL_5M_MS,
   lastModel: "claude-opus-5",
@@ -161,6 +166,119 @@ describe("judging the cache", () => {
   });
 });
 
+/** The durable log records written since `before`, parsed. */
+function logRecordsSince(before: number): Array<{ level: string; message: string; context: Record<string, unknown> }> {
+  const calls = vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<
+    [number, Buffer, number, number]
+  >;
+  return calls.map(
+    ([, bytes, offset, length]) =>
+      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
+        level: string;
+        message: string;
+        context: Record<string, unknown>;
+      },
+  );
+}
+
+/** The one record the floor writes when it lets a continuation through. */
+function floorRecord(before: number): { level: string; context: Record<string, unknown> } | undefined {
+  return logRecordsSince(before).find((record) => record.message.includes("under the cold-gate floor"));
+}
+
+describe("the cold-gate floor", () => {
+  // OWNER RULING, 2026-09-13: no cold gate when the context a cold read would
+  // re-read is under 70,000 tokens; at or above 70,000 the gate asks as
+  // before. The floor is stated once here so a change to the constant has to
+  // be a deliberate change to this table too.
+  it("stands at the 70,000 tokens the owner ruled", () => {
+    expect(COLD_GATE_FLOOR_TOKENS).toBe(70_000);
+  });
+
+  const LAPSED_AT = 1_000_000 + CACHE_TTL_5M_MS + 1;
+
+  const cases: ReadonlyArray<{
+    readonly name: string;
+    readonly facts: typeof FACTS;
+    readonly nowMs: number;
+    readonly requestedModel: string | undefined;
+    readonly expected: string | undefined;
+  }> = [
+    {
+      name: "a lapse holding 69,999 tokens continues WARM, one token under the floor",
+      facts: { ...FACTS, contextTokens: 69_999 },
+      nowMs: LAPSED_AT,
+      requestedModel: "claude-opus-5",
+      expected: undefined,
+    },
+    {
+      name: "a lapse holding exactly 70,000 tokens GATES: the floor is a floor, not a ceiling",
+      facts: { ...FACTS, contextTokens: 70_000 },
+      nowMs: LAPSED_AT,
+      requestedModel: "claude-opus-5",
+      expected: "lapsed",
+    },
+    {
+      name: "a lapse holding 0 tokens (a fresh transcript) continues WARM",
+      facts: { ...FACTS, contextTokens: 0 },
+      nowMs: LAPSED_AT,
+      requestedModel: "claude-opus-5",
+      expected: undefined,
+    },
+    {
+      name: "a MODEL CHANGE holding 50,000 tokens continues WARM: the same floor applies to a switch",
+      facts: { ...FACTS, contextTokens: 50_000 },
+      nowMs: 1_000_000 + 1,
+      requestedModel: "claude-sonnet-5",
+      expected: undefined,
+    },
+    {
+      name: "a lapse holding 200,000 tokens GATES as before",
+      facts: { ...FACTS, contextTokens: 200_000 },
+      nowMs: LAPSED_AT,
+      requestedModel: "claude-opus-5",
+      expected: "lapsed",
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(testCase.name, () => {
+      expect(judgeCold(testCase.facts, testCase.nowMs, testCase.requestedModel)).toBe(
+        testCase.expected,
+      );
+    });
+  }
+
+  it("records ONE info line naming the context, the lapse and the rule when it lets a lapse through", () => {
+    // Arrange: a lapsed conversation one token under the floor.
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    judgeCold({ ...FACTS, contextTokens: 69_999 }, LAPSED_AT, "claude-opus-5");
+
+    // Assert: the log can answer "why was I not asked".
+    const record = floorRecord(before);
+    expect([record?.level, record?.context.context_tokens, record?.context.floor_tokens, record?.context.lapse_ms, record?.context.reason]).toEqual([
+      "info",
+      69_999,
+      70_000,
+      CACHE_TTL_5M_MS + 1,
+      "lapsed",
+    ]);
+  });
+
+  it("records NOTHING when the conversation was warm anyway, so the floor is not credited for it", () => {
+    // Arrange: inside the tier, and far under the floor.
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    judgeCold({ ...FACTS, contextTokens: 1_000 }, 1_000_000 + 1, "claude-opus-5");
+
+    // Assert.
+    expect(floorRecord(before)).toBeUndefined();
+  });
+});
+
 describe("the refusal message", () => {
   it("carries the cost and the lapsed tier", () => {
     const cold = sessionCold(FACTS, "lapsed", "claude-opus-5");
@@ -171,7 +289,7 @@ describe("the refusal message", () => {
       reason: cold.reason.case,
       ttl: cold.reason.case === "lapsed" ? cold.reason.value.cacheTtlMs : undefined,
     }).toEqual({
-      contextTokens: 1000n,
+      contextTokens: 100_000n,
       lastRequestAtMs: 1_000_000n,
       reason: "lapsed",
       ttl: BigInt(CACHE_TTL_5M_MS),
