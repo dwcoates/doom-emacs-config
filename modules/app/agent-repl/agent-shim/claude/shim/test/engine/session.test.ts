@@ -37,7 +37,7 @@ import { mainAgentId } from "../../src/convert/ids.js";
 // static binding is the file's one copy and cannot drift from the engine's.
 import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
-import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, hookResponse, initMessage, resultMessage } from "./fakes.js";
+import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
   readonly engine: SessionEngine;
@@ -4210,6 +4210,155 @@ describe("the vendor query dying under the loop", () => {
     await reading;
 
     expect(causes).toContain("iteratorFailure");
+  });
+});
+
+describe("a vendor that ENDS the opening instead of announcing it", () => {
+  /**
+   * WHAT THIS GUARDS: that `INIT_TIMEOUT_MS` is a bound on SILENCE and nothing
+   * else. The grounded failure (2026-09-13, workspace 2b81f45a724642ef) had the
+   * vendor emit a `SessionStart:resume` hook and then stop, and every one of
+   * these arms used to sit out the full 45s before answering — long enough for
+   * the daemon's own bound to fire first and blame the shim.
+   *
+   * Every bound here is generous ON PURPOSE: a test that passed because the
+   * bound fired would prove the opposite of what it claims.
+   */
+  const AMPLE = 60_000;
+
+  it("settles the start when the vendor's stream ENDS before its init", async () => {
+    const h = harness({ initTimeoutMs: AMPLE });
+    const pending = h.engine.startSession(freshRequest());
+
+    (await untilQuery(h, 0)).query.end();
+
+    expect(failureCause(await pending)).toBe("vendorStartFailed");
+  });
+
+  it("names the query's end as the reason when the stream ends before the init", async () => {
+    const h = harness({ initTimeoutMs: AMPLE });
+    const pending = h.engine.startSession(freshRequest());
+
+    (await untilQuery(h, 0)).query.end();
+
+    const response = await pending;
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      "the vendor query ended before its init message",
+    );
+  });
+
+  it("settles the start when the vendor's stream THROWS before its init", async () => {
+    const h = harness({ initTimeoutMs: AMPLE });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+
+    // The loop is PARKED in the iterator, and a stream that merely ends under a
+    // parked reader is an EOF. One message unparks it, so the failure is raised
+    // on the next pull — which is how a real iterator throws.
+    first.query.emit(hookResponse({ outcome: "success", output: "" }));
+    first.query.fail(new Error("spawn ENOENT"));
+
+    const response = await pending;
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      "spawn ENOENT",
+    );
+  });
+
+  it("settles the start when the vendor answers the opening with an error result", async () => {
+    const h = harness({ initTimeoutMs: AMPLE });
+    const pending = h.engine.startSession(freshRequest());
+
+    (await untilQuery(h, 0)).query.emit(errorResultMessage());
+
+    expect(failureCause(await pending)).toBe("vendorStartFailed");
+  });
+
+  it("relays the vendor's own text when an error result refuses the opening", async () => {
+    // THE VENDOR'S WORDS, NOT THE SHIM'S. "No conversation found with session
+    // ID ..." is an answer a reader can act on; "did not send its init message"
+    // is not.
+    const h = harness({ initTimeoutMs: AMPLE });
+    const pending = h.engine.startSession(freshRequest());
+
+    (await untilQuery(h, 0)).query.emit(
+      errorResultMessage({ errors: ["No conversation found with session ID: bf5fcae1"] }),
+    );
+
+    const response = await pending;
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      "No conversation found with session ID: bf5fcae1",
+    );
+  });
+
+  it("leaves a SUCCESSFUL result before the init to the turn engine", async () => {
+    // Only an ERROR result ends an opening. A success-shaped result is an
+    // ordinary terminal and must not refuse a session that then opens fine.
+    const h = harness({ initTimeoutMs: AMPLE });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.emit(resultMessage());
+    first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("carries the vendor child's stderr into a start that timed out on silence", async () => {
+    // THE BOUND STILL FIRES FOR TRUE SILENCE, and when the child explained
+    // itself on stderr the refusal says so rather than reporting the quiet.
+    const h = harness({ initTimeoutMs: 5 });
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).spec.onStderr?.("Error: the resume handle is not recognized");
+
+    const response = await pending;
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      "the vendor said: Error: the resume handle is not recognized",
+    );
+  });
+
+  it("closes the vendor query a failed start had opened", async () => {
+    // NO ORPHANED CHILD. The retry must be the only writer on the
+    // conversation; the failed attempt's query is not left running beside it.
+    const h = harness({ initTimeoutMs: 5 });
+
+    await h.engine.startSession(freshRequest());
+
+    expect(h.queries[0]?.query.calls).toContain("close");
+  });
+
+  it("raises no query_died fault for the query a failed start closed", async () => {
+    // A RELEASED QUERY'S END IS NOT THE SESSION'S DEATH. Reporting one left a
+    // shim that had merely refused a start carrying a permanent vendor fault.
+    const h = harness({ initTimeoutMs: 5 });
+    const pushed: string[] = [];
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        pushed.push(step.value.update.case ?? "");
+      }
+    })();
+
+    await h.engine.startSession(freshRequest());
+    for (let attempt = 0; attempt < 20; attempt++) await new Promise((r) => setImmediate(r));
+    await h.engine.standDown("done");
+    await reading;
+
+    expect(pushed).not.toContain("queryDied");
+  });
+
+  it("records what the vendor DID emit before the start failed", async () => {
+    // THE NEXT OCCURRENCE EXPLAINS ITSELF. The grounded failure's only evidence
+    // was a store frame decoded by hand, because nothing logged the kinds.
+    const h = harness({ initTimeoutMs: 5 });
+    const before = logCursor();
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "success", output: "" }));
+    await pending;
+
+    expect(logContextFor(before, "what the vendor emitted before the start failed")?.["pre_init_kinds"]).toBe(
+      "system:hook_response",
+    );
   });
 });
 
