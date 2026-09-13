@@ -295,7 +295,7 @@ export function drawCreateWorkspaceForm(
 type CreateWorkspaceCause = NonNullable<CreateWorkspaceError["cause"]> & { case: string };
 
 /**
- * What each of CreateWorkspace's eleven refusals says.
+ * What each of CreateWorkspace's twelve refusals says.
  *
  * NONE OF THE CROSS-CUTTING FOUR CAN REACH THIS RPC: a creation is addressed
  * to a repository, not to an existing workspace, so every arm here is the
@@ -329,6 +329,12 @@ export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
       return `the worktree could not be created: ${cause.value.detail}`;
     case "spawnFailed":
       return `the workspace was created but its session would not start: ${cause.value.detail}`;
+    case "oneShotPolicyMissing":
+      return `${cause.value.repositoryRoot} states no one-shot policy: write ${
+        cause.value.missingFiles.length > 0
+          ? `${cause.value.missingFiles.join(", ")} in ${cause.value.policyDir}`
+          : cause.value.policyDir
+      }`;
     default: {
       const other: { case: string } = cause;
       return unreachableArm("CreateWorkspaceError.cause", other.case);
