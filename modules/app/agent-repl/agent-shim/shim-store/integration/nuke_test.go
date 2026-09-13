@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/shim-store/internal/db"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -35,6 +37,23 @@ func stampedForeignSchema(t *testing.T, path string) {
 	  CREATE TABLE ancient_messages (session_id TEXT, seq INTEGER);
 	  INSERT INTO ancient_messages VALUES ('s1', 1);`); err != nil {
 		t.Fatalf("staging a foreign schema: %v", err)
+	}
+}
+
+// stampedSupersededSchema stages a database at the version THIS binary
+// superseded — the ordinary state of an events.db that a schema bump has just
+// left behind.
+func stampedSupersededSchema(t *testing.T, path string) {
+	t.Helper()
+	handle, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("staging a superseded database: %v", err)
+	}
+	defer handle.Close()
+	if _, err := handle.Exec(fmt.Sprintf(`CREATE TABLE schema_meta (version INTEGER NOT NULL);
+	  INSERT INTO schema_meta(version) VALUES (%d);
+	  CREATE TABLE entry (id TEXT);`, db.SchemaVersion-1)); err != nil {
+		t.Fatalf("staging a superseded schema: %v", err)
 	}
 }
 
@@ -56,9 +75,10 @@ func TestAStoreBootsOverADatabaseStampedByAnotherBinary(t *testing.T) {
 	openUnknownAgent(ctx, t, store.client(), "main")
 }
 
-func TestNukingAForeignSchemaIsAnnouncedAsAWarning(t *testing.T) {
-	// Arrange: dropping a shape with somebody's data in it is the one schema
-	// event that deserves the weight.
+func TestNukingAForeignSchemaIsAnnouncedAsAnError(t *testing.T) {
+	// Arrange: the staged stamp is 99, ABOVE this binary's own — a database
+	// only a newer store could have written. Discarding it is not a version
+	// bump this binary superseded, and it takes somebody's data with it.
 	dbPath := filepath.Join(t.TempDir(), "events.db")
 	stampedForeignSchema(t, dbPath)
 
@@ -66,14 +86,59 @@ func TestNukingAForeignSchemaIsAnnouncedAsAWarning(t *testing.T) {
 	store := startStore(t, storeOptions{dbPath: dbPath})
 
 	// Assert
-	warned := false
+	errored := false
 	for _, rec := range store.logRecords() {
-		if rec.Operation == "store.db.schema" && rec.Level == "warn" {
-			warned = true
+		if rec.Operation == "store.db.schema" && rec.Level == "error" {
+			errored = true
 		}
 	}
-	if !warned {
-		t.Fatalf("nuking a foreign schema logged no store.db.schema warning\nstderr:\n%s", store.stderrText())
+	if !errored {
+		t.Fatalf("nuking a foreign schema logged no store.db.schema error\nstderr:\n%s", store.stderrText())
+	}
+}
+
+func TestASupersededSchemaVersionBootsWithoutAWarning(t *testing.T) {
+	// Arrange: a database one version BELOW this binary's, which is what every
+	// deploy that bumped the schema meets. The owner's log carried a WARNING
+	// for it (found version=5, want version=6, 2026-09-13 16:03:25) though the
+	// store was doing exactly what it documents: nuked, never migrated.
+	dbPath := filepath.Join(t.TempDir(), "events.db")
+	stampedSupersededSchema(t, dbPath)
+
+	// Act
+	store := startStore(t, storeOptions{dbPath: dbPath})
+
+	// Assert
+	schema := recordsAtOperation(store.logRecords(), "store.db.schema")
+	if warned := recordsAtLevel(schema, "warn"); len(warned) != 0 {
+		t.Fatalf("a superseded schema logged %d store.db.schema warning(s), want none: %v\nstderr:\n%s",
+			len(warned), warned, store.stderrText())
+	}
+	if errored := recordsAtLevel(schema, "error"); len(errored) != 0 {
+		t.Fatalf("a superseded schema logged %d store.db.schema error(s), want none: %v\nstderr:\n%s",
+			len(errored), errored, store.stderrText())
+	}
+}
+
+func TestASupersededSchemaVersionNamesBothVersions(t *testing.T) {
+	// Arrange: "from what, to what" is the operator's whole question at a nuke.
+	dbPath := filepath.Join(t.TempDir(), "events.db")
+	stampedSupersededSchema(t, dbPath)
+
+	// Act
+	store := startStore(t, storeOptions{dbPath: dbPath})
+
+	// Assert
+	found := fmt.Sprintf("found version=%d", db.SchemaVersion-1)
+	want := fmt.Sprintf("want version=%d", db.SchemaVersion)
+	named := false
+	for _, rec := range recordsAtOperation(store.logRecords(), "store.db.schema") {
+		if strings.Contains(rec.Message, found) && strings.Contains(rec.Message, want) {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("no store.db.schema record naming both %q and %q\nstderr:\n%s", found, want, store.stderrText())
 	}
 }
 
@@ -107,23 +172,25 @@ func TestNukingAnUnreadableDatabaseNamesTheCause(t *testing.T) {
 	// Act
 	store := startStore(t, storeOptions{dbPath: dbPath})
 
-	// Assert: the warning says WHY, so an operator is not left guessing whether
-	// the store deleted their file for a good reason.
+	// Assert: the record says WHY, so an operator is not left guessing whether
+	// the store deleted their file for a good reason. A file this binary cannot
+	// read at all is damaged, not a version bump it superseded, so it is an
+	// ERROR — the level a superseded version no longer carries.
 	//
-	// IT IS SCOPED TO THE OPERATION THAT OWNS IT. "Some warn carried an error
+	// IT IS SCOPED TO THE OPERATION THAT OWNS IT. "Some record carried an error
 	// key" passed for a reclaimed socket or an enabled pprof surface as readily
 	// as for the nuke, so the assertion held without the record ever existing.
 	schema := recordsAtOperation(store.logRecords(), "store.db.schema")
-	warned := recordsAtLevel(schema, "warn")
-	if len(warned) != 1 {
-		t.Fatalf("store.db.schema warn records = %d, want exactly 1: %v\nstderr:\n%s", len(warned), warned, store.stderrText())
+	errored := recordsAtLevel(schema, "error")
+	if len(errored) != 1 {
+		t.Fatalf("store.db.schema error records = %d, want exactly 1: %v\nstderr:\n%s", len(errored), errored, store.stderrText())
 	}
-	cause, ok := warned[0].Context["error"].(string)
+	cause, ok := errored[0].Context["error"].(string)
 	if !ok || cause == "" {
-		t.Fatalf("the nuke warning carries no error context: %v", warned[0].Context)
+		t.Fatalf("the nuke record carries no error context: %v", errored[0].Context)
 	}
-	if warned[0].Context["db"] != dbPath {
-		t.Errorf("the nuke warning names db %v, want %q", warned[0].Context["database_path"], dbPath)
+	if errored[0].Context["db"] != dbPath {
+		t.Errorf("the nuke record names db %v, want %q", errored[0].Context["database_path"], dbPath)
 	}
 }
 
