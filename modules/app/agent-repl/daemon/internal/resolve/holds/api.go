@@ -1,8 +1,7 @@
 // Package holds is the hold-tray resolver.
 //
 // The tray is fed by the PROMPT QUEUE and the MERGE ORCHESTRATOR, never by the
-// session watcher. Its heading is composed here. See ARCHITECTURE.md
-// "resolvers".
+// session watcher. See ARCHITECTURE.md "resolvers".
 //
 // THE TRAY IS ALWAYS WHOLE, INCLUDING WHEN IT IS EMPTY. An empty items list is
 // a meaningful value — "the daemon is holding nothing for you" — so the tray
