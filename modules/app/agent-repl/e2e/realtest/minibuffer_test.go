@@ -112,75 +112,32 @@ func TestChordDismissCeilingIsFarBelowTheChordCeiling(t *testing.T) {
 	}
 }
 
-// ---- The C-g press is judged by the marks Emacs is obliged to leave --------
+// ---- The C-g press is judged by the effect, not by the marks --------------
+//
+// The quit character leaves no input mark on this build, so every stage below
+// says which system it names and none of them may name two.
 
-func TestQuitEvidenceCountsAGrownRecentKeysAsArrival(t *testing.T) {
-	// Arrange
-	evidence := wsActQuitEvidence{KeysBefore: "SPC j m p", KeysAfter: "SPC j m p C-g"}
-
-	// Act / Assert
-	if !evidence.Arrived() {
-		t.Errorf("a (recent-keys) that grew is Emacs saying it read the quit character, so the press arrived; "+
-			"the evidence %+v was read as not having arrived", evidence)
-	}
-}
-
-func TestQuitEvidenceCountsAnArmedQuitFlagAsArrival(t *testing.T) {
-	// Arrange
-	evidence := wsActQuitEvidence{KeysBefore: "SPC j m p", KeysAfter: "SPC j m p", QuitFlagArmed: true}
-
-	// Act / Assert
-	if !evidence.Arrived() {
-		t.Errorf("an armed quit-flag is a quit Emacs took in and has not yet honoured, so the press arrived; "+
-			"the evidence %+v was read as not having arrived", evidence)
-	}
-}
-
-func TestQuitEvidenceCallsNeitherMarkANonArrival(t *testing.T) {
-	// Arrange
-	evidence := wsActQuitEvidence{KeysBefore: "SPC j m p", KeysAfter: "SPC j m p"}
-
-	// Act / Assert
-	if evidence.Arrived() {
-		t.Errorf("an arriving quit character must leave (recent-keys) grown or quit-flag armed, so neither "+
-			"mark is the key never entering Emacs's input; the evidence %+v was read as having arrived", evidence)
-	}
-}
-
-func TestQuitEvidenceTreatsAFailedProbeAsArrival(t *testing.T) {
-	// Arrange
-	//
-	// The conservative direction: an editor that would not answer has said
-	// nothing, and a reading nobody got must never let a real product defect
-	// be filed against the harness.
-	evidence := wsActQuitEvidence{ProbeFailure: "quit-flag after the press: connection refused"}
-
-	// Act / Assert
-	if !evidence.Arrived() {
-		t.Errorf("a probe that would not answer is not an absent mark; the evidence %+v was read as not "+
-			"having arrived", evidence)
-	}
-}
-
-func TestQuitFlagFormReadsTheFlagAsAWord(t *testing.T) {
+func TestDismissNoteBlamesTheHarnessWhenTheChordWasNeverPosted(t *testing.T) {
 	// Arrange / Act
-	form := wsActQuitFlagForm()
-
-	// Assert
-	if !strings.Contains(form, "quit-flag") || !strings.Contains(form, `"armed"`) {
-		t.Errorf("the quit-flag probe must read `quit-flag` and answer in a word an empty reply cannot pass "+
-			"for; it is:\n%s", form)
-	}
-}
-
-func TestDismissNoteBlamesTheHarnessWhenTheChordNeverArrived(t *testing.T) {
-	// Arrange / Act
-	note := wsActDismissNote(wsActDismissChordNeverArrived, "Repository: ", 1)
+	note := wsActDismissNote(wsActDismissNotPosted, "Initial prompt: ", 1)
 
 	// Assert
 	if !strings.Contains(note, "NOT A PRODUCT FINDING") || !strings.Contains(note, "key driver") {
-		t.Errorf("a `C-g` Emacs never saw is a defect in this harness's key driver and must say so rather "+
-			"than accuse the editor; it said %q", note)
+		t.Errorf("a `C-g` that was never posted is a defect in this harness's key driver and must say so "+
+			"rather than accuse the editor; it said %q", note)
+	}
+}
+
+func TestDismissNoteForANeverPostedChordMakesNoProductClaim(t *testing.T) {
+	// Arrange / Act
+	//
+	// The 2026-09-13 sweep printed this stage's note and the product note for
+	// the SAME press, so the absence of the product wording is the assertion.
+	note := wsActDismissNote(wsActDismissNotPosted, "Initial prompt: ", 1)
+
+	// Assert
+	if strings.Contains(note, "REACHED Emacs") {
+		t.Errorf("a key that never left this side cannot also have reached Emacs; it said %q", note)
 	}
 }
 
@@ -195,29 +152,23 @@ func TestDismissNoteKeepsTheProductFindingWhenTheChordArrived(t *testing.T) {
 	}
 }
 
-func TestQuitEvidenceNoteRendersBothReadings(t *testing.T) {
-	// Arrange
-	evidence := wsActQuitEvidence{KeysBefore: "SPC j m p", KeysAfter: "SPC j m p", QuitFlagArmed: true}
-
-	// Act
-	note := wsActQuitEvidenceNote(evidence)
+func TestDismissNoteNamesNobodyWhenTheQuitCharacterCannotBeConfirmed(t *testing.T) {
+	// Arrange / Act
+	note := wsActDismissNote(wsActDismissUndetermined, "One-shot commission: ", 1)
 
 	// Assert
-	if !strings.Contains(note, "quit-flag was armed") {
-		t.Errorf("the evidence sentence must carry what the editor said about the flag so the verdict can be "+
-			"checked rather than taken; it said %q", note)
+	if !strings.Contains(note, "UNDETERMINED") || !strings.Contains(note, "NEITHER SYSTEM") {
+		t.Errorf("a `C-g` whose arrival cannot be read must name neither the harness nor the product; it "+
+			"said %q", note)
 	}
 }
 
-func TestQuitEvidenceNoteNamesAProbeFailure(t *testing.T) {
-	// Arrange
-	evidence := wsActQuitEvidence{ProbeFailure: "quit-flag after the press: connection refused"}
-
-	// Act
-	note := wsActQuitEvidenceNote(evidence)
+func TestDismissNoteForAnUndeterminedQuitMakesNoProductClaim(t *testing.T) {
+	// Arrange / Act
+	note := wsActDismissNote(wsActDismissUndetermined, "One-shot commission: ", 1)
 
 	// Assert
-	if !strings.Contains(note, "connection refused") {
-		t.Errorf("a probe that would not answer must appear in the finding, not be smoothed over; it said %q", note)
+	if strings.Contains(note, "PRODUCT FINDING") {
+		t.Errorf("an unconfirmable press must not be filed against the editor; it said %q", note)
 	}
 }

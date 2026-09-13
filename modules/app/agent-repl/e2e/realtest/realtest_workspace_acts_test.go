@@ -111,11 +111,17 @@ var (
 	}
 	// wsActNewWorkspaceKey is the `n` of `SPC TAB n`, bound to
 	// `agent-repl-create-workspace` (lisp/keybindings.el).
+	//
+	// IT IS THE DYNAMIC CREATE (owner ruling, 2026-09-12): it asks for the
+	// initial prompt and NOTHING else. The repository is the one the current
+	// workspace sits in and the daemon mints the name, so the old repository
+	// picker is gone — it belongs to `SPC TAB N`, the static create, which is
+	// the one mode that names a repository and a name by hand.
 	wsActNewWorkspaceKey = Chord{
 		Emacs:     "n",
 		Keycode:   45,
 		Modifiers: nil,
-		Why:       "completes `SPC TAB n`, which opens the create command's repository picker",
+		Why:       "completes `SPC TAB n`, which opens the create command's initial-prompt read",
 	}
 	// wsActRegisterKey is the `C-n` of `SPC TAB C-n`, bound to
 	// `agent-repl-add-project-workspace`.
@@ -125,13 +131,19 @@ var (
 		Modifiers: []string{"control"},
 		Why:       "completes `SPC TAB C-n`, which opens the register command's directory prompt",
 	}
-	// wsActOpenKey is the `o` of `SPC TAB o`, bound to
+	// wsActOpenKey is the `O` of `SPC TAB O`, bound to
 	// `agent-repl-open-workspace`.
+	//
+	// SHIFTED SINCE THE 2026-09-12 OWNER RULING. `SPC TAB o` is the one-shot
+	// create now (`agent-repl-create-oneshot`), and re-opening a closed
+	// workspace moved to the capital. A harness still pressing the lowercase
+	// one raises "One-shot commission: " and would create a workspace where it
+	// meant to re-open one, which is what the 2026-09-13 sweep did.
 	wsActOpenKey = Chord{
-		Emacs:     "o",
+		Emacs:     "O",
 		Keycode:   31,
-		Modifiers: nil,
-		Why:       "completes `SPC TAB o`, which opens the re-open command's closed-workspace picker",
+		Modifiers: []string{"shift"},
+		Why:       "completes `SPC TAB O`, which opens the re-open command's closed-workspace picker",
 	}
 	// wsActQuit is `C-g`, which aborts whatever minibuffer read is standing.
 	wsActQuit = Chord{
@@ -139,6 +151,14 @@ var (
 		Keycode:   5,
 		Modifiers: []string{"control"},
 		Why:       "aborts the minibuffer read the chord under test opened, leaving no half-finished command",
+		// THE QUIT CHARACTER LEAVES NO INPUT MARK on this build, so its
+		// delivery cannot be judged the way every other key's is. It is
+		// judged by the effect instead (delivery.go carries the `keyboard.c`
+		// derivation and the sweep that made this necessary).
+		MarkFree: true,
+		MarkFreeWhy: "`kbd_buffer_store_buffered_event` hands the quit character to `handle_interrupt` " +
+			"instead of storing it, so `record_char` never records it and `(recent-keys)` cannot grow; and " +
+			"the `quit-flag` it arms is taken by the standing read microseconds later, so the flag reads down",
 		// A quit is a return to rest, not an advance: the second one aborts
 		// the read the first one did not, or signals quit at top level, which
 		// is what a `C-g` at rest already does. It is only ever pressed here
@@ -450,14 +470,19 @@ func wsActTabOrder(ctx context.Context, client *Client) ([]string, error) {
 	return names, nil
 }
 
-// wsActSection is one repository section of the roster: the label the create
-// command's picker offers, and the directory behind it.
+// wsActSection is one repository section of the roster: the label the STATIC
+// create's picker offers, and the directory behind it.
+//
+// The static create (`SPC TAB N`) is the one mode that still asks "Repository:
+// " at all since the 2026-09-12 ruling. The dynamic modes derive it from where
+// the editor is standing, which is wsActDynamicRepository's question — do not
+// wire this into one of those.
 type wsActSection struct {
 	Label string
 	Dir   string
 }
 
-// wsActRepoSections reads the repository sections the create command picks
+// wsActRepoSections reads the repository sections the STATIC create picks
 // from, so a test can name the scratch repository by the label the picker
 // actually offers rather than by one it guessed.
 func wsActRepoSections(ctx context.Context, client *Client) ([]wsActSection, error) {
@@ -523,15 +548,21 @@ func wsActSameDir(a, b string) bool {
 // 2026-09-12). Every command driven here is the USER-FACING command the plan
 // names, entered through `call-interactively` exactly as the keymap enters it,
 // with ONLY its minibuffer reads answered from this side. What is not real is
-// the typing: `agent-repl-create-workspace` asks four questions in sequence,
-// the first of which is a `completing-read` with `require-match`, and driving
-// that with synthetic keystrokes through the completion UI would be a test of
-// vertico's candidate ordering rather than of the product. The chord itself is
-// still proven with real keys, separately and first (wsActProveChord): the
-// test presses `SPC TAB n`, asserts the command's OWN first prompt came up —
-// which no other command would produce — and aborts it with a real `C-g`
-// before running the parameterized act. So the binding is tested by a key and
-// the verb is tested by the command, and neither claim rests on the other.
+// the typing: the re-open picker is a `completing-read` with `require-match`,
+// and driving that with synthetic keystrokes through the completion UI would be
+// a test of vertico's candidate ordering rather than of the product. The chord
+// itself is still proven with real keys, separately and first
+// (wsActProveChord): the test presses the chord, asserts the command's OWN
+// first prompt came up, and aborts it with a real `C-g` before running the
+// parameterized act. So the binding is tested by a key and the verb is tested
+// by the command, and neither claim rests on the other.
+//
+// SINCE THE 2026-09-12 CREATION RULING THE FIRST PROMPT IS OFTEN SHARED. The
+// three dynamic modes — `SPC TAB n`, `SPC TAB c` and `SPC TAB f` — all open
+// with "Initial prompt: ", so that prompt alone says only that ONE of them
+// ran. Where the distinction matters the test reads Emacs's own
+// `(recent-keys)` alongside it, which is the only thing that says WHICH key
+// completed the sequence (realtest 7 does exactly this).
 //
 // Nothing here reaches past a command into the verb layer. A test that called
 // `agent-repl-verb-create` would be testing the wire call and saying nothing
@@ -550,31 +581,79 @@ func wsActRegisterDirectory(ctx context.Context, client *Client, dir string) err
 
 // wsActCreateWorkspace creates a workspace through `SPC TAB n`'s command.
 //
-// The initial prompt and the base ref are both left BLANK, and that is a
-// choice about what this realtest is for. A blank prompt is what stops the
-// create from submitting a turn: the vendor is forbidden for the whole run, so
-// a prompt would exercise the fake SDK and put a conversation under test in a
-// realtest whose subject is the workspace's lifecycle. Conversation is
-// realtest 9. A blank base ref takes the repository's own default branch
-// resolution, which is the path the owner takes.
-func wsActCreateWorkspace(ctx context.Context, client *Client, repositoryLabel, name string) error {
-	form := fmt.Sprintf(`(progn
+// IT ASKS ONE QUESTION NOW (owner ruling, 2026-09-12). The dynamic create takes
+// its repository from the workspace the editor is standing on and lets the
+// daemon mint the name, so the only read to answer is "Initial prompt: ".
+// Neither a repository nor a name is a parameter here any more: a caller that
+// wants to name either wants `agent-repl-create-workspace-static`, which is a
+// different command on a different key.
+//
+// THE PROMPT IS LEFT BLANK, and that is a choice about what these realtests are
+// for. A blank prompt is what stops the create from submitting a turn: the
+// vendor is forbidden for the whole run, so a prompt would exercise the fake
+// SDK and put a conversation under test in a realtest whose subject is the
+// workspace's lifecycle. Conversation is realtest 9.
+//
+// A blank prompt is also what makes the created workspace's NAME predictable
+// without a vendor call: with nothing to name the workspace after, the daemon
+// names the branch after the workspace's own minted id
+// (daemon/internal/workspace/create.go, `branchFor`) and never issues the
+// headless naming call at all. Every assertion downstream reads the name back
+// off the roster row for the id, so nothing here has to guess it.
+//
+// The stub raises on any other prompt rather than answering it: a command that
+// grew a question this side does not know about must fail loudly, not be
+// answered blind.
+func wsActCreateWorkspace(ctx context.Context, client *Client) error {
+	form := `(progn
   (require 'cl-lib)
-  (cl-letf (((symbol-function 'completing-read)
+  (cl-letf (((symbol-function 'read-string)
              (lambda (prompt &rest _)
-               (if (string-prefix-p "Repository:" prompt)
-                   %q
-                 (error "realtest: unexpected completing-read prompt %%S" prompt))))
-            ((symbol-function 'read-string)
+               (if (string-prefix-p "Initial prompt:" prompt)
+                   ""
+                 (error "realtest: unexpected read-string prompt %S" prompt))))
+            ((symbol-function 'completing-read)
              (lambda (prompt &rest _)
-               (cond ((string-prefix-p "Initial prompt:" prompt) "")
-                     ((string-prefix-p "Name" prompt) %q)
-                     ((string-prefix-p "Base ref" prompt) "")
-                     (t (error "realtest: unexpected read-string prompt %%S" prompt))))))
+               (error "realtest: the dynamic create asked a completing-read it should not ask: %S" prompt))))
     (call-interactively #'agent-repl-create-workspace))
-  t)`, repositoryLabel, name)
+  t)`
 	_, err := client.Read(ctx, form)
 	return err
+}
+
+// wsActDynamicRepository reads the repository a DYNAMIC create would use right
+// now, through the product's own derivation.
+//
+// It is the precondition every dynamic act stands on since the 2026-09-12
+// ruling: `SPC TAB n`, `SPC TAB c`, `SPC TAB f` and `SPC TAB o` take their
+// repository from the roster section the CURRENT workspace's row sits in, so a
+// test standing on the wrong workspace would create in the wrong repository —
+// and, if that repository were one of the owner's, would be a realtest writing
+// where the standing decision says it may not.
+//
+// It calls `agent-repl-verbs--section-of-ws` rather than re-deriving the
+// section this side, so the check and the act cannot disagree.
+func wsActDynamicRepository(ctx context.Context, client *Client) (string, error) {
+	return client.ReadString(ctx, `(let* ((section (agent-repl-verbs--section-of-ws
+                                    (agent-repl--ws-current-name)))
+        (ref (and section (agent-repl-verbs--section-ref section))))
+   (or (plist-get ref :dir) ""))`)
+}
+
+// wsActRequireDynamicRepository fails the test unless a dynamic create entered
+// now would land in `want`.
+func wsActRequireDynamicRepository(ctx context.Context, t *testing.T, client *Client, want string) {
+	t.Helper()
+	dir, err := wsActDynamicRepository(ctx, client)
+	if err != nil {
+		t.Fatalf("read the repository a dynamic create would derive from the current workspace: %v", err)
+	}
+	if !wsActSameDir(dir, want) {
+		t.Fatalf("a dynamic create entered now would take its repository from %q, not from the scratch "+
+			"repository %s: the editor is standing on the wrong workspace, and the act would create "+
+			"somewhere this run is not allowed to write", dir, want)
+	}
+	t.Logf("a dynamic create would take its repository from the scratch repository %s", want)
 }
 
 // wsActCloseWorkspace closes the named workspace through the close command.
@@ -587,7 +666,7 @@ func wsActCloseWorkspace(ctx context.Context, client *Client, name string) error
 	return err
 }
 
-// wsActOpenWorkspace re-opens a closed workspace through `SPC TAB o`'s
+// wsActOpenWorkspace re-opens a closed workspace through `SPC TAB O`'s
 // command, choosing `name` from its picker.
 func wsActOpenWorkspace(ctx context.Context, client *Client, name string) error {
 	form := fmt.Sprintf(`(progn
@@ -629,14 +708,18 @@ func wsActMinibufferPrompt(ctx context.Context, client *Client) (string, error) 
 // wsActProveChord presses one leader sequence with REAL KEY EVENTS and proves
 // it reached the command the plan says it is bound to.
 //
-// THE PROOF IS THE COMMAND'S OWN FIRST PROMPT. `SPC TAB n` is
-// `agent-repl-create-workspace` and nothing else asks "Repository: " first, so
-// that prompt standing in the minibuffer is evidence the keymap resolved the
-// chord — evidence that an elisp call performing the same act could never
-// produce. `(recent-keys)` is read alongside it, exactly as realtest 1's key
-// self-test reads it, because it is Emacs's own account of its INPUT and is
-// the only thing that separates "the chord arrived" from "something called the
-// command".
+// THE PROOF IS THE COMMAND'S OWN FIRST PROMPT. `SPC TAB O` is
+// `agent-repl-open-workspace` and nothing else asks "Open workspace: ", so that
+// prompt standing in the minibuffer is evidence the keymap resolved the chord —
+// evidence that an elisp call performing the same act could never produce.
+// `(recent-keys)` is read alongside it, exactly as realtest 1's key self-test
+// reads it, because it is Emacs's own account of its INPUT and is the only
+// thing that separates "the chord arrived" from "something called the command".
+//
+// WHERE THE PROMPT IS SHARED, THE CALLER ADDS THE SECOND FACT. The dynamic
+// creation modes all open with "Initial prompt: " since the 2026-09-12 ruling,
+// so a caller pressing one of those asserts `(recent-keys)` contains its own
+// sequence on top of this proof (rt5ProveCreateChord, rt7ProveForkChord).
 //
 // It then aborts with a real `C-g`, so the chord under test leaves no
 // half-finished command standing and the parameterized act that follows starts
@@ -865,33 +948,53 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 		return
 	}
 
-	// CHANNEL ONE: the real chord.
+	// CHANNEL ONE: the real chord, judged by the effect it is pressed for.
 	//
-	// The editor's account of the press is taken AROUND it, not after it:
-	// `(recent-keys)` only answers "did the quit character arrive" against a
-	// reading from before the key was posted.
+	// THE PROMPT CLOSING IS THE PRESS'S OWN CONFIRMATION, polled inside the
+	// helper's hold (DeliveryEffect). It has to be: the quit character leaves
+	// no input mark on this build — delivery.go carries the `keyboard.c`
+	// derivation — so the marks that confirm every other key say nothing about
+	// this one, and the harness that judged it by them printed a harness
+	// finding and a product finding for the same press, six times in the
+	// 2026-09-13 sweep. One observation, one verdict.
 	reported := false
-	evidence := wsActQuitEvidence{}
+	arrived := false
 	if driver != nil {
-		evidence = wsActReadQuitEvidenceBefore(ctx, client)
-		if pressErr := driver.Press(ctx, wsActQuit); pressErr != nil {
-			note := fmt.Sprintf("C-g COULD NOT BE DELIVERED while %q was standing: %v. Either keydriver.swift "+
-				"refused to post — it will not post to an Emacs the window server does not report as "+
-				"frontmost with a focused window, because AppKit dispatches a key event only to a key "+
-				"window and drops such a post silently — or it posted, held the target key, and Emacs's own "+
-				"account never showed the key arriving. The read channel is used below and this delivery "+
-				"failure is the finding",
+		receipt, pressErr := driver.PressWithEffect(ctx, wsActQuit, &DeliveryEffect{
+			What: fmt.Sprintf("the standing minibuffer %q closed", prompt),
+			Observed: func(ctx context.Context) bool {
+				read, err := wsActMinibufferPrompt(ctx, client)
+				return err == nil && read == ""
+			},
+		})
+		arrived = receipt.Verdict == DeliveryArrived
+		switch {
+		case pressErr != nil:
+			note := fmt.Sprintf("C-g COULD NOT BE POSTED while %q was standing: %v. keydriver.swift will not "+
+				"post to an Emacs the window server does not report as frontmost with a focused window, "+
+				"because AppKit dispatches a key event only to a key window and drops such a post silently. "+
+				"The read channel is used below and this delivery failure is the finding",
 				prompt, pressErr)
 			manifest.Notes = append(manifest.Notes, note)
 			t.Errorf("%s", note)
 			reported = true
-		} else if wsActMinibufferGone(ctx, client, wsActChordDismissCeiling) {
+		case receipt.EffectObserved:
+			// The effect the key was pressed for happened while the hold was
+			// still on, so there is nothing left to ask: this IS the dismissal.
 			note := wsActDismissNote(wsActDismissByChord, prompt, 0)
 			manifest.Notes = append(manifest.Notes, note)
 			t.Logf("%s", note)
 			return
-		} else {
-			evidence = wsActReadQuitEvidenceAfter(ctx, client, evidence)
+		default:
+			// The hold's ceiling is shorter than the chord's, so the prompt is
+			// given the rest of its window before the eval channel is entered.
+			if wsActMinibufferGone(ctx, client, wsActChordDismissCeiling) {
+				note := wsActDismissNote(wsActDismissByChord, prompt, 0)
+				manifest.Notes = append(manifest.Notes, note)
+				t.Logf("%s", note)
+				return
+			}
+			manifest.Notes = append(manifest.Notes, "what the press knew about that `C-g`: "+receipt.Note())
 		}
 	}
 
@@ -901,14 +1004,19 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 			t.Logf("eval abort %d of the standing minibuffer %q did not answer: %v", attempt, prompt, evalErr)
 		}
 		if wsActMinibufferGone(ctx, client, wsActEvalDismissCeiling) {
-			stage := wsActDismissByEval
-			if driver != nil && !reported && !evidence.Arrived() {
-				stage = wsActDismissChordNeverArrived
+			// ONE VERDICT, CHOSEN ONCE. `reported` means the key never left
+			// this side; `arrived` means Emacs's own marks showed it landing
+			// and the read refused to abort anyway, which is the product; and
+			// the remaining case is the quit character's unreadable one, which
+			// names nobody.
+			stage := wsActDismissUndetermined
+			switch {
+			case reported:
+				stage = wsActDismissNotPosted
+			case arrived:
+				stage = wsActDismissByEval
 			}
 			note := wsActDismissNote(stage, prompt, attempt)
-			if driver != nil && !reported {
-				note += ". " + wsActQuitEvidenceNote(evidence)
-			}
 			manifest.Notes = append(manifest.Notes, note)
 			if reported {
 				t.Logf("%s", note)
@@ -948,42 +1056,6 @@ func wsActMinibufferGone(ctx context.Context, client *Client, ceiling time.Durat
 		case <-time.After(wsActDismissPollInterval):
 		}
 	}
-}
-
-// wsActReadQuitEvidenceBefore takes the reading a `C-g` press is judged against.
-//
-// A probe that will not answer is recorded as a probe failure rather than as an
-// empty reading: an editor that said nothing must not be able to make a press
-// look like it never arrived.
-func wsActReadQuitEvidenceBefore(ctx context.Context, client *Client) wsActQuitEvidence {
-	keys, err := RecentKeys(ctx, client)
-	if err != nil {
-		return wsActQuitEvidence{ProbeFailure: fmt.Sprintf("(recent-keys) before the press: %v", err)}
-	}
-	return wsActQuitEvidence{KeysBefore: keys}
-}
-
-// wsActReadQuitEvidenceAfter completes the account once the chord has had its
-// chance, and never overwrites a probe failure already recorded.
-func wsActReadQuitEvidenceAfter(ctx context.Context, client *Client, before wsActQuitEvidence) wsActQuitEvidence {
-	after := before
-	keys, err := RecentKeys(ctx, client)
-	if err != nil {
-		if after.ProbeFailure == "" {
-			after.ProbeFailure = fmt.Sprintf("(recent-keys) after the press: %v", err)
-		}
-	} else {
-		after.KeysAfter = keys
-	}
-	flag, flagErr := client.ReadString(ctx, wsActQuitFlagForm())
-	if flagErr != nil {
-		if after.ProbeFailure == "" {
-			after.ProbeFailure = fmt.Sprintf("quit-flag after the press: %v", flagErr)
-		}
-	} else {
-		after.QuitFlagArmed = flag == "armed"
-	}
-	return after
 }
 
 // wsActSpell renders a chord sequence the way a reader would type it.
