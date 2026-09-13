@@ -12,14 +12,15 @@
  * The one thing that must survive that is the ticker subscriptions the cards
  * open for their queued-at ages, which is what `TrayContext.onDispose` is for.
  *
- * AN EMPTY LIST IS A VALUE, not an absence: the heading still draws (the
- * daemon composed it, and it is the daemon's to compose) with a quiet empty
- * line beneath it. The host itself collapses to nothing only when the stream
- * has pushed nothing at all.
+ * THE HEADING IS UNDRAWN (owner ruling 2, 2026-09-13). The daemon still
+ * composes `DaemonHoldTray.heading` and the tray still REQUIRES it — a tray
+ * that omits it is malformed exactly as it always was — but nothing puts it on
+ * screen: the cards say what is held, and a "held (2)" counter over two visible
+ * cards is a second answer to a question the cards already answer. Whether the
+ * field survives on the wire is an owner/proto follow-up, not this layer's.
  */
 import { WatchDaemonHoldsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_holds_pb";
 import type {
-  DaemonHoldHeading,
   DaemonHoldItem,
   DaemonHoldTray,
 } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
@@ -84,7 +85,7 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
   };
 }
 
-/** The tray, whole: the daemon's heading over the held things in order. */
+/** The tray, whole: the held things, in the order the daemon served them. */
 export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElement {
   const path = "DaemonHoldTray";
   log.debug("drawing the hold tray", {
@@ -92,11 +93,12 @@ export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElem
     context: { items: u.items.length },
   });
 
+  // The heading is REQUIRED and UNDRAWN: the daemon owes it, so its absence is
+  // still malformed, and ruling 2 says nothing draws it.
+  requireMessage(u.heading, `${path}.heading`);
+
   const region = document.createElement("div");
   region.className = "hold-tray";
-  region.appendChild(
-    drawDaemonHoldHeading(requireMessage(u.heading, `${path}.heading`), `${path}.heading`),
-  );
 
   const list = document.createElement("div");
   // The shared delimiter class: the tray's rows are delimited exactly as a
@@ -116,18 +118,6 @@ export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElem
   }
   region.appendChild(list);
   return region;
-}
-
-/** The heading, composed by the daemon, drawn verbatim. */
-export function drawDaemonHoldHeading(u: DaemonHoldHeading, path: string): HTMLElement {
-  log.debug("drawing the hold tray heading", {
-    operation: "tray.heading",
-    context: { path },
-  });
-  const heading = document.createElement("div");
-  heading.className = "hold-tray-heading";
-  heading.textContent = u.text;
-  return heading;
 }
 
 /**
