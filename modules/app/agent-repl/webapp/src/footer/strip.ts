@@ -149,6 +149,49 @@ export function drawFooterStrip(u: FooterStrip, deps: StripDeps): HTMLElement {
   return row;
 }
 
+/**
+ * THE ONE STRIP THIS CLIENT COMPOSES ITSELF — the footer under a link the
+ * webapp knows is down (owner ruling, 2026-09-13).
+ *
+ * Everywhere else the daemon composes and this module draws, and that rule
+ * cannot cover this case: the strip that would say the link is down is a strip
+ * that would have to arrive over it. So the three status cells are built HERE,
+ * out of the client's own verdict (`src/rpc/link.ts`), in the same classes and
+ * the same order the pushed strip uses — the reader sees the footer they
+ * already know, saying `disconnected`, and not a second widget.
+ *
+ * NO CLOCK, NO TOKENS, NO CHIPS. Those are the daemon's figures and the page
+ * cannot reach the daemon; drawing the last ones it happened to hold would put
+ * stale numbers beside a status that says they cannot be trusted.
+ */
+export function drawClientDisconnectedStrip(substatus: string, activity: string): HTMLElement {
+  log.debug("drawing the client's own disconnected strip", {
+    operation: "footer.strip.client-verdict",
+    context: { substatus },
+  });
+  const row = document.createElement("div");
+  row.className = "pfooter-cells footer-strip";
+
+  const word = document.createElement("div");
+  word.className = `pfooter-cell pfooter-phase footer-status arm-disconnected ${statusArmClass("disconnected")}`;
+  word.setAttribute("data-arm", "disconnected");
+  word.textContent = statusWords("disconnected");
+  row.appendChild(word);
+
+  const step = document.createElement("div");
+  step.className = "pfooter-cell footer-substatus";
+  step.textContent = substatus;
+  row.appendChild(step);
+
+  const cell = document.createElement("div");
+  cell.className = "pfooter-cell pfooter-grow footer-activity";
+  cell.appendChild(textLine("footer-activity-client-verdict", activity));
+  cell.title = activity;
+  cell.appendChild(grabber());
+  row.appendChild(cell);
+  return row;
+}
+
 // ---- the status family ----------------------------------------------------
 
 /** Every substatus oneof in the contract, as one type to walk. */
