@@ -200,6 +200,26 @@ type Fleet struct {
 	// fact of the RUNNING process, which is why it is remembered here and not
 	// persisted.
 	buildSHA map[ids.WorkspaceID]string
+	// startGates serialize the STARTS of one workspace. See Start: the
+	// liveness check cannot do it, because a session is remembered only once
+	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
+	// whole start, which is why it is not mu itself.
+	startGates map[ids.WorkspaceID]*sync.Mutex
+}
+
+// startGate answers the gate that serializes one workspace's starts, minting
+// it on first use. It is never removed: a gate is one mutex per workspace this
+// daemon has ever started, and dropping one while a waiter held it would hand
+// the next caller a gate nobody is behind.
+func (f *Fleet) startGate(ws ids.WorkspaceID) *sync.Mutex {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	gate, ok := f.startGates[ws]
+	if !ok {
+		gate = &sync.Mutex{}
+		f.startGates[ws] = gate
+	}
+	return gate
 }
 
 // NewFleet builds the session fleet.
@@ -248,6 +268,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		lastCold:    map[ids.WorkspaceID]*conversationv1.SessionCold{},
 		generation:  map[ids.WorkspaceID]int{},
 		buildSHA:    map[ids.WorkspaceID]string{},
+		startGates:  map[ids.WorkspaceID]*sync.Mutex{},
 	}, nil
 }
 
@@ -487,6 +508,23 @@ func (f *Fleet) noteConversationAbandoned(ctx context.Context, log dlog.Logger, 
 //     paying for it;
 //  5. record the session facts and start the watcher.
 func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
+	// ONE START PER WORKSPACE AT A TIME, and it is a LOCK rather than the
+	// liveness check below because that check is a check-then-act: the session
+	// is remembered only after the shim is up, so two starts that overlap both
+	// read "not live" and both spawn. The second then reaches the workspace's
+	// socket, finds the FIRST one's shim listening behind a lock its
+	// StartSession has not taken yet, and attaches to it as an inert survivor
+	// — a warning about a race rather than a session.
+	//
+	// It stopped being hypothetical when the boot's bring-up moved out of the
+	// reconciliation and beside the accept loop (internal/boot: BringUp): a
+	// relaunch now has Emacs announcing the workspaces it holds while the boot
+	// is still starting their sessions, which is two starts of one workspace
+	// on two goroutines. The waiter re-reads liveness under the gate and
+	// answers the session the winner brought up.
+	gate := f.startGate(ws)
+	gate.Lock()
+	defer gate.Unlock()
 	// A DEAD SHIM'S ROW IS RETIRED BEFORE LIVENESS IS JUDGED. The row outlives
 	// the process, so a bring-up that read map presence alone answered "already
 	// live" for a workspace whose shim was killed out from under the daemon —

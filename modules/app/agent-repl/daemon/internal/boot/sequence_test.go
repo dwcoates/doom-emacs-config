@@ -1151,3 +1151,66 @@ func TestTheReconciliationDoesNotWaitOnASlowSessionStart(t *testing.T) {
 	default:
 	}
 }
+
+// TestABringUpStartsNothingFurtherOnceTheDaemonIsLeaving pins the half of the
+// split that the exit sees: the step now runs beside the accept loop, so a
+// shutdown can land in the middle of it, and the workspaces it has not reached
+// are simply not started.
+func TestABringUpStartsNothingFurtherOnceTheDaemonIsLeaving(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+	report, err := h.seq.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	leaving, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	brought := h.seq.BringUp(leaving, report.PendingBringUp)
+
+	// Assert.
+	if len(h.started) != 0 {
+		t.Fatalf("started = %v, want none once the daemon is leaving", h.started)
+	}
+	if len(brought.BroughtUp) != 0 {
+		t.Fatalf("BroughtUp = %v, want none once the daemon is leaving", brought.BroughtUp)
+	}
+}
+
+// TestAStartAlreadyBegunIsNotCutByTheExit pins the other half: a start that
+// has begun writes a session record, a spawned shim and — on a failure — a
+// fault, and an exit that cancelled it halfway left all three half-written.
+func TestAStartAlreadyBegunIsNotCutByTheExit(t *testing.T) {
+	// Arrange: the exit lands INSIDE the start, and the start reads its own
+	// context back afterwards.
+	leaving, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var startCtxErr error
+	h := newHarness(t, func(deps *Deps, h *harness) {
+		deps.StartSession = func(ctx context.Context, ws ids.WorkspaceID) error {
+			cancel()
+			startCtxErr = ctx.Err()
+			h.started = append(h.started, ws)
+			return nil
+		}
+	})
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+	report, err := h.seq.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Act.
+	brought := h.seq.BringUp(leaving, report.PendingBringUp)
+
+	// Assert.
+	if len(brought.BroughtUp) != 1 {
+		t.Fatalf("BroughtUp = %v, want the one workspace started", brought.BroughtUp)
+	}
+	if startCtxErr != nil {
+		t.Fatalf("the start ran under a context reading %v, want one the exit cannot cut", startCtxErr)
+	}
+}
