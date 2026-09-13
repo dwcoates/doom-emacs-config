@@ -21,12 +21,13 @@ import (
 // What it asserts, in order:
 //
 //   - `SPC TAB f` REACHES ITS COMMAND. The chord is pressed as real key events
-//     and the fork command's own first prompt, "Repository: ", is read back out
-//     of the minibuffer, then aborted with a real `C-g`. Because `SPC TAB n`
-//     asks the same first question, that prompt is not evidence on its own here
-//     the way it is in realtest 6, so Emacs's own `(recent-keys)` is asserted
-//     to contain the sequence as well: the two together say which command the
-//     keymap resolved.
+//     and the fork command's own first prompt, "Initial prompt: ", is read back
+//     out of the minibuffer, then aborted with a real `C-g`. Since the
+//     2026-09-12 creation ruling the fork is a DYNAMIC mode and asks for the
+//     prompt alone, which `SPC TAB n` and `SPC TAB c` also do, so that prompt
+//     is not evidence on its own here the way it is in realtest 6: Emacs's own
+//     `(recent-keys)` is asserted to contain the sequence as well, and the two
+//     together say which command the keymap resolved.
 //   - THE FORK IS A NEW WORKSPACE: its own daemon-minted id, its own row in
 //     `workspaces`, its own worktree, its own branch, its own tab.
 //   - THE FORK CARRIES THE PARENT'S CONVERSATION, asserted on the daemon's own
@@ -150,7 +151,7 @@ var rt7ForkKey = Chord{
 	Emacs:     "f",
 	Keycode:   3,
 	Modifiers: nil,
-	Why:       "completes `SPC TAB f`, which opens the fork command's repository picker",
+	Why:       "completes `SPC TAB f`, which opens the fork command's initial-prompt read",
 }
 
 // rt7SeedPrompt is what the parent is asked, and it is deliberately
@@ -282,9 +283,14 @@ func TestRealtestForkAWorkspace(t *testing.T) {
 
 	rt7ProveForkChord(ctx, t, client, driver, &manifest)
 
-	section := rt7SectionLabel(ctx, t, client, scratch)
+	// The fork is a dynamic mode: it takes its repository from the workspace
+	// the editor is standing on, which rt7SeedConversation has already asserted
+	// is the parent. This states the same fact about the REPOSITORY, through
+	// the product's own derivation, so a fork that landed somewhere this run
+	// may not write is refused before it happens rather than found afterwards.
+	wsActRequireDynamicRepository(ctx, t, client, scratch)
 	forkStarted := time.Now()
-	if err := rt7ForkWorkspace(ctx, client, section); err != nil {
+	if err := rt7ForkWorkspace(ctx, client); err != nil {
 		t.Fatalf("fork the parent through `SPC TAB f`'s command: %v", err)
 	}
 
@@ -398,11 +404,12 @@ func TestRealtestForkAWorkspace(t *testing.T) {
 // reached `agent-repl-fork-workspace`.
 //
 // The substrate's proof is the command's own first prompt, which is enough
-// where no other command asks it first. Here it is not: `SPC TAB n` also opens
-// with "Repository: ", so the prompt alone says only that ONE of the two
-// workspace-creating commands ran. Emacs's own `(recent-keys)` is therefore
-// asserted as well, because it is the only thing that separates "the `f`
-// arrived" from "the `n` did", and the two facts together identify the command.
+// where no other command asks it first. Here it is not: every dynamic mode
+// opens with "Initial prompt: " since the 2026-09-12 ruling, so the prompt
+// alone says only that ONE of them ran. Emacs's own `(recent-keys)` is
+// therefore asserted as well, because it is the only thing that separates "the
+// `f` arrived" from "the `n` did", and the two facts together identify the
+// command.
 //
 // Like the substrate's proof, a failure here does not stop the run: the chord
 // and the verb are separate claims, and a run that stopped would say nothing
@@ -410,7 +417,7 @@ func TestRealtestForkAWorkspace(t *testing.T) {
 func rt7ProveForkChord(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver, manifest *Manifest) {
 	t.Helper()
 	sequence := []Chord{wsActLeader, wsActTab, rt7ForkKey}
-	if !wsActProveChord(ctx, t, client, driver, sequence, "Repository:", manifest) {
+	if !wsActProveChord(ctx, t, client, driver, sequence, "Initial prompt:", manifest) {
 		return
 	}
 	keys, err := RecentKeys(ctx, client)
@@ -421,7 +428,7 @@ func rt7ProveForkChord(ctx context.Context, t *testing.T, client *Client, driver
 	spelled := wsActSpell(sequence)
 	if !strings.Contains(keys, spelled) {
 		note := fmt.Sprintf("`%s` put the fork command's prompt up, but Emacs's own (recent-keys) does not "+
-			"contain %q, so the prompt cannot be credited to this chord: `SPC TAB n` asks the same first "+
+			"contain %q, so the prompt cannot be credited to this chord: `SPC TAB n` and `SPC TAB c` ask the same first "+
 			"question. recent-keys ends with: %s", spelled, spelled, tail(keys, 120))
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
@@ -435,10 +442,10 @@ func rt7ProveForkChord(ctx context.Context, t *testing.T, client *Client, driver
 
 // rt7ForkWorkspace forks the current workspace through `SPC TAB f`'s command.
 //
-// `agent-repl-fork-workspace` reads two things and nothing else: a
-// `require-match` `completing-read` for the repository, answered with the label
-// the picker actually offers for the scratch repository, and a `read-string`
-// for the initial prompt, answered BLANK.
+// `agent-repl-fork-workspace` reads ONE thing and nothing else since the
+// 2026-09-12 creation ruling: a `read-string` for the initial prompt, answered
+// BLANK. The repository is no longer asked for — the fork takes the one the
+// current workspace sits in — and the daemon mints the name.
 //
 // The blank prompt is a choice about what this realtest is for, the same one
 // realtest 5 makes for the create: the fork's own first turn is not the
@@ -454,21 +461,19 @@ func rt7ProveForkChord(ctx context.Context, t *testing.T, client *Client, driver
 // (rt7SeedConversation): a fork of the wrong parent would be a wrong answer
 // about the product produced entirely by a wrong assumption about where the
 // editor was standing.
-func rt7ForkWorkspace(ctx context.Context, client *Client, repositoryLabel string) error {
-	form := fmt.Sprintf(`(progn
+func rt7ForkWorkspace(ctx context.Context, client *Client) error {
+	form := `(progn
   (require 'cl-lib)
-  (cl-letf (((symbol-function 'completing-read)
-             (lambda (prompt &rest _)
-               (if (string-prefix-p "Repository:" prompt)
-                   %q
-                 (error "realtest: unexpected completing-read prompt %%S" prompt))))
-            ((symbol-function 'read-string)
+  (cl-letf (((symbol-function 'read-string)
              (lambda (prompt &rest _)
                (if (string-prefix-p "Initial prompt:" prompt)
                    ""
-                 (error "realtest: unexpected read-string prompt %%S" prompt)))))
+                 (error "realtest: unexpected read-string prompt %S" prompt))))
+            ((symbol-function 'completing-read)
+             (lambda (prompt &rest _)
+               (error "realtest: the fork asked a completing-read it should not ask: %S" prompt))))
     (call-interactively #'agent-repl-fork-workspace))
-  t)`, repositoryLabel)
+  t)`
 	_, err := client.Read(ctx, form)
 	return err
 }
@@ -843,30 +848,6 @@ func rt7TabName(ctx context.Context, t *testing.T, client *Client, ws Workspace)
 		return row.Name
 	}
 	return ws.Name
-}
-
-// rt7SectionLabel is the label the fork command's repository picker offers for
-// one directory.
-//
-// Read rather than guessed: the label is composed by the daemon's resolver, and
-// a test that spelled its own would be answering a `require-match`
-// `completing-read` with a candidate that does not exist.
-func rt7SectionLabel(ctx context.Context, t *testing.T, client *Client, dir string) string {
-	t.Helper()
-	sections, err := wsActRepoSections(ctx, client)
-	if err != nil {
-		t.Fatalf("read the repository sections the fork command picks from: %v", err)
-	}
-	section, ok := wsActSectionForDir(sections, dir)
-	if !ok {
-		labels := make([]string, 0, len(sections))
-		for _, s := range sections {
-			labels = append(labels, fmt.Sprintf("%q (%s)", s.Label, s.Dir))
-		}
-		t.Fatalf("the roster offers no repository section for the scratch repository %s, so the fork "+
-			"command's picker has no candidate to answer with. It offers: %s", dir, strings.Join(labels, ", "))
-	}
-	return section.Label
 }
 
 // rt7Sources enumerates the log sources for a workspace set.

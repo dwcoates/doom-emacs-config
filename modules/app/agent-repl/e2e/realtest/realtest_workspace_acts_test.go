@@ -111,11 +111,17 @@ var (
 	}
 	// wsActNewWorkspaceKey is the `n` of `SPC TAB n`, bound to
 	// `agent-repl-create-workspace` (lisp/keybindings.el).
+	//
+	// IT IS THE DYNAMIC CREATE (owner ruling, 2026-09-12): it asks for the
+	// initial prompt and NOTHING else. The repository is the one the current
+	// workspace sits in and the daemon mints the name, so the old repository
+	// picker is gone — it belongs to `SPC TAB N`, the static create, which is
+	// the one mode that names a repository and a name by hand.
 	wsActNewWorkspaceKey = Chord{
 		Emacs:     "n",
 		Keycode:   45,
 		Modifiers: nil,
-		Why:       "completes `SPC TAB n`, which opens the create command's repository picker",
+		Why:       "completes `SPC TAB n`, which opens the create command's initial-prompt read",
 	}
 	// wsActRegisterKey is the `C-n` of `SPC TAB C-n`, bound to
 	// `agent-repl-add-project-workspace`.
@@ -125,13 +131,19 @@ var (
 		Modifiers: []string{"control"},
 		Why:       "completes `SPC TAB C-n`, which opens the register command's directory prompt",
 	}
-	// wsActOpenKey is the `o` of `SPC TAB o`, bound to
+	// wsActOpenKey is the `O` of `SPC TAB O`, bound to
 	// `agent-repl-open-workspace`.
+	//
+	// SHIFTED SINCE THE 2026-09-12 OWNER RULING. `SPC TAB o` is the one-shot
+	// create now (`agent-repl-create-oneshot`), and re-opening a closed
+	// workspace moved to the capital. A harness still pressing the lowercase
+	// one raises "One-shot commission: " and would create a workspace where it
+	// meant to re-open one, which is what the 2026-09-13 sweep did.
 	wsActOpenKey = Chord{
-		Emacs:     "o",
+		Emacs:     "O",
 		Keycode:   31,
-		Modifiers: nil,
-		Why:       "completes `SPC TAB o`, which opens the re-open command's closed-workspace picker",
+		Modifiers: []string{"shift"},
+		Why:       "completes `SPC TAB O`, which opens the re-open command's closed-workspace picker",
 	}
 	// wsActQuit is `C-g`, which aborts whatever minibuffer read is standing.
 	wsActQuit = Chord{
@@ -458,14 +470,19 @@ func wsActTabOrder(ctx context.Context, client *Client) ([]string, error) {
 	return names, nil
 }
 
-// wsActSection is one repository section of the roster: the label the create
-// command's picker offers, and the directory behind it.
+// wsActSection is one repository section of the roster: the label the STATIC
+// create's picker offers, and the directory behind it.
+//
+// The static create (`SPC TAB N`) is the one mode that still asks "Repository:
+// " at all since the 2026-09-12 ruling. The dynamic modes derive it from where
+// the editor is standing, which is wsActDynamicRepository's question — do not
+// wire this into one of those.
 type wsActSection struct {
 	Label string
 	Dir   string
 }
 
-// wsActRepoSections reads the repository sections the create command picks
+// wsActRepoSections reads the repository sections the STATIC create picks
 // from, so a test can name the scratch repository by the label the picker
 // actually offers rather than by one it guessed.
 func wsActRepoSections(ctx context.Context, client *Client) ([]wsActSection, error) {
@@ -531,15 +548,21 @@ func wsActSameDir(a, b string) bool {
 // 2026-09-12). Every command driven here is the USER-FACING command the plan
 // names, entered through `call-interactively` exactly as the keymap enters it,
 // with ONLY its minibuffer reads answered from this side. What is not real is
-// the typing: `agent-repl-create-workspace` asks four questions in sequence,
-// the first of which is a `completing-read` with `require-match`, and driving
-// that with synthetic keystrokes through the completion UI would be a test of
-// vertico's candidate ordering rather than of the product. The chord itself is
-// still proven with real keys, separately and first (wsActProveChord): the
-// test presses `SPC TAB n`, asserts the command's OWN first prompt came up —
-// which no other command would produce — and aborts it with a real `C-g`
-// before running the parameterized act. So the binding is tested by a key and
-// the verb is tested by the command, and neither claim rests on the other.
+// the typing: the re-open picker is a `completing-read` with `require-match`,
+// and driving that with synthetic keystrokes through the completion UI would be
+// a test of vertico's candidate ordering rather than of the product. The chord
+// itself is still proven with real keys, separately and first
+// (wsActProveChord): the test presses the chord, asserts the command's OWN
+// first prompt came up, and aborts it with a real `C-g` before running the
+// parameterized act. So the binding is tested by a key and the verb is tested
+// by the command, and neither claim rests on the other.
+//
+// SINCE THE 2026-09-12 CREATION RULING THE FIRST PROMPT IS OFTEN SHARED. The
+// three dynamic modes — `SPC TAB n`, `SPC TAB c` and `SPC TAB f` — all open
+// with "Initial prompt: ", so that prompt alone says only that ONE of them
+// ran. Where the distinction matters the test reads Emacs's own
+// `(recent-keys)` alongside it, which is the only thing that says WHICH key
+// completed the sequence (realtest 7 does exactly this).
 //
 // Nothing here reaches past a command into the verb layer. A test that called
 // `agent-repl-verb-create` would be testing the wire call and saying nothing
@@ -558,31 +581,79 @@ func wsActRegisterDirectory(ctx context.Context, client *Client, dir string) err
 
 // wsActCreateWorkspace creates a workspace through `SPC TAB n`'s command.
 //
-// The initial prompt and the base ref are both left BLANK, and that is a
-// choice about what this realtest is for. A blank prompt is what stops the
-// create from submitting a turn: the vendor is forbidden for the whole run, so
-// a prompt would exercise the fake SDK and put a conversation under test in a
-// realtest whose subject is the workspace's lifecycle. Conversation is
-// realtest 9. A blank base ref takes the repository's own default branch
-// resolution, which is the path the owner takes.
-func wsActCreateWorkspace(ctx context.Context, client *Client, repositoryLabel, name string) error {
-	form := fmt.Sprintf(`(progn
+// IT ASKS ONE QUESTION NOW (owner ruling, 2026-09-12). The dynamic create takes
+// its repository from the workspace the editor is standing on and lets the
+// daemon mint the name, so the only read to answer is "Initial prompt: ".
+// Neither a repository nor a name is a parameter here any more: a caller that
+// wants to name either wants `agent-repl-create-workspace-static`, which is a
+// different command on a different key.
+//
+// THE PROMPT IS LEFT BLANK, and that is a choice about what these realtests are
+// for. A blank prompt is what stops the create from submitting a turn: the
+// vendor is forbidden for the whole run, so a prompt would exercise the fake
+// SDK and put a conversation under test in a realtest whose subject is the
+// workspace's lifecycle. Conversation is realtest 9.
+//
+// A blank prompt is also what makes the created workspace's NAME predictable
+// without a vendor call: with nothing to name the workspace after, the daemon
+// names the branch after the workspace's own minted id
+// (daemon/internal/workspace/create.go, `branchFor`) and never issues the
+// headless naming call at all. Every assertion downstream reads the name back
+// off the roster row for the id, so nothing here has to guess it.
+//
+// The stub raises on any other prompt rather than answering it: a command that
+// grew a question this side does not know about must fail loudly, not be
+// answered blind.
+func wsActCreateWorkspace(ctx context.Context, client *Client) error {
+	form := `(progn
   (require 'cl-lib)
-  (cl-letf (((symbol-function 'completing-read)
+  (cl-letf (((symbol-function 'read-string)
              (lambda (prompt &rest _)
-               (if (string-prefix-p "Repository:" prompt)
-                   %q
-                 (error "realtest: unexpected completing-read prompt %%S" prompt))))
-            ((symbol-function 'read-string)
+               (if (string-prefix-p "Initial prompt:" prompt)
+                   ""
+                 (error "realtest: unexpected read-string prompt %S" prompt))))
+            ((symbol-function 'completing-read)
              (lambda (prompt &rest _)
-               (cond ((string-prefix-p "Initial prompt:" prompt) "")
-                     ((string-prefix-p "Name" prompt) %q)
-                     ((string-prefix-p "Base ref" prompt) "")
-                     (t (error "realtest: unexpected read-string prompt %%S" prompt))))))
+               (error "realtest: the dynamic create asked a completing-read it should not ask: %S" prompt))))
     (call-interactively #'agent-repl-create-workspace))
-  t)`, repositoryLabel, name)
+  t)`
 	_, err := client.Read(ctx, form)
 	return err
+}
+
+// wsActDynamicRepository reads the repository a DYNAMIC create would use right
+// now, through the product's own derivation.
+//
+// It is the precondition every dynamic act stands on since the 2026-09-12
+// ruling: `SPC TAB n`, `SPC TAB c`, `SPC TAB f` and `SPC TAB o` take their
+// repository from the roster section the CURRENT workspace's row sits in, so a
+// test standing on the wrong workspace would create in the wrong repository —
+// and, if that repository were one of the owner's, would be a realtest writing
+// where the standing decision says it may not.
+//
+// It calls `agent-repl-verbs--section-of-ws` rather than re-deriving the
+// section this side, so the check and the act cannot disagree.
+func wsActDynamicRepository(ctx context.Context, client *Client) (string, error) {
+	return client.ReadString(ctx, `(let* ((section (agent-repl-verbs--section-of-ws
+                                    (agent-repl--ws-current-name)))
+        (ref (and section (agent-repl-verbs--section-ref section))))
+   (or (plist-get ref :dir) ""))`)
+}
+
+// wsActRequireDynamicRepository fails the test unless a dynamic create entered
+// now would land in `want`.
+func wsActRequireDynamicRepository(ctx context.Context, t *testing.T, client *Client, want string) {
+	t.Helper()
+	dir, err := wsActDynamicRepository(ctx, client)
+	if err != nil {
+		t.Fatalf("read the repository a dynamic create would derive from the current workspace: %v", err)
+	}
+	if !wsActSameDir(dir, want) {
+		t.Fatalf("a dynamic create entered now would take its repository from %q, not from the scratch "+
+			"repository %s: the editor is standing on the wrong workspace, and the act would create "+
+			"somewhere this run is not allowed to write", dir, want)
+	}
+	t.Logf("a dynamic create would take its repository from the scratch repository %s", want)
 }
 
 // wsActCloseWorkspace closes the named workspace through the close command.
@@ -595,7 +666,7 @@ func wsActCloseWorkspace(ctx context.Context, client *Client, name string) error
 	return err
 }
 
-// wsActOpenWorkspace re-opens a closed workspace through `SPC TAB o`'s
+// wsActOpenWorkspace re-opens a closed workspace through `SPC TAB O`'s
 // command, choosing `name` from its picker.
 func wsActOpenWorkspace(ctx context.Context, client *Client, name string) error {
 	form := fmt.Sprintf(`(progn
