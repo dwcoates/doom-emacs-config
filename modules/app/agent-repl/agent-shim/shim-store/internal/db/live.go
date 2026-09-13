@@ -85,7 +85,7 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 	}
 	querySQL += ` ORDER BY file_id ASC`
 
-	rows, err := d.sql.QueryContext(ctx, querySQL, args...)
+	rows, err := d.read.QueryContext(ctx, querySQL, args...)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "reading cursors"))
 	}
@@ -111,7 +111,7 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 }
 
 func (d *DB) scanStrings(ctx context.Context, query string, args ...any) ([]string, error) {
-	rows, err := d.sql.QueryContext(ctx, query, args...)
+	rows, err := d.read.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

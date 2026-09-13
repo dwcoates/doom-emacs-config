@@ -237,6 +237,23 @@ store process serves every live producer on its own pooled connection, which
 makes those collisions routine. Keep the DSN, and never add a read-then-write
 transaction that begins DEFERRED.
 
+**AND A PURE READ RUNS ON ITS OWN POOL, WHICH THE WRITE LOCK IS NOT REACHABLE
+FROM.** There are TWO `sql.DB` handles on the one file: the WRITE handle, capped
+at `SetMaxOpenConns(1)` and reachable only through `beginWrite`; and the READ
+pool, on a DSN with NO `_txlock` and with `query_only(true)`. `OpenPage`,
+`ReadPage`, `BashRun`, `LiveWork` and every other pure read go through
+`db.beginRead` or `d.read` directly, and SQLite itself refuses a write on that
+pool — so a read path that grows one is a hard error at the first attempt rather
+than a silent second writer the gate knows nothing about. The read pool is
+opened AFTER the schema exists (`query_only` would refuse the DDL) and closed
+with the write handle, neither failure swallowed.
+
+The per-call-site `sql.TxOptions{ReadOnly: true}` below is kept and still
+correct; the pool is what makes it unforgettable. `_txlock` is a property of the
+CONNECTION, so a single DSN carrying `immediate` made every transaction a
+writer, and one forgotten option would queue a page repaint behind a producer's
+write exactly as before.
+
 **AND A PURE READ MUST NOT.** `_txlock` is per CONNECTION, so it applied to the
 read path too, and a page repaint therefore queued for — and could be REFUSED
 by — the write lock: the owner's store answered two `OpenAgentSession` calls
