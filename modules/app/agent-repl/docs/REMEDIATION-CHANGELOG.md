@@ -12,6 +12,8 @@ Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — t
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 - footer tokens: swept every footer token-count site against the one-format ruling — all already route through `figures.Tokens`/`formatTokens` — and added the ruled boundary cases (1049, 1050, 10113, 142300, 1000000) to both formatters' tests (owner ruling, token-count format, 2026-09-13)
+- topbar title: the vendor's own `ai-title` summary of the conversation is read off the transcript by the shim, stated as `conversation.v1 SessionUpdate.title`, and drawn in place of the workspace name (owner ruling B, 2026-09-13)
+- topbar schema: THE SCHEMA AND ORGANIZATION ARE FIXED — `hibernated` (11) and `cold_gate` (12) are retired, every cell is always in its slot, the three session-scoped controls are optional-by-presence and draw a dash, the context chip and warning strip are always set and carry the session-less facts, and the readiness gate is the naming and the account alone (owner ruling A, 2026-09-13)
 - webapp topbar: the hibernated and cold-gate cells are stated as the right group's own content at the strip's right edge, in the right cells' box (owner ruling 4, 2026-09-13)
 - webapp topbar: the connectivity glyph and the account label are one `.topbar-account-cell`, glyph first and at half the strip's gap, and the session-line reveal anchors on the pair (owner ruling 3, 2026-09-13)
 - webapp topbar: the row is a three-track grid (`1fr minmax(0, auto) 1fr`), so the title is centered on its own content against the whole strip whatever the flank groups weigh, and a title with no room ellipsis-clips instead of squeezing them (owner ruling 2, 2026-09-13)
