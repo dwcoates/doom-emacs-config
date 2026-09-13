@@ -15,6 +15,15 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Hold tray rulings 1, 2 and 3, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Ruling 1 says the held prompt card is right-aligned "like the user prompt bubbles they will become"; `.queued-card` carried the alignment inline beside its parked frame | The rail moves to its own class, `held-right`, applied by `holdCardClass` to every held prompt and keyed in the hold tray's CSS section; `.queued-card` keeps the frame and loses `max-width`/`margin-left`/`margin-right` | Two rules cannot both own the rail without one silently overriding the other, and the class is what a jsdom test can assert — a CSS rule is not observable in the unit suite | Restore the three alignment declarations on `.queued-card` and drop `held-right` from `holdCardClass` (webapp/src/tray/held-prompt.ts) |
+| 2026-09-13 | Ruling 1 leaves offers alone "unless they share the card class" | Offers are untouched: `drawHeldOffer` builds `merge-dequeue held-offer` and shares no class with `.queued-card`, so they keep their current alignment | The condition the ruling attached the exception to is simply not met | n/a |
+| 2026-09-13 | Ruling 2 removes the heading from the drawing; the daemon still sends `DaemonHoldTray.heading` | `drawDaemonHoldHeading` is gone and the field is UNDRAWN, but `requireMessage(u.heading, ...)` stays, so a tray that omits it is still a `MalformedView` | Dropping the check would weaken the strict-arms coverage for a field the daemon is still contractually required to compose; the field being undrawn is an owner/proto follow-up, not this landing's call | Re-add the heading draw at the top of `drawDaemonHoldTray` (webapp/src/tray/tray.ts) |
+| 2026-09-13 | Ruling 3 wants an empty tray to draw nothing, and `drawDaemonHoldTray` returns an element its caller mounts | The draw answers `HTMLElement | null` and the mount spreads it, so `host.replaceChildren()` runs with no arguments on an empty tray and `#hold-tray:empty` collapses the region | The alternative — the mount testing `items.length` itself — puts the emptiness rule in two places, and the one in the drawing function is the one every direct caller and test already reaches | Have `drawDaemonHoldTray` always return a region and drop the null branch in `onPush` |
+
 ## Forgetting a live workspace, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
