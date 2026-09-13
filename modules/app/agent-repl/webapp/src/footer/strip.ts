@@ -160,11 +160,18 @@ export function drawFooterStrip(u: FooterStrip, deps: StripDeps): HTMLElement {
  * the same order the pushed strip uses — the reader sees the footer they
  * already know, saying `disconnected`, and not a second widget.
  *
- * NO CLOCK, NO TOKENS, NO CHIPS. Those are the daemon's figures and the page
- * cannot reach the daemon; drawing the last ones it happened to hold would put
- * stale numbers beside a status that says they cannot be trusted.
+ * ONLY THE THREE STATUS CELLS ARE THE CLIENT'S. The clock, the tokens and the
+ * chips are still drawn from the daemon's LAST pushed strip when there is one,
+ * because a link that just died does not make the last figures untrue -- it
+ * makes them the last ones -- and blanking half the dock would say more than
+ * the client knows. With no push yet (LAST is null) the row is the three cells
+ * alone.
  */
-export function drawClientDisconnectedStrip(substatus: string, activity: string): HTMLElement {
+export function drawClientDisconnectedStrip(
+  substatus: string,
+  activity: string,
+  last: { strip: FooterStrip; deps: StripDeps } | null = null,
+): HTMLElement {
   log.debug("drawing the client's own disconnected strip", {
     operation: "footer.strip.client-verdict",
     context: { substatus },
@@ -189,6 +196,19 @@ export function drawClientDisconnectedStrip(substatus: string, activity: string)
   cell.title = activity;
   cell.appendChild(grabber());
   row.appendChild(cell);
+
+  if (last !== null) {
+    const path = "FooterStrip";
+    row.appendChild(
+      drawFooterClock(requireMessage(last.strip.clock, `${path}.clock`), last.deps),
+    );
+    row.appendChild(
+      drawFooterTokensCell(requireMessage(last.strip.tokens, `${path}.tokens`), last.deps),
+    );
+    row.appendChild(
+      drawFooterLiveWorkChips(requireMessage(last.strip.liveWork, `${path}.live_work`), last.deps),
+    );
+  }
   return row;
 }
 

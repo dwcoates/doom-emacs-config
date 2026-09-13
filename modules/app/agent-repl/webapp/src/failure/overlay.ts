@@ -167,17 +167,6 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
         });
         return;
       }
-      // THE CARD REACHES THE OVERLAY; THE FOOTER HEARS ABOUT IT TOO (the
-      // audit's N2 row 11: a footer left saying `thinking` under a dead link
-      // kept saying `thinking`). Only the two arms that describe THIS page's
-      // link to the daemon are relayed -- a boot failure, a departed
-      // workspace or a stale bundle is not a link this footer can speak for.
-      if (arm === "daemonUnreachable") {
-        reportClientFailure("daemon_unreachable_card", ARM_HEADLINE.daemonUnreachable);
-      }
-      if (arm === "frameUndecodable") {
-        reportClientFailure("frame_undecodable_card", ARM_HEADLINE.frameUndecodable);
-      }
       const replacing = cards.has(arm);
       const write = replacing ? log.debug : log.error;
       write(`${replacing ? "replacing" : "filing"} the ${arm} failure card`, {
@@ -186,6 +175,20 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
       });
       cards.set(arm, drawFailureCard(kind, arm));
       redraw();
+      // THE CARD REACHES THE OVERLAY; THE FOOTER HEARS ABOUT IT TOO (the
+      // audit's N2 row 11: a footer left saying `thinking` under a dead link
+      // kept saying `thinking`). Only the two arms that describe THIS page's
+      // link to the daemon are relayed -- a boot failure, a departed
+      // workspace or a stale bundle is not a link this footer can speak for.
+      // AFTER the card is filed and drawn, so the relay can never cost the
+      // card: the footer redrawing is somebody else's code running inside this
+      // call.
+      if (arm === "daemonUnreachable") {
+        reportClientFailure("daemon_unreachable_card", ARM_HEADLINE.daemonUnreachable);
+      }
+      if (arm === "frameUndecodable") {
+        reportClientFailure("frame_undecodable_card", ARM_HEADLINE.frameUndecodable);
+      }
     },
 
     suppress(arm: ClientFailureArm, untilMs: number): void {

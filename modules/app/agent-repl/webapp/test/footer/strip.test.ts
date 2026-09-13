@@ -958,8 +958,17 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     );
   });
 
-  it("draws NO clock, tokens or chips, which are figures only the daemon has", () => {
+  it("draws NO clock, tokens or chips when nothing was ever pushed", () => {
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
-    expect(row.querySelectorAll(".footer-clock, .footer-tokens, .footer-chip")).toHaveLength(0);
+    expect(row.querySelectorAll(".footer-clock, .footer-tokens, .footer-chips")).toHaveLength(0);
+  });
+
+  it("keeps the last pushed tokens cell, the figures being the last ones and not untrue", () => {
+    const h = harness();
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
+      strip: strip({ tokens: { input: { text: "12.3k in" } } }),
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx) },
+    });
+    expect(row.querySelector(".footer-tokens")?.textContent).toContain("12.3k in");
   });
 });
