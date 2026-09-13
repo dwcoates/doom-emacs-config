@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- shim start path: the init bound is for SILENCE only — an error `result`, an ended stream, an exited child or a throwing iterator settles StartSession at once as `vendor_start_failed` with the vendor's own text (its stderr appended), a failed start closes the query it opened, and the pre-`init` message kinds are logged at info (a resume emitted its `SessionStart:resume` hook, succeeded it in 12ms, then held the verb the full 45s twice with nothing in any log saying what it had emitted, 2026-09-13 18:17)
 - footer tokens: swept every footer token-count site against the one-format ruling — all already route through `figures.Tokens`/`formatTokens` — and added the ruled boundary cases (1049, 1050, 10113, 142300, 1000000) to both formatters' tests (owner ruling, token-count format, 2026-09-13)
 - webapp topbar: the hibernated and cold-gate cells are stated as the right group's own content at the strip's right edge, in the right cells' box (owner ruling 4, 2026-09-13)
 - webapp topbar: the connectivity glyph and the account label are one `.topbar-account-cell`, glyph first and at half the strip's gap, and the session-line reveal anchors on the pair (owner ruling 3, 2026-09-13)
