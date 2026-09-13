@@ -144,6 +144,38 @@ handle, removes the file with its siblings, and reopens onto an empty one. The
 mismatch is recorded ONCE, as a warn from `Open`, naming the found version and
 table set and saying the file was removed.
 
+### Throwing the database away on purpose: `bin/store-reset.sh`
+
+THE STORE NEEDS NO RETENTION DURING DEVELOPMENT (owner ruling 2026-09-13), and
+everything in `events.db` is re-derivable — the sidecar re-reads the vendor's
+transcripts from offset zero once its `cursor` rows are gone, and the shim
+re-observes the live stream. So a store that has grown past what its host wants
+to carry is THROWN AWAY, never pruned: `../../bin/store-reset.sh` stops the
+sidecar and the store, removes `events.db` with its `-wal`/`-shm` siblings, then
+starts the store, waits for `store.sock`, and starts the sidecar.
+
+- **THE SIDECAR GOES DOWN FIRST AND COMES UP LAST**, which is `deploy-all.sh`'s
+  recorded safe order. The sidecar's reader positions live in the `cursor` table
+  IN THIS FILE: one left running across the unlink writes into a deleted inode
+  and holds positions for a database that never saw the records they claim.
+- **THE STOP POLLS UNTIL LAUNCHD REPORTS NO PID.** `launchctl kill` returns when
+  the signal is delivered, and unlinking the file out from under a store still
+  draining a transaction is the race the script exists to avoid. A service that
+  will not exit fails the reset with nothing removed.
+- **THE GUARD IS `AGENT_REPL_STORE_RESET=1`, AN EXACT MATCH.** The intent is
+  stated twice — the script must be asked AND the environment must say yes —
+  because this deletes every stored record and the re-read afterwards is the
+  owner's whole corpus. `0` and `no` are somebody saying no, which a truthiness
+  test would read as yes.
+- A DIRECTORY AT THE DATABASE PATH IS REPORTED, NEVER REMOVED — the same guard
+  `db.Open` applies before it unlinks, for the same reason. An ABSENT database
+  is not an error: the reset's postcondition already holds.
+- `--keep-down` removes the files and leaves both services stopped.
+- The hermetic harness is `../../bin/test-store-reset.sh` (suite
+  `store-reset-harness` in `bin/test-all.sh`); it drives a `launchctl` stub
+  through `AGENT_REPL_LAUNCHCTL` and a fixture `XDG_CACHE_HOME`, so no test run
+  can ever reach the live launchd or the live database.
+
 **A `--db` FILE THAT IS NOT A DATABASE IS IN THE WAY, SO IT GOES** — the same
 answer, because the store holds a cache of what the vendor and the shim already
 know how to produce again, and refusing to boot would wedge the service on bytes
