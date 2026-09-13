@@ -148,6 +148,16 @@ type Converter struct {
 	// what this file already said — the converter cannot ask the reader anything.
 	spawnedRuns map[string]string
 
+	// foreignSpawns maps a vendor task id to the SESSION that launched it, for
+	// the runs whose launch was written to a different transcript than this one
+	// (foreignspawn.go). ONE ENTRY PER OBSERVED FOREIGN NOTIFICATION.
+	//
+	// IT IS THE THIRD ANSWER TO "WHY IS THERE NO LAUNCH". Beside "there is a
+	// real gap" and "the launch predates my window" stands "the launch was
+	// never in this file at all", which is what a background agent surviving a
+	// `/clear` looks like from here.
+	foreignSpawns map[string]string
+
 	// keepalive marks every record converted while a keep-alive turn is open.
 	// ONE REMEMBERED BOOL per file, cleared by the next non-keepalive prompt.
 	keepalive bool
@@ -172,11 +182,12 @@ type Converter struct {
 func New(log *logging.Bound) *Converter {
 	log.With(logging.Context{Operation: "convert-new"}).LogVerbose("constructing converter producer=%s", Producer)
 	return &Converter{
-		log:         log,
-		observer:    noopObserver{},
-		openCalls:   map[string]openCall{},
-		openSkills:  map[string]openCall{},
-		spawnedRuns: map[string]string{},
+		log:           log,
+		observer:      noopObserver{},
+		openCalls:     map[string]openCall{},
+		openSkills:    map[string]openCall{},
+		spawnedRuns:   map[string]string{},
+		foreignSpawns: map[string]string{},
 	}
 }
 
@@ -227,6 +238,11 @@ func (c *Converter) lineEntries(record map[string]any, at Attribution, next map[
 		c.joined = true
 		c.joinedOffset = at.Offset
 	}
+	// WHERE A RUN'S LAUNCH LIVES IS LEARNED BEFORE IT IS NEEDED. The record that
+	// says so is a notification about the run, which the vendor writes long
+	// before any stop; reading it here — on every line, ahead of the type
+	// switch — is what makes the fact available to the stop when it arrives.
+	c.noteForeignSpawn(record, at)
 	kind := str(record["type"])
 	c.log.With(at.ctxFor("convert-line")).
 		LogVerbose("converting line type=%q", kind)
