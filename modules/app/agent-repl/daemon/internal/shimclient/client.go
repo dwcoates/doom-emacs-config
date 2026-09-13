@@ -217,6 +217,22 @@ func (c *client) Reaped() (ExitInfo, bool) {
 	return *c.exitInfo, true
 }
 
+// ErrStandDownOrdered marks a shim call that failed because THIS DAEMON had
+// already asked the shim to stand down. It is the difference between a shim
+// that broke and a shim that did what it was told: the call still fails and
+// the error is still returned, but every consumer that reports the failure can
+// tell which of the two it is looking at.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34. A deploy's SIGTERM landed inside
+// the boot's own bring-up, the drain force-stopped the workspace's shim, and
+// the StartSession that was in flight to that shim came back `unavailable:
+// unexpected EOF` -- recorded as an ERROR by the client, again by the fleet
+// ("the StartSession call failed") and a third time by the boot ("an open
+// workspace's session did not come up"), on three consecutive daemon
+// generations, for a teardown the same process had ordered nine milliseconds
+// earlier and recorded at info on the line above.
+var ErrStandDownOrdered = errors.New("the shim was stood down by this daemon")
+
 // StandingDown answers the stand-down latch. It is the shim's own record that
 // THIS DAEMON asked it to end its session, and it is read by every consumer
 // that must tell a teardown it ordered from one that happened to it.
@@ -1311,10 +1327,22 @@ func unary[Req any, Resp any](
 	c.log.Debug(operation, "calling shim", dlog.Context{"workspace_id": string(c.ws)})
 	resp, err := call(ctx, connect.NewRequest(req))
 	if err != nil {
-		c.log.Error(operation, "shim call failed", dlog.Context{
+		// A CALL THAT DIED IN A TEARDOWN THIS DAEMON ORDERED IS NOT A FAULT.
+		// The latch is the shim's own record that a KillSession or a Kill was
+		// asked of it, so a call still in flight to that shim comes back
+		// `unavailable` for the plainest of reasons: the daemon killed the
+		// peer it was talking to. The error is unchanged in substance -- it is
+		// returned, wrapped so a caller can tell the two apart -- and only the
+		// record's level and wording change.
+		fields := dlog.Context{
 			"workspace_id": string(c.ws), "error": err.Error(),
 			"connect_code": connect.CodeOf(err).String(),
-		})
+		}
+		if c.StandingDown() {
+			c.log.Info(operation, "the shim call ended in a stand-down this daemon ordered", fields)
+			return nil, fmt.Errorf("%w: %w", ErrStandDownOrdered, err)
+		}
+		c.log.Error(operation, "shim call failed", fields)
 		return nil, err
 	}
 	c.log.Debug(operation, "shim answered", dlog.Context{"workspace_id": string(c.ws)})
