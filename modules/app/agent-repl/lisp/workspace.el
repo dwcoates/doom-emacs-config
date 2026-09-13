@@ -95,6 +95,8 @@
 (declare-function magit-status "ext:magit" (&optional directory cache))
 (declare-function agent-repl--magit-status-same-window "agent-repl-magit" (dir))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
+(declare-function agent-repl--log-note-workspace-departing "agent-repl-core" (ws))
+(declare-function agent-repl--log-note-workspace-registered "agent-repl-core" (ws))
 (declare-function agent-repl--ws-name-for-dir "agent-repl-worktree" (dir))
 (declare-function agent-repl--sidebar-push "sidebar" (&optional force))
 (declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
@@ -418,6 +420,12 @@ REFUSED — see the body."
        ws (format "%s changed from %S to %S" key old-value val)))
     (puthash ws (plist-put (gethash ws agent-repl--workspaces) key val)
              agent-repl--workspaces)
+    ;; A `:project-dir' write is a workspace ARRIVING under this name, and
+    ;; names are reused.  Whatever the last tenant did — departed on the
+    ;; editor's order, spent its one central-fallback announcement — is not
+    ;; this workspace's history, so the logging boundary forgets it here.
+    (when (eq key :project-dir)
+      (agent-repl--log-note-workspace-registered ws))
     (when stub-create
       (let ((trace (or (ignore-errors (agent-repl--ws-put-caller-trace))
                        "<trace-failed>")))
@@ -1078,6 +1086,12 @@ by `workspace.el' (see file Commentary and AGENTS.md).  It is the
 only `+workspace/kill' call site inside agent-repl outside the
 finish-workspace path."
   (agent-repl--assert-mergeable-teardown ws)
+  ;; The teardown is under way, so every record it writes from here on is a
+  ;; departing workspace's own, and a directory that has gone with it is not
+  ;; a stale registry row.  Declared AFTER the mergeable assertion: a REFUSED
+  ;; teardown leaves the workspace standing, and a standing workspace has
+  ;; ordered no departure.
+  (agent-repl--log-note-workspace-departing ws)
   (agent-repl--log ws "kill-one-workspace: ENTRY ws=%s preserve-entry=%s kill-cause=%s cache=%S"
                     ws (if preserve-entry "t" "nil")
                     (agent-repl--kill-cause-str)
