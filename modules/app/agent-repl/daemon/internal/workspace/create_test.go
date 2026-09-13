@@ -45,7 +45,7 @@ func oneShotBriefs(f *fixture) {
 	}
 }
 
-func TestCreateDerivesTheBranchFromTheInitialPrompt(t *testing.T) {
+func TestCreateNamesTheBranchFromTheModelsAnswer(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "DWC")
@@ -57,8 +57,8 @@ func TestCreateDerivesTheBranchFromTheInitialPrompt(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.git.created) != 1 || f.git.created[0].Branch != "DWC/fix-the-login" {
-		t.Fatalf("created worktrees = %+v, want branch DWC/fix-the-login", f.git.created)
+	if len(f.git.created) != 1 || f.git.created[0].Branch != "DWC/"+FixtureMintedName {
+		t.Fatalf("created worktrees = %+v, want branch DWC/%s", f.git.created, FixtureMintedName)
 	}
 }
 
@@ -74,7 +74,7 @@ func TestCreatePutsTheWorktreeInTheSiblingWorktreesDirectory(t *testing.T) {
 	}
 
 	// Assert.
-	want := filepath.Join(filepath.Dir(spec.RepoDir), filepath.Base(spec.RepoDir)+WorktreeDirSuffix, "fix-the-login")
+	want := filepath.Join(filepath.Dir(spec.RepoDir), filepath.Base(spec.RepoDir)+WorktreeDirSuffix, FixtureMintedName)
 	if f.git.created[0].WorktreeDir != want {
 		t.Fatalf("worktree dir = %q, want %q", f.git.created[0].WorktreeDir, want)
 	}
@@ -299,11 +299,16 @@ func TestCreateAcceptsAnUngatedModeWithConsent(t *testing.T) {
 	}
 }
 
-func TestCreateRefusesWhenNoSlugCanBeDerived(t *testing.T) {
+// TestCreateRefusesAPromptlessOneShotWithNoSlug pins the ONE site `no_slug`
+// still has now that word truncation is deleted: a one-shot with nothing to
+// run, which is an argument-validation failure and not a naming failure.
+func TestCreateRefusesAPromptlessOneShotWithNoSlug(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
+	oneShotBriefs(f)
 	spec := standardSpec(t)
-	spec.InitialPrompt = "!!! ???"
+	spec.InitialPrompt = ""
+	spec.OneShot = true
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -439,6 +444,29 @@ func TestCreateRefusesAOneShotInARepositoryThatStatesNoPolicy(t *testing.T) {
 	got, _ := refusal.Fields["missing_files"].([]string)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("missing_files = %v, want %v", got, want)
+	}
+}
+
+// TestCreateRefusesAOneShotWithNoPolicyBeforeSpendingANamingCall pins the
+// ORDERING of the two checks that both sit at the front of `Create': the
+// one-shot policy requirement runs BEFORE the naming call, so a create that is
+// going to be refused for a missing policy never pays for a model call. The
+// spec supplies no name, which is exactly the shape that would otherwise name
+// itself through `branchFor'.
+func TestCreateRefusesAOneShotWithNoPolicyBeforeSpendingANamingCall(t *testing.T) {
+	// Arrange: a repository that states no policy, and a nameless one-shot.
+	f := newFixture(t)
+	spec := standardSpec(t)
+	spec.Name = ""
+	spec.OneShot = true
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmOneShotPolicyMissing)
+	if len(f.headless.calls) != 0 {
+		t.Fatalf("headless calls = %v, want none: the policy refusal precedes the naming call", f.headless.calls)
 	}
 }
 

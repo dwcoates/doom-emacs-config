@@ -223,7 +223,7 @@ neither adopted nor orphan-closed, and the boot report names it.
 | `AGENT_REPL_HOLDOUT_WARN_EVERY` | test only | compresses the rollout's never-free holdout warning cadence (a Go duration; the default is ten minutes). A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
 | `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
-| `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary for the login pty and the real classifier (a fake script in tests) |
+| `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary every one of the daemon's OWN calls execs: the login pty, and `internal/headless`'s runs (the classifier's routing question and the workspace naming call). A fake script in tests. Naming it EXPLICITLY is also what makes those spawns legal under `AGENT_REPL_FORBID_VENDOR_CALLS`: the guard refuses only the bare default `claude`, since an explicit path is by definition not a call to the real CLI |
 | `AGENT_REPL_DEPLOY_SCRIPT` | test only | overrides `bin/deploy-all.sh` for the self-reload trigger |
 | `AGENT_REPL_TEST_ALL_SCRIPT` | test only | overrides `bin/test-all.sh` for the merge test gate (invoked as `bash <script> --suites <a,b>` in the merge TARGET worktree; exit 0 = pass; per-suite state parsed from the script's own `<suite>: passed in <N>s` / `<suite> failed after <N>s with exit code <rc>` lines; output archived under `<state>/merge-logs/`) |
 | `AGENT_REPL_PROMPTS_DIR` | operator | the prompts directory (the `--prompts-dir` flag beats it) |

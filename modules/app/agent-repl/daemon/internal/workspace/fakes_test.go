@@ -18,6 +18,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
+	"claude-repld/internal/headless"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
@@ -361,6 +362,10 @@ type fakeGit struct {
 	defaultErr    error
 
 	resolveErr error
+	// existingBranches are the branches this repository already holds, which
+	// is what the naming call's collision probe asks for.
+	existingBranches map[string]bool
+	branchExistsErr  error
 
 	created   []createdWorktree
 	createErr error
@@ -376,6 +381,10 @@ func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 		return "", g.resolveErr
 	}
 	return "sha-of-" + ref, nil
+}
+
+func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
+	return g.existingBranches[branch], g.branchExistsErr
 }
 
 func (g *fakeGit) CommonDir(context.Context, string) (string, error) {
@@ -1064,24 +1073,25 @@ func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 // fixture is one arranged verb surface plus every fake behind it, so a test
 // arranges by mutating fields and asserts by reading them.
 type fixture struct {
-	verbs   Verbs
-	db      *fakeDB
-	git     *fakeGit
-	account *fakeAccounts
-	queue   *fakeQueue
-	merge   *fakeMerge
-	rollout *fakeRollout
-	feed    *fakeFeed
-	footer  *fakeFooter
-	sidebar *fakeSidebar
-	health  *fakeHealth
-	host    *fakeHost
-	browser *fakeBrowser
-	fleet   *fakeSessions
-	shim    *fakeShim
-	owner   *fakeOwnership
-	cards   *fakeCards
-	log     *fakeSurfaces
+	verbs    Verbs
+	db       *fakeDB
+	git      *fakeGit
+	account  *fakeAccounts
+	queue    *fakeQueue
+	merge    *fakeMerge
+	rollout  *fakeRollout
+	feed     *fakeFeed
+	footer   *fakeFooter
+	sidebar  *fakeSidebar
+	health   *fakeHealth
+	host     *fakeHost
+	browser  *fakeBrowser
+	fleet    *fakeSessions
+	shim     *fakeShim
+	owner    *fakeOwnership
+	cards    *fakeCards
+	log      *fakeSurfaces
+	headless *fakeHeadless
 
 	// running is what the freeness probe answers.
 	running Running
@@ -1098,24 +1108,32 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
-		db:      newFakeDB(),
-		git:     &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: "/repo"},
-		account: &fakeAccounts{configDir: "/config"},
-		queue:   newFakeQueue(),
-		merge:   newFakeMerge(),
-		rollout: &fakeRollout{done: make(chan struct{}, 8)},
-		feed:    &fakeFeed{},
-		footer:  newFakeFooter(),
-		sidebar: &fakeSidebar{},
-		health:  &fakeHealth{},
-		host:    &fakeHost{},
-		browser: &fakeBrowser{},
-		fleet:   newFakeSessions(),
-		shim:    &fakeShim{},
-		owner:   &fakeOwnership{standing: StandingOwned},
-		cards:   newFakeCards(),
-		log:     newFakeSurfaces(),
-		briefs:  map[string]prompts.Prompt{},
+		db:       newFakeDB(),
+		git:      &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: "/repo"},
+		account:  &fakeAccounts{configDir: "/config"},
+		queue:    newFakeQueue(),
+		merge:    newFakeMerge(),
+		rollout:  &fakeRollout{done: make(chan struct{}, 8)},
+		feed:     &fakeFeed{},
+		footer:   newFakeFooter(),
+		sidebar:  &fakeSidebar{},
+		health:   &fakeHealth{},
+		host:     &fakeHost{},
+		browser:  &fakeBrowser{},
+		fleet:    newFakeSessions(),
+		shim:     &fakeShim{},
+		owner:    &fakeOwnership{standing: StandingOwned},
+		cards:    newFakeCards(),
+		log:      newFakeSurfaces(),
+		headless: &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
+		briefs:   map[string]prompts.Prompt{},
+	}
+	// EVERY UNNAMED CREATE NAMES THROUGH THE MODEL, so the naming brief is part
+	// of the arrangement every create test starts from, exactly as the corpus
+	// ships it.
+	f.briefs[BriefWorkspaceName] = prompts.Prompt{
+		Name: BriefWorkspaceName, Body: "name the work: {{prompt}} {{correction}}",
+		Placeholders: []string{"prompt", "correction"},
 	}
 	f.hasSession = true
 
@@ -1123,6 +1141,7 @@ func newFixture(t *testing.T) *fixture {
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Sessions: f.fleet,
+		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, Log: f.log,
 		// The policy probe answers from the SAME brief table the loader
@@ -1300,4 +1319,44 @@ func (s *fakeSurfaces) Evict(dir string) error {
 	}
 	s.evicted = append(s.evicted, dir)
 	return nil
+}
+
+// FixtureMintedName is the name the fixture's naming call answers. It is the
+// SHAPE a real answer has — at most three lowercase hyphenated words — and it
+// is deliberately not derivable from any prompt, so a test asserting on it is
+// asserting that the MODEL named the workspace and not some leftover
+// truncation rule.
+const FixtureMintedName = "the-minted-name"
+
+// headlessAnswer is one scripted answer from the fake naming call.
+type headlessAnswer struct {
+	text string
+	err  error
+}
+
+// fakeHeadless is the naming call, scripted. NOTHING in these tests execs a
+// vendor binary: the whole point of the headless.Runner seam is that the
+// workspace verbs are tested against answers, not processes.
+type fakeHeadless struct {
+	answers []headlessAnswer
+	// calls records every request, so a test can assert the model, the site
+	// and the prompt the call was made with.
+	calls []headless.Request
+}
+
+func (h *fakeHeadless) Bin() string { return "fake-claude" }
+
+func (h *fakeHeadless) Run(_ context.Context, req headless.Request) (headless.Response, error) {
+	h.calls = append(h.calls, req)
+	if len(h.answers) == 0 {
+		return headless.Response{}, errors.New("fake headless: no answer scripted")
+	}
+	answer := h.answers[0]
+	if len(h.answers) > 1 {
+		h.answers = h.answers[1:]
+	}
+	if answer.err != nil {
+		return headless.Response{}, answer.err
+	}
+	return headless.Response{Text: answer.text, Model: req.Model, Duration: time.Millisecond}, nil
 }
