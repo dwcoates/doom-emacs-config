@@ -15,6 +15,14 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The account cell's dropdown, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The logged-out cell's click opens the login TODAY. Does the dropdown replace that click, or only the logged-in one's? | Both arms open the dropdown | The ruling's webapp sentence names the cell without qualifying the arm, and one control with two answers is what made the logged-in cell unreadable in the first place; the logged-out remedy survives, because the current root is a row in its own list and choosing it opens that root's login | Restore the `data-arm === "loggedIn"` guard in `drawTopbarView` and re-attach the `openLogin` listener in `drawTopbarAccount` (`webapp/src/topbar/strip.ts`) |
+| 2026-09-13 | The bring-up re-decides the account routing at every start, so a root recorded on the session row would be overwritten by the path routing. Where does a CHOICE live? | Its own session-row column, `selected_config_dir` | One field cannot tell a root that merely happens to be recorded from a root somebody asked for, so a re-route would either always beat a choice or never take effect; the account package's own "the path is the only input" invariant is untouched, and the choice outranks it one layer up | Drop the layout-7 column and read `Session.ConfigDir` in `accountRootFor` (`daemon/internal/workspace/account.go`) |
+| 2026-09-13 | The restart path (prelaunch + resume) never re-decided the account root, so a switch recorded before a restart would not have taken effect. Fix the restart, or give SelectAccount its own bring-up? | Fix the restart | The ruling says the switch IS the restart verb path; a second bring-up would be a second place that ports transcripts across roots, and the two would drift | Restore `session.ConfigDir` in `Fleet.Prelaunch` and `Fleet.Resume` (`daemon/internal/workspace/fleet_rollout.go`) |
+| 2026-09-13 | Three topbar tests pinned the old clicks (session reveal on the logged-in cell, login on the logged-out one). Amend them? | Amend, and keep the session line's coverage on the title | The behavior they pin is exactly what the ruling changes, and the title still opens the session line in every account state, so the fact is still covered | `webapp/test/topbar/topbar.test.ts`, the three tests naming the account cell |
 ## The sidecar's three gap-scan groups, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
