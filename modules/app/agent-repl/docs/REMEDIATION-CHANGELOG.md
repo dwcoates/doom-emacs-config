@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- sidecar shutdown: a store write already on the wire gets a 500ms settle before SIGTERM cancels it, and the record no longer claims the cancelled write "will replay" — its outcome is unknown and safe either way (intermittent `TestSigtermCommitsNoCursorPastRecordsItDidNotStore` under parallel load)
 - proto hold tray: `DaemonHoldTray.heading` tag 1 is RETIRED and `DaemonHoldHeading` is deleted; the daemon composes no heading and the webapp requires none (owner ruling 5, 2026-09-13)
 - sidecar: the aged-unowned-spool `hold-expired` record is INFO, not WARN — the total-ingestion mandate working is not a fault (owner ruling 4, 2026-09-13)
 - webapp hold tray: an empty tray draws nothing — `drawDaemonHoldTray` answers `null`, the mount empties the host, and `#hold-tray:empty` collapses the region; the "nothing held" line is gone (owner ruling 3, 2026-09-13)
