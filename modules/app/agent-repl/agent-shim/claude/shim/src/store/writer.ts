@@ -590,6 +590,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       LOGGER.debug({ producer: next }, "named this writer from the conversation's original vendor session id");
     },
 
+    producerHasWrittenRows(): boolean {
+      return wroteUnderProducer;
+    },
+
     clearProducer(): void {
       if (producer === undefined) return;
       if (wroteUnderProducer) {

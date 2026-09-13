@@ -354,6 +354,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const rewind = new KeepaliveRewind();
 
   let identity: SessionIdentity | undefined;
+  /**
+   * The identity a FAILED start already recorded rows under, if there is one.
+   *
+   * A start that never reached a query leaves nothing behind and is abandoned
+   * whole. A start the vendor DID open and then refused — a `SessionStart` hook
+   * that blocks the opening is the live case — has already had its messages
+   * converted and written, so the record plane carries this conversation under
+   * this name. The name and the file that persists it therefore STAND, and the
+   * retry must reuse them rather than mint a second identity for one book.
+   */
+  let recordedOriginalVendorSessionId: string | undefined;
   let releaseLock: LockRelease | undefined;
   let releaseWorkspaceLock: LockRelease | undefined;
   let query: QueryLike | undefined;
@@ -1672,7 +1683,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // forgot to would be a compile error rather than a silent empty model.
     let requestedModel: string;
     if (source.case === "fresh") {
-      vendorSessionId = mintVendorSessionId();
+      // A retry of an attempt that already recorded rows resumes ITS id: minting
+      // a second one would key the retry's rows to a book the first attempt's
+      // rows are not on.
+      vendorSessionId = recordedOriginalVendorSessionId ?? mintVendorSessionId();
       requestedModel = source.value.model?.name ?? "";
       if (source.value.permissionMode !== undefined) permissionMode = source.value.permissionMode;
     } else {
@@ -1808,15 +1822,38 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // unhandled `Internal` on a verb that has a typed refusal for every real
       // condition.
       //
-      // NOTHING WAS WRITTEN UNDER THE NAME YET: the held cuts are written after
-      // this block precisely so that stays true, and `clearProducer` refuses
-      // outright if it ever stops being.
+      // THE HELD CUTS ARE NOT WRITTEN YET: they land after this block precisely
+      // so this attempt's own compaction is not stranded by it. What the shim
+      // does NOT control is the vendor, which writes through the converter the
+      // moment its query is live — so whether the name is still free is a
+      // question asked, not assumed.
       await releaseLock?.();
       releaseLock = undefined;
       await releaseWorkspaceLock?.();
       releaseWorkspaceLock = undefined;
-      deps.persistence.clearProducer();
-      if (!identityWasPersisted) await identityStore.forget();
+      // ...UNLESS THE VENDOR ALREADY SPOKE. `startQuery` returning means the
+      // query is live, and everything it emitted before the refusal went
+      // through the converter's `persist` — a `SessionStart` hook that blocks
+      // the opening emits exactly that. Those rows carry the producer name, so
+      // the name is no longer free: un-naming it would throw out of a verb that
+      // has a typed refusal for every real condition, and forgetting the file
+      // behind it would strand the rows on a book nothing names again. The
+      // identity stands instead, and the retry re-announces the same one —
+      // which `setProducer` takes as the no-op it is.
+      const recorded = deps.persistence.producerHasWrittenRows();
+      if (recorded) {
+        recordedOriginalVendorSessionId = identity.originalVendorSessionId;
+        LOGGER.info(
+          {
+            original_vendor_session_id: identity.originalVendorSessionId,
+            detail: "rows were written before the start was refused",
+          },
+          "keeping the identity a failed start recorded under: the record plane already carries this conversation",
+        );
+      } else {
+        deps.persistence.clearProducer();
+        if (!identityWasPersisted) await identityStore.forget();
+      }
       identity = undefined;
       const detail = err instanceof Error ? err.message : String(err);
       LOGGER.error({ cause: detail }, "the vendor query could not be started");
