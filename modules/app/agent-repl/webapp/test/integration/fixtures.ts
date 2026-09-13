@@ -47,8 +47,10 @@ import {
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import {
+  TopbarAccountOptionSchema,
   TopbarViewSchema,
   TopbarWarningSchema,
+  type TopbarAccountOption,
   type TopbarView,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
@@ -1601,10 +1603,33 @@ export const PERMISSION_MODES = [
   { mode: "plan", displayName: "plan" },
 ] as const;
 
+/**
+ * The account root the fixture daemon serves, and the second one a switch
+ * picks. `TopbarAccount.options` is ALWAYS THE WHOLE SET (topbar.proto): a
+ * one-root machine still gets a one-row dropdown, so a fixture that served an
+ * empty list would be a view no daemon can publish.
+ */
+export const ACCOUNT_CONFIG_DIR = "/tmp/config";
+export const OTHER_ACCOUNT_CONFIG_DIR = "/tmp/config-other";
+
+/** One offered root, as `TopbarAccount.options` takes it. */
+export type AccountOptionInit = {
+  configDir: string;
+  /** The email this root holds a login for; omitted means a logged-out root. */
+  email?: string;
+  current?: boolean;
+};
+
 type TopbarInit = {
   title?: string;
   sessionLine?: string;
   account?: (typeof TOPBAR_ACCOUNT_ARMS)[number];
+  /**
+   * The roots the dropdown offers. Omitted, the fixture serves exactly one —
+   * the root the cell itself describes, marked `current` — which is the
+   * smallest set the contract permits.
+   */
+  accountOptions?: AccountOptionInit[];
   email?: string;
   tone?: string;
   glyph?: string;
@@ -1624,6 +1649,18 @@ type TopbarInit = {
   warnings?: WarningInit[];
   permissionMode?: string;
 };
+
+/** One offered root: the arm is the state, exactly as the cell's own is. */
+function accountOption(init: AccountOptionInit): TopbarAccountOption {
+  return create(TopbarAccountOptionSchema, {
+    configDir: init.configDir,
+    current: init.current ?? false,
+    state:
+      init.email === undefined
+        ? { case: "loggedOut", value: {} }
+        : { case: "loggedIn", value: { email: init.email } },
+  });
+}
 
 export function topbarView(init?: TopbarInit): TopbarView {
   const models = init?.models ?? [
@@ -1673,10 +1710,18 @@ export function topbarView(init?: TopbarInit): TopbarView {
               ],
             },
     },
-    account:
-      init?.account === "loggedOut"
-        ? { state: { case: "loggedOut", value: {} } }
-        : { state: { case: "loggedIn", value: { email: init?.email ?? "dev@example.test" } } },
+    account: {
+      ...(init?.account === "loggedOut"
+        ? { state: { case: "loggedOut" as const, value: {} } }
+        : { state: { case: "loggedIn" as const, value: { email: init?.email ?? "dev@example.test" } } }),
+      options: (
+        init?.accountOptions ?? [
+          init?.account === "loggedOut"
+            ? { configDir: ACCOUNT_CONFIG_DIR, current: true }
+            : { configDir: ACCOUNT_CONFIG_DIR, email: init?.email ?? "dev@example.test", current: true },
+        ]
+      ).map(accountOption),
+    },
     permissionModePicker: {
       current: PERMISSION_MODES.find((m) => m.mode === (init?.permissionMode ?? "default")),
       options: PERMISSION_MODES.map((m) => ({ ...m })),
