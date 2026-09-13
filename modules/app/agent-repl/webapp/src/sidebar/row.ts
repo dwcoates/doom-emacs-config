@@ -106,7 +106,7 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     toggleRowMenu(ws, { sc, workspace, name });
   });
 
-  line.appendChild(drawExpandChevron(ws, sc, workspace.id));
+  line.appendChild(drawExpandChevron(ws, line, sc, workspace.id));
   line.appendChild(drawStatusMark(status.case, `${path}.status`));
 
   const label = document.createElement("span");
@@ -355,22 +355,79 @@ export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement
   return dot;
 }
 
-/** The detail panel's toggle. Local, persisted, and never on the wire. */
+/**
+ * The detail panel's toggle. Local, persisted, and never on the wire.
+ *
+ * IT IS HOVER-ONLY (owner ruling 3, 2026-09-13). The chevron is invisible at
+ * rest and appears when the pointer is over the row, when the keyboard focus
+ * is inside it, or when the row's details are already open — an open panel
+ * must always show the control that closes it. The reveal is `visibility`,
+ * not `display`, so the glyph keeps its slot and the name beside it does not
+ * shift the moment the pointer arrives.
+ *
+ * `data-shown` is the ONE fact the stylesheet reads, and it is maintained
+ * here rather than left to `:hover` alone, because "the row is expanded" is
+ * not a CSS state the chevron can see from its own selector — and two
+ * sources for one appearance is how the two drift.
+ */
 function drawExpandChevron(
   ws: HTMLElement,
+  line: HTMLElement,
   sc: SidebarContext,
   workspaceId: string,
 ): HTMLElement {
   const chevron = document.createElement("span");
   chevron.className = "chev";
   chevron.textContent = "▸";
+
+  let pointerOver = false;
+  let focusWithin = false;
+  const sync = (): void => {
+    const shown = pointerOver || focusWithin || ws.classList.contains("open");
+    if (shown === chevron.hasAttribute("data-shown")) return;
+    log.debug("the row's expand chevron changed visibility", {
+      operation: "sidebar.row.chevron",
+      verbosity: "verbose",
+      context: { workspace: workspaceId, shown, pointer: pointerOver, focus: focusWithin },
+    });
+    if (shown) chevron.setAttribute("data-shown", "");
+    else chevron.removeAttribute("data-shown");
+  };
+
+  line.addEventListener("mouseenter", () => {
+    pointerOver = true;
+    sync();
+  });
+  line.addEventListener("mouseleave", () => {
+    pointerOver = false;
+    sync();
+  });
+  line.addEventListener("focusin", () => {
+    focusWithin = true;
+    sync();
+  });
+  // `focusout` fires BEFORE the next element takes focus, so `activeElement`
+  // is not yet the answer; the event's own `relatedTarget` is.
+  line.addEventListener("focusout", (event) => {
+    const next = event.relatedTarget;
+    focusWithin = next instanceof Node && line.contains(next);
+    sync();
+  });
+
   chevron.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     const open = !ws.classList.contains("open");
     ws.classList.toggle("open", open);
     sc.prefs.setExpanded(workspaceId, open);
+    log.debug("toggling a row's detail panel", {
+      operation: "sidebar.row.detail-toggle",
+      context: { workspace: workspaceId, open },
+    });
+    sync();
   });
+
+  sync();
   return chevron;
 }
 

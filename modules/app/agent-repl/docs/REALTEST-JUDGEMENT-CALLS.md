@@ -573,3 +573,10 @@ they are covered by tests.
    the proto.
 6. Store volume: not to be solved by narrowing discovery; analyze what is
    written and stop storing what is never served (proposal owed).
+
+## Sidebar chevron and detail panel, owner ruling 3 (2026-09-13)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The ruling's "hover-only" also has to cover an EXPANDED row and keyboard focus, neither of which `.chev:hover` can see. One CSS selector list, or one JS-maintained fact? | ONE JS-MAINTAINED FACT: `drawExpandChevron` sets `data-shown` from a single predicate — pointer over the row, focus inside it, or `.open` — and the stylesheet reveals `.chev[data-shown]` and nothing else | Two sources for one appearance drift, and `:hover` cannot express "or this row is expanded"; `data-shown` is also the only form of the rule a jsdom test can assert, since the unit suite has no cascade | Replace the `[data-shown]` rule with `.row:hover .chev, .ws.open > .row .chev` and delete the pointer/focus listeners in `webapp/src/sidebar/row.ts` |
+| 2026-09-13 | Hiding it with `display: none` would collapse the glyph's slot and shift the name on hover | `visibility: hidden`, as the ruling requires: the slot is kept and nothing moves | The name jumping sideways under the pointer is exactly the shift the ruling names | Set `display: none` on `.chev` |

@@ -721,7 +721,14 @@ body::after {
   border-radius: 4px;
   flex: 0 0 auto;
   transition: transform 0.12s;
+  /* HOVER-ONLY (owner ruling 3, 2026-09-13). `visibility`, never `display`:
+     the glyph keeps its slot, so the name beside it does not jump sideways
+     the moment the pointer arrives. `data-shown` is set by row.ts from the
+     one predicate -- pointer over the row, keyboard focus inside it, or the
+     row's details already open -- so the appearance has a single source. */
+  visibility: hidden;
 }
+#ws-sidebar .row .chev[data-shown] { visibility: visible; }
 #ws-sidebar .row .chev:hover { background: var(--code-bg); }
 #ws-sidebar .ws.open > .row .chev { transform: rotate(90deg); }
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
