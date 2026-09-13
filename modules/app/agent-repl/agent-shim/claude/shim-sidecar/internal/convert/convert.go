@@ -176,6 +176,11 @@ type Converter struct {
 	// reported the second as the first.
 	joined       bool
 	joinedOffset int64
+
+	// pendingCut is a compaction drawn with the placeholder because its summary
+	// was not the line after the boundary, kept until the summary that names
+	// that boundary arrives (contextcut.go). Nil whenever no cut is waiting.
+	pendingCut *pendingCompaction
 }
 
 // New builds a Converter with no observer installed.
