@@ -703,6 +703,14 @@ Rulings already binding; code swaps to the generated arms when it lands:
   surviving stream (record the web participant as "expected" from the old
   daemon's snapshot, and mark it satisfied by the first AdoptWebWorkspace
   from any connection).
+- ON A JOINING SUCCESSOR THE REFUSAL IS NOT IMMEDIATE. `Handover` announces
+  the successor's address BEFORE it writes the intent manifest, so a
+  participant that dials the announced address at once can arrive ahead of
+  the arm. `rollout.rendezvousCall` HOLDS such a call (`awaitArm`) until the
+  manifest is read, bounded by `Deps.AdoptionWindow`; once a manifest is in
+  hand the transfer set is known and a workspace it does not name is refused
+  at once. A daemon that is not joining never waits, so the ordinary page
+  boot above is unchanged.
 - Vocab merge note: `footer_allowance` also landed on overhaul/integration
   (8c56dece8) directly; when overhaul/daemon merges into integration the
   render-colors.json conflict resolves to the daemon's version.
