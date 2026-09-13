@@ -130,14 +130,24 @@ means the daemon and this build disagree about the contract.
   "another process holds it" answer, and anything else is a hard failure —
   never `conversation_owned`.
 - **`StartSession` ALWAYS ANSWERS.** The verb is unsettled from the moment the
-  query is created until the vendor's `system:init` lands, and exactly three
-  things settle it: `init` itself; a hook that comes back BLOCKING before it
-  (the only hooks that can fire that early are the vendor's `SessionStart`
-  ones, and a blocked one gets no further answer, so its blocking text IS the
-  start's failure reason); or `INIT_TIMEOUT_MS`, the shim's own bound, sized
-  UNDER the daemon's bring-up bound so the shim — which knows why — answers
-  before the daemon, which does not. All three end as
+  query is created until the vendor's `system:init` lands, and five things
+  settle it: `init` itself; a hook that comes back BLOCKING before it (the only
+  hooks that can fire that early are the vendor's `SessionStart` ones, and a
+  blocked one gets no further answer, so its blocking text IS the start's
+  failure reason); a `result` carrying `is_error` (the vendor refusing the
+  opening, whose own text is the reason); the QUERY ENDING before `init` (an
+  exited child, an ended stream, a throwing iterator); or `INIT_TIMEOUT_MS`, the
+  shim's own bound, sized UNDER the daemon's bring-up bound so the shim — which
+  knows why — answers before the daemon, which does not. All five end as
   `StartSession{vendor_start_failed}` with the reason in `detail`.
+  **THE BOUND IS FOR SILENCE ONLY.** Every conclusive answer settles the start
+  at once; waiting the bound out on an answer already in hand is what lets the
+  daemon's bound fire first and blame the shim. The vendor child's stderr is
+  captured (`Options.stderr`) and appended to the refusal's `detail`, because a
+  CLI that will not honour a resume prints its reason there and nowhere else.
+  A failed start also CLOSES the query it opened: two attempts on one
+  conversation are two writers on one transcript, and a released query's loop
+  ending is not the live session dying.
   Blocking-versus-merely-failing has ONE reading, `convert/hooks.ts`
   `hookBlockingText`, shared by the gate and the drawn hook row so they cannot
   drift.
@@ -158,6 +168,8 @@ comma-separated:
 | --- | --- | --- |
 | `start` | `createFakeQuery` throws before any message, every time | `StartSession{vendor_start_failed}` |
 | `start-once` | the FIRST `createFakeQuery` throws; every later one succeeds | a retry after `vendor_start_failed` succeeding on the same shim |
+| `start-eof` | the query is created and its stream ENDS with no `init` at all | `StartSession{vendor_start_failed}` settled by the query's end, not by the init bound |
+| `start-error-result` | the query answers the opening with an error `result` and ends | `StartSession{vendor_start_failed}` carrying the vendor's own refusal text |
 | `set_model` | `setModel()` rejects | `SetSessionModel{vendor_refused}` |
 | `set_permission_mode` | `setPermissionMode()` rejects | `SetSessionPermissionMode{vendor_refused}` |
 
