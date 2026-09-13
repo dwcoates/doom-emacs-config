@@ -4930,19 +4930,21 @@ entry per tick for the whole bring-up."
                   (error "boom"))
                 :type 'error))
 
-;;;; ---- Tests: a deferred quit is DELIVERED, not just left armed -----------
+;;;; ---- Tests: a deferred quit is AUDITED, and NEVER taken down ----------
 ;;
-;; Arming `quit-flag' is half of a deferral.  The other half is that the quit
-;; reaches somewhere the user can see it: an armed flag taken at a checkpoint
-;; inside a standing minibuffer's own recursive edit prints `Quit' and leaves
-;; the prompt up, which is what a real `C-g' did twice in the 2026-09-12
-;; sweep.  These cover the delivery.
+;; Arming `quit-flag' IS the deferral, whole.  The failure these cover is the
+;; 2026-09-13 one: a zero-delay timer that cleared the flag and then tried to
+;; abort the standing minibuffer itself, whose `abort-minibuffers' signalled
+;; `Not in a minibuffer' from the timer's own current buffer and whose error
+;; `timer-event-handler' reduced to a message.  The quit was dropped.  The
+;; invariant is that nothing armed out of a guarded section may write the
+;; flag at all.
 
-(ert-deftest agent-repl-test-deferred-quit-arms-a-delivery-for-the-command-loop ()
-  "A quit deferred out of a guarded section arms a delivery naming it."
+(ert-deftest agent-repl-test-deferred-quit-arms-an-audit-for-the-command-loop ()
+  "A quit deferred out of a guarded section arms an audit naming it."
   ;; Arrange
   (let ((armed nil))
-    (cl-letf (((symbol-function 'agent-repl--deferred-quit-arm-delivery)
+    (cl-letf (((symbol-function 'agent-repl--deferred-quit-arm-audit)
                (lambda (context) (push context armed))))
       ;; Act
       (agent-repl-test--quit-deferred-p
@@ -4951,126 +4953,91 @@ entry per tick for the whole bring-up."
     ;; Assert
     (should (equal armed '("uds-filter")))))
 
-(ert-deftest agent-repl-test-deferred-quit-arms-no-delivery-without-a-quit ()
-  "No quit means no delivery -- the guard is inert on the ordinary path."
+(ert-deftest agent-repl-test-deferred-quit-arms-no-audit-without-a-quit ()
+  "No quit means no audit -- the guard is inert on the ordinary path."
   ;; Arrange
   (let ((quit-flag nil)
         (armed nil))
-    (cl-letf (((symbol-function 'agent-repl--deferred-quit-arm-delivery)
+    (cl-letf (((symbol-function 'agent-repl--deferred-quit-arm-audit)
                (lambda (context) (push context armed))))
       ;; Act
       (agent-repl--with-deferred-quit "uds-filter" t))
     ;; Assert
     (should-not armed)))
 
-(ert-deftest agent-repl-test-deferred-quit-delivery-is-armed-on-a-zero-delay-timer ()
-  "Delivery goes through a timer: the one context that reaches a waiting read."
+(ert-deftest agent-repl-test-deferred-quit-audit-is-armed-on-a-zero-delay-timer ()
+  "The audit goes through a timer: the first Lisp context after the section."
   ;; Arrange
   (let ((scheduled nil))
     (cl-letf (((symbol-function 'run-at-time)
                (lambda (delay repeat function &rest args)
                  (setq scheduled (list delay repeat function args)))))
       ;; Act
-      (agent-repl--deferred-quit-arm-delivery "uds-filter"))
-    ;; Assert
-    (should (equal scheduled
-                   (list 0 nil #'agent-repl--deferred-quit-deliver '("uds-filter"))))))
-
-(ert-deftest agent-repl-test-deferred-quit-delivery-does-nothing-when-the-flag-is-down ()
-  "A quit the command loop already honoured is not delivered a second time."
-  ;; Arrange
-  (let ((quit-flag nil)
-        (aborted nil))
-    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'abort-minibuffers) (lambda () (setq aborted t))))
-      ;; Act
-      (agent-repl--deferred-quit-deliver "uds-filter")
+      (agent-repl--deferred-quit-arm-audit "uds-filter")
       ;; Assert
-      (should-not aborted))))
+      (should (equal scheduled
+                     (list 0 nil #'agent-repl--deferred-quit-audit
+                           '("uds-filter")))))))
 
-(ert-deftest agent-repl-test-deferred-quit-delivery-aborts-a-standing-minibuffer ()
-  "A quit owed while a prompt stands aborts the prompt, which is what C-g means."
+(ert-deftest agent-repl-test-deferred-quit-audit-leaves-an-armed-quit-armed ()
+  "THE INVARIANT: a quit still owed when the audit runs is still owed after."
+  ;; Act / Assert -- the shared recipe stands in for the C-g already pressed.
+  (should (eq t (agent-repl-test--with-pending-quit
+                  (agent-repl--deferred-quit-audit "webview-precreate-drain")
+                  quit-flag))))
+
+(ert-deftest agent-repl-test-deferred-quit-audit-leaves-an-unarmed-flag-down ()
+  "A quit already honoured before the audit is not re-armed by it."
   ;; Arrange
-  (let ((aborted nil))
-    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'abort-minibuffers) (lambda () (setq aborted t))))
+  (let ((quit-flag nil))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
       ;; Act
-      (agent-repl-test--with-pending-quit
-        (agent-repl--deferred-quit-deliver "uds-filter")))
+      (agent-repl--deferred-quit-audit "webview-precreate-drain"))
     ;; Assert
-    (should aborted)))
+    (should-not quit-flag)))
 
-(ert-deftest agent-repl-test-deferred-quit-delivery-unwinds-every-minibuffer-level ()
-  "`abort-minibuffers' is preferred: `abort-recursive-edit' peels one level."
-  ;; Arrange
-  (let ((called nil))
-    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'abort-minibuffers) (lambda () (push 'all called)))
-              ((symbol-function 'abort-recursive-edit) (lambda () (push 'one called))))
-      ;; Act
-      (agent-repl-test--with-pending-quit
-        (agent-repl--deferred-quit-deliver "uds-filter")))
-    ;; Assert
-    (should (equal called '(all)))))
-
-(ert-deftest agent-repl-test-deferred-quit-delivery-falls-back-on-an-older-emacs ()
-  "Without `abort-minibuffers', the prompt is still aborted, one level at a time."
-  ;; Arrange
-  (let ((called nil))
-    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'abort-minibuffers) nil)
-              ((symbol-function 'abort-recursive-edit) (lambda () (push 'one called))))
-      ;; Act
-      (agent-repl-test--with-pending-quit
-        (agent-repl--deferred-quit-deliver "uds-filter")))
-    ;; Assert
-    (should (equal called '(one)))))
-
-(ert-deftest agent-repl-test-deferred-quit-delivery-signals-a-quit-with-no-prompt-standing ()
-  "With nothing to abort the quit is signalled as itself, exactly as C-g does."
-  ;; Arrange
-  (let ((signalled nil))
-    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () nil)))
-      ;; Act -- the `condition-case' sits OUTSIDE the shared recipe, which
-      ;; contains errors and deliberately not quits.
-      (setq signalled (condition-case nil
-                          (progn (agent-repl-test--with-pending-quit
-                                   (agent-repl--deferred-quit-deliver "uds-filter"))
-                                 nil)
-                        (quit t))))
-    ;; Assert
-    (should signalled)))
-
-(ert-deftest agent-repl-test-deferred-quit-delivery-takes-the-flag-down ()
-  "The flag is consumed BY BEING HONOURED, so no later checkpoint re-takes it."
-  ;; Arrange
-  (let ((observed 'unset))
-    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'abort-minibuffers) #'ignore))
-      ;; Act
-      (agent-repl-test--with-pending-quit
-        (agent-repl--deferred-quit-deliver "uds-filter")
-        (setq observed quit-flag)))
-    ;; Assert
-    (should (eq observed nil))))
-
-(ert-deftest agent-repl-test-deferred-quit-delivery-records-the-delivery ()
-  "A delivered quit is explainable from the canonical log alone."
+(ert-deftest agent-repl-test-deferred-quit-audit-records-a-quit-still-owed ()
+  "A still-armed quit is explainable from the canonical log alone."
   ;; Arrange
   (let ((logged nil))
     (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
-              ((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'abort-minibuffers) #'ignore))
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       ;; Act
       (agent-repl-test--with-pending-quit
-        (agent-repl--deferred-quit-deliver "uds-filter")))
+        (agent-repl--deferred-quit-audit "webview-precreate-drain")))
     ;; Assert
     (should (seq-find (lambda (line)
-                        (and (string-match-p "deferred-quit" line)
-                             (string-match-p "delivering" line)
-                             (string-match-p "uds-filter" line)))
+                        (string-match-p "still armed for the command loop" line))
                       logged))))
+
+(ert-deftest agent-repl-test-deferred-quit-audit-records-a-quit-already-honoured ()
+  "An unarmed flag at audit time is recorded as honoured, not as silence."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (logged nil))
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act
+      (agent-repl--deferred-quit-audit "webview-precreate-drain"))
+    ;; Assert
+    (should (seq-find (lambda (line)
+                        (string-match-p "honoured before the audit ran" line))
+                      logged))))
+
+(ert-deftest agent-repl-test-deferred-quit-audit-does-not-escape-as-an-error ()
+  "From a timer the audit must not signal: `timer-event-handler' eats errors."
+  ;; Arrange -- exactly how a timer runs it: current buffer is NOT a minibuffer.
+  (let ((raised nil))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (setq raised (agent-repl-test--with-pending-quit
+                     (condition-case err
+                         (progn (save-current-buffer
+                                  (agent-repl--deferred-quit-audit "uds-filter"))
+                                nil)
+                       (error err)))))
+    ;; Assert
+    (should-not raised)))
 
 ;;;; ---- Tests: a workspace's directory is canonicalized to its registry key ----
 

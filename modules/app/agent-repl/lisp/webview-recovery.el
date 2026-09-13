@@ -25,7 +25,7 @@
 (require 'url-util)
 
 (declare-function agent-repl--with-deferred-quit "agent-repl-core")
-(declare-function agent-repl--deferred-quit-arm-delivery "agent-repl-core" (context))
+(declare-function agent-repl--deferred-quit-arm-audit "agent-repl-core" (context))
 (declare-function agent-repl--log"agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -272,11 +272,16 @@ bringing it forward is what precedes one.  A `C-g' landing here found
 Emacs BUSY rather than waiting in `read_char', so Emacs could only arm
 `quit-flag'; the flag was then taken at a checkpoint inside this tick,
 which sits inside a standing minibuffer's own recursive edit, so the echo
-area said `Quit' and the prompt stayed up.  That is the 2026-09-12 \"a
-real C-g did not dismiss the standing minibuffer\" finding, and it is why
-the tick runs under `agent-repl--with-deferred-quit\': the guard holds the
-quit off the tick AND hands it to the command loop afterwards, where it
-reaches the read the user aimed it at.
+area said `Quit' and the prompt stayed up.  That is why the tick runs
+under `agent-repl--with-deferred-quit\': the guard holds the quit off the
+tick and LEAVES IT ARMED, so Emacs's own input wait turns it into the
+`C-g' event the standing read aborts on.
+
+That guard is also what made the 2026-09-13 realtest 5-8 failures land
+HERE and nowhere else: only a run with a pending pre-creation runs a
+guarded section on the focus edge, and the delivery timer the guard used
+to arm was clearing the flag without honouring it.  See core.el's
+commentary.
 
 The mid-tick state this also protects is real on its own terms: the timer
 is cleared at the top and re-armed at the bottom, so a quit between them
