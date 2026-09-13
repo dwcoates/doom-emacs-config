@@ -469,6 +469,16 @@ func (d *KeyDriver) confirm(ctx context.Context, chord Chord, before InputMark,
 		}
 	}
 
+	// THE DIAGNOSTIC CAPTURE, IF THE CALLER ASKED FOR ONE, GOES HERE AND
+	// NOWHERE ELSE. This is the first instant the editor may be spoken to
+	// without turning the key in flight into an interrupt, and it is before any
+	// probe of this harness's own has run — so the capture describes the editor
+	// as the KEY found it, not as the confirmation left it. It cannot change
+	// the verdict: nothing below reads it.
+	if effect != nil && effect.AfterQuietWindow != nil {
+		effect.AfterQuietWindow(ctx)
+	}
+
 	for {
 		if effect != nil && effect.Observed != nil {
 			happened, err := effect.Observed(ctx)
