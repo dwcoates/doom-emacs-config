@@ -333,6 +333,20 @@ describe("shim runtime logging", () => {
     expect(persisted().map((record) => record.operation)).toContain("shim.logging.stderr-mirror");
   });
 
+  it("records the retirement at info, because a shim outliving its daemon is the design", async () => {
+    // Arrange: a shim whose daemon has gone, which is every daemon bounce.
+    const log = await configured();
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
+
+    // Act.
+    log.bindLog({ operation: "shim.test.epipe" }).debug({}, "after the daemon exited");
+
+    // Assert: the record stands, and it is not a warning about anything.
+    expect(
+      persisted().find((record) => record.operation === "shim.logging.stderr-mirror"),
+    ).toMatchObject({ level: "info" });
+  });
+
   it("keeps logging durably after the stderr mirror is retired", async () => {
     const log = await configured();
     const terminal = vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
