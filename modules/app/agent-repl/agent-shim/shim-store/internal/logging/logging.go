@@ -116,13 +116,13 @@ type Fields struct {
 	// database's write lock, and for a connection out of the pool — rather
 	// than running the statement.
 	//
-	// IT IS NOT AN OPTIONAL EXTRA. Every transaction this store opens is
-	// BEGIN IMMEDIATE, reads included, so one producer's batch queues behind
-	// any other caller's transaction for as long as busy_timeout allows. A
-	// record reporting only the total said "this statement took 3.8 seconds"
+	// IT IS NOT AN OPTIONAL EXTRA. The store serializes its own writes, so one
+	// producer's batch queues on the write slot behind every other writer's.
+	// A record reporting only the total said "this statement took 3.8 seconds"
 	// about a statement that ran in microseconds behind a 3.8 second queue,
 	// and an operator reading it went looking for a missing index that was
 	// never missing. Split out, the same record says which of the two it was.
+	// (Reads have their own pool and queue on nothing, so they report zero.)
 	LockWait  time.Duration
 	Rows      int64
 	Threshold time.Duration
