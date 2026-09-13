@@ -395,7 +395,9 @@ lands in another run's card.
   (`UnownedSpoolWindow`, replaceable with `--unowned-spool-window`) its bytes
   are INGESTED as unparsed residue naming the spool as their source, and IT
   KEEPS BEING TAILED so nothing appended later is lost either. The demotion is
-  stated per file (WARNING) only for a spool that appeared while the sidecar was
+  stated per file (INFO, owner ruling 4 of 2026-09-13 — the aged unowned spool
+  is this mandate WORKING, not a fault, so the record states a fact and never
+  raises a warning) only for a spool that appeared while the sidecar was
   already running; a spool that was ALREADY on disk when the reader first
   scanned is startup backlog and is summarized instead (see "Startup catch-up").
 
@@ -427,8 +429,8 @@ leveled, arriving through three more paths.
   `catchup-summary` operation, carrying the class in `reason`, the count in
   `repeat_count`, and the oldest item's age in the message
   (`spool_unclaimed`, `workspace_unattributed`, and the LOST arms
-  `went_silent`/`swept_up`/`file_vanished`). A steady-state item warns per item
-  exactly as before.
+  `went_silent`/`swept_up`/`file_vanished`). A steady-state item is stated per
+  item exactly as before, at that item's own level (`hold-expired` is INFO).
 - NOTHING IS SILENCED. Every catch-up item is still stated, dropped to DEBUG, so
   the per-file detail is retrievable behind the summary, and the totals always
   ride the summary. The owner still sees "405 spools expired" — just not as 405
