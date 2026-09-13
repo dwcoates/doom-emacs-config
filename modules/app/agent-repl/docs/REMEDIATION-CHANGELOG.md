@@ -11,6 +11,10 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+## Log sweep, sidecar (2026-09-13)
+
+- sidecar: an observed vendor `api_error` is recorded at INFO, not WARN — the request was the vendor's and this conversion succeeded whole (log sweep, 80 `api-error` warns)
+
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
 - store/realtest harness: `bin/store-reset.sh` boots the kept-alive services out and bootstraps them back from their installed plists instead of killing them and waiting for a pid launchd immediately replaces, and a realtest run no longer copies `events.db` aside (store growth investigation, three 180s reset timeouts and 4.6GB of `realtest-bak` clones)
