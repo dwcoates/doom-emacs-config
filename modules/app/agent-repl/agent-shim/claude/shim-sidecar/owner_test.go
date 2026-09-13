@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"path/filepath"
 	"testing"
@@ -555,6 +556,45 @@ func TestAStopForAClaimedWorkflowSpoolStatesNoConverterGap(t *testing.T) {
 
 	// Act.
 	h := claimedWorkflowSpoolWithAStoppedRun(t, store, "w1nogap", "toolu_workflow_nogap", "workflow work\n")
+
+	// Assert.
+	h.requireNone(t, "cancel-terminal", "error")
+}
+
+// TestAShutdownWithdrawingTheTerminalWriteIsNotAStoreFailure closes the last
+// storeWrite caller that had no interrupted() guard. Its two siblings in
+// cycle.go return quietly when the shutdown withdraws a write — storeWrite has
+// already stated the one INFO `shutdown` record — while this one accused the
+// store of a failure it did not have.
+func TestAShutdownWithdrawingTheTerminalWriteIsNotAStoreFailure(t *testing.T) {
+	// Arrange: a stop ready to settle, against a store that never answers.
+	store := &fakeStore{}
+	h, spool := unownedResidueSpool(t, store, "b1withdrawn", "work\n")
+	h.sc.TaskStopped("b1withdrawn")
+	shutdown, cancel := context.WithCancel(context.Background())
+	h.sc.shutdown = shutdown
+	// Wedged only NOW: the setup's own reads must commit normally.
+	entered := make(chan struct{})
+	store.entered = entered
+	store.writeWedged = true
+	applied := make(chan struct{})
+
+	// Act: the terminal write wedges, then the shutdown withdraws it.
+	go func() {
+		defer close(applied)
+		h.sc.TaskSpawned("b1withdrawn", "toolu_withdrawn", "", spool, false, "/workspace", "workspace-id", "session-1")
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the store was never asked to write, so nothing is wedged to withdraw")
+	}
+	cancel()
+	select {
+	case <-applied:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the withdrawn write never returned")
+	}
 
 	// Assert.
 	h.requireNone(t, "cancel-terminal", "error")
