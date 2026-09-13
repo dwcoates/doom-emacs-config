@@ -224,6 +224,17 @@ type ExitInfo struct {
 	// Attribution is the kill this daemon asked for, nil when the process died
 	// on its own. This is how a supervised kill is told from a crash.
 	Attribution *KillAttribution
+	// Inferred reports that NO wait status was ever observed and the departure
+	// was CONCLUDED from evidence — a refused socket over a free workspace
+	// lock, or a socket already gone when the daemon went to stop it.
+	//
+	// It exists because an adopted shim is not this daemon's child, so there is
+	// no exit to decode and Code carries the sentinel -1 rather than a status.
+	// Read as a status, that sentinel says "signalled death" about a shim this
+	// daemon asked to leave and that left exactly as asked. Nothing else may
+	// set it: an inferred departure NOBODY asked for is still a death, and
+	// still loud.
+	Inferred bool
 }
 
 // KillAttribution records who asked for a kill and why, so a supervised stop
