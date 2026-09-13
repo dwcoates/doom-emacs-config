@@ -21,15 +21,21 @@ type OpenedPage struct {
 	PinSeq uint64
 }
 
-// beginRead opens the transaction a PURE READ runs in.
+// beginRead opens the transaction a PURE READ runs in, ON THE READ POOL.
 //
-// IT IS DEFERRED, AND THAT IS THE WHOLE POINT. The DSN carries
-// `_txlock=immediate` because every transaction that WRITES must take the write
-// lock at BEGIN rather than try to upgrade into it (see AGENTS.md). A read that
-// writes nothing has no upgrade to fear and no business holding the write lock
-// at all: WAL exists so readers never contend with the writer, and an
+// IT IS A DIFFERENT POOL, AND THAT IS THE STRUCTURAL HALF. `_txlock` is a
+// property of the CONNECTION, so the write handle's `immediate` reached every
+// transaction opened on it — a page repaint queued for the write lock a
+// producer held, and could be refused by it. The read pool's DSN carries no
+// `_txlock` and carries `query_only(true)`, so the write lock is not reachable
+// from it and a write attempted on it is refused by SQLite outright.
+//
+// IT IS ALSO DEFERRED, AND THAT IS THE PER-CALL HALF. A read that writes
+// nothing has no upgrade to fear and no business holding the write lock at all:
+// WAL exists so readers never contend with the writer, and an
 // `sql.TxOptions{ReadOnly: true}` makes the driver issue a plain `BEGIN`, which
-// takes only a read snapshot.
+// takes only a read snapshot. Kept alongside the pool rather than replaced by
+// it: it states the intent at the call site, and it costs nothing.
 //
 // A READ THAT TOOK THE WRITE LOCK COULD BE REFUSED BY A BUSY ONE, AND WAS. The
 // owner's store answered two `OpenAgentSession` calls with
@@ -44,7 +50,7 @@ type OpenedPage struct {
 // database as the lines it answers with — which is the property that comment
 // asks for, and it never needed the write lock to get it.
 func (d *DB) beginRead(ctx context.Context) (*sql.Tx, error) {
-	return d.sql.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	return d.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 }
 
 // OpenPage answers one agent's opening page.
@@ -186,7 +192,7 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 	const querySQL = `SELECT position, write_seq, frame FROM entry
 	  WHERE book_agent_id = ? AND kind = ? AND write_seq > ?
 	  ORDER BY write_seq ASC`
-	rows, err := d.sql.QueryContext(ctx, querySQL, agentID, kindPageLine, afterSeq)
+	rows, err := d.read.QueryContext(ctx, querySQL, agentID, kindPageLine, afterSeq)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "replaying lines of book %q", agentID))
 	}

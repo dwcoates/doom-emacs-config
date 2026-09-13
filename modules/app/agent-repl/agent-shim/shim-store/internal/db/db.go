@@ -60,8 +60,17 @@ func nowMillis() int64 { return time.Now().UnixMilli() }
 
 // DB wraps the SQLite handle plus the store's logger.
 type DB struct {
+	// sql is the WRITE handle, and it is capped at ONE connection: the store
+	// is the single writer process, so a second write connection could only
+	// ever contend with the first. Every statement on it goes through
+	// beginWrite (writer.go).
 	sql *sql.DB
-	log *logging.Logger
+	// read is the READ pool, on its own DSN: no `_txlock=immediate`, and
+	// `query_only(true)` so the kernel of SQLite itself refuses a write on it.
+	// Reads never queue behind a write, structurally, rather than by every
+	// read path remembering to pass sql.TxOptions{ReadOnly: true}.
+	read *sql.DB
+	log  *logging.Logger
 	// slowQuery is the duration past which a completed statement is reported
 	// at warn. Non-positive disables the reporting entirely, which only an
 	// explicit Options caller can ask for.
@@ -175,12 +184,12 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// contending writer is an immediate SQLITE_BUSY rather than a wait. Taking
 	// the lock at BEGIN removes the upgrade entirely.
 	//
-	// A PURE READ OPTS BACK OUT, through db.beginRead. _txlock is a property of
-	// the CONNECTION, so it reached the read path too and made a page repaint
-	// queue for the write lock a producer was holding — and be refused by it.
-	// See beginRead in read.go for why a deferred read still pins its watch in
-	// the page's own snapshot.
-	dsn := "file:" + path + "?" + url.Values{
+	// A PURE READ NEVER TOUCHES THIS DSN — it runs on the read pool below.
+	// _txlock is a property of the CONNECTION, so this one reached the read
+	// path too and made a page repaint queue for the write lock a producer was
+	// holding — and be refused by it. See beginRead in read.go for why a
+	// deferred read still pins its watch in the page's own snapshot.
+	writeDSN := "file:" + path + "?" + url.Values{
 		"_pragma": {
 			"journal_mode(WAL)",
 			"busy_timeout(5000)",
@@ -190,12 +199,38 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		"_txlock": {"immediate"},
 	}.Encode()
 
+	// THE READ POOL IS A SEPARATE POOL ON A SEPARATE DSN, and that is the
+	// structural half of "a read never waits on a write".
+	//
+	// `_txlock` is a property of the CONNECTION, so one DSN carrying
+	// `immediate` made EVERY transaction a writer — a page repaint queued for
+	// the write lock a producer held, and could be refused by it, which is
+	// precisely the failure WAL is chosen to remove. `beginRead`'s
+	// sql.TxOptions{ReadOnly: true} fixed that per call site, and a per-call-
+	// site fix is one forgotten option away from coming back. A pool the write
+	// lock is not reachable from cannot forget.
+	//
+	// `query_only(true)` is the second half: SQLite itself refuses a write
+	// statement on this pool, so a read path that grew one is a hard error at
+	// the first attempt rather than a silent second writer. It is applied LAST
+	// so the pragmas ahead of it are not themselves refused, and
+	// `journal_mode` is not among them — the journal mode is a durable
+	// property of the FILE that the write handle already established, and
+	// setting it needs write access this pool does not have.
+	readDSN := "file:" + path + "?" + url.Values{
+		"_pragma": {
+			"busy_timeout(5000)",
+			"foreign_keys(ON)",
+			"query_only(true)",
+		},
+	}.Encode()
+
 	clock := opts.Now
 	if clock == nil {
 		clock = nowMillis
 	}
 
-	d, err := openAt(dsn, path, log, opts, clock)
+	d, err := openAt(writeDSN, readDSN, path, log, opts, clock)
 	if err == nil {
 		return finishOpen(d, log, path, opts)
 	}
@@ -246,7 +281,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 			"removing the superseded database failed: %v", removeErr)
 		return nil, removeErr
 	}
-	d, err = openAt(dsn, path, log, opts, clock)
+	d, err = openAt(writeDSN, readDSN, path, log, opts, clock)
 	if err != nil {
 		return nil, err
 	}
@@ -264,15 +299,20 @@ func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, err
 
 // openAt opens the handle and brings it to SchemaVersion, closing the handle if
 // either step fails so the caller may remove the file underneath it.
-func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
+func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
 	monotonic := opts.Clock
 	if monotonic == nil {
 		monotonic = time.Now
 	}
-	sqldb, err := sql.Open("sqlite", dsn)
+	sqldb, err := sql.Open("sqlite", writeDSN)
 	if err != nil {
 		return nil, storagef(err, "opening %q", path)
 	}
+	// ONE WRITE CONNECTION, ENFORCED BY THE POOL AS WELL AS BY THE GATE. The
+	// gate (writer.go) is what a queued caller waits on and what reports its
+	// wait; this is what makes a second write connection unrepresentable, so
+	// nothing that bypassed the gate could quietly recreate the contention.
+	sqldb.SetMaxOpenConns(1)
 	if err := sqldb.Ping(); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, storagef(err, "pinging %q", path)
@@ -299,6 +339,22 @@ func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() in
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, err
 	}
+
+	// THE READ POOL OPENS AFTER THE SCHEMA EXISTS, because `query_only` would
+	// refuse the DDL that creates it and because a pool opened against a file
+	// this binary is about to unlink would hold a handle to the discarded
+	// inode.
+	readdb, err := sql.Open("sqlite", readDSN)
+	if err != nil {
+		sqldb.Close() //nolint:errcheck // the open already failed
+		return nil, storagef(err, "opening the read pool on %q", path)
+	}
+	if err := readdb.Ping(); err != nil {
+		readdb.Close() //nolint:errcheck // the open already failed
+		sqldb.Close()  //nolint:errcheck // the open already failed
+		return nil, storagef(err, "pinging the read pool on %q", path)
+	}
+	d.read = readdb
 	return d, nil
 }
 
@@ -326,12 +382,29 @@ func removeDatabaseFiles(path string) error {
 }
 
 // Close closes the underlying handle.
+// BOTH POOLS ARE CLOSED, AND NEITHER FAILURE IS SWALLOWED. The read pool is
+// closed first because it holds only snapshots; the write handle is closed
+// even if that fails, so a read-pool fault cannot leave the writer's file
+// handle open, and the first error is the one reported.
 func (d *DB) Close() error {
 	d.log.LogVerbose(logging.Fields{Operation: "store.db.close"}, "closing SQLite database")
+	var firstErr error
+	if d.read != nil {
+		if err := d.read.Close(); err != nil {
+			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
+				"closing the SQLite read pool failed: %v", err)
+			firstErr = storagef(err, "closing the read pool")
+		}
+	}
 	if err := d.sql.Close(); err != nil {
 		d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
 			"closing SQLite database failed: %v", err)
-		return storagef(err, "closing the database")
+		if firstErr == nil {
+			firstErr = storagef(err, "closing the database")
+		}
+	}
+	if firstErr != nil {
+		return firstErr
 	}
 	d.log.Log(logging.Fields{Operation: "store.db.close"}, "SQLite database closed")
 	return nil
