@@ -218,7 +218,10 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 		} else {
 			// A spool that appeared while the sidecar was already running and then
 			// aged out unclaimed is a newly-arising condition, stated per file.
-			s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Level: "warn"}).
+			// IT IS INFO, NOT WARN (owner ruling 4, 2026-09-13): the mandated
+			// behavior — ingest as residue, keep tailing, never drop — is working
+			// exactly as specified, so the record states a fact, not a fault.
+			s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Level: "info"}).
 				Log("spool unclaimed after %s: its bytes are ingested as unparsed residue naming the spool as their source, and it keeps being tailed", s.held.window)
 		}
 	}

@@ -204,8 +204,8 @@ func TestStartupCatchUpSummarizesABacklogOfUnclaimedSpools(t *testing.T) {
 	if got := ctxInt(t, rec, "repeat_count"); got != 3 {
 		t.Fatalf("summary repeat_count = %d, want 3", got)
 	}
-	if got := len(h.opsAt(t, "hold-expired", "warn")); got != 0 {
-		t.Fatalf("catch-up stated %d per-spool hold-expiry warnings, want none", got)
+	if got := len(h.opsAt(t, "hold-expired", "info")); got != 0 {
+		t.Fatalf("catch-up stated %d per-spool hold-expiry records, want none", got)
 	}
 }
 
@@ -228,7 +228,7 @@ func TestABacklogSpoolIsDemotedAtDebugNotWarn(t *testing.T) {
 	}
 }
 
-func TestASpoolThatAppearsAfterCatchUpWarnsPerItem(t *testing.T) {
+func TestASpoolThatAppearsAfterCatchUpIsStatedPerItem(t *testing.T) {
 	// Arrange: the sidecar is already running when the spool appears.
 	h := newHarness(t, &fakeStore{})
 	if err := h.sc.beginCycle(); err != nil {
@@ -242,8 +242,9 @@ func TestASpoolThatAppearsAfterCatchUpWarnsPerItem(t *testing.T) {
 	h.advance(UnownedSpoolWindow)
 	h.sc.rescan()
 
-	// Assert: a newly-arising unclaimed spool is a per-file degradation.
-	h.requireOnce(t, "hold-expired", "warn")
+	// Assert: a newly-arising unclaimed spool is stated per file, at INFO —
+	// the mandated ingest-as-residue-and-keep-tailing behavior working.
+	h.requireOnce(t, "hold-expired", "info")
 	if got := len(h.opsAt(t, "catchup-summary", "")); got != 0 {
 		t.Fatalf("a steady-state spool produced %d catch-up summaries, want none", got)
 	}

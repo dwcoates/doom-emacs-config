@@ -35,7 +35,6 @@ import {
   HOLD_ACCEPTABLE_ARM,
   HOLD_ARMS,
   HOLD_CLASSIFICATION_ARMS,
-  HOLD_TRAY_HEADING,
   WORKSPACE_ID,
   assertCoversOneof,
   heldOfferItem,
@@ -79,13 +78,11 @@ describe("arm coverage", () => {
 });
 
 describe("the heading", () => {
-  it("draws no heading, though the daemon still composes one", async () => {
+  it("draws no counter over the cards, the heading being retired from the wire", async () => {
     // Arrange / Act
     await withTray({});
     // Assert
-    expect(harness.$('[data-component="hold-tray"]')?.textContent).not.toContain(
-      HOLD_TRAY_HEADING,
-    );
+    expect(harness.$('[data-component="hold-tray"]')?.textContent).not.toContain("held (");
   });
 });
 
