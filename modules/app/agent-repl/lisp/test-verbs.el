@@ -570,11 +570,11 @@ detects the absence and Emacs draws the refusal it sent."
                                :value (:cause (:arm :one-shot-policy-missing
                                                :value (:repository-root "/src/p"
                                                        :policy-dir "/src/p/.agent-repl/prompts"
-                                                       :missing-files ("oneshot-success-suffix.md"))))))))
+                                                       :missing-files ("oneshot-completion-directive.md"))))))))
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
-                            :prompt "ship it" :finish :self-merge)
+                            :prompt "ship it")
     (should (agent-repl-test-verbs--messaged-p
-             "create refused: /src/p states no one-shot policy -- write oneshot-success-suffix.md in /src/p/.agent-repl/prompts"))))
+             "create refused: /src/p states no one-shot policy -- write oneshot-completion-directive.md in /src/p/.agent-repl/prompts"))))
 
 (ert-deftest agent-repl-verbs-create-one-shot-policy-missing-is-recorded-as-a-warning ()
   "The refusal is recorded at the WARNING rung, which is what a durable sweep
@@ -589,7 +589,7 @@ for refused creates reads."
                                                            :policy-dir "/src/p/.agent-repl/prompts"
                                                            :missing-files nil)))))))
         (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
-                                :prompt "ship it" :finish :self-merge)))
+                                :prompt "ship it")))
     (should (member "warn" levels))))
 
 (ert-deftest agent-repl-verbs-create-one-shot-policy-missing-with-no-files-names-the-directory-alone ()
@@ -602,7 +602,7 @@ drawn beside it."
                                                        :policy-dir "/src/p/.agent-repl/prompts"
                                                        :missing-files nil)))))))
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
-                            :prompt "ship it" :finish :self-merge)
+                            :prompt "ship it")
     (should (agent-repl-test-verbs--messaged-p
              "create refused: /src/p states no one-shot policy -- write /src/p/.agent-repl/prompts"))))
 
@@ -821,8 +821,8 @@ branch -- so a `read-string' here would be a question the ruling removed."
         (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
                        (agent-repl-test-verbs--repo-ref)))))))
 
-(ert-deftest agent-repl-verbs-oneshot-self-merge-asks-no-repository ()
-  "The self-merge one-shot derives its repository instead of asking."
+(ert-deftest agent-repl-verbs-oneshot-asks-no-repository ()
+  "The one-shot derives its repository instead of asking."
   ;; Arrange.
   (let ((agent-repl-roster-view
          (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
@@ -831,37 +831,7 @@ branch -- so a `read-string' here would be a question the ruling removed."
                 ((symbol-function 'completing-read)
                  (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
         ;; Act.
-        (agent-repl-create-oneshot-self-merge nil)
-        ;; Assert.
-        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
-                       (agent-repl-test-verbs--repo-ref)))))))
-
-(ert-deftest agent-repl-verbs-oneshot-open-pr-asks-no-repository ()
-  "The queued-PR one-shot derives its repository instead of asking."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
-    (agent-repl-test-verbs--with nil
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission"))
-                ((symbol-function 'completing-read)
-                 (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
-        ;; Act.
-        (agent-repl-create-oneshot-open-pr nil)
-        ;; Assert.
-        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
-                       (agent-repl-test-verbs--repo-ref)))))))
-
-(ert-deftest agent-repl-verbs-oneshot-open-pr-reviewed-asks-no-repository ()
-  "The review-demanding one-shot derives its repository instead of asking."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
-    (agent-repl-test-verbs--with nil
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission"))
-                ((symbol-function 'completing-read)
-                 (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
-        ;; Act.
-        (agent-repl-create-oneshot-open-pr-reviewed nil)
+        (agent-repl-create-oneshot nil)
         ;; Assert.
         (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
                        (agent-repl-test-verbs--repo-ref)))))))
@@ -1074,46 +1044,20 @@ a contract breach and the user is owed the reason nothing came up."
     (should-not agent-repl-test-verbs--selected)
     (should (agent-repl-test-verbs--messaged-p "no directory to switch to"))))
 
-;;;; ---- Create: the one-shot form and both finish arms ----
+;;;; ---- Create: the one-shot form ----
 
-(ert-deftest agent-repl-verbs-oneshot-self-merge-sets-that-finish-arm ()
-  "The self-merge one-shot finishes through the ordinary merge engine."
+(ert-deftest agent-repl-verbs-oneshot-sends-no-finish ()
+  "A one-shot carries its prompt and NOTHING else: there is no finish choice,
+because what happens on completion is the repository's own directive."
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission")))
-      (agent-repl-create-oneshot-self-merge nil)
+      (agent-repl-create-oneshot nil)
       (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
                                  :value)))
-        (should (eq (plist-get (plist-get one-shot :finish) :arm) :self-merge))))))
-
-(ert-deftest agent-repl-verbs-oneshot-open-pr-sets-both-flags-true ()
-  "The queued one-shot PR is self-certified and added to the merge queue."
-  (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission")))
-      (agent-repl-create-oneshot-open-pr nil)
-      (let* ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
-                                  :value))
-             (finish (plist-get one-shot :finish)))
-        (should (eq (plist-get finish :arm) :open-pr))
-        (should (eq (plist-get (plist-get finish :value) :self-certified) t))
-        (should (eq (plist-get (plist-get finish :value) :add-to-merge-queue) t))))))
-
-(ert-deftest agent-repl-verbs-oneshot-open-pr-reviewed-states-both-flags-false ()
-  "The review-demanding PR states both flags FALSE rather than omitting them."
-  (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission")))
-      (agent-repl-create-oneshot-open-pr-reviewed nil)
-      (let ((finish (plist-get (plist-get (plist-get (agent-repl-test-verbs--request :create)
-                                                     :form)
-                                          :value)
-                               :finish)))
-        (should-not (plist-get (plist-get finish :value) :self-certified))
-        (should-not (plist-get (plist-get finish :value) :add-to-merge-queue))))))
+        (should (plist-get one-shot :prompt))
+        (should-not (plist-member one-shot :finish))))))
 
 (ert-deftest agent-repl-verbs-oneshot-carries-its-prompt ()
   "A one-shot IS its prompt, so the prompt travels as a UserSaid text block."
@@ -1121,7 +1065,7 @@ a contract breach and the user is owed the reason nothing came up."
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission")))
-      (agent-repl-create-oneshot-self-merge nil)
+      (agent-repl-create-oneshot nil)
       (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
                                  :value)))
         (should (equal (plist-get one-shot :prompt)
@@ -1136,7 +1080,7 @@ a contract breach and the user is owed the reason nothing came up."
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "   ")))
-      (should-error (agent-repl-create-oneshot-self-merge nil) :type 'user-error)
+      (should-error (agent-repl-create-oneshot nil) :type 'user-error)
       (should-not agent-repl-test-verbs--sent))))
 
 (ert-deftest agent-repl-verbs-oneshot-prefix-arg-picks-a-model ()
@@ -1146,7 +1090,7 @@ a contract breach and the user is owed the reason nothing came up."
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "commission"))
               ((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
-      (agent-repl-create-oneshot-self-merge t)
+      (agent-repl-create-oneshot t)
       (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "haiku")))))
 
 ;;;; ---- Repository selection ----
@@ -1483,26 +1427,6 @@ pause sent."
                               :blocks)))
       (should (equal (plist-get (plist-get (car blocks) :value) :text) "fix the flake")))))
 
-(ert-deftest agent-repl-verbs-create-one-shot-self-merge-is-an-empty-arm ()
-  "The `self_merge' finish arm carries nothing: the arm is the whole fact."
-  (agent-repl-test-verbs--with nil
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
-                            :prompt "land it" :finish :self-merge)
-    (let ((form (plist-get (agent-repl-test-verbs--request :create) :form)))
-      (should (equal (plist-get (plist-get form :value) :finish)
-                     (list :arm :self-merge :value nil))))))
-
-(ert-deftest agent-repl-verbs-create-one-shot-open-pr-states-false-explicitly ()
-  "`open_pr's two bools are plain bools: false is a VALUE, never an absence."
-  (agent-repl-test-verbs--with nil
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
-                            :prompt "land it" :finish :open-pr
-                            :self-certified nil :add-to-merge-queue nil)
-    (let* ((form (plist-get (agent-repl-test-verbs--request :create) :form))
-           (finish (plist-get (plist-get form :value) :finish)))
-      (should (equal (plist-get finish :value)
-                     (list :self-certified nil :add-to-merge-queue nil))))))
-
 (ert-deftest agent-repl-verbs-create-standard-wraps-a-merge-action-as-user-said ()
   "A standard form's pre-merge action rides as `UserSaid', not as bare text."
   (agent-repl-test-verbs--with nil
@@ -1566,13 +1490,6 @@ a plain workspace the caller never asked for."
   "A form arm the verb does not know is refused before anything is sent."
   (agent-repl-test-verbs--with nil
     (should-error (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :bogus)
-                  :type 'user-error)))
-
-(ert-deftest agent-repl-verbs-create-unknown-finish-refuses ()
-  "A finish arm the verb does not know is refused before anything is sent."
-  (agent-repl-test-verbs--with nil
-    (should-error (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
-                                          :prompt "p" :finish :bogus)
                   :type 'user-error)))
 
 ;;;; ---- Resolution and logging ----
