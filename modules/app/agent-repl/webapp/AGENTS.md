@@ -88,6 +88,7 @@ and are contract on the same terms:
 | `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` (absent on every settled, failed, interrupted or turnless prompt) | int-fix-bubble-wave |
 | `.held-right` class | every held-prompt card in the hold tray | — (the rail: a held prompt hangs where the `.bubble.user` it will become hangs) | owner ruling 1, 2026-09-13 |
 | `data-shown` | a sidebar row's expand chevron (`.chev`) | — (present exactly while the pointer is over the row, the keyboard focus is inside it, or the row's details are open; the chevron is `visibility: hidden` without it) | owner ruling 3, 2026-09-13 |
+| `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 
 ## Commands
 

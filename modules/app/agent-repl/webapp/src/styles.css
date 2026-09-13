@@ -5404,6 +5404,17 @@ body.draining #composer-input::placeholder {
   overflow-wrap: anywhere;
 }
 
+/* THE ACCOUNT CELL: the connectivity glyph and the account label, in that
+   order, as ONE cell of the strip (owner ruling 3, 2026-09-13). The glyph is
+   the account's own status indicator, so it stands CLOSER to the label than
+   two cells of the strip stand to each other — half the strip's gap — and the
+   pair is what a session-line reveal hangs under. */
+.topbar-account-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--topbar-cell-gap) / 2);
+}
+
 /* The connectivity glyph is a different CHARACTER per state and those
    characters do not share an advance width; boxed and centered so a state
    change moves the mark and nothing else. */

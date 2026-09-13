@@ -435,3 +435,36 @@ describe("the strip's geometry", () => {
     ]).toEqual(["start", "end"]);
   });
 });
+
+describe("the account cell", () => {
+  // RULING 3. The glyph qualifies the label, so it reads BEFORE it — and in
+  // the same cell, which is what makes the pair one thing to point at.
+  it("draws the connectivity glyph before the account label inside one cell", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const cell = drawTopbarView(view(), tc).querySelector(".topbar-account-cell");
+    // ASSERT
+    expect([...(cell?.children ?? [])].map((el) => el.className.split(" ")[0])).toEqual([
+      "topbar-connectivity",
+      "topbar-account",
+    ]);
+  });
+
+  it("stands the glyph closer to its label than two cells of the strip stand apart", () => {
+    expect(declaration(".topbar-account-cell", "gap")).toBe("calc(var(--topbar-cell-gap) / 2)");
+  });
+
+  // ONE ELEMENT MEANS ONE ANCHOR: the session line hangs under the pair.
+  it("anchors the session-line reveal on the pair rather than on the label alone", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const row = drawTopbarView(view(), tc);
+    // ASSERT
+    expect([
+      row.querySelector(".topbar-account-cell")?.getAttribute("data-reveal-anchor"),
+      row.querySelector(".topbar-account")?.getAttribute("data-reveal-anchor"),
+    ]).toEqual(["session", null]);
+  });
+});
