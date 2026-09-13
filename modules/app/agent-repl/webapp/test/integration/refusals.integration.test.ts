@@ -29,6 +29,7 @@ import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/
 import { startHarness, type Harness } from "./harness";
 import { ROOT_FEED, REFUSAL_FACTS, refusalArmsOf, type RpcName } from "./fake-daemon";
 import {
+  ACCOUNT_CONFIG_DIR,
   REFUSED_COMMAND,
   WORKSPACE_ID,
   activityRow,
@@ -637,11 +638,31 @@ const REFUSAL_SITES: RefusalSite[] = [
     before: async (h) => h.click(".topbar-mode"),
   },
   {
+    // THE PICK IS WHAT OPENS THE LOGIN, and the cell is where its refusal
+    // lands. The account cell's own click opens the options dropdown (owner
+    // ruling, 2026-09-13, `src/topbar/account.ts`); picking a root with no
+    // login succeeds and the client opens OpenLogin behind it, with the CELL
+    // as the control it passes — so the refusal draws on
+    // `.topbar-account-cell`, the element the reveal hangs under.
     name: "OpenLogin",
     rpc: "openLogin",
-    click: ".topbar-account",
-    site: ".topbar-account",
+    click: `[data-account-option="${ACCOUNT_CONFIG_DIR}"]`,
+    site: ".topbar-account-cell",
     arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView({ account: "loggedOut" })),
+    before: async (h) => {
+      await h.click(".topbar-account");
+    },
+  },
+  {
+    // SelectAccount's own refusals draw at the same cell, for the same reason.
+    name: "SelectAccount",
+    rpc: "selectAccount",
+    click: `[data-account-option="${ACCOUNT_CONFIG_DIR}"]`,
+    site: ".topbar-account-cell",
+    arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView({ account: "loggedOut" })),
+    before: async (h) => {
+      await h.click(".topbar-account");
+    },
   },
   {
     name: "OpenExternal",

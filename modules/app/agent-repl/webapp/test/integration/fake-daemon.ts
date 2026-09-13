@@ -94,6 +94,7 @@ import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/end
 import { AssignWorkspaceTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
+import { SelectAccountResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_account_pb";
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { AnswerHeldOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
 import { UpdateShutdownScheduleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_shutdown_schedule_pb";
@@ -1284,6 +1285,30 @@ export function createFakeDaemon(): FakeDaemon {
         return answerFor("setPermissionMode", SetPermissionModeResponseSchema, {
           result: { case: "success", value: {} },
         });
+      },
+      selectAccount(request) {
+        record("selectAccount", request);
+        // THE ANSWER IS READ OFF THE SERVED OPTIONS, never a constant.
+        // `SelectAccountSuccess.logged_in` is the client's cue to open that
+        // root's login flow, so a stub that always said one thing would make
+        // one of the two branches behind that cue untestable, and a root the
+        // view never offered is `unknown_account` exactly as the daemon has
+        // it — the client may only echo a `config_dir` it was served.
+        const option = topbars
+          .get(request.workspace?.id ?? "")
+          ?.account?.options.find((served) => served.configDir === request.configDir);
+        return answerFor(
+          "selectAccount",
+          SelectAccountResponseSchema,
+          option === undefined
+            ? { result: { case: "error", value: { cause: { case: "unknownAccount", value: {} } } } }
+            : {
+                result: {
+                  case: "success",
+                  value: { loggedIn: option.state.case === "loggedIn" },
+                },
+              },
+        );
       },
       async *watchFooter(request, context) {
         yield* footerSource(request, context.signal) as AsyncGenerator<WatchFooterResponse>;
