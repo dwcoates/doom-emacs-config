@@ -5024,6 +5024,109 @@ entry per tick for the whole bring-up."
                         (string-match-p "honoured before the audit ran" line))
                       logged))))
 
+(ert-deftest agent-repl-test-deferred-quit-requeue-clears-the-flag ()
+  "A prompt standing means the flag comes DOWN -- the quit is now an event."
+  ;; Arrange
+  (let ((unread-command-events nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act / Assert -- nil is "no quit left armed" from the shared recipe.
+      (should-not (agent-repl-test--quit-deferred-p
+                    (agent-repl--with-deferred-quit "webview-precreate-drain"
+                      (setq quit-flag t)))))))
+
+(ert-deftest agent-repl-test-deferred-quit-requeue-queues-the-quit-character ()
+  "The quit goes back into the input stream as the key the user pressed."
+  ;; Arrange
+  (let ((unread-command-events nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl-test--quit-deferred-p
+        (agent-repl--with-deferred-quit "webview-precreate-drain"
+          (setq quit-flag t))))
+    ;; Assert
+    (should (equal unread-command-events (list ?\C-g)))))
+
+(ert-deftest agent-repl-test-deferred-quit-requeue-uses-the-terminals-quit-char ()
+  "A user who moved their quit character gets THAT key back, not `C-g'."
+  ;; Arrange
+  (let ((unread-command-events nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'current-input-mode)
+               (lambda () (list nil nil nil ?\C-x)))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl-test--quit-deferred-p
+        (agent-repl--with-deferred-quit "webview-precreate-drain"
+          (setq quit-flag t))))
+    ;; Assert
+    (should (equal unread-command-events (list ?\C-x)))))
+
+(ert-deftest agent-repl-test-deferred-quit-requeue-records-the-requeue ()
+  "Which hand-off was taken is answerable from the canonical log alone."
+  ;; Arrange
+  (let ((unread-command-events nil)
+        (logged nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act
+      (agent-repl-test--quit-deferred-p
+        (agent-repl--with-deferred-quit "webview-precreate-drain"
+          (setq quit-flag t))))
+    ;; Assert
+    (should (seq-find (lambda (line) (string-match-p "requeued the quit" line))
+                      logged))))
+
+(ert-deftest agent-repl-test-deferred-quit-no-minibuffer-keeps-the-flag-armed ()
+  "With no prompt standing the command loop is the right taker, so nothing moves."
+  ;; Arrange
+  (let ((unread-command-events nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () nil))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act / Assert
+      (should (agent-repl-test--quit-deferred-p
+                (agent-repl--with-deferred-quit "uds-filter"
+                  (setq quit-flag t)))))))
+
+(ert-deftest agent-repl-test-deferred-quit-no-minibuffer-queues-nothing ()
+  "A `C-g' aimed at no prompt has no keymap to be requeued into."
+  ;; Arrange
+  (let ((unread-command-events nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () nil))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl-test--quit-deferred-p
+        (agent-repl--with-deferred-quit "uds-filter"
+          (setq quit-flag t))))
+    ;; Assert
+    (should-not unread-command-events)))
+
+(ert-deftest agent-repl-test-deferred-quit-without-a-quit-queues-nothing ()
+  "No quit means nothing is put back -- the guard is inert on the ordinary path."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (unread-command-events nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl--with-deferred-quit "webview-precreate-drain" t))
+    ;; Assert
+    (should-not unread-command-events)))
+
+(ert-deftest agent-repl-test-deferred-quit-audit-requeues-a-prompt-raised-since ()
+  "A prompt that went up between the section and the timer still gets the key."
+  ;; Arrange -- the flag survived the section because no prompt stood then.
+  (let ((unread-command-events nil))
+    (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl-test--with-pending-quit
+        (agent-repl--deferred-quit-audit "webview-precreate-drain")))
+    ;; Assert
+    (should (equal unread-command-events (list ?\C-g)))))
+
 (ert-deftest agent-repl-test-deferred-quit-audit-does-not-escape-as-an-error ()
   "From a timer the audit must not signal: `timer-event-handler' eats errors."
   ;; Arrange -- exactly how a timer runs it: current buffer is NOT a minibuffer.
