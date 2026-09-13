@@ -5383,7 +5383,8 @@ body.draining #composer-input::placeholder {
    label IS the warning — but it is not an error either: nothing has failed,
    something is missing. */
 .topbar-account.arm-loggedOut,
-.topbar-account.topbar-account-warn {
+.topbar-account.topbar-account-warn,
+.topbar-account-option-label.topbar-account-warn {
   color: var(--thinking);
 }
 
@@ -5527,6 +5528,7 @@ body.draining #composer-input::placeholder {
 
 /* Menu rows: full-width buttons that light on hover, delimited by the shared
    `.list-rows` rule rather than borders of their own. */
+.topbar-account-option,
 .topbar-model-option,
 .topbar-mode-option,
 .topbar-warning-row {
@@ -5543,10 +5545,18 @@ body.draining #composer-input::placeholder {
   padding: 0.4rem 0.7rem;
   cursor: pointer;
 }
+.topbar-account-option:hover,
 .topbar-model-option:hover,
 .topbar-mode-option:hover,
 .topbar-warning-row:hover {
   background: var(--border);
+}
+/* The root's own path under its address: the SECOND line of an account row,
+   dim for the same reason a model's description is — it identifies the row,
+   it is not what the reader is choosing by. */
+.topbar-account-option-dir {
+  color: var(--muted);
+  font-size: 0.9em;
 }
 .topbar-model-description {
   color: var(--muted);

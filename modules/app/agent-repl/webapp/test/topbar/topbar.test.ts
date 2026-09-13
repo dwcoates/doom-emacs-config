@@ -13,7 +13,12 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
   const base = create(TopbarViewSchema, {
     title: { text: "DWC/fix" },
     sessionLine: { text: "session abc" },
-    account: { state: { case: "loggedIn", value: { email: "a@b.test" } } },
+    account: {
+      state: { case: "loggedIn", value: { email: "a@b.test" } },
+      options: [
+        { configDir: "/root/.claude", current: true, state: { case: "loggedIn", value: { email: "a@b.test" } } },
+      ],
+    },
     connectivity: { tone: "green", glyph: "●", title: "connected" },
     modelSelector: { options: [{ model: { name: "opus" }, displayName: "Opus" }] },
     permissionModePicker: {
@@ -150,29 +155,47 @@ describe("drawTopbarView", () => {
     expect(drawn.querySelector(".topbar-warning-chip")).not.toBeNull();
   });
 
-  it("binds the session reveal to a logged-in chip", () => {
+  // THE CELL'S CLICK IS THE LOGIN OPTIONS, in both arms (owner ruling,
+  // 2026-09-13). It used to open the session line when logged in — a different
+  // fact, and usually an empty one — and the login overlay when logged out.
+  it("opens the account options from a logged-in cell", () => {
     const { host, tc } = topbarContext();
     host.append(drawTopbarView(view(), tc));
     host
       .querySelector(".topbar-account")!
       .dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(openPanel(host)?.textContent).toBe("session abc");
+    expect(openPanel(host)?.querySelector("[data-account-option]")).not.toBeNull();
   });
 
-  it("gives a logged-out chip the login, not the session reveal", () => {
+  it("opens the same options from a logged-out cell rather than the login itself", () => {
     // ARRANGE
     const openLogin = vi.fn();
     const { host, tc } = topbarContext(undefined, openLogin);
     host.append(
       drawTopbarView(
-        view({ account: create(TopbarViewSchema, { account: { state: { case: "loggedOut", value: {} } } }).account }),
+        view({
+          account: create(TopbarViewSchema, {
+            account: {
+              state: { case: "loggedOut", value: {} },
+              options: [{ configDir: "/root/.claude", current: true, state: { case: "loggedOut", value: {} } }],
+            },
+          }).account,
+        }),
         tc,
       ),
     );
     // ACT
     host.querySelector(".topbar-account")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // ASSERT
-    expect([openLogin.mock.calls.length, openPanel(host)]).toEqual([1, null]);
+    expect([openLogin.mock.calls.length, openPanel(host)?.querySelector("[data-account-option]")])
+      .toEqual([0, expect.anything()]);
+  });
+
+  it("keeps the session line on the title, which carries it in every account state", () => {
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarView(view(), tc));
+    host.querySelector(".topbar-title")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(openPanel(host)?.textContent).toBe("session abc");
   });
 
   it("refuses a view missing a required element message", () => {
@@ -252,7 +275,9 @@ describe("mountTopbar", () => {
     });
     const handle = mountTopbar(host, ctx, { openLogin: () => undefined, geometry: GEOMETRY });
     await settle();
-    host.querySelector(".topbar-account")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // The TITLE is the session line's anchor; the account cell's own click is
+    // the login options.
+    host.querySelector(".topbar-title")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // ACT
     await vi.advanceTimersByTimeAsync(50);
     await settle();
@@ -439,8 +464,8 @@ describe("the account cell", () => {
     expect(declaration(".topbar-account-cell", "gap")).toBe("calc(var(--topbar-cell-gap) / 2)");
   });
 
-  // ONE ELEMENT MEANS ONE ANCHOR: the session line hangs under the pair.
-  it("anchors the session-line reveal on the pair rather than on the label alone", () => {
+  // ONE ELEMENT MEANS ONE ANCHOR: the options hang under the pair.
+  it("anchors the account reveal on the pair rather than on the label alone", () => {
     // ARRANGE
     const { tc } = topbarContext();
     // ACT
@@ -449,7 +474,7 @@ describe("the account cell", () => {
     expect([
       row.querySelector(".topbar-account-cell")?.getAttribute("data-reveal-anchor"),
       row.querySelector(".topbar-account")?.getAttribute("data-reveal-anchor"),
-    ]).toEqual(["session", null]);
+    ]).toEqual(["account", null]);
   });
 });
 

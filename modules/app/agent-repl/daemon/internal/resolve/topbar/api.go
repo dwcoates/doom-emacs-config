@@ -37,6 +37,32 @@ import (
 	"claude-repld/internal/vocab"
 )
 
+// Account is the topbar's account cell: which root the session spends as, and
+// the whole set it may switch to.
+//
+// THE OPTIONS ARE NOT DERIVED FROM THE EMAIL. The cell's click is a dropdown
+// of the login options (owner ruling, 2026-09-13), and the resolver renders
+// exactly what it was handed — a cell whose options the daemon forgot draws
+// the empty reveal that ruling was about, and it draws it loudly rather than
+// inventing a one-row list from the current root.
+type Account struct {
+	// Email is the CURRENT root's signed-in address, empty when it is logged
+	// out.
+	Email string
+	// Options is every root the daemon knows, in the account package's order.
+	Options []AccountOption
+}
+
+// AccountOption is one root the session may switch to.
+type AccountOption struct {
+	// ConfigDir is the root's path — the echo token SelectAccount takes back.
+	ConfigDir string
+	// Email is that root's signed-in address, empty when it is logged out.
+	Email string
+	// Current marks the root the session spends as right now.
+	Current bool
+}
+
 // Naming is the workspace's title and session line, from WSM.
 type Naming struct {
 	// Slug is the workspace's short name.
@@ -111,10 +137,10 @@ type Resolver interface {
 	// the order served, reporting false before a session has stated one.
 	// SetModel validates against what was served here.
 	ModelCatalog(ws ids.WorkspaceID) ([]string, bool)
-	// SetAccount installs the account line read from the config root's
-	// .claude.json. An EMPTY email is the logged-out arm, which is a drawn
-	// warning rather than a blank label.
-	SetAccount(ws ids.WorkspaceID, email string)
+	// SetAccount installs the account cell: the root in force and EVERY root
+	// the daemon knows beside it. An EMPTY email is the logged-out arm, which
+	// is a drawn warning rather than a blank label.
+	SetAccount(ws ids.WorkspaceID, account Account)
 	// SetDetachedUnmodeled installs the live detached-unmodeled items, one
 	// warning each. Nothing on the shim's streams announces them —
 	// DetachableWork has no unmodeled arm — so the daemon states the set.

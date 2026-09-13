@@ -453,6 +453,11 @@ type fakeAccounts struct {
 	// moved records MoveTranscript's account switches; moveErr fails them.
 	moved   []movedTranscript
 	moveErr error
+	// roster is every root the daemon knows, which is what the topbar's
+	// account cell offers. nil takes the routed root alone, so a fixture that
+	// does not care still gets a one-root machine.
+	roster    []account.Account
+	rosterErr error
 }
 
 type movedTranscript struct{ Path, ToConfigDir, WorkspaceDir string }
@@ -468,6 +473,22 @@ func (a *fakeAccounts) Read(_ context.Context, configDir string) (account.Accoun
 		return account.Account{}, a.readErr
 	}
 	return account.Account{ConfigDir: configDir, Email: a.email, LoggedIn: a.email != ""}, nil
+}
+
+// Roster answers every root the fixture holds, defaulting to the routed one
+// alone.
+func (a *fakeAccounts) Roster(ctx context.Context) ([]account.Account, error) {
+	if a.rosterErr != nil {
+		return nil, a.rosterErr
+	}
+	if a.roster != nil {
+		return a.roster, nil
+	}
+	routed, err := a.Read(ctx, a.configDir)
+	if err != nil {
+		return nil, err
+	}
+	return []account.Account{routed}, nil
 }
 
 func (a *fakeAccounts) FindTranscript(context.Context, string, string) (account.Transcript, error) {
@@ -1163,6 +1184,9 @@ type fixture struct {
 	// order. The STRIP has its own cold-gate state, and it is retired by the
 	// same answer that retires the footer's.
 	topbarColdGates []topbar.ColdGate
+	// topbarAccounts is every account cell the topbar seam was handed, in
+	// order.
+	topbarAccounts []topbar.Account
 
 	// running is what the freeness probe answers.
 	running Running
@@ -1210,7 +1234,7 @@ func newFixture(t *testing.T) *fixture {
 
 	verbs, err := New(Deps{
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Sessions: f.fleet,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -1346,6 +1370,8 @@ type stubTopbar struct {
 	parked *[]bool
 	// coldGates records every cold-gate state the verbs stated, in order.
 	coldGates *[]topbar.ColdGate
+	// accounts records every account cell the verbs installed, in order.
+	accounts *[]topbar.Account
 }
 type stubHolds struct{ holds.Resolver }
 
@@ -1373,8 +1399,12 @@ func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 
 func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
 func (stubTopbar) SetNaming(ids.WorkspaceID, topbar.Naming)      {}
-func (stubTopbar) SetAccount(ids.WorkspaceID, string)            {}
-func (stubHolds) SetWorkspaceDir(ids.WorkspaceID, string) error  { return nil }
+func (s stubTopbar) SetAccount(_ ids.WorkspaceID, account topbar.Account) {
+	if s.accounts != nil {
+		*s.accounts = append(*s.accounts, account)
+	}
+}
+func (stubHolds) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
 
 // asRefusal fails the test unless err is a refusal naming arm.
 func asRefusal(t *testing.T, err error, arm string) *Refusal {

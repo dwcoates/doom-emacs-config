@@ -251,3 +251,94 @@ func TestSetModelRelaysAShimRefusalByName(t *testing.T) {
 		})
 	}
 }
+
+// TestSelectAccountRelaysTheEchoedRootToTheVerb pins that the option's own
+// config_dir travels to the verb UNCHANGED: it is an echo token, and the
+// handler neither rewrites nor re-derives a path.
+func TestSelectAccountRelaysTheEchoedRootToTheVerb(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.selectAccountLoggedIn = true
+
+	// Act.
+	resp, err := h.Client.SelectAccount(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectAccountRequest{
+			Workspace: ref(), ConfigDir: "/Users/dev/.claude-work",
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectAccount: %v", err)
+	}
+	if h.Verbs.selectAccountDir != "/Users/dev/.claude-work" {
+		t.Fatalf("verb root = %q, want the echoed option", h.Verbs.selectAccountDir)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+}
+
+// TestSelectAccountSaysWhenTheChosenRootIsLoggedOut pins the cue the client
+// opens the login flow on: the switch happened, and the root holds no login.
+func TestSelectAccountSaysWhenTheChosenRootIsLoggedOut(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.selectAccountLoggedIn = false
+
+	// Act.
+	resp, err := h.Client.SelectAccount(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectAccountRequest{
+			Workspace: ref(), ConfigDir: "/Users/dev/.claude-work",
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectAccount: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want a success for a root the daemon knows", resp.Msg.GetResult())
+	}
+	if resp.Msg.GetSuccess().GetLoggedIn() {
+		t.Fatalf("logged_in = true for a root with no login")
+	}
+}
+
+// TestSelectAccountMapsTheUnknownAccountArm pins that only a root the daemon
+// actually knows may be chosen.
+func TestSelectAccountMapsTheUnknownAccountArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.selectAccountErr = &workspace.Refusal{
+		Arm: workspace.ArmUnknownAccount, Reason: "no such root",
+	}
+
+	// Act.
+	resp, err := h.Client.SelectAccount(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectAccountRequest{
+			Workspace: ref(), ConfigDir: "/Users/dev/.claude-elsewhere",
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectAccount: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownAccount() == nil {
+		t.Fatalf("result = %v, want unknown_account", resp.Msg.GetResult())
+	}
+}
+
+// TestSelectAccountRefusesABlankRoot pins that a request naming no root is a
+// validation failure rather than an arm: no option the daemon served is blank.
+func TestSelectAccountRefusesABlankRoot(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.SelectAccount(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectAccountRequest{Workspace: ref()}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
+}

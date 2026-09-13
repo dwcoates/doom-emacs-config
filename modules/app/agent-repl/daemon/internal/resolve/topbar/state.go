@@ -156,6 +156,9 @@ type wsState struct {
 
 	// email is the logged-in account, empty when the root is logged out.
 	email string
+	// accountOptions is every root the cell offers, in the order the daemon
+	// served them.
+	accountOptions []AccountOption
 	// accountSet reports whether the config root has been read at all.
 	accountSet bool
 

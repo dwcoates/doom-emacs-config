@@ -5,9 +5,15 @@
  * THE ACCOUNT LABEL IS THE WARNING (topbar.proto). A session whose config root
  * is logged out cannot run a turn, so `logged_out` draws the words "logged out"
  * in the warning register rather than a blank — a blank reads as "loading",
- * which is the one thing it is not — and clicking it is how the reader fixes
- * it: it opens the login overlay. A logged-in chip opens the session line
- * instead, which is the identity detail the strip has no room for.
+ * which is the one thing it is not.
+ *
+ * THE CELL'S CLICK IS THE LOGIN OPTIONS, in both arms (owner ruling,
+ * 2026-09-13). It used to open the session line when logged in, which is a
+ * different fact and usually an empty one, and the login overlay when logged
+ * out; the dropdown `./account.ts` draws answers both — every root the daemon
+ * knows, and picking one switches the workspace and then opens that root's
+ * login when it has none. The session line stays on the TITLE, which carries
+ * it in every account state.
  *
  * THE CONNECTIVITY INDICATOR IS FULLY RESOLVED: the daemon sends the glyph
  * character, the tooltip, and a tone NAME from the shared vocabulary. This end
@@ -37,8 +43,11 @@ export function asAnchor(element: HTMLElement, name: string): HTMLElement {
 
 /**
  * The account chip. THE ARM IS THE STATE.
+ *
+ * It takes no context: the cell's CLICK is the options dropdown's
+ * (`bindAccountReveal`), so the drawing has nothing to call.
  */
-export function drawTopbarAccount(u: TopbarAccount, tc: TopbarContext): HTMLElement {
+export function drawTopbarAccount(u: TopbarAccount): HTMLElement {
   const state = requireCase(u.state, "TopbarAccount.state");
   log.debug("drawing the topbar account", {
     operation: "topbar.account",
@@ -57,49 +66,20 @@ export function drawTopbarAccount(u: TopbarAccount, tc: TopbarContext): HTMLElem
       button.title = state.value.email;
       return button;
     case "loggedOut":
-      // THE LABEL IS THE WARNING, and the click is the remedy. The warning
-      // CLASS carries it for the eye: the chip is drawn in the warning
-      // register (brief: "logged out ... in the WARNING state — orange"), and
-      // the class is what the stylesheet paints from.
+      // THE LABEL IS THE WARNING. The warning CLASS carries it for the eye:
+      // the chip is drawn in the warning register (brief: "logged out ... in
+      // the WARNING state — orange"), and the class is what the stylesheet
+      // paints from. The remedy is one row down: the cell's dropdown offers
+      // this root among the others, and choosing it opens its login.
       button.classList.add("topbar-account-warn");
       button.textContent = "logged out";
-      button.title = "this session's account root has no login; click to log in";
-      button.addEventListener("click", () => {
-        log.info("the reader opened the login from the account chip", {
-          operation: "topbar.account-login-clicked",
-        });
-        // The chip is the call site: its refusal renders on the chip.
-        tc.openLogin(button);
-      });
+      button.title = "this session's account root has no login; click to choose an account";
       return button;
     default: {
       const other: { case: string } = state;
       return unreachableArm("TopbarAccount.state", other.case);
     }
   }
-}
-
-/**
- * Wire the logged-in chip's session-line reveal.
- *
- * Separate from the chip's own drawing because the session line is a DIFFERENT
- * field of the view: the chip draws the account, the reveal draws the session,
- * and only the assembled strip has both.
- */
-export function bindSessionReveal(
-  button: HTMLElement,
-  line: TopbarSessionLine | undefined,
-  tc: TopbarContext,
-): void {
-  if (line === undefined) return;
-  asAnchor(button, "session");
-  const body = (): HTMLElement => drawTopbarSessionLine(line);
-  // Registered as it is drawn, so a push that arrives while the reveal is open
-  // re-opens it with THIS push's session line rather than the previous one's.
-  tc.reveals.register("session", "session", body);
-  button.addEventListener("click", () => {
-    tc.reveals.toggle("session", "session", body);
-  });
 }
 
 /**
