@@ -1,10 +1,13 @@
 package discover
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -812,5 +815,68 @@ func TestTheRootAccessorsReportTheGlobbedSpelling(t *testing.T) {
 				t.Fatalf("%s = %q, want the resolved spelling %q (the caller passed %q)", tc.name, got, want, link)
 			}
 		})
+	}
+}
+
+// TestTransientReadFailureNamesOnlyTheErrnosARetryAnswers is the whole of the
+// deferred/unreadable decision, so it is tested as the table it is.
+//
+// THE ERRNO IS THE SUBJECT, NEVER THE MESSAGE TEXT: "too many open files in
+// system" is one platform's rendering of ENFILE and is not a contract. Each
+// case wraps the errno the way ReadMeta wraps it, because that wrapping is what
+// the classifier has to see through.
+func TestTransientReadFailureNamesOnlyTheErrnosARetryAnswers(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "ENFILE, the system had no descriptor", err: syscall.ENFILE, want: true},
+		{name: "EMFILE, this process had no descriptor", err: syscall.EMFILE, want: true},
+		{name: "EINTR, the call was interrupted", err: syscall.EINTR, want: true},
+		{name: "EAGAIN, momentarily unavailable", err: syscall.EAGAIN, want: true},
+		{name: "EACCES, a permission this process does not have", err: syscall.EACCES, want: false},
+		{name: "ENOENT, the file is not there", err: syscall.ENOENT, want: false},
+		{name: "a parse failure, which no retry answers", err: errors.New("parsing agent meta: invalid character"), want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: wrapped exactly as ReadMeta wraps what os.ReadFile returns.
+			wrapped := fmt.Errorf("reading agent meta %s: %w", "/tmp/agent-x.meta.json", tc.err)
+
+			// Act.
+			got := transientReadFailure(wrapped)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("transientReadFailure(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAMetaThatWillNeverBecomeReadableIsStillAnError guards the fix from
+// swallowing the class it was carved out of. A meta this process may not read is
+// not a read a retry answers, and it keeps the loud record.
+func TestAMetaThatWillNeverBecomeReadableIsStillAnError(t *testing.T) {
+	// Arrange.
+	d, base, _, logs := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	meta := filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json")
+	writeRaw(t, meta, []byte(`{"toolUseId":"toolu_abc"}`))
+	if err := os.Chmod(meta, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(meta, 0o644) })
+	if _, err := os.ReadFile(meta); err == nil {
+		t.Skip("this filesystem or user ignores mode 000, so no permanent read failure can be arranged")
+	}
+
+	// Act.
+	d.Scan()
+
+	// Assert.
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "discover-meta", "error")
+	if got := ctxString(t, rec, "reason"); got != holdMetaUnreadable {
+		t.Fatalf("reason = %q, want %q: a permission failure is not a deferred read", got, holdMetaUnreadable)
 	}
 }
