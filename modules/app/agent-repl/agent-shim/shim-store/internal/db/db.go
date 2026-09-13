@@ -42,7 +42,7 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // mono reads the DB's monotonic clock — the one every measured duration is
 // taken from. A zero-value DB (only constructible inside this package, by a
@@ -100,6 +100,14 @@ type DB struct {
 	// uses to observe a QUEUED writer — the state the gate exists to create —
 	// without sleeping for one. Nil in production; nothing reads it there.
 	queuedForWrite func()
+	// ledgerRetention is how far behind a file's committed cursor a write_ledger
+	// row must fall before the sweep may remove it. Non-positive keeps
+	// everything. See prune.go.
+	ledgerRetention int64
+	// afterPruneBatch, when set, is called after each sweep batch has committed
+	// AND given the write slot back. It is the seam a test uses to prove the
+	// sweep does not hold the slot across the whole sweep. Nil in production.
+	afterPruneBatch func()
 	// budgetMu guards budgets, which holds one rolling window of over-budget
 	// verdicts per statement family. Every producer's rpc runs on its own
 	// goroutine against this one DB, so the windows are shared state.
@@ -124,6 +132,12 @@ type Options struct {
 	// the slow-query elapsed time and the write gate's queue wait. Zero value
 	// means time.Now.
 	Clock func() time.Time
+	// LedgerRetentionBytes is how far behind a file's committed cursor a
+	// write_ledger row must fall before the sweep removes it. Zero falls back
+	// to DefaultLedgerRetentionBytes; NEGATIVE disables the sweep, which is how
+	// a caller says "keep every row" without the zero value meaning it by
+	// accident.
+	LedgerRetentionBytes int64
 }
 
 // Open opens (creating if absent) the store database at path with WAL enabled
@@ -325,6 +339,10 @@ func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, c
 	if bulkPerRow == 0 {
 		bulkPerRow = DefaultBulkPerRow
 	}
+	ledgerRetention := opts.LedgerRetentionBytes
+	if ledgerRetention == 0 {
+		ledgerRetention = DefaultLedgerRetentionBytes
+	}
 	d := &DB{
 		sql:        sqldb,
 		log:        log,
@@ -334,6 +352,8 @@ func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, c
 		now:        clock,
 		clock:      monotonic,
 		writeGate:  make(chan struct{}, 1),
+
+		ledgerRetention: ledgerRetention,
 	}
 	if err := d.ensureSchema(context.Background(), path); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
@@ -501,13 +521,24 @@ CREATE TABLE cursor (
   updated_at_ms INTEGER NOT NULL
 );
 
+-- write_ledger answers "has this write_id already been applied?" and is
+-- RETAINED ONLY AS LONG AS SOMEBODY CAN STILL ASK. source_file_id and
+-- source_offset are the batch's own cursor_advance — the file the rows were
+-- read from and the offset the producer's NEXT read starts at, which is above
+-- every offset the batch covered. They are what lets the sweep decide a row is
+-- further behind its file's committed cursor than the sidecar's boot rewind can
+-- ever reach. NULL for a write with no file behind it (stream plane, or a batch
+-- that advanced no cursor), and a NULL row is never pruned. See prune.go.
 CREATE TABLE write_ledger (
-  write_id      TEXT    PRIMARY KEY,
-  upsert_key    TEXT    NOT NULL,
-  write_seq     INTEGER NOT NULL,
-  applied_at_ms INTEGER NOT NULL
+  write_id       TEXT    PRIMARY KEY,
+  upsert_key     TEXT    NOT NULL,
+  write_seq      INTEGER NOT NULL,
+  applied_at_ms  INTEGER NOT NULL,
+  source_file_id TEXT,
+  source_offset  INTEGER
 );
 CREATE INDEX write_ledger_upsert_key ON write_ledger(upsert_key);
+CREATE INDEX write_ledger_source     ON write_ledger(source_file_id, source_offset);
 
 CREATE TABLE schema_meta (version INTEGER NOT NULL);
 `
