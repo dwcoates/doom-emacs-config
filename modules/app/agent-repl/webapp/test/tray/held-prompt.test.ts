@@ -121,6 +121,27 @@ describe("drawHeldPrompt identity", () => {
     expect(card.getAttribute("data-hold")).toBe("none");
   });
 
+  it("hangs the card on the prompt bubble's own right rail", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.classList.contains("held-right")).toBe(true);
+  });
+
+  it("keeps the right rail on a card wearing a hold frame", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "sched-9" } } }),
+      tc,
+    );
+    // Assert
+    expect(card.classList.contains("held-right")).toBe(true);
+  });
+
   it("draws the words the user typed", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);

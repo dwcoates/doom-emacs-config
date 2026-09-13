@@ -1137,9 +1137,10 @@ pre {
    child of its `.feed-item` wrapper — a plain block, not the feed's flex row
    — so an `align-self` on it is inert; a fit-content block with one fixed
    margin and one auto margin is what actually flushes it to a rail. The
-   parked queued cards below now ride this same fit-content, one-fixed-one-
-   auto-margin placement (see `.queued-card`), hugging the LEFT rail exactly
-   as the assistant response does. Every bubble reserves
+   parked held-prompt cards below ride this same fit-content, one-fixed-one-
+   auto-margin placement (see `.held-right`), hugging the RIGHT rail exactly
+   as this prompt bubble does, because that is what they are about to become.
+   Every bubble reserves
    its 0.3px border box up front, so a turn's final response gaining the
    green (or amber async) state border on completion recolors 0.3px that
    were already laid out rather than reflowing the feed under a reader
@@ -2147,15 +2148,11 @@ pre {
    opposite of the user bubble's saturated fill. The dash is drawn in the
    very --user blue the live bubble fills with, so even parked the card reads
    as the user's own prompt held back rather than a foreign chrome. It fits
-   its own text and hugs the LEFT rail at the agent column, exactly as the
-   assistant response bubble does (see `.bubble.assistant`): a short queued
-   message renders a small card flush with the response's left edge and no
-   wider than the response's rightward cap, never a full-width block. */
+   its own text; WHICH RAIL it hangs on is `.held-right`'s to say, in the hold
+   tray's own section below, because that is a statement about whose words
+   these are and not about how a parked card is framed. */
 .queued-card {
   width: fit-content;
-  max-width: var(--agent-bubble-cap);
-  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
-  margin-right: auto;
   border: 1px dashed var(--user);
   border-radius: 8px;
   background: var(--card);
@@ -4050,26 +4047,24 @@ body.draining #composer-input::placeholder {
 
 /* ---- hold tray (src/tray) ---------------------------------------------- */
 
-/* The tray's own heading, composed daemon-side. Quiet: it labels a region the
-   reader is scrolling past, not a section they came for. */
-.hold-tray-heading {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--muted);
-  letter-spacing: 0.03em;
-  padding: 0.4rem 0 0.3rem;
+/* THE HELD PROMPT HANGS ON THE PROMPT RAIL (owner ruling 1, 2026-09-13). A
+   held prompt is the user's own words on their way to becoming a
+   `.bubble.user`, so it sits on the side that bubble sits on and obeys that
+   bubble's width rule — the same 60% cap and the same half-leftover right
+   margin, so a released prompt does not jump rails as it is released. It used
+   to hug the agent's LEFT rail, which said the wrong thing about whose words
+   these are. Only the rail changes: the parked frame, fill, opacity and
+   type are `.queued-card`'s and are untouched. */
+.queued-card.held-right {
+  max-width: 60%;
+  margin-left: auto;
+  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
 }
+
 /* The items list. Delimited by the one shared `.list-rows` rule, so a held
    prompt is separated from the next exactly as a footer panel's rows are. */
 .hold-tray-items > * + * { padding-top: 0.5rem; }
 .hold-tray-items > * { padding-bottom: 0.5rem; }
-/* AN EMPTY TRAY IS A VALUE, drawn rather than collapsed away: the reader can
-   see that nothing is held instead of inferring it from a gap. */
-.hold-tray-empty {
-  font-size: 0.8rem;
-  color: var(--muted);
-  font-style: italic;
-}
 
 /* The ticking queued-at age, trailing the badge. Tabular so the number does
    not shuffle the badge sideways once a second. */

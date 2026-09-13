@@ -12,14 +12,15 @@
  * The one thing that must survive that is the ticker subscriptions the cards
  * open for their queued-at ages, which is what `TrayContext.onDispose` is for.
  *
- * AN EMPTY LIST IS A VALUE, not an absence: the heading still draws (the
- * daemon composed it, and it is the daemon's to compose) with a quiet empty
- * line beneath it. The host itself collapses to nothing only when the stream
- * has pushed nothing at all.
+ * THE HEADING IS UNDRAWN (owner ruling 2, 2026-09-13). The daemon still
+ * composes `DaemonHoldTray.heading` and the tray still REQUIRES it — a tray
+ * that omits it is malformed exactly as it always was — but nothing puts it on
+ * screen: the cards say what is held, and a "held (2)" counter over two visible
+ * cards is a second answer to a question the cards already answer. Whether the
+ * field survives on the wire is an owner/proto follow-up, not this layer's.
  */
 import { WatchDaemonHoldsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_holds_pb";
 import type {
-  DaemonHoldHeading,
   DaemonHoldItem,
   DaemonHoldTray,
 } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
@@ -69,8 +70,11 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
           disposers.push(fn);
         },
       };
+      // An EMPTY tray draws NOTHING, so the host is emptied rather than given
+      // a region: `#hold-tray:empty` is what collapses the space, and it only
+      // matches a host with no children at all.
       const drawn = drawDaemonHoldTray(tray, tc);
-      host.replaceChildren(drawn);
+      host.replaceChildren(...(drawn === null ? [] : [drawn]));
     },
   });
 
@@ -84,50 +88,42 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
   };
 }
 
-/** The tray, whole: the daemon's heading over the held things in order. */
-export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElement {
+/**
+ * The tray, whole: the held things, in the order the daemon served them —
+ * or `null` when nothing is held.
+ *
+ * AN EMPTY TRAY DRAWS NOTHING (owner ruling 3, 2026-09-13). Not a heading, not
+ * a "nothing held" line, not an empty region: the answer to "what is the daemon
+ * holding for you" when it is holding nothing is silence, and the region only
+ * appears when cards arrive. `null` rather than an empty element, because
+ * `#hold-tray:empty` collapses the region only while the host has NO children,
+ * so an empty wrapper would still pay layout.
+ */
+export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElement | null {
   const path = "DaemonHoldTray";
   log.debug("drawing the hold tray", {
     operation: "tray.draw",
     context: { items: u.items.length },
   });
 
+  // The heading is REQUIRED and UNDRAWN: the daemon owes it, so its absence is
+  // still malformed, and ruling 2 says nothing draws it.
+  requireMessage(u.heading, `${path}.heading`);
+
+  if (u.items.length === 0) return null;
+
   const region = document.createElement("div");
   region.className = "hold-tray";
-  region.appendChild(
-    drawDaemonHoldHeading(requireMessage(u.heading, `${path}.heading`), `${path}.heading`),
-  );
 
   const list = document.createElement("div");
   // The shared delimiter class: the tray's rows are delimited exactly as a
   // topbar dropdown's and an expanded footer panel's are.
   list.className = "hold-tray-items list-rows";
-  if (u.items.length === 0) {
-    // AN EMPTY TRAY IS A MEANINGFUL VALUE. It draws collapsed but present, so
-    // the reader can see that nothing is held rather than infer it from a gap.
-    const empty = document.createElement("div");
-    empty.className = "hold-tray-empty";
-    empty.setAttribute("data-empty", "");
-    empty.textContent = "nothing held";
-    list.appendChild(empty);
-  }
   for (const [index, item] of u.items.entries()) {
     list.appendChild(drawDaemonHoldItem(item, tc, `${path}.items[${index}]`));
   }
   region.appendChild(list);
   return region;
-}
-
-/** The heading, composed by the daemon, drawn verbatim. */
-export function drawDaemonHoldHeading(u: DaemonHoldHeading, path: string): HTMLElement {
-  log.debug("drawing the hold tray heading", {
-    operation: "tray.heading",
-    context: { path },
-  });
-  const heading = document.createElement("div");
-  heading.className = "hold-tray-heading";
-  heading.textContent = u.text;
-  return heading;
 }
 
 /**

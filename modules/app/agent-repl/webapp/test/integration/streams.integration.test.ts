@@ -93,8 +93,10 @@ const STREAM_CASES: StreamCase[] = [
   {
     name: "WatchDaemonHolds",
     rpc: "watchDaemonHolds",
+    // The heading is undrawn (owner ruling 2), so the marker rides the one
+    // thing the tray does draw: the held prompt's own words.
     push: (fake, marker) =>
-      fake.setTray(WORKSPACE_ID, holdTray({ heading: marker, items: [heldPromptItem()] })),
+      fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ text: marker })] })),
     selector: '[data-component="hold-tray"]',
     drawn: (marker) => marker,
   },

@@ -107,19 +107,25 @@ const tray = (items: DaemonHoldItem[], heading = "held (2)"): DaemonHoldTray =>
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("drawDaemonHoldTray", () => {
-  it("draws the daemon's heading verbatim", () => {
-    const drawn = drawDaemonHoldTray(tray([], "held (3)"), trayContext());
-    expect(drawn.querySelector(".hold-tray-heading")?.textContent).toBe("held (3)");
+  it("draws no heading node at all", () => {
+    // Arrange / Act
+    const drawn = drawDaemonHoldTray(tray([promptItem("t1")], "held (3)"), trayContext());
+    // Assert
+    expect(drawn?.textContent).not.toContain("held (3)");
   });
 
-  it("draws the empty tray as a value rather than a gap", () => {
+  it("draws nothing at all for an empty tray", () => {
+    // Arrange / Act
     const drawn = drawDaemonHoldTray(tray([]), trayContext());
-    expect(drawn.querySelector("[data-empty]")?.textContent).toBe("nothing held");
+    // Assert
+    expect(drawn).toBeNull();
   });
 
-  it("draws no empty line once something is held", () => {
+  it("draws the region once something is held", () => {
+    // Arrange / Act
     const drawn = drawDaemonHoldTray(tray([promptItem("t1")]), trayContext());
-    expect(drawn.querySelector("[data-empty]")).toBeNull();
+    // Assert
+    expect(drawn?.classList.contains("hold-tray")).toBe(true);
   });
 
   it("keeps the served display order", () => {
@@ -127,7 +133,7 @@ describe("drawDaemonHoldTray", () => {
       tray([promptItem("t1"), promptItem("t2")]),
       trayContext(),
     );
-    const turns = [...drawn.querySelectorAll("[data-held-turn]")].map((node) =>
+    const turns = [...(drawn?.querySelectorAll("[data-held-turn]") ?? [])].map((node) =>
       node.getAttribute("data-held-turn"),
     );
     expect(turns).toEqual(["t1", "t2"]);
@@ -135,7 +141,7 @@ describe("drawDaemonHoldTray", () => {
 
   it("delimits its rows with the one shared list rule", () => {
     const drawn = drawDaemonHoldTray(tray([promptItem("t1")]), trayContext());
-    expect(drawn.querySelector(".hold-tray-items")?.classList.contains("list-rows")).toBe(true);
+    expect(drawn?.querySelector(".hold-tray-items")?.classList.contains("list-rows")).toBe(true);
   });
 
   it("refuses a tray with no heading", () => {
@@ -196,6 +202,21 @@ describe("mountHoldTray", () => {
     const handle = mountHoldTray(host, ctx);
     await settle();
     expect(ticker.subscribers()).toBe(1);
+    handle.dispose();
+  });
+
+  it("leaves the host with no children at all when the tray is empty", async () => {
+    // Arrange
+    const host = document.createElement("section");
+    const ctx = streamingContext(async function* () {
+      yield tray([promptItem("t1")]);
+      yield tray([]);
+    });
+    // Act
+    const handle = mountHoldTray(host, ctx);
+    await settle();
+    // Assert
+    expect(host.childElementCount).toBe(0);
     handle.dispose();
   });
 

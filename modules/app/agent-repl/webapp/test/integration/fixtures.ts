@@ -1908,7 +1908,7 @@ export function holdTray(init?: { heading?: string; items?: HoldItemInit[] }): D
   });
 }
 
-/** The fake daemon's default tray: heading present, nothing held. */
+/** The fake daemon's default tray: heading present, nothing held — so it draws nothing. */
 export const emptyTray = (): DaemonHoldTray => holdTray({ items: [] });
 
 // ---------------------------------------------------------------------------
