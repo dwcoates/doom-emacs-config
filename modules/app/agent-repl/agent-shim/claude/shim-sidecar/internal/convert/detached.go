@@ -93,6 +93,29 @@ func (c *Converter) BashExited(at Attribution, run, output string, omitted uint6
 	})
 }
 
+// BashKilled converts the spool's `[killed]` terminator into the run's terminal.
+//
+// A KILL IS AN ENDING, NOT A LOSS. The wrapper wrote the line, so the run's own
+// file says it ended — which is why this is the COMPLETED arm carrying the
+// `killed` termination and never `interrupted{lost}`: we did not stop seeing
+// it, we read how it stopped. It is not `by_user` either: the wrapper's line
+// names no actor, and a run the harness killed for its own reasons is not a
+// person's decision.
+func (c *Converter) BashKilled(at Attribution, run, output string, omitted uint64) *storev1.StoreEntry {
+	c.log.With(at.ctxFor("bash-killed")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
+		Log("[killed] observed on disk; the run ends on evidence rather than on a silence timeout, with no status the shell reported")
+	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: spoolOutput(output, omitted),
+				Termination: &conversationv1.AgentBashTermination{
+					How: &conversationv1.AgentBashTermination_Killed{Killed: &conversationv1.AgentBashKilled{}},
+				},
+			}},
+		}},
+	})
+}
+
 // BashLost converts a run we STOPPED BEING ABLE TO SEE into its terminal.
 //
 // THE CAUSE IS `lost`, AND THE ARM IS HOW WE CONCLUDED IT. Landing 3 gave
