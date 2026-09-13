@@ -5,6 +5,12 @@ you typing it** — a merge-conflict repair brief, a workspace's first message,
 the routing classifier's question. They live here, as plain text, so you can
 change what the system says without editing source or rebuilding anything.
 
+**This directory is doom's own policy, not everyone's.** These files are the
+one-shot and merge policy of the ONE repository this checkout lives in. Every
+other repository states its own in `.agent-repl/prompts/` at its main checkout
+root, in this same format, and does not inherit these — see
+`../docs/ONE-SHOT-POLICY.md`.
+
 ## The contract
 
 **Edit freely.** Reword, restructure, add constraints, delete paragraphs. The
