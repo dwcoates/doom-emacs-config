@@ -137,7 +137,13 @@ type client struct {
 	exit chan ExitInfo
 	dead chan struct{}
 
-	// standDown latches the moment a KillSession is asked of this shim.
+	// standDown latches the moment THIS DAEMON asks this shim to go: a
+	// KillSession, or a Kill of the process itself.
+	//
+	// BOTH VERBS ARM IT, because both are teardowns this daemon ordered. Only
+	// the rpc did, so a teardown that went straight to the process — Forget
+	// and Nuke stand a session down through `Fleet.Stop`, which calls Kill —
+	// left every consumer reading an ordered departure as an unasked one.
 	//
 	// A SHIM ENDS ITS PROCESS ON KillSession -- the real one and the fake one
 	// both do -- so the supervised liveness stream breaking afterwards is this
@@ -281,10 +287,28 @@ func (c *client) Occupy(holder string) (func(), error) {
 // zombie per abandoned kill.
 func (c *client) Kill(ctx context.Context, attr KillAttribution) error {
 	c.mu.Lock()
-	switch {
-	case c.detached:
+	if c.detached {
 		c.mu.Unlock()
 		return ErrDetached
+	}
+	// THE LATCH IS ARMED BEFORE ANYTHING IS ENDED, and by the PROCESS kill and
+	// not only by KillSession.
+	//
+	// A kill is by construction a teardown THIS DAEMON ordered, so every side
+	// that later sees the departure — the liveness monitor, the redialer, the
+	// adopted-death witness — must read it as ordinary. Only KillSession armed
+	// it, so a teardown that goes straight to the process armed nothing:
+	// Forget stands a session down through `Fleet.Stop`, which calls Kill, and
+	// forgetting a live ADOPTED workspace therefore recorded
+	// `daemon.shimclient.exit` ERROR "adopted shim is gone" plus two
+	// `daemon.shimclient.redial` WARNs for a stand-down the daemon itself
+	// ordered and the shim performed exactly as asked.
+	//
+	// It is armed before the branches below because a shim that is already
+	// gone, and an adopted one with no child handle, are both still departures
+	// this daemon asked for.
+	c.standDown.Store(true)
+	switch {
 	case c.exited:
 		c.mu.Unlock()
 		c.log.Debug("daemon.shimclient.kill", "process already gone", dlog.Context{
@@ -440,8 +464,9 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 				"workspace_id": string(c.ws), "uds": c.udsPath, "actor": attr.Actor,
 			})
 			c.publishExit(ExitInfo{
-				Code:   -1,
-				Stderr: "adopted shim: the socket was already gone when the daemon went to stop it",
+				Code:     -1,
+				Inferred: true,
+				Stderr:   "adopted shim: the socket was already gone when the daemon went to stop it",
 			})
 			return nil
 		}
@@ -715,7 +740,7 @@ func (c *client) publishExit(info ExitInfo) {
 		ctx["actor"] = info.Attribution.Actor
 		ctx["reason"] = info.Attribution.Reason
 		c.log.Info("daemon.shimclient.exit", "supervised shim stopped as asked", ctx)
-	} else if c.standDown.Load() && info.Code == 0 && info.Signal == "" {
+	} else if c.standDown.Load() && (info.Inferred || (info.Code == 0 && info.Signal == "")) {
 		// THE SHIM ENDS ITS OWN PROCESS ON KillSession. Every graceful
 		// stand-down in this daemon asks before it signals, so the ordinary
 		// case is that the shim is already gone by the time anything would
@@ -725,11 +750,18 @@ func (c *client) publishExit(info ExitInfo) {
 		// teardown the daemon itself ordered and the shim performed exactly
 		// as asked.
 		//
-		// THE THREE CONDITIONS ARE ALL REQUIRED. A shim that was never asked
-		// to stand down, one that exits nonzero, and one that was signalled
-		// all reach the loud branch below unchanged: those are deaths however
-		// the teardown was ordered, and the whole point is telling them apart.
-		c.log.Info("daemon.shimclient.exit", "the shim exited cleanly after the stand-down it was asked for", ctx)
+		// THE CONDITIONS ARE ALL REQUIRED. A shim that was never asked to
+		// stand down, one that exits nonzero, and one that was signalled all
+		// reach the loud branch below unchanged: those are deaths however the
+		// teardown was ordered, and the whole point is telling them apart.
+		//
+		// AN INFERRED DEPARTURE HAS NO STATUS TO JUDGE. An adopted shim is not
+		// this daemon's child, so `Code` carries the -1 sentinel rather than a
+		// wait status, and reading that sentinel as a signalled death reported
+		// every ordered adopted teardown as a crash. `Inferred` says the
+		// evidence is a vanished socket and nothing else; with no ask behind
+		// it, it is still a death and still loud.
+		c.log.Info("daemon.shimclient.exit", "the shim left after the stand-down it was asked for", ctx)
 	} else {
 		ctx["stand_down_asked"] = c.standDown.Load()
 		c.log.Error("daemon.shimclient.exit", "shim died", ctx)
@@ -997,6 +1029,18 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 		})
 		next, err := c.redial(ctx)
 		if err != nil {
+			// THE LATCH IS RE-READ HERE, and that is not the same read as the
+			// one above. A stand-down asked WHILE this dial ladder was already
+			// climbing arms the latch after the gate has been passed, so the
+			// ladder ends on a process the daemon itself just ended; without
+			// this second read that ordered ending is a WARN, and the realtest
+			// harvest fails a run on every one of them.
+			if c.standDown.Load() {
+				c.log.Debug("daemon.shimclient.redial", "the redial ladder ended after a stand-down was asked of this shim", dlog.Context{
+					"uds": c.udsPath, "error": err.Error(),
+				})
+				return
+			}
 			c.log.Warn("daemon.shimclient.redial", "redial stopped", dlog.Context{
 				"uds": c.udsPath, "error": err.Error(),
 			})
@@ -1027,13 +1071,24 @@ func (c *client) witnessAdoptedDeath(dialErr error) bool {
 	if !free {
 		return false
 	}
-	c.log.Error("daemon.shimclient.exit", "adopted shim is gone: socket refused and workspace lock free", dlog.Context{
+	// A DEPARTURE THIS DAEMON ORDERED IS AN ORDINARY EVENT HERE TOO. The
+	// stand-down latch is the one signal every side reads, and this witness
+	// read none of it: a forget or a kill of a live adopted workspace ends the
+	// very socket this dial is failing on, and the failure was recorded as a
+	// shim that went missing.
+	evidence := dlog.Context{
 		"workspace_id": string(c.ws), "uds": c.udsPath, "error": dialErr.Error(),
-	})
+	}
+	if c.standDown.Load() {
+		c.log.Debug("daemon.shimclient.exit", "the adopted shim's socket is gone after the stand-down it was asked for", evidence)
+	} else {
+		c.log.Error("daemon.shimclient.exit", "adopted shim is gone: socket refused and workspace lock free", evidence)
+	}
 	c.publishExit(ExitInfo{
-		PID:    c.PID(),
-		Code:   -1,
-		Stderr: "adopted shim: no exit observed; socket refused and the workspace lock read free",
+		PID:      c.PID(),
+		Code:     -1,
+		Inferred: true,
+		Stderr:   "adopted shim: no exit observed; socket refused and the workspace lock read free",
 	})
 	return true
 }

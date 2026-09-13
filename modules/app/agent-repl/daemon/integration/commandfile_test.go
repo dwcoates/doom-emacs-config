@@ -539,3 +539,34 @@ func TestAQuarantinedForgetLeavesTheWorkspaceOnTheRoster(t *testing.T) {
 	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "a refused forget changes no registry fact")
 	f.d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry")
 }
+
+// TestForgettingAWorkspaceWithALiveSessionRecordsNoFault covers the realtest
+// harvest's own cleanup: the command file closes and then forgets a scratch
+// workspace whose SHIM IS STILL UP, because a close is view-level and leaves
+// the session alone. The forget stands that session down, and every side that
+// then sees the departure — the liveness monitor, the redial ladder, the exit
+// witness — must read a teardown this daemon ordered as an ordinary event.
+//
+// The assertion is the harness's own warning sweep, which fails this test on
+// any WARN or ERROR record no ExpectWarnings declared. Before the stand-down
+// latch was armed by the process kill, this run recorded
+// `daemon.shimclient.exit` ERROR "adopted shim is gone" and two
+// `daemon.shimclient.redial` WARNs (between-sweeps harvest, 2026-09-13).
+func TestForgettingAWorkspaceWithALiveSessionRecordsNoFault(t *testing.T) {
+	t.Parallel()
+	// Arrange: a worktree workspace with a live spawned shim. The forget's
+	// stand-down is the LAST verb that can address it, so this is the shape
+	// the defect lived in.
+	f := newOpenedWorktree(t, harness.Opts{}, "forget-live-session")
+	roster := f.d.WatchRoster()
+
+	// Act
+	commandfileWrite(t, f.d, "workspace_commands_forget_live.json",
+		`[{"type":"close","workspace":"`+f.ws.GetId()+`"},`+
+			`{"type":"forget","workspace":"`+f.ws.GetId()+`"}]`)
+
+	// Assert: the row leaves, and the cleanup sweep finds no fault behind it.
+	awaitRoster(t, f.d, roster, "the forgotten live workspace's row removal", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()) == nil
+	})
+}
