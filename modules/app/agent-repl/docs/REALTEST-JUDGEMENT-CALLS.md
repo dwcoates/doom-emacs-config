@@ -15,6 +15,15 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Realtest 5-8 quit-press delivery, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The confirmation opens an emacsclient probe within a millisecond of posting `C-g` and re-probes every 50ms, so the editor is executing harness lisp for nearly the whole window in which it has to read the key | The quit character gets a 250ms quiet window before the first probe and a 250ms cadence after it (`Chord.Interrupting`, `confirmFirstProbeDelay`, `confirmPollInterval`) | A `quit_char` that lands while Emacs is executing lisp goes to `handle_interrupt`, never to `read_key_sequence`: no mark, no dismissal. The same chord posted to the same pid with nothing talking to Emacs was recorded and closed its prompt | Set `Interrupting: false` on `wsActQuit` (e2e/realtest/realtest_workspace_acts_test.go) |
+| 2026-09-13 | A probe whose form never finished writing reads the answer of the probe `probeRingSize` earlier out of the same ring slot, and cannot tell | Every answer carries the sequence of the probe that asked for it and a mismatch is a probe failure; the slot is removed before the probe runs | It is the mechanism that turned an interrupted probe into "(recent-keys) did not change", which is the sentence six findings were built on | Drop the `seq` stamp and `checkProbeAnswer` (e2e/realtest/emacsclient.go) |
+| 2026-09-13 | The probe's `condition-case` handled `error`, which does not catch `quit` | Handle `(quit error)` | A probe interrupted by the very key it is confirming must come back as a named probe failure, not unwind silently | Restore the bare `error` handler in `probeWrapper` |
+| 2026-09-13 | `DeliveryEffect.Observed` answered a bare bool, so a minibuffer probe the editor refused read as "the effect has not happened" | It answers `(bool, error)`, and a failed effect probe downgrades a marks-absence to undetermined (`judgeWithEffectProbe`) | Two accounts, one silent and one failed, name nobody; blaming the key driver on them is the same sin as blaming the editor | Revert `judgeWithEffectProbe` to `judgeDelivery` in `confirm` |
+
 ## Log sweep (shim, webapp, elisp), 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
