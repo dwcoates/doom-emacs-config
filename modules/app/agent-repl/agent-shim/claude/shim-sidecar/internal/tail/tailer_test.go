@@ -320,3 +320,74 @@ func TestTailerCountersReportedToHandler(t *testing.T) {
 		t.Fatalf("bytes = %d, want %d", h.lastCtx.BytesObserved, r.Next.GetOffset())
 	}
 }
+
+// droppingHandler converts every frame and stores none of them — the shape a
+// batch of never-persisted residue lines takes (convert/neverpersist.go).
+type droppingHandler struct{ frames int }
+
+func (d *droppingHandler) Handle(fr []Frame, _ *Context) []*storev1.StoreEntry {
+	d.frames += len(fr)
+	return nil
+}
+
+func TestABatchOfOnlyDroppedLinesStillAdvancesTheCursor(t *testing.T) {
+	// Arrange. THE OFFSET IS ABSORBED BY THE CURSOR, NOT BY THE WRITE LEDGER. A
+	// line that produced no entry mints no write_id, so the store's ledger — one
+	// row per APPLIED write — holds nothing for it. What stops it being re-read
+	// and re-decided is that the batch's cursor advance is the BYTES READ, and
+	// the batch carries that advance whether or not it carries entries.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	body := `{"a":1}` + "\n" + `{"b":2}` + "\n"
+	writeFile(t, p, body)
+	h := &droppingHandler{}
+	tr := New(p, JSONLCodec{}, h, &Context{SessionID: "s1"}, testLog())
+
+	// Act.
+	r, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	tr.Commit(r)
+
+	// Assert.
+	if h.frames != 2 {
+		t.Fatalf("frames handled = %d, want both lines still READ", h.frames)
+	}
+	if len(r.Entries) != 0 || !r.Changed {
+		t.Fatalf("entries = %d changed = %v, want 0 and true", len(r.Entries), r.Changed)
+	}
+	if got := r.Next.GetOffset(); got != int64(len(body)) {
+		t.Fatalf("cursor advance = %d, want %d — the dropped lines' bytes", got, len(body))
+	}
+}
+
+func TestTheSecondPollAfterAnAllDroppedBatchRereadsNothing(t *testing.T) {
+	// Arrange. The other half of the same claim: with the advance committed, the
+	// dropped lines are never handed to the converter a second time, so nothing
+	// re-decides them.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	writeFile(t, p, `{"a":1}`+"\n"+`{"b":2}`+"\n")
+	h := &droppingHandler{}
+	tr := New(p, JSONLCodec{}, h, &Context{SessionID: "s1"}, testLog())
+	first, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll1: %v", err)
+	}
+	tr.Commit(first)
+
+	// Act.
+	second, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll2: %v", err)
+	}
+
+	// Assert.
+	if h.frames != 2 {
+		t.Fatalf("frames handled across both polls = %d, want 2 — the same lines must not be re-read", h.frames)
+	}
+	if second.Changed {
+		t.Fatalf("the second poll reported a change; the dropped lines' offset was already committed")
+	}
+}

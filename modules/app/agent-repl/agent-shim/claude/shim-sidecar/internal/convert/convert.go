@@ -10,8 +10,10 @@
 //   - AN UNSERVED ITEM. A keep-alive turn's item (no book), something one vendor
 //     does that no vendor-agnostic feed can show (vendor_specific), a record we
 //     parsed and do not model (unknown), or one we could not parse (unparsed).
-//   - A DROP, for the EXEMPT SET alone: built-ins deliberately not carried. A
-//     drop is never residue and never AgentUnmodeled.
+//   - A DROP, in two named cases and no others: the EXEMPT SET (built-ins
+//     deliberately not carried; a drop there is never residue and never
+//     AgentUnmodeled), and the NEVER-PERSISTED RESIDUE KINDS (neverpersist.go),
+//     which are classified exactly as before and then not written.
 //
 // THE NO-VARIABLE-STATE PRINCIPLE BINDS THIS PACKAGE. Every join is a single
 // indexed lookup: a tool return finds its call by tool_use_id, a skill document
@@ -164,17 +166,24 @@ type Converter struct {
 	// reported the second as the first.
 	joined       bool
 	joinedOffset int64
+
+	// droppedResidue tallies the never-persisted residue lines this converter
+	// classified and did not store, BY KIND. One converter is one file, so the
+	// tally is this file's, and the reader states it as one summary per file at
+	// the end of the startup catch-up window (neverpersist.go).
+	droppedResidue map[string]int
 }
 
 // New builds a Converter with no observer installed.
 func New(log *logging.Bound) *Converter {
 	log.With(logging.Context{Operation: "convert-new"}).LogVerbose("constructing converter producer=%s", Producer)
 	return &Converter{
-		log:         log,
-		observer:    noopObserver{},
-		openCalls:   map[string]openCall{},
-		openSkills:  map[string]openCall{},
-		spawnedRuns: map[string]string{},
+		log:            log,
+		observer:       noopObserver{},
+		openCalls:      map[string]openCall{},
+		openSkills:     map[string]openCall{},
+		spawnedRuns:    map[string]string{},
+		droppedResidue: map[string]int{},
 	}
 }
 
@@ -202,15 +211,26 @@ const KeepaliveMarker = "<!--agent-repl:keepalive-->"
 // the harness writes as the following line.
 //
 // It NEVER returns zero entries for a line it was given, except for the EXEMPT
-// SET, which is dropped deliberately and loudly. Total ingestion binds this
-// package: irrelevance to a reader is a consumption-side judgment, never a
-// reason to leave a record out of the database.
+// SET and the NEVER-PERSISTED RESIDUE KINDS, both of which are dropped
+// deliberately and loudly. Total ingestion still binds the READ: every line is
+// decoded and classified, and irrelevance to a reader is never a reason to stop
+// reading one — only, for the two ruled kinds, a reason not to store it.
 func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
 	// SET ONCE, HERE, FOR THE WHOLE RECORD. Attribution travels by value, so
 	// every conversion this record fans out to carries the vendor's uuid without
 	// thirty call sites having to pass it — and residue minted anywhere in that
 	// fan-out keys on the same record the other plane keys on.
 	at.RecordUUID = str(record["uuid"])
+	// THE LINE IS CLASSIFIED FIRST AND FILTERED AFTER, never read less. The
+	// never-persisted list (neverpersist.go) is applied to the entries the full
+	// conversion produced, so a dropped kind still ran its own converter branch
+	// and still stated what the vendor recorded.
+	return c.dropNeverPersisted(at, c.lineEntries(record, at, next))
+}
+
+// lineEntries is the conversion itself: everything Line does except the
+// never-persisted filter.
+func (c *Converter) lineEntries(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
 	if !c.joined {
 		c.joined = true
 		c.joinedOffset = at.Offset
