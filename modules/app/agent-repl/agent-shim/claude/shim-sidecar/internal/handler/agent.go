@@ -86,3 +86,8 @@ func (h *AgentTranscriptHandler) rememberCoords(ctx *Context) {
 		h.mainAgent = ctx.MainAgentID
 	}
 }
+
+// Conv exposes the handler's converter, so the reader can read the per-file
+// facts the conversion accumulated — the never-persisted residue tally the
+// catch-up summary states.
+func (h *AgentTranscriptHandler) Conv() *convert.Converter { return h.conv }

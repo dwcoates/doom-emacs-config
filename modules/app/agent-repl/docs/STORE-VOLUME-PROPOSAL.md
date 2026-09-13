@@ -21,13 +21,19 @@ Analyze what the store keeps and stop keeping what is never served.
 
 ## Proposal
 
-1. Do not store residue kinds that no reader serves: `attachment/hook_success`,
-   `attachment/total_tokens_reminder`, `queue-operation`, `file-history-snapshot`.
-   Removes 47% of rows and ~360 MB. The sidecar still READS every line (the
-   discovery mandate is untouched); it just does not persist unservable ones.
-   Needs an explicit allowlist of residue kinds worth keeping, in the sidecar's
-   AGENTS.md, so "unknown kind" defaults to kept (forward-compat) and only the
-   named never-served kinds are dropped.
+1. LANDED (first two kinds), 2026-09-13. Do not store residue kinds that no
+   reader serves. `attachment/hook_success` and `attachment/total_tokens_reminder`
+   are now classified and then not written — 286,389 rows and ~263 MB, 47% of the
+   residue this item names. The sidecar still READS every line (the discovery
+   mandate is untouched). The list is NAMED rather than a predicate, in
+   `internal/convert/neverpersist.go` and documented in the sidecar's AGENTS.md
+   under "residue kinds never persisted", so an unknown kind stays persisted for
+   forward compatibility and only the named kinds are dropped. Each drop is DEBUG
+   and the boot walk states one INFO summary per file with the counts by kind.
+
+   STILL OPEN: `queue-operation` (18,458 rows / 34 MB) and
+   `file-history-snapshot` (4,006 rows / 63 MB), which are top-level withheld
+   line kinds rather than attachments, and which the owner has not ruled on.
 2. `write_ledger` gets a retention rule: entries older than the newest
    transcript offset they could ever absorb again are prunable (design
    question: absorption correctness vs growth without bound).
@@ -35,4 +41,5 @@ Analyze what the store keeps and stop keeping what is never served.
    storing the raw line bytes once (blob) instead would roughly halve the
    bytes for `page_line`, but it changes the store's read contract. Later.
 
-The owner rules on 1 and 2 before anything lands.
+The owner ruled item 1's first two kinds on 2026-09-13; item 2 and the
+remaining item-1 kinds are still open.

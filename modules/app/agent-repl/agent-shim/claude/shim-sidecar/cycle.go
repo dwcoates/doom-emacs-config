@@ -44,6 +44,7 @@ import (
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/identity"
 	"agentrepl/shim-claude-sidecar/internal/logging"
@@ -1197,6 +1198,7 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 	}
 	s.catchupEnded = true
 	s.log.EndCatchup()
+	s.summarizeDroppedResidue()
 	// THE END OF CATCH-UP IS AN EDGE, AND IT IS STATED. It is written after the
 	// summaries, so a reader that has seen this record has seen every total the
 	// window owed, and from here on every one of the six operations is news
@@ -1204,6 +1206,63 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 	// steady state rather than racing the boot walk.
 	s.log.With(logging.Context{Operation: "catchup-end"}).Log(
 		"startup catch-up is over: the first poll pass drained the corpus, and every catch-up operation is stated per record from here")
+}
+
+// residueDropper is the handler surface the never-persisted summary reads: a
+// handler that owns a converter exposes it, and the converter carries the
+// per-file tally.
+type residueDropper interface{ Conv() *convert.Converter }
+
+// summarizeDroppedResidue states ONE INFO record per file for the residue kinds
+// the never-persisted list dropped during the boot walk, carrying the counts by
+// kind.
+//
+// PER FILE, AND AT THIS EDGE, for the same reason every other catch-up summary
+// is: the drops themselves are DEBUG and always will be (they are the steady
+// state, not news), so nothing at INFO would otherwise say the boot walk read a
+// quarter-million hook attachments and stored none of them. The file is the unit
+// because the converter is: one converter reads one transcript, and a total
+// across the corpus would hide which transcript the volume came from.
+//
+// It states nothing for a file that dropped nothing, exactly as EndCatchup
+// states nothing for an operation that demoted nothing.
+func (s *sidecar) summarizeDroppedResidue() {
+	for path, w := range s.watchers {
+		dropper, ok := w.tailer.Handler().(residueDropper)
+		if !ok {
+			continue
+		}
+		dropped := dropper.Conv().DroppedResidue()
+		if len(dropped) == 0 {
+			continue
+		}
+		total := 0
+		for _, kind := range convert.NeverPersistedResidueKinds() {
+			total += dropped[kind]
+		}
+		s.log.With(logging.Context{
+			Operation: "residue-drop-summary", Path: path, TaskID: w.target.TaskID,
+			FileID: w.tailer.FileID(), Repeat: logging.Repeat(total),
+		}).Log("startup catch-up read and classified %d never-persisted residue line(s) in this file and stored none of them: %s",
+			total, dropCounts(dropped))
+	}
+}
+
+// dropCounts renders a per-kind tally in the named list's stable order, so two
+// summaries of the same counts read identically.
+func dropCounts(dropped map[string]int) string {
+	out := ""
+	for _, kind := range convert.NeverPersistedResidueKinds() {
+		count, ok := dropped[kind]
+		if !ok {
+			continue
+		}
+		if out != "" {
+			out += ", "
+		}
+		out += fmt.Sprintf("%s=%d", kind, count)
+	}
+	return out
 }
 
 // RunSettled records that a converter read a detached run's OWN terminal off

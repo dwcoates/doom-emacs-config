@@ -673,6 +673,10 @@ filtering — curation is a downstream concern, never an ingestion concern.
   is why it can never be mistaken for a converter.
 - The EXEMPT SET is different: known built-ins deliberately not carried are
   DROPPED entirely — never `AgentUnmodeled`, never residue.
+- The RESIDUE KINDS NEVER PERSISTED are the second such drop, and the ONLY place
+  the mandate's "ends up in the store" half is narrowed. Every line is still
+  READ, framed and CLASSIFIED; two named kinds are then not written. See the
+  section below.
 - A shape the schema cannot express is a SCHEMA GAP to surface loudly, never a
   record to drop.
 
@@ -967,7 +971,8 @@ alone — a drop. There is no fifth, and nothing on disk is ever silently lost.
   (understood, deliberately not carried — the follow-up is a CONVERTER),
   `unknown` (parsed, not modeled — the follow-up is a MODEL), or `unparsed`
   (unreadable — a FAILURE, carrying source, offset, parse_error and bounded raw).
-- A **drop** is the exempt set only. Never residue, never `AgentUnmodeled`.
+- A **drop** is the exempt set, or one of the RESIDUE KINDS NEVER PERSISTED
+  (below). Never residue, never `AgentUnmodeled`.
 
 A recognizable modeled kind reaching `unknown` is a PRODUCER DEFECT. The
 golden-corpus test asserts the `unknown` set is EMPTY and the `vendor_specific`
@@ -1180,6 +1185,42 @@ page line. `AgentPrompt` carries a `TurnId` and a `PromptOrigin`, both
 daemon-minted; a file reader holds neither, so no history page can regrow a fake
 prompt bubble from this producer. The shim's `AgentPrompt` is the one served form,
 and a subagent's commission rides `AgentSubagentStart.prompt`.
+
+### Residue kinds never persisted
+
+Owner ruling 2026-09-13 (`docs/STORE-VOLUME-PROPOSAL.md` item 1, first two
+kinds). `internal/convert/neverpersist.go` holds the list; it is filtered out of
+what `Converter.Line` returns, so the drop is decided from the residue kind the
+converter itself minted and no producer of these kinds can route around it.
+
+| kind | why nothing is served from it |
+|---|---|
+| `attachment/hook_success` | The STREAM plane owns the served hook row (`activity:<hook_id>`, ruling 2026-09-04). The two planes hold disjoint identity material, so this transcript copy can never be joined to the row a reader sees. 229,013 rows / 218 MB of the measured 1.64 GB store. |
+| `attachment/total_tokens_reminder` | The vendor's per-turn `<total_tokens>N tokens left</total_tokens>` line: one bare `text` field, reaching no arm of the conversation vocabulary and read by nothing. 57,376 rows / 45 MB. |
+
+- THE DISCOVERY MANDATE IS UNTOUCHED. The line is read, framed and classified by
+  the same branch it always was — a hook attachment still runs through
+  `hookAttachment` and still states what the vendor recorded. Only the write is
+  skipped.
+- AN UNKNOWN KIND STAYS PERSISTED. The list is NAMED and never a predicate: a
+  residue kind nobody has ruled on is exactly the one whose stored record IS the
+  coverage, so forward compatibility is the default and only the two spellings
+  above are dropped. Adding a third is an owner ruling, and the golden-corpus
+  census plus `TestTheNamedListIsExactlyTheTwoRuledKinds` fail if the list drifts
+  without one.
+- THE OFFSET IS ABSORBED BY THE CURSOR, NOT BY THE WRITE LEDGER. A dropped line
+  produces no entry and therefore mints no `write_id`, so the store's ledger —
+  one row per APPLIED write — holds nothing for it. Nothing needs to: the
+  tailer's cursor advance is the BYTES READ (`PollResult.Changed` turns on the
+  offset, not on the entry count), and it rides the same batch, so the line is
+  never handed to the converter a second time. No "seen, not stored" mark exists
+  and none is needed.
+- LOGGING. Each drop is DEBUG (`residue-drop`) — a dropped kind is the steady
+  state, not news, and 37% of a transcript's records are hook attachments, so one
+  INFO per line would be a permanent inverted pyramid. The boot walk states one
+  INFO `residue-drop-summary` PER FILE at the catch-up edge
+  (`cycle.go summarizeDroppedResidue`), carrying the counts by kind; a file that
+  dropped nothing states nothing.
 
 ### Keep-alive
 
