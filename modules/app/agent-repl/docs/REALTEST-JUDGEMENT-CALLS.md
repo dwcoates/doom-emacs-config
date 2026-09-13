@@ -484,3 +484,9 @@ rule allows.
 6. Opening a workspace by any means other than switching to an already
    open one (creation, re-open, register, fork) opens its agent-repl
    panels immediately, as `SPC o c` does, before it is switched to.
+
+## Tab-bar owner rulings 1, 4 and 5 (2026-09-13)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Ruling 1 asks for exactly one space between `[N]` and the name. Three things could each add one — the padding format's leading space, the badge run's own trailing space, a name carrying leading whitespace. Normalize one of them, or all three? | ALL THREE, in the renderer, so the gap cannot be widened from anywhere. `agent-repl--render-tab` emits the single space itself, strips the padding format's leading whitespace, trims the name, and drops a badge run that is blank; `agent-repl--tab-badge-str` no longer joins blank parts | The gap was the sum of independent contributors, so fixing the loudest one leaves the shape reachable by the others. A roster row whose priority label is present but empty joined into a run made of nothing but spaces, which the renderer then padded on BOTH sides and met the padding's leading space — three spaces, which is the shape the owner reported. The padding format keeps its TRAILING half, which is a real width fill and unchanged on screen | Restore `(propertize (format agent-repl-tab-name-padding name) ...)` and the `(concat " " img-str " ")` badge wrap in `agent-repl--render-tab`; the six gap tests in `test-status.el` then fail and name the ruling |
