@@ -15,6 +15,8 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - sidecar: the aged-unowned-spool `hold-expired` record is INFO, not WARN — the total-ingestion mandate working is not a fault (owner ruling 4, 2026-09-13)
 - webapp sidebar: an open row's detail panel is fixed-positioned out of the rail — it grows into the feed as its content asks and is placed under its row by the topbar reveals' own `clampReveal`, so the sidebar's overflow and the window edges can no longer clip it (owner ruling 3, 2026-09-13)
 - shim cold gate: a cold read under 70,000 tokens no longer gates — `judgeCold` and `SetSessionModel` proceed warm and record one INFO line naming the size, the lapse and the floor (owner ruling, cold-gate floor, 2026-09-13)
+- sidecar store volume: `attachment/hook_success` and `attachment/total_tokens_reminder` are classified and then never persisted (`internal/convert/neverpersist.go`; ~286k rows / 263 MB), with an unruled kind still stored and one INFO `residue-drop-summary` per file at catch-up end (owner ruling 2026-09-13)
+
 - webapp hold tray: an empty tray draws nothing — `drawDaemonHoldTray` answers `null`, the mount empties the host, and `#hold-tray:empty` collapses the region; the "nothing held" line is gone (owner ruling 3, 2026-09-13)
 
 - webapp sidebar: the row's expand chevron is hover-only — invisible at rest, shown while the pointer is over the row, while the keyboard focus is inside it, or while the row's details are open, and it keeps its layout slot either way (`data-shown`, owner ruling 3, 2026-09-13)

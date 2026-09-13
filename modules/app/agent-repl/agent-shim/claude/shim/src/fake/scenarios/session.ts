@@ -455,7 +455,10 @@ const TOKENS_REMINDER = scenario({
     "— no capture carries a `context_budget_warning` record of any spelling, so that producer stays ungrounded " +
     "rather than guessed",
   writes: "a `total_tokens_reminder` attachment line",
-  arms: "residue `attachment/total_tokens_reminder` — recorded as itself, unconverted, and reaching no arm",
+  arms:
+    "NOTHING IS STORED for it: the sidecar reads and classifies the line and then drops it — " +
+    "`attachment/total_tokens_reminder` is on the never-persisted list (owner ruling 2026-09-13, " +
+    "shim-sidecar/internal/convert/neverpersist.go)",
   run(ctx) {
     ctx.log.debug({ turn: ctx.turn, branch: "tokens-reminder" }, "fake total-tokens-reminder turn");
     ctx.attachment({
