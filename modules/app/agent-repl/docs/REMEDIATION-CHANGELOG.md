@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- realtest: the sweep steals focus ONCE at its start (`TestSweepFocusTake`, `keydriver --take`) and hands it back ONCE from `bin/realtest.sh`'s EXIT trap (`TestSweepFocusGiveBack`, `keydriver --give-back`), and no press hands focus back any more (`keydriver --keep-focus`, `KeyDriver.KeepFocus`) (owner ruling 2026-09-13)
+
 - elisp: a workspace that becomes OPEN in this editor session opens its agent-repl panels at once, before it is switched to (`agent-repl--panels-open-on-arrival` called from `agent-repl-roster--open-tab`), with the startup roster exempt and a plain switch untouched (owner ruling 2026-09-13, look-and-feel aside #6)
 
 - elisp: a quit deferred out of a guarded section with a MINIBUFFER STANDING is requeued as the terminal's quit character on `unread-command-events` (`agent-repl--deferred-quit-hand-off`, core.el) instead of being left in `quit-flag`, because the focus-in path returns into more lisp and the first QUIT check there printed `Quit` with the prompt still up (realtests 5-8 post-`d37cf7d58` sweep; "Open workspace: " with no precreate pending was the one that worked)

@@ -378,6 +378,10 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 printf '%s\n' "$name" >> "${STUB_SLOT_MARKER:?the case must state a marker path}"
+held_name="${name#^}"
+held_name="${held_name%$}"
+printf '%s %s\n' "$held_name" "${AGENT_REPL_REALTEST_FOCUS_HELD:-unset}" \
+    >> "${STUB_HELD_MARKER:?the case must state a focus-held marker path}"
 [ -n "${STUB_ALIVE_FLAG:-}" ] && : > "$STUB_ALIVE_FLAG"
 if [ -n "${STUB_SLOT_FAIL:-}" ] && printf '%s' "$name" | grep -q -- "$STUB_SLOT_FAIL"; then
     exit 1
@@ -473,6 +477,16 @@ name="${name%$}"
 printf '%s %s %s %s\n' "$name" "${AGENT_REPL_REALTEST_LEFTOVERS:-none}" \
     "${AGENT_REPL_REALTEST_GAP_SCAN:-0}" "${AGENT_REPL_REALTEST_LEFTOVER_PREFIX:-none}" \
     >> "${STUB_GO_MARKER:?the case must state a go marker path}"
+# THE SWEEP'S FOCUS GETS ITS OWN MARKER rather than a fifth field above: the
+# cases that assert the leftover clean anchor their grep on the end of that
+# line, and widening it would rewrite tests that are about something else.
+if [ -n "${AGENT_REPL_REALTEST_FOCUS:-}" ]; then
+    printf '%s %s\n' "$AGENT_REPL_REALTEST_FOCUS" "$name" >> "${STUB_FOCUS_MARKER:?the case must state a focus marker path}"
+    if [ "${STUB_FOCUS_TAKE_FAIL:-}" = "1" ] && [ "$AGENT_REPL_REALTEST_FOCUS" = "take" ]; then
+        printf 'build the key helper to take the sweep FAILED\n'
+        exit 1
+    fi
+fi
 if [ -n "${STUB_LEFTOVERS_FAIL:-}" ] && [ "${AGENT_REPL_REALTEST_LEFTOVERS:-}" = "$STUB_LEFTOVERS_FAIL" ]; then
     printf 'REALTEST LEFTOVER WORKSPACES\n  ws-c22fed997b234b27 rt-8 (closed, MISSING) /leftover/dir\n'
     exit 1
@@ -553,6 +567,8 @@ run_script() {
     STUB_READINESS_JSON="$SCRATCH/readiness.json" \
     STUB_SLOT_MARKER="$SCRATCH/slot-reached" \
     STUB_GO_MARKER="${STUB_GO_MARKER:-$SCRATCH/go-reached}" \
+    STUB_FOCUS_MARKER="${STUB_FOCUS_MARKER:-$SCRATCH/focus-reached}" \
+    STUB_HELD_MARKER="${STUB_HELD_MARKER:-$SCRATCH/focus-held}" \
     STUB_KILL_MARKER="$SCRATCH/killed" \
     STUB_KILL_LOG="${STUB_KILL_LOG:-$SCRATCH/kill-log}" \
     STUB_ALIVE_FLAG="${STUB_ALIVE_FLAG:-$SCRATCH/alive}" \
@@ -568,7 +584,8 @@ run_script() {
 prepare_home() {
     SCRIPT_ARGS=()
     rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed" \
-        "${SCRATCH:?}/alive" "${SCRATCH:?}/kill-log" "${SCRATCH:?}/go-reached"
+        "${SCRATCH:?}/alive" "${SCRATCH:?}/kill-log" "${SCRATCH:?}/go-reached" \
+        "${SCRATCH:?}/focus-reached" "${SCRATCH:?}/focus-held"
     : > "$SCRATCH/procs"
     mkdir -p "$SCRATCH/home/.claude-emacs" "$SCRATCH/home/.cache/agent-repl/store"
     printf 'workspaces' > "$SCRATCH/home/.claude-emacs/wsm.db"
@@ -1395,6 +1412,141 @@ test_the_sweep_marks_where_it_ended() {
     pass "$name"
 }
 
+# ---- the sweep's focus: stolen once, handed back once ---------------------
+
+test_the_sweep_takes_focus_before_any_realtest() {
+    local name="the sweep takes focus ONCE, before its first realtest"
+    local dir out status=0
+    dir="$(scratch_bin focus-take)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ "$(grep -c '^take ' "$SCRATCH/focus-reached")" != "1" ]; then
+        fail "$name" "the take ran $(grep -c '^take ' "$SCRATCH/focus-reached") time(s), want exactly one: $(cat "$SCRATCH/focus-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_sweep_hands_focus_back_at_its_end() {
+    local name="the sweep hands focus back ONCE, at its end"
+    local dir out status=0
+    dir="$(scratch_bin focus-give-back)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    out="$(AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ "$(grep -c '^give-back ' "$SCRATCH/focus-reached")" != "1" ]; then
+        fail "$name" "the handback ran $(grep -c '^give-back ' "$SCRATCH/focus-reached") time(s), want exactly one: $(cat "$SCRATCH/focus-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_focus_goes_back_after_a_failing_realtest() {
+    local name="focus goes back even when a realtest FAILED"
+    local dir status=0
+    dir="$(scratch_bin focus-after-failure)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    STUB_SLOT_FAIL=TestRealtestStartTheEditor AGENT_REPL_REALTEST_TAKEOVER=1 \
+        run_script "$dir" >/dev/null 2>&1 || status=$?
+    if ! grep -q '^give-back ' "$SCRATCH/focus-reached"; then
+        fail "$name" "focus was never handed back, so the owner's desktop stays on Emacs: $(cat "$SCRATCH/focus-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_focus_goes_back_after_a_sweep_of_one() {
+    local name="a -run of a single realtest steals focus at its start and gives it back at its end"
+    local dir status=0
+    dir="$(scratch_bin focus-single-run)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(-run TestRealtestStartTheEditor)
+
+    AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir" >/dev/null 2>&1 || status=$?
+    if ! grep -q '^take ' "$SCRATCH/focus-reached" || ! grep -q '^give-back ' "$SCRATCH/focus-reached"; then
+        fail "$name" "a single -run did not do both halves: $(cat "$SCRATCH/focus-reached")"
+        return
+    fi
+    pass "$name"
+}
+
+test_the_presses_are_told_the_sweep_holds_focus() {
+    local name="the realtests are told the sweep holds focus, so no press hands it back"
+    local dir status=0
+    dir="$(scratch_bin focus-held-flag)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir" >/dev/null 2>&1 || status=$?
+    if ! grep -q '^TestRealtestStartTheEditor 1$' "$SCRATCH/focus-held"; then
+        fail "$name" "the realtest did not carry the focus-held flag: $(cat "$SCRATCH/focus-held")"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_take_that_failed_owes_no_handback() {
+    local name="a sweep that could NOT take focus owes no handback and tells its realtests so"
+    local dir out status=0
+    dir="$(scratch_bin focus-take-failed)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    out="$(STUB_FOCUS_TAKE_FAIL=1 AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if grep -q '^give-back ' "$SCRATCH/focus-reached"; then
+        fail "$name" "focus was handed back although it was never taken: $(cat "$SCRATCH/focus-reached")"
+        return
+    fi
+    if ! grep -q '^TestRealtestStartTheEditor unset$' "$SCRATCH/focus-held"; then
+        fail "$name" "the realtest was told the sweep holds focus although the take failed: $(cat "$SCRATCH/focus-held")"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'COULD NOT TAKE FOCUS'; then
+        fail "$name" "the failed take is not named in the output: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_a_take_that_failed_does_not_stop_the_sweep() {
+    local name="a sweep whose focus take failed still runs its realtests"
+    local dir out status=0
+    dir="$(scratch_bin focus-take-failed-runs)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    SCRIPT_ARGS=(1)
+
+    out="$(STUB_FOCUS_TAKE_FAIL=1 AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+        fail "$name" "the sweep ran nothing; a desktop that would not cooperate must not cost the run its findings: $out"
+        return
+    fi
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0: a failed focus take is not a failed sweep; output: $out"
+        return
+    fi
+    pass "$name"
+}
+
 test_clean_leftovers_runs_no_realtest() {
     local name="--clean-leftovers clears the realtest root and runs no realtest"
     local dir out status=0
@@ -1500,6 +1652,13 @@ test_between_sweep_findings_fail_an_otherwise_green_sweep
 test_the_sweep_cleans_its_own_rows_even_after_a_failure
 test_a_row_the_sweep_could_not_remove_fails_the_run
 test_the_sweep_marks_where_it_ended
+test_the_sweep_takes_focus_before_any_realtest
+test_the_sweep_hands_focus_back_at_its_end
+test_focus_goes_back_after_a_failing_realtest
+test_focus_goes_back_after_a_sweep_of_one
+test_the_presses_are_told_the_sweep_holds_focus
+test_a_take_that_failed_owes_no_handback
+test_a_take_that_failed_does_not_stop_the_sweep
 test_clean_leftovers_runs_no_realtest
 test_clean_leftovers_reports_rows_it_could_not_remove
 test_clean_leftovers_refuses_to_also_run_a_realtest
