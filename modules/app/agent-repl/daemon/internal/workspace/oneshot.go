@@ -123,6 +123,23 @@ func (v *verbs) requireOneShotPolicy(log dlog.Logger, repoDir string) (prompts.S
 		})
 }
 
+// repositoryRegisteredAt reports whether the registry holds a repository at a
+// NORMALIZED directory. It is the write path's half of the repository
+// invariant: a create names its repository by directory, and a directory the
+// registry does not carry is refused rather than minted.
+func (v *verbs) repositoryRegisteredAt(ctx context.Context, repoDir string) (bool, error) {
+	repositories, err := v.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read the repository registry: %w", err)
+	}
+	for _, repository := range repositories {
+		if repository.Dir == repoDir {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // repositoryRootOf answers a registered workspace's repository main checkout
 // root, which is what its policy source is derived from. The workspace record
 // names its repository by id; the registry holds the directory.
