@@ -851,3 +851,150 @@ func TestOpenStatesTheFailureToRecreateAfterTheSupersededFileIsGone(t *testing.T
 	}
 	s.assertLogged(t, "error", "could not be recreated at version=")
 }
+
+// ---- the synthetic corpus a latency bound is measured against ----
+
+// syntheticCorpusRows is how big the corpus a latency bound is proved against
+// is: the owner's store carried 225k `entry` rows and 318k `write_ledger` rows
+// when a 30-row batch was reported over budget, and a bound proved on a corpus
+// SMALLER than the one that produced the report proves nothing about it. 600k
+// of each is comfortably past what the box has ever held.
+const syntheticCorpusRows = 600_000
+
+// syntheticCorpusFiles is how many source files the corpus is spread across.
+// It is the store's own shape: the owner's `cursor` table held 2844 rows, and
+// the number matters because the ledger's retention window is a per-FILE
+// question — the sweep's plan is driven by this table, so a corpus with one
+// file would flatter it.
+const syntheticCorpusFiles = 2800
+
+// syntheticCorpusOffsetStep is how far apart two consecutive ledger rows of one
+// file sit. A retention window expressed as a multiple of it is how a test says
+// "only the oldest N writes per file are prunable".
+const syntheticCorpusOffsetStep = 4096
+
+// seedSyntheticCorpus fills `entry`, `write_ledger` and `cursor` with a corpus
+// the size of a real one, DIRECTLY rather than through WriteBatch.
+//
+// THE POINT IS THE INDEX DEPTH THE MEASURED STATEMENT SEES, not how the rows
+// got there — every other test in this package writes through the real path,
+// and driving 600k rows through it would cost 20k transactions to arrive at
+// exactly the same b-trees. The rows are inserted from a recursive CTE in one
+// transaction so the fixture costs seconds rather than minutes.
+//
+// Ledger offsets ascend per file, so `spread` is how far the newest row of a
+// file sits above its oldest: a retention window narrower than the spread makes
+// the older rows prunable, which is what gives a sweep real work to do.
+func seedSyntheticCorpus(t *testing.T, d *DB) (spread int64) {
+	t.Helper()
+	const offsetStep = syntheticCorpusOffsetStep
+	spread = int64(syntheticCorpusRows/syntheticCorpusFiles) * offsetStep
+
+	tx, err := d.sql.Begin()
+	if err != nil {
+		t.Fatalf("seeding the corpus: %v", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	const seqCTE = `WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM seq WHERE n < ?) `
+	statements := []struct {
+		what string
+		sql  string
+		args []any
+	}{
+		{
+			what: "entry rows",
+			sql: seqCTE + `INSERT INTO entry
+			  (position, upsert_key, write_id, write_seq, plane, kind, book_agent_id, run_id, top_level, frame,
+			   first_inserted_at_ms, last_written_at_ms)
+			  SELECT n+1, 'corpus-key-'||n, 'corpus-write-'||n, n+1, 2, 'page_line',
+			         'corpus-agent-'||(n % ?), NULL, NULL, x'00', ?, ?
+			    FROM seq`,
+			args: []any{syntheticCorpusRows - 1, syntheticCorpusFiles, testNow, testNow},
+		},
+		{
+			what: "write_ledger rows",
+			sql: seqCTE + `INSERT INTO write_ledger
+			  (write_id, upsert_key, write_seq, applied_at_ms, source_file_id, source_offset)
+			  SELECT 'corpus-write-'||n, 'corpus-key-'||n, n+1, ?,
+			         'corpus-file-'||(n % ?), (n / ?) * ?
+			    FROM seq`,
+			args: []any{syntheticCorpusRows - 1, testNow, syntheticCorpusFiles, syntheticCorpusFiles, offsetStep},
+		},
+		{
+			what: "cursor rows",
+			sql: seqCTE + `INSERT INTO cursor (file_id, path, offset, carry, updated_at_ms)
+			  SELECT 'corpus-file-'||n, '/corpus/'||n||'.jsonl', ?, NULL, ?
+			    FROM seq`,
+			args: []any{syntheticCorpusFiles - 1, spread, testNow},
+		},
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement.sql, statement.args...); err != nil {
+			t.Fatalf("seeding the corpus (%s): %v", statement.what, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("seeding the corpus: %v", err)
+	}
+	return spread
+}
+
+// thirtyRowFileBatch is the batch shape the owner's slow-query warning named: a
+// sidecar's file-plane batch of thirty page lines with the cursor advance they
+// were read behind.
+func thirtyRowFileBatch(tag string, fileID string, offset int64) *storev1.EntryBatch {
+	entries := make([]*storev1.StoreEntry, 0, 30)
+	for i := 0; i < 30; i++ {
+		key := fmt.Sprintf("%s-%d", tag, i)
+		entry := pageEntry(key, key, "agent-1", frameItem(activityFrame("agent-1", "act-"+key, prose())))
+		entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
+		entries = append(entries, entry)
+	}
+	return &storev1.EntryBatch{
+		Entries:       entries,
+		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/corpus/live.jsonl", Offset: offset},
+	}
+}
+
+// queryPlan renders SQLite's plan for one statement as one line per step, so a
+// test can state which rows of which table a statement is allowed to touch.
+//
+// A PLAN IS A STRUCTURAL ASSERTION AND A DURATION IS NOT. The cost of a table
+// SCAN is invisible on a warm, quiet box and ruinous on the owner's loaded one
+// — the same sweep batch measured 111ms here and 1464ms there — so a wall-clock
+// bound cannot tell a seek from a scan, while the plan says it outright and says
+// it the same way on every machine.
+func queryPlan(t *testing.T, d *DB, statement string, args ...any) string {
+	t.Helper()
+	rows, err := d.sql.Query("EXPLAIN QUERY PLAN "+statement, args...)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN %s: %v", statement, err)
+	}
+	defer rows.Close() //nolint:errcheck // the deferred close of a read
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scanning a plan row: %v", err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterating plan rows: %v", err)
+	}
+	return strings.Join(plan, "\n")
+}
+
+// assertNoTableScan fails unless every step of the plan is an indexed seek.
+// SQLite writes a full walk as "SCAN <table>" and an indexed lookup as
+// "SEARCH <table> USING …", so the vocabulary is the assertion.
+func assertNoTableScan(t *testing.T, what, plan string) {
+	t.Helper()
+	for _, step := range strings.Split(plan, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(step), "SCAN ") {
+			t.Fatalf("%s walks a whole table or index instead of seeking:\n%s", what, plan)
+		}
+	}
+}

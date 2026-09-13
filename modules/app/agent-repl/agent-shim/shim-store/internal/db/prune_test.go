@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -379,4 +381,117 @@ func seedLedgerRows(t *testing.T, d *DB, fileID string, offset int64, n int) {
 func ledgerHas(t *testing.T, d *DB, writeID string) bool {
 	t.Helper()
 	return scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger WHERE write_id = ?`, writeID) == 1
+}
+
+// TestASweepBatchAndAProducersBatchTogetherStayWithinTheProducersBudget is the
+// sweep's side of the same 400ms budget.
+//
+// THE SWEEP SHARES THE WRITE SLOT, so a producer's batch can wait one sweep
+// batch and then do its own work, and the number the producer is judged on is
+// the SUM. Asserting the two halves separately would let a 380ms sweep batch
+// and a 380ms write both pass while the producer times at 760ms, so the
+// assertion here is the sum against the one budget the store would warn past.
+//
+// IT IS A DETERMINISTIC SUM RATHER THAN A RACE. Timing the two against each
+// other and hoping they overlap proves the bound only on the runs where they
+// did; the worst case a producer can meet is exactly "the slowest sweep batch,
+// then my own batch", so that is what is measured. That the sweep RELEASES the
+// slot between batches — which is what bounds the wait at one batch rather than
+// one sweep — is pinned by TestTheSweepGivesTheWriteSlotBackBetweenBatches.
+//
+// THE PLAN IS WHAT THIS GUARDS. The sweep's delete drove from `write_ledger`
+// and could use no index for a bound that lives on `cursor`, so every batch —
+// the final empty one included — scanned the whole ledger: 111ms per batch on
+// the owner's 318k-row store and 4650ms for a 21-batch sweep, all of it holding
+// the slot. See the plan note in prune.go.
+func TestASweepBatchAndAProducersBatchTogetherStayWithinTheProducersBudget(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a wall-clock budget measures the race detector's instrumentation, not the store; see racedetector_on_test.go")
+	}
+
+	// Arrange: a full-sized corpus in the state a resident store is actually in
+	// — swept before, so only the OLDEST few writes of each file have fallen
+	// past the window since. That is the shape that costs: a sweep with a
+	// backlog finds its 2000 rows immediately whatever plan it runs, while one
+	// with a handful to remove is the case that either seeks to them or reads
+	// the whole ledger looking (the owner's 2026-09-13 17:51 sweep removed 870
+	// rows in ONE batch and took 1464ms).
+	s, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // best-effort test teardown
+	spread := seedSyntheticCorpus(t, d)
+	d.ledgerRetention = spread - 3*syntheticCorpusOffsetStep
+	budget := DefaultBulkBase + 30*DefaultBulkPerRow
+
+	var slowestSweepBatch time.Duration
+	batchStarted := time.Now()
+	d.afterPruneBatch = func() {
+		if elapsed := time.Since(batchStarted); elapsed > slowestSweepBatch {
+			slowestSweepBatch = elapsed
+		}
+		batchStarted = time.Now()
+	}
+
+	// Act
+	result, err := d.PruneWriteLedger(ctx())
+	if err != nil {
+		t.Fatalf("PruneWriteLedger: %v", err)
+	}
+	writeStarted := time.Now()
+	if _, err := d.WriteBatch(ctx(), "test-sidecar", thirtyRowFileBatch("live", "corpus-file-0", 1<<40), nil); err != nil {
+		t.Fatalf("WriteBatch after the sweep: %v", err)
+	}
+	writeElapsed := time.Since(writeStarted)
+
+	// Assert
+	if result.Batches < 2 {
+		t.Fatalf("the sweep took %d batches over %d deletes; the fixture must give it more than one turn of the slot",
+			result.Batches, result.Deleted)
+	}
+	if worst := slowestSweepBatch + writeElapsed; worst > budget {
+		t.Fatalf("a producer's 30-row batch behind the slowest of %d sweep batches would take %v (%v queued + %v writing), past its %v budget",
+			result.Batches, worst, slowestSweepBatch, writeElapsed, budget)
+	}
+	assertNoBusyRefusal(t, s)
+}
+
+// TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt is the defect this
+// file's latency case cannot see, stated where it IS visible.
+//
+// The retention bound is `c.offset - ?`: not a constant, but a column of the
+// OTHER table. Driven from `write_ledger`, the bound is unknown until `c` is
+// resolved, so `write_ledger_source` is usable for nothing and SQLite reads the
+// whole covering index probing `cursor` per row — 111ms per batch on the
+// owner's 318k-row ledger, 1464ms on the loaded box for the ONE batch that
+// removed 870 rows, and paid again by every later batch of the same sweep and
+// by the empty batch that ends it. All of it holds the write slot a producer's
+// WriteBatch queues on.
+//
+// A WALL-CLOCK BOUND CANNOT GUARD THIS. That same scan measures ~200ms on a
+// warm, idle box, comfortably inside the 400ms budget, so a duration assertion
+// passes on both plans and only the owner's loaded store can tell them apart.
+// The plan tells them apart everywhere.
+func TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt(t *testing.T) {
+	// Arrange
+	d, _ := newPruningStore(t, DefaultLedgerRetentionBytes)
+
+	// Act
+	plan := queryPlan(t, d, ledgerPruneDeleteSQL, DefaultLedgerRetentionBytes, ledgerPruneBatch)
+
+	// Assert: `cursor` is the one table the sweep may walk — it is the small
+	// side, and the window is a per-file question so every file must be asked.
+	// The ledger is reached only through write_ledger_source.
+	for _, step := range strings.Split(plan, "\n") {
+		step = strings.TrimSpace(step)
+		if strings.HasPrefix(step, "SCAN ") && !strings.HasPrefix(step, "SCAN c") {
+			t.Fatalf("the sweep's delete walks something other than the cursor table:\n%s", plan)
+		}
+	}
+	if !strings.Contains(plan, "SEARCH l USING COVERING INDEX write_ledger_source") {
+		t.Fatalf("the sweep's delete does not seek the ledger through write_ledger_source:\n%s", plan)
+	}
 }

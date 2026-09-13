@@ -213,6 +213,32 @@ cancellation, not a storage failure. A sweep that removed rows is one info
 record with the counts; one that removed nothing is verbose. `main.go` stops it
 BEFORE closing the database.
 
+**AND THE SWEEP'S DELETE IS DRIVEN FROM `cursor`, NEVER FROM THE LEDGER.** The
+retention bound is `c.offset - ?` — a column of the OTHER table, not a constant
+— so with `write_ledger` outermost `write_ledger_source` is usable for nothing
+and SQLite reads the whole covering index probing `cursor` per row. That cost
+111ms per batch on a 318k-row ledger and 1464ms on the loaded box for the ONE
+batch that removed 870 rows, paid again by every later batch of the same sweep
+and by the empty batch that ends it, all of it HOLDING THE WRITE SLOT. Driven
+from `cursor` (2844 rows) the same index is an ordinary seek and the same sweep
+batch is 3.7ms. The statement is `ledgerPruneDeleteSQL` at package scope and
+`CROSS JOIN` states the order so the planner's row estimates cannot flip it
+back.
+
+**A PLAN IS THE ASSERTION, NOT A DURATION.** A full scan of that index measures
+~200ms on a warm idle box — inside the 400ms write budget — and 1464ms on the
+owner's, so a wall-clock bound passes on both plans and only production can tell
+them apart. `TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt` EXPLAINs the
+production statement itself, and
+`TestEveryStatementOfAWriteBatchSeeksRatherThanScans` does the same for every
+statement in the write transaction, so a column added without the index it is
+looked up by fails in the suite rather than in the owner's log. The wall-clock
+budgets beside them (`TestAThirtyRowBatchOnAFullSizedCorpusStaysWithinItsOwnBudget`,
+`TestASweepBatchAndAProducersBatchTogetherStayWithinTheProducersBudget`) are
+proved against a 600k-row synthetic corpus and SKIP under `-race`: the detector
+shadows every access, and the same pair that measures 5ms + 3ms uninstrumented
+measured 413ms + 50ms under it, which is a number about the detector.
+
 There is no `--` flag: the window is `Options.LedgerRetentionBytes`, which only
 a test sets, and a NEGATIVE value disables the sweep entirely.
 
