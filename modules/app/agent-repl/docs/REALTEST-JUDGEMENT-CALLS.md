@@ -793,3 +793,11 @@ line separating rows inside the expanded section, and that line spans the
 footer's full width, left edge to right edge, so it fully partitions the
 two sections. (The token-usage figures in the footer are known to be
 wrong as currently described; deferred.)
+
+## Owner ruling: the unmodelled-line shape catalog (2026-09-13, owner)
+
+Unmodelled transcript lines are not stored as residue, but their SHAPE is:
+a separate table, one row per distinct recursive key structure (hash of
+the key names, recursively), holding the first example seen verbatim, the
+line kind, first/last seen and a count, so the vendor's API can be
+discovered later. The module AGENTS.md documents the catalog.
