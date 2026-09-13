@@ -303,3 +303,44 @@ Surfaced for the owner to overrule if re-open should keep the lowercase key.
 | 2026-09-12 | Whether the `toolu_...` in the rekey's `vendor_session_id` slot was an identity-file writer defect | No writer defect: no `agent-id.json` under the live state dir holds anything but a uuid, and the id came from the OWNER INDEX (the spawning call's book, legitimately a subagent's `toolu_` id) echoed back by `identity.Resolve` as `unrecorded` | The shim's writer was never involved; only the record's wording claimed it was | Nothing to revert; re-open if an identity file is ever found holding a `toolu_` id |
 | 2026-09-12 | Whether a first attribution should keep the `identity-rekey` operation name | Kept, at info, with the resolution source in the message | Both arms are the same pass answering the same question, and splitting the operation would break every existing query for it | Give the info arm its own operation name in `rekeyRotations` |
 
+## A residue spool CAN be asked for a stopped run's terminal (2026-09-12, agent)
+
+Realtest 3 wrote 21 `cancel-terminal` ERROR records, one per stopped run,
+saying the residue-spool converter implements no `CancelTerminal`. The brief
+allowed either implementing it or, if the converter genuinely cannot know the
+terminal, restating the condition at the level an expected condition takes.
+
+The seam already holds a precedent for the second option: `lost-terminal-residue`
+refuses a LOST terminal for a residue spool at info, reasoning that such a spool
+"names no run" and that minting one "would invent a run that never existed".
+
+Decision: implement it. That reasoning is true of a LOST sweep and false of a
+person's stop. A stop is read off a TRANSCRIPT, and by the time it arrives the
+reader has the spawning call — the live log shows a `toolu_` activity id
+recorded for every one of the 21 tasks, and shows the same task settling a
+cancelled terminal cleanly later, once its watcher happened to be rebuilt as a
+shell spool. The terminal was knowable; only the code was missing.
+
+The condition is not exotic. A spool is demoted to residue when its hold expires
+before any launch line claims it, and a restart with a transcript backlog — which
+is exactly realtest 3, "start with the daemon down" — reads those launch lines
+minutes later. The demoted watcher is never rebuilt (`rescan` skips a path it
+already watches), so the residue handler is the only handler that run will ever
+have.
+
+Not done, and surfaced rather than decided:
+
+- The LOST side keeps its refusal. Its rationale is sound where it is reached
+  with no run id, and changing an owner-visible policy on the strength of the
+  stop's evidence is not this brief's call.
+- `declaredResidueHandler` (the kicked `w*` workflow spool) still implements no
+  `CancelTerminal`, so a stopped workflow run would still take the seam's error
+  branch. Workflow ingestion is kicked for this wave; when it lands, that handler
+  should embed `RunOutput` too.
+- The deeper cause — a watcher demoted to residue is never rebuilt once its
+  owner IS observed — is untouched. Its bytes are already stored as residue at
+  those offsets, so promoting mid-file would split one run across two
+  representations. That is a design question for the owner, not a fix to slip in.
+
+How to reverse: drop `residueHandler.CancelTerminal` and the three reader-side
+tests in `owner_test.go`; the seam's error branch then fires again as before.
