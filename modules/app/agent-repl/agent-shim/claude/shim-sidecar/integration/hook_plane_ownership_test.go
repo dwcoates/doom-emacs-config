@@ -1,6 +1,9 @@
 package integration
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // SUBJECT — THE STREAM PLANE OWNS THE SERVED HOOK ROW (ruling 2026-09-04).
 //
@@ -14,12 +17,18 @@ import "testing"
 // frame and so carries neither the hook's name nor its event.
 //
 // The ruling is R15's precedent applied to hooks: the shim's row is the one
-// SERVED form, and this reader keeps the transcript record durable and
-// investigable as an UNSERVED item. These subjects pin both halves against the
-// real reader driving the real capture's own hook attachments.
+// SERVED form, and this reader still READS the transcript record and states
+// what it was. Under the 2026-09-13 residue ruling that classification is where
+// the record ends — it is named and withheld rather than stored as an unserved
+// item — so the reader's own account of it is what these subjects pin, against
+// the real reader driving the real capture's own hook attachments.
 
 // TestAHookOnTheFilePlaneServesNoActivityRow is the ruling's own assertion: the
-// sidecar wrote the hook down, and wrote NOTHING any page will serve.
+// sidecar read the hook, said what it was, and served NOTHING.
+//
+// RE-AIMED: it asserted the record landed under `residue:<uuid>` carrying the
+// vendor's attachment kind. No residue row is written, so the kind is observable
+// as the withheld record's own label instead.
 func TestAHookOnTheFilePlaneServesNoActivityRow(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -37,24 +46,24 @@ func TestAHookOnTheFilePlaneServesNoActivityRow(t *testing.T) {
 	if uuid == "" {
 		t.Fatalf("the capture's hook attachment carries no uuid")
 	}
+	// The withheld-record accounts are verbose, so the subject asks for them.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	startSidecar(t, opts)
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)))
 	g.AppendLine(encodeRecord(t, hook))
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
-	// Assert: the record landed, and it landed UNSERVED.
-	e := entryByUpsertKey(fake.Entries(), "residue:"+uuid)
-	if e == nil {
-		t.Fatalf("the hook attachment was not stored at all; keys were %v", upsertKeysOf(fake.Entries()))
-	}
-	if e.GetAgentUpdate().GetServeableFrame() != nil {
-		t.Fatalf("a hook attachment reached a page: %v", e.GetAgentUpdate().GetServeableFrame())
-	}
-	if got := e.GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind(); got != "attachment/hook_non_blocking_error" {
-		t.Fatalf("the hook landed as kind %q, want the vendor's own attachment type kept whole", got)
+	// Assert: the reader kept the vendor's own attachment type whole in what it
+	// said it withheld, and the hook reached no row of any sort.
+	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/attachment/hook_non_blocking_error")
+	requireNoResidueStored(t, fake.Entries())
+	for _, e := range fake.Entries() {
+		if strings.Contains(e.GetUpsertKey(), uuid) {
+			t.Fatalf("the hook attachment produced a row keyed %q", e.GetUpsertKey())
+		}
 	}
 }
 

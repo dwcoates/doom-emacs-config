@@ -125,11 +125,21 @@ func logResidue(log *logging.Bound, ctx *Context, offset int64, entries []*store
 		if entry.GetAgentUpdate().GetUnservedItem() == nil {
 			continue
 		}
-		log.With(logging.Context{
+		// THIS IS THE CLASSIFICATION RECORD, AND IT IS THE ONE WITH THE
+		// POSITION. Since the residue ruling (2026-09-13) the bytes themselves
+		// are not stored, so this record — path, file id and offset, plus the
+		// arm and its discriminator — is how an unreadable or uncarried line is
+		// investigated: it names the exact bytes to go and look at in the
+		// vendor's own durable file. The WITHHOLDING is stated once more, at the
+		// write path (`residue-drop`), which is the layer that knows nothing was
+		// stored and keeps the per-file tally; the two join on `reason`.
+		ctxFields := logging.Context{
 			Operation: "residue", Path: ctx.Path, FileID: ctx.FileID, TaskID: ctx.TaskID,
 			AgentID: ctx.AgentID, VendorSessionID: ctx.SessionID, Offset: logging.Off(offset),
 			UpsertKey: entry.GetUpsertKey(), WriteID: entry.GetWriteId(),
-		}).LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
+			Reason: convert.ResidueLabel(entry),
+		}
+		log.With(ctxFields).LogVerbose("record classified as an unserved item: %s", convert.Describe(entry))
 	}
 }
 

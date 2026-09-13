@@ -106,3 +106,70 @@ func TestAnUnparsableLineIsReportedAtItsOwnOffset(t *testing.T) {
 		t.Fatal("an unparsable line produced no residue write record at all")
 	}
 }
+
+// TestTheClassificationRecordCarriesTheResidueLabelItWillBeWithheldUnder is the
+// join. Since the residue ruling (2026-09-13) the bytes are not stored, so the
+// only account of an uncarried line is two records: this one, which has the
+// POSITION, and the reader's `residue-drop`, which has the withholding and the
+// tally. They join on `reason`, and without it the position record and the
+// count record are two unrelated lines about one line of a file.
+func TestTheClassificationRecordCarriesTheResidueLabelItWillBeWithheldUnder(t *testing.T) {
+	// Arrange.
+	var sink bytes.Buffer
+	h := NewSessionTranscriptHandler(captureLog(t, &sink))
+	frames := framesFrom(t, `{"type":"queue-operation","uuid":"q0","timestamp":"2026-07-21T15:36:10.000Z"}`)
+
+	// Act.
+	h.Handle(frames, sessionContext("/p/s.jsonl", "s"))
+
+	// Assert.
+	var reasons []string
+	for _, rec := range decodeCaptured(t, &sink) {
+		if rec.Operation != "residue" {
+			continue
+		}
+		reason, ok := rec.Context["reason"].(string)
+		if !ok {
+			t.Fatalf("the classification record carries no reason; its context was %v", rec.Context)
+		}
+		reasons = append(reasons, reason)
+	}
+	if len(reasons) != 1 || reasons[0] != "vendor_specific/queue-operation" {
+		t.Fatalf("classification reasons = %v, want the one residue label the reader withholds it under", reasons)
+	}
+}
+
+// TestAnUnparsableLineIsStillInvestigableFromTheLogAlone: the raw bytes are no
+// longer stored anywhere, so the parse failure record IS the investigation —
+// it must name the error and the position in the vendor's own durable file
+// where the offending bytes still sit.
+func TestAnUnparsableLineIsStillInvestigableFromTheLogAlone(t *testing.T) {
+	// Arrange.
+	var sink bytes.Buffer
+	h := NewSessionTranscriptHandler(captureLog(t, &sink))
+	frames := framesFrom(t, `{"type":`)
+
+	// Act.
+	h.Handle(frames, sessionContext("/p/s.jsonl", "s"))
+
+	// Assert.
+	var found bool
+	for _, rec := range decodeCaptured(t, &sink) {
+		if rec.Operation != "parse" {
+			continue
+		}
+		found = true
+		if rec.Context["path"] != "/p/s.jsonl" {
+			t.Fatalf("the parse failure names path %v, want the file the bytes are in", rec.Context["path"])
+		}
+		if _, ok := rec.Context["offset"]; !ok {
+			t.Fatalf("the parse failure names no offset; its context was %v", rec.Context)
+		}
+		if !strings.Contains(rec.Message, "parse failure") {
+			t.Fatalf("the parse failure message %q does not state the failure", rec.Message)
+		}
+	}
+	if !found {
+		t.Fatal("an unparsable line produced no parse failure record, so nothing says which bytes to go and look at")
+	}
+}
