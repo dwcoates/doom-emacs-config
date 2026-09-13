@@ -238,6 +238,19 @@ var ErrStandDownOrdered = errors.New("the shim was stood down by this daemon")
 // that must tell a teardown it ordered from one that happened to it.
 func (c *client) StandingDown() bool { return c.standDown.Load() }
 
+// StandDown arms the stand-down latch for a teardown this daemon is ordering,
+// answering whether it was armed. See Client.StandDown.
+func (c *client) StandDown() bool {
+	c.mu.Lock()
+	detached := c.detached
+	c.mu.Unlock()
+	if detached {
+		return false
+	}
+	c.standDown.Store(true)
+	return true
+}
+
 // Connectivity yields every link state change: dialing, connected, redialing,
 // dead.
 func (c *client) Connectivity() <-chan LinkState { return c.link.states() }
