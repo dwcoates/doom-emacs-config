@@ -26,6 +26,7 @@
 
 (declare-function agent-repl--with-deferred-quit "agent-repl-core")
 (declare-function agent-repl--deferred-quit-arm-audit "agent-repl-core" (context))
+(declare-function agent-repl--deferred-quit-hand-off "agent-repl-core" (context))
 (declare-function agent-repl--log"agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
