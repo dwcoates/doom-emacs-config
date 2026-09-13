@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon forced stop: a session kill that does not answer arms the shim client's stand-down latch BEFORE the escalation stops the process, and the unanswered kill is INFO under a stand-down this daemon ordered (WARN only outside one, which is a detached client) (`daemon.workspace.bring_up` WARN "the session kill did not answer" x2 with `daemon.shimclient.exit` ERROR x2 and `daemon.shimclient.redial` WARN x4, gap scan 2026-09-13 17:21)
+
 - shim WatchAgent tail: the store ending a standing `WatchAgentSession` is no longer read as a conclusion — the tail re-opens from the last served pointer on the retry schedule, bounded by three barren ends, and every `WatchAgent` ending is named (concluded at info, an unasked one at error) (daemon `a standing stream ended without the session ending` + `link_fault` with the shim silent, workspace 2b81f45a724642ef, 2026-09-13 16:03)
 
 - elisp daemon exit: the shutdown order names the process it was given to, so a restart's ensure spawning the successor first no longer wipes it and the predecessor's orderly exit is recorded at info (`elisp.daemon.exited requested=nil` WARN x2 on `bin/deploy-all.sh`, 2026-09-13)

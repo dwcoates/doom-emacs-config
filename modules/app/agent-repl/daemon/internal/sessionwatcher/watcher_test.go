@@ -1525,7 +1525,7 @@ func TestStreamEndAfterAnAskedStandDownIsNotAFailure(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.standDown()
+	h.client.StandDown()
 
 	// Act.
 	h.main.Close()
@@ -1544,7 +1544,7 @@ func TestASessionStreamEndAfterAnAskedStandDownIsNotAFailure(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.standDown()
+	h.client.StandDown()
 
 	// Act.
 	h.session.Close()
@@ -1585,7 +1585,7 @@ func TestADeadLinkInsideAnAskedStandDownRaisesNoFault(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.standDown()
+	h.client.StandDown()
 
 	// Act.
 	h.client.links <- shimclient.LinkDead
