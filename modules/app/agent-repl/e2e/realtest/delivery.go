@@ -21,16 +21,39 @@ import (
 // standing minibuffer, after the fact. This file makes that reading part of
 // pressing ANY key, before the run is allowed to believe it.
 //
-// THE MARKS ARE EMACS'S, AND THERE ARE TWO. On this macOS (NS) build a key that
-// enters Emacs's input is obliged to leave one of them — minibuffer.go carries
-// the `keyboard.c` reasoning and the sweep evidence, and this file does not
-// re-derive it:
+// THE MARKS ARE EMACS'S, AND THERE ARE TWO. On this macOS (NS) build an
+// ORDINARY key that enters Emacs's input is obliged to leave one of them:
 //
 //   - `(recent-keys)` grows, because `read_char` `record_char`s what it
 //     returns; or
 //   - `quit-flag` is still armed, for a quit character nothing has taken yet.
 //
-// Neither mark, and the key never entered Emacs's input at all.
+// Neither mark, and an ordinary key never entered Emacs's input at all.
+//
+// AND THE QUIT CHARACTER IS NOT AN ORDINARY KEY. This file used to apply the
+// rule above to `C-g` as well, and the rule is FALSE for it, in both halves:
+//
+//   - `kbd_buffer_store_buffered_event` hands a `quit_char` to
+//     `handle_interrupt` INSTEAD of storing it as an event, so `read_char`
+//     never returns it and `record_char` never records it. `(recent-keys)`
+//     cannot grow for a `C-g`, arriving or not.
+//   - `handle_interrupt` arms `quit-flag`, and on the NS build (`keyboard.c`
+//     guards `quit_throw_to_read_char` with `#ifndef HAVE_NS`) the flag is
+//     taken by the very read that is standing — the minibuffer the `C-g` is
+//     pressed at — microseconds later, far inside one poll interval. By the
+//     time this side reads it, `quit-flag` is down.
+//
+// So a `C-g` that arrives AND WORKS PERFECTLY leaves neither mark, which is
+// precisely the reading this file called a dropped key. The 2026-09-13 sweep
+// (rt-run12) reported six of them that way, every one with a helper receipt
+// reading `frontmost=yes focusedApplication=yes focusedWindow=yes posted`, in
+// runs where every ordinary key of the same sequences — `<escape>`, `SPC`,
+// `TAB`, `n`, `f`, `o`, `C-n` — did leave its mark. The oracle was wrong, not
+// the key driver.
+//
+// SUCH A CHORD SAYS SO (`Chord.MarkFree`) AND IS JUDGED BY ITS EFFECT. Where
+// the caller supplies a DeliveryEffect the effect settles it; where it does
+// not, the delivery is UNDETERMINED and blamed on nobody.
 //
 // AND THE READING HAS ONE AMBIGUITY, WHICH IS NAMED RATHER THAN IGNORED.
 // `recent-keys` is a ring of the last `lossage-size` keys, and a run adopts a
@@ -140,12 +163,17 @@ const (
 	DeliveryUndetermined
 )
 
-// judgeDelivery reads two marks taken around one press.
+// judgeDelivery reads two marks taken around one press of `chord`.
 //
 // The order of the questions is the order of their strength, and the
 // undetermined answers come FIRST: a reading that cannot distinguish must never
 // be overruled by one of the definite branches below it.
-func judgeDelivery(before, after InputMark) (DeliveryVerdict, string) {
+//
+// THE CHORD IS A PARAMETER because the marks do not mean the same thing for
+// every key: a mark-free chord is not obliged to leave either one, so the
+// silence this function reads as an absence for an ordinary key is no evidence
+// at all for that one.
+func judgeDelivery(chord Chord, before, after InputMark) (DeliveryVerdict, string) {
 	if before.ProbeFailure != "" {
 		return DeliveryUndetermined, "the editor would not answer before the press (" + before.ProbeFailure + ")"
 	}
@@ -166,8 +194,33 @@ func judgeDelivery(before, after InputMark) (DeliveryVerdict, string) {
 		return DeliveryArrived, "quit-flag was already armed before the press and still is, so a quit is owed " +
 			"and this press cannot be shown to have been dropped"
 	}
+	if chord.MarkFree {
+		return DeliveryUndetermined, "(recent-keys) did not change and quit-flag is down, and this chord is " +
+			"NOT obliged to leave either mark: " + chord.markFreeWhy() + ". Its arrival can only be settled " +
+			"by the effect it is pressed for, and no effect was observed"
+	}
 	return DeliveryAbsent, "(recent-keys) did not change and quit-flag is down, and on this build an arriving " +
 		"key is obliged to leave one of those two marks"
+}
+
+// DeliveryEffect is the thing a key is pressed FOR, offered as the account of
+// its arrival.
+//
+// It is the only account there is for a mark-free chord, and it is a better one
+// than the marks for any chord: a key whose effect has happened arrived,
+// whatever Emacs's input ring does or does not say. Passing it into the press
+// rather than checking it afterwards is what makes one observation settle both
+// questions, so a run cannot report an undelivered key and a product finding
+// about the same press — which is exactly what the 2026-09-13 sweep printed,
+// twice per prompt.
+type DeliveryEffect struct {
+	// What names the effect in the words a finding carries, e.g. "the standing
+	// minibuffer `Repository: ` closed".
+	What string
+	// Observed answers whether it has happened yet. It is polled inside the
+	// helper's hold, so it must be cheap and must never block for longer than
+	// the poll interval.
+	Observed func(context.Context) bool
 }
 
 // recentKeysUniform says whether a rendered `recent-keys` is the same key over
@@ -212,6 +265,11 @@ type DeliveryReceipt struct {
 	After  InputMark
 	// Elapsed is how long the confirmation took, focus held throughout.
 	Elapsed time.Duration
+	// EffectObserved says the verdict was settled by the effect the key was
+	// pressed for, rather than by Emacs's input marks. It is what a caller
+	// reads to learn that the act it pressed the key for has already happened,
+	// so it does not go and ask a second time and risk a second answer.
+	EffectObserved bool
 	// Focus is what the EDITOR said about its own desktop focus while the
 	// helper held the target key.
 	//

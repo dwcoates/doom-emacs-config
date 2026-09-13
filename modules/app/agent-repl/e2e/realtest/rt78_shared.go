@@ -63,7 +63,8 @@ func rt78Quote(value string) string {
 //
 // `parent_id` is the only column on that table recording a fork's parentage,
 // and it cannot carry a fork verdict on its own: there is no fork column, and
-// a plain child (`SPC TAB n` with a prefix argument) sets it identically,
+// a plain child (`SPC TAB c`, its own command since the 2026-09-12 ruling and
+// no longer a prefix argument on the plain create) sets it identically,
 // because the daemon's CreateSpec makes ForkFrom imply Parent. What separates
 // a fork from a plain child is `ported_prompts`.
 //

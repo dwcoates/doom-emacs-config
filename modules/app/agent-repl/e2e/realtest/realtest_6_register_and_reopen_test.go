@@ -15,7 +15,11 @@ import (
 // REALTEST 6 — REGISTER A DIRECTORY, CLOSE IT, RE-OPEN IT.
 //
 // docs/REALTEST-PLAN.md, "Workspaces", item 6: "Register a directory (`SPC TAB
-// C-n`); re-open a closed workspace (`SPC TAB o`)."
+// C-n`); re-open a closed workspace (`SPC TAB O`)."
+//
+// RE-OPEN IS THE CAPITAL SINCE THE 2026-09-12 OWNER RULING. `SPC TAB o` is the
+// one-shot create now, and a harness still pressing it raises "One-shot
+// commission: " and would create a workspace where it meant to re-open one.
 //
 // What it asserts, in order:
 //
@@ -34,7 +38,7 @@ import (
 //     database STILL HOLDS the record — a close that forgot the record would
 //     have nothing to re-open, which is the whole distinction between close
 //     and nuke.
-//   - `SPC TAB o` REACHES ITS COMMAND, and re-opening RESTORES THE SAME
+//   - `SPC TAB O` REACHES ITS COMMAND, and re-opening RESTORES THE SAME
 //     WORKSPACE. The identity asserted is the workspace id, byte for byte,
 //     because the id is the identity and a path has many spellings: a re-open
 //     that minted a second workspace at the same directory would look right in
@@ -334,14 +338,14 @@ func TestRealtestRegisterAndReopen(t *testing.T) {
 		t.Errorf("the workspace %s (%q) was closed and its roster row still reads open", registered.ID, tabName)
 	}
 
-	// ---- The act: `SPC TAB o` ------------------------------------------
+	// ---- The act: `SPC TAB O` ------------------------------------------
 
 	wsActProveChord(ctx, t, client, driver,
 		[]Chord{wsActLeader, wsActTab, wsActOpenKey}, "Open workspace:", &manifest)
 
 	reopenStarted := time.Now()
 	if err := wsActOpenWorkspace(ctx, client, tabName); err != nil {
-		t.Fatalf("re-open the closed workspace %q through `SPC TAB o`'s command: %v", tabName, err)
+		t.Fatalf("re-open the closed workspace %q through `SPC TAB O`'s command: %v", tabName, err)
 	}
 
 	afterReopen := wsActWaitForDB(ctx, t, "the registry to hold the workspace open again", dbPath,
