@@ -344,3 +344,10 @@ Not done, and surfaced rather than decided:
 
 How to reverse: drop `residueHandler.CancelTerminal` and the three reader-side
 tests in `owner_test.go`; the seam's error branch then fires again as before.
+
+## Owner ruling: the store is never retained during development (2026-09-13, owner)
+
+The events store needs no retention while the overhaul is in progress: it
+may be reset at any time. Separately, the volume of writes and the store's
+growth (1.63 GB, 606k rows on 2026-09-12) are to be explained and fixed at
+the source.
