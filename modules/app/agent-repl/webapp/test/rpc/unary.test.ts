@@ -48,7 +48,7 @@ function captureLog(): Array<[string, string]> {
   const lines: Array<[string, string]> = [];
   setLogger(
     new ForwardingLogger(
-      async () => {},
+      async () => "accepted",
       (level, line) => lines.push([level, line]),
       {},
       "debug",
