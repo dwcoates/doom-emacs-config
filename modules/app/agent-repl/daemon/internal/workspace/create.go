@@ -2,12 +2,14 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/headless"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/resolve/feed"
@@ -46,6 +48,9 @@ const (
 // The order is the ruled one and is not negotiable:
 //
 //  1. validate the form, including the ungated-mode consent check;
+//  1a. resolve and REQUIRE a one-shot's repository policy — before step 2,
+//     because step 2 may SPEND A MODEL CALL. A repository that states no
+//     one-shot policy is refused with no naming call made;
 //  2. derive the slug (supplied name, else the initial prompt by the naming
 //     rule), the branch, the worktree directory and the resolved base ref;
 //  3. record the CREATION JOB — merge geometry, configured actions and
@@ -70,9 +75,16 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	}
 
 	// A ONE-SHOT RUNS THE REPOSITORY'S OWN POLICY, so the policy is resolved
-	// and required HERE — before the id is minted, before the creation job is
-	// recorded, before git is touched. A repository that states none is
-	// refused with nothing built and nothing minted.
+	// and required HERE — before the id is minted, before the NAMING CALL is
+	// made, before the creation job is recorded, before git is touched. A
+	// repository that states none is refused with nothing built and nothing
+	// minted.
+	//
+	// THE POLICY CHECK PRECEDES `branchFor` DELIBERATELY. `branchFor` is where
+	// an unnamed create spends a headless model call to mint its name, and a
+	// create that is going to be refused for a missing policy must not pay for
+	// one. TestCreateRefusesAOneShotWithNoPolicyBeforeSpendingANamingCall pins
+	// the ordering.
 	var policy prompts.Source
 	if spec.OneShot {
 		policy, err = v.requireOneShotPolicy(global, repoDir)
@@ -87,7 +99,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	// naming rule never invents free text.
 	workspaceID := wsm.NewWorkspaceID()
 
-	branch, err := v.branchFor(global, spec, workspaceID)
+	branch, err := v.branchFor(ctx, global, spec, repoDir, workspaceID)
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
@@ -266,13 +278,16 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 	return nil
 }
 
-// branchFor derives the workspace's branch, which is also its name: the
-// supplied name when there is one, else the slug the naming rule derives from
-// the initial prompt, prefixed by the configured workspace prefix.
+// branchFor derives the workspace's branch, which is also its name and its
+// worktree directory component: the supplied name when there is one, else the
+// name the MODEL mints for the initial prompt.
 //
 // A supplied name that already carries a prefix component is taken as it
-// stands; the prefix is applied only to a name this daemon derived.
-func (v *verbs) branchFor(log dlog.Logger, spec CreateSpec, minted wsm.WorkspaceID) (string, error) {
+// stands; the prefix is applied only to a name this daemon derived. A name the
+// daemon derived is also DISAMBIGUATED against existing branches and
+// workspaces, which a supplied name is not — the user typed that one and is
+// owed git's own refusal if it is taken.
+func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string, minted wsm.WorkspaceID) (string, error) {
 	if supplied := strings.TrimSpace(spec.Name); supplied != "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "supplied := strings.TrimSpace(spec.Name); supplied != \"\""})
 		if strings.Contains(supplied, "/") {
@@ -282,22 +297,40 @@ func (v *verbs) branchFor(log dlog.Logger, spec CreateSpec, minted wsm.Workspace
 		return Name(Prefix(), supplied), nil
 	}
 	// An initial prompt is OPTIONAL on the standard form: an unset one is an
-	// empty workspace, which is a legal create. With no prompt there is no
-	// text to derive a slug from, so the branch is named after the workspace's
-	// own minted id rather than refused.
+	// empty workspace, which is a legal create. With no prompt there is
+	// nothing to name the workspace AFTER, and the naming call is not asked to
+	// invent one, so the branch is named after the workspace's own minted id.
 	if strings.TrimSpace(spec.InitialPrompt) == "" {
 		branch := Name(Prefix(), UnnamedSlugPrefix+string(minted))
 		log.Debug(opCreate, "named the branch after the minted workspace id", dlog.Context{"branch": branch})
 		return branch, nil
 	}
-	slug, err := Slug(spec.InitialPrompt)
+	slug, err := v.mintName(ctx, log, repoDir, spec.InitialPrompt)
 	if err != nil {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
-		return "", refuse(log, "CreateWorkspace", ArmNoSlug,
-			"no name was supplied and no slug can be derived from the initial prompt", false)
+		var failure *namingFailure
+		if errors.As(err, &failure) {
+			// THE REFUSAL AND THE ERROR RECORD ARE ONE. mintName already wrote
+			// the ERROR line; this states the same failure as the contract's
+			// own arm, with the fields a client renders.
+			return "", refuseWith(log, "CreateWorkspace", ArmNamingFailed,
+				fmt.Sprintf("no name was supplied and the naming call could not mint one: %s", failure.Detail), false,
+				map[string]any{
+					"model":    headless.ModelHaiku,
+					"cause":    failure.Cause,
+					"attempts": failure.Attempts,
+					"answer":   failure.Answer,
+				})
+		}
+		return "", err
 	}
-	branch := Name(Prefix(), slug)
-	log.Debug(opCreate, "derived the branch from the initial prompt", dlog.Context{"branch": branch})
+	branch, err := v.freeName(ctx, log, repoDir, Name(Prefix(), slug))
+	if err != nil {
+		log.Error(opCreate, "could not find a free name for the minted workspace name", dlog.Context{
+			"slug": slug, "cause": err.Error(),
+		})
+		return "", fmt.Errorf("create: name %q: %w", slug, err)
+	}
+	log.Debug(opCreate, "the model named the workspace from its initial prompt", dlog.Context{"branch": branch})
 	return branch, nil
 }
 

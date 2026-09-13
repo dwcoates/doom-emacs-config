@@ -2,8 +2,16 @@
 
 Every file in this directory is a prompt **agent-repl sends to an agent without
 you typing it** — a merge-conflict repair brief, a workspace's first message,
-the routing classifier's question. They live here, as plain text, so you can
-change what the system says without editing source or rebuilding anything.
+the routing classifier's question, the question that NAMES a new workspace.
+They live here, as plain text, so you can change what the system says without
+editing source or rebuilding anything.
+
+`workspace-name-from-prompt.md` is worth knowing about: every dynamically
+created workspace whose name you did not type is named by a headless model
+call the daemon makes from that file, and the three-word rule it states is
+ENFORCED on the answer rather than hoped for. Loosen the words in the brief
+and the daemon still refuses what the rule forbids — the rule itself lives in
+`daemon/internal/workspace/naming.go`.
 
 **This directory is doom's own policy, not everyone's.** These files are the
 one-shot and merge policy of the ONE repository this checkout lives in. Every

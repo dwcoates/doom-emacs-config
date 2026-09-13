@@ -138,6 +138,31 @@ func TestApplyFileMapsCreateOntoTheCreationVerb(t *testing.T) {
 	}
 }
 
+// TestApplyFileNamelessCreateLeavesTheNamingToTheVerb pins that the file
+// channel has NO naming of its own: a nameless entry reaches `Create' with an
+// empty Name, which is exactly what makes the daemon's headless naming call
+// fire for it. There is one naming site, not two.
+func TestApplyFileNamelessCreateLeavesTheNamingToTheVerb(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	path := f.write(t, "workspace_commands_c.json",
+		`[{"type":"create","git_root":"/repo","prompt":"fix the flaky login test"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	spec := f.verbs.calls[0].Spec
+	if spec.Name != "" {
+		t.Fatalf("create spec name = %q, want it empty so the verb's naming call mints one", spec.Name)
+	}
+	if spec.InitialPrompt != "fix the flaky login test" {
+		t.Fatalf("create spec prompt = %q, want the entry's own prompt for the naming call", spec.InitialPrompt)
+	}
+}
+
 func TestApplyFileOneShotCreateDispatchesTheOneShotFormAlone(t *testing.T) {
 	// Arrange: the channel names no finish, and neither does the spec — what
 	// happens on completion is the repository's own directive.

@@ -217,6 +217,63 @@ func TestDefaultBranchVerifiesCandidatesUnderRefsHeadsOnly(t *testing.T) {
 	fake.assertSubject(2, "show-ref", "--verify", "--quiet", "refs/heads/main")
 }
 
+// --- BranchExists -------------------------------------------------------
+
+func TestBranchExistsAnswersTrueForALocalBranch(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok("", "show-ref"))
+
+	// Act.
+	got, err := git.BranchExists(context.Background(), "/repo", "flaky-login-test")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("BranchExists: %v", err)
+	}
+	if !got {
+		t.Fatal("BranchExists = false, want true for a branch show-ref verified")
+	}
+}
+
+// TestBranchExistsAnswersFalseWithoutAnErrorRecord pins WHY this method exists
+// beside ResolveRef: the naming call's collision probe asks about branches
+// that are supposed not to exist, and an absent branch is the ANSWER it wants
+// — never an error record an operator has to explain away.
+func TestBranchExistsAnswersFalseWithoutAnErrorRecord(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(1, "", "show-ref"))
+
+	// Act.
+	got, err := git.BranchExists(context.Background(), "/repo", "not-a-branch")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("BranchExists: %v", err)
+	}
+	if got {
+		t.Fatal("BranchExists = true, want false for a branch show-ref did not verify")
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.branch_exists"); found {
+		t.Fatal("an absent branch was recorded at ERROR; it is an ordinary answer")
+	}
+}
+
+func TestBranchExistsVerifiesUnderRefsHeadsOnly(t *testing.T) {
+	// Arrange: a TAG named the same must never be mistaken for the branch.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("", "show-ref"))
+
+	// Act.
+	if _, err := git.BranchExists(context.Background(), "/repo", "v1"); err != nil {
+		t.Fatalf("BranchExists: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "show-ref", "--verify", "--quiet", "refs/heads/v1")
+}
+
 // --- ResolveRef ---------------------------------------------------------
 
 func TestResolveRefAnswersTheFullSha(t *testing.T) {

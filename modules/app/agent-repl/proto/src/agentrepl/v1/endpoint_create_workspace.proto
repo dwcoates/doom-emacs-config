@@ -171,6 +171,8 @@ message CreateWorkspaceError {
     // A one-shot was asked for in a repository that states no one-shot
     // policy of its own.
     CreateWorkspaceOneShotPolicyMissing one_shot_policy_missing = 12;
+    // The daemon could not mint a name for a create that supplied none.
+    CreateWorkspaceNamingFailed naming_failed = 13;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -218,4 +220,23 @@ message CreateWorkspaceOneShotPolicyMissing {
   // Every one-shot requires the same set: the autonomous preamble and the
   // completion directive.
   repeated string missing_files = 3;
+}
+
+// EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL. A create that
+// supplies no name gets one from a headless call the daemon makes inside
+// Create, constrained to at most three lowercase hyphenated words. There is
+// no word-truncation fallback — a name nobody chose is not a name — so a
+// naming call that cannot answer REFUSES the create, and the user retries or
+// supplies a name.
+message CreateWorkspaceNamingFailed {
+  // The model the naming call asked.
+  string model = 1;
+  // What went wrong, read off the failure: `guard_refused`, `no_binary`,
+  // `timeout`, `exit_status`, `unreadable_envelope` or `invalid_answer`.
+  string cause = 2;
+  // How many calls were made before giving up.
+  uint32 attempts = 3;
+  // The last answer the model gave, when there was one. Empty when the call
+  // never answered.
+  string answer = 4;
 }
