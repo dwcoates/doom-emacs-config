@@ -4251,6 +4251,47 @@ module loaded, about jobs nothing owns any more."
   (should (string-match-p agent-repl--input-buffer-re
                           "*agent-panel-input-ws-1 Refactor the codec*")))
 
+
+;;;; ---- Tests: the agent INPUT buffer name predicate ----
+;;
+;; The companion of the view predicate: together they are the two panels
+;; the tab bar's full-vs-partial extent asks about (owner ruling 5).
+
+(ert-deftest agent-repl-test-agent-input-buffer-name-p-matches-the-composer ()
+  "An input composer buffer name is recognized."
+  ;; Arrange / Act / Assert
+  (should (agent-repl--agent-input-buffer-name-p "*agent-panel-input-my-ws*")))
+
+(ert-deftest agent-repl-test-agent-input-buffer-name-p-matches-a-titled-composer ()
+  "A composer whose name carries the daemon's display title is recognized."
+  ;; Arrange / Act / Assert
+  (should (agent-repl--agent-input-buffer-name-p
+           "*agent-panel-input-my-ws Fix the tab bar*")))
+
+(ert-deftest agent-repl-test-agent-input-buffer-name-p-rejects-the-webview ()
+  "The webapp panel is not the input window."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl--agent-input-buffer-name-p "*agent-frontend-my-ws*")))
+
+(ert-deftest agent-repl-test-agent-input-buffer-name-p-rejects-a-plain-buffer ()
+  "An ordinary buffer name is not an input composer."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl--agent-input-buffer-name-p "*scratch*")))
+
+(ert-deftest agent-repl-test-agent-input-buffer-name-p-rejects-a-non-string ()
+  "A non-string name answers nil rather than signalling."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl--agent-input-buffer-name-p nil)))
+
+(ert-deftest agent-repl-test-agent-input-buffer-p-is-the-buffer-shaped-form ()
+  "The buffer-shaped form reads the buffer's own name."
+  ;; Arrange
+  (let ((buf (generate-new-buffer "*agent-panel-input-bufform*")))
+    (unwind-protect
+        ;; Act / Assert
+        (should (agent-repl--agent-input-buffer-p buf))
+      (kill-buffer buf))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here

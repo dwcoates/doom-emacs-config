@@ -3681,6 +3681,25 @@ Buffer-shaped form of `agent-repl--agent-view-buffer-name-p'."
   (agent-repl--agent-view-buffer-name-p
    (buffer-name (or buf (current-buffer)))))
 
+(defun agent-repl--agent-input-buffer-name-p (name)
+  "Return non-nil when NAME is a workspace's agent INPUT composer buffer.
+The companion of `agent-repl--agent-view-buffer-name-p': the two together
+are the pair the owner calls a workspace's agent-repl PANELS (the webapp
+panel and the input window), and the tab bar's full-vs-partial extent
+asks for both.
+
+Takes a NAME rather than a buffer for the same reason the view predicate
+does — one caller walks live buffers, the other a saved
+`window-state-get' tree, where buffers survive only as their names."
+  (and (stringp name)
+       (string-match-p agent-repl--input-buffer-re name)))
+
+(defun agent-repl--agent-input-buffer-p (&optional buf)
+  "Return non-nil if BUF (default: current buffer) is an agent input composer.
+Buffer-shaped form of `agent-repl--agent-input-buffer-name-p'."
+  (agent-repl--agent-input-buffer-name-p
+   (buffer-name (or buf (current-buffer)))))
+
 (defun agent-repl--non-user-buffer-p (buf)
   "Return non-nil if BUF is not a user-facing buffer.
 Matches agent panel buffers, minibuffers, and dead/nil buffers.
