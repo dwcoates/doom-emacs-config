@@ -1,6 +1,7 @@
 /**
- * expanded — the section that opens ABOVE the strip when a chip or the tokens
- * cell is selected.
+ * expanded — the section that opens UNDER the strip when a chip or the tokens
+ * cell is selected (owner ruling, 2026-09-13). `footer.ts` orders the dock and
+ * draws the one divider above this section; nothing here positions itself.
  *
  * EVERY PANEL ARRIVES ON EVERY PUSH, fully resolved, and the SELECTION IS
  * WEBVIEW-LOCAL — the daemon never learns which one is open. That is the whole

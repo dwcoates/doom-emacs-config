@@ -22,6 +22,8 @@ import {
   strip,
   type Harness,
 } from "./harness.js";
+import STYLESHEET from "../../src/styles.css?raw";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 
 const NOW = 1_800_000_000_000;
 
@@ -379,5 +381,123 @@ describe("mountFooter: a stop's own answer outlives the push it caused", () => {
     footer.dispose();
     // Assert
     expect(host.querySelector(".footer-stop-turn")).toBeNull();
+  });
+});
+
+/**
+ * THE DOCK'S ORDER (owner ruling, 2026-09-13): the strip on top, one divider,
+ * the expanded section under it. These pin the ORDER and the PARTITION, which
+ * is what the ruling settles; every panel's own content is `expanded.test.ts`.
+ */
+describe("mountFooter: the strip on top, the expanded section under it", () => {
+  /** Mount, push a view with an agent, and open the agents panel. */
+  async function openPanel(): Promise<HTMLElement> {
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { agents: { count: 1 } } }) })));
+    await settle();
+    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    return host;
+  }
+
+  it("draws the expanded panel as a FOLLOWING sibling of the strip", async () => {
+    // Arrange / Act
+    const host = await openPanel();
+    // Assert
+    const dock = host.querySelector(".pfooter");
+    const children = [...(dock?.children ?? [])];
+    expect(children.indexOf(host.querySelector(".footer-expanded") as Element)).toBeGreaterThan(
+      children.indexOf(host.querySelector(".footer-strip") as Element),
+    );
+  });
+
+  it("puts the divider BETWEEN the strip and the expanded panel", async () => {
+    // Arrange / Act
+    const host = await openPanel();
+    // Assert
+    const dock = host.querySelector(".pfooter");
+    const named = [".footer-strip", ".footer-divider", ".footer-expanded"];
+    expect(
+      [...(dock?.children ?? [])].map((el) => named.find((sel) => el.matches(sel)) ?? el.className),
+    ).toEqual(named);
+  });
+
+  it("draws NO divider while the footer is closed: one section needs no partition", async () => {
+    // Arrange
+    const { host, h } = mount();
+    await settle();
+    // Act
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Assert
+    expect(host.querySelector(".footer-divider")).toBeNull();
+  });
+
+  it("hangs the divider off the DOCK, not off the padded expanded section", async () => {
+    // Arrange / Act
+    const host = await openPanel();
+    // Assert
+    expect(host.querySelector(".footer-divider")?.parentElement?.className).toBe("pfooter");
+  });
+
+  it("paints the divider one step darker than the rows' own delimiter", async () => {
+    // Arrange
+    const teardown = installStylesheet();
+    // Act
+    const host = await openPanel();
+    // Assert
+    try {
+      expect(cascadedValue(host.querySelector(".footer-divider") as Element, "border-top-color"))
+        .toBe("var(--border-strong)");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("takes its darker token from the row delimiter's own, one step down", () => {
+    // Arrange / Act / Assert: same hue, derived — never a second unrelated grey.
+    expect(STYLESHEET).toMatch(
+      /--border-strong:\s*color-mix\(in srgb, var\(--border\) 85%, var\(--fg\)\);/,
+    );
+  });
+
+  it("insets the divider on NEITHER side, so it spans the dock edge to edge", async () => {
+    // Arrange
+    const teardown = installStylesheet();
+    // Act
+    const host = await openPanel();
+    // Assert
+    const divider = host.querySelector(".footer-divider") as Element;
+    try {
+      expect(
+        ["margin-left", "margin-right", "padding-left", "padding-right"].map((p) =>
+          cascadedValue(divider, p),
+        ),
+      ).toEqual(["0px", "0px", "0px", "0px"]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("measures the divider at the dock's own full width", async () => {
+    // Arrange: jsdom lays nothing out, so the dock's width is stubbed and the
+    // divider -- a plain in-flow block with no inset -- is measured against it.
+    const teardown = installStylesheet();
+    const host = await openPanel();
+    const dock = host.querySelector(".pfooter") as HTMLElement;
+    const divider = host.querySelector(".footer-divider") as HTMLElement;
+    const DOCK_WIDTH = 640;
+    Object.defineProperty(dock, "clientWidth", { value: DOCK_WIDTH, configurable: true });
+    // Act: the width a no-inset in-flow block takes is its container's, less
+    // whatever the cascade insets it by -- which the rule pins at zero.
+    const inset = ["margin-left", "margin-right", "padding-left", "padding-right"]
+      .map((p) => Number.parseFloat(cascadedValue(divider, p)))
+      .reduce((a, b) => a + b, 0);
+    // Assert
+    try {
+      expect(dock.clientWidth - inset).toBe(DOCK_WIDTH);
+    } finally {
+      teardown();
+    }
   });
 });
