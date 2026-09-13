@@ -236,6 +236,29 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) ([]S
 		Batch:    batch,
 	}))
 	if err != nil {
+		// A WRITE THIS PROCESS WITHDREW IS NOT A TRANSPORT FAILURE. The one way
+		// this call sees context.Canceled is the sidecar cancelling its own
+		// cycle context on the way out, and the outcome is the ordinary one the
+		// contract already promises: nothing committed, the cursor not advanced,
+		// the same durable bytes re-read from the store's cursor on the next
+		// boot. Calling that an error made every deploy restart that landed
+		// mid-batch write one — on the owner's machine, 191 entries at
+		// 2026-09-13T01:21:08, seconds before the process exited.
+		//
+		// A DEADLINE IS STILL A FAILURE and keeps the error: the store was asked
+		// and did not answer in time, which is a fact about the store. Only a
+		// cancellation this process issued is exempt, and the error itself is
+		// returned to the caller unchanged either way.
+		//
+		// THE NARRATION BELONGS TO THE CALLER, so this is the per-call DETAIL
+		// and not a second normal-level record: the sidecar's storeWrite is the
+		// layer that knows a shutdown is in progress and states the one INFO
+		// `shutdown` record for it. Two records for one fact is what the
+		// exactly-once rule forbids.
+		if errors.Is(err, context.Canceled) {
+			bound.LogVerbose("write abandoned for %d entrie(s): the caller cancelled the request, so nothing was committed and the cursor did not advance", len(batch.GetEntries()))
+			return nil, fmt.Errorf("storeclient: %s: %w", rpcWriteBatch, err)
+		}
 		bound.With(logging.Context{Level: "error"}).Log("write transport failure for %d entrie(s): %v", len(batch.GetEntries()), err)
 		return nil, fmt.Errorf("storeclient: %s: %w", rpcWriteBatch, err)
 	}
