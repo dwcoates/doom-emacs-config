@@ -55,9 +55,7 @@
 (declare-function agent-repl-create-workspace "verbs")
 (declare-function agent-repl-create-child-workspace "verbs")
 (declare-function agent-repl-fork-workspace "verbs")
-(declare-function agent-repl-create-oneshot-self-merge "verbs")
-(declare-function agent-repl-create-oneshot-open-pr "verbs")
-(declare-function agent-repl-create-oneshot-open-pr-reviewed "verbs")
+(declare-function agent-repl-create-oneshot "verbs")
 (declare-function agent-repl-open-workspace "verbs")
 (declare-function agent-repl-daemon-shutdown-schedule "verbs")
 (declare-function agent-repl-daemon-shutdown-cancel "verbs")
@@ -376,45 +374,24 @@ round-trip exists."
         (should (equal (agent-repl-itest--body-field (car blocks) 'text 'text)
                        "fix the flake"))))))
 
-(ert-deftest agent-repl-itest-verbs-create-one-shot-self-merge-sends-its-finish ()
-  "The one-shot form's `self_merge' finish arm rides the request.
+(ert-deftest agent-repl-itest-verbs-create-one-shot-sends-its-prompt-alone ()
+  "The one-shot form rides the request as its prompt and nothing else.
 ONE-SHOTS ride the wire now: Emacs supplies {prompt, model, parentage}
-and the DAEMON owns naming, worktree, decoration and postprocessing."
+and the DAEMON owns naming, worktree and decoration.  There is no finish
+choice at all -- completion is the repository's own directive."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
       (agent-repl-verb-create agent-repl-itest-verbs--repo
-                              :one-shot :prompt "land the fix" :finish :self-merge)
+                              :one-shot :prompt "land the fix")
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
-      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-        ;; `self_merge' is an EMPTY message: present and `{}', which parses
-        ;; back to nil, so presence is the whole assertion.
-        (should (assq 'selfMerge (agent-repl-itest--body-field body 'oneShot)))))))
-
-(ert-deftest agent-repl-itest-verbs-create-one-shot-open-pr-sends-its-flags ()
-  "The `open_pr' finish arm carries both of its bools explicitly.
-`self_certified' and `add_to_merge_queue' are plain bools: false is a
-value the daemon must receive, not an absence."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-workspace daemon ref
-      (ignore ref)
-      ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo
-                              :one-shot :prompt "land the fix" :finish :open-pr
-                              :self-certified t :add-to-merge-queue t)
-      (agent-repl-itest--await-call daemon "CreateWorkspace")
-      ;; Assert.
-      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-        (should (eq (agent-repl-itest--body-field
-                     body 'oneShot 'openPr 'selfCertified)
-                    t))
-        (should (eq (agent-repl-itest--body-field
-                     body 'oneShot 'openPr 'addToMergeQueue)
-                    t))))))
+      (let ((one-shot (agent-repl-itest--body-field
+                       (agent-repl-itest-verbs--body daemon "CreateWorkspace") 'oneShot)))
+        (should (assq 'prompt one-shot))
+        (should (equal (mapcar #'car one-shot) '(prompt)))))))
 
 (ert-deftest agent-repl-itest-verbs-create-parent-carries-the-parents-ref ()
   "A child workspace names its parent by ref.
@@ -834,47 +811,6 @@ the raw wire text can tell an explicit false from an omitted field."
       ;; Assert.
       (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "RestartWorkspace"))))
         (should (string-match-p (regexp-quote "\"force\":false") raw))))))
-
-(ert-deftest agent-repl-itest-verbs-create-open-pr-both-false-sends-explicit-false-on-the-raw-wire ()
-  "A reviewed one-shot's PR flags ride the wire as explicit `false', not absence.
-Pins \"Default false\" for `self_certified'/`add_to_merge_queue'
-(endpoint_create_workspace.proto, CreateWorkspaceOneShotOpenPr): both
-flags default false, so the wire must state them rather than let the
-daemon's zero value stand in silently."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-primary daemon conn
-      (ignore conn)
-      ;; Act.
-      (agent-repl-verb-create
-       agent-repl-itest-verbs--repo
-       :one-shot :prompt "land the fix" :finish :open-pr
-       :self-certified nil :add-to-merge-queue nil)
-      (agent-repl-itest--await-call daemon "CreateWorkspace")
-      ;; Assert.
-      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "CreateWorkspace"))))
-        (should (string-match-p (regexp-quote "\"selfCertified\":false") raw))
-        (should (string-match-p (regexp-quote "\"addToMergeQueue\":false") raw))))))
-
-;;;; ---- One-shot `finish' required before send (audit finding 74) ----
-
-(ert-deftest agent-repl-itest-verbs-create-one-shot-without-finish-refuses-before-send ()
-  "An unset one-shot `finish' is refused before send, with ZERO daemon calls.
-Pins \"an unset one-shot `finish' is refused before send\"
-(elisp-fanout.md §5): `finish' is a oneof, and an unset oneof is a
-contract breach the codec catches while encoding, before any bytes leave
-Emacs."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-primary daemon conn
-      (ignore conn)
-      ;; Act / Assert: the signal happens during encoding, before the transport call.
-      (should-error
-       (agent-repl-verb-create
-        agent-repl-itest-verbs--repo
-        :one-shot :prompt "x")
-       :type 'agent-repl-wire-error)
-      (should (null (agent-repl-itest--calls daemon "CreateWorkspace"))))))
 
 ;;;; ---- CreateWorkspaceRequest fields (audit finding 75) ----
 
@@ -2009,72 +1945,8 @@ command's whole contract is that BOTH facts ride together."
                            (plist-get ref :id)))
             (should (assq 'fork (agent-repl-itest--body-field body 'parent)))))))))
 
-;; audit-3 #53(d)
-(ert-deftest agent-repl-itest-verbs-create-oneshot-open-pr-reviewed-sends-explicit-false-on-the-raw-wire ()
-  "The REVIEWED one-shot open-PR command sends both flags explicitly false.
-`agent-repl-create-oneshot-open-pr-reviewed' is \"neither self-certified
-nor queued\", and the parsed body drops a zero-valued bool, so only the
-raw wire text can prove the daemon actually received `false' rather than
-an absence."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-workspace daemon ref
-      ;; A one-shot is a DYNAMIC mode: it derives its repository from the
-      ;; roster section the current workspace's row sits in and asks for no
-      ;; repository at all, so the row is what makes it runnable here.
-      (agent-repl-itest-verbs--with-roster
-          daemon (list (agent-repl-itest-verbs--roster-row
-                        (plist-get ref :id) (plist-get ref :dir)
-                        :name agent-repl-itest-verbs--ws))
-        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-                   (lambda () agent-repl-itest-verbs--ws))
-                  ((symbol-function 'completing-read)
-                   (lambda (&rest _)
-                     (error "a one-shot must not ask for a repository")))
-                  ((symbol-function 'read-string)
-                   (lambda (prompt &optional initial &rest _)
-                     (ignore prompt initial) "reviewed one-shot")))
-          ;; Act.
-          (agent-repl-create-oneshot-open-pr-reviewed nil)
-          (agent-repl-itest--await-call daemon "CreateWorkspace")
-          ;; Assert.
-          (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "CreateWorkspace"))))
-            (should (string-match-p (regexp-quote "\"selfCertified\":false") raw))
-            (should (string-match-p (regexp-quote "\"addToMergeQueue\":false") raw))))))))
-
-;; audit-3 #53(d)
-(ert-deftest agent-repl-itest-verbs-create-oneshot-open-pr-sends-explicit-true-on-the-raw-wire ()
-  "The PLAIN one-shot open-PR command sends both flags explicitly true.
-The other half of the reviewed case: a command that always encoded
-`false' would pass the reviewed test on its own."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-workspace daemon ref
-      ;; A one-shot is a DYNAMIC mode: it derives its repository from the
-      ;; roster section the current workspace's row sits in and asks for no
-      ;; repository at all, so the row is what makes it runnable here.
-      (agent-repl-itest-verbs--with-roster
-          daemon (list (agent-repl-itest-verbs--roster-row
-                        (plist-get ref :id) (plist-get ref :dir)
-                        :name agent-repl-itest-verbs--ws))
-        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-                   (lambda () agent-repl-itest-verbs--ws))
-                  ((symbol-function 'completing-read)
-                   (lambda (&rest _)
-                     (error "a one-shot must not ask for a repository")))
-                  ((symbol-function 'read-string)
-                   (lambda (prompt &optional initial &rest _)
-                     (ignore prompt initial) "queued one-shot")))
-          ;; Act.
-          (agent-repl-create-oneshot-open-pr nil)
-          (agent-repl-itest--await-call daemon "CreateWorkspace")
-          ;; Assert.
-          (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "CreateWorkspace"))))
-            (should (string-match-p (regexp-quote "\"selfCertified\":true") raw))
-            (should (string-match-p (regexp-quote "\"addToMergeQueue\":true") raw))))))))
-
 ;; audit-3 #53(e)
-(ert-deftest agent-repl-itest-verbs-create-oneshot-self-merge-with-a-model-prefix-sends-the-chosen-model ()
+(ert-deftest agent-repl-itest-verbs-create-oneshot-with-a-model-prefix-sends-the-chosen-model ()
   "A model-prefix one-shot sends the picker's CHOSEN candidate as `model'.
 `agent-repl-oneshot-model-candidates' backs the picker; without this a
 prefix that asked for a model choice could silently create on the
@@ -2098,7 +1970,7 @@ daemon's default instead."
                    (lambda (prompt &optional initial &rest _)
                      (ignore prompt initial) "one-shot with a model")))
           ;; Act.
-          (agent-repl-create-oneshot-self-merge t)
+          (agent-repl-create-oneshot t)
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
           (should (equal (agent-repl-itest--body-field
