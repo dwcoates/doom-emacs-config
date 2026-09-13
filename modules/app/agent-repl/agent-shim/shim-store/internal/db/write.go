@@ -108,16 +108,20 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 
 	// THE CLOCK STARTS BEFORE THE TRANSACTION, AND THE WAIT IS MEASURED APART
-	// FROM THE WORK. Every transaction this store opens is BEGIN IMMEDIATE,
-	// reads included, so a batch queues behind whatever else holds the write
-	// lock for as long as busy_timeout allows, and behind the connection pool
-	// before that. Timing only the total made every such queue look like a slow
-	// statement: the owner's store reported a 3822ms `write_batch` for SIX rows
-	// whose statements are all single indexed seeks, and the record blamed
-	// index maintenance for time no index spent. `lock_wait_ms` is the half an
-	// operator can act on — it says to look at what ELSE is writing, not for a
-	// missing index.
-	started := time.Now()
+	// FROM THE WORK. A batch queues on the process-wide write slot behind
+	// whatever else this store is writing, and Timing only the total made that
+	// queue look like a slow statement: the owner's store reported a 3822ms
+	// `write_batch` for SIX rows whose statements are all single indexed seeks,
+	// and the record blamed index maintenance for time no index spent.
+	// `lock_wait_ms` is the half an operator can act on — it says to look at
+	// what ELSE is writing, not for a missing index.
+	//
+	// WHAT IT MEASURES IS NOW THE IN-PROCESS QUEUE, which is the same number an
+	// operator wanted and a truthful one: before the gate it was time spent
+	// inside SQLite's busy handler, which ended either in a write or — nine
+	// times on 2026-09-13 — in a SQLITE_BUSY refusal after the whole 5s
+	// timeout. A wait here always ends in a turn.
+	started := d.mono()
 	var lockWait time.Duration
 	defer func() {
 		base.LockWait = lockWait
@@ -129,11 +133,23 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
 	}, "starting transaction entries=%d cursor_advance=%t", len(entries), cursor != nil)
 
-	tx, err := d.sql.BeginTx(ctx, nil)
-	lockWait = time.Since(started)
+	tx, release, err := d.beginWrite(ctx)
+	lockWait = d.mono().Sub(started)
 	if err != nil {
+		// A CALLER THAT HUNG UP WHILE QUEUED GETS ITS OWN CANCELLATION BACK.
+		// The database was never touched and nothing about it failed, so
+		// dressing the wait's end as a storage failure would tell the producer
+		// to retry a batch its own caller has already abandoned — and would
+		// write an error record for a healthy store.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return WriteResult{}, d.refuse(base, err)
+		}
 		return WriteResult{}, d.refuse(base, storagef(err, "begin write transaction"))
 	}
+	// LIFO: the rollback runs first, then the slot is released. Releasing
+	// before the transaction ended would let the next writer begin against a
+	// lock this one still holds, which is the contention the gate removes.
+	defer release()
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
 	nextSeq, err := d.currentWriteSeq(ctx, tx)
