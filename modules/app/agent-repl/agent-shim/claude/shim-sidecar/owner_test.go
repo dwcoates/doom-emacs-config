@@ -491,3 +491,71 @@ func TestALaunchAppliesAStopThatWasWaitingForIt(t *testing.T) {
 		t.Fatalf("the applied stop must state by_user: %v", cut.GetCause())
 	}
 }
+
+// claimedWorkflowSpoolWithAStoppedRun arranges the remaining converter-gap case:
+// a w* spool a spawning call CLAIMED, so it is tailed under the declared-residue
+// handler rather than demoted, and a person then stops its run.
+func claimedWorkflowSpoolWithAStoppedRun(t *testing.T, store *fakeStore, task, run, output string) *harness {
+	t.Helper()
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, task, output)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.TaskSpawned(task, run, "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.rescan()
+	if got := h.sc.watchers[spool].target.Kind; got != tail.KindWorkflowSpool {
+		t.Fatalf("kind = %s, want the claimed w* spool tailed as a declared-kind spool", got)
+	}
+	h.sc.pollAll()
+	h.sc.TaskStopped(task)
+	return h
+}
+
+func TestAStopMintsTheCancelledTerminalForAClaimedWorkflowSpool(t *testing.T) {
+	// Arrange. Kicking workflow CONVERSION says nothing about whether a workflow
+	// run can be stopped: the reader knows the run and its owner, so the unit is
+	// open downstream and a stop must settle it.
+	store := &fakeStore{}
+
+	// Act.
+	claimedWorkflowSpoolWithAStoppedRun(t, store, "w1stopped", "toolu_workflow_run", "workflow work\n")
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_workflow_run")
+	if cut == nil {
+		t.Fatal("no cancelled terminal was written for a stopped run whose spool is a claimed w* spool")
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("a stop is a person's decision and must state by_user: %v", cut.GetCause())
+	}
+}
+
+func TestTheWorkflowSpoolsCancelledTerminalCarriesTheOutputItRead(t *testing.T) {
+	// Arrange. A terminal owes the run's output, and this handler is the spool's
+	// sole reader — so it must carry what it read rather than claiming nothing
+	// was observed.
+	store := &fakeStore{}
+
+	// Act.
+	claimedWorkflowSpoolWithAStoppedRun(t, store, "w1bytes", "toolu_workflow_bytes", "workflow work\n")
+
+	// Assert.
+	got := interruptedFor(store.writes, "toolu_workflow_bytes").GetOutput().GetText().GetStdout()
+	if got != "workflow work\n" {
+		t.Fatalf("cancelled stdout = %q, want the output the workflow spool held", got)
+	}
+}
+
+func TestAStopForAClaimedWorkflowSpoolStatesNoConverterGap(t *testing.T) {
+	// Arrange. The reader states a converter that could not be asked for a
+	// terminal at error level. The declared-residue handler CAN be asked for one
+	// now, so that record is a false alarm and must not be written.
+	store := &fakeStore{}
+
+	// Act.
+	h := claimedWorkflowSpoolWithAStoppedRun(t, store, "w1nogap", "toolu_workflow_nogap", "workflow work\n")
+
+	// Assert.
+	h.requireNone(t, "cancel-terminal", "error")
+}
