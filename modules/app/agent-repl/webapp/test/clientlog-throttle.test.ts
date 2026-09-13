@@ -230,3 +230,44 @@ describe("ClientLogThrottle: a refused drop summary", () => {
     expect(sent.filter((r) => r.message.startsWith("client log forwarding dropped"))).toHaveLength(1);
   });
 });
+
+describe("discard: the sink is gone, not failing", () => {
+  it("answers how many buffered records it threw away", () => {
+    // Arrange.
+    const { throttle } = harness({});
+    throttle.write(record("info", "one"));
+    throttle.write(record("info", "two"));
+
+    // Act.
+    const lost = throttle.discard();
+
+    // Assert.
+    expect(lost).toBe(2);
+  });
+
+  it("counts the unreported drops in what it threw away", () => {
+    // Arrange.
+    const { throttle } = harness({ maxBuffer: 1 });
+    throttle.write(record("info", "kept"));
+    throttle.write(record("info", "lost to the bound"));
+
+    // Act.
+    const lost = throttle.discard();
+
+    // Assert.
+    expect(lost).toBe(2);
+  });
+
+  it("leaves the buffer empty, so a later flush sends nothing", () => {
+    // Arrange.
+    const { throttle, sent } = harness({});
+    throttle.write(record("info", "one"));
+    throttle.discard();
+
+    // Act.
+    throttle.flush();
+
+    // Assert.
+    expect(sent).toHaveLength(0);
+  });
+});

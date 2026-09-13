@@ -12,8 +12,8 @@ import (
 )
 
 // OnTurnEnded is the LifecycleSink's turn end: the interrupting status clears,
-// the turn's close is stamped, the one-shot finish hook runs, the acts queued
-// behind the turn drain, and the next prompt is popped and delivered.
+// the turn's close is stamped, the acts queued behind the turn drain, and the
+// next prompt is popped and delivered.
 func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose) {
 	ctx := context.Background()
 	log, err := q.logger(ctx, ws)
@@ -43,32 +43,11 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		log.Error(opTurnEnded, "could not stamp the turn's close", dlog.Context{"cause": err.Error()})
 	}
 
-	q.runFinishHook(ctx, ws, turn, how, log)
 	q.drainActs(ctx, ws, log)
 
 	if err := q.popAndDeliver(ctx, ws, log); err != nil {
 		log.Error(opTurnEnded, "the next held prompt was not delivered", dlog.Context{"cause": err.Error()})
 	}
-}
-
-// runFinishHook takes a one-shot workspace's finish action at the SUCCESS
-// terminal.
-//
-// RECORDED READING: "the success marker" is the turn concluding successfully —
-// CloseCompleted. A failed, killed or orphaned turn never earns the finish,
-// because the brief gates the wrap-up on implementation, tests and commits all
-// succeeding. The hook itself is a no-op on a workspace that owes no action, so
-// the queue calls it on every successful conclusion rather than deciding which
-// workspaces are one-shots.
-func (q *queue) runFinishHook(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose, log dlog.Logger) {
-	if q.deps.OneShotFinish == nil || how != wsm.CloseCompleted {
-		return
-	}
-	if err := q.deps.OneShotFinish(ctx, ws, turn); err != nil {
-		log.Error(opFinish, "the one-shot finish action failed", dlog.Context{"cause": err.Error()})
-		return
-	}
-	log.Debug(opFinish, "the one-shot finish hook ran", nil)
 }
 
 // popAndDeliver delivers the next deliverable hold: the SEMANTIC HEAD an

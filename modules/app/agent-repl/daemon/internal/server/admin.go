@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -14,6 +15,7 @@ import (
 	"claude-repld/internal/drain"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
+	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
 
@@ -165,7 +167,7 @@ func (s *server) ClientLog(
 		return nil, err
 	}
 	resp := &agentreplv1.ClientLogResponse{}
-	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	subject, cerr, done := s.subjectForClientLog(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
@@ -192,6 +194,37 @@ func (s *server) ClientLog(
 	})
 	resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 	return connect.NewResponse(resp), nil
+}
+
+// subjectForClientLog is subjectFor for ClientLog, whose unknown-workspace
+// refusal is ORDINARY TRAFFIC rather than a fault.
+//
+// A LATE LOG LINE AFTER A CLOSE IS EXPECTED. A forwarder learns its workspace
+// is gone only by being told, and records it already wrote keep arriving for
+// the seconds it takes that to happen (measured, realtest 8, 2026-09-12: a
+// forgotten scratch repo drew a ClientLog eighteen seconds later). So the
+// refusal is recorded at INFO — the record still names the workspace — and the
+// forwarder reads `ClientLogError.unknown_workspace` as its cue to stop.
+func (s *server) subjectForClientLog(
+	ctx context.Context,
+	rpc string,
+	ref *workspacev1.WorkspaceRef,
+	resp proto.Message,
+) (resolved, *connect.Error, bool) {
+	if err := validateWorkspaceRef("workspace", ref); err != nil {
+		return resolved{}, err, true
+	}
+	subject, r, err := s.resolveRef(ctx, rpc, ref)
+	if err != nil {
+		return resolved{}, fail(s.log, rpc, err), true
+	}
+	if r != nil {
+		if r.Arm == workspace.ArmUnknownWorkspace {
+			r.Info = true
+		}
+		return resolved{}, s.refuse(s.log, rpc, resp, *r), true
+	}
+	return subject, nil, false
 }
 
 // clientRuntime maps the record's runtime arm onto the daemon-owned client

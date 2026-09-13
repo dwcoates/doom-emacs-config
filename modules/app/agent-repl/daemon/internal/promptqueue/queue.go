@@ -30,7 +30,6 @@ const (
 	opLeaseChange = "daemon.promptqueue.lease_changed"
 	opRestore     = "daemon.promptqueue.restore_holds"
 	opTray        = "daemon.promptqueue.tray"
-	opFinish      = "daemon.promptqueue.one_shot_finish"
 )
 
 // wsState is the queue's in-memory memory of one workspace: the semantic head

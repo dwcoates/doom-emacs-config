@@ -77,31 +77,6 @@ type CreateSpec struct {
 	PermissionMode string
 	// Priority is the roster priority recorded at creation, nil when unset.
 	Priority *wsm.Priority
-	// Finish is the one-shot form's finish action. It is REQUIRED when OneShot
-	// is set and refused otherwise.
-	Finish *OneShotFinish
-}
-
-// OneShotFinish is how a one-shot workspace ends: exactly one arm is set. The
-// finish is recorded in the creation job BEFORE materialization, because the
-// turn that concludes with the success marker is what acts on it and that turn
-// may outlive this daemon.
-type OneShotFinish struct {
-	// SelfMerge enqueues the workspace's own merge when the session's turn
-	// concludes with the success marker.
-	SelfMerge bool
-	// OpenPr submits the create-pr follow-up as a post-prompt instead of
-	// merging.
-	OpenPr *OneShotOpenPr
-}
-
-// OneShotOpenPr is the open-pr finish's configuration, as the create-pr
-// invocation spells it.
-type OneShotOpenPr struct {
-	// SelfCertified passes the self-certification flag to the pr command.
-	SelfCertified bool
-	// AddToMergeQueue asks the pr command to add the pr to the merge queue.
-	AddToMergeQueue bool
 }
 
 // InterruptTarget names what an Interrupt aims at. Exactly one is set.
@@ -199,13 +174,6 @@ type Verbs interface {
 	// verbatim. The daemon validates the workspace and opens nothing itself;
 	// there is no ack and no command loop.
 	OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path string, line *uint32) error
-	// OnOneShotTurnConcluded is the TURN-TERMINAL hook for a one-shot
-	// workspace's finish action: the prompt queue calls it when a turn
-	// concludes with the success marker, and this package does NOT detect the
-	// terminal itself. The action is the one recorded in the creation job at
-	// creation, and it is SPENT when it runs, so a second conclusion takes it
-	// exactly once.
-	OnOneShotTurnConcluded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// Notify raises one host notification: it relays the TYPED notification
 	// onto the workspace's host stream and sets the roster's attention marker,
 	// which SelectWorkspace and AsksSettled clear. It is the session watcher's

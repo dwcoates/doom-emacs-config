@@ -357,3 +357,70 @@ func TestClientLogRecordsTheSuccessfulRequestBoundaryAtDebug(t *testing.T) {
 		t.Fatalf("context = %v, want the forwarded operation", persisted.Context)
 	}
 }
+
+// TestClientLogAnswersTheLandedUnknownWorkspaceArm pins realtest 8's finding E:
+// a ClientLog naming a workspace the registry has forgotten is answered with
+// the typed `unknown_workspace` arm, never a Connect error.
+func TestClientLogAnswersTheLandedUnknownWorkspaceArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: &workspacev1.WorkspaceRef{Id: "ws-forgotten"},
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.render",
+			Message:   "a late line after the close",
+		},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+}
+
+// TestClientLogRecordsTheUnknownWorkspaceRefusalAtInfo pins that the refusal is
+// ORDINARY traffic: a late log line after a close is recorded at INFO, and the
+// unlanded-arm WARN realtest 8 caught is gone.
+func TestClientLogRecordsTheUnknownWorkspaceRefusalAtInfo(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{global: log}
+	})
+
+	// Act.
+	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: &workspacev1.WorkspaceRef{Id: "ws-forgotten"},
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.render",
+			Message:   "a late line after the close",
+		},
+	})); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if warnings := log.at("WARN"); len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	var refusal *logRecord
+	for i := range log.records {
+		if log.records[i].Context["arm"] == "unknown_workspace" {
+			refusal = &log.records[i]
+			break
+		}
+	}
+	if refusal == nil {
+		t.Fatalf("records = %v, want the typed refusal", log.records)
+	}
+	if refusal.Level != "INFO" {
+		t.Fatalf("record = %+v, want the refusal at INFO", refusal)
+	}
+}

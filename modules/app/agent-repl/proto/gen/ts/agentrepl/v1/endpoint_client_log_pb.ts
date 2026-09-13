@@ -20,7 +20,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_client_log.proto.
  */
 export const file_agentrepl_v1_endpoint_client_log: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xpZW50X2xvZy5wcm90bxIMYWdlbnRyZXBsLnYxInAKEENsaWVudExvZ1JlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhItCgZyZWNvcmQYAiABKAsyHS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVjb3JkItUDCg9DbGllbnRMb2dSZWNvcmQSMgoFZGVidWcYASABKAsyIS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxEZWJ1Z0gAEjAKBGluZm8YAiABKAsyIC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxJbmZvSAASMAoEd2FybhgDIAEoCzIgLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbFdhcm5IABIyCgVlcnJvchgEIAEoCzIhLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbEVycm9ySAASEQoJb3BlcmF0aW9uGAUgASgJEg8KB21lc3NhZ2UYBiABKAkSKAoHY29udGV4dBgHIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEQoJdGltZXN0YW1wGAggASgJEg8KB3ZlcmJvc2UYCSABKAgSNgoGd2ViYXBwGAogASgLMiQuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVXZWJhcHBIARI4CgdzaWRlY2FyGAsgASgLMiUuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVTaWRlY2FySAFCBwoFbGV2ZWxCCQoHcnVudGltZSIYChZDbGllbnRMb2dSdW50aW1lV2ViYXBwIhkKF0NsaWVudExvZ1J1bnRpbWVTaWRlY2FyIhUKE0NsaWVudExvZ0xldmVsRGVidWciFAoSQ2xpZW50TG9nTGV2ZWxJbmZvIhQKEkNsaWVudExvZ0xldmVsV2FybiIVChNDbGllbnRMb2dMZXZlbEVycm9yIn8KEUNsaWVudExvZ1Jlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5hZ2VudHJlcGwudjEuQ2xpZW50TG9nU3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuYWdlbnRyZXBsLnYxLkNsaWVudExvZ0Vycm9ySABCCAoGcmVzdWx0IhIKEENsaWVudExvZ1N1Y2Nlc3MiEAoOQ2xpZW50TG9nRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_google_protobuf_struct]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xpZW50X2xvZy5wcm90bxIMYWdlbnRyZXBsLnYxInAKEENsaWVudExvZ1JlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhItCgZyZWNvcmQYAiABKAsyHS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVjb3JkItUDCg9DbGllbnRMb2dSZWNvcmQSMgoFZGVidWcYASABKAsyIS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxEZWJ1Z0gAEjAKBGluZm8YAiABKAsyIC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxJbmZvSAASMAoEd2FybhgDIAEoCzIgLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbFdhcm5IABIyCgVlcnJvchgEIAEoCzIhLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbEVycm9ySAASEQoJb3BlcmF0aW9uGAUgASgJEg8KB21lc3NhZ2UYBiABKAkSKAoHY29udGV4dBgHIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEQoJdGltZXN0YW1wGAggASgJEg8KB3ZlcmJvc2UYCSABKAgSNgoGd2ViYXBwGAogASgLMiQuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVXZWJhcHBIARI4CgdzaWRlY2FyGAsgASgLMiUuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVTaWRlY2FySAFCBwoFbGV2ZWxCCQoHcnVudGltZSIYChZDbGllbnRMb2dSdW50aW1lV2ViYXBwIhkKF0NsaWVudExvZ1J1bnRpbWVTaWRlY2FyIhUKE0NsaWVudExvZ0xldmVsRGVidWciFAoSQ2xpZW50TG9nTGV2ZWxJbmZvIhQKEkNsaWVudExvZ0xldmVsV2FybiIVChNDbGllbnRMb2dMZXZlbEVycm9yIn8KEUNsaWVudExvZ1Jlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5hZ2VudHJlcGwudjEuQ2xpZW50TG9nU3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuYWdlbnRyZXBsLnYxLkNsaWVudExvZ0Vycm9ySABCCAoGcmVzdWx0IhIKEENsaWVudExvZ1N1Y2Nlc3MiXwoOQ2xpZW50TG9nRXJyb3ISRAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJy5hZ2VudHJlcGwudjEuQ2xpZW50TG9nVW5rbm93bldvcmtzcGFjZUgAQgcKBWNhdXNlIhsKGUNsaWVudExvZ1Vua25vd25Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_google_protobuf_struct]);
 
 /**
  * @generated from message agentrepl.v1.ClientLogRequest
@@ -288,11 +288,29 @@ export const ClientLogSuccessSchema: GenMessage<ClientLogSuccess> = /*@__PURE__*
   messageDesc(file_agentrepl_v1_endpoint_client_log, 9);
 
 /**
- * EMPTY ON PURPOSE: arms DERIVED at the wave, spelled per 3b.
+ * Arms derived from the daemon's refusal sites.
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.ClientLogError
  */
 export type ClientLogError = Message<"agentrepl.v1.ClientLogError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.ClientLogError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry. ORDINARY TRAFFIC, not
+     * a fault: a client that has just been told its workspace closed can still
+     * have records in flight for it, and the record names the workspace it was
+     * written about, so the daemon has nowhere to file it. The daemon records
+     * the refusal at INFO; a forwarder that receives this arm STOPS sending for
+     * that workspace id and keeps the rest of its records locally.
+     *
+     * @generated from field: agentrepl.v1.ClientLogUnknownWorkspace unknown_workspace = 1;
+     */
+    value: ClientLogUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -301,4 +319,17 @@ export type ClientLogError = Message<"agentrepl.v1.ClientLogError"> & {
  */
 export const ClientLogErrorSchema: GenMessage<ClientLogError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_client_log, 10);
+
+/**
+ * @generated from message agentrepl.v1.ClientLogUnknownWorkspace
+ */
+export type ClientLogUnknownWorkspace = Message<"agentrepl.v1.ClientLogUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.ClientLogUnknownWorkspace.
+ * Use `create(ClientLogUnknownWorkspaceSchema)` to create a new message.
+ */
+export const ClientLogUnknownWorkspaceSchema: GenMessage<ClientLogUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_client_log, 11);
 

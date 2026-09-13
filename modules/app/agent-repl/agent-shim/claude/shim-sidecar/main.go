@@ -449,9 +449,14 @@ func openLogger(storeSocket, stateDir, logPath string) (*logging.Bound, func(), 
 // Lower layers keep ownership of the errors they log themselves.
 func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) error {
 	sc := newSidecar(options, logf)
+	// THE ROOTS ARE READ BACK OFF THE DISCOVERER, NEVER OFF THE FLAGS. Every
+	// root is symlink-resolved when the discoverer is built, and every `path`
+	// a later record carries is spelled that way — so naming the flags here
+	// would print `/tmp` above thousands of records under `/private/tmp` and
+	// break the one join this record exists to make.
 	logf.With(logging.Context{Operation: "start"}).Log(
 		"sidecar starting config_roots=%v spool_root=%s state_dir=%s poll_interval=%s rescan_interval=%s lost_windows=%+v",
-		options.ConfigRoots, options.SpoolRoot, options.StateDir, options.PollInterval, options.RescanInterval, sc.tracker.Windows())
+		sc.disc.ConfigRoots(), sc.disc.SpoolRoot(), options.StateDir, options.PollInterval, options.RescanInterval, sc.tracker.Windows())
 	if err := sc.Run(stop); err != nil {
 		logf.With(logging.Context{Operation: "run", Level: "error"}).Log("sidecar stopped with error: %v", err)
 		return err

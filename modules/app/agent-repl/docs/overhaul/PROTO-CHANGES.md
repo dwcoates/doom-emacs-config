@@ -781,5 +781,51 @@ what diagnoses a bad brief.
 `no_slug` SURVIVES, with exactly one site left: a one-shot creation carrying
 no prompt, which is argument validation and not a naming failure. The two are
 distinct — nothing to name from, versus a naming call that could not answer.
+### `ClientLogUnknownWorkspace`, a late log line after a close
+
+`ClientLogError` gains its FIRST arm: `cause.unknown_workspace = 1`, an empty
+`ClientLogUnknownWorkspace`, shaped like the thirty-one sibling
+`<Rpc>UnknownWorkspace` arms — all of which are empty, because the request
+already names the workspace the refusal is about.
+
+OWN ACCORD, 2026-09-12 (realtest 8, finding E): the daemon already REFUSED this
+state, through `server.UnlandedArm` at WARN under
+`daemon.refusal.unlanded_arm`, so the arm was intended and merely unlanded.
+`ClientLogError` was "EMPTY ON PURPOSE: arms DERIVED at the wave" and this is
+that derivation.
+
+The condition is ORDINARY TRAFFIC, not a fault: a forwarder learns its
+workspace is gone only by being told, and records it already wrote keep
+arriving meanwhile (measured: a forgotten scratch repo drew a ClientLog
+eighteen seconds after the forget). So the daemon records the refusal at INFO
+via `subjectForClientLog`, and the arm is a forwarder's cue to stop sending for
+that workspace id and keep the rest of its records locally.
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+### The one-shot's `finish` oneof, and the two arms that policed it, RETIRE
+
+`CreateWorkspaceOneShot` loses its `finish` oneof: tags 2 and 3
+(`self_merge`, `open_pr`) are reserved, and the messages
+`CreateWorkspaceOneShotSelfMerge` and `CreateWorkspaceOneShotOpenPr` are
+deleted. `CreateWorkspaceError.cause` loses `finish_required` (tag 3) and
+`finish_not_one_shot` (tag 4), both reserved, and their two empty messages go
+with them.
+
+USER-RULED, 2026-09-12 (`docs/REALTEST-JUDGEMENT-CALLS.md`, "Owner rulings:
+dynamic creation design questions"): THERE IS NO "OPEN PR" OPTION AND NO FINISH
+CHOICE AT ALL. A repository states, in one canonical plain-English file, what
+is to be done on completion; the daemon concatenates it to the one-shot's
+initial prompt behind the literal sentence "when you're all done, please do the
+following postprocessing directive: " and the AGENT carries it out. The daemon
+performs no finish action programmatically.
+
+So a one-shot form is its prompt and nothing else, and both retired error arms
+described a fault — a missing finish, a misplaced finish — that is no longer
+representable.
+
+`one_shot_policy_missing` and `brief_missing` are untouched.
+`CreateWorkspaceOneShotPolicyMissing.missing_files` now always names the same
+two required files, since no finish varies the set.
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4

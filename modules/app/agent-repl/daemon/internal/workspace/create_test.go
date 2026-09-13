@@ -37,16 +37,11 @@ func standardSpec(t *testing.T) CreateSpec {
 	return CreateSpec{RepoDir: mainWorktree(t), InitialPrompt: "fix the login bug"}
 }
 
-// oneShotBriefs arranges the three briefs the one-shot decoration reads.
+// oneShotBriefs arranges the two briefs the one-shot decoration reads.
 func oneShotBriefs(f *fixture) {
 	f.briefs[BriefAutonomousPreamble] = prompts.Prompt{Name: BriefAutonomousPreamble, Body: "PREAMBLE\n"}
-	f.briefs[BriefOneShotSuccessSuffix] = prompts.Prompt{
-		Name: BriefOneShotSuccessSuffix, Body: "invoke {{invocation}} to {{action_phrase}}.",
-		Placeholders: []string{"invocation", "action_phrase"},
-	}
-	f.briefs[BriefOneShotCreatePrFollowup] = prompts.Prompt{
-		Name: BriefOneShotCreatePrFollowup, Body: "after {{create_pr_command}} run {{wrapup_command}}.",
-		Placeholders: []string{"create_pr_command", "wrapup_command"},
+	f.briefs[BriefOneShotCompletionDirective] = prompts.Prompt{
+		Name: BriefOneShotCompletionDirective, Body: "DIRECTIVE",
 	}
 }
 
@@ -304,32 +299,6 @@ func TestCreateAcceptsAnUngatedModeWithConsent(t *testing.T) {
 	}
 }
 
-func TestCreateRefusesAOneShotWithNoFinishAction(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	spec := standardSpec(t)
-	spec.OneShot = true
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	asRefusal(t, err, ArmFinishRequired)
-}
-
-func TestCreateRefusesAFinishActionOnTheStandardForm(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	spec := standardSpec(t)
-	spec.Finish = &OneShotFinish{SelfMerge: true}
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	asRefusal(t, err, ArmFinishNotOneShot)
-}
-
 // TestCreateRefusesAPromptlessOneShotWithNoSlug pins the ONE site `no_slug`
 // still has now that word truncation is deleted: a one-shot with nothing to
 // run, which is an argument-validation failure and not a naming failure.
@@ -340,7 +309,6 @@ func TestCreateRefusesAPromptlessOneShotWithNoSlug(t *testing.T) {
 	spec := standardSpec(t)
 	spec.InitialPrompt = ""
 	spec.OneShot = true
-	spec.Finish = &OneShotFinish{SelfMerge: true}
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -406,19 +374,39 @@ func TestCreateDecoratesTheOneShotPrompt(t *testing.T) {
 	oneShotBriefs(f)
 	spec := standardSpec(t)
 	spec.OneShot = true
-	spec.Finish = &OneShotFinish{SelfMerge: true}
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Assert.
+	// Assert: preamble, the user's own words, then the framing sentence and
+	// the repository's directive, in that order and verbatim.
 	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
-	if !strings.Contains(sent, "PREAMBLE") || !strings.Contains(sent, "fix the login bug") ||
-		!strings.Contains(sent, selfMergeActionPhrase) {
-		t.Fatalf("the one-shot prompt = %q, want preamble, prompt and wrap-up", sent)
+	want := prompts.Wrap("PREAMBLE\n") + "fix the login bug" +
+		prompts.Wrap("\n"+completionDirectiveLead+"DIRECTIVE")
+	if sent != want {
+		t.Fatalf("the one-shot prompt = %q, want %q", sent, want)
 	}
+}
+
+func TestCreateRefusesAOneShotWhoseDirectiveDeclaresAPlaceholder(t *testing.T) {
+	// Arrange: the directive is plain English and the daemon fills nothing in,
+	// so a declared placeholder has no value and the composition fails.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	f.briefs[BriefOneShotCompletionDirective] = prompts.Prompt{
+		Name: BriefOneShotCompletionDirective, Body: "merge into {{target}}.",
+		Placeholders: []string{"target"},
+	}
+	spec := standardSpec(t)
+	spec.OneShot = true
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmBriefMissing)
 }
 
 func TestCreateRefusesAOneShotWhenACorpusBriefIsMissing(t *testing.T) {
@@ -429,7 +417,6 @@ func TestCreateRefusesAOneShotWhenACorpusBriefIsMissing(t *testing.T) {
 	spec := standardSpec(t)
 	f.ownRepository(t, spec.RepoDir)
 	spec.OneShot = true
-	spec.Finish = &OneShotFinish{SelfMerge: true}
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -444,20 +431,42 @@ func TestCreateRefusesAOneShotInARepositoryThatStatesNoPolicy(t *testing.T) {
 	f := newFixture(t)
 	oneShotBriefs(f)
 	delete(f.briefs, BriefAutonomousPreamble)
-	delete(f.briefs, BriefOneShotSuccessSuffix)
+	delete(f.briefs, BriefOneShotCompletionDirective)
 	spec := standardSpec(t)
 	spec.OneShot = true
-	spec.Finish = &OneShotFinish{SelfMerge: true}
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmOneShotPolicyMissing)
-	want := []string{BriefAutonomousPreamble + prompts.Suffix, BriefOneShotSuccessSuffix + prompts.Suffix}
+	want := []string{BriefAutonomousPreamble + prompts.Suffix, BriefOneShotCompletionDirective + prompts.Suffix}
 	got, _ := refusal.Fields["missing_files"].([]string)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("missing_files = %v, want %v", got, want)
+	}
+}
+
+// TestCreateRefusesAOneShotWithNoPolicyBeforeSpendingANamingCall pins the
+// ORDERING of the two checks that both sit at the front of `Create': the
+// one-shot policy requirement runs BEFORE the naming call, so a create that is
+// going to be refused for a missing policy never pays for a model call. The
+// spec supplies no name, which is exactly the shape that would otherwise name
+// itself through `branchFor'.
+func TestCreateRefusesAOneShotWithNoPolicyBeforeSpendingANamingCall(t *testing.T) {
+	// Arrange: a repository that states no policy, and a nameless one-shot.
+	f := newFixture(t)
+	spec := standardSpec(t)
+	spec.Name = ""
+	spec.OneShot = true
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmOneShotPolicyMissing)
+	if len(f.headless.calls) != 0 {
+		t.Fatalf("headless calls = %v, want none: the policy refusal precedes the naming call", f.headless.calls)
 	}
 }
 
@@ -466,7 +475,6 @@ func TestCreateNamesTheRepositoryPolicyDirectoryInTheRefusal(t *testing.T) {
 	f := newFixture(t)
 	spec := standardSpec(t)
 	spec.OneShot = true
-	spec.Finish = &OneShotFinish{SelfMerge: true}
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -482,51 +490,11 @@ func TestCreateNamesTheRepositoryPolicyDirectoryInTheRefusal(t *testing.T) {
 	}
 }
 
-func TestCreateRequiresThePullRequestFollowupOnlyOfAnOpenPrOneShot(t *testing.T) {
-	// Arrange: every policy brief but the pull-request follow-up.
-	f := newFixture(t)
-	oneShotBriefs(f)
-	delete(f.briefs, BriefOneShotCreatePrFollowup)
-	spec := standardSpec(t)
-	spec.OneShot = true
-	spec.Finish = &OneShotFinish{SelfMerge: true}
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert: a self-merge one-shot never composes the follow-up, so its
-	// absence is not this create's business.
-	if err != nil {
-		t.Fatalf("Create(one_shot, self_merge) = %v, want a success", err)
-	}
-}
-
-func TestCreateRefusesAnOpenPrOneShotMissingOnlyTheFollowupBrief(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	oneShotBriefs(f)
-	delete(f.briefs, BriefOneShotCreatePrFollowup)
-	spec := standardSpec(t)
-	spec.OneShot = true
-	spec.Finish = &OneShotFinish{OpenPr: &OneShotOpenPr{}}
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	refusal := asRefusal(t, err, ArmOneShotPolicyMissing)
-	got, _ := refusal.Fields["missing_files"].([]string)
-	if len(got) != 1 || got[0] != BriefOneShotCreatePrFollowup+prompts.Suffix {
-		t.Fatalf("missing_files = %v, want only the pull-request follow-up", got)
-	}
-}
-
 func TestCreateMintsNothingWhenTheRepositoryStatesNoPolicy(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	spec := standardSpec(t)
 	spec.OneShot = true
-	spec.Finish = &OneShotFinish{SelfMerge: true}
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -551,7 +519,6 @@ func TestCreateOfAOneShotInTheDaemonsOwnRepositoryIsNeverPolicyRefused(t *testin
 	spec := standardSpec(t)
 	f.ownRepository(t, spec.RepoDir)
 	spec.OneShot = true
-	spec.Finish = &OneShotFinish{OpenPr: &OneShotOpenPr{}}
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -562,13 +529,12 @@ func TestCreateOfAOneShotInTheDaemonsOwnRepositoryIsNeverPolicyRefused(t *testin
 	}
 }
 
-func TestCreateRecordsTheOneShotFinishInTheCreationJob(t *testing.T) {
+func TestCreateRecordsTheOneShotFormInTheCreationJob(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	oneShotBriefs(f)
 	spec := standardSpec(t)
 	spec.OneShot = true
-	spec.Finish = &OneShotFinish{SelfMerge: true}
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -747,26 +713,6 @@ func TestCreateAcceptsAutoWithoutConsent(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("Create(auto): %v", err)
-	}
-}
-
-func TestCreateRecordsTheOneShotFinishAction(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	oneShotBriefs(f)
-	spec := standardSpec(t)
-	spec.OneShot = true
-	spec.Finish = &OneShotFinish{OpenPr: &OneShotOpenPr{AddToMergeQueue: true}}
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Assert: the action is durable before the worktree exists, because the
-	// turn that takes it may run after a restart.
-	if f.db.putJobs[0].Finish != "open_pr+add_to_merge_queue" {
-		t.Fatalf("recorded finish = %q, want open_pr+add_to_merge_queue", f.db.putJobs[0].Finish)
 	}
 }
 

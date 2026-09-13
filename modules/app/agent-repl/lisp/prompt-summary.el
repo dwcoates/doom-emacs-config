@@ -44,6 +44,7 @@
 (declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--state-save "history")
 (declare-function agent-repl--warn "core")
+(declare-function agent-repl--info "core")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-put "workspace")
 
@@ -574,18 +575,24 @@ only real vendor exec site, so it is the only place that has to honour
 it -- and it honours it by REFUSING, never by faking a summary.")
 
 (defvar agent-repl--prompt-summary-forbid-warned nil
-  "Non-nil once the vendor-call refusal has been reported.
-The refusal is reported ONCE per session: it is a standing configuration
-fact, not a per-prompt event, and a warning on every keystroke-driven
+  "Non-nil once the vendor-call refusal has been recorded.
+The refusal is recorded ONCE per session: it is a standing configuration
+fact, not a per-prompt event, and a record on every keystroke-driven
 send would bury everything else in the log.")
 
 (defun agent-repl--prompt-summary-forbidden-p (ws)
   "Return non-nil when a real vendor call is forbidden in this process.
-Reports the refusal at WARNING the first time and stays silent after."
+Records the refusal at INFO the first time and stays silent after.
+
+INFO, not WARNING: the harness sets the variable on purpose for every
+realtest, so the module honouring it is the configured, expected
+behaviour, and a WARNING here fails every realtest\='s log harvest.  The
+record still names the environment variable, so the reason summaries are
+absent stays visible in the log."
   (when (getenv agent-repl--prompt-summary-forbid-env)
     (unless agent-repl--prompt-summary-forbid-warned
       (setq agent-repl--prompt-summary-forbid-warned t)
-      (agent-repl--warn ws "elisp.prompt-summary.vendor-calls-forbidden env=%s -- prompt summaries are disabled for this process"
+      (agent-repl--info ws "elisp.prompt-summary.vendor-calls-forbidden env=%s -- prompt summaries are disabled for this process"
                         agent-repl--prompt-summary-forbid-env))
     t))
 

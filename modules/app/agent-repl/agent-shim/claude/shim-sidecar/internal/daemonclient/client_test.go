@@ -223,6 +223,58 @@ func TestForwardInvalidatesTheRosterRefAfterClientLogRefusal(t *testing.T) {
 	}
 }
 
+// TestForwardConcludesUnresolvableOnTheUnknownWorkspaceArm pins the departure
+// RACE: the roster named the workspace when the ref was resolved, and the
+// daemon had forgotten it by the time the record landed. The refusal reaches
+// the same conclusion the roster path reaches when the row is already gone, so
+// forwardLoop stops retrying for it, narrates at DEBUG, and persists the record
+// unattributed centrally rather than losing it.
+func TestForwardConcludesUnresolvableOnTheUnknownWorkspaceArm(t *testing.T) {
+	// Arrange.
+	client, server := serveClientLog(t, &agentreplv1.ClientLogResponse{
+		Result: &agentreplv1.ClientLogResponse_Error{Error: &agentreplv1.ClientLogError{
+			Cause: &agentreplv1.ClientLogError_UnknownWorkspace{
+				UnknownWorkspace: &agentreplv1.ClientLogUnknownWorkspace{},
+			},
+		}},
+	})
+
+	// Act.
+	_, err := client.Forward(logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", Message: "read",
+		WorkspaceDir: server.workspace.GetDir(), WorkspaceID: "deadbeef",
+	})
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardWorkspaceUnresolvable) {
+		t.Fatalf("Forward against a departed workspace = %v, want ErrForwardWorkspaceUnresolvable", err)
+	}
+}
+
+// TestForwardKeepsAnArmlessRefusalARealFailure pins the other side of that
+// fork: a refusal that is NOT unknown_workspace is still a genuine failure, so
+// the forwarder retries it rather than concluding the workspace departed.
+func TestForwardKeepsAnArmlessRefusalARealFailure(t *testing.T) {
+	// Arrange.
+	client, server := serveClientLog(t, &agentreplv1.ClientLogResponse{
+		Result: &agentreplv1.ClientLogResponse_Error{Error: &agentreplv1.ClientLogError{}},
+	})
+
+	// Act.
+	_, err := client.Forward(logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", Message: "read",
+		WorkspaceDir: server.workspace.GetDir(), WorkspaceID: "deadbeef",
+	})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Forward against an armless refusal succeeded, want a failure")
+	}
+	if errors.Is(err, logging.ErrForwardWorkspaceUnresolvable) {
+		t.Fatalf("Forward against an armless refusal = %v, want an ordinary failure", err)
+	}
+}
+
 // startFakeDaemon stands up a loopback AgentRepl whose roster stream runs the
 // supplied handler, publishes its address in daemon.addr, and records whether
 // ClientLog was ever reached. It is the seam for exercising resolveWorkspace's

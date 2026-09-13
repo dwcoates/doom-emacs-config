@@ -80,7 +80,15 @@ function mintConnectionId(): string {
  */
 function clientLogSink(getClient: () => AgentReplClient, workspace: WorkspaceRef): ClientLogSink {
   return async (record) => {
-    await getClient().clientLog({ workspace, record });
+    const response = await getClient().clientLog({ workspace, record });
+    // `unknown_workspace` is TERMINAL, not a failure: this page's workspace has
+    // been closed or forgotten and the daemon has nowhere to file the record.
+    // The logger reads it as the cue to stop forwarding; every other arm is a
+    // refusal of one record, which leaves forwarding alone.
+    return response.result.case === "error" &&
+      response.result.value.cause.case === "unknownWorkspace"
+      ? "workspace_departed"
+      : "accepted";
   };
 }
 

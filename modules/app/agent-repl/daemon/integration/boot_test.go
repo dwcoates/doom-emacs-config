@@ -570,9 +570,9 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	f.d.WithDB(func(db *sql.DB) {
 		now := time.Now().UnixNano()
 		if _, err := db.Exec(
-			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after, base_ref, materialized, one_shot, one_shot_finish, initial_prompt, consented_ungated_mode, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			f.ws.GetId(), "feature/x", f.repo.Dir, f.repo.Dir, "create", "[]", "[]", "main", 1, 0, "", "", "", now); err != nil {
+			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after, base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			f.ws.GetId(), "feature/x", f.repo.Dir, f.repo.Dir, "create", "[]", "[]", "main", 1, 0, "", "", now); err != nil {
 			t.Fatalf("seed a creation_jobs row: %v", err)
 		}
 		if _, err := db.Exec(
