@@ -66,6 +66,7 @@ import {
 } from "./store/persistence.js";
 import { createRealQuery } from "./sdk/real-query.js";
 import { createFakeQuery } from "./fake/index.js";
+import { ensureWorkspaceTrusted } from "./trust.js";
 import { randomUUID } from "node:crypto";
 import { shimRoutes } from "./service/routes.js";
 import { serve, type ShimServer } from "./service/server.js";
@@ -665,9 +666,20 @@ export function logCorrelation(
  * than of a second implementation of it.
  */
 export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: string): CreateQuery {
+  // THE WORKSPACE IS TRUSTED BEFORE ANY VENDOR IS CONSTRUCTED, mocked one
+  // included. This is the single place a query comes into being, so trust
+  // cannot be forgotten on one path and remembered on another; and the mocked
+  // vendor takes the same step so the ordering itself is testable offline.
+  // An untrusted directory is not refused by the vendor — it is run with the
+  // workspace's permission allowlists silently dropped, which is why nothing
+  // here treats absence as a failure to start.
+  const trusted = (): void => {
+    ensureWorkspaceTrusted(environment.claudeConfigDir, cwd);
+  };
   if (!fake) {
-    return (spec: QuerySpec) =>
-      createRealQuery(
+    return (spec: QuerySpec) => {
+      trusted();
+      return createRealQuery(
         {
           cwd,
           claudeConfigDir: environment.claudeConfigDir,
@@ -681,9 +693,11 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
         },
         spec.prompt,
       );
+    };
   }
-  return (spec: QuerySpec) =>
-    Promise.resolve(
+  return (spec: QuerySpec) => {
+    trusted();
+    return Promise.resolve(
       createFakeQuery(spec.prompt, spec.canUseTool, {
         cwd,
         configDir: environment.claudeConfigDir,
@@ -700,6 +714,7 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
         ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
       }),
     );
+  };
 }
 
 export async function main(): Promise<void> {
