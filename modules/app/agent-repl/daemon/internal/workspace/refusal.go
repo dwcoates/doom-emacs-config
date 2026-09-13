@@ -36,6 +36,12 @@ const (
 	// ArmBaseRefUnresolved is a creation whose base ref does not resolve in
 	// the repository it is cut from.
 	ArmBaseRefUnresolved = "base_ref_unresolved"
+	// ArmUnknownRepository is a creation naming a repository the daemon
+	// cannot act in. The registry may still hold the row -- what it names is
+	// gone from disk, which is the same answer to the client as a ref that
+	// matched nothing, and the same arm the server already refuses a
+	// registry miss with (CreateWorkspaceError.unknown_repository).
+	ArmUnknownRepository = "unknown_repository"
 	// ArmNoSlug is a creation that carries neither a name nor the prompt it
 	// needs. Since the naming call replaced word truncation it has exactly one
 	// site left: the PROMPTLESS ONE-SHOT, which is an argument-validation

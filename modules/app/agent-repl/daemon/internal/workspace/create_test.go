@@ -776,3 +776,45 @@ func TestCreateBaseRefRefusalNamesTheRefAsTheArmsField(t *testing.T) {
 		t.Fatalf("the arm's ref field = %v, want the base ref that did not resolve", got)
 	}
 }
+
+// TestCreateRefusesARepositoryThatIsNotOnDisk pins the arm for a repository
+// whose directory is gone. The registry may still hold the row -- a worktree
+// removed underneath it, a scratch repository a run cleaned up -- and the
+// create then ran on to WorktreeDir's bare `stat <repo>/.git` failure: one
+// ERROR from the verb and a second `the rpc failed` from the boundary, for a
+// refusal the contract has an arm for.
+func TestCreateRefusesARepositoryThatIsNotOnDisk(t *testing.T) {
+	tests := []struct {
+		name    string
+		removed bool
+		wantArm string
+	}{
+		{name: "the repository is on disk", removed: false},
+		{name: "the repository directory was removed", removed: true, wantArm: ArmUnknownRepository},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			spec := standardSpec(t)
+			if tt.removed {
+				if err := os.RemoveAll(spec.RepoDir); err != nil {
+					t.Fatalf("remove the repository: %v", err)
+				}
+			}
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			if tt.wantArm == "" {
+				if err != nil {
+					t.Fatalf("Create: %v", err)
+				}
+				return
+			}
+			asRefusal(t, err, tt.wantArm)
+		})
+	}
+}

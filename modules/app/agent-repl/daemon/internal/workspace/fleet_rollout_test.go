@@ -606,6 +606,13 @@ func TestFleetServingAnswersWhatTheDirectiveCanReach(t *testing.T) {
 			name: "a session whose shim has been reaped",
 			install: func(f *fleetFixture, ws ids.WorkspaceID) {
 				f.client.reaped = true
+				f.fleet.remember(ws, &live{client: f.client, sessionStarted: true})
+			},
+			want: false,
+		},
+		{
+			name: "a live shim parked behind a cold gate, whose session never started",
+			install: func(f *fleetFixture, ws ids.WorkspaceID) {
 				f.fleet.remember(ws, &live{client: f.client})
 			},
 			want: false,
@@ -613,7 +620,7 @@ func TestFleetServingAnswersWhatTheDirectiveCanReach(t *testing.T) {
 		{
 			name: "a session with a live shim",
 			install: func(f *fleetFixture, ws ids.WorkspaceID) {
-				f.fleet.remember(ws, &live{client: f.client})
+				f.fleet.remember(ws, &live{client: f.client, sessionStarted: true})
 			},
 			want: true,
 		},
@@ -651,5 +658,57 @@ func TestHibernateAnswersTheTypedNoLiveSessionState(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, drain.ErrNoLiveSession) {
 		t.Fatalf("Hibernate on a workspace with no session = %v, want drain.ErrNoLiveSession", err)
+	}
+}
+
+// TestKillSessionSkipsTheDirectiveWhenNoSessionWasStarted is the other half of
+// the stand-down ordering above: a shim that never started a session can only
+// answer the directive `no_session`, and the daemon reported that answer as a
+// kill that "did not answer" -- a WARN per teardown of every cold-gated
+// workspace. The stop is what such a workspace was owed, and the directive is
+// not sent at all.
+func TestKillSessionSkipsTheDirectiveWhenNoSessionWasStarted(t *testing.T) {
+	tests := []struct {
+		name           string
+		sessionStarted bool
+		wantDirective  bool
+	}{
+		{
+			name:           "a shim holding a started session is directed",
+			sessionStarted: true,
+			wantDirective:  true,
+		},
+		{
+			name:           "a shim parked behind a cold gate is only stopped",
+			sessionStarted: false,
+			wantDirective:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.fleet.remember(ws.ID, &live{client: f.client, sessionStarted: tt.sessionStarted})
+			*f.standDown = nil
+
+			// Act.
+			if err := f.fleet.KillSession(context.Background(), ws.ID, true); err != nil {
+				t.Fatalf("KillSession: %v", err)
+			}
+
+			// Assert.
+			var directed bool
+			for _, step := range *f.standDown {
+				if step == "shim.KillSession" {
+					directed = true
+				}
+			}
+			if directed != tt.wantDirective {
+				t.Fatalf("shim.KillSession sent = %v, want %v (steps %v)",
+					directed, tt.wantDirective, *f.standDown)
+			}
+		})
 	}
 }

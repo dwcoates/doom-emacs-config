@@ -144,6 +144,26 @@ type live struct {
 	// the host view's live half is answered from what this daemon IS
 	// operating rather than from a durable row that may outlive the session.
 	hostSessionID string
+	// sessionStarted reports whether a SESSION exists on this client's shim.
+	//
+	// A CLIENT IS NOT A SESSION. The fleet installs a client on two paths that
+	// leave the shim with no session at all: a bring-up the shim answered COLD
+	// keeps its client so the gate's answer can re-open through it, and the
+	// relaunch engine installs its prelaunched shim before Resume runs. Both
+	// leave an entry in `sessions` that every session-directed verb would then
+	// address, and the shim answers each one `no_session`.
+	//
+	// That is what the idle sweep did for ten hours: `Serving` read the entry,
+	// the sweep sent Hibernate every five minutes, the shim refused
+	// `no_session` every five minutes, and the WARN repeated forever for a
+	// workspace whose session had never started (2026-09-13 log sweep, 142
+	// records for one workspace). It is also what made a forced teardown of a
+	// cold-gated workspace warn that "the session kill did not answer".
+	//
+	// It is set where a session is KNOWN to exist on the shim -- a session
+	// this daemon started, and a shim it adopted, which has already started
+	// its one -- and nowhere else.
+	sessionStarted bool
 }
 
 // Fleet brings sessions up and down. It is the SPAWN-ON-MOUNT semantics in one
@@ -548,11 +568,16 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// this install opens (landing 7) — the same attach-only path the
 	// handover's successor and the boot adoption take.
 	if adopted {
-		f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
+		// AN ADOPTED SHIM HAS ALREADY STARTED ITS ONE SESSION -- that is the
+		// premise of the whole branch -- so the entry says so, and every
+		// session-directed verb may address it.
+		f.remember(ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true})
 		if err := f.Install(ctx, ws, client); err != nil {
 			log.Error(opBringUp, "the adopted shim could not be installed", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("start session for %q: install the adopted shim: %w", ws, err)
 		}
+		// AFTER the install, which rewrote the entry the remember above wrote.
+		f.noteSessionStarted(ws)
 		log.Info(opBringUp, "attached to a surviving shim without starting a session", dlog.Context{
 			"adopted": true, "shim_pid": client.PID(),
 		})
@@ -580,6 +605,10 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		// through this very entry, and a resume that had to mint a second
 		// identity would report a NEW session for a conversation that never
 		// ended.
+		// AND NO SESSION EXISTS ON THE SHIM. `sessionStarted` stays false, so
+		// the idle sweep skips the workspace instead of directing a shim that
+		// can only refuse `no_session`, and a teardown stops the process
+		// without asking it to end a session it never began.
 		f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
 		f.publishHost(ws)
 		log.Info(opBringUp, "the session is parked at its cold gate", dlog.Context{
@@ -624,13 +653,13 @@ func (f *Fleet) sessionUp(
 	// know the session would answer "no live facts" for a workspace whose
 	// session record already exists, and the host view would be withheld with
 	// an invariant violation for a session that is coming up perfectly well.
-	f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
+	f.remember(ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true})
 	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)
 	}
-	f.remember(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID})
+	f.remember(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID, sessionStarted: true})
 
 	if err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil"})
@@ -1035,7 +1064,13 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if failure := response.GetFailure(); failure != nil {
 		if cold := failure.GetCold(); cold != nil {
 			f.raiseColdGate(ws, src.VendorSessionID, cold)
-			log.Warn(opBringUp, "the session is parked behind a cold gate", dlog.Context{
+			// AN ANSWER, NOT A FAILURE -- as this function's own doc says. The
+			// gate is a designed product state: the shim states the cost of
+			// resuming a large context, `raiseColdGate` publishes it to the
+			// footer and the feed, and the USER chooses pay, clear or compact.
+			// Nothing is broken and nothing is to be fixed, so it is INFO,
+			// carrying the cost facts that no other record does.
+			log.Info(opBringUp, "the session is parked behind a cold gate", dlog.Context{
 				"context_tokens":  cold.GetContextTokens(),
 				"requested_model": cold.GetRequestedModel().GetName(),
 			})
@@ -1361,6 +1396,32 @@ func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
 	}
 	f.logTransition(ws, "session_live", stood, true,
 		dlog.Context{"shim_pid": session.client.PID(), "watcher_attached": session.watcher != nil})
+}
+
+// noteSessionStarted marks the workspace's installed client as one whose shim
+// holds a started session. It is the ONE mutation of that fact after the entry
+// exists, and it exists because Install rewrites the entry: an adoption that
+// remembered the fact first would have it erased by the very install that
+// attaches to the started session.
+//
+// A workspace with no entry is not created here: nothing was installed, so
+// there is nothing to say a session started on.
+func (f *Fleet) noteSessionStarted(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if session, ok := f.sessions[ws]; ok {
+		session.sessionStarted = true
+	}
+}
+
+// sessionStarted reports whether the workspace's installed client's shim holds
+// a started session. A workspace with no entry has no shim at all, so it has no
+// session either.
+func (f *Fleet) sessionStarted(ws ids.WorkspaceID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	session, ok := f.sessions[ws]
+	return ok && session.sessionStarted
 }
 
 // closeDisplaced closes a watcher no handle points at any more. A close is a

@@ -230,6 +230,15 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 		"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID,
 	})
 	if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
+		// A CANCELLED BRING-UP IS THE DAEMON LEAVING, not a session that
+		// failed to come up. Nothing is left to serve the revived
+		// conversation, and the next boot revives it again.
+		if canceled(err) {
+			log.Info(opRegister, "the announced workspace's revival ended when its context was cancelled", dlog.Context{
+				"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID, "cause": err.Error(),
+			})
+			return
+		}
 		log.Error(opRegister, "the announced workspace's recorded conversation did not come back up", dlog.Context{
 			"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID, "cause": err.Error(),
 		})

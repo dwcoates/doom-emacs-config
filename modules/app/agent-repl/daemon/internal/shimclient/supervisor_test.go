@@ -802,3 +802,42 @@ func TestSpawnIsRefusedOnceTheSupervisorHasStoodDown(t *testing.T) {
 		t.Fatal("Spawn() answered a client while the supervisor was standing down")
 	}
 }
+
+// TestTheSweptSpawnIsRecordedAtInfo pins the LEVEL of the case above. The latch
+// leaves exactly two cases and no third, and this is the expected one: a spawn
+// in flight when the shutdown landed. Catching it is the sweep succeeding, so
+// it states what it did; a kill that FAILS is what stays loud, because a leaked
+// shim holds the workspace lock that refuses the next session.
+func TestTheSweptSpawnIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	sup, surfaces := newSupervisorLogging(t, WithKillGrace(50*time.Millisecond))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sup.Spawn(context.Background(), spec)
+		done <- err
+	}()
+	record := sink.record(t)
+	waitForSessionOpen(t, f)
+
+	// Act.
+	if err := sup.StandDownEverySpawn(context.Background(), "an immediate shutdown was requested"); err != nil {
+		t.Fatalf("StandDownEverySpawn() error = %v", err)
+	}
+	waitForExit(t, record.PID)
+	<-done
+
+	// Assert.
+	var level string
+	for _, r := range surfaces.log.Records() {
+		if r.Operation == "daemon.shimclient.standdown" {
+			level = r.Level
+		}
+	}
+	if level != "info" {
+		t.Fatalf("the swept spawn was recorded at %q, want info", level)
+	}
+}

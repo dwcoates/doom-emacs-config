@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -72,6 +73,22 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	if err != nil {
 		global.Error(opCreate, "the repository directory cannot be normalized", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create: repository %q: %w", spec.RepoDir, err)
+	}
+
+	// A REPOSITORY THAT IS NOT ON DISK IS REFUSED, NOT FAILED. The registry may
+	// still hold the row -- a worktree removed underneath it, a scratch
+	// repository a run cleaned up -- and the roster already stops offering such
+	// a repository, so reaching here means the client's roster was stale. That
+	// is a refusal the client renders, on the arm the server already answers a
+	// repository ref that matches nothing with.
+	//
+	// WITHOUT IT the create ran on to `WorktreeDir`, whose stat of
+	// "<repo>/.git" failed with a bare filesystem error: an ERROR from the
+	// verb and a second `the rpc failed` ERROR from the boundary, for a
+	// refusal the contract has an arm for.
+	if _, statErr := os.Stat(repoDir); statErr != nil {
+		return wsm.Workspace{}, refuse(global, "CreateWorkspace", ArmUnknownRepository,
+			fmt.Sprintf("the repository directory %q is not on disk: %v", repoDir, statErr), true)
 	}
 
 	// A ONE-SHOT RUNS THE REPOSITORY'S OWN POLICY, so the policy is resolved

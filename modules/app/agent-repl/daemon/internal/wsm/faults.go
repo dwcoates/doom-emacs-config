@@ -72,6 +72,23 @@ func (s *store) OpenFault(ctx context.Context, f Fault) (FaultID, error) {
 		var ws any
 		if f.Workspace != nil {
 			ws = string(*f.Workspace)
+			// THE WORKSPACE MAY HAVE BEEN FORGOTTEN WHILE ITS SHIM WAS STILL
+			// DYING. The link watcher, the health reporter and the lifecycle
+			// sink all outlive the registry row, so a shim that dies after its
+			// workspace is forgotten arrives here naming a row that is gone.
+			// The foreign key already refuses it -- structurally, and it stays
+			// -- but it refuses with `FOREIGN KEY constraint failed (787)`,
+			// which is an unreadable ERROR three layers deep. The check is
+			// inside the transaction, so the answer cannot be stale: this is
+			// the same BEGIN IMMEDIATE the insert runs in.
+			var exists int
+			switch err := tx.QueryRowContext(ctx,
+				`SELECT 1 FROM workspaces WHERE id = ?`, ws).Scan(&exists); {
+			case errors.Is(err, sql.ErrNoRows):
+				return fmt.Errorf("wsm: fault workspace %s: %w", *f.Workspace, ErrNotFound)
+			case err != nil:
+				return err
+			}
 		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO faults (id, workspace_id, kind, detail, evidence, opened_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,

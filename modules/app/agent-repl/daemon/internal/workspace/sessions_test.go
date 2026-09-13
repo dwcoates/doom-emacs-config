@@ -816,6 +816,50 @@ func TestStartAnswersAColdRefusalWithTheGate(t *testing.T) {
 	}
 }
 
+// TestColdGatedBringUpIsNotServing is the sweep's selection read end-to-end
+// through the production bring-up: a cold refusal keeps the client installed so
+// the gate's answer can re-open through it, and for ten hours that installed
+// client made the workspace look hibernatable -- one Hibernate directive and
+// one `no_session` WARN every five minutes for a session that never started.
+func TestColdGatedBringUpIsNotServing(t *testing.T) {
+	tests := []struct {
+		name     string
+		response *shimv1.StartSessionResponse
+		want     bool
+	}{
+		{
+			name:     "a bring-up the shim answered cold",
+			response: coldResponse(),
+			want:     false,
+		},
+		{
+			name:     "a bring-up whose session started",
+			response: startedResponse("vendor-1"),
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			f.client.response = tt.response
+
+			// Act.
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			if got := f.fleet.Serving(ws.ID); got != tt.want {
+				t.Fatalf("Serving(%q) = %v, want %v", ws.ID, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStartRemembersTheColdGateMenu(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -1969,5 +2013,37 @@ func TestStartReportsACancelledAdoptionAsItsOwnCause(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "did not answer within") {
 		t.Fatalf("Start error = %q, want the cancellation rather than an overrun", err)
+	}
+}
+
+// TestTheColdGateIsRecordedAtInfo pins the gate's LEVEL. A cold refusal is the
+// designed answer to resuming a large context -- the cost is published to the
+// footer and the feed and the user chooses pay, clear or compact -- so it
+// carries no defect and must not stand in a log the owner reads for defects.
+func TestTheColdGateIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	var found bool
+	for _, record := range f.log.logger.Records() {
+		if record.Message != "the session is parked behind a cold gate" {
+			continue
+		}
+		found = true
+		if record.Level != "info" {
+			t.Fatalf("the cold-gate record is %q, want info", record.Level)
+		}
+	}
+	if !found {
+		t.Fatal("no cold-gate record was written")
 	}
 }
