@@ -425,6 +425,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the user's priority command")
     ("verbs.el" agent-repl-verb-create "agent-repl: workspace requested"
      "confirms the user's create command")
+    ("verbs.el" agent-repl-verbs--create-policy-refusal
+     "create refused: %s states no one-shot policy -- write %s"
+     "tells the user which repository states no one-shot policy and what to write")
     ("verbs.el" agent-repl-verbs-select-minted
      "agent-repl: the new workspace carries no directory to switch to"
      "reports why the requested new workspace cannot be selected")

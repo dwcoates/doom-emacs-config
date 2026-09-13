@@ -1124,7 +1124,11 @@ func newFixture(t *testing.T) *fixture {
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Sessions: f.fleet,
 		Health:     f.health,
-		PromptsDir: "/prompts", Log: f.log,
+		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, Log: f.log,
+		// The policy probe answers from the SAME brief table the loader
+		// answers from, so a fixture that registers a brief has it in the
+		// repository's policy and one that does not has neither.
+		Policy: policyOf(f),
 		Shim: func(ids.WorkspaceID) (Shim, bool) {
 			if !f.hasSession {
 				return nil, false
@@ -1173,6 +1177,45 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.verbs = verbs
 	return f
+}
+
+// fixtureCheckoutRoot is the module checkout the fixture's daemon was deployed
+// from. It is deliberately OUTSIDE every fixture repository, so a fixture
+// repository's one-shot policy is its own `.agent-repl/prompts` — which is
+// what every repository but one is. A test that needs the CORPUS source, i.e.
+// the one repository the daemon's checkout lives in, calls
+// `fixture.ownRepository`.
+const fixtureCheckoutRoot = "/checkout/modules/app/agent-repl"
+
+// fixturePolicy is the fixture's policy probe: a directory holds exactly the
+// briefs the fixture's loader was given.
+type fixturePolicy struct{ f *fixture }
+
+func policyOf(f *fixture) prompts.Files { return fixturePolicy{f: f} }
+
+func (p fixturePolicy) Missing(_ string, names []string) []string {
+	var missing []string
+	for _, name := range names {
+		if _, ok := p.f.briefs[name]; !ok {
+			missing = append(missing, name+prompts.Suffix)
+		}
+	}
+	return missing
+}
+
+func (p fixturePolicy) Text(_ string, name string) (string, error) {
+	brief, ok := p.f.briefs[name]
+	if !ok {
+		return "", errors.New("no such brief: " + name)
+	}
+	return brief.Body, nil
+}
+
+// ownRepository makes dir the repository the daemon's own checkout lives in,
+// so its one-shot policy is the daemon's corpus rather than its own tree.
+func (f *fixture) ownRepository(t *testing.T, dir string) {
+	t.Helper()
+	f.mutable(t).deps.CheckoutRoot = filepath.Join(dir, "modules", "app", "agent-repl")
 }
 
 // mutable exposes the concrete verbs so a test can rearrange a collaborator

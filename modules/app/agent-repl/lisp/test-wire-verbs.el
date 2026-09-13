@@ -1243,6 +1243,32 @@ everything it carries."
                     (agent-repl-test-wire-verbs--parse "{\"worktreeCreationFailed\":{\"detail\":\"fatal: exists\"}}"))
                    '(:cause (:arm :worktree-creation-failed :value (:detail "fatal: exists")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-create-error-one-shot-policy-missing-arm ()
+  "CreateWorkspaceError's `one_shot_policy_missing' arm decodes with everything
+it carries: the repository, the directory it must state its policy in, and
+the files that directory does not hold."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"oneShotPolicyMissing\":{\"repositoryRoot\":\"/src/p\",\"policyDir\":\"/src/p/.agent-repl/prompts\",\"missingFiles\":[\"oneshot-success-suffix.md\"]}}"))
+                   '(:cause (:arm :one-shot-policy-missing
+                             :value (:repository-root "/src/p"
+                                     :policy-dir "/src/p/.agent-repl/prompts"
+                                     :missing-files ("oneshot-success-suffix.md"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-one-shot-policy-missing-empty-file-list ()
+  "The arm's `missing_files' is a repeated field, so an omitted one decodes as
+no files rather than as a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (plist-get (plist-get
+                               (agent-repl-wire-decode-create-workspace-error
+                                (agent-repl-test-wire-verbs--parse
+                                 "{\"oneShotPolicyMissing\":{\"repositoryRoot\":\"/src/p\",\"policyDir\":\"/src/p/.agent-repl/prompts\"}}"))
+                               :cause)
+                              :value)
+                              :missing-files)
+                   nil))))
+
 (ert-deftest agent-repl-test-wire-verbs-create-error-unset-cause-is-a-breach ()
   "CreateWorkspaceError with no arm set says nothing actionable, so it is a
 breach."
@@ -1263,7 +1289,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "finishRequired" "finishNotOneShot" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "finishRequired" "finishNotOneShot" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-spawn-failed-arm ()
