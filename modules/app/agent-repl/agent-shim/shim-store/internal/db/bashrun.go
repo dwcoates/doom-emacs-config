@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -43,7 +42,7 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 	if runID == "" {
 		return BashRunReplay{}, d.refuse(base, invalidFieldf("run", "run id value is empty"))
 	}
-	started := time.Now()
+	started := d.mono()
 
 	tx, err := d.beginRead(ctx)
 	if err != nil {

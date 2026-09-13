@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -150,6 +151,12 @@ var errNotAPageLine = errors.New("entry row indexed as a page line carries no se
 // errNotABashRow is the cause of a row indexed as a bash row whose stored
 // frame carries none — a corruption of this store's own invariant.
 var errNotABashRow = errors.New("entry row indexed as a bash row carries no bash frame")
+
+// isContextError reports the caller's own cancellation or deadline, which is
+// nobody's fault and never a storage failure.
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
 
 // isNoRows reports the driver's empty-result signal.
 func isNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }

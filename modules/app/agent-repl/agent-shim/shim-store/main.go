@@ -143,6 +143,24 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 	}
 	defer database.Close()
 
+	// THE LEDGER SWEEP RUNS FOR AS LONG AS THE STORE SERVES, AND STOPS BEFORE
+	// THE DATABASE CLOSES. Its defer is registered AFTER database.Close's, so
+	// it runs first: a sweep batch still in flight against a closed handle
+	// would be a storage error on a perfectly orderly shutdown. It writes
+	// through the same serialized write slot every producer's batch does, one
+	// bounded batch at a time, so it can delay a producer by one batch and
+	// never by a whole sweep.
+	sweepCtx, stopSweep := context.WithCancel(context.Background())
+	sweepDone := make(chan struct{})
+	go func() {
+		defer close(sweepDone)
+		database.SweepWriteLedger(sweepCtx, db.DefaultLedgerSweepInterval)
+	}()
+	defer func() {
+		stopSweep()
+		<-sweepDone
+	}()
+
 	ln, err := server.Listen(socketPath, log.With(logging.Fields{Component: "server"}))
 	if err != nil {
 		return err

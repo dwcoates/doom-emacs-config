@@ -277,7 +277,7 @@ func (d *DB) observeQuery(statement, table string, fields logging.Fields, starte
 	if threshold <= 0 {
 		return
 	}
-	elapsed := time.Since(started)
+	elapsed := d.mono().Sub(started)
 	over, window := d.observeBudget(statement, elapsed >= threshold)
 	if elapsed < threshold {
 		return
