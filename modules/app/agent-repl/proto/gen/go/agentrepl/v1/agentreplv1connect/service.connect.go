@@ -105,6 +105,8 @@ const (
 	// AgentReplSetPermissionModeProcedure is the fully-qualified name of the AgentRepl's
 	// SetPermissionMode RPC.
 	AgentReplSetPermissionModeProcedure = "/agentrepl.v1.AgentRepl/SetPermissionMode"
+	// AgentReplSelectAccountProcedure is the fully-qualified name of the AgentRepl's SelectAccount RPC.
+	AgentReplSelectAccountProcedure = "/agentrepl.v1.AgentRepl/SelectAccount"
 	// AgentReplWatchFooterProcedure is the fully-qualified name of the AgentRepl's WatchFooter RPC.
 	AgentReplWatchFooterProcedure = "/agentrepl.v1.AgentRepl/WatchFooter"
 	// AgentReplWatchDaemonHoldsProcedure is the fully-qualified name of the AgentRepl's
@@ -199,6 +201,7 @@ var (
 	agentReplWatchTopbarMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("WatchTopbar")
 	agentReplSetModelMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SetModel")
 	agentReplSetPermissionModeMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
+	agentReplSelectAccountMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SelectAccount")
 	agentReplWatchFooterMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("WatchFooter")
 	agentReplWatchDaemonHoldsMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchDaemonHolds")
 	agentReplUpdateHeldPromptMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UpdateHeldPrompt")
@@ -295,6 +298,10 @@ type AgentReplClient interface {
 	// The permission-mode switch, SetModel's sibling. See
 	// endpoint_set_permission_mode.proto.
 	SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error)
+	// The account cell's pick: make this workspace's session spend as one of
+	// the roots TopbarAccount.options served. See
+	// endpoint_select_account.proto.
+	SelectAccount(context.Context, *connect.Request[v1.SelectAccountRequest]) (*connect.Response[v1.SelectAccountResponse], error)
 	// The footer's stream: the view, whole.
 	WatchFooter(context.Context, *connect.Request[v1.WatchFooterRequest]) (*connect.ServerStreamForClient[v1.WatchFooterResponse], error)
 	// The tray's stream: the tray, whole.
@@ -530,6 +537,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetPermissionModeMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		selectAccount: connect.NewClient[v1.SelectAccountRequest, v1.SelectAccountResponse](
+			httpClient,
+			baseURL+AgentReplSelectAccountProcedure,
+			connect.WithSchema(agentReplSelectAccountMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchFooter: connect.NewClient[v1.WatchFooterRequest, v1.WatchFooterResponse](
 			httpClient,
 			baseURL+AgentReplWatchFooterProcedure,
@@ -710,6 +723,7 @@ type agentReplClient struct {
 	watchTopbar            *connect.Client[v1.WatchTopbarRequest, v1.WatchTopbarResponse]
 	setModel               *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
 	setPermissionMode      *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
+	selectAccount          *connect.Client[v1.SelectAccountRequest, v1.SelectAccountResponse]
 	watchFooter            *connect.Client[v1.WatchFooterRequest, v1.WatchFooterResponse]
 	watchDaemonHolds       *connect.Client[v1.WatchDaemonHoldsRequest, v1.WatchDaemonHoldsResponse]
 	updateHeldPrompt       *connect.Client[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse]
@@ -860,6 +874,11 @@ func (c *agentReplClient) SetModel(ctx context.Context, req *connect.Request[v1.
 // SetPermissionMode calls agentrepl.v1.AgentRepl.SetPermissionMode.
 func (c *agentReplClient) SetPermissionMode(ctx context.Context, req *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error) {
 	return c.setPermissionMode.CallUnary(ctx, req)
+}
+
+// SelectAccount calls agentrepl.v1.AgentRepl.SelectAccount.
+func (c *agentReplClient) SelectAccount(ctx context.Context, req *connect.Request[v1.SelectAccountRequest]) (*connect.Response[v1.SelectAccountResponse], error) {
+	return c.selectAccount.CallUnary(ctx, req)
 }
 
 // WatchFooter calls agentrepl.v1.AgentRepl.WatchFooter.
@@ -1056,6 +1075,10 @@ type AgentReplHandler interface {
 	// The permission-mode switch, SetModel's sibling. See
 	// endpoint_set_permission_mode.proto.
 	SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error)
+	// The account cell's pick: make this workspace's session spend as one of
+	// the roots TopbarAccount.options served. See
+	// endpoint_select_account.proto.
+	SelectAccount(context.Context, *connect.Request[v1.SelectAccountRequest]) (*connect.Response[v1.SelectAccountResponse], error)
 	// The footer's stream: the view, whole.
 	WatchFooter(context.Context, *connect.Request[v1.WatchFooterRequest], *connect.ServerStream[v1.WatchFooterResponse]) error
 	// The tray's stream: the tray, whole.
@@ -1287,6 +1310,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSetPermissionModeMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplSelectAccountHandler := connect.NewUnaryHandler(
+		AgentReplSelectAccountProcedure,
+		svc.SelectAccount,
+		connect.WithSchema(agentReplSelectAccountMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchFooterHandler := connect.NewServerStreamHandler(
 		AgentReplWatchFooterProcedure,
 		svc.WatchFooter,
@@ -1489,6 +1518,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSetModelHandler.ServeHTTP(w, r)
 		case AgentReplSetPermissionModeProcedure:
 			agentReplSetPermissionModeHandler.ServeHTTP(w, r)
+		case AgentReplSelectAccountProcedure:
+			agentReplSelectAccountHandler.ServeHTTP(w, r)
 		case AgentReplWatchFooterProcedure:
 			agentReplWatchFooterHandler.ServeHTTP(w, r)
 		case AgentReplWatchDaemonHoldsProcedure:
@@ -1646,6 +1677,10 @@ func (UnimplementedAgentReplHandler) SetModel(context.Context, *connect.Request[
 
 func (UnimplementedAgentReplHandler) SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetPermissionMode is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SelectAccount(context.Context, *connect.Request[v1.SelectAccountRequest]) (*connect.Response[v1.SelectAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectAccount is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchFooter(context.Context, *connect.Request[v1.WatchFooterRequest], *connect.ServerStream[v1.WatchFooterResponse]) error {

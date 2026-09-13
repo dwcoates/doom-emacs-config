@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- topbar account cell: clicking it opens a dropdown of every account root the daemon knows (email or "logged out", the current one marked), and picking one switches the workspace's session to it through SelectAccount and the restart verb's engine, opening that root's login when it has none; it is the pair's reveal, replacing the session line the cell used to open (owner ruling 2026-09-13: the logged-in cell did nothing)
+
 - footer tokens: swept every footer token-count site against the one-format ruling — all already route through `figures.Tokens`/`formatTokens` — and added the ruled boundary cases (1049, 1050, 10113, 142300, 1000000) to both formatters' tests (owner ruling, token-count format, 2026-09-13)
 - webapp topbar: the hibernated and cold-gate cells are stated as the right group's own content at the strip's right edge, in the right cells' box (owner ruling 4, 2026-09-13)
 - webapp topbar: the connectivity glyph and the account label are one `.topbar-account-cell`, glyph first and at half the strip's gap, and the session-line reveal anchors on the pair (owner ruling 3, 2026-09-13)

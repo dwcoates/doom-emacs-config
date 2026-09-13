@@ -52,6 +52,7 @@ import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "agentrepl/v1/endpoint_client_log.proto";
 import "agentrepl/v1/endpoint_register_workspace.proto";
+import "agentrepl/v1/endpoint_select_account.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
 import "agentrepl/v1/endpoint_watch_host_workspace.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
@@ -154,6 +155,11 @@ service AgentRepl {
   // The permission-mode switch, SetModel's sibling. See
   // endpoint_set_permission_mode.proto.
   rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
+
+  // The account cell's pick: make this workspace's session spend as one of
+  // the roots TopbarAccount.options served. See
+  // endpoint_select_account.proto.
+  rpc SelectAccount(SelectAccountRequest) returns (SelectAccountResponse);
 
   // ---- FOOTER ----
 

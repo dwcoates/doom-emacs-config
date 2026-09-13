@@ -83,6 +83,10 @@ CREATE TABLE sessions (
   host_session_id    TEXT NOT NULL,
   vendor_session_id  TEXT NOT NULL,
   config_dir         TEXT NOT NULL,
+  -- The root the USER CHOSE (SelectAccount), '' when nobody chose one and the
+  -- path routing decides. Distinct from config_dir, which records where the
+  -- session actually came up.
+  selected_config_dir TEXT NOT NULL DEFAULT '',
   model              TEXT NOT NULL,
   permission_mode    TEXT NOT NULL,
   started_at         INTEGER NOT NULL,

@@ -155,6 +155,13 @@ type Verbs interface {
 	// SetModel switches the session's model through the QUEUE's session-act
 	// path, so it cannot overtake a queued prompt.
 	SetModel(ctx context.Context, ws ids.WorkspaceID, model string) error
+	// SelectAccount makes the workspace's session spend as the named account
+	// root: the choice is recorded on the session row and the session is then
+	// bounced through the restart verb's own engine, which is what carries the
+	// vendor transcript into the new root. It answers whether that root holds
+	// a login, so the caller can open its login flow; a logged-out root is
+	// honored, never refused.
+	SelectAccount(ctx context.Context, ws ids.WorkspaceID, configDir string) (bool, error)
 	// SetPermissionMode switches the permission mode through the same path,
 	// validating the mode against exactly what the topbar's picker served. An
 	// ungated mode needs the consent recorded at creation.

@@ -204,6 +204,14 @@ type Session struct {
 	VendorSessionID string
 	// ConfigDir is the account root the session was spawned under.
 	ConfigDir string
+	// SelectedConfigDir is the account root the USER CHOSE for this workspace
+	// (SelectAccount), empty when nobody has chosen one and the path routing
+	// decides. It is a DIFFERENT FACT from ConfigDir, which records where the
+	// session actually came up: with one field the two answers collide, and a
+	// bring-up cannot tell a root that merely happens to be recorded from a
+	// root somebody asked for — so a re-route would either always beat a
+	// choice or never take effect at all.
+	SelectedConfigDir string
 	// Model is the last-writer-wins model fact, in shim order.
 	Model string
 	// PermissionMode is the session's current permission mode.
