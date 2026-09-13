@@ -937,9 +937,26 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 	// STARTED, because nothing on this conversation has a session yet. Only a
 	// HELD lock says the conversation is already owned and must not be
 	// started a second time.
+	//
+	// IT IS NOT AN ANOMALY, AND IT IS NOT A WARNING. The shim takes its locks
+	// INSIDE StartSession, so free-and-listening is what an inert shim looks
+	// like BY CONTRACT -- and recording it as a disagreement between two
+	// kernel facts states something untrue. The BOOT's own copy of this exact
+	// branch already says so at INFO ("a shim is listening with no session of
+	// its own; adopting the inert survivor", internal/boot/sequence.go), and
+	// `TestAnInertSurvivorIsNotWarnedAbout` pins the level there; one
+	// condition recorded at two levels by two callers is the drift, not the
+	// state.
+	//
+	// IT IS NOT THE PHANTOM-SHIM CLASS EITHER, and the lock is what tells
+	// them apart. A phantom is a shim that OUTLIVED a lock it had taken; this
+	// is a shim that never took one, because its StartSession refused and
+	// rolled them back. The realtest's own occurrence (2026-09-13T18:18:41)
+	// followed a `vendor_start_failed` on the very shim being adopted, one
+	// bring-up earlier -- the designed recovery, working.
 	inert := false
 	if state == sessionlock.StateFree && socket == shimsocket.StateLive {
-		log.Warn(opBringUp, "the workspace lock reads free but a shim is listening; attaching to the inert survivor and starting its session",
+		log.Info(opBringUp, "the workspace lock reads free but a shim is listening; attaching to the inert survivor and starting its session",
 			dlog.Context{"lock": lockPath, "socket": socketPath, "lock_state": state.String()})
 		inert = true
 	}
@@ -1900,6 +1917,13 @@ func (f *Fleet) adoptBounded(
 		}
 		return nil, err
 	}
+	// THE PID IS NAMED HERE, and this is the one record that can name it: the
+	// probe two callers up sees a live socket and nothing else, so an adoption
+	// is the first moment the daemon learns WHICH process it attached to. A
+	// reader correlating an inert survivor's adoption against the spawn that
+	// left it -- which is how the 2026-09-13T18:18:41 pair was read at all --
+	// needs both pids, and the spawn record already carries its own.
+	fields["shim_pid"] = client.PID()
 	log.Info(opBringUp, "adopted the running shim", fields)
 	return client, nil
 }
