@@ -42,15 +42,35 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
-const SchemaVersion = 5
+const SchemaVersion = 6
+
+// mono reads the DB's monotonic clock — the one every measured duration is
+// taken from. A zero-value DB (only constructible inside this package, by a
+// test that cares about nothing else) falls back to time.Now rather than
+// panicking on a nil field.
+func (d *DB) mono() time.Time {
+	if d.clock == nil {
+		return time.Now()
+	}
+	return d.clock()
+}
 
 // nowMillis is the store's wall clock in unix millis.
 func nowMillis() int64 { return time.Now().UnixMilli() }
 
 // DB wraps the SQLite handle plus the store's logger.
 type DB struct {
+	// sql is the WRITE handle, and it is capped at ONE connection: the store
+	// is the single writer process, so a second write connection could only
+	// ever contend with the first. Every statement on it goes through
+	// beginWrite (writer.go).
 	sql *sql.DB
-	log *logging.Logger
+	// read is the READ pool, on its own DSN: no `_txlock=immediate`, and
+	// `query_only(true)` so the kernel of SQLite itself refuses a write on it.
+	// Reads never queue behind a write, structurally, rather than by every
+	// read path remembering to pass sql.TxOptions{ReadOnly: true}.
+	read *sql.DB
+	log  *logging.Logger
 	// slowQuery is the duration past which a completed statement is reported
 	// at warn. Non-positive disables the reporting entirely, which only an
 	// explicit Options caller can ask for.
@@ -64,6 +84,30 @@ type DB struct {
 	// now is the clock every written timestamp is taken from. Injectable so a
 	// test can assert an exact instant without sleeping for one.
 	now func() int64
+	// clock is the MONOTONIC clock every measured duration is taken from — the
+	// slow-query elapsed time and the write gate's queue wait. It is separate
+	// from `now`, which stamps rows in wall-clock millis, because a duration
+	// and a timestamp are different questions. Injectable for the same reason:
+	// a test asserts an exact wait by advancing it, never by waiting one out.
+	clock func() time.Time
+	// writeGate is the process-wide write slot: exactly one write transaction
+	// at a time, so a batch never meets a sibling's BEGIN IMMEDIATE. It is a
+	// one-slot channel rather than a mutex so a queued caller can be canceled.
+	// See writer.go.
+	writeGate chan struct{}
+	// queuedForWrite, when set, is called by acquireWrite the moment a writer
+	// finds the slot taken and is about to block on it. It is the seam a test
+	// uses to observe a QUEUED writer — the state the gate exists to create —
+	// without sleeping for one. Nil in production; nothing reads it there.
+	queuedForWrite func()
+	// ledgerRetention is how far behind a file's committed cursor a write_ledger
+	// row must fall before the sweep may remove it. Non-positive keeps
+	// everything. See prune.go.
+	ledgerRetention int64
+	// afterPruneBatch, when set, is called after each sweep batch has committed
+	// AND given the write slot back. It is the seam a test uses to prove the
+	// sweep does not hold the slot across the whole sweep. Nil in production.
+	afterPruneBatch func()
 	// budgetMu guards budgets, which holds one rolling window of over-budget
 	// verdicts per statement family. Every producer's rpc runs on its own
 	// goroutine against this one DB, so the windows are shared state.
@@ -81,8 +125,19 @@ type Options struct {
 	// budget rather than a zero one that would flag every bulk write.
 	BulkBase   time.Duration
 	BulkPerRow time.Duration
-	// Now overrides the wall clock. Zero value means time.Now.
+	// Now overrides the wall clock rows are stamped from. Zero value means
+	// time.Now().UnixMilli.
 	Now func() int64
+	// Clock overrides the monotonic clock measured DURATIONS are taken from —
+	// the slow-query elapsed time and the write gate's queue wait. Zero value
+	// means time.Now.
+	Clock func() time.Time
+	// LedgerRetentionBytes is how far behind a file's committed cursor a
+	// write_ledger row must fall before the sweep removes it. Zero falls back
+	// to DefaultLedgerRetentionBytes; NEGATIVE disables the sweep, which is how
+	// a caller says "keep every row" without the zero value meaning it by
+	// accident.
+	LedgerRetentionBytes int64
 }
 
 // Open opens (creating if absent) the store database at path with WAL enabled
@@ -143,12 +198,12 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// contending writer is an immediate SQLITE_BUSY rather than a wait. Taking
 	// the lock at BEGIN removes the upgrade entirely.
 	//
-	// A PURE READ OPTS BACK OUT, through db.beginRead. _txlock is a property of
-	// the CONNECTION, so it reached the read path too and made a page repaint
-	// queue for the write lock a producer was holding — and be refused by it.
-	// See beginRead in read.go for why a deferred read still pins its watch in
-	// the page's own snapshot.
-	dsn := "file:" + path + "?" + url.Values{
+	// A PURE READ NEVER TOUCHES THIS DSN — it runs on the read pool below.
+	// _txlock is a property of the CONNECTION, so this one reached the read
+	// path too and made a page repaint queue for the write lock a producer was
+	// holding — and be refused by it. See beginRead in read.go for why a
+	// deferred read still pins its watch in the page's own snapshot.
+	writeDSN := "file:" + path + "?" + url.Values{
 		"_pragma": {
 			"journal_mode(WAL)",
 			"busy_timeout(5000)",
@@ -158,12 +213,38 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		"_txlock": {"immediate"},
 	}.Encode()
 
+	// THE READ POOL IS A SEPARATE POOL ON A SEPARATE DSN, and that is the
+	// structural half of "a read never waits on a write".
+	//
+	// `_txlock` is a property of the CONNECTION, so one DSN carrying
+	// `immediate` made EVERY transaction a writer — a page repaint queued for
+	// the write lock a producer held, and could be refused by it, which is
+	// precisely the failure WAL is chosen to remove. `beginRead`'s
+	// sql.TxOptions{ReadOnly: true} fixed that per call site, and a per-call-
+	// site fix is one forgotten option away from coming back. A pool the write
+	// lock is not reachable from cannot forget.
+	//
+	// `query_only(true)` is the second half: SQLite itself refuses a write
+	// statement on this pool, so a read path that grew one is a hard error at
+	// the first attempt rather than a silent second writer. It is applied LAST
+	// so the pragmas ahead of it are not themselves refused, and
+	// `journal_mode` is not among them — the journal mode is a durable
+	// property of the FILE that the write handle already established, and
+	// setting it needs write access this pool does not have.
+	readDSN := "file:" + path + "?" + url.Values{
+		"_pragma": {
+			"busy_timeout(5000)",
+			"foreign_keys(ON)",
+			"query_only(true)",
+		},
+	}.Encode()
+
 	clock := opts.Now
 	if clock == nil {
 		clock = nowMillis
 	}
 
-	d, err := openAt(dsn, path, log, opts, clock)
+	d, err := openAt(writeDSN, readDSN, path, log, opts, clock)
 	if err == nil {
 		return finishOpen(d, log, path, opts)
 	}
@@ -214,7 +295,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 			"removing the superseded database failed: %v", removeErr)
 		return nil, removeErr
 	}
-	d, err = openAt(dsn, path, log, opts, clock)
+	d, err = openAt(writeDSN, readDSN, path, log, opts, clock)
 	if err != nil {
 		return nil, err
 	}
@@ -232,11 +313,20 @@ func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, err
 
 // openAt opens the handle and brings it to SchemaVersion, closing the handle if
 // either step fails so the caller may remove the file underneath it.
-func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
-	sqldb, err := sql.Open("sqlite", dsn)
+func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
+	monotonic := opts.Clock
+	if monotonic == nil {
+		monotonic = time.Now
+	}
+	sqldb, err := sql.Open("sqlite", writeDSN)
 	if err != nil {
 		return nil, storagef(err, "opening %q", path)
 	}
+	// ONE WRITE CONNECTION, ENFORCED BY THE POOL AS WELL AS BY THE GATE. The
+	// gate (writer.go) is what a queued caller waits on and what reports its
+	// wait; this is what makes a second write connection unrepresentable, so
+	// nothing that bypassed the gate could quietly recreate the contention.
+	sqldb.SetMaxOpenConns(1)
 	if err := sqldb.Ping(); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, storagef(err, "pinging %q", path)
@@ -249,11 +339,42 @@ func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() in
 	if bulkPerRow == 0 {
 		bulkPerRow = DefaultBulkPerRow
 	}
-	d := &DB{sql: sqldb, log: log, slowQuery: opts.SlowQuery, bulkBase: bulkBase, bulkPerRow: bulkPerRow, now: clock}
+	ledgerRetention := opts.LedgerRetentionBytes
+	if ledgerRetention == 0 {
+		ledgerRetention = DefaultLedgerRetentionBytes
+	}
+	d := &DB{
+		sql:        sqldb,
+		log:        log,
+		slowQuery:  opts.SlowQuery,
+		bulkBase:   bulkBase,
+		bulkPerRow: bulkPerRow,
+		now:        clock,
+		clock:      monotonic,
+		writeGate:  make(chan struct{}, 1),
+
+		ledgerRetention: ledgerRetention,
+	}
 	if err := d.ensureSchema(context.Background(), path); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, err
 	}
+
+	// THE READ POOL OPENS AFTER THE SCHEMA EXISTS, because `query_only` would
+	// refuse the DDL that creates it and because a pool opened against a file
+	// this binary is about to unlink would hold a handle to the discarded
+	// inode.
+	readdb, err := sql.Open("sqlite", readDSN)
+	if err != nil {
+		sqldb.Close() //nolint:errcheck // the open already failed
+		return nil, storagef(err, "opening the read pool on %q", path)
+	}
+	if err := readdb.Ping(); err != nil {
+		readdb.Close() //nolint:errcheck // the open already failed
+		sqldb.Close()  //nolint:errcheck // the open already failed
+		return nil, storagef(err, "pinging the read pool on %q", path)
+	}
+	d.read = readdb
 	return d, nil
 }
 
@@ -281,12 +402,29 @@ func removeDatabaseFiles(path string) error {
 }
 
 // Close closes the underlying handle.
+// BOTH POOLS ARE CLOSED, AND NEITHER FAILURE IS SWALLOWED. The read pool is
+// closed first because it holds only snapshots; the write handle is closed
+// even if that fails, so a read-pool fault cannot leave the writer's file
+// handle open, and the first error is the one reported.
 func (d *DB) Close() error {
 	d.log.LogVerbose(logging.Fields{Operation: "store.db.close"}, "closing SQLite database")
+	var firstErr error
+	if d.read != nil {
+		if err := d.read.Close(); err != nil {
+			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
+				"closing the SQLite read pool failed: %v", err)
+			firstErr = storagef(err, "closing the read pool")
+		}
+	}
 	if err := d.sql.Close(); err != nil {
 		d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
 			"closing SQLite database failed: %v", err)
-		return storagef(err, "closing the database")
+		if firstErr == nil {
+			firstErr = storagef(err, "closing the database")
+		}
+	}
+	if firstErr != nil {
+		return firstErr
 	}
 	d.log.Log(logging.Fields{Operation: "store.db.close"}, "SQLite database closed")
 	return nil
@@ -383,13 +521,24 @@ CREATE TABLE cursor (
   updated_at_ms INTEGER NOT NULL
 );
 
+-- write_ledger answers "has this write_id already been applied?" and is
+-- RETAINED ONLY AS LONG AS SOMEBODY CAN STILL ASK. source_file_id and
+-- source_offset are the batch's own cursor_advance — the file the rows were
+-- read from and the offset the producer's NEXT read starts at, which is above
+-- every offset the batch covered. They are what lets the sweep decide a row is
+-- further behind its file's committed cursor than the sidecar's boot rewind can
+-- ever reach. NULL for a write with no file behind it (stream plane, or a batch
+-- that advanced no cursor), and a NULL row is never pruned. See prune.go.
 CREATE TABLE write_ledger (
-  write_id      TEXT    PRIMARY KEY,
-  upsert_key    TEXT    NOT NULL,
-  write_seq     INTEGER NOT NULL,
-  applied_at_ms INTEGER NOT NULL
+  write_id       TEXT    PRIMARY KEY,
+  upsert_key     TEXT    NOT NULL,
+  write_seq      INTEGER NOT NULL,
+  applied_at_ms  INTEGER NOT NULL,
+  source_file_id TEXT,
+  source_offset  INTEGER
 );
 CREATE INDEX write_ledger_upsert_key ON write_ledger(upsert_key);
+CREATE INDEX write_ledger_source     ON write_ledger(source_file_id, source_offset);
 
 CREATE TABLE schema_meta (version INTEGER NOT NULL);
 `
@@ -515,10 +664,15 @@ func (d *DB) inspectSchema(ctx context.Context) (int, []string, error) {
 // are no tables — a foreign shape never reaches here, because Open removed the
 // file it was in.
 func (d *DB) createSchema(ctx context.Context) error {
-	tx, err := d.sql.BeginTx(ctx, nil)
+	// THROUGH THE GATE LIKE EVERY OTHER WRITE. Nothing else is running yet at
+	// open, so this never queues; it goes through beginWrite anyway so that
+	// "every write transaction in this package is opened by beginWrite" is a
+	// property anyone can check by grepping for BeginTx rather than a habit.
+	tx, release, err := d.beginWrite(ctx)
 	if err != nil {
 		return storagef(err, "begin schema creation")
 	}
+	defer release()
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
 	if _, err := tx.ExecContext(ctx, schemaDDL); err != nil {

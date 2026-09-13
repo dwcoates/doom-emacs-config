@@ -108,16 +108,20 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 
 	// THE CLOCK STARTS BEFORE THE TRANSACTION, AND THE WAIT IS MEASURED APART
-	// FROM THE WORK. Every transaction this store opens is BEGIN IMMEDIATE,
-	// reads included, so a batch queues behind whatever else holds the write
-	// lock for as long as busy_timeout allows, and behind the connection pool
-	// before that. Timing only the total made every such queue look like a slow
-	// statement: the owner's store reported a 3822ms `write_batch` for SIX rows
-	// whose statements are all single indexed seeks, and the record blamed
-	// index maintenance for time no index spent. `lock_wait_ms` is the half an
-	// operator can act on — it says to look at what ELSE is writing, not for a
-	// missing index.
-	started := time.Now()
+	// FROM THE WORK. A batch queues on the process-wide write slot behind
+	// whatever else this store is writing, and Timing only the total made that
+	// queue look like a slow statement: the owner's store reported a 3822ms
+	// `write_batch` for SIX rows whose statements are all single indexed seeks,
+	// and the record blamed index maintenance for time no index spent.
+	// `lock_wait_ms` is the half an operator can act on — it says to look at
+	// what ELSE is writing, not for a missing index.
+	//
+	// WHAT IT MEASURES IS NOW THE IN-PROCESS QUEUE, which is the same number an
+	// operator wanted and a truthful one: before the gate it was time spent
+	// inside SQLite's busy handler, which ended either in a write or — nine
+	// times on 2026-09-13 — in a SQLITE_BUSY refusal after the whole 5s
+	// timeout. A wait here always ends in a turn.
+	started := d.mono()
 	var lockWait time.Duration
 	defer func() {
 		base.LockWait = lockWait
@@ -129,11 +133,23 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
 	}, "starting transaction entries=%d cursor_advance=%t", len(entries), cursor != nil)
 
-	tx, err := d.sql.BeginTx(ctx, nil)
-	lockWait = time.Since(started)
+	tx, release, err := d.beginWrite(ctx)
+	lockWait = d.mono().Sub(started)
 	if err != nil {
+		// A CALLER THAT HUNG UP WHILE QUEUED GETS ITS OWN CANCELLATION BACK.
+		// The database was never touched and nothing about it failed, so
+		// dressing the wait's end as a storage failure would tell the producer
+		// to retry a batch its own caller has already abandoned — and would
+		// write an error record for a healthy store.
+		if isContextError(err) {
+			return WriteResult{}, d.refuse(base, err)
+		}
 		return WriteResult{}, d.refuse(base, storagef(err, "begin write transaction"))
 	}
+	// LIFO: the rollback runs first, then the slot is released. Releasing
+	// before the transaction ended would let the next writer begin against a
+	// lock this one still holds, which is the contention the gate removes.
+	defer release()
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
 	nextSeq, err := d.currentWriteSeq(ctx, tx)
@@ -196,7 +212,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		if err != nil {
 			return WriteResult{}, d.refuse(fields, err)
 		}
-		if err := d.recordApplied(ctx, tx, r, nextSeq, now); err != nil {
+		if err := d.recordApplied(ctx, tx, r, cursor, nextSeq, now); err != nil {
 			return WriteResult{}, d.refuse(fields, err)
 		}
 		if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
@@ -289,7 +305,7 @@ func (d *DB) refuse(fields logging.Fields, err error) error {
 	// RETURNED unchanged for the server to shape into its failure arm. An
 	// abandoned call that left no record at all would be indistinguishable
 	// from one that never arrived.
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if isContextError(err) {
 		fields.Level = "info"
 		d.log.Log(fields, "abandoned: the caller's context ended before the statement finished: %v", err)
 		return err
@@ -336,9 +352,24 @@ func (d *DB) absorbedBefore(ctx context.Context, tx *sql.Tx, writeID string) (bo
 // TRANSACTION as the row it applied. Split them and a crash between the two
 // would either lose the absorption fact (a replay regresses the row) or claim
 // one that never happened (a write is silently dropped).
-func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, writeSeq uint64, now int64) error {
-	const insertSQL = `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms) VALUES (?,?,?,?)`
-	if _, err := tx.ExecContext(ctx, insertSQL, r.writeID, r.upsertKey, writeSeq, now); err != nil {
+// THE ROW IS STAMPED WITH THE BATCH'S SOURCE POSITION WHERE THERE IS ONE, and
+// that stamp is the whole basis of the ledger's retention (see prune.go). It is
+// the batch's `cursor_advance` — the file these rows were read from and the
+// offset the producer's NEXT read starts at, which is strictly above every
+// offset the batch's own rows came from, so subtracting from it can only ever
+// keep a row too long. A FILE-plane entry in a batch that advanced no cursor,
+// and every STREAM-plane entry, are stamped NULL and are kept forever: neither
+// names a byte the store could measure a re-read against.
+func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, cursor *storev1.CursorState, writeSeq uint64, now int64) error {
+	const insertSQL = `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms, source_file_id, source_offset)
+	  VALUES (?,?,?,?,?,?)`
+	var sourceFile sql.NullString
+	var sourceOffset sql.NullInt64
+	if r.plane == planeFile && cursor != nil && cursor.GetFileId() != "" {
+		sourceFile = sql.NullString{String: cursor.GetFileId(), Valid: true}
+		sourceOffset = sql.NullInt64{Int64: cursor.GetOffset(), Valid: true}
+	}
+	if _, err := tx.ExecContext(ctx, insertSQL, r.writeID, r.upsertKey, writeSeq, now, sourceFile, sourceOffset); err != nil {
 		return storagef(err, "recording write_id %q in the write ledger", r.writeID)
 	}
 	return nil
