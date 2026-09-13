@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -700,6 +701,107 @@ func TestAReadIsAnsweredWhileAWriterHoldsTheWriteLock(t *testing.T) {
 				}
 			case <-time.After(bound):
 				t.Fatalf("the read did not answer within %v — it is queueing for the write lock", bound)
+			}
+		})
+	}
+}
+
+// ---- the read pool: a read never waits on a write ----
+
+// TestAReadCompletesWhileAWriteTransactionIsHeld is the structural assertion
+// behind the read pool. The read runs SYNCHRONOUSLY while the write
+// transaction is open and the single write connection is taken: if a read path
+// ever reaches the write pool again, this does not fail slowly, it never
+// returns, and the package timeout says so.
+//
+// It is what the DSN split buys over `beginRead`'s ReadOnly option alone. That
+// option was a per-call-site fix for a per-connection property, and one
+// forgotten option would have queued a page repaint behind a producer's write
+// exactly as before.
+func TestAReadCompletesWhileAWriteTransactionIsHeld(t *testing.T) {
+	tests := []struct {
+		name string
+		// read is the read path exercised while the writer holds its
+		// transaction. Each opens through a different door of the read pool:
+		// a read transaction, and a pooled statement with no transaction.
+		read func(t *testing.T, d *DB)
+	}{
+		{
+			name: "a page open, which begins a read transaction",
+			read: func(t *testing.T, d *DB) {
+				if _, err := d.OpenPage(ctx(), "agent-1", 10, nil); err != nil {
+					t.Fatalf("OpenPage while a write was held: %v", err)
+				}
+			},
+		},
+		{
+			name: "a live-work scan, which runs a pooled statement",
+			read: func(t *testing.T, d *DB) {
+				if _, err := d.LiveWork(ctx()); err != nil {
+					t.Fatalf("LiveWork while a write was held: %v", err)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: a book to read, then a write transaction held open.
+			d, _ := newStore(t)
+			seedBook(t, d, "agent-1", 1)
+			tx, release, err := d.beginWrite(ctx())
+			if err != nil {
+				t.Fatalf("beginWrite: %v", err)
+			}
+			defer release()
+			defer tx.Rollback() //nolint:errcheck // the fixture write is never committed
+			if _, err := tx.ExecContext(ctx(), `UPDATE schema_meta SET version = version`); err != nil {
+				t.Fatalf("the fixture write did not take the write lock: %v", err)
+			}
+
+			// Act + Assert: the read answers without the writer letting go.
+			test.read(t, d)
+		})
+	}
+}
+
+// TestTheReadPoolRefusesAWrite pins the second half of the split: the pool
+// carries `query_only(true)`, so a read path that grew a write is a hard error
+// at the first attempt rather than a silent second writer the gate knows
+// nothing about.
+func TestTheReadPoolRefusesAWrite(t *testing.T) {
+	tests := []struct {
+		name      string
+		statement string
+	}{
+		{name: "an insert", statement: `INSERT INTO schema_meta(version) VALUES (99)`},
+		{name: "an update", statement: `UPDATE schema_meta SET version = 99`},
+		{name: "a delete", statement: `DELETE FROM schema_meta`},
+		{name: "DDL", statement: `CREATE TABLE smuggled (x INTEGER)`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+
+			// Act
+			_, err := d.read.ExecContext(ctx(), test.statement)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("the read pool applied %q; it must refuse every write", test.statement)
+			}
+			if !strings.Contains(err.Error(), "readonly") {
+				t.Fatalf("the read pool refused %q with %v, want SQLite's readonly refusal", test.statement, err)
+			}
+			// The refusal is the store's own error the moment a read path
+			// reports it: every read path wraps what the database hands back
+			// through storagef, which is the class the server turns into a
+			// storage_failure arm.
+			if wrapped := storagef(err, "writing from a read path"); !errors.Is(wrapped, ErrStorage) {
+				t.Fatalf("the refusal did not survive as an ErrStorage: %v", wrapped)
+			}
+			if got := scalar[int](t, d, `SELECT version FROM schema_meta`); got != SchemaVersion {
+				t.Fatalf("schema_meta version = %d, want %d unchanged", got, SchemaVersion)
 			}
 		})
 	}
