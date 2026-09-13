@@ -708,14 +708,18 @@ func wsActMinibufferPrompt(ctx context.Context, client *Client) (string, error) 
 // wsActProveChord presses one leader sequence with REAL KEY EVENTS and proves
 // it reached the command the plan says it is bound to.
 //
-// THE PROOF IS THE COMMAND'S OWN FIRST PROMPT. `SPC TAB n` is
-// `agent-repl-create-workspace` and nothing else asks "Repository: " first, so
-// that prompt standing in the minibuffer is evidence the keymap resolved the
-// chord — evidence that an elisp call performing the same act could never
-// produce. `(recent-keys)` is read alongside it, exactly as realtest 1's key
-// self-test reads it, because it is Emacs's own account of its INPUT and is
-// the only thing that separates "the chord arrived" from "something called the
-// command".
+// THE PROOF IS THE COMMAND'S OWN FIRST PROMPT. `SPC TAB O` is
+// `agent-repl-open-workspace` and nothing else asks "Open workspace: ", so that
+// prompt standing in the minibuffer is evidence the keymap resolved the chord —
+// evidence that an elisp call performing the same act could never produce.
+// `(recent-keys)` is read alongside it, exactly as realtest 1's key self-test
+// reads it, because it is Emacs's own account of its INPUT and is the only
+// thing that separates "the chord arrived" from "something called the command".
+//
+// WHERE THE PROMPT IS SHARED, THE CALLER ADDS THE SECOND FACT. The dynamic
+// creation modes all open with "Initial prompt: " since the 2026-09-12 ruling,
+// so a caller pressing one of those asserts `(recent-keys)` contains its own
+// sequence on top of this proof (rt5ProveCreateChord, rt7ProveForkChord).
 //
 // It then aborts with a real `C-g`, so the chord under test leaves no
 // half-finished command standing and the parameterized act that follows starts
