@@ -3,6 +3,8 @@ package classifier
 import (
 	"context"
 	"testing"
+
+	"claude-repld/internal/headless"
 )
 
 // TestNewBuildsTheVendorJudge pins that the production constructor hands back
@@ -13,7 +15,7 @@ func TestNewBuildsTheVendorJudge(t *testing.T) {
 	guard := forbiddingGuard(t)
 
 	// Act.
-	got, err := New(guard, "fake-claude", "/prompts")
+	got, err := New(guard, headless.New(guard, "fake-claude"), "/prompts")
 
 	// Assert.
 	if err != nil {
@@ -23,8 +25,8 @@ func TestNewBuildsTheVendorJudge(t *testing.T) {
 	if !ok {
 		t.Fatalf("New() = %T, want *vendorJudge", got)
 	}
-	if judge.bin != "fake-claude" || judge.promptsDir != "/prompts" {
-		t.Fatalf("judge = {bin:%q promptsDir:%q}, want the constructor's arguments", judge.bin, judge.promptsDir)
+	if judge.headless.Bin() != "fake-claude" || judge.promptsDir != "/prompts" {
+		t.Fatalf("judge = {bin:%q promptsDir:%q}, want the constructor's arguments", judge.headless.Bin(), judge.promptsDir)
 	}
 }
 
@@ -33,7 +35,7 @@ func TestNewBuildsTheVendorJudge(t *testing.T) {
 // first classification rather than refuse.
 func TestNewWiresTheProductionRunSeam(t *testing.T) {
 	// Arrange.
-	got, err := New(forbiddingGuard(t), "fake-claude", "/prompts")
+	got, err := New(forbiddingGuard(t), headless.New(forbiddingGuard(t), "fake-claude"), "/prompts")
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}

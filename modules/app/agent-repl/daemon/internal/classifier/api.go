@@ -11,6 +11,7 @@ import (
 	"context"
 
 	"claude-repld/internal/envc"
+	"claude-repld/internal/headless"
 )
 
 // ExplicitInterrupts is the fast path: a prompt whose FIRST WORD is one of
@@ -40,15 +41,19 @@ type Judge interface {
 }
 
 // New builds the real judge: a headless vendor run, refused by guard when
-// vendor calls are forbidden. vendorBin is the binary it runs and promptsDir
-// is where the routing brief is read AT USE TIME.
+// vendor calls are forbidden. runner is the shared internal/headless facility
+// — which is where the binary is resolved, so the classifier can no longer be
+// built with an empty one — and promptsDir is where the routing brief is read
+// AT USE TIME.
 //
 // SEAM CHANGE (recorded): the skeleton's New took (guard, vendorBin). The
 // routing question is `prompts/queue-routing-classifier.md`, read at use time
 // like every other brief, so the judge needs the prompts directory too; there
-// is no other way for it to reach one.
-func New(guard envc.VendorGuard, vendorBin, promptsDir string) (Judge, error) {
-	return newVendorJudge(guard, vendorBin, promptsDir), nil
+// is no other way for it to reach one. A LATER SEAM CHANGE (recorded): the
+// bare binary name became the shared headless runner, so the classifier and
+// the workspace naming call share one exec site.
+func New(guard envc.VendorGuard, runner headless.Runner, promptsDir string) (Judge, error) {
+	return newVendorJudge(guard, runner, promptsDir), nil
 }
 
 // NewFake builds the `-fake` judge: the scripted keyword heuristic, which
