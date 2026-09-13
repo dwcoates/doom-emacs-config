@@ -198,12 +198,39 @@ message TopbarAccount {
     TopbarAccountLoggedIn logged_in = 1;
     TopbarAccountLoggedOut logged_out = 2;
   }
+  // EVERY ACCOUNT ROOT THE DAEMON KNOWS, in the account package's own order,
+  // and the cell's click presents them as a dropdown: choosing one makes this
+  // workspace's session spend as that account (SelectAccount). The arm above
+  // stays the CELL's label — which account is spent as right now — and this
+  // list is the CHOICE behind it; the option carrying `current` is the one the
+  // arm above describes.
+  //
+  // ALWAYS THE WHOLE SET, never the alternatives alone. A one-root machine
+  // draws a one-row dropdown, which states what the choice is; a list that
+  // omitted the current root would leave the reader with an empty menu and no
+  // way to tell it apart from a menu that failed to load.
+  repeated TopbarAccountOption options = 3;
 }
 message TopbarAccountLoggedIn {
   // The logged-in email, verbatim.
   string email = 1;
 }
 message TopbarAccountLoggedOut {}
+
+// One account root the session may spend as. THE ARM IS THE STATE here for
+// the same reason it is on the cell: a logged-out root is an answer the reader
+// acts on (choosing it switches the workspace and then opens that root's login
+// flow), never a blank row.
+message TopbarAccountOption {
+  // The root's absolute path — the echo token SelectAccount takes back.
+  string config_dir = 1;
+  oneof state {
+    TopbarAccountLoggedIn logged_in = 2;
+    TopbarAccountLoggedOut logged_out = 3;
+  }
+  // This is the root the workspace's session spends as right now.
+  bool current = 4;
+}
 
 // The title line the topbar shows.
 message TopbarTitle {
