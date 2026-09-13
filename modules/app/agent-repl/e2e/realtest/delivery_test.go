@@ -341,17 +341,31 @@ func TestHoldCeilingOutlivesTheConfirmation(t *testing.T) {
 // handback that dropped keys.
 func TestKeyDriverArgs(t *testing.T) {
 	tests := []struct {
-		name string
-		hold bool
-		want []string
+		name      string
+		hold      bool
+		keepFocus bool
+		want      []string
 	}{
 		{name: "a held press asks for the hold", hold: true, want: []string{"--hold=5", "42", "5", "control"}},
 		{name: "a blind press does not", hold: false, want: []string{"42", "5", "control"}},
+		{
+			name:      "a press inside a sweep that holds focus says so",
+			hold:      true,
+			keepFocus: true,
+			want:      []string{"--hold=5", "--keep-focus", "42", "5", "control"},
+		},
+		{
+			name:      "a press outside a sweep does not, so the helper hands focus back itself",
+			hold:      true,
+			keepFocus: false,
+			want:      []string{"--hold=5", "42", "5", "control"},
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			args := keyDriverArgs(42, Chord{Emacs: "C-g", Keycode: 5, Modifiers: []string{"control"}}, test.hold)
+			args := keyDriverArgs(42, Chord{Emacs: "C-g", Keycode: 5, Modifiers: []string{"control"}},
+				test.hold, test.keepFocus)
 
 			if len(args) != len(test.want) {
 				t.Fatalf("args = %v, want %d of them", args, len(test.want))
@@ -639,5 +653,83 @@ func TestConfirmAsksTheEditorNothingDuringTheQuietWindow(t *testing.T) {
 		t.Errorf("the editor was asked %s after the post, inside the %s quiet window the quit character needs "+
 			"to be read as a key rather than taken as an interrupt (verdict %d: %s, observed %v)",
 			firstAsk, keyDeliveryQuietWindow, verdict, reason, observed)
+	}
+}
+
+// THE DIAGNOSTIC CAPTURE IS TAKEN AFTER THE QUIET WINDOW AND BEFORE THE FIRST
+// PROBE. Taken earlier it would turn the key in flight into an interrupt; taken
+// later it would describe an editor this harness has already been running lisp
+// in, which is the state that is under suspicion in the first place.
+func TestTheAfterQuietWindowCaptureRunsBeforeTheFirstProbe(t *testing.T) {
+	// Arrange
+	driver := &KeyDriver{Pid: 1, Client: &Client{Socket: "/nonexistent/socket", Scratch: t.TempDir()}}
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+	order := make([]string, 0, 4)
+	effect := &DeliveryEffect{
+		What: "the standing minibuffer closed",
+		Observed: func(context.Context) (bool, error) {
+			order = append(order, "probe")
+			return false, nil
+		},
+		AfterQuietWindow: func(context.Context) {
+			order = append(order, "capture")
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), keyDeliveryQuietWindow+200*time.Millisecond)
+	defer cancel()
+
+	// Act
+	driver.confirm(ctx, quit, InputMark{Keys: "SPC"}, effect)
+
+	// Assert
+	if len(order) == 0 || order[0] != "capture" {
+		t.Errorf("the confirmation did %v, want the capture first and every probe after it", order)
+	}
+}
+
+// AND IT IS TAKEN ONCE. Eighteen fields per poll would be this harness running
+// lisp in the editor for most of the window the key has to be read in — which
+// is the very defect the quiet window exists for.
+func TestTheAfterQuietWindowCaptureIsTakenOnce(t *testing.T) {
+	// Arrange
+	driver := &KeyDriver{Pid: 1, Client: &Client{Socket: "/nonexistent/socket", Scratch: t.TempDir()}}
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+	captures := 0
+	effect := &DeliveryEffect{
+		What:             "the standing minibuffer closed",
+		Observed:         func(context.Context) (bool, error) { return false, nil },
+		AfterQuietWindow: func(context.Context) { captures++ },
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), keyDeliveryConfirmCeiling+time.Second)
+	defer cancel()
+
+	// Act
+	driver.confirm(ctx, quit, InputMark{Keys: "SPC"}, effect)
+
+	// Assert
+	if captures != 1 {
+		t.Errorf("the capture was taken %d time(s), want exactly one", captures)
+	}
+}
+
+// THE CAPTURE DECIDES NOTHING. It is a diagnostic seam, and a verdict that
+// moved because of it would make the evidence part of the judgement.
+func TestTheAfterQuietWindowCaptureDoesNotChangeTheVerdict(t *testing.T) {
+	// Arrange
+	driver := &KeyDriver{Pid: 1, Client: &Client{Socket: "/nonexistent/socket", Scratch: t.TempDir()}}
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+	observed := func(context.Context) (bool, error) { return false, nil }
+	ctx, cancel := context.WithTimeout(context.Background(), keyDeliveryConfirmCeiling+time.Second)
+	defer cancel()
+
+	// Act
+	without, _, _, _ := driver.confirm(ctx, quit, InputMark{Keys: "SPC"},
+		&DeliveryEffect{What: "the prompt closed", Observed: observed})
+	with, _, _, _ := driver.confirm(ctx, quit, InputMark{Keys: "SPC"},
+		&DeliveryEffect{What: "the prompt closed", Observed: observed, AfterQuietWindow: func(context.Context) {}})
+
+	// Assert
+	if without != with {
+		t.Errorf("the verdict was %d without the capture and %d with it", without, with)
 	}
 }

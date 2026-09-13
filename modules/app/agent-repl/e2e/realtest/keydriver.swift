@@ -21,12 +21,21 @@
 // we must not type into.
 //
 // The one route that reliably reaches a specific Emacs's keymap is to make that
-// Emacs key for the instant of the keypress and then hand focus back. So this
-// helper: records the frontmost application, activates the target Emacs, posts
-// keyDown then keyUp addressed to its pid, lets the event loop consume them
-// while Emacs is still key, and reactivates whatever was frontmost before. The
-// owner is disturbed only for that instant, and the key-proof phase is the only
-// phase that does it — distinct from startup, which never brings Emacs forward.
+// Emacs key for the keypress. So this helper records the frontmost application,
+// activates the target Emacs, posts keyDown then keyUp addressed to its pid,
+// and lets the event loop consume them while Emacs is still key.
+//
+// WHO HANDS FOCUS BACK, AND WHEN (OWNER RULING, 2026-09-13). It used to be this
+// helper, immediately, once per press: activate, post, restore. That flickered
+// the owner's desktop once per keystroke and left no way to tell by looking at
+// the screen whether a sweep was still running. The policy now is that THE
+// SWEEP steals focus once at its start (`--take`) and hands it back once at its
+// end (`--give-back`), and a press made with `--keep-focus` leaves the target
+// frontmost instead of restoring. A press that finds Emacs NOT frontmost — the
+// owner clicked away, or the realtest just cold-started a new Emacs —
+// re-activates it and says `refocused=yes` in its receipt. Without
+// `--keep-focus` the old per-press restore is exactly what happens, for a
+// caller that is not inside a sweep.
 // (An accessibility route — AXUIElement posting to the focused UI element — was
 // considered; macOS exposes no general key-event delivery to a non-frontmost
 // app's first responder through it, so it is not a substitute here.)
@@ -76,10 +85,15 @@
 // Usage:
 //   keydriver --check                      exit 0 trusted, 1 not trusted
 //   keydriver --session                    print screenLocked=yes|no|unknown
-//   keydriver [--hold[=SECONDS]] <pid> <keycode> [modifiers]
+//   keydriver --take [<pid>]               print where focus is now as a token,
+//                                          and bring that pid forward if given
+//   keydriver --give-back <token>          hand focus back to that token
+//   keydriver [--hold[=SECONDS]] [--keep-focus] <pid> <keycode> [modifiers]
 //                                          activate pid, post keyDown/keyUp,
 //                                          hold the target key until released
-//                                          (with --hold), restore prior focus
+//                                          (with --hold), and restore prior
+//                                          focus unless --keep-focus says the
+//                                          sweep is holding it
 //
 // `--hold` also says the CALLER WILL CONFIRM the key against the editor, so the
 // key-window reading becomes advisory and the post goes ahead whatever it says.
@@ -166,14 +180,137 @@ if arguments.first == "--check" {
     exit(trusted ? 0 : 1)
 }
 
+// ---- THE SWEEP'S FOCUS, STOLEN ONCE AND HANDED BACK ONCE -------------------
+//
+// OWNER RULING, 2026-09-13. Every press used to activate Emacs, post, and hand
+// focus back — so a sweep flickered the owner's desktop once per keystroke and
+// gave no way to tell, by looking at the screen, that the run was still going.
+// The sweep now takes focus ONCE at its start and gives it back ONCE at its
+// end, so the owner can watch the run and can see when it is over.
+//
+// The two halves are separate invocations because they belong to different
+// processes: `bin/realtest.sh` takes focus before its first `go test` and gives
+// it back from its EXIT trap, so a realtest that failed, a `go test` that
+// panicked and an operator's interrupt all reach the handback.
+//
+// THE TOKEN IS A NAME, NOT A HANDLE. The taking process is gone by the time the
+// handback runs, so what travels between them is a string: the bundle
+// identifier where the application has one, its pid otherwise, and `none` when
+// nothing was frontmost. A bundle identifier survives an application that
+// relaunched between the two moments; a raw pid would hand focus to whatever
+// inherited the number, or to nothing.
+
+// sweepFocusSettleSeconds bounds ONE activation request's landing.
+//
+// Twice the accessibility messaging timeout above, for the same reason the
+// press path spends two rounds: an activation is asynchronous and the window
+// server may take a turn to grant it. It is a bound on waiting, never a bound
+// on the answer — an activation that has not landed by then is REPORTED as
+// declined rather than retried forever, because a sweep must not stall on the
+// owner's desktop.
+let sweepFocusSettleSeconds = TimeInterval(axMessagingTimeout) * 2
+
+func focusToken(_ app: NSRunningApplication?) -> String {
+    guard let app = app else { return "none" }
+    if let bundle = app.bundleIdentifier, !bundle.isEmpty {
+        return "bundle:" + bundle
+    }
+    return "pid:\(app.processIdentifier)"
+}
+
+func applicationForToken(_ token: String) -> NSRunningApplication? {
+    if token.hasPrefix("bundle:") {
+        let identifier = String(token.dropFirst("bundle:".count))
+        return NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first
+    }
+    if token.hasPrefix("pid:"), let value = Int32(token.dropFirst("pid:".count)) {
+        return NSRunningApplication(processIdentifier: value)
+    }
+    return nil
+}
+
+// activateAndSettle asks for one application to come forward and answers
+// whether the window server granted it, read from NSWorkspace rather than from
+// the request returning.
+func activateAndSettle(_ app: NSRunningApplication) -> Bool {
+    activate(app)
+    spin(upTo: sweepFocusSettleSeconds, until: {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
+    })
+    return NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
+}
+
+if arguments.first == "--take" {
+    // EXIT 0 WHATEVER HAPPENS, and say what happened on the line. A declined
+    // activation, a pid that names no process and a locked screen are all
+    // READINGS the sweep reports and carries on from: refusing to run a sweep
+    // because the desktop would not come forward would throw away every
+    // finding the sweep exists to collect. What must never happen is the
+    // handback losing the name of where focus started, and that is printed
+    // first on the line for exactly that reason.
+    let rest = Array(arguments.dropFirst())
+    if rest.count > 1 {
+        fail("usage: keydriver --take [<pid>]")
+    }
+    let previous = focusToken(NSWorkspace.shared.frontmostApplication)
+    guard let first = rest.first else {
+        print("keydriver-took: previous=\(previous) target=none activated=no "
+            + "reason=no editor was named, so only where focus started was recorded "
+            + "screenLocked=\(screenLockWord())")
+        exit(0)
+    }
+    guard let targetPid = Int32(first) else {
+        fail("--take takes a pid, got \"\(first)\"")
+    }
+    guard let target = NSRunningApplication(processIdentifier: targetPid) else {
+        print("keydriver-took: previous=\(previous) target=\(targetPid) activated=no "
+            + "reason=no running application for that pid screenLocked=\(screenLockWord())")
+        exit(0)
+    }
+    let granted = activateAndSettle(target)
+    print("keydriver-took: previous=\(previous) target=\(targetPid) "
+        + "activated=\(granted ? "yes" : "declined") screenLocked=\(screenLockWord())")
+    exit(0)
+}
+
+if arguments.first == "--give-back" {
+    guard arguments.count == 2 else {
+        fail("usage: keydriver --give-back <bundle:ID|pid:N|none>")
+    }
+    let token = arguments[1]
+    if token == "none" {
+        print("keydriver-gave-back: previous=none restored=no "
+            + "reason=nothing was frontmost when the sweep took focus, so there is nobody to hand it back to")
+        exit(0)
+    }
+    guard let app = applicationForToken(token) else {
+        print("keydriver-gave-back: previous=\(token) restored=no "
+            + "reason=that application is no longer running screenLocked=\(screenLockWord())")
+        exit(0)
+    }
+    let restored = activateAndSettle(app)
+    print("keydriver-gave-back: previous=\(token) restored=\(restored ? "yes" : "no") "
+        + "screenLocked=\(screenLockWord())")
+    exit(0)
+}
+
 // THE HOLD IS OPT-IN AND ALWAYS BOUNDED. A caller that never releases must not
 // be able to leave the owner's focus parked on Emacs, so the ceiling applies
 // whatever the caller does — including a caller that dies mid-press.
 let holdDefaultSeconds = 5.0
 var holdSeconds: TimeInterval? = nil
+// keepFocus IS THE SWEEP SAYING IT OWNS THE DESKTOP. With it the press still
+// makes the target key — that is the only way AppKit will dispatch the event —
+// and then LEAVES it there, because the sweep took focus once at its start and
+// will hand it back once at its end. Without it the press restores whatever was
+// frontmost before, which is the pre-2026-09-13 behaviour and is what a caller
+// outside a sweep gets.
+var keepFocus = false
 var positional: [String] = []
 for argument in arguments {
-    if argument == "--hold" {
+    if argument == "--keep-focus" {
+        keepFocus = true
+    } else if argument == "--hold" {
         holdSeconds = holdDefaultSeconds
     } else if argument.hasPrefix("--hold=") {
         guard let parsed = TimeInterval(argument.dropFirst("--hold=".count)), parsed > 0 else {
@@ -188,7 +325,9 @@ for argument in arguments {
 }
 
 guard positional.count >= 2, let pid = Int32(positional[0]), let keycode = UInt16(positional[1]) else {
-    fail("usage: keydriver --check | keydriver [--hold[=SECONDS]] <pid> <keycode> [command,shift,option,control]")
+    fail("usage: keydriver --check | keydriver --session | keydriver --take [<pid>] | "
+        + "keydriver --give-back <token> | "
+        + "keydriver [--hold[=SECONDS]] [--keep-focus] <pid> <keycode> [command,shift,option,control]")
 }
 
 var flags = CGEventFlags()
@@ -226,6 +365,19 @@ guard let target = NSRunningApplication(processIdentifier: pid) else {
 }
 let workspace = NSWorkspace.shared
 let previous = workspace.frontmostApplication
+
+// WAS EMACS ALREADY FRONTMOST WHEN THIS PRESS ARRIVED?
+//
+// Under the sweep's focus policy the answer is normally yes: the sweep took
+// focus before its first realtest and nothing has handed it back. A NO means
+// one of two things the receipt must distinguish for the reader — the owner
+// clicked away mid-sweep, or this is the first press against an Emacs the
+// realtest just relaunched (realtests 1, 2, 3 and 5 through 8 all cold-start
+// their own editor, and the new process is nobody's frontmost application).
+// Either way the press re-takes focus and SAYS SO, and it still does not hand
+// it back.
+let alreadyFrontmost = previous?.processIdentifier == pid
+let refocused = keepFocus && !alreadyFrontmost
 
 // WHETHER THE TARGET CAN RECEIVE A KEY IS A READING, NOT A GATE — EXCEPT WHERE
 // NOBODY WILL CHECK.
@@ -452,7 +604,7 @@ let sessionLock = screenLockWord()
 
 // A DEFINITE NO REFUSES ONLY WHERE NOTHING WILL CHECK THE POST AFTERWARDS.
 if holdSeconds == nil, let reason = focus.refused {
-    if let previous = previous, previous.processIdentifier != pid {
+    if !keepFocus, let previous = previous, previous.processIdentifier != pid {
         activate(previous)
     }
     fail("pid \(pid) could not be made ready to receive a key — \(reason) — after \(String(format: "%.1f", readyAfter))s, so the key event was NOT "
@@ -467,7 +619,8 @@ if holdSeconds == nil, let reason = focus.refused {
 // finding can say whether the target looked able to receive the key without
 // having to re-read this file.
 let readiness = "readiness=\(focus.describe()) askedTwice=\(reactivated ? "yes" : "no") "
-    + "readyAfter=\(String(format: "%.2f", readyAfter))s screenLocked=\(sessionLock)"
+    + "readyAfter=\(String(format: "%.2f", readyAfter))s screenLocked=\(sessionLock) "
+    + "keepFocus=\(keepFocus ? "yes" : "no") refocused=\(refocused ? "yes" : "no")"
 
 // Down then up, addressed to the process. There is no delay between them: a
 // keystroke is not a hold, and Emacs's own input queue serializes them.
@@ -536,8 +689,14 @@ if let holdSeconds = holdSeconds {
     print("keydriver-receipt: posted keycode=\(keycode) pid=\(pid) hold=none \(readiness)")
 }
 
-// Restore whatever was frontmost before, so the owner is disturbed only for the
-// instant of the keypress. Nothing to restore when Emacs already was frontmost.
-if let previous = previous, previous.processIdentifier != pid {
+// HAND FOCUS BACK, UNLESS THE SWEEP IS HOLDING IT.
+//
+// Without `--keep-focus` this is the old policy: the owner is disturbed only
+// for the instant of the keypress. With it the sweep owns the desktop from its
+// first press to its last, and `bin/realtest.sh`'s EXIT trap is what returns
+// focus to where the sweep found it — once, however the sweep ends. Restoring
+// here as well would undo the steal the sweep just made and put the flicker
+// back, one per keystroke.
+if !keepFocus, let previous = previous, previous.processIdentifier != pid {
     activate(previous)
 }
