@@ -15,6 +15,13 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Forgetting a live workspace, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | An adopted shim's `ExitInfo.Code` is the sentinel -1 because the daemon is not its parent, and `publishExit` reads that as a signalled death — so no adopted teardown could ever be recorded as orderly | `ExitInfo` gains `Inferred`, set only where a departure is CONCLUDED from a vanished socket, and an inferred departure inside a stand-down is recorded at info | The alternative is loosening the code/signal test for everyone, which would quiet a spawned shim that really did die under a stand-down | Drop the `Inferred` arm from `publishExit`'s orderly branch (daemon/internal/shimclient/client.go) |
+| 2026-09-13 | Only `KillSession` armed the stand-down latch, so a teardown that went straight to the process armed nothing | `client.Kill` arms it too, before any branch, and a kill refused for a DETACHED client arms nothing | A kill is by construction a teardown this daemon ordered; a detached client's process is the successor's and nothing about it was ordered by us | Remove the `c.standDown.Store(true)` at the top of `Kill` |
+
 ## Realtest 5-8 quit-press delivery, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |

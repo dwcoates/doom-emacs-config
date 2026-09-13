@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon: the stand-down latch is armed by the process kill as well as by KillSession, and the redial ladder and the adopted-death witness both re-read it (`internal/shimclient/client.go`), so forgetting a live adopted workspace no longer records `adopted shim is gone` ERROR plus `redial stopped` WARNs (realtest 2026-09-13 between-sweeps)
 - sidecar: a shell spool ending `[exited with code N]` now ends its run on that evidence (`internal/handler/shell.go`), so a finished detached run is no longer written up as `went_silent` (realtest 2026-09-13 between-sweeps `lost-policy`/`bash-lost` WARNs)
 - realtest harness: the confirmation leaves the editor alone after a `C-g` (`Chord.Interrupting`, quiet window) and every probe answer carries the sequence of the probe that asked for it (`probeWrapper` seq stamp, slot cleared, `quit` caught), because the confirmation's own emacsclient traffic was turning the press into an interrupt and then reading a stale ring slot as proof it never arrived (realtests 5-8, six `C-g DID NOT REACH EMACS`)
 
