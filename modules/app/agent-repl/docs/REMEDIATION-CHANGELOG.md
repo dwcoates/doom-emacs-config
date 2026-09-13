@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- realtest handback: the sweep's EXIT trap quits a guarded Emacs, stops a guarded daemon under `AGENT_REPL_REALTEST_STOP_DAEMON`, and cold-starts a guard-free editor with `open -gj -a Emacs`, so a run no longer leaves the owner's editor talking to the fake vendor (owner's live logs, 2026-09-13 14:19)
+- deploy-all: a daemon restart through an Emacs carrying `AGENT_REPL_FORBID_VENDOR_CALLS` is REFUSED unless `AGENT_REPL_REALTEST_TAKEOVER=1`, because the incoming daemon would inherit the guard (owner's live logs, 2026-09-13 14:19)
 - proto hold tray: `DaemonHoldTray.heading` tag 1 is RETIRED and `DaemonHoldHeading` is deleted; the daemon composes no heading and the webapp requires none (owner ruling 5, 2026-09-13)
 - sidecar: the aged-unowned-spool `hold-expired` record is INFO, not WARN — the total-ingestion mandate working is not a fault (owner ruling 4, 2026-09-13)
 - webapp sidebar: an open row's detail panel is fixed-positioned out of the rail — it grows into the feed as its content asks and is placed under its row by the topbar reveals' own `clampReveal`, so the sidebar's overflow and the window edges can no longer clip it (owner ruling 3, 2026-09-13)
