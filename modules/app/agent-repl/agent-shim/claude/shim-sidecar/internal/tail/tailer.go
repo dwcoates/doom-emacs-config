@@ -34,6 +34,14 @@ type Tailer struct {
 	offset  int64
 	carry   []byte
 	records int64
+
+	// lastSize is the file's size as of the last SUCCESSFUL poll, and sized
+	// says a poll ever observed one. Together with the committed offset they
+	// answer the only question a vanished file leaves open: was there anything
+	// past the offset that went with it? A tailer that never polled cannot
+	// answer, which is why the boolean exists rather than a zero sentinel.
+	lastSize int64
+	sized    bool
 }
 
 // New builds a Tailer over path with the given codec, handler, and attribution
@@ -74,6 +82,10 @@ type PollResult struct {
 	Changed bool
 }
 
+// LastSize returns the file size seen by the last successful poll, and whether
+// any poll ever saw one.
+func (t *Tailer) LastSize() (int64, bool) { return t.lastSize, t.sized }
+
 // FileID returns the tailer's last-known "dev:inode" identity (empty until first Poll).
 func (t *Tailer) FileID() string { return t.fileID }
 
@@ -89,6 +101,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 	}
 	fileID := statID(fi)
 	size := fi.Size()
+	t.lastSize, t.sized = size, true
 
 	offset, carry, records := t.offset, t.carry, t.records
 	switch {

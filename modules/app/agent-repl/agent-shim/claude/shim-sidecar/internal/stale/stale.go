@@ -99,21 +99,37 @@ type Lost struct {
 	// — without it the flood this policy exists to stop simply reappeared one
 	// layer down, as one `bash-lost` WARN per backlog run.
 	Catchup bool
-	// TreeRemoved says the file did not merely disappear: its DIRECTORY went
-	// with it. A whole tree removed on purpose (a harness deleting its run
-	// directory, a vendor session directory deleted wholesale) is an ordinary
-	// end — the committed offset was the last thing the file had — so the
-	// conclusion is stated at INFO. Only a file unlinked while its directory
-	// stands is the genuine unlink-under-the-reader this policy warns about.
-	// It changes NO conclusion and NO wire arm: the run is still LOST and the
-	// arm is still file_vanished.
-	TreeRemoved bool
+	// BenignEnd names WHY the file's disappearance took nothing with it, and
+	// is empty when it may have. A whole tree removed on purpose
+	// (BenignTreeRemoved), a spool that had already written its terminator
+	// (BenignEnded), a file every byte of which was read and committed before
+	// it went (BenignFullyRead) — in each the committed offset was the last
+	// thing the file had, so the conclusion is stated at INFO. Only a
+	// disappearance that could have taken bytes past the committed offset is
+	// the loss this policy warns about. It changes NO conclusion and NO wire
+	// arm: the run is still LOST and the arm is still file_vanished.
+	BenignEnd string
 }
+
+// The BenignEnd vocabulary. Each names a way a vanished file can be known to
+// have given up everything it ever had; the empty string is the genuine loss.
+const (
+	// BenignTreeRemoved: the DIRECTORY holding the file was gone too, so
+	// nobody unlinked a file out from under the reader.
+	BenignTreeRemoved = "tree_removed"
+	// BenignEnded: the file was a spool that had already written its
+	// terminator (`[exited with code N]`, `[killed]`), so the run it carried
+	// was already concluded when the file went.
+	BenignEnded = "ended"
+	// BenignFullyRead: the committed offset equalled the size the last poll
+	// observed, so every byte the file ever held is durable.
+	BenignFullyRead = "fully_read"
+)
 
 type entry struct {
 	work         Work
-	vanishedAtMs int64 // 0 = the file is present
-	treeRemoved  bool  // the file's directory was gone too when it vanished
+	vanishedAtMs int64  // 0 = the file is present
+	benignEnd    string // why the vanish took nothing with it; "" = a genuine loss
 }
 
 // Tracker holds the open runs and concludes LOST. Safe for concurrent use: the
@@ -222,12 +238,12 @@ func (t *Tracker) Activity(path string, nowMs int64) {
 
 // MarkVanished starts the grace clock for a file that disappeared.
 //
-// treeRemoved says the file's DIRECTORY was gone too. That is what separates a
-// tree deleted on purpose from a file unlinked under the reader, and it decides
-// only the LEVEL of the records: a tree removal is an ordinary end and is stated
-// at INFO, an unlink under a standing directory stays a WARNING. The conclusion
-// itself and the wire arm are identical either way.
-func (t *Tracker) MarkVanished(path string, nowMs int64, treeRemoved bool) {
+// benignEnd names why the disappearance took nothing with it, or is empty when
+// it may have. That is what separates an ordinary end from a file losing bytes
+// under the reader, and it decides only the LEVEL of the records: a benign end
+// is stated at INFO, anything else stays a WARNING. The conclusion itself and
+// the wire arm are identical either way.
+func (t *Tracker) MarkVanished(path string, nowMs int64, benignEnd string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	existing, ok := t.open[path]
@@ -238,10 +254,10 @@ func (t *Tracker) MarkVanished(path string, nowMs int64, treeRemoved bool) {
 		return
 	}
 	existing.vanishedAtMs = nowMs
-	existing.treeRemoved = treeRemoved
-	if treeRemoved {
-		t.bound(existing.work).Log(
-			"the run's file vanished along with its whole directory, which is an ordinary end rather than a loss; the grace window of %s still decides the conclusion", t.opt.Grace)
+	existing.benignEnd = benignEnd
+	if benignEnd != "" {
+		t.bound(existing.work).With(logging.Context{Reason: benignEnd}).Log(
+			"the run's file vanished with nothing outstanding (%s), which is an ordinary end rather than a loss; the grace window of %s still decides the conclusion", benignEnd, t.opt.Grace)
 		return
 	}
 	t.bound(existing.work).With(logging.Context{Level: "warn"}).Log(
@@ -290,7 +306,7 @@ func (t *Tracker) Sweep(bootMs, nowMs int64) []Lost {
 			continue
 		}
 		delete(t.open, path)
-		out = append(out, Lost{Work: existing.work, Reason: reason, ObservedAtMs: nowMs, TreeRemoved: existing.treeRemoved})
+		out = append(out, Lost{Work: existing.work, Reason: reason, ObservedAtMs: nowMs, BenignEnd: existing.benignEnd})
 	}
 	return t.state(out, nowMs)
 }
@@ -371,22 +387,23 @@ func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
 				lost.Reason, lost.LastActivityMs, nowMs)
 			continue
 		}
-		if lost.TreeRemoved {
-			// THE WHOLE TREE WENT, SO NOTHING WAS LOST UNDER US. The committed
-			// offset was the last thing the file had, and a directory removed on
-			// purpose is an ordinary end. The conclusion is unchanged and the
-			// wire arm is unchanged — only the level, because there is nothing
-			// here for an operator to act on.
+		if lost.BenignEnd != "" {
+			// NOTHING WAS OUTSTANDING WHEN THE FILE WENT. The committed offset
+			// was the last thing the file had — because the whole tree was
+			// removed on purpose, because the spool had already written its
+			// terminator, or because every byte was read and committed. The
+			// conclusion is unchanged and the wire arm is unchanged — only the
+			// level, because there is nothing here for an operator to act on.
 			//
 			// THE `reason` KEY STAYS THE WIRE ARM. `lost-terminal` joins to this
 			// record on it (seam.go), so spelling a second vocabulary into the
 			// same key would break the join that exists to explain a terminal.
-			// The tree removal is stated in the sentence and is filterable one
-			// record earlier, on the `file-vanished` record that carries
-			// reason=tree_removed.
+			// The benign end is stated in the sentence and is filterable one
+			// record earlier, on the `file-vanished` record that carries it in
+			// `reason`.
 			t.bound(lost.Work).With(logging.Context{Reason: string(lost.Reason)}).Log(
-				"run concluded LOST reason=%s: its file went with the whole directory it lived in, which is an ordinary end rather than a loss (last_activity_ms=%d observed_at_ms=%d)",
-				lost.Reason, lost.LastActivityMs, nowMs)
+				"run concluded LOST reason=%s: its file vanished with nothing outstanding (%s), which is an ordinary end rather than a loss (last_activity_ms=%d observed_at_ms=%d)",
+				lost.Reason, lost.BenignEnd, lost.LastActivityMs, nowMs)
 			continue
 		}
 		if lost.Reason == ReasonWentSilent {

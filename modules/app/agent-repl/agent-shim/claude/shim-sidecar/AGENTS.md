@@ -570,6 +570,19 @@ genuine unlink under the reader.
   `fs.ErrNotExist` and nothing else; a stat that fails for a permission change
   or an unresponsive mount is not evidence the tree was removed, and reading it
   as one would quietly downgrade a real unlink.
+- A FILE THAT WAS ALREADY READ TO ITS END LOST NOTHING EITHER (owner ruling,
+  2026-09-13). The same INFO path is taken when the file's directory STANDS but
+  nothing was outstanding: a spool whose terminator (`[exited with code N]`,
+  `[killed]`) had been read carries `reason=ended` — the vendor reaps a task's
+  output file once the task is reaped — and a file whose committed offset equals
+  the size the last successful poll saw carries `reason=fully_read`. The
+  committed offset moves only on a store ack, so a batch in flight, a held
+  frame, or a tailer mid-tail all leave bytes outstanding and keep the WARNING,
+  as does a tailer that never completed a poll and so has no size to compare.
+  `vanishReason` (cycle.go) is the single place the three are decided.
+- THE REASON IS A VOCABULARY, NOT A PILE OF BOOLEANS. `Lost.BenignEnd` carries
+  it through to the conclusion as a string whose empty value is the genuine
+  loss, so two ways of ending the same way cannot both be true of one file.
 - IT CHANGES NO CONCLUSION AND NO WIRE ARM. The run is still LOST and
   `DetachedLost` still carries `file_vanished`. `lost-terminal` joins back to the
   sweep on the `reason` key, so that key stays the wire's own arm on every
