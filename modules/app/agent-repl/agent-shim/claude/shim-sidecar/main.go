@@ -459,6 +459,10 @@ func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*l
 // runWithLogger owns process-level failures once canonical logging exists.
 // Lower layers keep ownership of the errors they log themselves.
 func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) error {
+	// THE CATCH-UP WINDOW OPENS BEFORE ANY FILE IS READ and closes when the
+	// first full poll pass has drained the corpus that was already on disk. The
+	// operations named here are the ones the boot walk restates wholesale.
+	logf.BeginCatchup(catchupOperations...)
 	sc := newSidecar(options, logf)
 	// THE ROOTS ARE READ BACK OFF THE DISCOVERER, NEVER OFF THE FLAGS. Every
 	// root is symlink-resolved when the discoverer is built, and every `path`

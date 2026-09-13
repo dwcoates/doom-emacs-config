@@ -225,6 +225,13 @@ type sidecar struct {
 	// is summarized once per pass rather than warned per entry, exactly as the
 	// spool and workspace backlogs are; a skip in steady state is warned instead.
 	catchupBookConflicts catchupTally
+	// drainedPass records that one poll pass walked every watcher to
+	// completion, and catchupEnded that the startup catch-up window has been
+	// closed off that fact. Both are process-lifetime latches: the boot walk
+	// happens once, and a later store bounce must not reopen a window whose
+	// summaries were already stated.
+	drainedPass  bool
+	catchupEnded bool
 	// suspensionStated remembers that the WARNING opening this outage has been
 	// written. THE OUTAGE IS STATED ONCE, and a process that starts with no
 	// store is in an outage exactly like one whose store died mid-run — so the
@@ -286,6 +293,32 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 // goroutine, and all it does is cancel the context every store rpc derives
 // from: the blocked call returns at once, the cycle unwinds through its normal
 // paths, and this loop leaves by ctx.Done() with the usual shutdown record.
+// catchupOperations are the operations whose per-item INFO records are the
+// BOOT WALK RESTATING THE CORPUS rather than news.
+//
+// A restarted sidecar re-derives the owner's whole historical corpus from
+// files: every transcript is rewound, every watcher picks up its restored
+// bytes, every spawning call in those bytes is re-read, every unclaimed spool
+// is re-held, and every long-dead run is re-concluded. One boot generation on
+// the owner's machine held 9,337 `launch`, 9,337 `record-spawn`, 7,128
+// `hold-spool`, 6,748 `tail-pickup`, 6,172 `boot-rewind` and 4,789
+// `lost-policy` INFO records, and rolled the 64 MB durable log five times over.
+// None of it is news: it is the same inverted-pyramid flood the rescan-driven
+// holds and the LOST tracker already level, arriving through the six operations
+// that read the corpus.
+//
+// During catch-up each is stated at DEBUG and tallied; the window's end states
+// one INFO `catchup-summary` per operation carrying the count. After the window
+// closes each is INFO per record exactly as before, because then it IS news.
+var catchupOperations = []string{
+	"launch",
+	"record-spawn",
+	"hold-spool",
+	"tail-pickup",
+	"boot-rewind",
+	"lost-policy",
+}
+
 func (s *sidecar) Run(stop <-chan os.Signal) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -327,6 +360,7 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 			s.producing(s.rescan)
 		case <-pollT.C:
 			s.producing(s.pollAll)
+			s.endCatchupOnFirstDrainedPass()
 		case <-sweepT.C:
 			s.producing(s.sweep)
 		}
@@ -1120,6 +1154,32 @@ func (s *sidecar) pollAll() {
 			FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
 		}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
 	}
+	// EVERY WATCHER WAS POLLED. Only this exit reaches here: an abandoned pass
+	// returns early above, and an abandoned pass has not drained the corpus.
+	s.drainedPass = true
+}
+
+// endCatchupOnFirstDrainedPass closes the startup catch-up window the first time
+// a poll pass has walked every watcher to completion.
+//
+// THAT PASS IS THE BOOT WALK. The cycle's first rescan discovers the whole
+// corpus and rewinds it; the first poll pass that runs all the way through has
+// picked up every restored byte and converted every spawning call in it. A pass
+// that was abandoned — a store outage, a shutdown — has not, so the window stays
+// open and the backlog it still owes is leveled rather than restated.
+func (s *sidecar) endCatchupOnFirstDrainedPass() {
+	if s.catchupEnded || !s.drainedPass {
+		return
+	}
+	s.catchupEnded = true
+	s.log.EndCatchup()
+	// THE END OF CATCH-UP IS AN EDGE, AND IT IS STATED. It is written after the
+	// summaries, so a reader that has seen this record has seen every total the
+	// window owed, and from here on every one of the six operations is news
+	// stated per item. It is also the one edge a test can wait on to be inside
+	// steady state rather than racing the boot walk.
+	s.log.With(logging.Context{Operation: "catchup-end"}).Log(
+		"startup catch-up is over: the first poll pass drained the corpus, and every catch-up operation is stated per record from here")
 }
 
 // RunSettled records that a converter read a detached run's OWN terminal off
