@@ -42,6 +42,12 @@ type fakeClient struct {
 	// reaped makes the supervised process ALREADY GONE, which is how a test
 	// reaches the split between a session row and a live shim.
 	reaped bool
+	// entered is closed by StartSession on its first call and startHold is
+	// what it then waits on, which is how a test holds a start open for as
+	// long as it needs to observe something about the caller that is NOT
+	// waiting for it. A nil startHold never waits.
+	entered   chan struct{}
+	startHold chan struct{}
 }
 
 func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
@@ -51,8 +57,19 @@ func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
 	return shimclient.ExitInfo{PID: c.pid, Signal: "SIGKILL"}, true
 }
 
-func (c *fakeClient) StartSession(_ context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
+func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
 	c.requests = append(c.requests, req)
+	if c.entered != nil {
+		close(c.entered)
+		c.entered = nil
+	}
+	if c.startHold != nil {
+		select {
+		case <-c.startHold:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if c.startErr != nil {
 		return nil, c.startErr
 	}
@@ -2129,5 +2146,94 @@ func TestTwoStartsOfOneWorkspaceSpawnOneShim(t *testing.T) {
 	}
 	if len(f.supervisor.spawns) != 1 {
 		t.Fatalf("spawns = %d, want exactly one shim for one workspace", len(f.supervisor.spawns))
+	}
+}
+
+// ---- a start nobody is waiting for ----
+
+// TestStartDetachedDoesNotHoldItsCaller is the contract RegisterWorkspace
+// depends on: the caller hands the fleet a workspace to bring up and gets its
+// goroutine back, whatever the start is doing.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34: the register's revival ran
+// inline, `Fleet.Start` took the workspace's start gate behind the boot's own
+// bring-up, and the shim never answered that bring-up's StartSession. Emacs
+// timed the register out at its 10s bound on three consecutive daemon
+// generations for a roster row the daemon had already written.
+func TestStartDetachedDoesNotHoldItsCaller(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-detached")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	f.client.entered = entered
+	f.client.startHold = release
+	settled := make(chan error, 1)
+
+	// Act.
+	f.fleet.StartDetached(ws.ID, func(err error) { settled <- err })
+	<-entered
+
+	// Assert.
+	select {
+	case err := <-settled:
+		t.Fatalf("the detached start settled (%v) while its StartSession was still in flight", err)
+	default:
+	}
+	close(release)
+	if err := <-settled; err != nil {
+		t.Fatalf("the detached start = %v, want the session up", err)
+	}
+}
+
+// TestDrainStartsEndsAnInFlightStartAndJoinsIt covers the exit. A start nobody
+// waits for still reads and writes the state client, so the teardown ends it
+// and joins it BEFORE that client closes — the same rule the prompt queue's
+// background work is drained under.
+func TestDrainStartsEndsAnInFlightStartAndJoinsIt(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-drained")
+	entered := make(chan struct{})
+	f.client.entered = entered
+	f.client.startHold = make(chan struct{}) // never closed: only the drain ends it.
+	settled := make(chan error, 1)
+	f.fleet.StartDetached(ws.ID, func(err error) { settled <- err })
+	<-entered
+
+	// Act.
+	left := f.fleet.DrainStarts(time.Minute)
+
+	// Assert.
+	if !left {
+		t.Fatal("DrainStarts = false, want the in-flight start ended and joined")
+	}
+	if err := <-settled; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the drained start = %v, want a cancellation", err)
+	}
+}
+
+// TestDrainStartsReportsAStartThatOutlivesItsBound is the other half: the
+// drain answers false rather than waiting forever, so the exit can say loudly
+// that it is tearing down under a start instead of hanging.
+func TestDrainStartsReportsAStartThatOutlivesItsBound(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-stuck")
+	entered := make(chan struct{})
+	stuck := make(chan struct{})
+	t.Cleanup(func() { close(stuck) })
+	f.client.entered = entered
+	// The START finishes; what outlives the drain is the SETTLEMENT, which
+	// blocks on `stuck` and never looks at a context at all.
+	f.fleet.StartDetached(ws.ID, func(error) { <-stuck })
+	<-entered
+
+	// Act.
+	left := f.fleet.DrainStarts(10 * time.Millisecond)
+
+	// Assert.
+	if left {
+		t.Fatal("DrainStarts = true, want false for a start still running at the bound")
 	}
 }

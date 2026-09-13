@@ -418,6 +418,11 @@ type Sessions interface {
 	Start(ctx context.Context, ws ids.WorkspaceID) error
 	// Stop ends a workspace's session, forced or graceful.
 	Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error
+	// StartDetached brings a workspace's session up OFF the caller's
+	// goroutine, reporting the outcome to `done` when it settles. It is what
+	// a caller uses when the start is occasioned by its answer rather than
+	// contained in it; see Fleet.StartDetached for why the register uses it.
+	StartDetached(ws ids.WorkspaceID, done func(error))
 	// Live reports whether the workspace currently has a live session.
 	Live(ws ids.WorkspaceID) bool
 	// ResumeCold re-opens a session parked behind a standing cold gate,
