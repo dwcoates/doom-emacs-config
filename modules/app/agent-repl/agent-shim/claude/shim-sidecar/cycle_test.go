@@ -1769,3 +1769,62 @@ func TestTheResidueDropSummaryIsStatedAtInfo(t *testing.T) {
 		t.Fatalf("residue-drop-summary INFO records = %d, want exactly 1: %s", got, h.logText())
 	}
 }
+
+// --- a vanished file whose whole directory went with it ---------------------
+
+func TestTreeRemovedAnswersOnlyForADefinitelyAbsentDirectory(t *testing.T) {
+	// Arrange: one case per way the parent can answer.
+	root := t.TempDir()
+	standing := filepath.Join(root, "standing")
+	if err := os.MkdirAll(standing, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", standing, err)
+	}
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "the directory is gone too", path: filepath.Join(root, "removed", "b1.output"), want: true},
+		{name: "the directory stands", path: filepath.Join(standing, "b1.output"), want: false},
+		{name: "the directory is a file, so it is present and unusable", path: filepath.Join(root, "notadir"), want: false},
+	}
+	if err := os.WriteFile(filepath.Join(root, "notadir"), nil, 0o644); err != nil {
+		t.Fatalf("writing the not-a-directory fixture: %v", err)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := treeRemoved(tc.path)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("treeRemoved(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAFileThatWentWithItsWholeTreeIsStatedWithoutWarning(t *testing.T) {
+	// Arrange: a claimed spool whose entire task directory is then removed, which
+	// is what a harness deleting its own run directory does.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Dir(spool)); err != nil {
+		t.Fatalf("removing %s: %v", filepath.Dir(spool), err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	h.requireNone(t, "file-vanished", "warn")
+	rec := h.requireOnce(t, "file-vanished", "info")
+	if got := ctxString(t, rec, "reason"); got != reasonTreeRemoved {
+		t.Fatalf("the record's reason = %q, want %q", got, reasonTreeRemoved)
+	}
+}

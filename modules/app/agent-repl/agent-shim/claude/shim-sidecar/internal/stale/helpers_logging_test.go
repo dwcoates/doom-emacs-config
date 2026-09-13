@@ -77,6 +77,15 @@ func requireOnceIn(t *testing.T, records []logRecord, operation, level string) l
 	return got[0]
 }
 
+// requireNoneIn states that a branch was never reached.
+func requireNoneIn(t *testing.T, records []logRecord, operation, level string) {
+	t.Helper()
+	if got := opsAt(records, operation, level); len(got) != 0 {
+		t.Fatalf("operation %q at level %q was recorded %d times, want none; the log held %v",
+			operation, level, len(got), operationLevels(records))
+	}
+}
+
 // operationLevels renders what the log actually holds, so a failure names
 // branches rather than dumping prose.
 func operationLevels(records []logRecord) []string {

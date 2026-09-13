@@ -38,8 +38,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -1334,6 +1336,24 @@ func fileActivityMs(path string, fallback int64) int64 {
 	return info.ModTime().UnixMilli()
 }
 
+// reasonTreeRemoved is the `file-vanished` record's discriminator: the file did
+// not merely disappear, the DIRECTORY holding it went too. It is not a LOST arm
+// and never reaches the wire — DetachedLost still carries file_vanished — it is
+// the fact that says whether an operator has anything to look at.
+const reasonTreeRemoved = "tree_removed"
+
+// treeRemoved answers whether a vanished file's DIRECTORY is gone as well.
+//
+// ONLY A DEFINITE ABSENCE COUNTS. A stat that fails for any other reason — a
+// permission change, an unresponsive mount — is not evidence the tree was
+// removed, and reading it as such would quietly downgrade a genuine unlink to an
+// ordinary end. Anything but ErrNotExist therefore answers false and the record
+// keeps its warning.
+func treeRemoved(path string) bool {
+	_, err := os.Stat(filepath.Dir(path))
+	return errors.Is(err, fs.ErrNotExist)
+}
+
 // pollFailed narrates one file's read failure and, for a file that vanished,
 // starts the LOST policy's grace clock.
 //
@@ -1344,13 +1364,27 @@ func fileActivityMs(path string, fallback int64) int64 {
 // downstream. It is dropped in lostEntries, once its terminal has been stated.
 func (s *sidecar) pollFailed(path string, w *watched, err error, nowMs int64) {
 	if os.IsNotExist(err) {
-		s.tracker.MarkVanished(path, nowMs)
+		gone := treeRemoved(path)
+		s.tracker.MarkVanished(path, nowMs, gone)
 		if w.vanished {
 			s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID}).
 				LogVerbose("the vanished file is still absent; its grace window has not decided yet")
 			return
 		}
 		w.vanished = true
+		if gone {
+			// A FILE THAT WENT WITH ITS WHOLE TREE IS AN ORDINARY END. Nobody
+			// unlinked a file out from under the reader: the directory holding it
+			// was removed on purpose — a harness deleting its run directory, a
+			// vendor session directory deleted wholesale — and the committed
+			// offset is therefore the last thing the file ever had. There is
+			// nothing for an operator to act on, so it is stated rather than
+			// warned, and `reason` carries the discriminator so the two cases are
+			// filterable apart without reading prose.
+			s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID, Reason: reasonTreeRemoved}).
+				Log("the watched file vanished with the whole directory it lived in; the committed offset is the last thing it had")
+			return
+		}
 		s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID, Level: "warn"}).
 			Log("the watched file vanished; any bytes appended past the committed offset went with it")
 		return
