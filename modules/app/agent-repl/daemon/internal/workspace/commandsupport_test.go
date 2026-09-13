@@ -26,7 +26,7 @@ func addSupportBrief(f *fixture) {
 func supportFixture(t *testing.T) (*fixture, string) {
 	t.Helper()
 	f := newFixture(t)
-	repo := mainWorktree(t)
+	repo := mainWorktree(t, f)
 	ws := f.workspace("w1", t.TempDir())
 	f.db.repositories = []wsm.Repository{{ID: ws.Repo, Dir: repo}}
 	addSupportBrief(f)

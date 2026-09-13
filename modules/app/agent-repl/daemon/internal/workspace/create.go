@@ -91,6 +91,33 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 			fmt.Sprintf("the repository directory %q is not on disk: %v", repoDir, statErr), true)
 	}
 
+	// A REPOSITORY THE REGISTRY DOES NOT HOLD IS REFUSED HERE, at the verb, and
+	// not only at the rpc boundary. A workspace whose repository is
+	// unregistered is an invariant violation (owner ruling, 2026-09-13): it
+	// must be impossible, and the write path is where that is decided.
+	//
+	// The CreateWorkspace endpoint has always resolved its RepositoryRef
+	// against the registry and refused a miss on this same arm, but it is only
+	// ONE of three ways into this verb. The COMMAND-FILE channel supplies a
+	// bare `git_root` an agent wrote into a file (internal/commandfile), and
+	// the support-workspace verb derives its dir from a record; neither passed
+	// through that lookup, so a create naming any directory on disk minted a
+	// brand-new repository row for it. Putting the check on the verb makes the
+	// endpoint's lookup a redundancy rather than the only guard.
+	//
+	// It is a REFUSAL and not a mint because the roster's repository sections
+	// are the create targets: a repository nothing has registered is not one
+	// the user chose, and registering the directory is what puts it there.
+	registered, err := v.repositoryRegisteredAt(ctx, repoDir)
+	if err != nil {
+		global.Error(opCreate, "could not read the repository registry", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create: repository %q: %w", repoDir, err)
+	}
+	if !registered {
+		return wsm.Workspace{}, refuse(global, "CreateWorkspace", ArmUnknownRepository,
+			fmt.Sprintf("no repository is registered at %q", repoDir), true)
+	}
+
 	// A ONE-SHOT RUNS THE REPOSITORY'S OWN POLICY, so the policy is resolved
 	// and required HERE — before the id is minted, before the NAMING CALL is
 	// made, before the creation job is recorded, before git is touched. A
