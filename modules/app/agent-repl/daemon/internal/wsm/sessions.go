@@ -23,7 +23,7 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 		detail     sql.NullString
 		at         sql.NullInt64
 	)
-	if err := row.Scan(&s.Workspace, &s.HostSessionID, &s.VendorSessionID, &s.ConfigDir, &s.Model, &s.PermissionMode, &started, &engagement, &pid, &kind, &detail, &at); err != nil {
+	if err := row.Scan(&s.Workspace, &s.HostSessionID, &s.VendorSessionID, &s.ConfigDir, &s.SelectedConfigDir, &s.Model, &s.PermissionMode, &started, &engagement, &pid, &kind, &detail, &at); err != nil {
 		return Session{}, err
 	}
 	s.StartedAt = fromNanos(started)
@@ -89,16 +89,17 @@ func (s *store) PutSession(ctx context.Context, sess Session) error {
 			pid = int64(*sess.ShimPID)
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(workspace_id) DO UPDATE SET
 			   host_session_id = excluded.host_session_id,
-			   vendor_session_id = excluded.vendor_session_id, config_dir = excluded.config_dir, model = excluded.model,
+			   vendor_session_id = excluded.vendor_session_id, config_dir = excluded.config_dir,
+			   selected_config_dir = excluded.selected_config_dir, model = excluded.model,
 			   permission_mode = excluded.permission_mode, started_at = excluded.started_at,
 			   last_engagement_at = excluded.last_engagement_at, shim_pid = excluded.shim_pid,
 			   terminal_kind = excluded.terminal_kind,
 			   terminal_detail = excluded.terminal_detail, terminal_at = excluded.terminal_at`,
-			sess.Workspace, sess.HostSessionID, sess.VendorSessionID, sess.ConfigDir, sess.Model, sess.PermissionMode,
+			sess.Workspace, sess.HostSessionID, sess.VendorSessionID, sess.ConfigDir, sess.SelectedConfigDir, sess.Model, sess.PermissionMode,
 			nanos(sess.StartedAt), nanos(sess.LastEngagementAt), pid, tKind, tDetail, tAt)
 		return err
 	})
@@ -112,7 +113,7 @@ func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, err
 	)
 	err := s.read(ctx, "daemon.wsm.session", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
 		sess, err := scanSession(s.db().QueryRowContext(ctx,
-			`SELECT workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at
+			`SELECT workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at
 			 FROM sessions WHERE workspace_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			out, found = Session{}, false

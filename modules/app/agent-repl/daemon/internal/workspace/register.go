@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"claude-repld/internal/account"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/wsm"
@@ -295,13 +296,12 @@ func (v *verbs) bindResolvers(log dlog.Logger, id wsm.WorkspaceID, dir string) e
 // Until they are installed the topbar is not complete and publishes NO view at
 // all, so this is part of registration rather than of a session's bring-up.
 func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.Workspace, defaultBranch string) error {
-	configDir := v.deps.Accounts.ConfigDirFor(record.Dir)
-	account, err := v.deps.Accounts.Read(ctx, configDir)
+	configDir, err := v.accountRoot(ctx, record)
 	if err != nil {
-		log.Error(opRegister, "the account root could not be read", dlog.Context{
-			"config_dir": configDir, "cause": err.Error(),
-		})
-		return fmt.Errorf("read the account root %q: %w", configDir, err)
+		return err
+	}
+	if err := v.publishAccount(ctx, log, record, configDir); err != nil {
+		return err
 	}
 	v.deps.Topbar.SetNaming(record.ID, topbar.Naming{
 		Slug:          record.Name,
@@ -310,14 +310,74 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 		DefaultBranch: defaultBranch,
 		ConfigDir:     configDir,
 	})
-	// An EMPTY email is the logged-out arm, which the topbar draws as a
-	// warning rather than a blank label: it is an answer, never a gap.
-	v.deps.Topbar.SetAccount(record.ID, account.Email)
 	log.Debug(opRegister, "installed the topbar's naming and account lines", dlog.Context{
-		"workspace": string(record.ID), "config_dir": configDir,
-		"logged_in": account.LoggedIn, "default_branch": defaultBranch,
+		"workspace": string(record.ID), "config_dir": configDir, "default_branch": defaultBranch,
 	})
 	return nil
+}
+
+// accountRoot answers the root this workspace's session spends as right now:
+// the reader's choice, then the root the session is filed under, then the path
+// routing. It is what the topbar's account cell reports and what the session
+// line names.
+func (v *verbs) accountRoot(ctx context.Context, record wsm.Workspace) (string, error) {
+	session, _, err := v.deps.DB.Session(ctx, record.ID)
+	if err != nil {
+		return "", fmt.Errorf("read the session record of %q: %w", record.ID, err)
+	}
+	return spawnRootFor(v.deps.Accounts, record.Dir, session), nil
+}
+
+// publishAccount installs the topbar's account cell: the root in force, and
+// EVERY root the daemon knows as an option beside it, with that one marked.
+//
+// THE WHOLE ROSTER, ALWAYS. The cell's click is a dropdown of the login
+// options (owner ruling, 2026-09-13), so the options are what makes the click
+// mean anything — a cell published without them is the empty reveal the ruling
+// was about.
+func (v *verbs) publishAccount(ctx context.Context, log dlog.Logger, record wsm.Workspace, configDir string) error {
+	roster, err := v.deps.Accounts.Roster(ctx)
+	if err != nil {
+		log.Error(opRegister, "the account roster could not be read", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("read the account roster: %w", err)
+	}
+	current, known := findAccount(roster, configDir)
+	if !known {
+		// A root the roster does not hold is still the root this session
+		// spends from, so it is READ on its own rather than dropped: the cell
+		// must never draw an account the workspace is not actually running as.
+		current, err = v.deps.Accounts.Read(ctx, configDir)
+		if err != nil {
+			log.Error(opRegister, "the account root could not be read", dlog.Context{
+				"config_dir": configDir, "cause": err.Error(),
+			})
+			return fmt.Errorf("read the account root %q: %w", configDir, err)
+		}
+	}
+	options := make([]topbar.AccountOption, 0, len(roster))
+	for _, acct := range roster {
+		options = append(options, topbar.AccountOption{
+			ConfigDir: acct.ConfigDir, Email: acct.Email, Current: acct.ConfigDir == configDir,
+		})
+	}
+	// An EMPTY email is the logged-out arm, which the topbar draws as a
+	// warning rather than a blank label: it is an answer, never a gap.
+	v.deps.Topbar.SetAccount(record.ID, topbar.Account{Email: current.Email, Options: options})
+	log.Debug(opRegister, "installed the topbar's account cell", dlog.Context{
+		"workspace": string(record.ID), "config_dir": configDir,
+		"logged_in": current.LoggedIn, "options": len(options),
+	})
+	return nil
+}
+
+// findAccount picks one root out of the roster.
+func findAccount(roster []account.Account, configDir string) (account.Account, bool) {
+	for _, acct := range roster {
+		if acct.ConfigDir == configDir {
+			return acct, true
+		}
+	}
+	return account.Account{}, false
 }
 
 // PublishRegistry publishes the roster's durable half once, from what the

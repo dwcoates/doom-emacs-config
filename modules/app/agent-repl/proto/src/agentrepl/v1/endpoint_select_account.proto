@@ -1,0 +1,77 @@
+// endpoint_select_account.proto — SelectAccount: make this workspace's
+// session spend as a given account root. TOPBAR section, the account cell's
+// dropdown pick (TopbarAccount.options).
+//
+// THE ROOT IS THE ECHO TOKEN. The client sends back an option's own
+// `config_dir` unchanged; it never composes a path and never names a root the
+// daemon did not serve. A root outside the set the daemon knows is
+// `unknown_account`, not a root it will create.
+//
+// THE SWITCH IS A RESTART. The daemon records the chosen root on the
+// workspace's session and brings the session back up under it, exactly as the
+// restart verb does — so the cold gate applies here as it applies to any
+// resume, and every visible effect arrives on the streams rather than in this
+// response.
+//
+// A LOGGED-OUT ROOT IS STILL A SUCCESS. The choice is honored: the workspace
+// is switched, and the client opens that root's login flow (OpenLogin) the way
+// the logged-out account cell's own click does. Answering an error would leave
+// the reader with no way to log a known root in.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SelectAccountRequest {
+  // The workspace whose session switches roots.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The chosen root, verbatim from the option's `config_dir`.
+  string config_dir = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SelectAccountResponse {
+  oneof result {
+    SelectAccountSuccess success = 1;
+    SelectAccountError error = 2;
+  }
+}
+
+// The root is recorded and the session's restart is accepted. The new account
+// arrives on the TOPBAR STREAM, not here.
+message SelectAccountSuccess {
+  // Whether the chosen root holds a login. FALSE is the client's cue to open
+  // that root's login flow; the switch itself already happened.
+  bool logged_in = 1;
+}
+
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message SelectAccountError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SelectAccountUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SelectAccountWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SelectAccountTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SelectAccountNotYetAdopted not_yet_adopted = 4;
+    // The named root is not one the daemon knows.
+    SelectAccountUnknownAccount unknown_account = 5;
+  }
+}
+message SelectAccountUnknownWorkspace {}
+message SelectAccountWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SelectAccountTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SelectAccountNotYetAdopted {}
+message SelectAccountUnknownAccount {}

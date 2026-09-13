@@ -34,9 +34,9 @@ import type { TopbarContext } from "./context.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarFastMode } from "./fast-mode.js";
+import { bindAccountReveal } from "./account.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import {
-  bindSessionReveal,
   bindTitleSessionReveal,
   drawTopbarAccount,
   drawTopbarConnectivity,
@@ -118,19 +118,18 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   // 2026-09-13): the connectivity mark is the ACCOUNT'S status indicator, so
   // it reads to the left of the label it qualifies and closer to it than to
   // anything else in the strip. One element also means one reveal anchor —
-  // the session line hangs under the PAIR, not under half of it.
+  // the options hang under the PAIR, not under half of it.
   const accountCell = document.createElement("div");
   accountCell.className = "topbar-account-cell";
-  const account = drawTopbarAccount(requireMessage(u.account, "TopbarView.account"), tc);
+  const accountView = requireMessage(u.account, "TopbarView.account");
   accountCell.append(
     drawTopbarConnectivity(requireMessage(u.connectivity, "TopbarView.connectivity")),
-    account,
+    drawTopbarAccount(accountView),
   );
-  // The session line is the LOGGED-IN chip's reveal; a logged-out chip's click
-  // is the login, and binding both would give one button two answers.
-  if (account.getAttribute("data-arm") === "loggedIn") {
-    bindSessionReveal(accountCell, u.sessionLine, tc);
-  }
+  // THE CELL'S CLICK IS THE LOGIN OPTIONS, in both arms (owner ruling,
+  // 2026-09-13). The session line rides the TITLE, which carries it whatever
+  // the account state.
+  bindAccountReveal(accountCell, accountView, tc);
   left.append(accountCell);
 
   const center = drawTopbarTitle(requireMessage(u.title, "TopbarView.title"));
