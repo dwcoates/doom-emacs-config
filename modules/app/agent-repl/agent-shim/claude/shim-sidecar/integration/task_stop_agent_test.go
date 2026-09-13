@@ -68,10 +68,16 @@ func TestATaskStopOnAnAgentTaskCancelsItsSpawnUnit(t *testing.T) {
 	}
 }
 
-// TestATaskStopForATaskNoLaunchOpenedIsStoredWholeAndLoudly asserts the other
-// edge: an unlaunched task's stop is kept whole rather than keyed on a guess,
-// and is never quietly dropped into the LOST policy's hands.
-func TestATaskStopForATaskNoLaunchOpenedIsStoredWholeAndLoudly(t *testing.T) {
+// TestATaskStopForATaskNoLaunchOpenedIsClassifiedWholeAndLoudly asserts the
+// other edge: an unlaunched task's stop is carried whole under the residue kind
+// that names WHY, rather than keyed on a guess, and is never quietly dropped
+// into the LOST policy's hands.
+//
+// THAT KIND IS RESIDUE, AND RESIDUE IS NEVER PERSISTED. The reader still frames
+// the stop and still says `task_stop/unlaunched` about it — that account is the
+// coverage — and it announces no row, so nothing is keyed on an invented owner
+// and nothing is stored.
+func TestATaskStopForATaskNoLaunchOpenedIsClassifiedWholeAndLoudly(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -82,7 +88,9 @@ func TestATaskStopForATaskNoLaunchOpenedIsStoredWholeAndLoudly(t *testing.T) {
 	cwd := "/Users/dodgecoates/taskstop-unlaunched-probe"
 	slug := cwdSlug(cwd)
 	session := "6b6b6b6b-6b6b-46b6-86b6-6b6b6b6b6b6b"
-	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// The per-record withholding statement is DEBUG, and it is this subject's
+	// evidence that the stop was framed rather than dropped.
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 	unlaunched := "nolaunchtask00001"
 
 	stop := retargetTaskStop(t,
@@ -100,13 +108,14 @@ func TestATaskStopForATaskNoLaunchOpenedIsStoredWholeAndLoudly(t *testing.T) {
 	g.AppendLine(encodeRecord(t, stop))
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
-	// Assert: kept whole under the residue kind that names WHY…
-	residue := fake.awaitEntry(ctx, t, "the unlaunched stop's residue", func(e *storev1.StoreEntry) bool {
-		return e.GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind() == "task_stop/unlaunched"
-	})
-	if residue.GetUpsertKey() == "" {
-		t.Errorf("the stored stop carries no upsert key, so a re-read would append a second copy of itself")
+	// Assert: framed whole under the residue kind that names WHY…
+	rec := awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/task_stop/unlaunched")
+	// …announcing no row, because nothing was stored and a key nobody can look
+	// up is an untraceable announcement…
+	if key, ok := rec.Context["upsert_key"]; ok && key != "" {
+		t.Errorf("the withholding record names upsert_key %v; a withheld stop announces no row", key)
 	}
+	requireNoResidueStored(t, fake.Entries())
 	// …and said so.
 	awaitLog(ctx, t, opts.LogPath, "the unlaunched-stop warning", func(r logRecord) bool {
 		return r.Level == "warn" && r.Operation == "task-stop" && r.Context["task_id"] == unlaunched

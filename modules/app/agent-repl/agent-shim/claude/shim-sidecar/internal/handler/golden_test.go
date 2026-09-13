@@ -120,10 +120,15 @@ func TestGoldenCorpusVendorSpecificKindsAreTheDeclaredSet(t *testing.T) {
 		// The hook outcomes. READ AND KEPT WHOLE, never served: the STREAM plane
 		// owns the hook row (ruling 2026-09-04) because the vendor hands the two
 		// planes disjoint identity material and no key can name one firing on
-		// both — see convert/attachment.go's hookAttachment. `hook_success` is
-		// absent because it is never persisted at all (owner ruling 2026-09-13,
-		// convert/neverpersist.go): it is classified exactly as these are and
-		// then dropped, so no entry of that kind can reach this census.
+		// both — see convert/attachment.go's hookAttachment.
+		//
+		// THIS CENSUS IS OVER WHAT THE CONVERTER CLASSIFIES, NOT OVER WHAT IS
+		// STORED. Since the residue ruling (2026-09-13, convert/neverpersist.go)
+		// NONE of these reach the store: the reader withholds every residue arm
+		// at its write path. The classification is still the contract — it is
+		// what the counts and the debug records name — so a new kind appearing
+		// here is still a mapping regression.
+		"attachment/hook_success":            true,
 		"attachment/hook_blocking_error":     true,
 		"attachment/hook_non_blocking_error": true, "attachment/hook_cancelled": true,
 		// R15: a file-plane prompt can never be a page line.

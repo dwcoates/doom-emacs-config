@@ -63,7 +63,7 @@ func TestARotatedTranscriptIsWatchedUnderTheOriginalsBook(t *testing.T) {
 	h := newHarness(t, &fakeStore{})
 	h.mintIdentity(t, bookWorkspace, bookOriginal)
 	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
-	path := h.transcript(t, bookRotated, promptLine)
+	path := h.transcript(t, bookRotated, assistantLine)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -92,7 +92,7 @@ func TestTheBookResolutionIsStatedOncePerTranscript(t *testing.T) {
 	h := newHarness(t, &fakeStore{})
 	h.mintIdentity(t, bookWorkspace, bookOriginal)
 	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
-	h.transcript(t, bookRotated, promptLine)
+	h.transcript(t, bookRotated, assistantLine)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -133,7 +133,7 @@ func TestAnUnlinkedTranscriptKeepsItsOwnBook(t *testing.T) {
 func TestATranscriptWithNoIdentityRecordKeepsItsOwnBook(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	path := h.transcript(t, bookRotated, promptLine)
+	path := h.transcript(t, bookRotated, assistantLine)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -151,7 +151,7 @@ func TestATranscriptWithNoIdentityRecordKeepsItsOwnBook(t *testing.T) {
 func TestALinkThatAppearsMidTailMovesTheWatchedFilesBook(t *testing.T) {
 	// Arrange: the transcript is watched before the link file exists.
 	h := newHarness(t, &fakeStore{})
-	path := h.transcript(t, bookRotated, promptLine)
+	path := h.transcript(t, bookRotated, assistantLine)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestALinkThatAppearsBetweenTwoRescansMovesTheBookOnTheVeryNextPoll(t *testi
 	// exactly as it is when a `/clear` outruns the shim's link file.
 	store := &fakeStore{}
 	h := newHarness(t, store)
-	path := h.transcript(t, bookRotated, promptLine)
+	path := h.transcript(t, bookRotated, assistantLine)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestALinkThatAppearsBetweenTwoRescansMovesTheBookOnTheVeryNextPoll(t *testi
 	// ordinary case rather than an exotic one.
 	h.mintIdentity(t, bookWorkspace, bookOriginal)
 	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
-	h.write(t, path, promptLine+"\n"+assistantLine+"\n")
+	h.write(t, path, assistantLine+"\n"+assistantLine+"\n")
 	h.sc.pollAll()
 
 	// Assert: the records this poll read landed in the original's book.
@@ -237,7 +237,7 @@ func TestTheBookMoveUnparksTheFileTheStoreRefused(t *testing.T) {
 	// store refuses the batch for naming a book those rows are not in.
 	store := &fakeStore{}
 	h := newHarness(t, store)
-	path := h.transcript(t, bookRotated, promptLine)
+	path := h.transcript(t, bookRotated, assistantLine)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestTheUnparkedFileRereadsTheSameBytesUnderTheNewBook(t *testing.T) {
 	// Arrange.
 	store := &fakeStore{}
 	h := newHarness(t, store)
-	path := h.transcript(t, bookRotated, promptLine)
+	path := h.transcript(t, bookRotated, assistantLine)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestAnUnrecordedResolutionNeverMovesAFileOffItsBook(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: the file is booked to the original on real evidence.
 			h := newHarness(t, &fakeStore{})
-			path := h.transcript(t, bookRotated, promptLine)
+			path := h.transcript(t, bookRotated, assistantLine)
 			h.mintIdentity(t, bookWorkspace, bookOriginal)
 			h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
 			if err := h.sc.beginCycle(); err != nil {

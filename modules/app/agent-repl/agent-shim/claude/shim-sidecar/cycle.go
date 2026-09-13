@@ -42,6 +42,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -195,6 +196,12 @@ type sidecar struct {
 	// drops every tailer must not quietly un-park the file the store already
 	// told us it cannot accept.
 	parked map[string]bool
+	// residueWithheld tallies the RESIDUE records the write path classified and
+	// did not store, keyed by the tailed file's `dev:inode` identity and then by
+	// residue label. Inferred batches name no file and tally under the empty
+	// key. It is process-scoped, like the withholding itself: the reader states
+	// it as one summary per file at the end of the startup catch-up window.
+	residueWithheld map[string]map[string]int
 	// defects counts how many times each file's OWN defect has now been
 	// observed, keyed by the file's `dev:inode` identity so a rename does not
 	// buy the same defect a fresh count.
@@ -296,6 +303,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		settling:           map[string]string{},
 		stopped:            map[string]int64{},
 		parked:             map[string]bool{},
+		residueWithheld:    map[string]map[string]int{},
 		defects:            map[string]*fileDefect{},
 		rewound:            map[string]bool{},
 		workspaceBySession: map[string]workspaceAttribution{},
@@ -1242,7 +1250,7 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 	}
 	s.catchupEnded = true
 	s.log.EndCatchup()
-	s.summarizeDroppedResidue()
+	s.summarizeWithheldResidue()
 	// THE END OF CATCH-UP IS AN EDGE, AND IT IS STATED. It is written after the
 	// summaries, so a reader that has seen this record has seen every total the
 	// window owed, and from here on every one of the six operations is news
@@ -1252,59 +1260,63 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 		"startup catch-up is over: the first poll pass drained the corpus, and every catch-up operation is stated per record from here")
 }
 
-// residueDropper is the handler surface the never-persisted summary reads: a
-// handler that owns a converter exposes it, and the converter carries the
-// per-file tally.
-type residueDropper interface{ Conv() *convert.Converter }
-
-// summarizeDroppedResidue states ONE INFO record per file for the residue kinds
-// the never-persisted list dropped during the boot walk, carrying the counts by
-// kind.
+// summarizeWithheldResidue states ONE INFO record per file for the residue the
+// write path withheld during the boot walk, carrying the counts by residue
+// label.
 //
 // PER FILE, AND AT THIS EDGE, for the same reason every other catch-up summary
-// is: the drops themselves are DEBUG and always will be (they are the steady
-// state, not news), so nothing at INFO would otherwise say the boot walk read a
-// quarter-million hook attachments and stored none of them. The file is the unit
-// because the converter is: one converter reads one transcript, and a total
-// across the corpus would hide which transcript the volume came from.
+// is: the per-line withholding records are DEBUG and always will be (they are
+// the steady state, not news), so nothing at INFO would otherwise say the boot
+// walk read a quarter-million residue lines and stored none of them. The file is
+// the unit because the volume question is always "which file produced it".
 //
-// It states nothing for a file that dropped nothing, exactly as EndCatchup
+// THE INFERRED BATCHES HAVE NO FILE and are summarized separately, under the
+// empty tally key: they were not read at a file position, so there is no path to
+// name.
+//
+// It states nothing for a file that withheld nothing, exactly as EndCatchup
 // states nothing for an operation that demoted nothing.
-func (s *sidecar) summarizeDroppedResidue() {
-	for path, w := range s.watchers {
-		dropper, ok := w.tailer.Handler().(residueDropper)
-		if !ok {
-			continue
-		}
-		dropped := dropper.Conv().DroppedResidue()
-		if len(dropped) == 0 {
-			continue
-		}
-		total := 0
-		for _, kind := range convert.NeverPersistedResidueKinds() {
-			total += dropped[kind]
-		}
-		s.log.With(logging.Context{
-			Operation: "residue-drop-summary", Path: path, TaskID: w.target.TaskID,
-			FileID: w.tailer.FileID(), Repeat: logging.Repeat(total),
-		}).Log("startup catch-up read and classified %d never-persisted residue line(s) in this file and stored none of them: %s",
-			total, dropCounts(dropped))
+func (s *sidecar) summarizeWithheldResidue() {
+	for _, w := range s.watchers {
+		s.stateWithheld(w.target.Path, w.target.TaskID, s.residueWithheld[w.tailer.FileID()])
 	}
+	s.stateWithheld("", "", s.residueWithheld[""])
 }
 
-// dropCounts renders a per-kind tally in the named list's stable order, so two
-// summaries of the same counts read identically.
-func dropCounts(dropped map[string]int) string {
+// stateWithheld writes one summary for one tally, and nothing for an empty one.
+func (s *sidecar) stateWithheld(path, taskID string, tally map[string]int) {
+	if len(tally) == 0 {
+		return
+	}
+	total := 0
+	for _, count := range tally {
+		total += count
+	}
+	where := "in this file"
+	if path == "" {
+		where = "in this process's inferred records, which name no file"
+	}
+	s.log.With(logging.Context{
+		Operation: "residue-drop-summary", Path: path, TaskID: taskID,
+		Repeat: logging.Repeat(total),
+	}).Log("startup catch-up read and classified %d residue record(s) %s and stored none of them: %s",
+		total, where, residueCounts(tally))
+}
+
+// residueCounts renders a tally in label order, so two summaries of the same
+// counts read identically.
+func residueCounts(tally map[string]int) string {
+	labels := make([]string, 0, len(tally))
+	for label := range tally {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
 	out := ""
-	for _, kind := range convert.NeverPersistedResidueKinds() {
-		count, ok := dropped[kind]
-		if !ok {
-			continue
-		}
+	for _, label := range labels {
 		if out != "" {
 			out += ", "
 		}
-		out += fmt.Sprintf("%s=%d", kind, count)
+		out += fmt.Sprintf("%s=%d", label, tally[label])
 	}
 	return out
 }
@@ -1506,9 +1518,62 @@ func (s *sidecar) interrupted(err error) bool {
 	return err != nil && s.shutdown != nil && s.shutdown.Err() != nil && errors.Is(err, context.Canceled)
 }
 
+// withholdResidue is the RESIDUE RULE, applied where nothing can route around
+// it: only TYPED entries are persisted, and every residue arm — `vendor_specific`
+// of any kind, `unknown`, and the `unparsed` bytes an unowned spool ingests — is
+// classified, counted, and not written.
+//
+// IT SITS IMMEDIATELY ABOVE THE ONE WRITE PATH ON PURPOSE. Residue is minted by
+// the converter, by three handlers and by the detached-stop seam, so a filter at
+// any producer is a filter that the next producer forgets. `storeWrite` is the
+// sidecar's only door to the store, so a rule enforced here is a rule about the
+// SIDECAR rather than about the callers that happen to exist today.
+//
+// NOTHING IS SILENCED AND NOTHING IS READ LESS. The line was framed, converted
+// and classified before it reached here; the withholding is stated per record at
+// DEBUG and rolled into the per-file `residue-drop-summary` at INFO. And nothing
+// is unrecoverable: the sidecar's sources are the vendor's own durable files, so
+// the day a residue arm earns a model, the file is simply re-read.
+//
+// THE CURSOR STILL ADVANCES. It rides the batch, not the entries, so a batch
+// whose every record was residue still commits the reader's position — the bytes
+// were read, and re-reading them would produce the same nothing.
+func (s *sidecar) withholdResidue(batch *storev1.EntryBatch) []*storev1.StoreEntry {
+	entries := batch.GetEntries()
+	kept := entries[:0]
+	for _, e := range entries {
+		if !convert.IsResidue(e) {
+			kept = append(kept, e)
+			continue
+		}
+		label := convert.ResidueLabel(e)
+		fileID := batch.GetCursorAdvance().GetFileId()
+		tally := s.residueWithheld[fileID]
+		if tally == nil {
+			tally = map[string]int{}
+			s.residueWithheld[fileID] = tally
+		}
+		tally[label]++
+		// IT ANNOUNCES NO ROW, so it carries no upsert_key: the whole point is
+		// that nothing was stored, and a record naming a key nobody can look up
+		// is the untraceable announcement the field-set contract forbids.
+		s.log.With(logging.Context{
+			Operation: "residue-drop", FileID: fileID, Reason: label,
+		}).LogVerbose("residue %s is never persisted; the record was read and classified and is not stored", label)
+	}
+	return kept
+}
+
 // storeWrite is the sidecar's ONLY path to the store. Routing every write
 // through here is what makes an unreachable store impossible to miss.
 func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) ([]storeclient.SkippedEntry, error) {
+	batch.Entries = s.withholdResidue(batch)
+	if len(batch.GetEntries()) == 0 && batch.GetCursorAdvance() == nil {
+		// Nothing to store and no position to advance. A batch that was ONLY
+		// residue is not an empty write to make: the store has nothing to do
+		// with it, and asking anyway would spend an rpc per residue line.
+		return nil, nil
+	}
 	ctx, cancel := s.rpcContext()
 	defer cancel()
 	skipped, err := s.store.WriteBatch(ctx, batch)

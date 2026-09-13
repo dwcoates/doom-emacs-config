@@ -1239,41 +1239,51 @@ daemon-minted; a file reader holds neither, so no history page can regrow a fake
 prompt bubble from this producer. The shim's `AgentPrompt` is the one served form,
 and a subagent's commission rides `AgentSubagentStart.prompt`.
 
-### Residue kinds never persisted
+### Residue is never persisted
 
-Owner ruling 2026-09-13 (`docs/STORE-VOLUME-PROPOSAL.md` item 1, first two
-kinds). `internal/convert/neverpersist.go` holds the list; it is filtered out of
-what `Converter.Line` returns, so the drop is decided from the residue kind the
-converter itself minted and no producer of these kinds can route around it.
+Owner ruling 2026-09-13 (`docs/STORE-VOLUME-PROPOSAL.md` item 1). ONLY TYPED
+ENTRIES ARE PERSISTED. Every residue outcome — `vendor_specific` of any kind,
+`unknown`, and the `unparsed` bytes an unowned or unclassifiable spool ingests —
+is classified, counted, and NOT WRITTEN.
 
-| kind | why nothing is served from it |
-|---|---|
-| `attachment/hook_success` | The STREAM plane owns the served hook row (`activity:<hook_id>`, ruling 2026-09-04). The two planes hold disjoint identity material, so this transcript copy can never be joined to the row a reader sees. 229,013 rows / 218 MB of the measured 1.64 GB store. |
-| `attachment/total_tokens_reminder` | The vendor's per-turn `<total_tokens>N tokens left</total_tokens>` line: one bare `text` field, reaching no arm of the conversation vocabulary and read by nothing. 57,376 rows / 45 MB. |
+WHY: NOBODY READS IT. Those three arms have zero readers anywhere downstream —
+not in the daemon, not in the webapp, not in the editor — and the measured store
+(1.64 GB, 612,214 rows) is overwhelmingly made of them. The volume was stored
+for nothing.
 
-- THE DISCOVERY MANDATE IS UNTOUCHED. The line is read, framed and classified by
-  the same branch it always was — a hook attachment still runs through
-  `hookAttachment` and still states what the vendor recorded. Only the write is
+- `internal/convert/neverpersist.go` holds the predicate (`IsResidue`) and the
+  counting label (`ResidueLabel`); `cycle.go withholdResidue` applies it.
+- IT SITS IMMEDIATELY ABOVE `storeWrite`, THE SIDECAR'S ONLY DOOR TO THE STORE.
+  Residue is minted by the converter, by three handlers and by the detached-stop
+  seam, so a filter at any producer is a filter the next producer forgets. A rule
+  enforced at the one write path is a rule about the SIDECAR rather than about
+  the callers that happen to exist today.
+- THE DISCOVERY MANDATE AND THE CLASSIFICATION ARE UNTOUCHED. Every line is still
+  read, framed and filed under its own arm by the branch it always was, and the
+  golden-corpus census still pins the vendor_specific kinds the converter mints —
+  a new kind appearing there is still a mapping regression. Only the write is
   skipped.
-- AN UNKNOWN KIND STAYS PERSISTED. The list is NAMED and never a predicate: a
-  residue kind nobody has ruled on is exactly the one whose stored record IS the
-  coverage, so forward compatibility is the default and only the two spellings
-  above are dropped. Adding a third is an owner ruling, and the golden-corpus
-  census plus `TestTheNamedListIsExactlyTheTwoRuledKinds` fail if the list drifts
-  without one.
-- THE OFFSET IS ABSORBED BY THE CURSOR, NOT BY THE WRITE LEDGER. A dropped line
-  produces no entry and therefore mints no `write_id`, so the store's ledger —
-  one row per APPLIED write — holds nothing for it. Nothing needs to: the
-  tailer's cursor advance is the BYTES READ (`PollResult.Changed` turns on the
-  offset, not on the entry count), and it rides the same batch, so the line is
-  never handed to the converter a second time. No "seen, not stored" mark exists
-  and none is needed.
-- LOGGING. Each drop is DEBUG (`residue-drop`) — a dropped kind is the steady
-  state, not news, and 37% of a transcript's records are hook attachments, so one
-  INFO per line would be a permanent inverted pyramid. The boot walk states one
-  INFO `residue-drop-summary` PER FILE at the catch-up edge
-  (`cycle.go summarizeDroppedResidue`), carrying the counts by kind; a file that
-  dropped nothing states nothing.
+- KEEPALIVE IS NOT RESIDUE. It rides the same `unserved_item` field, but it is a
+  well-formed conversation fact with no book rather than something the reader
+  could not carry, and it is persisted like any other typed entry.
+- THE FORWARD-COMPAT ARGUMENT MOVES TO THE COUNTS. `unknown` used to be kept on
+  the grounds that its stored row IS the coverage for a vendor behavior nobody
+  has modelled. The classification, the per-record `residue-drop` label and the
+  per-file summary are that coverage now — and nothing is unrecoverable, because
+  the sidecar's sources are the vendor's own DURABLE files: the day a residue arm
+  earns a model, the file is simply re-read.
+- THE CURSOR STILL ADVANCES. It rides the batch, not the entries
+  (`PollResult.Changed` turns on the offset, not the entry count), so a batch
+  whose every record was residue still commits the reader's position — the bytes
+  were read, and re-reading them would produce the same nothing. A batch left
+  with no entries AND no cursor advance is not sent at all.
+- LOGGING. Each withholding is DEBUG (`residue-drop`), carrying the residue label
+  on `reason` and NO `upsert_key` — it announces no row, and a key nobody can
+  look up is exactly what the field-set contract forbids. The boot walk states
+  one INFO `residue-drop-summary` PER FILE at the catch-up edge
+  (`cycle.go summarizeWithheldResidue`), carrying the counts by label; the
+  inferred batches, which name no file, are summarized under their own record. A
+  file that withheld nothing states nothing.
 
 ### Keep-alive
 

@@ -166,24 +166,17 @@ type Converter struct {
 	// reported the second as the first.
 	joined       bool
 	joinedOffset int64
-
-	// droppedResidue tallies the never-persisted residue lines this converter
-	// classified and did not store, BY KIND. One converter is one file, so the
-	// tally is this file's, and the reader states it as one summary per file at
-	// the end of the startup catch-up window (neverpersist.go).
-	droppedResidue map[string]int
 }
 
 // New builds a Converter with no observer installed.
 func New(log *logging.Bound) *Converter {
 	log.With(logging.Context{Operation: "convert-new"}).LogVerbose("constructing converter producer=%s", Producer)
 	return &Converter{
-		log:            log,
-		observer:       noopObserver{},
-		openCalls:      map[string]openCall{},
-		openSkills:     map[string]openCall{},
-		spawnedRuns:    map[string]string{},
-		droppedResidue: map[string]int{},
+		log:         log,
+		observer:    noopObserver{},
+		openCalls:   map[string]openCall{},
+		openSkills:  map[string]openCall{},
+		spawnedRuns: map[string]string{},
 	}
 }
 
@@ -221,15 +214,14 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 	// thirty call sites having to pass it — and residue minted anywhere in that
 	// fan-out keys on the same record the other plane keys on.
 	at.RecordUUID = str(record["uuid"])
-	// THE LINE IS CLASSIFIED FIRST AND FILTERED AFTER, never read less. The
-	// never-persisted list (neverpersist.go) is applied to the entries the full
-	// conversion produced, so a dropped kind still ran its own converter branch
-	// and still stated what the vendor recorded.
-	return c.dropNeverPersisted(at, c.lineEntries(record, at, next))
+	// THE LINE IS CLASSIFIED IN FULL, and the READER decides what is written:
+	// residue is withheld at the sidecar's single write path (neverpersist.go,
+	// cycle.go withholdResidue), so every branch here still runs and still
+	// states what the vendor recorded.
+	return c.lineEntries(record, at, next)
 }
 
-// lineEntries is the conversion itself: everything Line does except the
-// never-persisted filter.
+// lineEntries is the conversion itself.
 func (c *Converter) lineEntries(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
 	if !c.joined {
 		c.joined = true

@@ -1,11 +1,12 @@
 package convert
 
-// neverpersist_test.go — the residue kinds the owner ruled are never persisted.
+// neverpersist_test.go — the residue arms the owner ruled are never persisted,
+// and the classification that survives the rule.
 
 import (
-	"encoding/json"
-	"strings"
 	"testing"
+
+	storev1 "agentrepl/proto/store/v1"
 )
 
 // tokensReminderLine is the vendor's per-turn budget line: one bare `text`
@@ -21,21 +22,112 @@ func hookSuccessLine(uuid string) string {
 		`"toolUseID":"toolu_gated","hookEvent":"PreToolUse","command":"/h.sh","exitCode":0}`)
 }
 
-func TestTheNamedResidueKindsProduceNoEntry(t *testing.T) {
+func TestIsResidueNamesEveryArmNobodyReads(t *testing.T) {
+	at := testAttribution(0)
+	cases := []struct {
+		name  string
+		entry *storev1.StoreEntry
+		want  bool
+	}{
+		{
+			name:  "vendor_specific — understood and deliberately not carried",
+			entry: VendorSpecificEntry(at, "attachment/hook_success", map[string]any{}),
+			want:  true,
+		},
+		{
+			name:  "unknown — parsed and not modelled",
+			entry: UnknownEntry(at, "a_new_line_type", "type", map[string]any{}),
+			want:  true,
+		},
+		{
+			name:  "unparsed — could not be read at all",
+			entry: UnparsedEntry(at, []byte("{"), errTestUnparsed),
+			want:  true,
+		},
+		{
+			name:  "keepalive — a well-formed fact with no book, not residue",
+			entry: Keepalive(at, "keepalive", "turn:1", at.AgentID, &storev1.StoreAgentItem{}),
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := IsResidue(tc.entry)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("IsResidue = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResidueLabelNamesTheArmAndItsDiscriminator(t *testing.T) {
+	at := testAttribution(0)
+	cases := []struct {
+		name  string
+		entry *storev1.StoreEntry
+		want  string
+	}{
+		{
+			name:  "vendor_specific carries its kind",
+			entry: VendorSpecificEntry(at, "attachment/hook_success", map[string]any{}),
+			want:  "vendor_specific/attachment/hook_success",
+		},
+		{
+			name:  "unknown carries the field and the discriminator it read",
+			entry: UnknownEntry(at, "a_new_line_type", "type", map[string]any{}),
+			want:  "unknown/type:a_new_line_type",
+		},
+		{
+			name:  "unparsed has no discriminator to carry",
+			entry: UnparsedEntry(at, []byte("{"), errTestUnparsed),
+			want:  "unparsed",
+		},
+		{
+			name:  "a typed entry is not labelled at all",
+			entry: Keepalive(at, "keepalive", "turn:1", at.AgentID, &storev1.StoreAgentItem{}),
+			want:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := ResidueLabel(tc.entry)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("ResidueLabel = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// THE CLASSIFICATION SURVIVES THE RULE. The converter still reads every line and
+// still files it under its own arm; the reader is what withholds it from the
+// store, so a converter that stopped classifying would lose the count and the
+// debug record the rule leaves behind as its evidence.
+func TestAWithheldKindIsStillClassifiedByTheConverter(t *testing.T) {
 	cases := []struct {
 		name string
 		line string
+		want string
 	}{
 		{
-			// 229,013 rows and 218 MB of the measured store, unjoinable to the
-			// hook row a reader is actually served.
 			name: "hook_success",
 			line: hookSuccessLine("h1"),
+			want: "vendor_specific/attachment/hook_success",
 		},
 		{
-			// 57,376 rows and 45 MB, read by nothing.
 			name: "total_tokens_reminder",
 			line: tokensReminderLine("r1", "<total_tokens>18000 tokens left</total_tokens>"),
+			want: "vendor_specific/attachment/total_tokens_reminder",
+		},
+		{
+			name: "a line type the vendor added yesterday",
+			line: attachmentLineOf("u1", `{"type":"a_kind_the_vendor_added_yesterday","text":"whatever"}`),
+			want: "vendor_specific/attachment/a_kind_the_vendor_added_yesterday",
 		},
 	}
 	for _, tc := range cases {
@@ -47,158 +139,19 @@ func TestTheNamedResidueKindsProduceNoEntry(t *testing.T) {
 			entries := convertLines(t, c, tc.line)
 
 			// Assert.
-			if len(entries) != 0 {
-				t.Fatalf("entries = %d (%v), want the line classified and not stored", len(entries), allKeys(entries))
+			if len(entries) != 1 {
+				t.Fatalf("entries = %d (%v), want the line classified", len(entries), allKeys(entries))
+			}
+			if got := ResidueLabel(entries[0]); got != tc.want {
+				t.Fatalf("label = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestAnUnknownAttachmentTypeIsStillPersistedAsResidue(t *testing.T) {
-	// Arrange. THE LIST IS NAMED, NEVER A PREDICATE. A residue kind nobody has
-	// ruled on is exactly the one whose stored record IS the coverage, so it
-	// keeps being written.
-	c := newTestConverter(t)
-	line := attachmentLineOf("u1", `{"type":"a_kind_the_vendor_added_yesterday","text":"whatever"}`)
+// errTestUnparsed is the parse failure the unparsed fixtures carry.
+var errTestUnparsed = errTest("truncated object")
 
-	// Act.
-	entries := convertLines(t, c, line)
+type errTest string
 
-	// Assert.
-	if len(entries) != 1 {
-		t.Fatalf("entries = %d, want the unruled kind still stored whole", len(entries))
-	}
-	if got := vendorKindOf(entries[0]); got != "attachment/a_kind_the_vendor_added_yesterday" {
-		t.Fatalf("kind = %q, want the unruled kind stored as residue", got)
-	}
-}
-
-func TestADroppedHookAttachmentMintsNothingInTheServedHookKeySpace(t *testing.T) {
-	// Arrange. The STREAM plane owns the served hook row under
-	// `activity:<hook_id>` (keys.go). The drop must leave that row alone: not by
-	// writing a poorer copy of it, and not by writing anything at all.
-	c := newTestConverter(t)
-
-	// Act.
-	entries := convertLines(t, c, hookSuccessLine("h1"))
-
-	// Assert.
-	for _, key := range allKeys(entries) {
-		if strings.HasPrefix(key, "activity:") {
-			t.Fatalf("the file plane minted %q; the stream plane's hook row is the only one", key)
-		}
-	}
-	if len(entries) != 0 {
-		t.Fatalf("entries = %d (%v), want none", len(entries), allKeys(entries))
-	}
-}
-
-func TestTheDropIsStatedAtDebugPerLine(t *testing.T) {
-	// Arrange. A dropped kind is the STEADY STATE, not news, so the per-line
-	// record must never be INFO — but it must exist, so one record can be traced.
-	c, sink := loggedConverter(t)
-
-	// Act.
-	convertLines(t, c, hookSuccessLine("h1"))
-
-	// Assert.
-	if got := levelForMessage(t, sink, "is on the never-persisted list"); got != "debug" {
-		t.Fatalf("level = %q, want debug", got)
-	}
-}
-
-func TestTheDropTallyCarriesCountsByKind(t *testing.T) {
-	// Arrange. The summary the reader states at catch-up end is per KIND, so the
-	// converter has to keep them apart rather than counting drops in one bucket.
-	c := newTestConverter(t)
-
-	// Act.
-	convertLines(t, c,
-		hookSuccessLine("h1"),
-		hookSuccessLine("h2"),
-		hookSuccessLine("h3"),
-		tokensReminderLine("r1", "<total_tokens>9 tokens left</total_tokens>"),
-	)
-
-	// Assert.
-	dropped := c.DroppedResidue()
-	if got := dropped["attachment/hook_success"]; got != 3 {
-		t.Fatalf("hook_success drops = %d, want 3", got)
-	}
-	if got := dropped["attachment/total_tokens_reminder"]; got != 1 {
-		t.Fatalf("total_tokens_reminder drops = %d, want 1", got)
-	}
-}
-
-func TestAFileThatDroppedNothingHasNoTally(t *testing.T) {
-	// Arrange. The reader states one summary per file only for a file that had
-	// one, exactly as EndCatchup states nothing for an operation that demoted
-	// nothing.
-	c := newTestConverter(t)
-
-	// Act.
-	convertLines(t, c, attachmentLineOf("u1", `{"type":"date_change","text":"today"}`))
-
-	// Assert.
-	if got := c.DroppedResidue(); got != nil {
-		t.Fatalf("tally = %v, want nil for a file that dropped nothing", got)
-	}
-}
-
-func TestTheTallyIsACopyTheCallerCannotMutate(t *testing.T) {
-	// Arrange. The summary reads the tally while the converter keeps reading the
-	// file, so a handed-out map that aliased the counter would let a reader
-	// corrupt the file's own record of what it dropped.
-	c := newTestConverter(t)
-	convertLines(t, c, hookSuccessLine("h1"))
-
-	// Act.
-	c.DroppedResidue()["attachment/hook_success"] = 99
-
-	// Assert.
-	if got := c.DroppedResidue()["attachment/hook_success"]; got != 1 {
-		t.Fatalf("tally after a caller mutated its copy = %d, want the converter's own 1", got)
-	}
-}
-
-func TestTheNamedListIsExactlyTheTwoRuledKinds(t *testing.T) {
-	// Arrange. Adding a kind is an owner ruling, so the list is pinned here and a
-	// silent third entry fails rather than quietly deleting rows.
-	want := []string{"attachment/hook_success", "attachment/total_tokens_reminder"}
-
-	// Act.
-	got := NeverPersistedResidueKinds()
-
-	// Assert.
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("never-persisted kinds = %v, want %v", got, want)
-	}
-}
-
-func TestADroppedLineIsDecidedOnceBecauseItsOffsetRidesTheBatch(t *testing.T) {
-	// Arrange. A line that produced no entry leaves NO write_ledger row (the
-	// ledger holds one row per APPLIED write), so re-deciding it is prevented by
-	// the CURSOR rather than by absorption: the batch's cursor advance is the
-	// bytes read, not the entries produced. This test pins the converter's half
-	// of that — a dropped line still moves the offset a batch would commit — and
-	// tail's TestABatchOfOnlyDroppedLinesStillAdvancesTheCursor pins the reader's.
-	c := newTestConverter(t)
-
-	// Act. One line, then the SAME record re-read as a fresh reader would after
-	// a cursor that had not advanced.
-	first := convertLines(t, c, hookSuccessLine("h1"))
-	firstDrops := c.DroppedResidue()["attachment/hook_success"]
-
-	// Assert. The drop is decided once per read; nothing about the record makes
-	// the decision sticky, which is exactly why the cursor must carry it.
-	if len(first) != 0 || firstDrops != 1 {
-		t.Fatalf("entries = %d, drops = %d, want 0 and 1", len(first), firstDrops)
-	}
-	var record map[string]any
-	if err := json.Unmarshal([]byte(hookSuccessLine("h1")), &record); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if entries := c.Line(record, testAttribution(0), nil); len(entries) != 0 {
-		t.Fatalf("a re-decided line produced %d entrie(s); it must still store nothing", len(entries))
-	}
-}
+func (e errTest) Error() string { return string(e) }
