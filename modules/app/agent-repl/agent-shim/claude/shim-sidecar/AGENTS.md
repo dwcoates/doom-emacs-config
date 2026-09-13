@@ -538,6 +538,27 @@ re-derives every historical run at once, so a run whose last activity predates
 catch-up"); only a run that went stale while the sidecar watched is a per-item
 WARNING. `state` partitions each sweep — the boot sweep included — into the two.
 
+A FILE THAT WENT WITH ITS WHOLE TREE IS AN ORDINARY END, NOT A LOSS (owner
+ruling, 2026-09-13). When a watched file disappears the reader stats its PARENT
+DIRECTORY. A directory that is gone too means nobody unlinked a file out from
+under us — a harness deleted its run directory, a vendor session directory went
+wholesale — so the committed offset is the last thing that file ever had and
+there is nothing for an operator to act on. Every record on that path is then
+INFO: the `file-vanished` record carries `reason=tree_removed`, and the
+`lost-policy` grace-clock and conclusion records say the directory went with it.
+A file unlinked while its directory STANDS keeps its WARNING, because that is a
+genuine unlink under the reader.
+
+- ONLY A DEFINITE ABSENCE COUNTS. `treeRemoved` (cycle.go) answers true for
+  `fs.ErrNotExist` and nothing else; a stat that fails for a permission change
+  or an unresponsive mount is not evidence the tree was removed, and reading it
+  as one would quietly downgrade a real unlink.
+- IT CHANGES NO CONCLUSION AND NO WIRE ARM. The run is still LOST and
+  `DetachedLost` still carries `file_vanished`. `lost-terminal` joins back to the
+  sweep on the `reason` key, so that key stays the wire's own arm on every
+  `lost-policy` record; `tree_removed` rides the `file-vanished` record, which
+  names a FILE rather than a run and has no arm to collide with.
+
 A VANISHED FILE KEEPS ITS TAILER until its terminal has been stated. The
 converter that spells the terminal is reached through the watcher entry, so
 dropping the tailer the moment the file disappears turns every `file_vanished`
