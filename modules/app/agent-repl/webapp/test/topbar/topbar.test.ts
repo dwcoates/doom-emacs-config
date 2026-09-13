@@ -6,7 +6,7 @@ import { TopbarViewSchema, type TopbarView } from "../../../proto/gen/ts/fronten
 import { MalformedView } from "../../src/rpc/malformed.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
-import { GEOMETRY, NOW, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
+import { GEOMETRY, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
 /** A complete view; each test overrides only what it is about. */
 function view(overrides: Partial<TopbarView> = {}): TopbarView {
@@ -27,30 +27,18 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
 }
 
 /**
- * A PARKED workspace's view: the three workspace-scoped elements the daemon
- * can still resolve, and the hibernated state. Nothing session-scoped is set,
- * which is what the state means.
+ * A SESSION-LESS workspace's view: the cells the daemon can always resolve,
+ * and NOT ONE of the three session-scoped controls. The context chip and the
+ * warning strip are still set — always — and they are where the state's own
+ * facts ride (topbar.proto, FIXED SCHEMA AND ORGANIZATION).
  */
-function hibernatedView(): TopbarView {
+function sessionlessView(reason: string, context = "0"): TopbarView {
   return create(TopbarViewSchema, {
     title: { text: "DWC/fix" },
     account: { state: { case: "loggedIn", value: { email: "a@b.test" } } },
     connectivity: { tone: "none", glyph: "○", title: "no session" },
-    hibernated: { sinceMs: BigInt(NOW - 60_000) },
-  });
-}
-
-/**
- * A COLD-GATED workspace's view: the same three workspace-scoped elements, and
- * the cold-gate state. Nothing session-scoped is set, because the shim
- * answered `cold` and no session was ever created.
- */
-function coldGateView(): TopbarView {
-  return create(TopbarViewSchema, {
-    title: { text: "DWC/fix" },
-    account: { state: { case: "loggedIn", value: { email: "a@b.test" } } },
-    connectivity: { tone: "none", glyph: "○", title: "no session" },
-    coldGate: { contextTokens: 142_300n, sinceMs: BigInt(NOW - 60_000) },
+    context: { text: context, breakdown: { sections: [{ heading: { text: reason }, rows: [] }] } },
+    warnings: { warnings: [{ line: { text: reason } }] },
   });
 }
 
@@ -65,69 +53,65 @@ describe("drawTopbarView", () => {
     ]).toEqual([true, true, true]);
   });
 
-  // THE HIBERNATED STRIP. A parked workspace's view carries the account, the
-  // connectivity and the title and nothing session-scoped, because the daemon
-  // has no session to resolve those from.
-  it("draws the hibernated cell for a parked workspace", () => {
+  // THE SESSION-LESS STRIP. It is the SAME strip: every slot is filled, the
+  // three controls with a dash and the chip and the warning strip with the
+  // state's own facts. Two whole-view states used to replace the right-hand
+  // group here; the fixed-schema ruling retired both.
+  it("draws every cell for a workspace with no session", () => {
     const { tc } = topbarContext();
-    const row = drawTopbarView(hibernatedView(), tc);
-    expect(row.querySelector(".topbar-hibernated")?.textContent).toBe("hibernated 1m");
-  });
-
-  it("draws the account, the connectivity and the title for a parked workspace", () => {
-    const { tc } = topbarContext();
-    const row = drawTopbarView(hibernatedView(), tc);
+    const row = drawTopbarView(sessionlessView("hibernated since 14:03"), tc);
     expect([
       row.querySelector(".topbar-account") !== null,
       row.querySelector(".topbar-connectivity") !== null,
       row.querySelector(".topbar-title") !== null,
-    ]).toEqual([true, true, true]);
-  });
-
-  it("draws no session-scoped element for a parked workspace", () => {
-    const { tc } = topbarContext();
-    const row = drawTopbarView(hibernatedView(), tc);
-    expect([
       row.querySelector(".topbar-model") !== null,
-      row.querySelector(".topbar-permission-mode") !== null,
-      row.querySelector(".topbar-context-figure") !== null,
+      row.querySelector(".topbar-mode") !== null,
       row.querySelector(".topbar-fast") !== null,
-    ]).toEqual([false, false, false, false]);
+      row.querySelector(".topbar-context") !== null,
+    ]).toEqual([true, true, true, true, true, true, true]);
   });
 
-  // THE COLD-GATE STRIP. A workspace standing at the gate resolves no session
-  // fact at all, so before this branch the strip published nothing and stayed
-  // blank for as long as the gate stood.
-  it("draws the cold-gate cell for a workspace standing at the gate", () => {
+  it("draws each absent control as a dash in its own slot", () => {
     const { tc } = topbarContext();
-    const row = drawTopbarView(coldGateView(), tc);
-    expect(row.querySelector(".topbar-cold-gate")?.textContent).toBe("cold context 142.3k 1m");
+    const row = drawTopbarView(sessionlessView("hibernated since 14:03"), tc);
+    expect([...row.querySelectorAll("[data-no-session]")].map((el) => el.getAttribute("data-no-session")))
+      .toEqual(["model", "mode", "fast"]);
   });
 
-  it("draws the account, the connectivity and the title for a cold-gated workspace", () => {
+  it("keeps the cells in one order whether or not there is a session", () => {
+    // THE STRIP DOES NOT REARRANGE ITSELF under the reader; that is the whole
+    // point of the fixed schema.
     const { tc } = topbarContext();
-    const row = drawTopbarView(coldGateView(), tc);
-    expect([
-      row.querySelector(".topbar-account") !== null,
-      row.querySelector(".topbar-connectivity") !== null,
-      row.querySelector(".topbar-title") !== null,
-    ]).toEqual([true, true, true]);
+    const classOf = (v: TopbarView): string[] =>
+      [...(drawTopbarView(v, tc).querySelector(".topbar-right")?.children ?? [])].map((el) =>
+        el.className.split(" ")[0],
+      );
+    const warned = view({
+      warnings: create(TopbarViewSchema, {
+        warnings: { warnings: [{ line: { text: "a" }, detail: { case: "accounting", value: { lines: [] } } }] },
+      }).warnings,
+    });
+    expect(classOf(sessionlessView("hibernated since 14:03"))).toEqual(classOf(warned));
   });
 
-  it("draws no session-scoped element for a cold-gated workspace", () => {
+  it("draws the context figure for a workspace with no session", () => {
     const { tc } = topbarContext();
-    const row = drawTopbarView(coldGateView(), tc);
-    expect([
-      row.querySelector(".topbar-model") !== null,
-      row.querySelector(".topbar-permission-mode") !== null,
-      row.querySelector(".topbar-context-figure") !== null,
-      row.querySelector(".topbar-fast") !== null,
-    ]).toEqual([false, false, false, false]);
+    const row = drawTopbarView(sessionlessView("cold context, awaiting your answer", "101.1k"), tc);
+    expect(row.querySelector(".topbar-context-figure")?.textContent).toBe("101.1k");
   });
 
-  it("draws no fast-mode cell when the vendor has stated no fast mode", () => {
+  it("draws the state as a warning line rather than losing it", () => {
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarView(sessionlessView("cold context, awaiting your answer"), tc));
+    host.querySelector(".topbar-warnings")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(openPanel(host)?.textContent).toBe("cold context, awaiting your answer");
+  });
+
+  it("draws the fast-mode cell as a dash when the vendor has stated no fast mode", () => {
     const { tc } = topbarContext();
-    expect(drawTopbarView(view(), tc).querySelector(".topbar-fast")).toBeNull();
+    expect(
+      drawTopbarView(view(), tc).querySelector(".topbar-fast")?.getAttribute("data-no-session"),
+    ).toBe("fast");
   });
 
   it("draws the fast-mode cell beside the permission-mode picker", () => {
@@ -469,31 +453,17 @@ describe("the account cell", () => {
   });
 });
 
-describe("the whole-view states", () => {
-  // RULING 4. A state that replaces the session-scoped controls stands where
-  // they stood: the LAST cell of the right group, at the strip's right edge.
-  it("draws the hibernated cell as the right group's own content", () => {
-    // ARRANGE
-    const { tc } = topbarContext();
-    // ACT
-    const right = drawTopbarView(hibernatedView(), tc).querySelector(".topbar-right");
-    // ASSERT
-    expect([...(right?.children ?? [])].map((el) => el.className)).toEqual(["topbar-hibernated"]);
-  });
-
-  it("draws the cold-gate cell as the right group's own content", () => {
-    // ARRANGE
-    const { tc } = topbarContext();
-    // ACT
-    const right = drawTopbarView(coldGateView(), tc).querySelector(".topbar-right");
-    // ASSERT
-    expect([...(right?.children ?? [])].map((el) => el.className)).toEqual(["topbar-cold-gate"]);
-  });
-
-  // ...and in the right cells' box, so the reader sees the right group's
-  // content rather than a stray label.
-  it("boxes both state cells exactly as the strip's other right-hand cells", () => {
-    expect(declaration(".topbar-fast,\n.topbar-hibernated,\n.topbar-cold-gate", "padding")).toBe(
+describe("the no-session cells", () => {
+  // A DASH IS A LABEL, NOT A CONTROL: it takes the right group's box so the
+  // slot keeps its width and its neighbours do not move, and it takes neither
+  // the cursor nor the hover border that would promise a click.
+  it("boxes every no-session cell exactly as the strip's other right-hand cells", () => {
+    expect(
+      declaration(
+        ".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-mode[data-no-session]",
+        "padding",
+      ),
+    ).toBe(
       declaration(
         ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-warning-chip",
         "padding",
