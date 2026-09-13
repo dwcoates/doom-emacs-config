@@ -128,6 +128,12 @@ func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
 	captured := loadCapturedSession(t)
 	path := tree.sessionPath(captured.Slug, captured.Session)
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
+	// THE PER-ITEM DETAIL LIVES AT DEBUG DURING CATCH-UP. This record is one of
+	// the six corpus-walk operations the startup catch-up window levels (see
+	// "Startup catch-up"), and this subject asserts the per-item record rather
+	// than the summary, so it reads the log at the threshold the detail is
+	// written to.
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 
 	g := newGrowingFile(t, path)
 	var headBytes int64
@@ -341,6 +347,12 @@ func TestARewindIsStatedInTheLog(t *testing.T) {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
+	// THE PER-ITEM DETAIL LIVES AT DEBUG DURING CATCH-UP. This record is one of
+	// the six corpus-walk operations the startup catch-up window levels (see
+	// "Startup catch-up"), and this subject asserts the per-item record rather
+	// than the summary, so it reads the log at the threshold the detail is
+	// written to.
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 	secondLog := filepath.Join(t.TempDir(), "sidecar-restarted.log")
 
 	// Act.

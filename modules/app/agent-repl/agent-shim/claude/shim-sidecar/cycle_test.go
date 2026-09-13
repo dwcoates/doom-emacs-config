@@ -1573,3 +1573,121 @@ func TestASteadyStateBookConflictSkipWarns(t *testing.T) {
 		t.Fatalf("a steady-state skip produced %d catch-up summaries, want none", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The startup catch-up window's boundary.
+// ---------------------------------------------------------------------------
+
+// A poll pass that walked every watcher to completion IS the boot walk: the
+// corpus discovered by the cycle's first rescan has been picked up and
+// converted, so the window may close.
+func TestACompletedPollPassLatchesTheDrainedPass(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	if !h.sc.drainedPass {
+		t.Fatal("a completed poll pass did not latch the drained pass")
+	}
+}
+
+// AN ABANDONED PASS HAS NOT DRAINED THE CORPUS. A store outage cuts the pass
+// short, so the backlog it still owes must keep being leveled.
+func TestAnAbandonedPollPassDoesNotLatchTheDrainedPass(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "transaction rolled back"
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	if h.sc.drainedPass {
+		t.Fatal("a pass abandoned by a store outage latched the drained pass")
+	}
+}
+
+// The window closes off that one fact, and a corpus-walk operation is news
+// again afterwards.
+func TestTheCatchupWindowClosesAfterTheFirstDrainedPass(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	h.sc.log.BeginCatchup(catchupOperations...)
+	h.sc.drainedPass = true
+
+	// Act.
+	h.sc.endCatchupOnFirstDrainedPass()
+	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("a live rewind")
+
+	// Assert.
+	if !strings.Contains(h.logText(), `"level":"info","verbosity":"normal","operation":"boot-rewind"`) {
+		t.Fatalf("boot-rewind after the window closed is not INFO: %s", h.logText())
+	}
+}
+
+// A pass that never completed leaves the window open, so the backlog it still
+// owes is still leveled.
+func TestTheCatchupWindowStaysOpenWithoutADrainedPass(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	h.sc.log.BeginCatchup(catchupOperations...)
+
+	// Act.
+	h.sc.endCatchupOnFirstDrainedPass()
+	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("still backlog")
+
+	// Assert.
+	if !strings.Contains(h.logText(), `"level":"debug"`) {
+		t.Fatalf("boot-rewind with the window still open is not DEBUG: %s", h.logText())
+	}
+}
+
+// THE LATCH IS FOR THE PROCESS'S LIFETIME. A later pass must not restate the
+// summaries a closed window already stated.
+func TestASecondDrainedPassDoesNotRestateTheSummaries(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	h.sc.log.BeginCatchup(catchupOperations...)
+	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("backlog")
+	h.sc.drainedPass = true
+	h.sc.endCatchupOnFirstDrainedPass()
+	before := strings.Count(h.logText(), `"operation":"catchup-summary"`)
+
+	// Act.
+	h.sc.endCatchupOnFirstDrainedPass()
+
+	// Assert.
+	if got := strings.Count(h.logText(), `"operation":"catchup-summary"`); got != before {
+		t.Fatalf("a second drained pass restated the summaries: %d, want %d", got, before)
+	}
+}
+
+// The end of catch-up is STATED, so an operator (and a subject) has one edge
+// that says "everything from here is news, stated per item".
+func TestTheEndOfCatchupIsStated(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	h.sc.log.BeginCatchup(catchupOperations...)
+	h.sc.drainedPass = true
+
+	// Act.
+	h.sc.endCatchupOnFirstDrainedPass()
+
+	// Assert.
+	if !strings.Contains(h.logText(), `"operation":"catchup-end"`) {
+		t.Fatalf("the end of catch-up was not stated: %s", h.logText())
+	}
+}
