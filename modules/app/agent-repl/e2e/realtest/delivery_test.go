@@ -465,7 +465,7 @@ func TestConfirmSettlesAMarkFreeChordOnItsEffect(t *testing.T) {
 	quit := Chord{Emacs: "C-g", MarkFree: true, MarkFreeWhy: "the quit character leaves no mark"}
 	effect := &DeliveryEffect{
 		What:     "the standing minibuffer closed",
-		Observed: func(context.Context) bool { return true },
+		Observed: func(context.Context) (bool, error) { return true, nil },
 	}
 
 	// Act
@@ -487,7 +487,7 @@ func TestConfirmLeavesAMarkFreeChordUndeterminedWhenItsEffectDoesNotHappen(t *te
 	cancel()
 	effect := &DeliveryEffect{
 		What:     "the standing minibuffer closed",
-		Observed: func(context.Context) bool { return false },
+		Observed: func(context.Context) (bool, error) { return false, nil },
 	}
 
 	// Act
@@ -496,5 +496,148 @@ func TestConfirmLeavesAMarkFreeChordUndeterminedWhenItsEffectDoesNotHappen(t *te
 	// Assert
 	if verdict == DeliveryAbsent || observed {
 		t.Errorf("verdict = %d observed = %v, want the press blamed on nobody", verdict, observed)
+	}
+}
+
+// AN ORDINARY KEY IS PROBED IMMEDIATELY. It is queued while Emacs executes
+// lisp and read when Emacs next looks, so nothing is bought by waiting and the
+// owner's focus is held for the whole of the confirmation.
+func TestAnOrdinaryChordIsProbedWithoutAQuietWindow(t *testing.T) {
+	// Arrange
+	ordinary := Chord{Emacs: "s-}", Keycode: 30}
+
+	// Act
+	delay := confirmFirstProbeDelay(ordinary)
+
+	// Assert
+	if delay != 0 {
+		t.Errorf("confirmFirstProbeDelay = %s for an ordinary chord, want no wait at all", delay)
+	}
+}
+
+// AN INTERRUPTING CHORD IS NOT. A `quit_char` that lands while Emacs is running
+// this harness's own probe is handed to `handle_interrupt` and never read as a
+// key, so the editor is left alone until it has had its chance at the key.
+func TestAnInterruptingChordGetsAQuietWindowBeforeTheFirstProbe(t *testing.T) {
+	// Arrange
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+
+	// Act
+	delay := confirmFirstProbeDelay(quit)
+
+	// Assert
+	if delay != keyDeliveryQuietWindow {
+		t.Errorf("confirmFirstProbeDelay = %s for the quit character, want the quiet window %s",
+			delay, keyDeliveryQuietWindow)
+	}
+}
+
+// And it is re-read slowly afterwards, for the same reason: every probe is a
+// spell in which the editor is executing our lisp rather than reading its input.
+func TestAnInterruptingChordIsRereadMoreSlowlyThanAnOrdinaryOne(t *testing.T) {
+	// Arrange
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+	ordinary := Chord{Emacs: "s-}", Keycode: 30}
+
+	// Act
+	quiet, tight := confirmPollInterval(quit), confirmPollInterval(ordinary)
+
+	// Assert
+	if quiet <= tight {
+		t.Errorf("the quit character is re-read every %s and an ordinary key every %s; the quit character "+
+			"must be the slower of the two or the editor is never idle long enough to read it", quiet, tight)
+	}
+}
+
+// The quiet window is spent INSIDE the confirmation, which is spent inside the
+// helper's hold. A window that outlived either would spend the whole press
+// waiting and report every quit character as undelivered.
+func TestTheQuietWindowFitsInsideTheConfirmation(t *testing.T) {
+	// Arrange & Act & Assert
+	if keyDeliveryQuietWindow >= keyDeliveryConfirmCeiling {
+		t.Errorf("the quiet window is %s and the confirm ceiling is %s, so the first probe would never be "+
+			"taken", keyDeliveryQuietWindow, keyDeliveryConfirmCeiling)
+	}
+}
+
+// AN EFFECT PROBE THAT WOULD NOT ANSWER MUST NOT LEAVE A PRESS BLAMED. Two
+// accounts, one silent and one failed, name nobody.
+func TestAnAbsenceIsDowngradedWhenTheEffectProbeFailed(t *testing.T) {
+	// Arrange
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+	before := InputMark{Keys: "SPC j m p"}
+	after := InputMark{Keys: "SPC j m p"}
+
+	// Act
+	verdict, reason := judgeWithEffectProbe(quit, before, after, "the editor would not answer")
+
+	// Assert
+	if verdict != DeliveryUndetermined {
+		t.Errorf("verdict = %d (%s), want the press blamed on nobody when neither account answered",
+			verdict, reason)
+	}
+}
+
+// An effect probe that DID answer leaves the marks' absence standing: that is a
+// real harness failure and must keep being reported as one.
+func TestAnAbsenceStandsWhenTheEffectProbeAnswered(t *testing.T) {
+	// Arrange
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+	before := InputMark{Keys: "SPC j m p"}
+	after := InputMark{Keys: "SPC j m p"}
+
+	// Act
+	verdict, reason := judgeWithEffectProbe(quit, before, after, "")
+
+	// Assert
+	if verdict != DeliveryAbsent {
+		t.Errorf("verdict = %d (%s), want the absence still named as a harness failure", verdict, reason)
+	}
+}
+
+// A failed effect probe never turns an ARRIVAL into a doubt: the marks already
+// settled that one.
+func TestAnArrivalIsNotDowngradedByAFailedEffectProbe(t *testing.T) {
+	// Arrange
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+	before := InputMark{Keys: "SPC j m p"}
+	after := InputMark{Keys: "SPC j m p C-g"}
+
+	// Act
+	verdict, reason := judgeWithEffectProbe(quit, before, after, "the editor would not answer")
+
+	// Assert
+	if verdict != DeliveryArrived {
+		t.Errorf("verdict = %d (%s), want the arrival the ring already recorded", verdict, reason)
+	}
+}
+
+// THE WINDOW IS REALLY LEFT QUIET. The delay is a constant nobody reads unless
+// `confirm` honours it, so this presses an interrupting chord's confirmation
+// and asserts nothing asked the editor anything before the window was up.
+func TestConfirmAsksTheEditorNothingDuringTheQuietWindow(t *testing.T) {
+	// Arrange
+	driver := &KeyDriver{Pid: 1, Client: &Client{Socket: "/nonexistent/socket", Scratch: t.TempDir()}}
+	quit := Chord{Emacs: "C-g", Keycode: 5, Interrupting: true}
+	started := time.Now()
+	var firstAsk time.Duration
+	effect := &DeliveryEffect{
+		What: "the standing minibuffer closed",
+		Observed: func(context.Context) (bool, error) {
+			if firstAsk == 0 {
+				firstAsk = time.Since(started)
+			}
+			return true, nil
+		},
+	}
+
+	// Act
+	verdict, reason, _, observed := driver.confirm(context.Background(), quit, InputMark{Keys: "a b c"}, effect)
+
+	// Assert
+	if firstAsk < keyDeliveryQuietWindow {
+		t.Errorf("the editor was asked %s after the post, inside the %s quiet window the quit character needs "+
+			"to be read as a key rather than taken as an interrupt (verdict %d: %s, observed %v)",
+			firstAsk, keyDeliveryQuietWindow, verdict, reason, observed)
 	}
 }

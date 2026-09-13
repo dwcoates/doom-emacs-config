@@ -87,6 +87,29 @@ const (
 	// this loop runs, and the owner's desktop is what pays for a slow poll.
 	keyDeliveryPollInterval = 50 * time.Millisecond
 
+	// keyDeliveryQuietWindow is how long an INTERRUPTING chord's target is left
+	// alone after the post, before this side reads anything back.
+	//
+	// It is not a guess at how long Emacs takes: it is a bound on how long this
+	// harness may keep the editor executing its lisp while a quit character is
+	// in flight, and the answer is "not at all until the key has been read".
+	// Consuming a queued CGEvent is one turn of the NS run loop — the
+	// 2026-09-13 manual press, with nothing talking to Emacs, was recorded and
+	// had closed its prompt by the time the shell came back — so a quarter of a
+	// second is a small multiple of the work, and it is spent INSIDE the
+	// helper's hold, which is twenty times longer.
+	keyDeliveryQuietWindow = 250 * time.Millisecond
+
+	// keyDeliveryQuietPollInterval is how often an interrupting chord's marks
+	// are re-read once the quiet window has passed.
+	//
+	// Deliberately the same as the window: every probe is a spell during which
+	// the editor is executing this harness's lisp rather than reading its
+	// input, so the cadence has to leave the editor idle for most of the
+	// confirmation rather than for none of it. The confirm ceiling is eight of
+	// these, which is eight chances for a key whose first reading missed it.
+	keyDeliveryQuietPollInterval = 250 * time.Millisecond
+
 	// keyDeliveryHoldCeiling is the helper's own bound on holding the target
 	// key, passed as `--hold=`. Strictly larger than the confirm ceiling so
 	// the hold outlives the reading it exists to protect, and bounded anyway
@@ -206,6 +229,51 @@ func judgeDelivery(chord Chord, before, after InputMark) (DeliveryVerdict, strin
 		"key is obliged to leave one of those two marks"
 }
 
+// confirmFirstProbeDelay is how long the editor is left alone after the post,
+// before this side reads anything back.
+//
+// Zero for every chord but the quit character: an ordinary key is queued while
+// Emacs executes lisp and read when it next looks, so probing immediately costs
+// it nothing, and the owner's focus is held for the whole of this.
+func confirmFirstProbeDelay(chord Chord) time.Duration {
+	if chord.Interrupting {
+		return keyDeliveryQuietWindow
+	}
+	return 0
+}
+
+// confirmPollInterval is how often the marks are re-read for one chord.
+//
+// An interrupting chord is re-read slowly for the reason it is left alone in
+// the first place: each probe is a window in which Emacs is executing this
+// harness's lisp, and a quit character that lands in one of those windows is
+// swallowed as an interrupt instead of read as a key.
+func confirmPollInterval(chord Chord) time.Duration {
+	if chord.Interrupting {
+		return keyDeliveryQuietPollInterval
+	}
+	return keyDeliveryPollInterval
+}
+
+// judgeWithEffectProbe takes the marks' verdict and downgrades a definite
+// ABSENCE where the EFFECT probe would not answer.
+//
+// A press judged against two accounts is only as definite as the weaker one. An
+// effect probe that errored has said nothing about the key, and the marks alone
+// cannot separate "the key never arrived" from "the key arrived, was taken as
+// an interrupt, and quit the very probe that was asking" — which is the shape
+// this harness printed six times in the 2026-09-13 12:13 sweep. Undetermined is
+// the reading that blames nobody, and it is the honest one here.
+func judgeWithEffectProbe(chord Chord, before, after InputMark, effectFailure string) (DeliveryVerdict, string) {
+	verdict, reason := judgeDelivery(chord, before, after)
+	if verdict != DeliveryAbsent || effectFailure == "" {
+		return verdict, reason
+	}
+	return DeliveryUndetermined, reason + ", BUT the effect this key was pressed for could not be read either (" +
+		effectFailure + "), so the two accounts of this press are one silence and one failure and neither " +
+		"names anybody"
+}
+
 // DeliveryEffect is the thing a key is pressed FOR, offered as the account of
 // its arrival.
 //
@@ -220,10 +288,16 @@ type DeliveryEffect struct {
 	// What names the effect in the words a finding carries, e.g. "the standing
 	// minibuffer `Repository: ` closed".
 	What string
-	// Observed answers whether it has happened yet. It is polled inside the
-	// helper's hold, so it must be cheap and must never block for longer than
-	// the poll interval.
-	Observed func(context.Context) bool
+	// Observed answers whether it has happened yet, and SAYS SO WHEN IT
+	// CANNOT ANSWER. It is polled inside the helper's hold, so it must be
+	// cheap and must never block for longer than the poll interval.
+	//
+	// THE ERROR IS NOT DECORATION. This probe used to answer a bare bool, so a
+	// reading the editor refused came back as "the effect has not happened"
+	// and the press was judged absent on the strength of a question nobody
+	// answered. An error here downgrades the verdict to undetermined
+	// (judgeWithEffectProbe) instead.
+	Observed func(context.Context) (bool, error)
 }
 
 // recentKeysUniform says whether a rendered `recent-keys` is the same key over
