@@ -827,9 +827,11 @@ func rt8PressAct(ctx context.Context, t *testing.T, client *Client, driver *KeyD
 	if !strings.Contains(keys, recorded) {
 		where, _ := client.ReadString(ctx, `(format "buffer=%s evil-state=%s major-mode=%s"
         (buffer-name) (or (bound-and-true-p evil-state) "none") major-mode)`)
+		reading, foreign := readChordRing(keys, wsActEscape.recorded(), recorded)
 		t.Fatalf("pressed `%s` and Emacs's own (recent-keys) does not contain %q, so the sequence never "+
-			"reached its keymap and the act did not happen. recent-keys ends with: %s. It was pressed at %s",
-			spelled, recorded, tail(keys, 120), where)
+			"reached its keymap and the act did not happen. recent-keys ends with: %s. It was pressed at %s. %s",
+			spelled, recorded, tail(keys, 120), where,
+			wsActRingNote(reading, foreign, spelled, wsActEscape.Emacs))
 	}
 
 	prompt, err := wsActMinibufferPrompt(ctx, client)
