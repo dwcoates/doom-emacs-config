@@ -83,6 +83,14 @@ type controller struct {
 	// workspace until it adopts one, whatever the intent manifest says or has
 	// not yet said.
 	joiningMode bool
+	// manifestSeen reports that the incumbent's intent manifest has actually
+	// been READ. Until it has, this daemon does not know which workspaces are
+	// being handed to it, so "not armed" says nothing: the manifest is written
+	// AFTER the successor's address is announced, and a participant that dials
+	// the announced address at once arrives ahead of it. Once it is read the
+	// transfer set is known and a workspace it does not name genuinely has no
+	// transfer announced.
+	manifestSeen bool
 	// transferred is every workspace this daemon handed to a successor, mapped
 	// to the successor's address. It is what makes a per-workspace rpc refuse
 	// with `transferring_away{address}` instead of serving a workspace this
