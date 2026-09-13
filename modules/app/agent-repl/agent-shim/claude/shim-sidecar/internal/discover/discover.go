@@ -216,6 +216,15 @@ func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer
 // ConfigRoots returns the resolved config roots.
 func (d *Discoverer) ConfigRoots() []string { return d.configRoots }
 
+// SpoolRoot returns the resolved task-spool root.
+//
+// IT IS THE RESOLVED SPELLING, NOT THE FLAG'S. `--spool-root /tmp` is globbed
+// as `/private/tmp` on macOS, and every discovered `path` a log record carries
+// is spelled that way — so a boot record naming the flag's spelling names a
+// root that matches none of the paths under it, which is exactly the join an
+// operator reads the boot record to make.
+func (d *Discoverer) SpoolRoot() string { return d.spoolRoot }
+
 // Scan performs a full glob-based discovery across every root. It is the
 // sidecar's only discovery path, run on RescanInterval.
 func (d *Discoverer) Scan() []Target {
