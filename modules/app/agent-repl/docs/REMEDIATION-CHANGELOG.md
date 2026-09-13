@@ -11,6 +11,12 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- realtest harness: a chord that did not reach its command is classified off Emacs's ring (`chordring.go`), so a leader eaten by input the run never sent names neither the binding nor the key driver (realtest 8's `SPC j m p`)
+
+- realtest harness: a `C-g` pressed at a standing minibuffer read is judged by the ring again (`wsActQuit.MarkFree` false, `wsActDismissNotDelivered`), because the read records it (realtests 6-8 named nobody for three keys that never arrived)
+
+- realtest harness: the chord-credit check reads `(recent-keys)` in Emacs's own spelling (`Chord.Recorded`, `SpellRecorded`), so `SPC TAB n` and `SPC TAB f` are credited against `<tab>` rather than `TAB` (realtests 5 and 7 called their own prompts uncreditable)
+
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
 - store/realtest harness: `bin/store-reset.sh` boots the kept-alive services out and bootstraps them back from their installed plists instead of killing them and waiting for a pid launchd immediately replaces, and a realtest run no longer copies `events.db` aside (store growth investigation, three 180s reset timeouts and 4.6GB of `realtest-bak` clones)

@@ -55,33 +55,42 @@ import (
 //     defect accuses an innocent system and buries a real hole in the key
 //     driver.
 //
-// AND THERE IS A THIRD, WHICH IS THE ONE THE 2026-09-13 SWEEP ACTUALLY HIT.
-// This file used to claim Emacs itself tells the first two apart, on the rule
-// that an arriving `C-g` must leave `(recent-keys)` grown or `quit-flag`
-// armed. THE RULE IS FALSE FOR THE QUIT CHARACTER, in both halves, and
-// delivery.go now carries the `keyboard.c` derivation: the quit character is
-// intercepted before `record_char` ever sees it, and the flag it arms is taken
-// by the very read that is standing, microseconds later. A `C-g` that arrives
-// and works leaves neither mark. So the marks cannot judge it at all, and the
-// harness that judged it by them printed both findings at once for the same
-// press — "HARNESS KEY DELIVERY FAILED, AND IT IS NOT A PRODUCT FINDING"
-// immediately followed by "DEVIATION, AND A PRODUCT FINDING" — six times in
-// one sweep.
+// AND THE ORACLE THAT TELLS THEM APART WAS WRONG TWICE, IN OPPOSITE
+// DIRECTIONS. It first read the quit character like every other key, and
+// reported three arriving presses as dropped. The 2026-09-13 correction went
+// past the truth: it declared `C-g` unreadable ALWAYS, on the `keyboard.c`
+// interrupt path, and then named nobody for presses that had genuinely not
+// arrived. Both are settled by one distinction:
 //
-// SO THE PRESS IS JUDGED BY ITS EFFECT, AND THE JUDGEMENT IS MADE ONCE. The
-// `C-g` is pressed through `KeyDriver.PressWithEffect` with the effect it is
-// pressed for — this prompt closing — polled inside the helper's hold. That
-// one observation settles both questions, and the stage it produces is the
-// run's ONLY verdict on the press:
+//   - WITH EMACS BUSY and no key read standing, the quit character is handed
+//     to `handle_interrupt` before `record_char` and leaves no mark.
+//   - WITH A MINIBUFFER READ STANDING, which is the only moment this file
+//     presses it, `read_key_sequence` reads it as an ordinary key sequence
+//     bound to `abort-minibuffers` / `minibuffer-keyboard-quit`. It IS
+//     recorded, and `(recent-keys)` grows.
+//
+// The 2026-09-13 11:10 sweep carries both halves of the proof: realtest 5's
+// ring ends `... SPC <tab> n C-g <escape>` for the press that closed its
+// prompt, and realtests 6, 7 and 8 gained nothing for three presses whose
+// prompts stayed up.
+//
+// SO THE PRESS IS JUDGED BY TWO FACTS, AND THE JUDGEMENT IS MADE ONCE: whether
+// `(recent-keys)` gained the `C-g`, and whether the prompt closed. The chord is
+// pressed through `KeyDriver.PressWithEffect` with the effect it is pressed for
+// — this prompt closing — polled inside the helper's hold, so one observation
+// settles both, and the stage it produces is the run's ONLY verdict:
 //
 //   - the prompt closed: `wsActDismissByChord`, and the chord is proven;
-//   - the helper could not post at all: `wsActDismissNotPosted`, a HARNESS
-//     finding, and no word about the product;
-//   - Emacs's marks DID show the key arriving and the prompt still stood:
-//     `wsActDismissByEval`, a PRODUCT finding;
-//   - the key was posted, the prompt stood, and the quit character leaves no
-//     mark to confirm it by: `wsActDismissUndetermined`, which names neither
-//     system and carries the helper's own receipt for the owner to rule on.
+//   - the key never entered Emacs's input, whether the helper refused to post
+//     or the ring never grew: `wsActDismissNotDelivered`, a HARNESS finding,
+//     and no word about the product;
+//   - the ring DID gain the `C-g` and the prompt still stood:
+//     `wsActDismissByEval`, a PRODUCT finding, because a user at that prompt
+//     has no eval channel;
+//   - the editor could not answer for its own input at all — a probe that
+//     failed, or a ring of one key repeated that cannot render a change:
+//     `wsActDismissUndetermined`, which names neither system and carries the
+//     helper's own receipt for the owner to rule on.
 
 const (
 	// wsActChordDismissCeiling is how long a real `C-g` may take to close a
@@ -132,14 +141,15 @@ const (
 	wsActDismissByEval
 	// wsActDismissFailed: neither channel closed it.
 	wsActDismissFailed
-	// wsActDismissNotPosted: the press itself failed, so the key never left
-	// this side and the editor's quit handling was never asked to do
-	// anything. A HARNESS finding, and the press's own error says what went
-	// wrong.
-	wsActDismissNotPosted
-	// wsActDismissUndetermined: the key was posted, the prompt stood, and the
-	// quit character leaves no mark that could confirm it arrived. Neither
-	// system is named; the owner rules on it.
+	// wsActDismissNotDelivered: the key never entered Emacs's input — the
+	// helper refused to post it, or it was posted and Emacs's own ring never
+	// grew — so the editor's quit handling was never asked to do anything. A
+	// HARNESS finding, and the press's own error says which of the two it was.
+	wsActDismissNotDelivered
+	// wsActDismissUndetermined: the prompt stood and the editor could not
+	// answer for its own input — a probe that failed, or a ring of one key
+	// repeated, which renders identically whether or not the key was appended.
+	// Neither system is named; the owner rules on it.
 	wsActDismissUndetermined
 )
 
@@ -185,20 +195,23 @@ func wsActDismissNote(stage wsActDismissStage, prompt string, evalAttempts int) 
 			"emacsclient eval scheduling `abort-minibuffers`, which took %d attempt(s). The editor is clean "+
 			"for the acts that follow, but the chord did not do it, and a user at that prompt has no eval "+
 			"channel", prompt, wsActChordDismissCeiling, evalAttempts)
-	case wsActDismissNotPosted:
+	case wsActDismissNotDelivered:
 		return fmt.Sprintf("HARNESS KEY DELIVERY FAILED, AND IT IS NOT A PRODUCT FINDING: the `C-g` that "+
-			"should have dismissed %q was never posted — the press reported its own failure above, and the "+
+			"should have dismissed %q never entered Emacs's input — either the helper refused to post it or "+
+			"it was posted and Emacs's own `(recent-keys)` never gained it, and the press's own error above "+
+			"says which. A `C-g` pressed at a standing minibuffer read IS recorded, because the read reads it "+
+			"as an ordinary key sequence, so a ring that did not grow is a key that did not arrive. The "+
 			"editor's quit handling was therefore never asked to do anything. The prompt was aborted through "+
 			"the read channel instead, which took %d attempt(s); the defect is in this harness's key driver",
 			prompt, evalAttempts)
 	case wsActDismissUndetermined:
 		return fmt.Sprintf("UNDETERMINED, AND NAMED AGAINST NEITHER SYSTEM: a real `C-g` was posted while %q "+
-			"stood, the prompt did not close within %s, and the quit character leaves NO mark this side can "+
-			"read it by — it is intercepted before `record_char` and the `quit-flag` it arms is taken by the "+
-			"standing read itself (delivery.go carries the derivation). So this run cannot say whether the "+
-			"key reached Emacs and the read refused to abort, or the key was dropped after the post. The "+
-			"prompt was aborted through the read channel instead, which took %d attempt(s); the helper's own "+
-			"receipt is beside this note and the owner rules on it",
+			"stood, the prompt did not close within %s, and Emacs could not answer for its own input — the "+
+			"mark probe failed, or its ring is one key repeated and cannot render an append (delivery.go "+
+			"carries the derivation). So this run cannot say whether the key reached Emacs and the read "+
+			"refused to abort, or the key never arrived. The prompt was aborted through the read channel "+
+			"instead, which took %d attempt(s); the helper's own receipt is beside this note and the owner "+
+			"rules on it",
 			prompt, wsActChordDismissCeiling, evalAttempts)
 	case wsActDismissFailed:
 		return fmt.Sprintf("MINIBUFFER COULD NOT BE DISMISSED: %q is still standing after a real `C-g` (%s) and "+

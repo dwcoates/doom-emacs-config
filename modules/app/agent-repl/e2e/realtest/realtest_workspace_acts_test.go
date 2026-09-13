@@ -103,8 +103,15 @@ var (
 		Why:       "Doom's leader key; on its own it only opens the leader map",
 	}
 	// wsActTab is the `TAB` of the `SPC TAB` workspace prefix.
+	//
+	// EMACS RECORDS IT AS `<tab>`, NOT `TAB`. The physical tab key on this GUI
+	// build arrives as the function key symbol `tab`, which
+	// `key-description` renders `<tab>`; only the ASCII character 9 that
+	// `(kbd "TAB")` produces renders "TAB". Chord.Recorded carries the
+	// difference and the sweep that made it necessary.
 	wsActTab = Chord{
 		Emacs:     "TAB",
+		Recorded:  "<tab>",
 		Keycode:   48,
 		Modifiers: nil,
 		Why:       "the workspace prefix of the leader map; on its own it only opens that prefix",
@@ -151,14 +158,24 @@ var (
 		Keycode:   5,
 		Modifiers: []string{"control"},
 		Why:       "aborts the minibuffer read the chord under test opened, leaving no half-finished command",
-		// THE QUIT CHARACTER LEAVES NO INPUT MARK on this build, so its
-		// delivery cannot be judged the way every other key's is. It is
-		// judged by the effect instead (delivery.go carries the `keyboard.c`
-		// derivation and the sweep that made this necessary).
-		MarkFree: true,
-		MarkFreeWhy: "`kbd_buffer_store_buffered_event` hands the quit character to `handle_interrupt` " +
-			"instead of storing it, so `record_char` never records it and `(recent-keys)` cannot grow; and " +
-			"the `quit-flag` it arms is taken by the standing read microseconds later, so the flag reads down",
+		// IT IS RECORDED, BECAUSE IT IS ONLY EVER PRESSED AT A STANDING
+		// MINIBUFFER READ. The `handle_interrupt` path that swallows a quit
+		// character before `record_char` is the BUSY-EMACS path: with a read
+		// standing, `read_key_sequence` reads `C-g` as an ordinary key
+		// sequence and dispatches it to `abort-minibuffers` /
+		// `minibuffer-keyboard-quit`, so `(recent-keys)` grows exactly as it
+		// does for every other key. This chord's only caller is
+		// `wsActAbortMinibuffer`, which presses it at a prompt it just read,
+		// so `MarkFree` is FALSE and a ring that did not grow is a key that
+		// did not arrive.
+		//
+		// The 2026-09-13 11:10 sweep settles it inside one run: realtest 5's
+		// ring ends `... SPC <tab> n C-g <escape>` for the press that closed
+		// its prompt, and realtests 6, 7 and 8 gained nothing at all for
+		// presses whose prompts stayed up. Reading that silence as "the quit
+		// character cannot be read" hid three undelivered keys behind a note
+		// that named nobody.
+		MarkFree: false,
 		// A quit is a return to rest, not an advance: the second one aborts
 		// the read the first one did not, or signals quit at top level, which
 		// is what a `C-g` at rest already does. It is only ever pressed here
@@ -788,9 +805,17 @@ func wsActProveChord(ctx context.Context, t *testing.T, client *Client, driver *
 	if !reached {
 		where, _ := client.ReadString(ctx, `(format "buffer=%s evil-state=%s major-mode=%s"
         (buffer-name) (or (bound-and-true-p evil-state) "none") major-mode)`)
+		// WHICH SYSTEM THIS NAMES IS READ OFF THE RING, not assumed. The
+		// sequence is preceded by this run's own `<escape>`, so a ring that
+		// ends with the sequence but carries something else in the escape's
+		// place is carrying input the run did not send — and that key ate the
+		// leader. chordring.go carries the reading and the sweep that made it
+		// necessary.
+		reading, foreign := readChordRing(keys, wsActEscape.recorded(), SpellRecorded(sequence))
 		note := fmt.Sprintf("CHORD DID NOT REACH ITS COMMAND: `%s` should have put %q up and the "+
-			"minibuffer holds %q instead. Emacs's own (recent-keys) ends with: %s. It was pressed at %s",
-			wsActSpell(sequence), wantPrompt, prompt, tail(keys, 120), where)
+			"minibuffer holds %q instead. Emacs's own (recent-keys) ends with: %s. It was pressed at %s. %s",
+			wsActSpell(sequence), wantPrompt, prompt, tail(keys, 120), where,
+			wsActRingNote(reading, foreign, wsActSpell(sequence), wsActEscape.Emacs))
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
 	} else {
@@ -970,10 +995,12 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 		arrived = receipt.Verdict == DeliveryArrived
 		switch {
 		case pressErr != nil:
-			note := fmt.Sprintf("C-g COULD NOT BE POSTED while %q was standing: %v. keydriver.swift will not "+
-				"post to an Emacs the window server does not report as frontmost with a focused window, "+
-				"because AppKit dispatches a key event only to a key window and drops such a post silently. "+
-				"The read channel is used below and this delivery failure is the finding",
+			note := fmt.Sprintf("C-g DID NOT REACH EMACS while %q was standing: %v. Either keydriver.swift "+
+				"refused the post — it will not post to an Emacs the window server does not report as "+
+				"frontmost with a focused window, because AppKit dispatches a key event only to a key window "+
+				"and drops such a post silently — or it posted and Emacs's own `(recent-keys)` never gained "+
+				"the key, which at a standing minibuffer read is an absence because the read records what it "+
+				"reads. The read channel is used below and this delivery failure is the finding",
 				prompt, pressErr)
 			manifest.Notes = append(manifest.Notes, note)
 			t.Errorf("%s", note)
@@ -1004,15 +1031,18 @@ func wsActAbortMinibuffer(ctx context.Context, t *testing.T, client *Client, dri
 			t.Logf("eval abort %d of the standing minibuffer %q did not answer: %v", attempt, prompt, evalErr)
 		}
 		if wsActMinibufferGone(ctx, client, wsActEvalDismissCeiling) {
-			// ONE VERDICT, CHOSEN ONCE. `reported` means the key never left
-			// this side; `arrived` means Emacs's own marks showed it landing
-			// and the read refused to abort anyway, which is the product; and
-			// the remaining case is the quit character's unreadable one, which
-			// names nobody.
+			// ONE VERDICT, CHOSEN ONCE. `reported` means the key never
+			// entered Emacs's input — the helper refused it, or it was posted
+			// and the ring never grew, which at a standing read is an absence
+			// because the read records what it reads; `arrived` means Emacs's
+			// own marks showed it landing and the read refused to abort
+			// anyway, which is the product; and the remaining case is an
+			// editor that could not answer for its own input, which names
+			// nobody.
 			stage := wsActDismissUndetermined
 			switch {
 			case reported:
-				stage = wsActDismissNotPosted
+				stage = wsActDismissNotDelivered
 			case arrived:
 				stage = wsActDismissByEval
 			}
