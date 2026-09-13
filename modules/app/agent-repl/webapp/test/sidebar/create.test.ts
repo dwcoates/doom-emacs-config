@@ -32,9 +32,6 @@ function raw(over: Partial<Parameters<typeof collect>[0]> = {}): Parameters<type
     beforeWsMerge: "",
     postprocessingPrompt: "",
     oneShotPrompt: "",
-    openPr: false,
-    selfCertified: false,
-    addToMergeQueue: false,
     parent: false,
     fork: false,
     model: "",
@@ -116,14 +113,9 @@ describe("what the form collects", () => {
     expect(collect(raw({ oneShotMode: true }))).toBeNull();
   });
 
-  it("takes self-merge as the default finish", () => {
+  it("collects a one-shot as its commission and nothing else", () => {
     const form = collect(raw({ oneShotMode: true, oneShotPrompt: "do it" }))?.form;
-    expect(form?.case === "oneShot" ? form.finish.case : null).toBe("selfMerge");
-  });
-
-  it("takes the PR finish when it is picked", () => {
-    const form = collect(raw({ oneShotMode: true, oneShotPrompt: "do it", openPr: true }))?.form;
-    expect(form?.case === "oneShot" ? form.finish.case : null).toBe("openPr");
+    expect(form).toEqual({ case: "oneShot", prompt: "do it" });
   });
 
   it("passes the consent through as the flag the request turns into presence", () => {
@@ -185,7 +177,7 @@ describe("the request the spec becomes", () => {
   it("sets the one-shot arm for a one-shot", () => {
     const request = buildCreateWorkspaceRequest({
       repository: REPO,
-      form: { case: "oneShot", prompt: "do it", finish: { case: "selfMerge" } },
+      form: { case: "oneShot", prompt: "do it" },
       allowUngated: false,
     });
     expect(request.form.case).toBe("oneShot");
@@ -194,40 +186,12 @@ describe("the request the spec becomes", () => {
   it("carries the one-shot's commission as its prompt", () => {
     const request = buildCreateWorkspaceRequest({
       repository: REPO,
-      form: { case: "oneShot", prompt: "do it", finish: { case: "selfMerge" } },
+      form: { case: "oneShot", prompt: "do it" },
       allowUngated: false,
     });
     expect(said(request.form.case === "oneShot" ? request.form.value.prompt : undefined)).toBe(
       "do it",
     );
-  });
-
-  it("finishes a one-shot by self-merging when that arm is chosen", () => {
-    const request = buildCreateWorkspaceRequest({
-      repository: REPO,
-      form: { case: "oneShot", prompt: "do it", finish: { case: "selfMerge" } },
-      allowUngated: false,
-    });
-    expect(request.form.case === "oneShot" ? request.form.value.finish.case : null).toBe(
-      "selfMerge",
-    );
-  });
-
-  it("carries the PR's two flags on the open_pr arm", () => {
-    const request = buildCreateWorkspaceRequest({
-      repository: REPO,
-      form: {
-        case: "oneShot",
-        prompt: "do it",
-        finish: { case: "openPr", selfCertified: true, addToMergeQueue: true },
-      },
-      allowUngated: false,
-    });
-    const finish = request.form.case === "oneShot" ? request.form.value.finish : undefined;
-    expect(finish?.case === "openPr" ? [finish.value.selfCertified, finish.value.addToMergeQueue] : null).toEqual([
-      true,
-      true,
-    ]);
   });
 
   it("leaves the parent unset for a top-level create", () => {
