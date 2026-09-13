@@ -179,6 +179,13 @@ decline() {
 
 note() { printf '[realtest] %s\n' "$1"; }
 
+# note_err — the same line, on stderr. For a function whose STDOUT IS ITS
+# ANSWER (`stop_daemons_orderly` prints the pids still standing), where a note
+# on stdout would be read back as part of that answer. It is not a warning and
+# is not formatted as one; the two streams are interleaved in a terminal and
+# both are captured by bin/test-realtest.sh.
+note_err() { printf '[realtest] %s\n' "$1" >&2; }
+
 # ---- the world each realtest demands --------------------------------------
 #
 # One row per realtest: NUMBER|GO TEST NAME|EMACS|DAEMON. This is the RUNNER'S
@@ -595,31 +602,66 @@ preflight_editor_handback() {
 }
 trap preflight_editor_handback EXIT
 
-# How long the daemon is given to exit after SIGTERM before realtest 3 is
-# skipped. A daemon drains its shims on the way out; this is a small multiple
-# of that, not a guess at a machine's speed.
+# How long the daemon is given to exit after it has been asked to stop, before
+# realtest 3 is skipped. A daemon stands its sessions down on the way out; this
+# is a small multiple of that, not a guess at a machine's speed.
 #
 # AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS shortens it for bin/test-realtest.sh,
 # which asserts what happens when a daemon does NOT go and must not wait out a
-# real drain to do it.
+# real stand-down to do it.
 readonly DAEMON_STOP_SECONDS="${AGENT_REPL_REALTEST_DAEMON_STOP_SECONDS:-30}"
 
-# The kill used to stop it. A variable so bin/test-realtest.sh can watch what
-# would be signalled without a process to signal, the same reason
-# AGENT_REPL_REALTEST_EMACSCLIENT exists.
+# The kill used for the FALLBACK stop only. A variable so bin/test-realtest.sh
+# can watch what would be signalled without a process to signal, the same
+# reason AGENT_REPL_REALTEST_EMACSCLIENT exists.
 REALTEST_KILL="${AGENT_REPL_REALTEST_KILL:-/bin/kill}"
 
 
-# stop_daemons_sigterm PID... — SIGTERM every pid named and wait for the
-# daemon to be gone. Prints the pids still standing afterwards (empty when it
-# went). ONE SPELLING of the stop, because the three places that stop a daemon
-# — realtest 3's world, this preflight, and the handback — must not disagree
-# about the signal sent or how long it is given.
+# stop_daemons_orderly PID... — stop the owner's daemon THROUGH ITS OWN DOOR,
+# and wait for it to be gone. Prints the pids still standing afterwards (empty
+# when it went). ONE SPELLING of the stop, because the three places that stop a
+# daemon — this preflight's vendor-guard swap, realtest 3's world, and the
+# sweep-end handback — must not disagree about how a daemon is asked to go or
+# how long it is given.
+#
+# A BARE SIGTERM WAS THE WRONG DOOR, and the daemon said so four times in the
+# harvest of 2026-09-13:
+#
+#   WARN daemon.rollout.reconcile "sessions survived a bounce that wrote no
+#        intent manifest; each one is unaccounted for"
+#   WARN daemon.rollout.reconcile "a session's bounce disposition needs a human"
+#
+# SIGTERM cancels the daemon's serving context and does nothing else: no
+# session is stood down on the way out, so every shim it was holding survives
+# it, and the next daemon adopts processes whose bounce nobody stated an intent
+# for. `UpdateShutdownSchedule{now}` — what the editor's own
+# `agent-repl-frontend-daemon-stop` sends, and therefore what bin/deploy-all.sh
+# reaches through `agent-repl-runtime-restart-await` — stops intake, stands
+# every session down, flushes the in-flight writes and exits. Its successor
+# then adopts nothing and logs an ordinary boot.
+#
+# NO EMACS IS INVOLVED, deliberately: two of the three call sites have just
+# quit the owner's editor, so an editor-mediated stop is unavailable at exactly
+# the moments the stop is needed. The rpc is spoken by
+# `TestOrderlyDaemonStop` (e2e/realtest/daemonstop.go) with the generated
+# client, run the way every other harness check here is run.
+#
+# THE FALLBACK IS SIGTERM, AND IT IS ALWAYS STATED. A daemon that does not
+# answer its own door cannot be left standing — the run's whole point is a
+# stack whose daemon carries the guard — so the signal is still sent, with the
+# reason it came to that said out loud rather than discovered in a log.
 #
 # NO SIGKILL, anywhere. Escalating on the owner's daemon is not a decision this
-# script makes; a daemon that ignored SIGTERM is a finding in its own right.
-stop_daemons_sigterm() {
-    "$REALTEST_KILL" -TERM "$@" >/dev/null 2>&1 || true
+# script makes; a daemon that ignored both is a finding in its own right.
+stop_daemons_orderly() {
+    if run_harness_check TestOrderlyDaemonStop \
+        AGENT_REPL_REALTEST_DAEMON_STOP=1 >&2; then
+        note_err "the daemon was stopped through its own door (UpdateShutdownSchedule{now}); no signal was sent, and it stands its sessions down on the way out"
+    else
+        note_err "the daemon did not accept an orderly stop (output above), so this falls back to SIGTERM"
+        note_err "A DAEMON STOPPED BY SIGNAL STANDS NO SESSION DOWN: its shims survive it, and the next daemon reports each one as an unaccounted-for bounce (daemon.rollout.reconcile)."
+        "$REALTEST_KILL" -TERM "$@" >/dev/null 2>&1 || true
+    fi
     local _i
     for _i in $(seq 1 "$DAEMON_STOP_SECONDS"); do
         if [ -z "$(daemon_pids)" ]; then
@@ -716,10 +758,10 @@ if [ -n "$DAEMON_PID" ]; then
             UNGUARDED_DAEMONS+=("$pid")
         done < <(daemon_pids)
         if [ "${#UNGUARDED_DAEMONS[@]}" -gt 0 ]; then
-            note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the unguarded daemon (pid(s) ${UNGUARDED_DAEMONS[*]}) with SIGTERM"
-            DAEMON_LEFT="$(stop_daemons_sigterm "${UNGUARDED_DAEMONS[@]}")"
+            note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the unguarded daemon (pid(s) ${UNGUARDED_DAEMONS[*]}) through its own door"
+            DAEMON_LEFT="$(stop_daemons_orderly "${UNGUARDED_DAEMONS[@]}")"
             if [ -n "$DAEMON_LEFT" ]; then
-                printf '[realtest] DECLINED: the unguarded daemon (pid(s) %s) was still running %ss after SIGTERM.\n' "$DAEMON_LEFT" "$DAEMON_STOP_SECONDS" >&2
+                printf '[realtest] DECLINED: the unguarded daemon (pid(s) %s) was still running %ss after it was asked to stop.\n' "$DAEMON_LEFT" "$DAEMON_STOP_SECONDS" >&2
                 printf '[realtest] This run does not escalate to SIGKILL on the owner'"'"'s daemon, so nothing is run\n' >&2
                 printf '[realtest] against a stack whose daemon could reach the real vendor. Stop it by hand.\n' >&2
                 exit "$EXIT_DECLINED"
@@ -1025,11 +1067,11 @@ establish_no_daemon() {
         DAEMON_SKIP_REASON="a daemon is running (pid(s) ${pids[*]}) and this realtest measures a startup with the daemon DOWN. Stopping it ends every live session it holds, which the editor takeover does not cover: set AGENT_REPL_REALTEST_STOP_DAEMON=1 to let this run stop it, or stop it deliberately (SPC o C-d from the editor, or kill ${pids[*]}) and run this realtest on its own."
         return 1
     fi
-    note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the daemon (pid(s) ${pids[*]}) with SIGTERM"
+    note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the daemon (pid(s) ${pids[*]}) through its own door"
     local left
-    left="$(stop_daemons_sigterm "${pids[@]}")"
+    left="$(stop_daemons_orderly "${pids[@]}")"
     if [ -n "$left" ]; then
-        DAEMON_SKIP_REASON="the daemon (pid(s) $left) was still running ${DAEMON_STOP_SECONDS}s after SIGTERM. This run does not escalate to SIGKILL on the owner's daemon, so this realtest is skipped rather than run with a daemon up."
+        DAEMON_SKIP_REASON="the daemon (pid(s) $left) was still running ${DAEMON_STOP_SECONDS}s after it was asked to stop (the door it was asked through is stated above). This run does not escalate to SIGKILL on the owner's daemon, so this realtest is skipped rather than run with a daemon up."
         return 1
     fi
     note "the daemon has stopped"
@@ -1199,12 +1241,12 @@ restore_owner_editor() {
             printf '[realtest] which this run was not given permission for: set AGENT_REPL_REALTEST_STOP_DAEMON=1\n' >&2
             printf '[realtest] to let a run stop it, or stop it by hand now (kill %s).\n' "${guarded[*]}" >&2
         else
-            note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the guarded daemon (pid(s) ${guarded[*]}) with SIGTERM so the new editor spawns a real one"
+            note "AGENT_REPL_REALTEST_STOP_DAEMON=1: stopping the guarded daemon (pid(s) ${guarded[*]}) through its own door so the new editor spawns a real one"
             local left
-            left="$(stop_daemons_sigterm "${guarded[@]}")"
+            left="$(stop_daemons_orderly "${guarded[@]}")"
             if [ -n "$left" ]; then
                 daemon_left="$left"
-                printf '[realtest] THE GUARDED DAEMON (pid(s) %s) IS STILL RUNNING %ss after SIGTERM. This run does\n' "$left" "$DAEMON_STOP_SECONDS" >&2
+                printf '[realtest] THE GUARDED DAEMON (pid(s) %s) IS STILL RUNNING %ss after it was asked to stop. This run does\n' "$left" "$DAEMON_STOP_SECONDS" >&2
                 printf '[realtest] not escalate to SIGKILL on the owner'"'"'s daemon, so the editor it launches will adopt\n' >&2
                 printf '[realtest] a FAKE-vendor daemon. Stop it by hand.\n' >&2
             else
