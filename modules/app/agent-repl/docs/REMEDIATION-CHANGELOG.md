@@ -14,6 +14,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 ## Log sweep, sidecar (2026-09-13)
 
 - sidecar: a stop whose spawning call is not known yet is HELD at debug instead of refused at ERROR, and the launch that finally names the call applies it — a stopped run writes no more bytes, so the spool-batch retry edge alone never fired (log sweep, 31 `cancel-terminal` errors, 31 runs left open)
+- sidecar: a claimed w* workflow spool mints a stopped run's cancelled terminal through the same `handler.RunOutput` every other spool uses, so the last converter that could not be asked for one is closed (log sweep, the `declaredResidueHandler` case e9381b182 left open)
 - sidecar: an observed vendor `api_error` is recorded at INFO, not WARN — the request was the vendor's and this conversion succeeded whole (log sweep, 80 `api-error` warns)
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
