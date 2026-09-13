@@ -13,8 +13,18 @@ import (
 // own case: a driver that reads "arrived" off a reading that says nothing is
 // how a harness hole got filed against the editor three times in one sweep.
 func TestJudgeDelivery(t *testing.T) {
+	// An ordinary key: Emacs is obliged to leave a mark for it, so silence is
+	// an absence. The mark-free cases name their own chord.
+	ordinary := Chord{Emacs: "n"}
+	quit := Chord{
+		Emacs:       "C-g",
+		MarkFree:    true,
+		MarkFreeWhy: "the quit character is intercepted before `record_char`",
+	}
+
 	tests := []struct {
 		name        string
+		chord       Chord
 		before      InputMark
 		after       InputMark
 		wantVerdict DeliveryVerdict
@@ -22,6 +32,7 @@ func TestJudgeDelivery(t *testing.T) {
 	}{
 		{
 			name:        "quit-flag coming up is an arrival",
+			chord:       ordinary,
 			before:      InputMark{Keys: "a b c"},
 			after:       InputMark{Keys: "a b c", QuitArmed: true},
 			wantVerdict: DeliveryArrived,
@@ -29,6 +40,7 @@ func TestJudgeDelivery(t *testing.T) {
 		},
 		{
 			name:        "recent-keys changing is an arrival",
+			chord:       ordinary,
 			before:      InputMark{Keys: "a b c"},
 			after:       InputMark{Keys: "a b c ESC"},
 			wantVerdict: DeliveryArrived,
@@ -36,6 +48,7 @@ func TestJudgeDelivery(t *testing.T) {
 		},
 		{
 			name:        "a quit already owed before the press is not read as a drop",
+			chord:       ordinary,
 			before:      InputMark{Keys: "a b c", QuitArmed: true},
 			after:       InputMark{Keys: "a b c", QuitArmed: true},
 			wantVerdict: DeliveryArrived,
@@ -43,6 +56,7 @@ func TestJudgeDelivery(t *testing.T) {
 		},
 		{
 			name:        "neither mark on a ring that could have shown one is an absence",
+			chord:       ordinary,
 			before:      InputMark{Keys: "a b c"},
 			after:       InputMark{Keys: "a b c"},
 			wantVerdict: DeliveryAbsent,
@@ -50,6 +64,7 @@ func TestJudgeDelivery(t *testing.T) {
 		},
 		{
 			name:        "a ring of one repeated key cannot answer",
+			chord:       ordinary,
 			before:      InputMark{Keys: "C-g C-g C-g"},
 			after:       InputMark{Keys: "C-g C-g C-g"},
 			wantVerdict: DeliveryUndetermined,
@@ -57,6 +72,7 @@ func TestJudgeDelivery(t *testing.T) {
 		},
 		{
 			name:        "an editor that would not answer before the press blames nobody",
+			chord:       ordinary,
 			before:      InputMark{ProbeFailure: "connection refused"},
 			after:       InputMark{Keys: "a b c"},
 			wantVerdict: DeliveryUndetermined,
@@ -64,16 +80,36 @@ func TestJudgeDelivery(t *testing.T) {
 		},
 		{
 			name:        "an editor that would not answer after the press blames nobody",
+			chord:       ordinary,
 			before:      InputMark{Keys: "a b c"},
 			after:       InputMark{ProbeFailure: "timed out"},
 			wantVerdict: DeliveryUndetermined,
 			wantReason:  "would not answer after",
 		},
+		{
+			// The 2026-09-13 sweep's whole finding: a working `C-g` leaves
+			// neither mark, and reading that as a drop filed six harness
+			// failures and six product findings for six healthy presses.
+			name:        "neither mark on a mark-free chord blames nobody",
+			chord:       quit,
+			before:      InputMark{Keys: "SPC <tab> n"},
+			after:       InputMark{Keys: "SPC <tab> n"},
+			wantVerdict: DeliveryUndetermined,
+			wantReason:  "NOT obliged to leave either mark",
+		},
+		{
+			name:        "a mark-free chord that does leave a mark still arrived",
+			chord:       quit,
+			before:      InputMark{Keys: "SPC <tab> n"},
+			after:       InputMark{Keys: "SPC <tab> n", QuitArmed: true},
+			wantVerdict: DeliveryArrived,
+			wantReason:  "quit-flag",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			verdict, reason := judgeDelivery(test.before, test.after)
+			verdict, reason := judgeDelivery(test.chord, test.before, test.after)
 
 			if verdict != test.wantVerdict {
 				t.Errorf("verdict on %v then %v = %d, want %d", test.before, test.after, verdict, test.wantVerdict)
@@ -411,12 +447,54 @@ func TestConfirmIsBoundedByAClosedContext(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		driver.confirm(ctx, InputMark{Keys: "a b c"})
+		driver.confirm(ctx, Chord{Emacs: "n"}, InputMark{Keys: "a b c"}, nil)
 	}()
 
 	select {
 	case <-done:
 	case <-time.After(keyDeliveryConfirmCeiling + 5*time.Second):
 		t.Fatal("the confirmation did not return on a cancelled context")
+	}
+}
+
+// A mark-free chord waits on its EFFECT, and the effect is the account it
+// answers with: no mark could have said this, and the press must not need one.
+func TestConfirmSettlesAMarkFreeChordOnItsEffect(t *testing.T) {
+	// Arrange
+	driver := &KeyDriver{Pid: 1, Client: &Client{Socket: "/nonexistent/socket", Scratch: t.TempDir()}}
+	quit := Chord{Emacs: "C-g", MarkFree: true, MarkFreeWhy: "the quit character leaves no mark"}
+	effect := &DeliveryEffect{
+		What:     "the standing minibuffer closed",
+		Observed: func(context.Context) bool { return true },
+	}
+
+	// Act
+	verdict, reason, _, observed := driver.confirm(context.Background(), quit, InputMark{Keys: "a b c"}, effect)
+
+	// Assert
+	if verdict != DeliveryArrived || !observed {
+		t.Errorf("verdict = %d observed = %v, want an arrival settled by the effect: %s", verdict, observed, reason)
+	}
+}
+
+// And an effect that never happens must not be reported as a drop: the marks
+// cannot speak for this chord either way.
+func TestConfirmLeavesAMarkFreeChordUndeterminedWhenItsEffectDoesNotHappen(t *testing.T) {
+	// Arrange
+	driver := &KeyDriver{Pid: 1, Client: &Client{Socket: "/nonexistent/socket", Scratch: t.TempDir()}}
+	quit := Chord{Emacs: "C-g", MarkFree: true, MarkFreeWhy: "the quit character leaves no mark"}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	effect := &DeliveryEffect{
+		What:     "the standing minibuffer closed",
+		Observed: func(context.Context) bool { return false },
+	}
+
+	// Act
+	verdict, _, _, observed := driver.confirm(ctx, quit, InputMark{Keys: "a b c"}, effect)
+
+	// Assert
+	if verdict == DeliveryAbsent || observed {
+		t.Errorf("verdict = %d observed = %v, want the press blamed on nobody", verdict, observed)
 	}
 }

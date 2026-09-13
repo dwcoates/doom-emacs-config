@@ -79,6 +79,39 @@ type Chord struct {
 	// RepeatWhy says why this chord is, or is not, repeatable, so a reader of
 	// a finding can check the judgement rather than take it.
 	RepeatWhy string
+	// MarkFree says Emacs is NOT OBLIGED to leave an input mark for this
+	// chord, so the absence of both marks says nothing about whether it
+	// arrived.
+	//
+	// The quit character is the one that has this shape on this build, and it
+	// is not a special case anybody chose: `kbd_buffer_store_buffered_event`
+	// hands a `quit_char` to `handle_interrupt` INSTEAD of storing it, so
+	// `read_char` never returns it and `record_char` never records it —
+	// `(recent-keys)` cannot grow. `handle_interrupt` arms `quit-flag`, and on
+	// the NS build (`keyboard.c` guards `quit_throw_to_read_char` with
+	// `#ifndef HAVE_NS`) the flag is taken by the very read that is standing,
+	// microseconds later and far inside one poll interval — so `quit-flag`
+	// reads down. A working `C-g` therefore leaves NEITHER mark, which is
+	// exactly the reading delivery.go used to call a dropped key: the
+	// 2026-09-13 sweep reported six `C-g` presses as undelivered while the
+	// helper's own receipt said frontmost, focused, key window, posted.
+	//
+	// A mark-free chord is judged by its EFFECT instead (DeliveryEffect), and
+	// where no effect is supplied its delivery is UNDETERMINED and blamed on
+	// nobody.
+	MarkFree bool
+	// MarkFreeWhy says why this chord leaves no mark, so a reader of a finding
+	// can check the judgement rather than take it.
+	MarkFreeWhy string
+}
+
+// markFreeWhy is MarkFreeWhy with the answer every mark-free chord that says
+// nothing gives.
+func (c Chord) markFreeWhy() string {
+	if c.MarkFreeWhy != "" {
+		return c.MarkFreeWhy
+	}
+	return "this chord is recorded as leaving no input mark, and no reason was given"
 }
 
 // repeatWhy is RepeatWhy with the answer every chord that says nothing gives.
@@ -197,6 +230,23 @@ func (d *KeyDriver) Press(ctx context.Context, chord Chord) error {
 	return err
 }
 
+// PressWithEffect posts one chord and confirms it by the EFFECT it is pressed
+// for, alongside Emacs's own input marks.
+//
+// It exists for the mark-free chords (Chord.MarkFree): a key Emacs is not
+// obliged to record cannot be confirmed by the marks, and the thing the caller
+// is about to look at anyway — the standing minibuffer closing — is the only
+// account of that key there is. Supplying it here rather than checking it
+// afterwards is what keeps the verdict SINGLE-VALUED: one observation settles
+// both "did the key arrive" and "did it do what it is pressed for", so the run
+// cannot report a delivery failure and a product finding about the same press.
+//
+// The effect is polled INSIDE the hold, so the target keeps its key window for
+// exactly as long as the answer takes and no longer.
+func (d *KeyDriver) PressWithEffect(ctx context.Context, chord Chord, effect *DeliveryEffect) (DeliveryReceipt, error) {
+	return d.press(ctx, chord, effect)
+}
+
 // DrainNotes takes what the presses have said about themselves and empties the
 // list, so a caller can put them in its manifest without reporting any of them
 // twice.
@@ -219,6 +269,12 @@ func (d *KeyDriver) DrainNotes() []string {
 // the editor, and the receipt says so rather than claiming a delivery nobody
 // checked.
 func (d *KeyDriver) PressWithReceipt(ctx context.Context, chord Chord) (DeliveryReceipt, error) {
+	return d.press(ctx, chord, nil)
+}
+
+// press is the one press path; PressWithReceipt and PressWithEffect differ
+// only in whether an effect is supplied to confirm a mark-free chord by.
+func (d *KeyDriver) press(ctx context.Context, chord Chord, effect *DeliveryEffect) (DeliveryReceipt, error) {
 	if d.helper == "" {
 		return DeliveryReceipt{Chord: chord}, fmt.Errorf("the key helper has not been built; call Build first")
 	}
@@ -254,22 +310,24 @@ func (d *KeyDriver) PressWithReceipt(ctx context.Context, chord Chord) (Delivery
 		// application the moment the hold ends, so a reading taken afterwards
 		// would always say unfocused.
 		var focus FocusReading
+		observed := false
 		verdict, reason := DeliveryUndetermined, "the helper never reported the key as posted"
 		out, err := d.post(ctx, chord, func() {
-			verdict, reason, after = d.confirm(ctx, before)
+			verdict, reason, after, observed = d.confirm(ctx, chord, before, effect)
 			focus = ReadEmacsFocus(ctx, d.Client)
 		})
 
 		receipt = DeliveryReceipt{
-			Chord:    chord,
-			Verdict:  verdict,
-			Reason:   reason,
-			Attempts: attempt,
-			Helper:   out,
-			Before:   before,
-			After:    after,
-			Elapsed:  time.Since(started),
-			Focus:    focus,
+			Chord:          chord,
+			Verdict:        verdict,
+			Reason:         reason,
+			Attempts:       attempt,
+			Helper:         out,
+			Before:         before,
+			After:          after,
+			Elapsed:        time.Since(started),
+			Focus:          focus,
+			EffectObserved: observed,
 		}
 		if err != nil {
 			return receipt, err
@@ -298,26 +356,37 @@ func (d *KeyDriver) PressWithReceipt(ctx context.Context, chord Chord) (Delivery
 // the reading is one that more time cannot resolve — so the ordinary press
 // gives the owner's focus back in milliseconds. A probe that would not answer
 // is retried until the ceiling, because that one IS transient.
-func (d *KeyDriver) confirm(ctx context.Context, before InputMark) (DeliveryVerdict, string, InputMark) {
+// AN EFFECT, WHERE ONE IS SUPPLIED, IS THE STRONGEST ACCOUNT THERE IS and is
+// asked first: a key whose effect has happened arrived, whatever the marks say
+// or fail to say.
+func (d *KeyDriver) confirm(ctx context.Context, chord Chord, before InputMark,
+	effect *DeliveryEffect) (DeliveryVerdict, string, InputMark, bool) {
 	deadline := time.Now().Add(keyDeliveryConfirmCeiling)
+	var after InputMark
 	for {
-		after := ReadInputMark(ctx, d.Client)
-		verdict, reason := judgeDelivery(before, after)
-		if verdict == DeliveryArrived {
-			return verdict, reason, after
+		if effect != nil && effect.Observed != nil && effect.Observed(ctx) {
+			return DeliveryArrived, "the key's own effect happened: " + effect.What, after, true
 		}
-		if verdict == DeliveryUndetermined && before.ProbeFailure == "" && after.ProbeFailure == "" {
+		after = ReadInputMark(ctx, d.Client)
+		verdict, reason := judgeDelivery(chord, before, after)
+		if verdict == DeliveryArrived {
+			return verdict, reason, after, false
+		}
+		if verdict == DeliveryUndetermined && before.ProbeFailure == "" && after.ProbeFailure == "" && effect == nil {
 			// The ring cannot distinguish this press, and it will not start
 			// being able to. Holding focus out to the ceiling for a reading
 			// that cannot change would cost the owner's desktop for nothing.
-			return verdict, reason, after
+			// WITH AN EFFECT TO WAIT ON IT IS A DIFFERENT QUESTION: that one
+			// CAN change, and the hold is what keeps the target's key window
+			// open long enough for it to.
+			return verdict, reason, after, false
 		}
 		if ctx.Err() != nil || !time.Now().Before(deadline) {
-			return verdict, reason, after
+			return verdict, reason, after, false
 		}
 		select {
 		case <-ctx.Done():
-			return verdict, reason, after
+			return verdict, reason, after, false
 		case <-time.After(keyDeliveryPollInterval):
 		}
 	}
