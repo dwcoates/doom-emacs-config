@@ -34,6 +34,13 @@ See `docs/REALTEST-PLAN.md` for run status.
 | 2026-09-13 | Warn or error for the ones that keep their weight? | ERROR | A warning that nobody may leave standing is an error in everything but name, and the standing order is zero warnings; these are faults, not conventions | Set those three records back to `Level: "warn"` |
 | 2026-09-13 | The failed-recreate record is unreachable from a test (every filesystem state that fails the open also fails the unlink). Ship it untested, add a seam, or drop it? | Add the `reopenAfterNuke` seam | Dropping the record would leave the one branch with no database at all silent, and shipping it untested is the coverage rule this module holds everything else to | Inline `openAt` at that call site and delete the variable |
 
+## The talkative run's output bound, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The sidecar warned `run-output-bound` three times in one session ("the run has said more than 1048576 bytes"). Raise the bound, or re-level? | Re-level to INFO | The terminal the record is about CARRIES the omitted count, so no reader is misled and nothing is silently lost; a run saying more than a megabyte is ordinary, not a defect | Restore `handleWarn` at `agent-shim/claude/shim-sidecar/internal/handler/runoutput.go` |
+| 2026-09-13 | Keep the record at all? | Yes, with both counts | It is the only place the operator learns a terminal is partial and by how much, and dropping it would make the omission invisible outside the terminal | Delete the `Log` call in `RunOutput.Remember` |
+
 ## The adopt that outruns the intent manifest, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
