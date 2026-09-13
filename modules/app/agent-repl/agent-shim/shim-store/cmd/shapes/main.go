@@ -11,6 +11,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -69,27 +70,36 @@ func run(socket, kind string, limit uint32, example bool) error {
 	if failure := res.Msg.GetFailure(); failure != nil {
 		return fmt.Errorf("the store refused the listing: %s", failure.GetDetail())
 	}
-	print(res.Msg.GetSuccess().GetShapes(), example)
+	render(os.Stdout, res.Msg.GetSuccess().GetShapes(), example)
 	return nil
 }
 
-// print renders the catalog. An empty catalog says so rather than printing
+// render writes the catalog to w. An empty catalog says so rather than printing
 // nothing, because "no shapes" and "the tool did not run" must not look alike.
-func print(shapes []*storev1.ResidueShapeRow, example bool) {
+func render(w io.Writer, shapes []*storev1.ResidueShapeRow, example bool) {
 	if len(shapes) == 0 {
-		fmt.Println("the residue shape catalog is empty")
+		fmt.Fprintln(w, "the residue shape catalog is empty")
 		return
 	}
 	for _, s := range shapes {
-		fmt.Printf("%s  count=%d  kind=%s\n", s.GetShapeHash()[:min(12, len(s.GetShapeHash()))], s.GetCount(), s.GetKind())
-		fmt.Printf("  first_seen=%s  last_seen=%s\n", millis(s.GetFirstSeenMs()), millis(s.GetLastSeenMs()))
-		fmt.Printf("  structure: %s\n", s.GetKeyStructure())
+		hash := s.GetShapeHash()
+		if len(hash) > shortHash {
+			hash = hash[:shortHash]
+		}
+		fmt.Fprintf(w, "%s  count=%d  kind=%s\n", hash, s.GetCount(), s.GetKind())
+		fmt.Fprintf(w, "  first_seen=%s  last_seen=%s\n", millis(s.GetFirstSeenMs()), millis(s.GetLastSeenMs()))
+		fmt.Fprintf(w, "  structure: %s\n", s.GetKeyStructure())
 		if example {
-			fmt.Printf("  example:   %s\n", s.GetFirstExample())
+			fmt.Fprintf(w, "  example:   %s\n", s.GetFirstExample())
 		}
 	}
-	fmt.Printf("\n%d shape(s)\n", len(shapes))
+	fmt.Fprintf(w, "\n%d shape(s)\n", len(shapes))
 }
+
+// shortHash is how much of a digest identifies a row on screen. Twelve hex
+// characters is what every other tool in this repo abbreviates a digest to, and
+// the full hash is still what the rpc filters and the table keys on.
+const shortHash = 12
 
 func millis(ms int64) string { return time.UnixMilli(ms).Format(time.RFC3339) }
 
