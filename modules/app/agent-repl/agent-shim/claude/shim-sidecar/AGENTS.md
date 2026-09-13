@@ -293,6 +293,15 @@ because neither spelling may make a spool invisible.
   `tail.KindResidueSpool` so its bytes land whole as residue. Dropping the
   file from discovery, which this package used to do, is the one outcome the
   mandate forbids.
+- A TRANSCRIPT THAT IS GONE BEFORE ITS FIRST BYTE IS AN ORDINARY END, NOT A
+  HELD ATTRIBUTION (owner ruling, 2026-09-13). Workspace attribution is the
+  FIRST thing done to a discovered transcript, and a vendor session directory
+  deleted between the scan and that read leaves nothing to attribute and nothing
+  to wait for — no bytes were skipped, because none were ever read. So an
+  `fs.ErrNotExist` from the attribution read is stated at INFO with
+  `reason=transcript_vanished`, once per file, and summarized when it is startup
+  backlog. A transcript that is PRESENT and cannot be attributed keeps its
+  WARNING: that one is a real hold an operator must look at.
 - A TRANSCRIPT WITHOUT ITS META IS HELD, NEVER DROPPED: `agent-<id>.meta.json`
   is the ONLY source of the agent's type, spawn depth, model and worktree, so
   the transcript is discovered, stated ONCE, re-checked every rescan, and not
