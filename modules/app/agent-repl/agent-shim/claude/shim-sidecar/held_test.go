@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -345,4 +346,71 @@ func TestStartupCatchUpSummarizesABacklogOfLegacyBookConflicts(t *testing.T) {
 	if got := len(h.opsAt(t, "book-conflict-skip", "warn")); got != 0 {
 		t.Fatalf("catch-up stated %d per-entry skip warnings, want none", got)
 	}
+}
+
+// --- a transcript that was gone before its first byte -----------------------
+
+// vanishedTranscript names a session transcript that is NOT on disk: the vendor
+// session directory was removed between the scan that listed it and the
+// attribution read, which is what deleting a session does to every file under it
+// at once.
+func (h *harness) vanishedTranscript(session string) discover.Target {
+	return discover.Target{
+		Path:       filepath.Join(h.rootA, "projects", "proj", session+".jsonl"),
+		Kind:       tail.KindSessionTranscript,
+		ConfigRoot: h.rootA,
+		ProjectKey: "proj",
+		SessionID:  session,
+	}
+}
+
+func TestATranscriptGoneBeforeItsFirstByteIsStatedNotWarned(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	target := h.vanishedTranscript("90000000-0000-4000-8000-000000000001")
+
+	// Act.
+	if _, ok := h.sc.resolveTranscriptWorkspace(target); ok {
+		t.Fatal("a transcript that is not on disk was attributed")
+	}
+
+	// Assert.
+	h.requireNone(t, "resolve-transcript-workspace", "warn")
+	rec := h.requireOnce(t, "resolve-transcript-workspace", "info")
+	if got := ctxString(t, rec, "reason"); got != reasonTranscriptVanished {
+		t.Fatalf("the record's reason = %q, want %q", got, reasonTranscriptVanished)
+	}
+}
+
+func TestATranscriptGoneBeforeItsFirstByteIsStatedOncePerFile(t *testing.T) {
+	// Arrange: a rescan re-checks every discovered transcript each pass.
+	h := newHarness(t, &fakeStore{})
+	target := h.vanishedTranscript("90000000-0000-4000-8000-000000000002")
+
+	// Act.
+	h.sc.resolveTranscriptWorkspace(target)
+	h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	h.requireOnce(t, "resolve-transcript-workspace", "info")
+}
+
+func TestAPresentTranscriptThatCannotBeAttributedStillWarns(t *testing.T) {
+	// Arrange: the file is there and carries no cwd, which is the condition an
+	// operator must look at.
+	h := newHarness(t, &fakeStore{})
+	h.unresolvableTranscript(t, "90000000-0000-4000-8000-000000000003")
+	target := discover.Target{
+		Path:       filepath.Join(h.rootA, "projects", "proj", "90000000-0000-4000-8000-000000000003.jsonl"),
+		Kind:       tail.KindSessionTranscript,
+		ConfigRoot: h.rootA,
+		ProjectKey: "proj",
+		SessionID:  "90000000-0000-4000-8000-000000000003",
+	}
+
+	// Act.
+	h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	h.requireOnce(t, "resolve-transcript-workspace", "warn")
 }
