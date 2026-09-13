@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- sidecar: a shell spool ending `[exited with code N]` now ends its run on that evidence (`internal/handler/shell.go`), so a finished detached run is no longer written up as `went_silent` (realtest 2026-09-13 between-sweeps `lost-policy`/`bash-lost` WARNs)
+
 - realtest harness: a chord that did not reach its command is classified off Emacs's ring (`chordring.go`), so a leader eaten by input the run never sent names neither the binding nor the key driver (realtest 8's `SPC j m p`)
 
 - realtest harness: a `C-g` pressed at a standing minibuffer read is judged by the ring again (`wsActQuit.MarkFree` false, `wsActDismissNotDelivered`), because the read records it (realtests 6-8 named nobody for three keys that never arrived)
