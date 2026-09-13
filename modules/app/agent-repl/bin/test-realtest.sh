@@ -623,8 +623,11 @@ test_backs_up_before_refusing_the_takeover() {
         fail "$name" "no workspace-state backup was taken before the refusal"
         return
     fi
-    if ! ls "$SCRATCH/home/.cache/agent-repl/store/events.db.realtest-bak-"* >/dev/null 2>&1; then
-        fail "$name" "no store backup was taken before the refusal"
+    # THE STORE IS NOT COPIED. It is a cache that needs no retention during
+    # development (owner ruling 2026-09-13), and its per-run clones cost
+    # gigabytes for a file every byte of which is re-derivable.
+    if ls "$SCRATCH/home/.cache/agent-repl/store/events.db.realtest-bak-"* >/dev/null 2>&1; then
+        fail "$name" "the store was copied aside; it is a cache and needs no backup"
         return
     fi
     pass "$name"
