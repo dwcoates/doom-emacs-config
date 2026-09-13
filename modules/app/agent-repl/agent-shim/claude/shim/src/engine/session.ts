@@ -34,6 +34,7 @@ import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
 import { terminalUpsertKey } from "../store/keys.js";
+import { PersistenceError } from "../store/persistence.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
 import {
   announceLiveWork,
@@ -2086,6 +2087,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const RECONCILE_PAGE_SIZE = 512;
 
   /**
+   * Whether the record plane ANSWERED "no rows under that agent yet".
+   *
+   * THE CLASS IS THE MEANING, never "any error". `unknown_agent` is the store
+   * reading its registry and telling the truth about a book whose first write
+   * has not landed -- an ordinary state for a workspace created seconds ago,
+   * which the store itself records at info. A reader that folds it in with a
+   * refused socket or a timeout diagnoses a healthy store as unreachable, opens
+   * a session fault, and makes the daemon open a health fault over a store that
+   * did exactly what it should. Every OTHER kind stays the failure it is.
+   */
+  function answeredNoBookYet(err: unknown): err is PersistenceError {
+    return err instanceof PersistenceError && err.kind === "unknown_agent";
+  }
+
+  /**
    * GetLiveWork reconciliation.
    *
    * RE-ADOPT what the revived vendor process actually has, and WRITE THE
@@ -2118,13 +2134,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     let book: readonly conversationv1.HistoryEntryAt[] = [];
     if (open.liveDetached.length > 0 || open.liveAgents.length > 0) {
       try {
-        book = (await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE)).entries;
+        book = (
+          await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE, undefined, () =>
+            knowsAgent(agentId),
+          )
+        ).entries;
       } catch (err) {
-        // warn: a defect because reconciliation lost access to the durable book it must describe.
-        LOGGER.warn(
-          { cause: err instanceof Error ? err.message : String(err) },
-          "the book could not be read for reconciliation; live work cannot be described",
-        );
+        if (answeredNoBookYet(err)) {
+          LOGGER.debug(
+            { agent: agentId.value },
+            "this session's book holds no rows yet, so reconciliation describes live work from an empty book",
+          );
+        } else {
+          // warn: a defect because reconciliation lost access to the durable book it must describe.
+          LOGGER.warn(
+            { cause: err instanceof Error ? err.message : String(err) },
+            "the book could not be read for reconciliation; live work cannot be described",
+          );
+        }
       }
     }
 
@@ -2533,9 +2560,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (handles.length === 0) return [];
       // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
       // tail this description never stands.
+      const agentId = requireIdentity().agentId;
       const page = await deps.persistence.readFirstPage(
-        requireIdentity().agentId,
+        agentId,
         RECONCILE_PAGE_SIZE,
+        undefined,
+        () => knowsAgent(agentId),
       );
       const undescribed: conversationv1.DetachedWorkId[] = [];
       const announcements = announceLiveWork(page.entries, handles, (handle) => {
@@ -2544,6 +2574,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       for (const handle of undescribed) await recordUndescribedHandle(handle);
       return announcements;
     } catch (err) {
+      // NO BOOK YET IS NOT AN UNREACHABLE STORE. A workspace created moments
+      // ago has written no row, so the store answers `unknown_agent` -- its
+      // ordinary answer, which it logs at info. The live membership of a
+      // conversation with no record is EMPTY, and that is the whole answer:
+      // no fault, nothing for the daemon's health to open, and a line at debug.
+      if (answeredNoBookYet(err)) {
+        LOGGER.debug(
+          { cause: err.message },
+          "this session's book holds no rows yet; re-announcing an empty live membership for the new watch",
+        );
+        return [];
+      }
       // LOUD, NEVER SILENT: the watch still opens — a consumer told nothing at
       // all is worse off than one told the opening with an empty membership —
       // but the record plane being unreachable is a session-level fact every
