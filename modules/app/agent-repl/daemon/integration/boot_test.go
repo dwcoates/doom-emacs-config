@@ -1023,7 +1023,7 @@ func TestBootClosesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
 	// and the stat error.
 	nd.AwaitLogRecord(nd.RunLogPath(), "the missing-directory close record", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.boot.close_missing_dir" &&
-			strings.ToLower(r.Level) == "warn" &&
+			strings.ToLower(r.Level) == "info" &&
 			r.WorkspaceID == ws.GetId() &&
 			r.WorkspaceDir == ws.GetDir() &&
 			r.Context["error"] != nil
