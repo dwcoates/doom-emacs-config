@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- elisp tab bar: the full-vs-partial background is the panels-open fact and nothing else — the ready-view dwell fade is gone, `agent-repl--ws-agent-open-p` now requires the webapp panel AND the input window, and a flip repaints on the window-configuration change that caused it and records one debug line (owner ruling 5)
+
 - elisp tab bar: the selection underline covers exactly the workspace name — the leading separator, `[N]`, the gap, the badge run, the width fill and the terminator are all drawn un-underlined (owner ruling 4)
 
 - elisp tab bar: exactly one space separates `[N]` from the workspace name — the gap is emitted by `agent-repl--render-tab` (name trimmed, the padding format's leading space stripped) and a blank priority label no longer forms a badge run (owner ruling 1, `[3]    test-workspace`)
