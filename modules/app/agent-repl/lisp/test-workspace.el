@@ -2515,6 +2515,35 @@ one is a no-op rather than an error."
         ;; Assert
         (should (equal landed "ws"))))))
 
+(ert-deftest agent-repl-test-kill-one-workspace-declares-the-departure ()
+  "A teardown under way is what explains its own workspace's missing sink."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+      (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+      (cl-letf (((symbol-function 'agent-repl--state-save) #'ignore)
+                ((symbol-function 'agent-repl--kill-workspace-buffers) #'ignore)
+                ((symbol-function 'agent-repl--ws-repaint-sidebar) #'ignore)
+                ((symbol-function 'agent-repl--ws-system-available-p) (lambda () nil))
+                ((symbol-function 'agent-repl--land-after-teardown) #'ignore))
+        ;; Act
+        (agent-repl--kill-one-workspace "ws")
+        ;; Assert
+        (should (agent-repl--log-workspace-departing-p "ws"))))))
+
+(ert-deftest agent-repl-test-a-refused-teardown-declares-no-departure ()
+  "A teardown refused before it began leaves the workspace standing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--departed-log-workspaces (make-hash-table :test #'equal)))
+      (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+      (cl-letf (((symbol-function 'agent-repl--assert-mergeable-teardown)
+                 (lambda (_ws) (error "merge not finished"))))
+        ;; Act
+        (should-error (agent-repl--kill-one-workspace "ws"))
+        ;; Assert
+        (should-not (agent-repl--log-workspace-departing-p "ws"))))))
+
 (ert-deftest agent-repl-test-kill-one-workspace-survives-a-failing-landing ()
   "A landing that signals is warned about and never aborts the teardown."
   ;; Arrange
