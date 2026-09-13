@@ -17,10 +17,12 @@
 #                       is kickstarted when the installed binary is not the one
 #                       its running process was started on (a stamp written at
 #                       kickstart time, NOT "did this build change the file" —
-#                       see needs_bounce), store strictly before sidecar with a
-#                       wait on store.sock in between — the recorded safe order
-#                       (a simultaneous bounce once cost a silent full re-read
-#                       via cold cursor recovery)
+#                       see needs_bounce). A store restart is an OUTAGE OF THE
+#                       STORE SOCKET, so it is taken with the sidecar already
+#                       stopped: bootout the sidecar, kickstart the store, wait
+#                       on store.sock, then bootstrap the sidecar — the same
+#                       order bin/store-reset.sh records, and the only one in
+#                       which no sidecar write can meet a missing socket
 #  4b. revision gate   readiness-report.sh --require-ready webapp, run once
 #                       everything is built and BEFORE any kickstart or daemon
 #                       restart: a stale artifact must never be bounced into
@@ -139,6 +141,16 @@ STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 SOCK_STALL="${AGENT_REPL_STORE_SOCK_TIMEOUT:-15}"
 SOCK_MAX="${AGENT_REPL_STORE_SOCK_MAX:-180}"
+
+# WHERE THE PLISTS LIVE. The same directory `.claude/install.sh`
+# (install_agent_shim_services) writes each rewritten template into, and the
+# same `$LABEL.plist` naming: a service that has been booted OUT of the user
+# domain comes back only by bootstrapping the file it was bootstrapped from.
+# Overridable for the hermetic harness, for the same reason
+# AGENT_REPL_EMACSCLIENT is — reaching the LIVE launchd from a test run is
+# exactly what must never happen.
+LAUNCH_AGENTS_DIR="${AGENT_REPL_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+service_plist() { printf '%s/%s.plist' "$LAUNCH_AGENTS_DIR" "$1"; }
 READINESS_REPORT="$THIS_DIR/readiness-report.sh"
 
 # Overridable so the hermetic test harness can substitute its PATH stub — the
@@ -336,13 +348,77 @@ if [ "$NO_BOUNCE" -eq 1 ]; then
     exit 0
 fi
 
-kickstart() { launchctl kickstart -k "gui/$(id -u)/$1"; }
+UID_NUM="$(id -u)"
+
+kickstart() { launchctl kickstart -k "gui/$UID_NUM/$1"; }
+
+# WHY THE SIDECAR IS BOOTED OUT BEFORE THE STORE IS KICKSTARTED.
+#
+# A store kickstart unlinks store.sock and does not rebind it until the new
+# process is serving. The sidecar writes into that socket continuously, so a
+# store restart taken underneath a RUNNING sidecar is an error storm in the
+# sidecar's log for as long as the gap lasts: on 2026-09-13 one deploy produced
+# `storeclient-write-batch` "dial unix .../store.sock: no such file or
+# directory", `store-write` "cursor not advanced", failed `storeclient-cursors`
+# and `recover-cursors`, and a `production-suspended` warning — every one of
+# them the deploy's own doing.
+#
+# bin/store-reset.sh already records the order that has none of that: sidecar
+# down, store down, store up, sidecar up. This is the same order, so no sidecar
+# write can ever meet a missing socket.
+#
+# AND THE STOP IS `bootout`, NOT `kill`. Both plists set KeepAlive, so launchd
+# answers a signalled process with a new pid within a second and a poll for
+# "no pid" can never succeed; bootout removes the service from the user domain,
+# which takes the relaunch away with it. `bootstrap` puts it back afterwards,
+# and RunAtLoad starts the process.
+service_known() { # LABEL -> 0 while launchd still holds the label
+    launchctl print "gui/$UID_NUM/$1" >/dev/null 2>&1
+}
+
+# THE PLIST IS PROVED BEFORE ANYTHING IS STOPPED. A bootout with no plist to
+# bootstrap back from would leave the host with no sidecar and no way for this
+# script to return one, so a missing file is a refusal taken while the sidecar
+# is still running and nothing has been bounced.
+require_sidecar_plist() {
+    local plist
+    plist="$(service_plist "$SIDECAR_LABEL")"
+    [ -f "$plist" ] && return 0
+    echo "[deploy-all] $plist is missing; the store restart boots the sidecar out and needs this plist to bring it back. The sidecar is still running, no service was kickstarted, and the runtime was NOT bounced. Re-run .claude/install.sh --with-agent-shim-services to reinstall the services." >&2
+    exit 1
+}
+
+stop_sidecar() {
+    local waited=0
+    if ! service_known "$SIDECAR_LABEL"; then
+        log "sidecar: already stopped"
+        return 0
+    fi
+    log "sidecar: booting out $SIDECAR_LABEL before the store restarts..."
+    launchctl bootout "gui/$UID_NUM/$SIDECAR_LABEL" >/dev/null 2>&1 || true
+    while service_known "$SIDECAR_LABEL"; do
+        if [ "$waited" -ge "$SOCK_MAX" ]; then
+            echo "[deploy-all] $SIDECAR_LABEL did not leave the user domain within the ${SOCK_MAX}s upper bound. The store was NOT kickstarted and the runtime was NOT bounced." >&2
+            exit 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    log "sidecar: stopped"
+}
+
+start_sidecar() {
+    local plist
+    plist="$(service_plist "$SIDECAR_LABEL")"
+    log "sidecar: bootstrapping $plist..."
+    launchctl bootstrap "gui/$UID_NUM" "$plist"
+}
 
 # The store's pid as launchd reports it, or empty when the service is not
 # running. A flat deadline could not tell "still booting" from "died on boot",
 # and answered both the same way; this is the difference.
 store_service_pid() {
-    launchctl print "gui/$(id -u)/$STORE_LABEL" 2>/dev/null |
+    launchctl print "gui/$UID_NUM/$STORE_LABEL" 2>/dev/null |
         awk '/^[[:space:]]*pid = /{ gsub(/[^0-9]/, "", $3); print $3; exit }'
 }
 
@@ -385,7 +461,7 @@ wait_for_store_sock() {
     while [ ! -S "$STORE_SOCK" ]; do
         pid="$(store_service_pid)"
         if [ -z "$pid" ]; then
-            echo "[deploy-all] the store died before $STORE_SOCK appeared (${waited}s after kickstart; launchd reports no pid for $STORE_LABEL). The sidecar was NOT kickstarted and the runtime was NOT bounced." >&2
+            echo "[deploy-all] the store died before $STORE_SOCK appeared (${waited}s after kickstart; launchd reports no pid for $STORE_LABEL). The sidecar was stopped for this restart and has NOT been started again, and the runtime was NOT bounced." >&2
             echo "[deploy-all] the store's last words:" >&2
             store_log_tail >&2
             exit 1
@@ -410,13 +486,13 @@ wait_for_store_sock() {
             break
         fi
         if [ $((waited - progress)) -ge "$SOCK_STALL" ]; then
-            echo "[deploy-all] $STORE_SOCK did not appear and the store (pid $pid) has written nothing for ${SOCK_STALL}s, so it is wedged rather than working. The sidecar was NOT kickstarted and the runtime was NOT bounced." >&2
+            echo "[deploy-all] $STORE_SOCK did not appear and the store (pid $pid) has written nothing for ${SOCK_STALL}s, so it is wedged rather than working. The sidecar was stopped for this restart and has NOT been started again, and the runtime was NOT bounced." >&2
             echo "[deploy-all] the store's last words:" >&2
             store_log_tail >&2
             exit 1
         fi
         if [ "$waited" -ge "$SOCK_MAX" ]; then
-            echo "[deploy-all] $STORE_SOCK did not appear within the ${SOCK_MAX}s upper bound, though the store (pid $pid) is alive and still writing. The sidecar was NOT kickstarted and the runtime was NOT bounced." >&2
+            echo "[deploy-all] $STORE_SOCK did not appear within the ${SOCK_MAX}s upper bound, though the store (pid $pid) is alive and still writing. The sidecar was stopped for this restart and has NOT been started again, and the runtime was NOT bounced." >&2
             echo "[deploy-all] the store's last words:" >&2
             store_log_tail >&2
             exit 1
@@ -429,25 +505,38 @@ wait_for_store_sock() {
     fi
 }
 
+# Set once the sidecar has been booted out for a store restart: it is then this
+# script's job to bring it back, whether or not the sidecar's own binary moved.
+SIDECAR_STOPPED=0
+
 if [ "$STORE_STALE" -eq 1 ]; then
+    require_sidecar_plist
+    stop_sidecar
+    SIDECAR_STOPPED=1
     log "store: kickstarting $STORE_LABEL..."
     # The store's socket is unlinked on shutdown and recreated on boot, so we
     # wait for the NEW instance's socket — the recorded safe order requires
-    # the store healthy before the sidecar bounces (cold cursor recovery on
+    # the store serving before the sidecar comes back (cold cursor recovery on
     # the sidecar is a silent full re-read).
     kickstart "$STORE_LABEL"
     wait_for_store_sock
     record_deployed shim-store
     log "store: up ($STORE_SOCK)"
-    # A store bounce always bounces the sidecar too, stale or not: the
-    # sidecar's link recovery is connection-scoped, and a fresh pair is the
-    # recorded known-good state after a store restart.
-    SIDECAR_STALE=1
 else
     log "store: unchanged, kickstart skipped"
 fi
 
-if [ "$SIDECAR_STALE" -eq 1 ]; then
+if [ "$SIDECAR_STOPPED" -eq 1 ]; then
+    # A store bounce always restarts the sidecar too, stale or not: the
+    # sidecar's link recovery is connection-scoped, and a fresh pair is the
+    # recorded known-good state after a store restart. It comes back by
+    # bootstrap because that is how a booted-out service comes back.
+    start_sidecar
+    record_deployed shim-claude-sidecar
+    log "sidecar: done"
+elif [ "$SIDECAR_STALE" -eq 1 ]; then
+    # The store never moved, so its socket is up throughout and a plain
+    # kickstart of the sidecar alone loses nothing.
     log "sidecar: kickstarting $SIDECAR_LABEL..."
     kickstart "$SIDECAR_LABEL"
     record_deployed shim-claude-sidecar
