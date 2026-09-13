@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- elisp: a quit deferred out of a guarded section with a MINIBUFFER STANDING is requeued as the terminal's quit character on `unread-command-events` (`agent-repl--deferred-quit-hand-off`, core.el) instead of being left in `quit-flag`, because the focus-in path returns into more lisp and the first QUIT check there printed `Quit` with the prompt still up (realtests 5-8 post-`d37cf7d58` sweep; "Open workspace: " with no precreate pending was the one that worked)
+
 - elisp: a quit deferred out of an `agent-repl--with-deferred-quit` section is left armed for the command loop and only AUDITED afterwards (`agent-repl--deferred-quit-audit`, core.el), because the old delivery timer cleared `quit-flag` and then called `abort-minibuffers` from a non-minibuffer buffer, whose `Not in a minibuffer` error `timer-event-handler` swallowed (realtests 5-8, `C-g` neither dismissing the prompt nor reaching `(recent-keys)`)
 
 - daemon: the stand-down latch is armed by the process kill as well as by KillSession, and the redial ladder and the adopted-death witness both re-read it (`internal/shimclient/client.go`), so forgetting a live adopted workspace no longer records `adopted shim is gone` ERROR plus `redial stopped` WARNs (realtest 2026-09-13 between-sweeps)
