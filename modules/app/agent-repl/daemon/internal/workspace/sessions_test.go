@@ -816,6 +816,50 @@ func TestStartAnswersAColdRefusalWithTheGate(t *testing.T) {
 	}
 }
 
+// TestColdGatedBringUpIsNotServing is the sweep's selection read end-to-end
+// through the production bring-up: a cold refusal keeps the client installed so
+// the gate's answer can re-open through it, and for ten hours that installed
+// client made the workspace look hibernatable -- one Hibernate directive and
+// one `no_session` WARN every five minutes for a session that never started.
+func TestColdGatedBringUpIsNotServing(t *testing.T) {
+	tests := []struct {
+		name     string
+		response *shimv1.StartSessionResponse
+		want     bool
+	}{
+		{
+			name:     "a bring-up the shim answered cold",
+			response: coldResponse(),
+			want:     false,
+		},
+		{
+			name:     "a bring-up whose session started",
+			response: startedResponse("vendor-1"),
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			f.client.response = tt.response
+
+			// Act.
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			if got := f.fleet.Serving(ws.ID); got != tt.want {
+				t.Fatalf("Serving(%q) = %v, want %v", ws.ID, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStartRemembersTheColdGateMenu(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

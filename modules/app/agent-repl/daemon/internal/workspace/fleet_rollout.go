@@ -310,6 +310,12 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	if previous != nil {
 		carried = previous.hostSessionID
 	}
+	// A NEWLY INSTALLED CLIENT HAS NO SESSION YET. `Install` rotates the
+	// process, and the two things that follow it differ: the relaunch engine
+	// installs a PRELAUNCHED shim and calls Resume next, while an adoption
+	// attaches to a shim that has already started its one session and says so
+	// itself. So the flag is not carried from the retired entry the way the
+	// host identity is -- it is false here, and the adopting callers set it.
 	f.sessions[ws] = &live{client: c, hostSessionID: carried}
 	_, gateStood := f.coldGates[ws]
 	delete(f.coldGates, ws)
@@ -384,6 +390,9 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 	if err := f.Install(ctx, ws, client); err != nil {
 		return nil, fmt.Errorf("workspace: adopt %q: %w", ws, err)
 	}
+	// THE TRANSFERRED SHIM'S SESSION IS ALREADY STARTED, as the comment above
+	// says, so the entry Install just wrote says so too.
+	f.noteSessionStarted(ws)
 	return client, nil
 }
 
@@ -501,7 +510,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		})
 		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: start the watcher: %w", ws, err)
 	}
-	f.remember(ws, &live{client: c, watcher: watcher, hostSessionID: session.HostSessionID})
+	f.remember(ws, &live{client: c, watcher: watcher, hostSessionID: session.HostSessionID, sessionStarted: true})
 	// A resume keeps the session's host identity: the process rotated, the
 	// session did not.
 	if err := f.recordFacts(ctx, log, ws, session, started, session.ConfigDir, session.HostSessionID, c.PID()); err != nil {
@@ -532,13 +541,24 @@ func (f *Fleet) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.Hibe
 }
 
 // Serving reports whether this daemon holds a shim it can address for the
-// workspace. It is drain.Stand's selection predicate, and it answers off
-// Client so it cannot disagree with the directive it gates: a reaped client is
-// a row awaiting teardown, not a session, and a workspace whose bring-up has
-// not installed a client yet is not one either.
+// workspace AND that shim holds a started session. It is drain.Stand's
+// selection predicate, and it answers off Client so it cannot disagree with the
+// directive it gates: a reaped client is a row awaiting teardown, not a
+// session, and a workspace whose bring-up has not installed a client yet is not
+// one either.
+//
+// THE SECOND HALF IS THE ONE THE FIRST DOES NOT COVER. A cold-gated bring-up
+// and a relaunch's freshly installed shim both leave an ADDRESSABLE client with
+// no session behind it, and the idle sweep then sent a Hibernate directive
+// whose only possible answer was `no_session` -- every five minutes, forever,
+// for a workspace whose session had never begun. The predicate's own contract
+// already said a workspace "whose session is not up" is skipped; this is what
+// makes that true.
 func (f *Fleet) Serving(ws ids.WorkspaceID) bool {
-	_, ok := f.Client(ws)
-	return ok
+	if _, ok := f.Client(ws); !ok {
+		return false
+	}
+	return f.sessionStarted(ws)
 }
 
 // KillSession ends a workspace's session: it ASKS THE SHIM to end the session
@@ -550,7 +570,7 @@ func (f *Fleet) Serving(ws ids.WorkspaceID) bool {
 // answer is not a reason to leave the process running, so the stop below is
 // unconditional and the refusal is evidence.
 func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool) error {
-	if shim, live := f.Shim(ws); live {
+	if shim, live := f.Shim(ws); live && f.sessionStarted(ws) {
 		// THE WATCHER IS TOLD BEFORE THE VERB GOES. The shim ends its standing
 		// streams as the session ends, and a watcher that has not been told
 		// reads this daemon's own act as a transport fault: it records a
@@ -569,8 +589,31 @@ func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool)
 				}
 			}
 		}
+	} else if live {
+		// A SHIM WITH NO SESSION IS STOPPED, NOT DIRECTED. Asking it to end a
+		// session it never started is answered `no_session` -- which the
+		// branch above then reported as a kill that "did not answer", against
+		// a shim that answered perfectly well. The process stop below is what
+		// this verb owed such a workspace all along.
+		f.logNoSessionToKill(ctx, ws, force)
 	}
 	return f.Stop(ctx, ws, force)
+}
+
+// logNoSessionToKill records, at DEBUG, that a stand-down skipped the session
+// directive because the shim holds no session. It is DEBUG because it is an
+// ordinary shape -- a cold-gated workspace and a relaunch's prelaunched shim
+// both reach it -- and the stop it precedes is recorded on its own.
+func (f *Fleet) logNoSessionToKill(ctx context.Context, ws ids.WorkspaceID, force bool) {
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		f.deps.Log.Global().Debug(opBringUp, "no session was started on this shim; stopping the process",
+			dlog.Context{"workspace": string(ws), "force": force})
+		return
+	}
+	f.deps.Log.WorkspaceOrCentral(record.Dir).Debug(opBringUp,
+		"no session was started on this shim; stopping the process",
+		dlog.Context{"workspace": string(ws), "force": force})
 }
 
 // StandDown is the rollout's stand-down: end the session, then stop the
