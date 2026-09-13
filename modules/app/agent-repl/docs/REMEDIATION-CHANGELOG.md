@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- sidecar context cut: a compaction whose boundary is not followed by a summary is drawn with the stated placeholder "context compacted; no summary was written" at INFO, and a summary that names the boundary later — the vendor interleaves other system lines — supersedes it on the cut's own key (gap scan `context-compacted` warn, 2026-09-13 17:04)
+
 - sidecar lost policy: a `went_silent` conclusion is stated at INFO in both the policy and the terminal it mints, because the file plane cannot tell a quiet dead run from a quiet live one; `file_vanished` under a standing directory keeps its warn (gap scan `lost-policy` warn x2 for the owner's own polling background shells, 2026-09-13 16:51)
 
 - sidecar shell spool: `[killed]` is read as the third vendor terminator and settles the run on the `killed` termination arm, so a killed background shell ends on its own evidence instead of waiting out a silence window (gap scan `lost-policy` warn `went_silent` for `bpth8pp8m.output`, whose 27 bytes ended `[killed]` 30 minutes earlier, 2026-09-13 16:51)
