@@ -24,6 +24,15 @@ See `docs/REALTEST-PLAN.md` for run status.
 | 2026-09-13 | The probe's `condition-case` handled `error`, which does not catch `quit` | Handle `(quit error)` | A probe interrupted by the very key it is confirming must come back as a named probe failure, not unwind silently | Restore the bare `error` handler in `probeWrapper` |
 | 2026-09-13 | `DeliveryEffect.Observed` answered a bare bool, so a minibuffer probe the editor refused read as "the effect has not happened" | It answers `(bool, error)`, and a failed effect probe downgrades a marks-absence to undetermined (`judgeWithEffectProbe`) | Two accounts, one silent and one failed, name nobody; blaming the key driver on them is the same sin as blaming the editor | Revert `judgeWithEffectProbe` to `judgeDelivery` in `confirm` |
 
+## Deferred-quit drop in the editor, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Whether the realtest 5-8 `C-g` failures were still key delivery after the harness fixed its own probe interference | No: the drop is in our elisp, `agent-repl--deferred-quit-deliver` (core.el) | It cleared `quit-flag` and then called `abort-minibuffers`, which reads `this_minibuffer_depth` of the CURRENT BUFFER (src/minibuf.c) and signals `Not in a minibuffer` from a timer's buffer, and `timer-event-handler` reduces that `error` to a message. Flag down, prompt up, chord absent from `(recent-keys)` because our timer consumed the flag before `kbd_buffer_get_event` could make it an event | Not applicable, it is a defect |
+| 2026-09-13 | Whether to repair the delivery (select the minibuffer buffer before aborting) or remove it | Remove it; the guard now only leaves `quit-flag` armed | Emacs's own input wait is the delivery mechanism and it already works — a `C-g` posted to an UNGUARDED `read-string` in the same session dismissed it. Anything of ours that touches the flag can only lose the race and eat the quit | Reinstate an abort inside `agent-repl--deferred-quit-audit` (not recommended) |
+| 2026-09-13 | What the zero-delay timer is for once it no longer delivers | An audit: it reads `quit-flag` and records at debug whether the quit was still owed or already honoured | The property the delivery half was really earning was that a quit which looks ignored is answerable from the log; an audit keeps that and cannot repeat the drop | Delete `agent-repl--deferred-quit-arm-audit` and its call in the macro |
+| 2026-09-13 | The six existing `deferred-quit-delivery-*` tests pinned the dropping behavior | Deleted, replaced by audit tests including one that the flag survives the audit | A test that pins a defect is not coverage | Restore them from 97ceef954 |
+
 ## Log sweep (shim, webapp, elisp), 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
