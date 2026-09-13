@@ -12,12 +12,10 @@
  * The one thing that must survive that is the ticker subscriptions the cards
  * open for their queued-at ages, which is what `TrayContext.onDispose` is for.
  *
- * THE HEADING IS UNDRAWN (owner ruling 2, 2026-09-13). The daemon still
- * composes `DaemonHoldTray.heading` and the tray still REQUIRES it — a tray
- * that omits it is malformed exactly as it always was — but nothing puts it on
- * screen: the cards say what is held, and a "held (2)" counter over two visible
- * cards is a second answer to a question the cards already answer. Whether the
- * field survives on the wire is an owner/proto follow-up, not this layer's.
+ * THERE IS NO HEADING (owner rulings 2 and 5, 2026-09-13). The cards say what
+ * is held, so a "held (2)" counter over two visible cards is a second answer to
+ * a question the cards already answer. The field is RETIRED from the proto, so
+ * the tray neither draws nor requires one.
  */
 import { WatchDaemonHoldsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_holds_pb";
 import type {
@@ -92,8 +90,8 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
  * The tray, whole: the held things, in the order the daemon served them —
  * or `null` when nothing is held.
  *
- * AN EMPTY TRAY DRAWS NOTHING (owner ruling 3, 2026-09-13). Not a heading, not
- * a "nothing held" line, not an empty region: the answer to "what is the daemon
+ * AN EMPTY TRAY DRAWS NOTHING (owner ruling 3, 2026-09-13). Not a "nothing
+ * held" line, not an empty region: the answer to "what is the daemon
  * holding for you" when it is holding nothing is silence, and the region only
  * appears when cards arrive. `null` rather than an empty element, because
  * `#hold-tray:empty` collapses the region only while the host has NO children,
@@ -105,10 +103,6 @@ export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElem
     operation: "tray.draw",
     context: { items: u.items.length },
   });
-
-  // The heading is REQUIRED and UNDRAWN: the daemon owes it, so its absence is
-  // still malformed, and ruling 2 says nothing draws it.
-  requireMessage(u.heading, `${path}.heading`);
 
   if (u.items.length === 0) return null;
 

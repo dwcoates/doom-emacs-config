@@ -1899,16 +1899,13 @@ export const heldOfferItem = (headline = HELD_OFFER_HEADLINE): HoldItemInit => (
   },
 });
 
-export const HOLD_TRAY_HEADING = "held prompts";
-
-export function holdTray(init?: { heading?: string; items?: HoldItemInit[] }): DaemonHoldTray {
+export function holdTray(init?: { items?: HoldItemInit[] }): DaemonHoldTray {
   return create(DaemonHoldTraySchema, {
-    heading: { text: init?.heading ?? HOLD_TRAY_HEADING },
     items: init?.items ?? [heldPromptItem()],
   });
 }
 
-/** The fake daemon's default tray: heading present, nothing held — so it draws nothing. */
+/** The fake daemon's default tray: nothing held — so it draws nothing. */
 export const emptyTray = (): DaemonHoldTray => holdTray({ items: [] });
 
 // ---------------------------------------------------------------------------
