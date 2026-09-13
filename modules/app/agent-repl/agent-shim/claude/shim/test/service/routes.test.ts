@@ -535,4 +535,64 @@ describe("shimRoutes unanticipated exceptions", () => {
     // Assert.
     expect(records(written).some((record) => record.level === "error")).toBe(false);
   });
+
+  /** The exception Node raises for a write onto a stream the peer already reset. */
+  function streamDestroyed(): Error {
+    return Object.assign(new Error("The stream has been destroyed"), {
+      code: "ERR_HTTP2_INVALID_STREAM",
+    });
+  }
+
+  it("does NOT call a write onto a peer-destroyed stream an unanticipated exception", async () => {
+    // A cancel is the ordinary end of a standing watch; recorded as a defect it
+    // buries the exceptions that are one.
+    // Arrange.
+    const client = clientFor(throwingStreamEngine(streamDestroyed()));
+
+    // Act.
+    await drain(client.watchSession(requests.watchSessionRequest())).catch(() => undefined);
+
+    // Assert.
+    expect(records(written).some((record) => record.level === "error")).toBe(false);
+  });
+
+  it("still RECORDS the peer's departure, which the log is the only place to learn", async () => {
+    // Arrange.
+    const client = clientFor(throwingStreamEngine(streamDestroyed()));
+
+    // Act.
+    await drain(client.watchSession(requests.watchSessionRequest())).catch(() => undefined);
+
+    // Assert.
+    expect(
+      records(written).some(
+        (record) => record.level === "info" && record.context.rpc === "WatchSession",
+      ),
+    ).toBe(true);
+  });
+
+  it("reads the departure off the message when the code did not survive a wrapper", async () => {
+    // Arrange: the same failure re-thrown with its text but without its code.
+    const client = clientFor(throwingStreamEngine(new Error("The stream has been destroyed")));
+
+    // Act.
+    await drain(client.watchSession(requests.watchSessionRequest())).catch(() => undefined);
+
+    // Assert.
+    expect(records(written).some((record) => record.level === "error")).toBe(false);
+  });
+
+  it("still answers the caller Internal, because a listener is owed the failure", async () => {
+    // Arrange.
+    const client = clientFor(throwingStreamEngine(streamDestroyed()));
+
+    // Act.
+    const rejection = await drain(client.watchSession(requests.watchSessionRequest())).then(
+      () => null,
+      (err: unknown) => ConnectError.from(err),
+    );
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.Internal);
+  });
 });
