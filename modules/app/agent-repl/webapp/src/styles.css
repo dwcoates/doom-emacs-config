@@ -777,18 +777,34 @@ body::after {
 #ws-sidebar .ws-merge-note.error { color: var(--err); }
 #ws-sidebar .ws-merge-note { font-style: italic; }
 
-/* Expanded detail panel under a row. */
+/* Expanded detail panel under a row.
+
+   IT LEAVES THE RAIL (owner ruling 3, 2026-09-13): it may extend past the
+   sidebar's width into the feed for room, and may never be cut off by the
+   window. `#ws-sidebar` clips its content and `.sb-scroll` clips it again, so
+   an in-flow panel could only ever be rail-wide and was cropped at the rail's
+   bottom edge. `position: fixed` is the one positioning that escapes both --
+   no ancestor here is transformed -- and row.ts's `placeRowDetail` sets the
+   left, top and max-height through the topbar reveals' own `clampReveal`, so
+   the panel lands under its row and stays inside the viewport. `width:
+   max-content` is what lets it grow into the feed only as far as its own
+   content asks; the max-width is the window's own last word on that. */
 #ws-sidebar .detail { display: none; }
 #ws-sidebar .ws.open > .detail {
   display: block;
-  margin: 0.15rem 0.7rem 0.45rem 2rem;
+  position: fixed;
+  z-index: 40;
+  width: max-content;
+  min-width: 12rem;
+  max-width: min(34rem, calc(100vw - 1rem));
+  overflow-y: auto;
+  margin: 0;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.5rem 0.6rem;
   font-size: 0.78rem;
 }
-#ws-sidebar .kids .ws.open > .detail { margin-left: 1.6rem; }
 #ws-sidebar .detail dl {
   margin: 0;
   display: grid;
