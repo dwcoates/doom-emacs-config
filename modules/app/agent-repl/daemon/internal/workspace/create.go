@@ -49,7 +49,7 @@ const (
 // The order is the ruled one and is not negotiable:
 //
 //  1. validate the form, including the ungated-mode consent check;
-//  1a. resolve and REQUIRE a one-shot's repository policy — before step 2,
+//     1a. resolve and REQUIRE a one-shot's repository policy — before step 2,
 //     because step 2 may SPEND A MODEL CALL. A repository that states no
 //     one-shot policy is refused with no naming call made;
 //  2. derive the slug (supplied name, else the initial prompt by the naming
