@@ -36,8 +36,14 @@ const (
 	// ArmBaseRefUnresolved is a creation whose base ref does not resolve in
 	// the repository it is cut from.
 	ArmBaseRefUnresolved = "base_ref_unresolved"
-	// ArmNoSlug is a creation whose name and initial prompt yield no slug.
+	// ArmNoSlug is a creation that carries neither a name nor the prompt it
+	// needs. Since the naming call replaced word truncation it has exactly one
+	// site left: the PROMPTLESS ONE-SHOT, which is an argument-validation
+	// failure. Everything the model could not answer is ArmNamingFailed.
 	ArmNoSlug = "no_slug"
+	// ArmNamingFailed is a creation that supplied no name and whose headless
+	// naming call could not mint one.
+	ArmNamingFailed = "naming_failed"
 	// ArmFinishRequired is a one-shot creation with no finish action.
 	ArmFinishRequired = "finish_required"
 	// ArmFinishNotOneShot is a finish action on a standard creation.

@@ -21,6 +21,7 @@ import (
 	"claude-repld/internal/externalbrowser"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
+	"claude-repld/internal/headless"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
@@ -268,6 +269,11 @@ type Deps struct {
 	Sessions Sessions
 	// Browser opens a clicked link in the pinned external browser.
 	Browser externalbrowser.Opener
+	// Headless is the daemon's own one-shot vendor run. A create that supplies
+	// no name asks it for one; nothing else in this package uses it. nil is a
+	// build with no naming call at all, which REFUSES an unnamed create rather
+	// than inventing a name.
+	Headless headless.Runner
 	// PromptsDir is where RequestCommandSupport reads its brief at use time.
 	// It is also the daemon's own prompt CORPUS, which is the one-shot policy
 	// of exactly one repository: the one the daemon's checkout lives in.
