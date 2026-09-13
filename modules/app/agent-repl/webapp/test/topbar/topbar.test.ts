@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import { TopbarViewSchema, type TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import STYLESHEET from "../../src/styles.css?raw";
 import { drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
 import { GEOMETRY, NOW, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
@@ -308,5 +309,195 @@ describe("mountTopbar", () => {
     await settle();
     handle.dispose();
     expect(host.children.length).toBe(0);
+  });
+});
+
+/**
+ * THE STRIP'S LAYOUT (owner rulings 1-4, 2026-09-13).
+ *
+ * jsdom resolves the cascade but lays nothing out, so a layout claim is
+ * asserted where it is DECIDED — the declarations in `src/styles.css` and the
+ * DOM order `drawTopbarView` builds — rather than by measuring boxes that are
+ * all zero here. The stylesheet is read raw for the same reason
+ * `test/feed/rows/separation.test.ts` reads it: the token a rule was written
+ * with is the assertion, and jsdom would hand back a resolved-away shorthand.
+ */
+function ruleBody(selector: string): string {
+  const start = STYLESHEET.indexOf(`\n${selector} {`);
+  expect(start).toBeGreaterThan(-1);
+  const open = STYLESHEET.indexOf("{", start);
+  const close = STYLESHEET.indexOf("}", open);
+  return STYLESHEET.slice(open + 1, close);
+}
+
+/** The value of DECLARATION in SELECTOR's block, comments stripped. */
+function declaration(selector: string, property: string): string {
+  const body = ruleBody(selector).replace(/\/\*[\s\S]*?\*\//g, "");
+  const match = new RegExp(`(?:^|;|\\n)\\s*${property}\\s*:([^;]*);`).exec(body);
+  expect(match).not.toBeNull();
+  return (match?.[1] ?? "").trim();
+}
+
+describe("the strip's layout", () => {
+  // RULING 1. Not "both are 0.5rem" — both are the SAME TOKEN, which is what
+  // keeps them from drifting apart the next time one of them is tuned.
+  it("pads the strip's edges with the very token that gaps its cells", () => {
+    // ARRANGE / ACT
+    const padding = declaration(".topbar-row", "padding");
+    const gap = declaration(".topbar-row", "gap");
+    // ASSERT
+    expect(padding).toBe(`0 ${gap}`);
+  });
+});
+
+/**
+ * THE STRIP'S GEOMETRY, WORKED FROM THE TRACKS THE STYLESHEET DECLARES.
+ *
+ * jsdom lays out nothing, so the boxes are stubbed and placed here by the
+ * rule `grid-template-columns: 1fr minmax(0, auto) 1fr` states: two equal
+ * free tracks either side of a content-sized middle one, each free track
+ * floored at its own content (an `fr` track keeps an auto minimum) and the
+ * middle one clipped when what is left is less than it wants. The template
+ * itself is asserted alongside, so a change to it fails these tests rather
+ * than quietly leaving them measuring a layout the app no longer has.
+ */
+interface StubWidths {
+  readonly row: number;
+  readonly padding: number;
+  readonly gap: number;
+  readonly left: number;
+  readonly right: number;
+  readonly title: number;
+}
+
+interface Placed {
+  readonly left: { start: number; width: number };
+  readonly title: { start: number; width: number };
+  readonly right: { start: number; width: number };
+}
+
+function placeTracks(w: StubWidths): Placed {
+  const inner = w.row - 2 * w.padding - 2 * w.gap;
+  const share = (inner - w.title) / 2;
+  // THE GROUPS NEVER SHRINK: each free track is at least its own content.
+  const left = Math.max(w.left, share);
+  const right = Math.max(w.right, share);
+  // ...so the title is what gives, down to nothing.
+  const title = Math.min(w.title, Math.max(0, inner - left - right));
+  const titleStart = w.padding + left + w.gap;
+  return {
+    left: { start: w.padding, width: left },
+    title: { start: titleStart, width: title },
+    right: { start: titleStart + title + w.gap, width: right },
+  };
+}
+
+describe("the strip's geometry", () => {
+  it("lays the row out in three tracks whose outer two are the same free size", () => {
+    expect(declaration(".topbar-row", "grid-template-columns")).toBe("1fr minmax(0, auto) 1fr");
+  });
+
+  // RULING 2. The title is centered on ITS OWN CONTENT against the whole
+  // strip: a wide right group and a narrow left one move it not at all.
+  it("centers the title on the whole strip with unequal left and right groups", () => {
+    // ARRANGE
+    const w: StubWidths = { row: 1000, padding: 8, gap: 8, left: 120, right: 340, title: 60 };
+    // ACT
+    const placed = placeTracks(w);
+    // ASSERT
+    expect(placed.title.start + placed.title.width / 2).toBe(w.row / 2);
+  });
+
+  // THE OVERFLOW RULE, stated as the ruling states it: the title clips, the
+  // groups keep every pixel they asked for.
+  it("clips a title too wide for the free space without shrinking either group", () => {
+    // ARRANGE
+    const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 200, right: 300, title: 400 };
+    // ACT
+    const placed = placeTracks(w);
+    // ASSERT
+    expect([placed.left.width, placed.right.width, placed.title.width]).toEqual([200, 300, 68]);
+  });
+
+  it("ellipsis-clips the title rather than letting it wrap or spill", () => {
+    expect([
+      declaration(".topbar-title", "min-width"),
+      declaration(".topbar-title", "overflow"),
+      declaration(".topbar-title", "text-overflow"),
+      declaration(".topbar-title", "white-space"),
+    ]).toEqual(["0", "hidden", "ellipsis", "nowrap"]);
+  });
+
+  it("hangs each flank group on its own edge of the strip", () => {
+    expect([
+      declaration(".topbar-left", "justify-self"),
+      declaration(".topbar-right", "justify-self"),
+    ]).toEqual(["start", "end"]);
+  });
+});
+
+describe("the account cell", () => {
+  // RULING 3. The glyph qualifies the label, so it reads BEFORE it — and in
+  // the same cell, which is what makes the pair one thing to point at.
+  it("draws the connectivity glyph before the account label inside one cell", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const cell = drawTopbarView(view(), tc).querySelector(".topbar-account-cell");
+    // ASSERT
+    expect([...(cell?.children ?? [])].map((el) => el.className.split(" ")[0])).toEqual([
+      "topbar-connectivity",
+      "topbar-account",
+    ]);
+  });
+
+  it("stands the glyph closer to its label than two cells of the strip stand apart", () => {
+    expect(declaration(".topbar-account-cell", "gap")).toBe("calc(var(--topbar-cell-gap) / 2)");
+  });
+
+  // ONE ELEMENT MEANS ONE ANCHOR: the session line hangs under the pair.
+  it("anchors the session-line reveal on the pair rather than on the label alone", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const row = drawTopbarView(view(), tc);
+    // ASSERT
+    expect([
+      row.querySelector(".topbar-account-cell")?.getAttribute("data-reveal-anchor"),
+      row.querySelector(".topbar-account")?.getAttribute("data-reveal-anchor"),
+    ]).toEqual(["session", null]);
+  });
+});
+
+describe("the whole-view states", () => {
+  // RULING 4. A state that replaces the session-scoped controls stands where
+  // they stood: the LAST cell of the right group, at the strip's right edge.
+  it("draws the hibernated cell as the right group's own content", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const right = drawTopbarView(hibernatedView(), tc).querySelector(".topbar-right");
+    // ASSERT
+    expect([...(right?.children ?? [])].map((el) => el.className)).toEqual(["topbar-hibernated"]);
+  });
+
+  it("draws the cold-gate cell as the right group's own content", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT
+    const right = drawTopbarView(coldGateView(), tc).querySelector(".topbar-right");
+    // ASSERT
+    expect([...(right?.children ?? [])].map((el) => el.className)).toEqual(["topbar-cold-gate"]);
+  });
+
+  // ...and in the right cells' box, so the reader sees the right group's
+  // content rather than a stray label.
+  it("boxes both state cells exactly as the strip's other right-hand cells", () => {
+    expect(declaration(".topbar-fast,\n.topbar-hibernated,\n.topbar-cold-gate", "padding")).toBe(
+      declaration(
+        ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-warning-chip",
+        "padding",
+      ),
+    );
   });
 });
