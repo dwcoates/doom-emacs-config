@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"path/filepath"
 	"testing"
@@ -426,4 +427,175 @@ func TestAForegroundSpawnIsNeverReportedAsBackgrounded(t *testing.T) {
 	if got {
 		t.Fatal("a foreground spawn is reported as backgrounded")
 	}
+}
+
+// unownedResidueSpool arranges the shape that wrote 31 cancel-terminal ERRORs
+// on the owner's machine: a spool whose hold lapsed with nothing naming its
+// spawning call, so it is demoted to residue and TAILED — watched, readable,
+// and still owned by nobody. The launch line naming its call is tens of
+// megabytes back in a transcript the restarted reader is still catching up on.
+func unownedResidueSpool(t *testing.T, store *fakeStore, task, output string) (*harness, string) {
+	t.Helper()
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, task, output)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+	if got := h.sc.watchers[spool].target.Kind; got != tail.KindResidueSpool {
+		t.Fatalf("kind = %s, want the spool demoted to residue and tailed", got)
+	}
+	h.sc.pollAll()
+	return h, spool
+}
+
+// TestAStopWhoseSpawningCallIsUnknownIsHeldNotErrored pins the LEVEL. The spool
+// is being read, but the terminal is keyed on the spawning call and nothing has
+// named it yet, so there is nothing to settle YET — a wait, not a failure.
+func TestAStopWhoseSpawningCallIsUnknownIsHeldNotErrored(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h, _ := unownedResidueSpool(t, store, "b1unknown", "work with no launch in sight\n")
+
+	// Act.
+	h.sc.TaskStopped("b1unknown")
+
+	// Assert.
+	h.requireNone(t, "cancel-terminal", "error")
+}
+
+// TestALaunchAppliesAStopThatWasWaitingForIt is the retry edge the seam was
+// missing. applyStop was reached only after a batch of the run's spool
+// committed — and a run a person stopped has stopped writing, so a stop learned
+// before its launch was never retried at all and the run stayed open forever.
+// The launch itself must close it, with no further poll.
+func TestALaunchAppliesAStopThatWasWaitingForIt(t *testing.T) {
+	// Arrange: the spool is read and stopped while nothing names its call.
+	store := &fakeStore{}
+	h, spool := unownedResidueSpool(t, store, "b1waiting", "everything this run ever said\n")
+	h.sc.TaskStopped("b1waiting")
+	if cut := interruptedFor(store.writes, "toolu_waiting_run"); cut != nil {
+		t.Fatal("a terminal was minted before anything named the run's spawning call")
+	}
+
+	// Act: the transcript catches up and states who spawned it. Nothing polls
+	// afterwards — a stopped run writes no more bytes, so no poll would come.
+	h.sc.TaskSpawned("b1waiting", "toolu_waiting_run", "", spool, false, "/workspace", "workspace-id", "session-1")
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_waiting_run")
+	if cut == nil {
+		t.Fatalf("the launch did not apply the stop that was waiting for it: %s", h.logText())
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("the applied stop must state by_user: %v", cut.GetCause())
+	}
+}
+
+// claimedWorkflowSpoolWithAStoppedRun arranges the remaining converter-gap case:
+// a w* spool a spawning call CLAIMED, so it is tailed under the declared-residue
+// handler rather than demoted, and a person then stops its run.
+func claimedWorkflowSpoolWithAStoppedRun(t *testing.T, store *fakeStore, task, run, output string) *harness {
+	t.Helper()
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, task, output)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.TaskSpawned(task, run, "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.rescan()
+	if got := h.sc.watchers[spool].target.Kind; got != tail.KindWorkflowSpool {
+		t.Fatalf("kind = %s, want the claimed w* spool tailed as a declared-kind spool", got)
+	}
+	h.sc.pollAll()
+	h.sc.TaskStopped(task)
+	return h
+}
+
+func TestAStopMintsTheCancelledTerminalForAClaimedWorkflowSpool(t *testing.T) {
+	// Arrange. Kicking workflow CONVERSION says nothing about whether a workflow
+	// run can be stopped: the reader knows the run and its owner, so the unit is
+	// open downstream and a stop must settle it.
+	store := &fakeStore{}
+
+	// Act.
+	claimedWorkflowSpoolWithAStoppedRun(t, store, "w1stopped", "toolu_workflow_run", "workflow work\n")
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_workflow_run")
+	if cut == nil {
+		t.Fatal("no cancelled terminal was written for a stopped run whose spool is a claimed w* spool")
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("a stop is a person's decision and must state by_user: %v", cut.GetCause())
+	}
+}
+
+func TestTheWorkflowSpoolsCancelledTerminalCarriesTheOutputItRead(t *testing.T) {
+	// Arrange. A terminal owes the run's output, and this handler is the spool's
+	// sole reader — so it must carry what it read rather than claiming nothing
+	// was observed.
+	store := &fakeStore{}
+
+	// Act.
+	claimedWorkflowSpoolWithAStoppedRun(t, store, "w1bytes", "toolu_workflow_bytes", "workflow work\n")
+
+	// Assert.
+	got := interruptedFor(store.writes, "toolu_workflow_bytes").GetOutput().GetText().GetStdout()
+	if got != "workflow work\n" {
+		t.Fatalf("cancelled stdout = %q, want the output the workflow spool held", got)
+	}
+}
+
+func TestAStopForAClaimedWorkflowSpoolStatesNoConverterGap(t *testing.T) {
+	// Arrange. The reader states a converter that could not be asked for a
+	// terminal at error level. The declared-residue handler CAN be asked for one
+	// now, so that record is a false alarm and must not be written.
+	store := &fakeStore{}
+
+	// Act.
+	h := claimedWorkflowSpoolWithAStoppedRun(t, store, "w1nogap", "toolu_workflow_nogap", "workflow work\n")
+
+	// Assert.
+	h.requireNone(t, "cancel-terminal", "error")
+}
+
+// TestAShutdownWithdrawingTheTerminalWriteIsNotAStoreFailure closes the last
+// storeWrite caller that had no interrupted() guard. Its two siblings in
+// cycle.go return quietly when the shutdown withdraws a write — storeWrite has
+// already stated the one INFO `shutdown` record — while this one accused the
+// store of a failure it did not have.
+func TestAShutdownWithdrawingTheTerminalWriteIsNotAStoreFailure(t *testing.T) {
+	// Arrange: a stop ready to settle, against a store that never answers.
+	store := &fakeStore{}
+	h, spool := unownedResidueSpool(t, store, "b1withdrawn", "work\n")
+	h.sc.TaskStopped("b1withdrawn")
+	shutdown, cancel := context.WithCancel(context.Background())
+	h.sc.shutdown = shutdown
+	// Wedged only NOW: the setup's own reads must commit normally.
+	entered := make(chan struct{})
+	store.entered = entered
+	store.writeWedged = true
+	applied := make(chan struct{})
+
+	// Act: the terminal write wedges, then the shutdown withdraws it.
+	go func() {
+		defer close(applied)
+		h.sc.TaskSpawned("b1withdrawn", "toolu_withdrawn", "", spool, false, "/workspace", "workspace-id", "session-1")
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the store was never asked to write, so nothing is wedged to withdraw")
+	}
+	cancel()
+	select {
+	case <-applied:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the withdrawn write never returned")
+	}
+
+	// Assert.
+	h.requireNone(t, "cancel-terminal", "error")
 }

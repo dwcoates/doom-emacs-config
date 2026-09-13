@@ -544,3 +544,21 @@ func TestASpawnOnlyResponseRecordsItsZeroUnitsAtDebug(t *testing.T) {
 		t.Fatalf("the zero-units record was recorded at %q, want debug (a spawn announces at its result — benign)", got)
 	}
 }
+
+// TestAnUnmodeledContentBlockIsRecordedAtDebug pins the severity of the
+// forward-compat arm. A vendor adding a block type is expected, and the stored
+// vendor_specific unit is the coverage — the same argument the line-level arm
+// one level up already carries.
+func TestAnUnmodeledContentBlockIsRecordedAtDebug(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+
+	// Act.
+	convertLines(t, c, `{"type":"assistant","uuid":"a1","isSidechain":false,"timestamp":"`+ts1+`",`+
+		`"message":{"id":"msg_1","role":"assistant","content":[{"type":"fallback","text":"?"}]}}`)
+
+	// Assert.
+	if got := levelForMessage(t, sink, `type="fallback" is not modeled`); got != "debug" {
+		t.Fatalf("the unmodelled content block was recorded at %q, want debug", got)
+	}
+}

@@ -208,8 +208,18 @@ func (c *Converter) assistantBlock(block map[string]any, index int, messageID st
 		// A content block kind this schema does not model. It is a real
 		// assistant block, so it becomes a unit whose payload is the vendor's
 		// own — never a silent drop and never prose the agent did not write.
-		c.log.With(at.ctxWarn("assistant-block")).With(logging.Context{ActivityID: BlockActivityID(messageID, index)}).
-			Log("assistant content block type=%q is not modeled; stored as vendor_specific", kind)
+		//
+		// BENIGN FORWARD-COMPAT — debug, not warn, and for the identical reason
+		// 23f26d5e2 gave the LINE-level arm one level up: a vendor adding a
+		// block type is expected, not a fault, and the stored unit IS the
+		// coverage — it re-converts the day the type is modelled. That commit
+		// leveled five sibling arms and missed this one, which left one
+		// unmodelled-shape record warning while the rest did not, and a
+		// re-scan restating one warn per such block. A block that is not an
+		// object at all stays warn above: that is malformed, not merely
+		// unmodelled.
+		c.log.With(at.ctxFor("assistant-block")).With(logging.Context{ActivityID: BlockActivityID(messageID, index)}).
+			LogVerbose("assistant content block type=%q is not modeled; stored as vendor_specific", kind)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "content_block/"+kind, block)}, ""
 	}
 }
