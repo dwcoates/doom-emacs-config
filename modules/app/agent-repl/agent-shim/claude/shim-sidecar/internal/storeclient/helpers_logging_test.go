@@ -197,8 +197,8 @@ func TestARefusedWriteNamesBothTheRefusalsKindAndItsSite(t *testing.T) {
 // own storeWrite states the one normal-level `shutdown` record for that fact.
 func TestAWithdrawnWriteIsNotStatedAsATransportFailure(t *testing.T) {
 	cases := []struct {
-		name      string
-		callCtx   func(*testing.T) context.Context
+		name    string
+		callCtx func(*testing.T) context.Context
 		// wantErrors is how many ERROR records the call is allowed to leave.
 		wantErrors int
 	}{
