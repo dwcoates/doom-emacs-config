@@ -629,6 +629,21 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 		}
 		if err := s.deps.StartSession(startCtx, ws.ID); err != nil {
 			fields["error"] = err.Error()
+			// A START THIS DAEMON STOOD THE SHIM DOWN UNDER IS NOT A FAILED
+			// BRING-UP. The exit's drain force-stops every workspace session,
+			// and a start still in flight when it does comes back
+			// `unavailable: unexpected EOF` from a shim the same process just
+			// killed. It is the ordinary shape of an exit landing inside the
+			// bring-up -- the loop's next iteration sees ctx.Err() and stops
+			// -- and it is counted apart from the workspaces that genuinely
+			// would not start, so the summary's `failed` still means what it
+			// says. MEASURED: realtest run 2026-09-13T16:20:34 recorded it as
+			// an ERROR on three consecutive daemon generations.
+			if errors.Is(err, shimclient.ErrStandDownOrdered) {
+				log.Debug("daemon.boot.bring_up", "an open workspace's start ended in a stand-down this daemon ordered", fields)
+				report.StoodDown = append(report.StoodDown, ws.ID)
+				continue
+			}
 			log.Error("daemon.boot.bring_up", "an open workspace's session did not come up; the boot goes on", fields)
 			report.BringUpFailed = append(report.BringUpFailed, ws.ID)
 			continue
@@ -644,6 +659,7 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 		"pending":         len(pending),
 		"started":         len(report.BroughtUp),
 		"hibernated_left": len(report.HibernatedLeft),
+		"stood_down":      len(report.StoodDown),
 		"failed":          len(report.BringUpFailed),
 	})
 	return report

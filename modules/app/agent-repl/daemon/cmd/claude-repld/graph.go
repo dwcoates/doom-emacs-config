@@ -121,6 +121,13 @@ type graph struct {
 	// promptqueue.Queue.Drain states: both read and write that client off their
 	// own goroutine.
 	DrainQueue func(bound time.Duration) bool
+	// DrainStarts is the BOUNDED wait for the session starts that run off a
+	// caller's goroutine -- the register's revival of an announced
+	// workspace's conversation. It ENDS them first and then joins them, and
+	// `run` calls it BEFORE the state client closes, for the same reason
+	// DrainQueue is called there: a start reads and writes that client from
+	// its own goroutine.
+	DrainStarts func(bound time.Duration) bool
 	// DrainMerges is the BOUNDED wait for merge runs that have reached their
 	// terminal. `run` calls it BEFORE the watchers close and before the state
 	// client does: a SIGTERM landing mid-terminal used to close the store
@@ -172,6 +179,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	adoptBound, err := resolveAdoptBound(os.Getenv(envBootAdoptBound))
 	if err != nil {
 		log.Error(graphOperation, "the boot adoption bound was refused", dlog.Context{
+			"cause": err.Error(),
+		})
+		return nil, err
+	}
+	// THE START BOUND, on the same contract and for the same reason: the
+	// integration suite's subject includes a shim that accepts a start and
+	// never answers, and waiting out the production window to observe it would
+	// cost that test a minute.
+	startBound, err := resolveStartBound(os.Getenv(envStartSessionBound))
+	if err != nil {
+		log.Error(graphOperation, "the session start bound was refused", dlog.Context{
 			"cause": err.Error(),
 		})
 		return nil, err
@@ -395,6 +413,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ShimBuildSHA: paths.ShimBuildSHA,
 		Fake:         p.Contracts.Fake() || fakeShims(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
+		StartBound:   startBound,
 		Log:          p.Surfaces,
 	})
 	if err != nil {
@@ -739,6 +758,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		},
 		CloseWatchers: fleet.CloseWatchers,
 		DrainQueue:    queue.Drain,
+		DrainStarts:   fleet.DrainStarts,
 		DrainMerges:   mergeOrchestrator.Drain,
 	}, nil
 }
@@ -1131,6 +1151,28 @@ func adoptedDeathWitness(probe func(string) (sessionlock.State, error)) func(str
 		}
 		return state == sessionlock.StateFree, nil
 	}
+}
+
+// envStartSessionBound overrides workspace.DefaultStartSessionBound. It exists
+// for the integration suite, whose subject includes a shim that accepts the
+// start and never answers it.
+const envStartSessionBound = "AGENT_REPL_START_SESSION_BOUND"
+
+// resolveStartBound reads the start bound's override. Empty is
+// workspace.DefaultStartSessionBound; a malformed or non-positive value is a
+// REFUSAL, on the same reasoning resolveAdoptBound states.
+func resolveStartBound(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return workspace.DefaultStartSessionBound, nil
+	}
+	bound, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envStartSessionBound, value, err)
+	}
+	if bound <= 0 {
+		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envStartSessionBound, value)
+	}
+	return bound, nil
 }
 
 // envBootAdoptBound overrides boot.DefaultAdoptBound. It exists for the

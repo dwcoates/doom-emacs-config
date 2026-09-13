@@ -691,3 +691,38 @@ func TestRegisterLevelsACancelledRevivalAtInfo(t *testing.T) {
 		})
 	}
 }
+
+// TestRegisterAnswersWhileTheRevivalIsStillStarting is the whole point of
+// detaching the revival: the announcement's answer is the ROSTER ROW, and the
+// row is written before the session start is anywhere near done.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34. The revival ran inline, so the
+// register waited on `Sessions.Start` — which takes the workspace's start gate
+// and therefore waited on the boot's own bring-up of the SAME workspace, whose
+// StartSession the shim never answered. Emacs abandoned RegisterWorkspace at
+// its 10s bound on three daemon generations running and reported
+// `link-up-register-failed`, then `call-on-closed-connection SelectWorkspace`,
+// for a workspace whose row the daemon had already written and could have
+// answered from immediately.
+func TestRegisterAnswersWhileTheRevivalIsStillStarting(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir, record := registeredWithAConversation(t, f, nil)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	f.fleet.detachEntered = entered
+	f.fleet.detachHold = release
+
+	// Act.
+	answered, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("the re-announcement: %v", err)
+	}
+	if answered.ID != record.ID {
+		t.Fatalf("Register answered %q, want the known workspace %q", answered.ID, record.ID)
+	}
+	<-entered
+}

@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -371,5 +372,69 @@ func TestTheRosterDropsARepositoryWhoseDirectoryIsGone(t *testing.T) {
 		func(r *frontendv1.WorkspaceRoster) bool { return len(r.GetRepository().GetSections()) == 0 })
 	if rosterRow(got, f.ws.GetId()) != nil {
 		t.Fatalf("the roster still carries a row for %q under a repository that is not on disk", f.ws.GetId())
+	}
+}
+
+// TestRegisterWorkspaceAnswersWhileTheBootsOwnBringUpIsStuck pins the fix
+// landed in 71b59ab87: RegisterWorkspace's revival of an announced
+// workspace's recorded conversation used to call Sessions.Start INLINE, and
+// Start takes the workspace's per-workspace start gate -- the very gate the
+// boot's own bring-up of that same workspace holds for the whole of its
+// start. A shim that never answers StartSession therefore held
+// RegisterWorkspace open indefinitely, and Emacs timed it out at its own 10s
+// bound. The fix detaches the start (Fleet.StartDetached), so the register
+// answers from the registry rather than from a session start.
+func TestRegisterWorkspaceAnswersWhileTheBootsOwnBringUpIsStuck(t *testing.T) {
+	t.Parallel()
+	// Arrange: open a workspace to mint a vendor session, then force-kill it.
+	// The workspace stays OPEN with a recorded conversation and no live shim
+	// -- exactly what the boot's own reconciliation hands BringUp as
+	// "pending bring-up" on the next boot.
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.kill_session",
+		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.watch_agent", "daemon.workspace.kill",
+		"daemon.shimclient.redial", "daemon.sessionwatcher.reopen")
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.Stop()
+
+	// A shim profile that never answers StartSession, filed BEFORE the
+	// successor starts: its own boot bring-up is what spawns the shim that
+	// reads it, which is exactly the race a control-socket script would lose.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{HangStartSession: true})
+	successor := harness.StartDaemon(t, harness.Opts{
+		StateDir:   f.d.StateDir,
+		ProfileDir: f.d.ProfileDir,
+		ExtraArgs: []string{
+			"--default-config-dir", f.d.DefaultConfigDir,
+			"--multi-repo-config-dir", f.d.MultiRepoConfigDir,
+		},
+		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
+	})
+	// NOTHING IS DECLARED FOR THE STUCK START. The boot's own bring-up and the
+	// register's detached revival both call Sessions.Start against a shim that
+	// never answers, and both settle only when this daemon's own teardown
+	// stands that shim down -- which is a teardown it ORDERED, and is recorded
+	// as such rather than as a fault. The cleanup sweep is what pins that.
+
+	// Act: RegisterWorkspace re-announces the SAME workspace, on a context
+	// bounded by harness.DefaultTimeout -- the harness's ONE-WAIT failure
+	// bound -- rather than the whole run budget.
+	ctx, cancel := context.WithTimeout(successor.Ctx(), harness.DefaultTimeout)
+	defer cancel()
+	resp, err := successor.Client().RegisterWorkspace(ctx, connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: f.repo.Dir}))
+
+	// Assert: it answers, naming the same workspace, well inside the bound --
+	// even though the boot's own bring-up of this same workspace is stuck in
+	// a StartSession the shim will never answer.
+	if err != nil {
+		t.Fatalf("RegisterWorkspace(%s) = error %v, want a success within %s", f.repo.Dir, err, harness.DefaultTimeout)
+	}
+	if got := resp.Msg.GetSuccess().GetWorkspace().GetId(); got != f.ws.GetId() {
+		t.Fatalf("RegisterWorkspace(%s) = workspace %q, want the same workspace %q", f.repo.Dir, got, f.ws.GetId())
 	}
 }

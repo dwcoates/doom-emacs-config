@@ -134,6 +134,10 @@ type FleetDeps struct {
 	// a field for the same reason Probe is, so the give-up is exercised
 	// without waiting the real bound out.
 	AdoptBound time.Duration
+	// StartBound bounds ONE StartSession call. Zero means
+	// DefaultStartSessionBound, which is where the sizing is stated; it is a
+	// field for the same reason AdoptBound is.
+	StartBound time.Duration
 	// PublishHost recomposes and republishes one workspace's HOST view. The
 	// fleet owns the edges that move it and the server cannot see them: a
 	// session coming up, a session going away, a shim replaced. Nil means no
@@ -184,6 +188,8 @@ type Fleet struct {
 	now         func() time.Time
 	// adoptBound bounds ONE adoption; see FleetDeps.AdoptBound.
 	adoptBound time.Duration
+	// startBound bounds ONE StartSession; see DefaultStartSessionBound.
+	startBound time.Duration
 
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
@@ -205,6 +211,68 @@ type Fleet struct {
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
 	// whole start, which is why it is not mu itself.
 	startGates map[ids.WorkspaceID]*sync.Mutex
+
+	// detached counts the session starts running OFF a caller's goroutine, and
+	// detachedCtx is the context every one of them runs under. See
+	// StartDetached and DrainStarts: the pair is this fleet's own lifetime for
+	// work no request is waiting on, so the exit can end those starts and join
+	// them rather than close the state client under one.
+	detached    sync.WaitGroup
+	detachedCtx context.Context
+	endDetached context.CancelFunc
+}
+
+// StartDetached brings a workspace's session up WITHOUT the caller waiting for
+// it, reporting the outcome to `done` on the start's own goroutine.
+//
+// A SESSION START IS NOT PART OF AN ANNOUNCEMENT'S ANSWER. RegisterWorkspace
+// records a row; reviving the conversation that row names is work the row
+// occasions, not work the answer contains. Running it inline made the answer
+// wait for the start, and Start takes the workspace's start gate -- so a
+// register that arrived while the boot's own bring-up held that gate waited
+// for the WHOLE of the boot's start.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34: three daemon generations in a
+// row (pids 58458, 68787, 80526) had the boot bring-up's StartSession for
+// `2b81f45a724642ef` hang -- the shim never answered -- and Emacs's
+// re-announcement of that same workspace parked behind it on the gate. Emacs
+// timed RegisterWorkspace out at 10s all three times and reported
+// `link-up-register-failed` and then `call-on-closed-connection
+// SelectWorkspace`, for a row the daemon had already written: the register
+// answer was ready and the start was what was late.
+//
+// THE CONTEXT IS THE FLEET'S, NOT THE CALLER'S. The caller's dies with its
+// answer, which would cancel the very start being detached from it. The
+// fleet's own is ended by DrainStarts at the exit, so an in-flight start is
+// ended and joined rather than left writing into a closing state client.
+func (f *Fleet) StartDetached(ws ids.WorkspaceID, done func(error)) {
+	f.detached.Add(1)
+	go func() {
+		defer f.detached.Done()
+		err := f.Start(f.detachedCtx, ws)
+		if done != nil {
+			done(err)
+		}
+	}()
+}
+
+// DrainStarts ends every detached start and waits, bounded, for it to leave.
+// It answers false when one is still running at the bound, which is the
+// caller's cue to say so loudly: the state client closes next, and a start
+// still writing through it is a refused write on a path that owes no error.
+func (f *Fleet) DrainStarts(bound time.Duration) bool {
+	f.endDetached()
+	left := make(chan struct{})
+	go func() {
+		f.detached.Wait()
+		close(left)
+	}()
+	select {
+	case <-left:
+		return true
+	case <-time.After(bound):
+		return false
+	}
 }
 
 // startGate answers the gate that serializes one workspace's starts, minting
@@ -256,13 +324,21 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	if adoptBound <= 0 {
 		adoptBound = shimclient.DefaultAdoptBound
 	}
+	startBound := deps.StartBound
+	if startBound <= 0 {
+		startBound = DefaultStartSessionBound
+	}
+	detachedCtx, endDetached := context.WithCancel(context.Background())
 	return &Fleet{
+		detachedCtx: detachedCtx,
+		endDetached: endDetached,
 		deps:        deps,
 		probe:       probe,
 		socketProbe: socketProbe,
 		watch:       watch,
 		now:         now,
 		adoptBound:  adoptBound,
+		startBound:  startBound,
 		sessions:    map[ids.WorkspaceID]*live{},
 		coldGates:   map[ids.WorkspaceID]ServedColdGate{},
 		lastCold:    map[ids.WorkspaceID]*conversationv1.SessionCold{},
@@ -1083,6 +1159,36 @@ func freshModel(recorded string) *conversationv1.AgentModel {
 	return &conversationv1.AgentModel{Name: recorded}
 }
 
+// DefaultStartSessionBound bounds ONE StartSession call.
+//
+// A START THAT NEVER ANSWERS IS A WORKSPACE THAT NEVER COMES BACK. StartSession
+// was the one step of the bring-up with no bound at all: the shim client's
+// dial ladder is bounded, an adoption is bounded by AdoptBound, and then the
+// rpc that actually starts the session was allowed to take forever. It also
+// holds the workspace's START GATE for its whole duration, so every other
+// route to starting that workspace waits behind it.
+//
+// MEASURED, realtest run 2026-09-13T16:20:34. Workspace 2b81f45a724642ef's
+// shim accepted the start, logged `shim.convert.hooks: a hook blocked the
+// gated action` on `SessionStart:resume`, and never answered. Three daemon
+// generations each sat in that call until the NEXT deploy's SIGTERM ended the
+// process -- 35s, 3m30s and 8m30s -- with the workspace sessionless the whole
+// time and nothing in the daemon's log saying why.
+//
+// IT IS A PRODUCT WINDOW, NOT A BOUND ON THE DAEMON'S OWN WORK, and it is
+// sized the way boot.DefaultAdoptBound is. What it has to cover is the shim's
+// vendor resume plus whatever SessionStart hooks the user has configured,
+// which are arbitrary commands this daemon cannot measure. Every HEALTHY start
+// in that same run finished far inside it: the whole bring-up -- spawn, ready,
+// StartSession and the watcher -- ran 116ms, 245ms and 254ms, and the
+// StartSession rpc is a fraction of each. 60s is therefore ~240x the slowest
+// healthy start observed, which is deliberate: this bound exists to end a
+// start that has HUNG, never to hurry a slow one.
+//
+// AGENT_REPL_START_SESSION_BOUND overrides it; a malformed or non-positive
+// value is REFUSED, never ignored.
+const DefaultStartSessionBound = 60 * time.Second
+
 // startSession runs StartSession and answers a COLD refusal with the gate. A
 // nil SessionStarted with a nil error means the session is parked behind a
 // standing gate, which is an answer and not a failure.
@@ -1101,8 +1207,37 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		}}
 	}
 
-	response, err := client.StartSession(ctx, req)
+	// THE CALL IS BOUNDED. See DefaultStartSessionBound: a shim that accepts
+	// the start and never answers held this call, and the workspace's start
+	// gate with it, until the process died.
+	startCtx, endStart := context.WithTimeout(ctx, f.startBound)
+	defer endStart()
+	response, err := client.StartSession(startCtx, req)
 	if err != nil {
+		// AN EXPIRED BOUND IS NAMED, never left as a bare deadline. "context
+		// deadline exceeded" says nothing about which step spent it, and this
+		// one is the difference between a shim that is not there and a shim
+		// that took the request and went quiet -- which are remediated
+		// differently and which the log has to tell apart.
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			log.Error(opBringUp, "the shim accepted the start and did not answer inside its bound", dlog.Context{
+				"bound_ms": f.startBound.Milliseconds(), "shim_pid": client.PID(), "cause": err.Error(),
+			})
+			return nil, fmt.Errorf("start session for %q: the shim did not answer StartSession within %s: %w",
+				ws, f.startBound, err)
+		}
+		// A START THAT DIED IN A TEARDOWN THIS DAEMON ORDERED IS NOT A FAILED
+		// START. The shim client latches the KillSession or Kill the daemon
+		// asked for, and a StartSession still in flight to that shim then
+		// comes back `unavailable: unexpected EOF` -- not because the session
+		// would not come up, but because the daemon killed the shim it was
+		// asking. The error is still returned and the bring-up still stops;
+		// only the record says which of the two happened.
+		if errors.Is(err, shimclient.ErrStandDownOrdered) {
+			log.Info(opBringUp, "the StartSession call ended in a stand-down this daemon ordered",
+				dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("start session for %q: %w", ws, err)
+		}
 		log.Error(opBringUp, "the StartSession call failed", dlog.Context{"cause": err.Error()})
 		return nil, fmt.Errorf("start session for %q: %w", ws, err)
 	}
