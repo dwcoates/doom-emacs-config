@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -18,7 +17,7 @@ import (
 // closing terminal for what did not, so the set shrinks to empty either way.
 func (d *DB) LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error) {
 	base := logging.Fields{Operation: "store.db.live-work", Table: "agent"}
-	started := time.Now()
+	started := d.mono()
 	success := &storev1.GetLiveWorkSuccess{}
 
 	// MAIN AGENTS ARE NEVER LISTED. A main agent's liveness is the SESSION's
@@ -76,7 +75,7 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 		}
 		base.FileID = *fileID
 	}
-	started := time.Now()
+	started := d.mono()
 
 	querySQL := `SELECT file_id, path, offset, carry FROM cursor`
 	var args []any

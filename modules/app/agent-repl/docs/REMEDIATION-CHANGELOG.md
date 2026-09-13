@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- store writes: every write transaction goes through one process-wide slot (`beginWrite`), so a batch queues in-process and is never refused for a sibling's `SQLITE_BUSY`, and `lock_wait_ms` now measures that queue (gap scan `store.db.write-batch` x9 "database is locked (5)", 2026-09-13 14:02)
+
 - realtest preflight: the unguarded SHIMS a stopped daemon leaves listening are stood down under `AGENT_REPL_REALTEST_STOP_DAEMON` too (SIGTERM per shim and shim-lock after the daemon is gone, each stated), and a run that quit the owner's editor now cold-starts a guard-free one even when it DECLINED before any realtest ran (preflight DECLINE, 2026-09-13 15:2x)
 - realtest preflight: an UNGUARDED standing daemon is now STOPPED under `AGENT_REPL_REALTEST_STOP_DAEMON` (editor quit first, then SIGTERM) instead of declining, so a sweep that follows the guard-free handback can start (preflight DECLINE, 2026-09-13 15:08)
 - daemon sessions: `Fleet.Start` serializes the starts of ONE workspace behind a per-workspace gate, so a relaunch's boot bring-up and Emacs's announce can no longer both spawn and leave the second attaching to the first's shim as an inert survivor (integration `daemon.workspace.bring_up` warn, 2026-09-13)

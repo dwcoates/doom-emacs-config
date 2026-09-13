@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
@@ -66,7 +65,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 	if err := validateBook(agentID, pageSize); err != nil {
 		return OpenedPage{}, d.refuse(base, err)
 	}
-	started := time.Now()
+	started := d.mono()
 
 	tx, err := d.beginRead(ctx)
 	if err != nil {
@@ -133,7 +132,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 	if err != nil {
 		return nil, d.refuse(base, err)
 	}
-	started := time.Now()
+	started := d.mono()
 
 	tx, err := d.beginRead(ctx)
 	if err != nil {
@@ -182,7 +181,7 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 	if agentID == "" {
 		return nil, d.refuse(base, invalidFieldf("agent", "agent id value is empty"))
 	}
-	started := time.Now()
+	started := d.mono()
 
 	const querySQL = `SELECT position, write_seq, frame FROM entry
 	  WHERE book_agent_id = ? AND kind = ? AND write_seq > ?
