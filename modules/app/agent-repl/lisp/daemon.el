@@ -1298,11 +1298,24 @@ flag, not the protection itself."
       (agent-repl-daemon--record-exit proc event))))
 
 (defvar agent-repl-daemon--exit-requested nil
-  "Non-nil once this editor has asked the daemon to shut down.
-Set where the request is issued (`agent-repl-frontend-daemon-stop\'),
-consumed by `agent-repl-daemon--record-exit\', and cleared again when a
-daemon is spawned so an order given to one daemon can never excuse the
-departure of its successor.")
+  "The daemon this editor has asked to shut down, or nil for none.
+Set where the request is issued (`agent-repl-frontend-daemon-stop\'), which
+every restart path goes through, and consumed by
+`agent-repl-daemon--record-exit\'.
+
+IT NAMES THE PROCESS, NOT MERELY THE FACT.  It holds the process object the
+order was given to when this Emacs spawned that daemon, and t when there was
+no process object to name (an adopted daemon).  Naming the addressee is what
+keeps an order given to one daemon from excusing the departure of its
+successor, and it has to be identity rather than a blanket clear on spawn:
+`agent-repl-daemon--await-departure\' keys on the BOOT CLAIM, which the
+kernel releases the instant the old process ends, while Emacs runs that
+process\='s sentinel later.  So the restart\='s ensure spawns, and the
+predecessor\='s sentinel only then fires.  A clear at the spawn wiped the
+order before the exit it excused was ever recorded, and two orderly
+`bin/deploy-all.sh\' restarts were logged as unrequested exits at WARN
+(2026-09-13).  A t is still cleared on spawn: it names nobody, so it could
+otherwise excuse the new daemon.")
 
 (defconst agent-repl-daemon--exit-log-format
   "elisp.daemon.exited status=%S event=%s requested=%s"
@@ -1335,10 +1348,14 @@ THE LEVEL FOLLOWS WHO ASKED.  A daemon exit is not one fact:
 The request is CONSUMED here, so it excuses exactly the one exit it
 ordered and the next unrequested departure is heard in full."
   (let* ((status (process-exit-status proc))
-         (requested agent-repl-daemon--exit-requested)
+         (order agent-repl-daemon--exit-requested)
+         (requested (or (eq order t) (eq order proc)))
          (trimmed (string-trim (or event "")))
          (scope '(:agent-repl-central "the resident daemon lifecycle spans workspaces")))
-    (setq agent-repl-daemon--exit-requested nil)
+    ;; CONSUMED ONLY BY ITS OWN ADDRESSEE.  An order standing for some other
+    ;; daemon outlives this exit, so the departure it was given for is still
+    ;; heard as requested when it arrives.
+    (when requested (setq agent-repl-daemon--exit-requested nil))
     (cond
      (requested
       (agent-repl--info scope agent-repl-daemon--exit-log-format
@@ -1518,10 +1535,13 @@ is stated on the spawn rather than assumed."
              (proc (agent-repl--frontend-spawn-daemon
                     argv (agent-repl-daemon--environment))))
         (setq agent-repl--frontend-daemon-process proc)
-        ;; A NEW DAEMON INHERITS NO ORDERS.  Any shutdown this editor asked
-        ;; of a predecessor is spent; leaving it standing would let one
-        ;; deliberate restart excuse the next daemon's unasked-for death.
-        (setq agent-repl-daemon--exit-requested nil)
+        ;; A NEW DAEMON INHERITS NO ORDERS.  An order that names no process
+        ;; could otherwise excuse this daemon's unasked-for death, so it is
+        ;; spent here.  One that NAMES its addressee is left standing: it can
+        ;; only ever match that process, and the predecessor's sentinel
+        ;; routinely fires after this spawn.
+        (when (eq agent-repl-daemon--exit-requested t)
+          (setq agent-repl-daemon--exit-requested nil))
         (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.started argv=%S state-dir=%S"
                           argv (agent-repl--global-state-dir))
         (agent-repl-daemon--set-lifecycle 'starting)
@@ -1750,7 +1770,8 @@ missing link, or transport failure; interactive callers leave it out."
       ;; RECORDED AT THE REQUEST, not at its acceptance: the daemon may be
       ;; gone before its answer reaches us, and the exit that races the
       ;; acknowledgement is still the exit this editor asked for.
-      (setq agent-repl-daemon--exit-requested t)
+      (setq agent-repl-daemon--exit-requested
+            (or agent-repl--frontend-daemon-process t))
       (agent-repl-rpc-update-shutdown-schedule
        conn (list :action
                   (list :arm :now

@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- elisp daemon exit: the shutdown order names the process it was given to, so a restart's ensure spawning the successor first no longer wipes it and the predecessor's orderly exit is recorded at info (`elisp.daemon.exited requested=nil` WARN x2 on `bin/deploy-all.sh`, 2026-09-13)
+
 - daemon/drain: the drain loop's schedule read cancelled by the serving lifetime's end records at debug as the exit withdrawing the loop, and a read that fails while serving keeps its error (`daemon.drain.run` `context canceled` during an ordinary shutdown, integration suite under load 2026-09-13)
 - webapp footer: the expanded section draws UNDER the strip (strip, one full-width `--border-strong` divider, then the panel) instead of over it (owner ruling, 2026-09-13)
 
