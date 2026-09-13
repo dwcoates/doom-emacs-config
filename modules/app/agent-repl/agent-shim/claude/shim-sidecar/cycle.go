@@ -808,6 +808,18 @@ func (s *sidecar) cursorFor(target discover.Target, identity string) (*storev1.C
 	if err != nil {
 		// storeclient owns the causal record with its rpc and refusal detail.
 		s.noteStoreErr("recover-cursors", err)
+		if s.interrupted(err) {
+			// THE SHUTDOWN WITHDREW THE RECOVERY, so the store never said it
+			// could not answer. The file is left unwatched exactly as it would
+			// be by the exit one instant later, and the next boot asks for this
+			// position again. Stating it as a fault would accuse a store that
+			// was fine, which is the rule commit fd8105ee0 settled on the write
+			// path and this is the same rule on the cursor path.
+			s.log.With(logging.Context{
+				Operation: "shutdown", Path: target.Path, TaskID: target.TaskID, FileID: identity,
+			}).Log("shutdown withdrew this file's cursor recovery; it is not watched and the next boot recovers its position")
+			return nil, false
+		}
 		s.log.With(logging.Context{
 			Operation: "recover-cursors", Path: target.Path, TaskID: target.TaskID,
 			FileID: identity, Level: "warn",

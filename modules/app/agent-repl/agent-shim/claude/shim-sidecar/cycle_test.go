@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -1827,4 +1828,63 @@ func TestAFileThatWentWithItsWholeTreeIsStatedWithoutWarning(t *testing.T) {
 	if got := ctxString(t, rec, "reason"); got != reasonTreeRemoved {
 		t.Fatalf("the record's reason = %q, want %q", got, reasonTreeRemoved)
 	}
+}
+
+// --- a cursor recovery the shutdown withdrew --------------------------------
+
+// TestAShutdownWithdrawingACursorRecoveryIsNotAStoreFailure applies the rule
+// commit fd8105ee0 settled on the write path to the cursor path. A recovery this
+// process cancelled on the way out says nothing about the store: the file is
+// left unwatched exactly as the exit one instant later would leave it, and the
+// next boot asks for its position again.
+func TestAShutdownWithdrawingACursorRecoveryIsNotAStoreFailure(t *testing.T) {
+	// Arrange: a running cycle, then a per-file recovery that wedges.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	shutdown, cancel := context.WithCancel(context.Background())
+	h.sc.shutdown = shutdown
+	entered := make(chan struct{})
+	store.cursorsEntered = entered
+	store.cursorsWedged = true
+	answered := make(chan struct{})
+
+	// Act: the recovery wedges, then the shutdown withdraws it.
+	go func() {
+		defer close(answered)
+		h.sc.cursorFor(discover.Target{Path: "/private/tmp/b1.output", TaskID: "b1"}, "1:1")
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the store was never asked for a cursor, so nothing is wedged to withdraw")
+	}
+	cancel()
+	select {
+	case <-answered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the withdrawn recovery never returned")
+	}
+
+	// Assert.
+	h.requireNone(t, "recover-cursors", "warn")
+	h.requireOnce(t, "shutdown", "info")
+}
+
+func TestAStoreThatCannotAnswerACursorStillWarns(t *testing.T) {
+	// Arrange: no shutdown; the store refuses.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.cursorsFail = "the store cannot read its cursors"
+
+	// Act.
+	h.sc.cursorFor(discover.Target{Path: "/private/tmp/b1.output", TaskID: "b1"}, "1:1")
+
+	// Assert.
+	h.requireOnce(t, "recover-cursors", "warn")
 }

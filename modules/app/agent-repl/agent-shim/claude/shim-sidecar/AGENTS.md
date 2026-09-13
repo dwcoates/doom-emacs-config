@@ -502,6 +502,14 @@ A stop that is asked for is a stop that happens.
   and the next boot resolves it by resuming from whichever cursor the store
   holds. The shutdown record says exactly that and never claims the write was
   undone.
+- A STORE CALL THIS PROCESS WITHDREW IS NOT A STORE FAILURE, ON EITHER VERB.
+  `context.Canceled` can only come from the sidecar cancelling its own cycle
+  context on the way out — a call the store failed to answer in time comes back
+  `DeadlineExceeded` — so `storeclient` states the withdrawal at DEBUG and the
+  narration belongs to the layer that knows a shutdown is running: `storeWrite`
+  for a batch, `attempt` and `cursorFor` for a cursor recovery, each one INFO
+  `shutdown`. The error value is returned to the caller unchanged either way,
+  and a DEADLINE keeps its ERROR because that is a fact about the store.
 - THE LOG DRAIN IS THE ONE UNBOUNDED WAIT, AND IT IS NOW BOUNDED.
   `logging.Logger.Close` waits for the forwarding queue to drain, and the
   closing forward loop probes and dials the daemon ONCE PER QUEUED RECORD. With

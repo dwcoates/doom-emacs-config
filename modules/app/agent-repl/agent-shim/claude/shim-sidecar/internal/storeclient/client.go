@@ -187,6 +187,28 @@ func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorS
 	}
 	response, err := c.rpc.GetSidecarCursors(ctx, connect.NewRequest(request))
 	if err != nil {
+		// A RECOVERY THIS PROCESS WITHDREW IS NOT A TRANSPORT FAILURE — the same
+		// rule WriteBatch below already follows, on the other verb. The one way
+		// this call sees context.Canceled is the sidecar cancelling its own
+		// cycle context on the way out, and the outcome is the ordinary one: no
+		// cursor was recovered, so nothing is read and no tailer is built, and
+		// the next boot asks again. Calling it a transport failure made every
+		// shutdown that landed mid-recovery accuse a store that was fine — six
+		// ERRORs in the 2026-09-13 15:28 gap scan alone, every one of them
+		// inside a shutdown.
+		//
+		// A DEADLINE IS STILL A FAILURE and keeps the error: the store was asked
+		// and did not answer in time, which is a fact about the store. The error
+		// value is returned to the caller unchanged either way.
+		//
+		// THE NARRATION BELONGS TO THE CALLER, so this is the per-call DETAIL
+		// and not a second normal-level record: the sidecar's `attempt` and
+		// `cursorFor` are the layers that know a shutdown is in progress and
+		// state the one INFO record for it.
+		if errors.Is(err, context.Canceled) {
+			bound.LogVerbose("cursor recovery abandoned: the caller cancelled the request, so no position was recovered and nothing was read")
+			return nil, fmt.Errorf("storeclient: %s: %w", rpcGetSidecarCursors, err)
+		}
 		bound.With(logging.Context{Level: "error"}).Log("cursor recovery transport failure: %v", err)
 		return nil, fmt.Errorf("storeclient: %s: %w", rpcGetSidecarCursors, err)
 	}
