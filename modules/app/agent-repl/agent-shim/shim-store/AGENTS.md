@@ -187,6 +187,45 @@ directory, a full disk — and is returned), and only for a REGULAR FILE. A
 directory at `--db` is reported, never replaced: unlinking whatever sits at an
 operator-supplied path is how a service deletes somebody's data.
 
+### THE STORE IS THE SINGLE WRITER, AND IT SERIALIZES ITS WRITES ITSELF
+
+Nothing else opens this database by design — the store owns the file and serves
+every producer over its socket — so every writer SQLite could ever arbitrate
+between is one of this process's own goroutines. Leaving that arbitration to
+SQLite meant two of the store's connections both issuing `BEGIN IMMEDIATE`, one
+waiting out the whole `busy_timeout` and then being REFUSED: on 2026-09-13 the
+sidecar's full re-ingestion after a store reset met the shim mid-write and
+produced nine `store.db.write-batch` errors reading "begin write transaction:
+database is locked (5) (SQLITE_BUSY)", each one a batch handed back to its
+caller's retry, plus five `store.db.slow-query` warnings whose whole 5199ms was
+the timeout being burned before the refusal.
+
+So there is a PROCESS-WIDE WRITE SLOT (`DB.writeGate`, `internal/db/writer.go`)
+and **`beginWrite` is the only way a write transaction is opened in this
+package** — grep for `BeginTx` to check it. A batch WAITS ITS TURN, bounded only
+by its own request context, and then writes; it is never refused for a BUSY
+caused by a sibling.
+
+- **The slot is a one-slot channel, not a `sync.Mutex`**, precisely so it can be
+  selected against `ctx.Done()`. A caller that hangs up while queued gets its own
+  `context.Canceled` back — an `info` "abandoned" record, not an `error` — rather
+  than a storage failure its producer would retry for a caller that is gone.
+- **The release is deferred BEFORE the rollback**, so it runs after it. Handing
+  the slot back while the transaction still held the lock would guarantee
+  nothing.
+- **`lock_wait_ms` now measures the IN-PROCESS QUEUE**, which is both the number
+  an operator wanted and a truthful one: before the gate it was time inside
+  SQLite's busy handler, which ended either in a write or in a refusal. A wait
+  now always ends in a turn. Durations are read from `DB.mono`, an injectable
+  monotonic clock, so a test asserts an exact wait by advancing it rather than
+  by sleeping.
+- **THE REFUSAL PATH SURVIVES FOR AN OUTSIDE WRITER.** Nothing else is supposed
+  to open the file, but `sqlite3` at a shell, a stray second store racing the
+  socket singleton check, or a backup tool all still can, and the DSN's
+  `busy_timeout` plus the existing storage-failure refusal remain the answer for
+  that. What the gate guarantees is only, and exactly, that a BUSY can never have
+  come from this process.
+
 ### Any transaction that writes must BEGIN IMMEDIATE
 
 The DSN carries `_txlock=immediate` (plus WAL, `busy_timeout`,

@@ -44,6 +44,17 @@ import (
 // and the only remedy for "no" is to recreate it.
 const SchemaVersion = 5
 
+// mono reads the DB's monotonic clock — the one every measured duration is
+// taken from. A zero-value DB (only constructible inside this package, by a
+// test that cares about nothing else) falls back to time.Now rather than
+// panicking on a nil field.
+func (d *DB) mono() time.Time {
+	if d.clock == nil {
+		return time.Now()
+	}
+	return d.clock()
+}
+
 // nowMillis is the store's wall clock in unix millis.
 func nowMillis() int64 { return time.Now().UnixMilli() }
 
@@ -64,6 +75,22 @@ type DB struct {
 	// now is the clock every written timestamp is taken from. Injectable so a
 	// test can assert an exact instant without sleeping for one.
 	now func() int64
+	// clock is the MONOTONIC clock every measured duration is taken from — the
+	// slow-query elapsed time and the write gate's queue wait. It is separate
+	// from `now`, which stamps rows in wall-clock millis, because a duration
+	// and a timestamp are different questions. Injectable for the same reason:
+	// a test asserts an exact wait by advancing it, never by waiting one out.
+	clock func() time.Time
+	// writeGate is the process-wide write slot: exactly one write transaction
+	// at a time, so a batch never meets a sibling's BEGIN IMMEDIATE. It is a
+	// one-slot channel rather than a mutex so a queued caller can be canceled.
+	// See writer.go.
+	writeGate chan struct{}
+	// queuedForWrite, when set, is called by acquireWrite the moment a writer
+	// finds the slot taken and is about to block on it. It is the seam a test
+	// uses to observe a QUEUED writer — the state the gate exists to create —
+	// without sleeping for one. Nil in production; nothing reads it there.
+	queuedForWrite func()
 	// budgetMu guards budgets, which holds one rolling window of over-budget
 	// verdicts per statement family. Every producer's rpc runs on its own
 	// goroutine against this one DB, so the windows are shared state.
@@ -81,8 +108,13 @@ type Options struct {
 	// budget rather than a zero one that would flag every bulk write.
 	BulkBase   time.Duration
 	BulkPerRow time.Duration
-	// Now overrides the wall clock. Zero value means time.Now.
+	// Now overrides the wall clock rows are stamped from. Zero value means
+	// time.Now().UnixMilli.
 	Now func() int64
+	// Clock overrides the monotonic clock measured DURATIONS are taken from —
+	// the slow-query elapsed time and the write gate's queue wait. Zero value
+	// means time.Now.
+	Clock func() time.Time
 }
 
 // Open opens (creating if absent) the store database at path with WAL enabled
@@ -233,6 +265,10 @@ func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, err
 // openAt opens the handle and brings it to SchemaVersion, closing the handle if
 // either step fails so the caller may remove the file underneath it.
 func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
+	monotonic := opts.Clock
+	if monotonic == nil {
+		monotonic = time.Now
+	}
 	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, storagef(err, "opening %q", path)
@@ -249,7 +285,16 @@ func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() in
 	if bulkPerRow == 0 {
 		bulkPerRow = DefaultBulkPerRow
 	}
-	d := &DB{sql: sqldb, log: log, slowQuery: opts.SlowQuery, bulkBase: bulkBase, bulkPerRow: bulkPerRow, now: clock}
+	d := &DB{
+		sql:        sqldb,
+		log:        log,
+		slowQuery:  opts.SlowQuery,
+		bulkBase:   bulkBase,
+		bulkPerRow: bulkPerRow,
+		now:        clock,
+		clock:      monotonic,
+		writeGate:  make(chan struct{}, 1),
+	}
 	if err := d.ensureSchema(context.Background(), path); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, err
@@ -515,10 +560,15 @@ func (d *DB) inspectSchema(ctx context.Context) (int, []string, error) {
 // are no tables — a foreign shape never reaches here, because Open removed the
 // file it was in.
 func (d *DB) createSchema(ctx context.Context) error {
-	tx, err := d.sql.BeginTx(ctx, nil)
+	// THROUGH THE GATE LIKE EVERY OTHER WRITE. Nothing else is running yet at
+	// open, so this never queues; it goes through beginWrite anyway so that
+	// "every write transaction in this package is opened by beginWrite" is a
+	// property anyone can check by grepping for BeginTx rather than a habit.
+	tx, release, err := d.beginWrite(ctx)
 	if err != nil {
 		return storagef(err, "begin schema creation")
 	}
+	defer release()
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
 	if _, err := tx.ExecContext(ctx, schemaDDL); err != nil {
