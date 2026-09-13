@@ -895,3 +895,47 @@ func TestASpawnedClientReadsTheSupervisorsLatch(t *testing.T) {
 		t.Fatal("a client wired to the supervisor reports StandingDown() = false after the supervisor latched")
 	}
 }
+
+// TestSpawnedForAnswersTheLiveSpawnRegistry pins the adoption's own guard. A
+// spawn reaches the fleet's session map only after StartSession answers, so
+// for the whole window before that the supervisor's registry is the ONLY thing
+// that knows the process exists -- and "lock free, socket live" is exactly what
+// our own inert shim looks like to the next bring-up's probe.
+func TestSpawnedForAnswersTheLiveSpawnRegistry(t *testing.T) {
+	held := ids.WorkspaceID("ws-1")
+	tests := []struct {
+		name    string
+		ask     ids.WorkspaceID
+		release bool
+		want    bool
+	}{
+		{name: "a spawn this supervisor still owns is ours", ask: held, want: true},
+		{name: "another workspace's spawn is not ours", ask: ids.WorkspaceID("ws-2")},
+		{name: "a spawn that has left the registry is not ours", ask: held, release: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			sup := newSupervisor(t).(*supervisor)
+			c := newClient(newTestSurfaces().Global(), held, "/sock/ws-1.sock", defaultBackoff, nil)
+			c.mu.Lock()
+			c.pid = 4242
+			c.mu.Unlock()
+			sup.hold(c)
+			if tt.release {
+				c.releaseHold()
+			}
+
+			// Act.
+			pid, ours := sup.SpawnedFor(tt.ask)
+
+			// Assert.
+			if ours != tt.want {
+				t.Fatalf("SpawnedFor(%q) ours = %v, want %v", tt.ask, ours, tt.want)
+			}
+			if tt.want && pid != 4242 {
+				t.Fatalf("SpawnedFor(%q) pid = %d, want the held spawn's 4242", tt.ask, pid)
+			}
+		})
+	}
+}
