@@ -45,6 +45,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - elisp logging: a workspace whose REGISTERED directory is MISSING is a stale registry row and keeps the `:warning` popup at the warn rung; an unregistered or non-durable path is ordinary and records at `info` with no popup at all (same complaint: the docstring called both ordinary while both popped up)
 =======
 =======
+- daemon/dlog: the emergency echo -- the one write that fires when the durable sink itself failed -- is a single marshalled record carrying the unpersisted one in `unpersisted_record`, instead of two lines of prose no reader in the system could parse (2026-09-13 log sweep, all 24 non-records)
 - daemon/cmd+boot+shimclient: the three lifecycle events that are the mechanism WORKING record at info -- losing the boot claim, closing a workspace whose directory is gone (the owner's 2026-09-11 ruling), and sweeping a spawn that was still in flight at shutdown -- while every arm beside them keeps its warn and its error (2026-09-13 log sweep, 10 WARNs)
 >>>>>>> a41d17e0a (fix(daemon): a mechanism working is not a warning)
 - daemon/create: a create naming a repository whose directory is gone is refused `unknown_repository` before git is touched, instead of running on to a bare `stat <repo>/.git` failure that cost an ERROR from the verb and a second from the rpc boundary (2026-09-13 log sweep, 12 ERRORs)
