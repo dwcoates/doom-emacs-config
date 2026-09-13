@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/stale"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestCycleBeginsOnlyAfterASuccessfulCursorRead(t *testing.T) {
@@ -1952,9 +1954,12 @@ func TestOnlyTypedEntriesReachTheStore(t *testing.T) {
 	}
 }
 
-func TestABatchOfOnlyResidueIsNotEvenSentToTheStore(t *testing.T) {
-	// Arrange: nothing to store and no position to advance, so there is nothing
-	// for the store to do and asking anyway would spend an rpc per residue line.
+// A BATCH OF ONLY RESIDUE STILL GOES, AND CARRIES ONLY ITS SHAPES. The records
+// are withheld, but the shape catalog is the one durable thing a withheld line
+// leaves behind (owner ruling 2026-09-13), and an observation dropped because
+// its batch looked empty is a shape no re-read ever observes again.
+func TestABatchOfOnlyResidueIsSentCarryingOnlyItsShapes(t *testing.T) {
+	// Arrange.
 	store := &fakeStore{}
 	h := newHarness(t, store)
 
@@ -1964,8 +1969,30 @@ func TestABatchOfOnlyResidueIsNotEvenSentToTheStore(t *testing.T) {
 	})
 
 	// Assert.
+	if store.writeCalls != 1 {
+		t.Fatalf("write calls = %d, want the one write the shape observation needs", store.writeCalls)
+	}
+	if len(store.writes[0].GetEntries()) != 0 {
+		t.Fatalf("entries = %d, want the residue withheld", len(store.writes[0].GetEntries()))
+	}
+	if len(store.shapes[0]) != 1 {
+		t.Fatalf("shapes = %v, want the withheld line's one observation", store.shapes[0])
+	}
+}
+
+// A BATCH OF NOTHING AT ALL IS STILL NOT SENT: no records, no position, no
+// shape, so the store has nothing to do with it.
+func TestABatchOfNothingIsNotSentToTheStore(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+
+	// Act.
+	h.sc.emit("subject", nil)
+
+	// Assert.
 	if store.writeCalls != 0 {
-		t.Fatalf("write calls = %d, want none for a batch that was only residue", store.writeCalls)
+		t.Fatalf("write calls = %d, want none for a batch with nothing in it", store.writeCalls)
 	}
 }
 
@@ -2015,5 +2042,196 @@ func TestTheWithheldRecordAnnouncesNoRow(t *testing.T) {
 	}
 	if _, ok := rec.Context["upsert_key"]; ok {
 		t.Fatalf("the withholding record announced a row: %v", rec.Context)
+	}
+}
+
+// ---- the residue shape catalog at the write door ----
+
+// residueEntryFor builds one vendor_specific residue entry over a JSON literal,
+// which is what the withholding door sees for every unmodelled line.
+func residueEntryFor(t *testing.T, kind, literal string) *storev1.StoreEntry {
+	t.Helper()
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(literal), &raw); err != nil {
+		t.Fatalf("decoding %s: %v", literal, err)
+	}
+	s, err := structpb.NewStruct(raw)
+	if err != nil {
+		t.Fatalf("structpb.NewStruct: %v", err)
+	}
+	return &storev1.StoreEntry{Entry: &storev1.StoreEntry_AgentUpdate{
+		AgentUpdate: &storev1.StoreAgentUpdate{AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{
+			UnservedItem: &storev1.StoreUnservedItem{
+				UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{
+					VendorSpecific: &storev1.StoreVendorSpecific{Kind: kind, Raw: s},
+				},
+			},
+		}},
+	}}
+}
+
+// typedEntryFor builds one servable page line, the entry class the door keeps.
+func typedEntryFor() *storev1.StoreEntry {
+	return &storev1.StoreEntry{Entry: &storev1.StoreEntry_AgentUpdate{
+		AgentUpdate: &storev1.StoreAgentUpdate{AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
+			ServeableFrame: &storev1.StorePageLine{},
+		}},
+	}}
+}
+
+func TestAWithheldResidueLineContributesAShapeObservation(t *testing.T) {
+	// Arrange. The bytes are not stored, so the shape is the only thing left
+	// that says the vendor emits this line at all.
+	h := newHarness(t, nil)
+	batch := &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+		residueEntryFor(t, "hook_success", `{"a":"x"}`),
+	}}
+
+	// Act.
+	kept, shapes := h.sc.withholdResidue(batch)
+
+	// Assert.
+	if len(kept) != 0 {
+		t.Fatalf("kept = %d entries, want the residue withheld", len(kept))
+	}
+	if len(shapes) != 1 || shapes[0].GetKeyStructure() != `{a:string}` {
+		t.Fatalf("shapes = %v, want one observation of the line's key structure", shapes)
+	}
+}
+
+// ONE OBSERVATION PER SHAPE PER BATCH. A boot walk reads thousands of lines of
+// one shape, and one observation per line would send the catalog the very
+// volume the catalog exists to avoid storing.
+func TestTwoWithheldLinesOfOneShapeContributeOneObservation(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	batch := &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+		residueEntryFor(t, "hook_success", `{"a":"first"}`),
+		residueEntryFor(t, "hook_success", `{"a":"second"}`),
+	}}
+
+	// Act.
+	_, shapes := h.sc.withholdResidue(batch)
+
+	// Assert.
+	if len(shapes) != 1 {
+		t.Fatalf("shapes = %d, want the batch deduped by hash", len(shapes))
+	}
+}
+
+func TestTwoWithheldLinesOfDifferentShapesContributeTwoObservations(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	batch := &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+		residueEntryFor(t, "hook_success", `{"a":"x"}`),
+		residueEntryFor(t, "hook_success", `{"b":1}`),
+	}}
+
+	// Act.
+	_, shapes := h.sc.withholdResidue(batch)
+
+	// Assert.
+	if len(shapes) != 2 {
+		t.Fatalf("shapes = %d, want one per distinct key structure", len(shapes))
+	}
+}
+
+func TestTheFirstExampleIsTheFirstLineOfItsShape(t *testing.T) {
+	// Arrange. One readable line per shape is what makes the catalog actionable.
+	h := newHarness(t, nil)
+	batch := &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+		residueEntryFor(t, "hook_success", `{"a":"first"}`),
+		residueEntryFor(t, "hook_success", `{"a":"second"}`),
+	}}
+
+	// Act.
+	_, shapes := h.sc.withholdResidue(batch)
+
+	// Assert.
+	if string(shapes[0].GetFirstExample()) != `{"a":"first"}` {
+		t.Fatalf("first_example = %q, want the first line of the shape", shapes[0].GetFirstExample())
+	}
+}
+
+func TestATypedEntryContributesNoShapeObservation(t *testing.T) {
+	// Arrange. The catalog is about what was NOT stored.
+	h := newHarness(t, nil)
+	batch := &storev1.EntryBatch{Entries: []*storev1.StoreEntry{typedEntryFor()}}
+
+	// Act.
+	kept, shapes := h.sc.withholdResidue(batch)
+
+	// Assert.
+	if len(kept) != 1 {
+		t.Fatalf("kept = %d entries, want the typed entry persisted", len(kept))
+	}
+	if len(shapes) != 0 {
+		t.Fatalf("shapes = %v, want none for a typed entry", shapes)
+	}
+}
+
+// `new_shapes` MEANS FIRST SEEN BY THIS PROCESS. A shape already contributed in
+// an earlier batch still rides the wire — the store's count must rise — but it
+// is not news for the summary.
+func TestAShapeSeenInAnEarlierBatchIsNotCountedAsNew(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	cursor := &storev1.CursorState{FileId: "16777232:1", Path: "/t/a.jsonl", Offset: 1}
+	first := &storev1.EntryBatch{
+		Entries:       []*storev1.StoreEntry{residueEntryFor(t, "hook_success", `{"a":"x"}`)},
+		CursorAdvance: cursor,
+	}
+	second := &storev1.EntryBatch{
+		Entries:       []*storev1.StoreEntry{residueEntryFor(t, "hook_success", `{"a":"y"}`)},
+		CursorAdvance: cursor,
+	}
+	h.sc.withholdResidue(first)
+
+	// Act.
+	_, shapes := h.sc.withholdResidue(second)
+
+	// Assert.
+	if len(shapes) != 1 {
+		t.Fatalf("shapes = %d, want the observation still sent so the store's count rises", len(shapes))
+	}
+	if got := h.sc.newShapes["16777232:1"]; got != 1 {
+		t.Fatalf("new_shapes = %d, want only the first sighting counted", got)
+	}
+}
+
+func TestEachDistinctShapeCountsOnceAsNew(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	batch := &storev1.EntryBatch{
+		Entries: []*storev1.StoreEntry{
+			residueEntryFor(t, "hook_success", `{"a":"x"}`),
+			residueEntryFor(t, "hook_success", `{"b":1}`),
+		},
+		CursorAdvance: &storev1.CursorState{FileId: "16777232:1", Path: "/t/a.jsonl", Offset: 1},
+	}
+
+	// Act.
+	h.sc.withholdResidue(batch)
+
+	// Assert.
+	if got := h.sc.newShapes["16777232:1"]; got != 2 {
+		t.Fatalf("new_shapes = %d, want one per distinct key structure", got)
+	}
+}
+
+func TestTheCatchupSummaryStatesTheNewShapeCount(t *testing.T) {
+	// Arrange. The per-line withholding is DEBUG, so the summary is the only
+	// place at INFO that says what the boot walk discovered.
+	h := newHarness(t, nil)
+	h.sc.withholdResidue(&storev1.EntryBatch{
+		Entries: []*storev1.StoreEntry{residueEntryFor(t, "hook_success", `{"a":"x"}`)},
+	})
+
+	// Act.
+	h.sc.summarizeWithheldResidue()
+
+	// Assert.
+	if !strings.Contains(h.logText(), "cataloguing 1 shape(s) this process had not seen before") {
+		t.Fatalf("logs = %v, want the summary to state the new shape count", *h.logs)
 	}
 }

@@ -893,3 +893,28 @@ AT MOST ONE OF `hibernated` AND `cold_gate` IS EVER SET, and the daemon states
 waits on nothing.
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+### `store.v1` — the unmodelled-line shape catalog
+
+`WriteBatchRequest` gains `repeated ShapeObservation shapes = 3`, with the new
+message `ShapeObservation { string shape_hash = 1; string kind = 2; string
+key_structure = 3; bytes first_example = 4; int64 seen_ms = 5; }`. A new unary
+`ShimStore.ListResidueShapes` reads the catalog back
+(`endpoint_list_residue_shapes.proto`: request `{optional string kind, uint32
+limit, bool include_example}`, success `repeated ResidueShapeRow`, the standard
+two-arm failure).
+
+USER-RULED, 2026-09-13 (docs/REALTEST-JUDGEMENT-CALLS.md, "Owner ruling: the
+unmodelled-line shape catalog"). A residue line the sidecar no longer persists
+takes its bytes out of the store, and with them the only evidence that the
+vendor emits that line at all. The catalog keeps ONE ROW PER DISTINCT RECURSIVE
+KEY STRUCTURE — the key names and scalar types, never the values — plus the
+first example verbatim, the kind, first/last seen and a count, so the vendor's
+API stays discoverable at a cost that does not grow with traffic.
+
+THE OBSERVATIONS RIDE `WriteBatchRequest` RATHER THAN THEIR OWN RPC because
+they are read from bytes whose cursor advance commits in that same
+transaction: a shape observed and not committed with the advance that consumed
+its line is a shape no re-read will ever observe again.
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4

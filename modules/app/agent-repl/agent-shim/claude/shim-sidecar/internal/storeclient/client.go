@@ -243,7 +243,7 @@ func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorS
 // re-ingesting already-stored content is idempotent. Those entries are returned
 // so the caller can fold them into its own catch-up summary; they are not a
 // failure and the cursor still advances.
-func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) ([]SkippedEntry, error) {
+func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch, shapes []*storev1.ShapeObservation) ([]SkippedEntry, error) {
 	if batch == nil {
 		return nil, errors.New("storeclient: WriteBatch requires a batch")
 	}
@@ -255,10 +255,14 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) ([]S
 			FileID: cursor.GetFileId(), Path: cursor.GetPath(), Offset: logging.Off(cursor.GetOffset()),
 		})
 	}
-	bound.LogVerbose("write requested entries=%d cursor_advance=%t", len(batch.GetEntries()), batch.GetCursorAdvance() != nil)
+	bound.LogVerbose("write requested entries=%d shapes=%d cursor_advance=%t", len(batch.GetEntries()), len(shapes), batch.GetCursorAdvance() != nil)
 	response, err := c.rpc.WriteBatch(ctx, connect.NewRequest(&storev1.WriteBatchRequest{
 		Producer: Producer,
 		Batch:    batch,
+		// THE SHAPE CATALOG RIDES THE SAME REQUEST as the records and the cursor
+		// advance, so an observation taken from bytes this advance consumes
+		// becomes durable with it or not at all.
+		Shapes: shapes,
 	}))
 	if err != nil {
 		// A WRITE THIS PROCESS WITHDREW IS NOT A TRANSPORT FAILURE. The one way

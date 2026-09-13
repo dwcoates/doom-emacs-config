@@ -93,7 +93,7 @@ than served and hoped about, and a configured surface that cannot bind is a
 hard error. Both outcomes are recorded (`store.pprof.disabled` /
 `store.pprof.enabled`).
 
-## The four tables
+## The tables
 
 - `agent` — one row per `AgentId`, main agent included. THE home of agent
   metadata: `spawned_by_agent` XOR `spawned_by_workflow` (main: neither), the
@@ -126,6 +126,45 @@ hard error. Both outcomes are recorded (`store.pprof.disabled` /
 filters and joins on them; `entry`'s frame stays a BLOB because activity
 vocabulary is content, and unpacking it would drag every `conversation.v1`
 change into DDL.
+
+### `residue_shapes` — the catalog of what nobody stored
+
+Owner ruling 2026-09-13 (`docs/REALTEST-JUDGEMENT-CALLS.md`, "the
+unmodelled-line shape catalog"). The sidecar persists no residue, which takes
+the bytes out of the store and with them the only evidence the vendor emits
+that line at all. THE SHAPE IS KEPT INSTEAD: `residue_shapes` holds one row per
+distinct recursive key structure — `shape_hash` (PK, SHA-256 over the
+rendering), `kind`, `key_structure`, `first_example`, `first_seen_ms`,
+`last_seen_ms`, `count` — so a human can ask what the vendor is emitting that
+this system does not model.
+
+- **THE TABLE HOLDS STRUCTURE, NOT CONTENT.** `key_structure` is key names and
+  scalar TYPES with every value dropped; the producer owns the rendering and the
+  wildcard rule, documented in the sidecar's AGENTS.md under "the residue shape
+  catalog". `first_example` is the one verbatim line, and it is the deliberate
+  exception: a shape nobody can read an example of is a shape nobody can act on.
+- **NO RETENTION RULE, BY RULING.** The row count is bounded by the number of
+  distinct shapes a vendor emits, not by traffic, so there is nothing here for a
+  sweep to remove — unlike `write_ledger` below.
+- **THE FIRST INSERT OWNS THE EXAMPLE.** A later observation raises `count` and
+  takes a MAXIMUM of `last_seen_ms`, and touches nothing else. Maximum, not
+  assignment: the producers are not ordered against each other and a replayed
+  batch carries an old instant, so an unconditional write would walk a row
+  backwards.
+- **IT COMMITS IN THE BATCH'S OWN TRANSACTION** (`internal/db/shape.go`,
+  `applyShapes`, called from `WriteBatch`). An observation is read from bytes
+  whose cursor advance commits there; split them and an advance that survived a
+  lost catalog write takes the shape with it, because nothing re-reads bytes
+  already past the cursor. Every observation is validated BEFORE the transaction
+  opens, so a malformed one refuses the batch whole. A batch carrying nothing
+  but shapes is a real write and is accepted.
+- **READING IT.** `ListResidueShapes` serves the catalog newest-seen first, with
+  an optional `kind` filter (present-but-empty is refused, as everywhere), a
+  limit bounded by the store's own default and maximum, and the example OPT-IN
+  because it is the one column carrying raw vendor bytes. `make -C
+  agent-shim/shim-store shapes` runs it (`cmd/shapes`, `ARGS="--kind unparsed
+  --example"`), because a discovery surface reachable only by `sqlite3` is one
+  nobody consults. Nothing in the running system reads the catalog.
 
 ### The write ledger is retained only as long as absorption can ask
 

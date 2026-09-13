@@ -1,0 +1,77 @@
+// endpoint_list_residue_shapes.proto — ListResidueShapes: the catalog of key
+// structures the producers observed on lines they did not store.
+//
+// IT EXISTS SO THE CATALOG IS QUERYABLE WITHOUT OPENING THE DATABASE BY HAND.
+// The catalog's whole purpose is discovery of a vendor's API after the bytes
+// stop being kept, and a discovery surface reachable only by `sqlite3` is one
+// nobody consults.
+
+syntax = "proto3";
+
+package store.v1;
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Read the catalog, newest-seen first.
+message ListResidueShapesRequest {
+  // UNSET asks for every kind; set narrows to one residue kind exactly.
+  optional string kind = 1;
+  // At most this many rows. 0 means the store's own default.
+  uint32 limit = 2;
+  // THE EXAMPLE IS OPT-IN because it is the one field that carries raw vendor
+  // bytes: a catalog listing is a structure listing, and a caller that wants
+  // the line asks for it.
+  bool include_example = 3;
+}
+
+// The rows, or why they could not be served.
+message ListResidueShapesResponse {
+  oneof result {
+    ListResidueShapesSuccess success = 1;
+    ListResidueShapesFailure failure = 2;
+  }
+}
+
+// The catalog rows. Empty is a legitimate answer: a store that has observed no
+// unstored residue has no shapes.
+message ListResidueShapesSuccess {
+  repeated ResidueShapeRow shapes = 1;
+}
+
+// One catalogued shape: one distinct recursive key structure.
+message ResidueShapeRow {
+  // SHA-256, lowercase hex, over key_structure.
+  string shape_hash = 1;
+  // The residue kind the shape was first observed under.
+  string kind = 2;
+  // The canonical rendering the hash was taken over.
+  string key_structure = 3;
+  // The verbatim first line seen with this shape. UNSET unless the request
+  // asked for it.
+  bytes first_example = 4;
+  // When this shape was first catalogued, unix millis.
+  int64 first_seen_ms = 5;
+  // The most recent observation, unix millis.
+  int64 last_seen_ms = 6;
+  // How many observations have been folded into this row.
+  int64 count = 7;
+}
+
+// The catalog could not be read. THE ARM IS WHY.
+message ListResidueShapesFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // kind present but empty.
+    ListResidueShapesInvalidRequest invalid_request = 2;
+    ListResidueShapesStorageFailure storage_failure = 3;
+  }
+}
+// The request was malformed or violated the validation invariant.
+message ListResidueShapesInvalidRequest {
+  // Which field, as the store names it — for the caller's logs, never
+  // switched on.
+  string field = 1;
+}
+// The database failed; `detail` carries the driver's text.
+message ListResidueShapesStorageFailure {}
