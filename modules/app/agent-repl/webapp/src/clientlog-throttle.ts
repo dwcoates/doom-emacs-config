@@ -118,6 +118,20 @@ export class ClientLogThrottle {
     if (this.buffer.length > 0 || this.dropped > 0) this.arm();
   }
 
+  /**
+   * Discard everything buffered and unreported, answering how many records
+   * that was. For a sink that will NEVER accept them again — the workspace
+   * this page logs for has departed — where holding them is an unbounded queue
+   * against a destination that is gone.
+   */
+  discard(): number {
+    const lost = this.buffer.length + this.dropped;
+    this.buffer.length = 0;
+    this.dropped = 0;
+    this.disarm();
+    return lost;
+  }
+
   /** Records waiting for their window. */
   bufferedCount(): number {
     return this.buffer.length;

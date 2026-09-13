@@ -109,7 +109,7 @@ describe("interruptErrorSentence: every arm words itself", () => {
 describe("logInterruptRefusal: the one line a refused stop leaves behind", () => {
   it("warns with the arm's own case and sentence, under the caller's operation", () => {
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     logInterruptRefusal(kindOf("noSession"), "this workspace has no session to interrupt", "footer.turn-stop-refused");
     expect(
       lines.some(

@@ -185,7 +185,7 @@ describe("renderExternalLink: what it renders", () => {
 
   it("warns when it refuses to link a destination", () => {
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const { ctx } = harness();
     renderExternalLink(ctx, { text: "x", url: "mailto:a@b.test" });
     expect(lines.some(([level, line]) => level === "warn" && line.includes("link.unlinkable-scheme"))).toBe(true);
@@ -288,7 +288,7 @@ describe("renderExternalLink: the click", () => {
 
   it("warns on a refusal", async () => {
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const { ctx } = harness("error");
     click(renderExternalLink(ctx, { text: "docs", url: "https://example.test" }));
     await settle();
@@ -478,7 +478,7 @@ describe("renderEditorLink", () => {
 
   it("warns on a refusal", async () => {
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const { ctx } = harness("error");
     click(renderEditorLink(ctx, { text: "x", path: "/w/x" }));
     await settle();

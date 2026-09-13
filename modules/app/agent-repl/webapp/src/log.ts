@@ -79,7 +79,16 @@ export interface WebappLogRecord {
 }
 
 /** Hands one record to the daemon. Rejects when the call did not land. */
-export type ClientLogSink = (record: ClientLogRecord) => Promise<void>;
+/**
+ * What the daemon did with one forwarded record.
+ *
+ * `workspace_departed` is `ClientLogError.unknown_workspace`: the daemon no
+ * longer knows the workspace this page logs for, and never will again. It is
+ * ORDINARY (the daemon records it at INFO) and it is TERMINAL — the sink is
+ * gone, not failing — so it is a distinct outcome from a rejection.
+ */
+export type ClientLogSinkOutcome = "accepted" | "workspace_departed";
+export type ClientLogSink = (record: ClientLogRecord) => Promise<ClientLogSinkOutcome>;
 
 /**
  * The `level` oneof arm each level name selects. Spelled as data so a renamed
@@ -113,6 +122,9 @@ export function parseClientLogLevel(value: string | null): ClientLogLevel {
 export class ForwardingLogger {
   private readonly throttle: ClientLogThrottle;
   private sinkFailures = 0;
+  // Set once the daemon answers unknown_workspace: forwarding is over for the
+  // life of this logger, because the workspace it logs for is gone.
+  private departed = false;
   private announcedSinkFailure = false;
 
   /**
@@ -191,12 +203,43 @@ export class ForwardingLogger {
    * sink turns into an unbounded queue.
    */
   private forward(record: ClientLogRecord): boolean {
+    if (this.departed) return true;
     const restamped = create(ClientLogRecordSchema, {
       ...record,
       context: restampRecordIdentity(record.context ?? {}) as JsonObject,
     });
-    void this.send(restamped).catch((err: unknown) => this.noteSinkFailure(err));
+    void this.send(restamped)
+      .then((outcome) => {
+        if (outcome === "workspace_departed") this.noteWorkspaceDeparted();
+      })
+      .catch((err: unknown) => this.noteSinkFailure(err));
     return true;
+  }
+
+  /**
+   * The daemon has forgotten the workspace this page logs for. STOP FORWARDING
+   * — every later record would draw the same refusal — and drop what is queued
+   * for it, since no daemon will ever file those records.
+   *
+   * NOTHING GOES SILENT. The console remains the sink for every record from
+   * here on (`write` consoles before it forwards), and the count of what the
+   * queue lost is stated once, at debug, through the same direct console path
+   * the sink-failure announcement uses: routing it through `log` would forward
+   * a record about having stopped forwarding.
+   */
+  private noteWorkspaceDeparted(): void {
+    if (this.departed) return;
+    this.departed = true;
+    const dropped = this.throttle.discard();
+    console.debug(
+      `webapp ClientLog stopped: the daemon no longer knows this workspace; ` +
+        `dropped ${String(dropped)} queued record(s), the console is now the only sink`,
+    );
+  }
+
+  /** Whether forwarding has stopped because the workspace departed. */
+  workspaceDeparted(): boolean {
+    return this.departed;
   }
 
   private noteSinkFailure(err: unknown): void {
