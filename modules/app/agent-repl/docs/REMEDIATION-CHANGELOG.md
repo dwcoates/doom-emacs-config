@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- shim WatchAgent tail: the store ending a standing `WatchAgentSession` is no longer read as a conclusion — the tail re-opens from the last served pointer on the retry schedule, bounded by three barren ends, and every `WatchAgent` ending is named (concluded at info, an unasked one at error) (daemon `a standing stream ended without the session ending` + `link_fault` with the shim silent, workspace 2b81f45a724642ef, 2026-09-13 16:03)
+
 - elisp daemon exit: the shutdown order names the process it was given to, so a restart's ensure spawning the successor first no longer wipes it and the predecessor's orderly exit is recorded at info (`elisp.daemon.exited requested=nil` WARN x2 on `bin/deploy-all.sh`, 2026-09-13)
 
 - store schema: a database stamped BELOW this binary's `SchemaVersion` is recreated at INFO naming both versions (the deploy-time bump is the store's documented convention), while a stamp at or above it, a file with no `schema_meta`, an unreadable file and a failed recreate are ERROR (gap scan `store.db.schema` warn "found version=5 ... want version=6", 2026-09-13 16:03)
