@@ -11,6 +11,8 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon stand-down: the stand-down latch every shim client reads is the SUPERVISOR's as well as the client's own, and an immediate shutdown raises it BEFORE it walks the sessions -- so a client no walk can name (an adopted survivor of a refused StartSession) records the daemon's own teardown at INFO instead of `daemon.shimclient.exit` ERROR "shim died" plus `daemon.shimclient.redial` WARN "redial stopped" (gap scan 2026-09-13T18:31:58, finding 1)
+
 - topbar account cell: clicking it opens a dropdown of every account root the daemon knows (email or "logged out", the current one marked), and picking one switches the workspace's session to it through SelectAccount and the restart verb's engine, opening that root's login when it has none; it is the pair's reveal, replacing the session line the cell used to open (owner ruling 2026-09-13: the logged-in cell did nothing)
 
 - footer tokens: swept every footer token-count site against the one-format ruling — all already route through `figures.Tokens`/`formatTokens` — and added the ruled boundary cases (1049, 1050, 10113, 142300, 1000000) to both formatters' tests (owner ruling, token-count format, 2026-09-13)

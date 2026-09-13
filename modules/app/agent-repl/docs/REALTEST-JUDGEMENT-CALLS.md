@@ -1044,3 +1044,10 @@ composes `TopbarTitle.text` from it in preference to the workspace name.
 | 2026-09-13 | Whether "the warning strip is ALWAYS drawn" retires its own "nothing is drawn when nothing is wrong" rule | No. The FIELD is always set; an EMPTY list still draws no chip | The ruling's subject is the wire — the strip must be there to carry the state line — and the proto's own rule that a control over an empty list only invites the click that proves it is empty was not reopened | Draw a quiet warning chip on every strip |
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+## The immediate shutdown's ordinary departures, 2026-09-13
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | Eight `daemon.shimclient.exit` ERROR "shim died" landed during `UpdateShutdownSchedule{now}` with `stand_down_asked=false`, on a client the drain's walk never touched. Arm the latch on more paths, or change what the latch IS? | Change what it is: the latch is the DAEMON's, not only the client's | The measured shape is ONE shim process with TWO clients — the supervisor's spawn record and the fleet's adopted one, because a bring-up whose StartSession refused leaves its shim serving and the next bring-up adopts that inert survivor. No per-client arming can cover a client nothing holds; the question every consumer actually asks is "did this daemon order the departure", and only the supervisor's latch answers it for every client it handed out | Drop `client.daemonStandDown` and restore `StandingDown()` to `c.standDown.Load()` (`daemon/internal/shimclient/client.go`) |
+| 2026-09-13 | The supervisor's latch went up inside `StandDownEverySpawn`, which runs AFTER `standEverySessionDown`. Leave it there? | No — `ShutdownNow` raises it first, through `BeginStandDown` | The walk itself causes departures, so a latch raised after the walk is false for every one of them; raised first, the two halves of the shutdown answer the same question the same way | Delete the `BeginStandDown` call in `drain.controller.ShutdownNow` (`daemon/internal/drain/controller.go`) |
