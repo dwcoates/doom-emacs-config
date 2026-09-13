@@ -117,7 +117,7 @@ func TestVanishedRunIsLostAfterGrace(t *testing.T) {
 	// Arrange.
 	tr, _ := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
 	lost := tr.Sweep(bootMs, nowMs+1000)
@@ -132,7 +132,7 @@ func TestVanishedRunSurvivesInsideGrace(t *testing.T) {
 	// Arrange: the ordinary rename/replace race.
 	tr, _ := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
 	lost := tr.Sweep(bootMs, nowMs+999)
@@ -147,7 +147,7 @@ func TestAReturningFileClearsTheVanish(t *testing.T) {
 	// Arrange.
 	tr, _ := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
 	tr.Activity("/private/tmp/b1.output", nowMs+500)
@@ -437,7 +437,7 @@ func TestAVanishedRunIsStillJudgedByItsGraceWindowWhenItPredatesBoot(t *testing.
 	// rule, so the grace window keeps deciding.
 	tr, _ := tracker(t, Options{})
 	tr.Observe(shellRun("/private/tmp/b1.output", bootMs-1), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
 	lost := tr.Sweep(bootMs, nowMs+DefaultGrace.Milliseconds())
@@ -644,7 +644,7 @@ func TestATreeRemovedVanishStatesTheGraceClockWithoutWarning(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, true)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, BenignTreeRemoved)
 
 	// Assert.
 	requireNoneIn(t, parseLogLines(t, *logs), "lost-policy", "warn")
@@ -656,7 +656,7 @@ func TestAnUnlinkUnderAStandingDirectoryStillWarnsTheGraceClock(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Assert.
 	requireOnceIn(t, parseLogLines(t, *logs), "lost-policy", "warn")
@@ -666,7 +666,7 @@ func TestATreeRemovedConclusionIsStatedAtInfo(t *testing.T) {
 	// Arrange.
 	tr, logs := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, true)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, BenignTreeRemoved)
 
 	// Act.
 	tr.Sweep(bootMs, nowMs+1000)
@@ -685,13 +685,13 @@ func TestATreeRemovedRunIsStillConcludedLostOnTheFileVanishedArm(t *testing.T) {
 	// Arrange: the level changes, the conclusion does not.
 	tr, _ := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, true)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, BenignTreeRemoved)
 
 	// Act.
 	lost := tr.Sweep(bootMs, nowMs+1000)
 
 	// Assert.
-	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished || !lost[0].TreeRemoved {
+	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished || lost[0].BenignEnd != BenignTreeRemoved {
 		t.Fatalf("swept %+v, want one file_vanished conclusion carrying the tree removal", lost)
 	}
 }
@@ -700,7 +700,7 @@ func TestAnUnlinkUnderAStandingDirectoryStillWarnsItsConclusion(t *testing.T) {
 	// Arrange.
 	tr, logs := tracker(t, Options{Grace: time.Second})
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
-	tr.MarkVanished("/private/tmp/b1.output", nowMs, false)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs, "")
 
 	// Act.
 	tr.Sweep(bootMs, nowMs+1000)
@@ -731,4 +731,38 @@ func requireConclusion(t *testing.T, records []logRecord) logRecord {
 		t.Fatalf("the conclusion was recorded at level %q, want info", found[0].Level)
 	}
 	return found[0]
+}
+
+// --- a file that vanished after everything in it was read -------------------
+
+// TestEveryBenignEndStatesItsConclusionWithoutWarning covers the vocabulary the
+// tree removal opened: whatever the reason a vanish took nothing with it, the
+// grace clock and the conclusion are stated rather than warned.
+func TestEveryBenignEndStatesItsConclusionWithoutWarning(t *testing.T) {
+	cases := []struct {
+		name   string
+		benign string
+	}{
+		{name: "the spool had already written its terminator", benign: BenignEnded},
+		{name: "the committed offset was the whole file", benign: BenignFullyRead},
+		{name: "the whole directory went with it", benign: BenignTreeRemoved},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			tr, logs := tracker(t, Options{Grace: time.Second})
+			tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+			tr.MarkVanished("/private/tmp/b1.output", nowMs, tc.benign)
+
+			// Act.
+			lost := tr.Sweep(bootMs, nowMs+1000)
+
+			// Assert: no warning anywhere, and the wire arm is untouched.
+			requireNoneIn(t, parseLogLines(t, *logs), "lost-policy", "warn")
+			if len(lost) != 1 || lost[0].Reason != ReasonFileVanished || lost[0].BenignEnd != tc.benign {
+				t.Fatalf("swept %+v, want one file_vanished conclusion carrying %q", lost, tc.benign)
+			}
+		})
+	}
 }

@@ -2235,3 +2235,79 @@ func TestTheCatchupSummaryStatesTheNewShapeCount(t *testing.T) {
 		t.Fatalf("logs = %v, want the summary to state the new shape count", *h.logs)
 	}
 }
+
+// --- a vanished file that had already given up everything it held -----------
+
+// TestAVanishedFileIsWarnedAboutOnlyWhenSomethingWasOutstanding is the whole
+// rule in one table: the WARNING exists for bytes that could have been lost, so
+// it is spent only when bytes past the committed offset could have existed. A
+// spool the vendor reaped after writing its terminator, and a file read to the
+// last byte any poll ever saw, each gave up everything they held before they
+// went.
+func TestAVanishedFileIsWarnedAboutOnlyWhenSomethingWasOutstanding(t *testing.T) {
+	cases := []struct {
+		name       string
+		content    string
+		removeTree bool
+		wantReason string // "" = the record keeps its warning
+	}{
+		{
+			name:       "the spool had already written its terminator",
+			content:    "work\n[exited with code 0]\n",
+			wantReason: reasonEnded,
+		},
+		{
+			name:       "the committed offset is the size the last poll saw",
+			content:    "hello\n",
+			wantReason: reasonFullyRead,
+		},
+		{
+			// One poll reads at most 4 MiB, so a longer line leaves the tailer
+			// mid-tail: the last size it saw is past everything it committed,
+			// and those bytes went with the file.
+			name:    "bytes past the committed offset could have existed",
+			content: strings.Repeat("a", 5<<20) + "\n",
+		},
+		{
+			name:       "the whole directory went with it",
+			content:    "hello\n",
+			removeTree: true,
+			wantReason: reasonTreeRemoved,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a claimed spool, read once, and then removed.
+			h := newHarness(t, &fakeStore{})
+			spool := h.spoolFile(t, "b1", tc.content)
+			h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+			h.sc.pollAll()
+			target := spool
+			if tc.removeTree {
+				target = filepath.Dir(spool)
+			}
+			if err := os.RemoveAll(target); err != nil {
+				t.Fatalf("removing %s: %v", target, err)
+			}
+
+			// Act.
+			h.sc.pollAll()
+
+			// Assert.
+			if tc.wantReason == "" {
+				h.requireNone(t, "file-vanished", "info")
+				h.requireOnce(t, "file-vanished", "warn")
+				return
+			}
+			h.requireNone(t, "file-vanished", "warn")
+			rec := h.requireOnce(t, "file-vanished", "info")
+			if got := ctxString(t, rec, "reason"); got != tc.wantReason {
+				t.Fatalf("the record's reason = %q, want %q", got, tc.wantReason)
+			}
+		})
+	}
+}

@@ -126,6 +126,11 @@ type watched struct {
 	// vanished records that the file has gone missing, so the disappearance is
 	// stated once rather than on every poll of a file that is still absent.
 	vanished bool
+	// terminated records that this file's OWN terminal was read off it (a
+	// spool's `[exited with code N]` / `[killed]`). A file that disappears
+	// afterwards took nothing with it, which is what keeps a reaped task spool
+	// out of the WARNINGs.
+	terminated bool
 }
 
 type sidecar struct {
@@ -1341,6 +1346,13 @@ func residueCounts(tally map[string]int) string {
 // this is a promise the poll loop keeps in applySettled.
 func (s *sidecar) RunSettled(path, run string) {
 	s.settling[path] = run
+	// THE TERMINAL IS ALSO WHAT MAKES A LATER DISAPPEARANCE ORDINARY. A spool
+	// the vendor reaps after its task ends carried `[exited with code N]` or
+	// `[killed]` before it went, so nothing was outstanding; the watcher
+	// remembers that so pollFailed can say so instead of warning.
+	if w := s.watchers[path]; w != nil {
+		w.terminated = true
+	}
 }
 
 // applySettled tells the LOST policy about every terminal whose batch just
@@ -1372,11 +1384,49 @@ func fileActivityMs(path string, fallback int64) int64 {
 	return info.ModTime().UnixMilli()
 }
 
-// reasonTreeRemoved is the `file-vanished` record's discriminator: the file did
-// not merely disappear, the DIRECTORY holding it went too. It is not a LOST arm
-// and never reaches the wire — DetachedLost still carries file_vanished — it is
-// the fact that says whether an operator has anything to look at.
-const reasonTreeRemoved = "tree_removed"
+// reasonTreeRemoved is one of the `file-vanished` record's discriminators: the
+// file did not merely disappear, the DIRECTORY holding it went too. None of the
+// discriminators is a LOST arm and none reaches the wire — DetachedLost still
+// carries file_vanished — they are the fact that says whether an operator has
+// anything to look at. The vocabulary itself lives in the stale package, which
+// carries it through to the conclusion.
+const (
+	reasonTreeRemoved = stale.BenignTreeRemoved
+	reasonEnded       = stale.BenignEnded
+	reasonFullyRead   = stale.BenignFullyRead
+)
+
+// vanishReason answers why a vanished file took NOTHING with it, or "" when it
+// may have taken bytes past the committed offset.
+//
+// A FILE THAT VANISHES AFTER EVERYTHING IN IT WAS READ LOST NOTHING. Three ways
+// that can be known, checked in the order of how much each says:
+//
+//   - the DIRECTORY went too, so nobody unlinked a file out from under us;
+//   - the spool had already written its TERMINATOR, so the run it carried was
+//     concluded before the file went (the vendor reaps a task's output file
+//     after the task ends, which is exactly this case);
+//   - the committed offset equals the SIZE the last poll saw, so every byte the
+//     file ever held is already durable.
+//
+// A tailer that never completed a poll cannot answer the third question, and a
+// file whose size GREW past the committed offset before it went plainly had
+// outstanding bytes; both keep the WARNING, which is the loss the level exists
+// for.
+func vanishReason(path string, w *watched) string {
+	if treeRemoved(path) {
+		return reasonTreeRemoved
+	}
+	if w.terminated {
+		return reasonEnded
+	}
+	if w.tailer != nil {
+		if size, sized := w.tailer.LastSize(); sized && w.tailer.Offset() >= size {
+			return reasonFullyRead
+		}
+	}
+	return ""
+}
 
 // treeRemoved answers whether a vanished file's DIRECTORY is gone as well.
 //
@@ -1400,25 +1450,25 @@ func treeRemoved(path string) bool {
 // downstream. It is dropped in lostEntries, once its terminal has been stated.
 func (s *sidecar) pollFailed(path string, w *watched, err error, nowMs int64) {
 	if os.IsNotExist(err) {
-		gone := treeRemoved(path)
-		s.tracker.MarkVanished(path, nowMs, gone)
+		reason := vanishReason(path, w)
+		s.tracker.MarkVanished(path, nowMs, reason)
 		if w.vanished {
 			s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID}).
 				LogVerbose("the vanished file is still absent; its grace window has not decided yet")
 			return
 		}
 		w.vanished = true
-		if gone {
-			// A FILE THAT WENT WITH ITS WHOLE TREE IS AN ORDINARY END. Nobody
-			// unlinked a file out from under the reader: the directory holding it
-			// was removed on purpose — a harness deleting its run directory, a
-			// vendor session directory deleted wholesale — and the committed
-			// offset is therefore the last thing the file ever had. There is
-			// nothing for an operator to act on, so it is stated rather than
-			// warned, and `reason` carries the discriminator so the two cases are
-			// filterable apart without reading prose.
-			s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID, Reason: reasonTreeRemoved}).
-				Log("the watched file vanished with the whole directory it lived in; the committed offset is the last thing it had")
+		if reason != "" {
+			// A FILE THAT VANISHED WITH NOTHING OUTSTANDING IS AN ORDINARY END.
+			// Either nobody unlinked a file out from under the reader (the
+			// directory holding it went too), or the file had already given up
+			// everything it ever held — a spool past its terminator, a file read
+			// to its last observed byte and committed there. There is nothing for
+			// an operator to act on, so it is stated rather than warned, and
+			// `reason` carries the discriminator so the cases are filterable
+			// apart without reading prose.
+			s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID, Reason: reason}).
+				Log("the watched file vanished with nothing outstanding (%s); the committed offset is the last thing it had", reason)
 			return
 		}
 		s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID, Level: "warn"}).
