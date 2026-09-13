@@ -223,7 +223,7 @@ describe("paintClass", () => {
   it("warns once about an unknown class so the drift stays visible", () => {
     // ARRANGE
     const lines: Array<[string, string]> = [];
-    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     // ACT
     paintClass("also-nonesuch");
     // ASSERT
