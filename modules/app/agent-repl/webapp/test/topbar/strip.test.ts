@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   TopbarAccountSchema,
@@ -9,7 +9,6 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
-  bindSessionReveal,
   bindTitleSessionReveal,
   drawTopbarAccount,
   drawTopbarConnectivity,
@@ -26,48 +25,31 @@ const loggedOut = () =>
 
 describe("drawTopbarAccount", () => {
   it("draws the logged-in email verbatim", () => {
-    const { tc } = topbarContext();
-    expect(drawTopbarAccount(loggedIn("a@b.test"), tc).textContent).toBe("a@b.test");
+    expect(drawTopbarAccount(loggedIn("a@b.test")).textContent).toBe("a@b.test");
   });
 
   it("carries the arm as a hook", () => {
-    const { tc } = topbarContext();
-    expect(drawTopbarAccount(loggedIn("a@b.test"), tc).getAttribute("data-arm")).toBe("loggedIn");
+    expect(drawTopbarAccount(loggedIn("a@b.test")).getAttribute("data-arm")).toBe("loggedIn");
   });
 
   it("says 'logged out' rather than nothing, since a blank reads as loading", () => {
-    const { tc } = topbarContext();
-    expect(drawTopbarAccount(loggedOut(), tc).textContent).toBe("logged out");
+    expect(drawTopbarAccount(loggedOut()).textContent).toBe("logged out");
   });
 
   it("wears the logged-out arm class the warning color hangs on", () => {
-    const { tc } = topbarContext();
-    expect(drawTopbarAccount(loggedOut(), tc).classList.contains("arm-loggedOut")).toBe(true);
-  });
-
-  it("opens the login when the logged-out chip is clicked", () => {
-    // ARRANGE
-    const openLogin = vi.fn();
-    const { tc } = topbarContext(undefined, openLogin);
-    const chip = drawTopbarAccount(loggedOut(), tc);
-    // ACT
-    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    // ASSERT
-    expect(openLogin).toHaveBeenCalledTimes(1);
+    expect(drawTopbarAccount(loggedOut()).classList.contains("arm-loggedOut")).toBe(true);
   });
 
   it("refuses an account naming no arm", () => {
-    const { tc } = topbarContext();
-    expect(() => drawTopbarAccount(create(TopbarAccountSchema, {}), tc)).toThrow(MalformedView);
+    expect(() => drawTopbarAccount(create(TopbarAccountSchema, {}))).toThrow(MalformedView);
   });
 
   it("refuses an account arm this build cannot draw, rather than drawing a blank chip", () => {
     // ARRANGE: a newer daemon's arm, reaching a build that has no case for it.
-    const { tc } = topbarContext();
     const future = loggedOut();
     (future.state as { case: string }).case = "loggedInAsRobot";
     // ACT / ASSERT
-    expect(() => drawTopbarAccount(future, tc)).toThrow(
+    expect(() => drawTopbarAccount(future)).toThrow(
       /TopbarAccount.state.*loggedInAsRobot/,
     );
   });
@@ -137,29 +119,6 @@ describe("bindTitleSessionReveal", () => {
     host.append(title);
     bindTitleSessionReveal(title, undefined, tc);
     expect(title.getAttribute("data-reveal-anchor")).toBeNull();
-  });
-});
-
-describe("bindSessionReveal", () => {
-  it("opens the session line on a click", () => {
-    // ARRANGE
-    const { host, tc } = topbarContext();
-    const chip = drawTopbarAccount(loggedIn("a@b.test"), tc);
-    host.append(chip);
-    bindSessionReveal(chip, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
-    // ACT
-    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    // ASSERT
-    expect(openPanel(host)?.textContent).toBe("session abc");
-  });
-
-  it("binds nothing when the view carries no session line", () => {
-    const { host, tc } = topbarContext();
-    const chip = drawTopbarAccount(loggedIn("a@b.test"), tc);
-    host.append(chip);
-    bindSessionReveal(chip, undefined, tc);
-    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(openPanel(host)).toBeNull();
   });
 });
 
