@@ -13,6 +13,7 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 ## Startup and workspace sections (realtests 1-8), 2026-09-12
 
+- store/realtest harness: `bin/store-reset.sh` boots the kept-alive services out and bootstraps them back from their installed plists instead of killing them and waiting for a pid launchd immediately replaces, and a realtest run no longer copies `events.db` aside (store growth investigation, three 180s reset timeouts and 4.6GB of `realtest-bak` clones)
 - store: every `store.db.slow-query` and statement trace carries `lock_wait_ms`, so a `write_batch` that queued behind another `BEGIN IMMEDIATE` is no longer reported as a slow statement (store growth investigation, `write_batch duration_ms=3822 rows=6`)
 - store: `bin/store-reset.sh` stops the sidecar then the store, removes `events.db` with its `-wal`/`-shm` siblings, and brings the pair back in the recorded safe order, refusing unless `AGENT_REPL_STORE_RESET=1` (store growth investigation, owner ruling: no retention during development)
 - realtest harness: the `C-g` that dismisses a standing minibuffer is confirmed by its EFFECT inside the helper's hold, not by input marks the quit character never leaves, so one press yields one verdict instead of a harness failure and a product finding at once (realtests 5-8, contradictory C-g lines)
