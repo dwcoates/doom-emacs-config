@@ -17,8 +17,12 @@ import (
 )
 
 // mainWorktree makes a directory that looks like a repository's MAIN worktree,
-// which is what the worktree-directory rule branches on.
-func mainWorktree(t *testing.T) string {
+// which is what the worktree-directory rule branches on, and REGISTERS it.
+//
+// The registration is not decoration. A create naming a repository the registry
+// does not hold is refused on `unknown_repository' (create.go), so a fixture
+// repository nothing registered would refuse every create in the package.
+func mainWorktree(t *testing.T, f *fixture) string {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
@@ -28,13 +32,20 @@ func mainWorktree(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("normalizeDir: %v", err)
 	}
+	f.db.repositories = append(f.db.repositories, wsm.Repository{
+		ID:            ids.RepoID("repo-" + filepath.Base(normalized)),
+		Dir:           normalized,
+		Name:          filepath.Base(normalized),
+		DefaultBranch: "master",
+	})
 	return normalized
 }
 
-// standardSpec is the ordinary creation form against a real main worktree.
-func standardSpec(t *testing.T) CreateSpec {
+// standardSpec is the ordinary creation form against a real, registered main
+// worktree.
+func standardSpec(t *testing.T, f *fixture) CreateSpec {
 	t.Helper()
-	return CreateSpec{RepoDir: mainWorktree(t), InitialPrompt: "fix the login bug"}
+	return CreateSpec{RepoDir: mainWorktree(t, f), InitialPrompt: "fix the login bug"}
 }
 
 // oneShotBriefs arranges the two briefs the one-shot decoration reads.
@@ -52,7 +63,7 @@ func TestCreateNamesTheBranchFromTheModelsAnswer(t *testing.T) {
 	t.Setenv(LegacyPrefixEnv, "")
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -66,7 +77,7 @@ func TestCreatePutsTheWorktreeInTheSiblingWorktreesDirectory(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "DWC")
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -84,7 +95,7 @@ func TestCreateUsesTheSuppliedName(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "DWC")
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.Name = "chosen-name"
 
 	// Act.
@@ -102,7 +113,7 @@ func TestCreateKeepsASuppliedNameThatAlreadyCarriesAPrefix(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "DWC")
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.Name = "OTHER/chosen"
 
 	// Act.
@@ -122,7 +133,7 @@ func TestCreateDefaultsTheBaseRefToTheRepositoryDefaultBranch(t *testing.T) {
 	f.git.defaultBranch = "main"
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -135,7 +146,7 @@ func TestCreateDefaultsTheBaseRefToTheRepositoryDefaultBranch(t *testing.T) {
 func TestCreateKeepsAnExplicitBaseRef(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.BaseRef = "release/1.2"
 
 	// Act.
@@ -154,7 +165,7 @@ func TestCreateRecordsTheCreationJobBeforeMaterialization(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -173,7 +184,7 @@ func TestCreateRecordsTheCreationJobBeforeMaterialization(t *testing.T) {
 func TestCreateRecordsTheMergeLayoutAtCreation(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -200,7 +211,7 @@ func TestCreateTargetsTheParentWorktreeWhenCutFromOne(t *testing.T) {
 	f := newFixture(t)
 	parentDir := t.TempDir()
 	parent := f.workspace("parent", parentDir)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.ForkFrom = &id
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
@@ -221,7 +232,7 @@ func TestCreateRecordsTheSpawningParentOnTheWorkspace(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	parent := f.workspace("parent", t.TempDir())
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.Parent = &id
 
@@ -242,7 +253,7 @@ func TestCreateRecordsNoParentWhenSpawnedFromNone(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	record, err := f.verbs.Create(context.Background(), standardSpec(t))
+	record, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -259,7 +270,7 @@ func TestCreateRegistersOnlyAfterTheWorktreeExists(t *testing.T) {
 	f.git.createErr = errors.New("branch already checked out")
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	if err == nil {
@@ -273,7 +284,7 @@ func TestCreateRegistersOnlyAfterTheWorktreeExists(t *testing.T) {
 func TestCreateRefusesAnUngatedModeWithoutConsent(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.PermissionMode = "bypassPermissions"
 
 	// Act.
@@ -286,7 +297,7 @@ func TestCreateRefusesAnUngatedModeWithoutConsent(t *testing.T) {
 func TestCreateAcceptsAnUngatedModeWithConsent(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.PermissionMode = "bypassPermissions"
 	spec.ConsentedUngatedMode = "bypassPermissions"
 
@@ -306,7 +317,7 @@ func TestCreateRefusesAPromptlessOneShotWithNoSlug(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	oneShotBriefs(f)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.InitialPrompt = ""
 	spec.OneShot = true
 
@@ -322,7 +333,7 @@ func TestCreateSubmitsTheInitialPromptWithTheCreationOrigin(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -341,7 +352,7 @@ func TestCreateSubmitsTheInitialPromptOnlyAfterTheSessionIsUp(t *testing.T) {
 	f.fleet.startErr = errors.New("the shim died during bring-up")
 
 	// Act.
-	_, err := f.verbs.Create(context.Background(), standardSpec(t))
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
 	// Assert.
 	if err == nil {
@@ -355,7 +366,7 @@ func TestCreateSubmitsTheInitialPromptOnlyAfterTheSessionIsUp(t *testing.T) {
 func TestCreateWithoutAPromptSubmitsNothing(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := CreateSpec{RepoDir: mainWorktree(t), Name: "promptless"}
+	spec := CreateSpec{RepoDir: mainWorktree(t, f), Name: "promptless"}
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -372,7 +383,7 @@ func TestCreateDecoratesTheOneShotPrompt(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	oneShotBriefs(f)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.OneShot = true
 
 	// Act.
@@ -399,7 +410,7 @@ func TestCreateRefusesAOneShotWhoseDirectiveDeclaresAPlaceholder(t *testing.T) {
 		Name: BriefOneShotCompletionDirective, Body: "merge into {{target}}.",
 		Placeholders: []string{"target"},
 	}
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.OneShot = true
 
 	// Act.
@@ -414,7 +425,7 @@ func TestCreateRefusesAOneShotWhenACorpusBriefIsMissing(t *testing.T) {
 	// brief is never defaulted, so its absence from the corpus refuses the
 	// creation at decoration.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	f.ownRepository(t, spec.RepoDir)
 	spec.OneShot = true
 
@@ -432,7 +443,7 @@ func TestCreateRefusesAOneShotInARepositoryThatStatesNoPolicy(t *testing.T) {
 	oneShotBriefs(f)
 	delete(f.briefs, BriefAutonomousPreamble)
 	delete(f.briefs, BriefOneShotCompletionDirective)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.OneShot = true
 
 	// Act.
@@ -456,7 +467,7 @@ func TestCreateRefusesAOneShotInARepositoryThatStatesNoPolicy(t *testing.T) {
 func TestCreateRefusesAOneShotWithNoPolicyBeforeSpendingANamingCall(t *testing.T) {
 	// Arrange: a repository that states no policy, and a nameless one-shot.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.Name = ""
 	spec.OneShot = true
 
@@ -473,7 +484,7 @@ func TestCreateRefusesAOneShotWithNoPolicyBeforeSpendingANamingCall(t *testing.T
 func TestCreateNamesTheRepositoryPolicyDirectoryInTheRefusal(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.OneShot = true
 
 	// Act.
@@ -493,7 +504,7 @@ func TestCreateNamesTheRepositoryPolicyDirectoryInTheRefusal(t *testing.T) {
 func TestCreateMintsNothingWhenTheRepositoryStatesNoPolicy(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.OneShot = true
 
 	// Act.
@@ -516,7 +527,7 @@ func TestCreateOfAOneShotInTheDaemonsOwnRepositoryIsNeverPolicyRefused(t *testin
 	// corpus holds every brief.
 	f := newFixture(t)
 	oneShotBriefs(f)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	f.ownRepository(t, spec.RepoDir)
 	spec.OneShot = true
 
@@ -533,7 +544,7 @@ func TestCreateRecordsTheOneShotFormInTheCreationJob(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	oneShotBriefs(f)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.OneShot = true
 
 	// Act.
@@ -553,7 +564,7 @@ func TestCreateForksTheParentTranscriptBeforeTheSessionStarts(t *testing.T) {
 	parent := f.workspace("parent", t.TempDir())
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
 	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.ForkFrom = &id
 
@@ -579,7 +590,7 @@ func TestCreateForkRecordsAFreshConversationForResume(t *testing.T) {
 	parent := f.workspace("parent", t.TempDir())
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
 	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.ForkFrom = &id
 
@@ -603,7 +614,7 @@ func TestCreateRefusesAForkOfAParentWithNoConversation(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	parent := f.workspace("parent", t.TempDir())
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.ForkFrom = &id
 
@@ -617,7 +628,7 @@ func TestCreateRefusesAForkOfAParentWithNoConversation(t *testing.T) {
 func TestCreateRecordsThePriority(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	priority := wsm.PriorityP1
 	spec.Priority = &priority
 
@@ -637,7 +648,7 @@ func TestCreateRecordsThePriority(t *testing.T) {
 func TestCreateRecordsTheModelAndModeAsSpawnFacts(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.Model = "opus"
 	spec.PermissionMode = "plan"
 
@@ -659,7 +670,7 @@ func TestCreateRecordsTheModelAndModeAsSpawnFacts(t *testing.T) {
 func TestCreateMintsTheHostSessionIdentityWithTheSpawnFacts(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 
 	// Act.
 	created, err := f.verbs.Create(context.Background(), spec)
@@ -687,7 +698,7 @@ func TestSaidTextComposesOneTextBlock(t *testing.T) {
 func TestMergeTargetDirRefusesAnUnknownParent(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	unknown := ids.WorkspaceID("nope")
 	spec.ForkFrom = &unknown
 
@@ -704,7 +715,7 @@ func TestCreateAcceptsAutoWithoutConsent(t *testing.T) {
 	// Arrange: `auto` KEEPS a gate — a classifier decides each ask instead of
 	// the user — so it is not an ungated mode and needs no creation consent.
 	f := newFixture(t)
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.PermissionMode = "auto"
 
 	// Act.
@@ -722,7 +733,7 @@ func TestCreateWithNeitherANameNorAPromptNamesTheBranchAfterTheWorkspaceID(t *te
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "DWC")
 	t.Setenv(LegacyPrefixEnv, "")
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.InitialPrompt = ""
 
 	// Act.
@@ -744,7 +755,7 @@ func TestCreateWithAnUnresolvableBaseRefIsRefused(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.git.resolveErr = errors.New("fatal: invalid reference: does-not-exist")
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.BaseRef = "does-not-exist"
 
 	// Act.
@@ -761,7 +772,7 @@ func TestCreateBaseRefRefusalNamesTheRefAsTheArmsField(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.git.resolveErr = errors.New("fatal: invalid reference: does-not-exist")
-	spec := standardSpec(t)
+	spec := standardSpec(t, f)
 	spec.BaseRef = "does-not-exist"
 
 	// Act.
@@ -797,7 +808,7 @@ func TestCreateRefusesARepositoryThatIsNotOnDisk(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
-			spec := standardSpec(t)
+			spec := standardSpec(t, f)
 			if tt.removed {
 				if err := os.RemoveAll(spec.RepoDir); err != nil {
 					t.Fatalf("remove the repository: %v", err)
@@ -816,5 +827,86 @@ func TestCreateRefusesARepositoryThatIsNotOnDisk(t *testing.T) {
 			}
 			asRefusal(t, err, tt.wantArm)
 		})
+	}
+}
+
+// TestCreateRefusesARepositoryTheRegistryDoesNotHold pins the WRITE half of
+// the repository invariant: a workspace whose repository is unregistered is an
+// invariant violation (owner ruling, 2026-09-13), so the create that would
+// mint one is refused at the verb rather than at one of the three ways in.
+func TestCreateRefusesARepositoryTheRegistryDoesNotHold(t *testing.T) {
+	tests := []struct {
+		name       string
+		registered bool
+		wantArm    string
+	}{
+		{name: "the repository is registered", registered: true},
+		{name: "the repository is not registered", registered: false, wantArm: ArmUnknownRepository},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			spec := standardSpec(t, f)
+			if !tt.registered {
+				f.db.repositories = nil
+			}
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			if tt.wantArm == "" {
+				if err != nil {
+					t.Fatalf("Create: %v", err)
+				}
+				return
+			}
+			asRefusal(t, err, tt.wantArm)
+		})
+	}
+}
+
+// A refused create MATERIALIZES NOTHING. The refusal lands before the creation
+// job is recorded and before git is touched, so an unregistered repository
+// leaves no worktree and no half-built row behind.
+func TestACreateRefusedForAnUnregisteredRepositoryBuildsNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	f.db.repositories = nil
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmUnknownRepository)
+	if len(f.git.created) != 0 {
+		t.Fatalf("created worktrees = %+v, want none", f.git.created)
+	}
+	if len(f.db.registered) != 0 {
+		t.Fatalf("registered %d workspaces, want none", len(f.db.registered))
+	}
+}
+
+// The registry read's own failure is SURFACED, never read as "not registered":
+// a create refused on `unknown_repository' because the database was
+// unreachable would tell the user their repository is gone.
+func TestCreateSurfacesARegistryReadFailureRatherThanRefusing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	f.db.listRepositoriesErr = errors.New("the state database is unreachable")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Create() = nil error, want the registry read failure surfaced")
+	}
+	if _, ok := AsRefusal(err); ok {
+		t.Fatalf("Create() = %v, want a plain failure rather than a refusal arm", err)
 	}
 }
