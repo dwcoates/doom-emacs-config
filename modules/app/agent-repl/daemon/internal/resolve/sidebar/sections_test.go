@@ -299,3 +299,29 @@ func TestEveryRegisteredWorkspaceIsResolvableFromTheRoster(t *testing.T) {
 		})
 	}
 }
+
+// The remediation the roster's assertion names is the one the state store's
+// own boot check names. A person who meets the violation in either log is told
+// the same thing to do about it.
+func TestTheRosterAssertionNamesTheSameRemedyAsTheStore(t *testing.T) {
+	// Arrange.
+	r, surfaces := newResolver(t)
+	stray := workspace("w-stray", "stray")
+	stray.Repo = ids.RepoID("repo-missing")
+
+	// Act.
+	r.SetRegistry(registry(stray))
+
+	// Assert.
+	const want = "re-register the workspace's directory, which mints its repository row, or forget the workspace"
+	for _, rec := range surfaces.Records() {
+		if rec.Operation != "daemon.sidebar.repository_view" || rec.Level != "error" {
+			continue
+		}
+		if rec.Context["remediation"] != want {
+			t.Fatalf("remediation = %v, want %q", rec.Context["remediation"], want)
+		}
+		return
+	}
+	t.Fatal("the roster recorded no repository-invariant assertion")
+}
