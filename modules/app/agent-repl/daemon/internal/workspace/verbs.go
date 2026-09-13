@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -104,6 +105,15 @@ func (v *verbs) owned(ctx context.Context, rpc string, ws ids.WorkspaceID) (wsm.
 func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operation string) {
 	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
+		// A CANCELLED CONTEXT IS THIS DAEMON GOING AWAY, not a read that
+		// broke: the exit cancels the serving context under whatever was in
+		// flight, and a roster nobody is left to receive is no loss. Every
+		// other refusal keeps its ERROR. The precedent is the state client's
+		// own read, which has always answered a cancellation at info.
+		if canceled(err) {
+			log.Info(operation, "the roster read ended when its context was cancelled", dlog.Context{"cause": err.Error()})
+			return
+		}
 		log.Error(operation, "could not list the workspaces for the roster", dlog.Context{"cause": err.Error()})
 		return
 	}
@@ -169,4 +179,11 @@ func coldGateRow(ws ids.WorkspaceID, vendorSessionID string, answer *frontendv1.
 			},
 		},
 	}
+}
+
+// canceled reports whether err is a context ending -- this daemon's own exit,
+// or a caller that left -- rather than something that broke. Work abandoned
+// that way is stated at info; everything else keeps its error.
+func canceled(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
