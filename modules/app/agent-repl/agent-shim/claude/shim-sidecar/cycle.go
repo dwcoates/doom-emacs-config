@@ -871,7 +871,13 @@ func (s *sidecar) mainAgentFor(target discover.Target) string {
 }
 
 // rekeyRotations re-resolves every watched file's book, and moves it when the
-// shim's answer has changed since the file was first watched.
+// answer has changed since the file was first watched.
+//
+// NOT EVERY CHANGE IS A MOVE. A file watched with NO book — a spool aged into
+// residue before the launch line naming its owner was read — is given one here
+// for the first time, and there is nothing to move it from. That arm is stated
+// at INFO; only a book that leaves one non-empty book for another is the WARN
+// a person has to act on.
 //
 // DISCOVERY ORDER IS NOT CAUSAL ORDER, exactly as it is not for refreshSpawnFacts
 // beside it: the rotated transcript can be discovered in the window before its
@@ -910,12 +916,35 @@ func (s *sidecar) rekeyRotations() {
 		previous := w.ctx.MainAgentID
 		w.ctx.MainAgentID = resolved.Original
 		if !s.parked[path] {
+			if previous == "" {
+				// A FIRST ATTRIBUTION IS NOT A MOVE, and must not be stated as
+				// one. A task spool is routinely discovered BEFORE the launch
+				// result that names its owner is converted, so it is watched
+				// with no book at all and this pass is what finally gives it
+				// one. Nothing is leaving a book, nothing is being superseded
+				// across books, and there is no defect for anybody to act on —
+				// so it is the ordinary fact that it is, at info.
+				//
+				// IT ALSO NAMES ITS SOURCE RATHER THAN THE IDENTITY FILES. The
+				// answer for a spool comes from the OWNER INDEX (the spawning
+				// call's book), which for a subagent's spawn is legitimately a
+				// tool_use_id and not a vendor session id at all; the identity
+				// files never named it, and saying they did sent a reader
+				// hunting for a rotation that never happened.
+				s.log.With(logging.Context{
+					Operation: "identity-rekey", Path: path,
+					VendorSessionID: observed, BookAgentID: resolved.Original, AgentID: resolved.Original,
+				}).Log(
+					"this file was watched before anything named its owner, and is now booked under %s for the first time (resolution source=%s); no records move, because none had a book to move from",
+					resolved.Original, resolved.Source)
+				continue
+			}
 			s.log.With(logging.Context{
 				Operation: "identity-rekey", Path: path, Level: "warn",
 				VendorSessionID: observed, BookAgentID: resolved.Original, AgentID: resolved.Original,
 			}).Log(
-				"the shim's identity files now name %s as this transcript's original vendor session id; its records move from book %s to that one, and nothing already written is duplicated because their write ids are digested from file positions that did not move",
-				resolved.Original, previous)
+				"%s is now named as this transcript's original vendor session id (resolution source=%s); its records move from book %s to that one, and nothing already written is duplicated because their write ids are digested from file positions that did not move",
+				resolved.Original, resolved.Source, previous)
 			continue
 		}
 		delete(s.parked, path)
