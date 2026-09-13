@@ -158,7 +158,12 @@ func (s *sequence) closeMissingDirs(ctx context.Context, log dlog.Logger, worksp
 		// The LOCAL row is closed with the durable one, so every step below
 		// this reads the workspace as the closed row it now is.
 		ws.Closed = true
-		log.Warn("daemon.boot.close_missing_dir", "the workspace directory is gone; the workspace is closed", context)
+		// THE OWNER RULED THIS AUTOMATIC (2026-09-11): a workspace whose
+		// directory no longer exists is closed, no question asked. A ruled
+		// automatic action that succeeded states what it did; the two arms
+		// above it -- a stat that failed for any other reason, and a close
+		// that could not be written -- keep their WARN and their ERROR.
+		log.Info("daemon.boot.close_missing_dir", "the workspace directory is gone; the workspace is closed", context)
 		report.MissingDirClosed = append(report.MissingDirClosed, ws.ID)
 	}
 	return nil

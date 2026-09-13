@@ -147,7 +147,12 @@ func (s *supervisor) StandDownEverySpawn(ctx context.Context, reason string) err
 	attr := KillAttribution{Actor: ActorStandDown, Reason: reason, Force: true}
 	var errs []error
 	for _, c := range held {
-		c.log.Warn("daemon.shimclient.standdown", "a spawn this daemon never registered is being stood down", dlog.Context{
+		// ONE OF THE TWO CASES THE LATCH ABOVE LEAVES, and the expected one:
+		// a spawn in flight when the shutdown landed. The sweep exists
+		// precisely to catch it, so catching it is the sweep succeeding. The
+		// FAILED kill below is what is loud, because a leaked shim holds the
+		// workspace lock that refuses the next session.
+		c.log.Info("daemon.shimclient.standdown", "a spawn this daemon never registered is being stood down", dlog.Context{
 			"workspace_id": string(c.ws), "pid": c.PID(), "reason": reason,
 		})
 		if err := c.killWithin(ctx, s.grace, attr); err != nil {
