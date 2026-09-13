@@ -964,3 +964,31 @@ is catalogued in a summary doc, then remediated.
 Every token count the footer shows (text mostly composed in the daemon)
 uses one standardized format: thousands with a `k` suffix and decimals,
 e.g. `10.1k`, never `10,113`.
+
+### Sweep and judgement calls (2026-09-13, footer/token-format)
+
+Swept every footer token-count site (`daemon/internal/resolve/footer/*.go`):
+the tokens cell, the expanded usage rows (input/cache-read/cache-write/
+output/thinking), the alarm sentence, the per-response first-token latency,
+the subagent row's running token sum, and the context-budget/rate-limit/
+bring-up-failure activity lines. Every site that draws a token COUNT already
+routed through the shared `figures.Tokens` formatter
+(`daemon/internal/figures/tokens.go`) and its webapp mirror `formatTokens`
+(`webapp/src/format.ts`) — no production code needed to change. The
+activity-line text that isn't a bare count (context-budget warnings, cold-gate
+detail, bring-up failure detail) is vendor/producer prose passed through
+verbatim, never a count this ruling governs.
+
+- **Reused, did not add, a second formatter.** `figures.Tokens` (daemon) and
+  `formatTokens` (webapp `src/format.ts`) already existed, already matched
+  this exact ruling's spelling, and are documented in `webapp/AGENTS.md` as
+  the module's ONE token formatter. No site needed rerouting.
+- **Rounding is round-half-up at one fractional digit**, inherited from
+  `strconv.FormatFloat(..., 'f', 1, 64)` (Go) and `Math.round` (TS) — both already
+  in place, not changed here. `1049` -> `1k` (1.049 rounds to 1.0, trimmed);
+  `1050` -> `1.1k` (1.05 rounds to 1.1). Added both as explicit boundary tests
+  since the ruling names them, alongside `10113` -> `10.1k` and the
+  million-exact case `1000000` -> `1M`.
+- **Unit promotion is decided on the RENDERED value**, not the raw count —
+  already the rule in both formatters (`999950` renders `1M`, not `1000.0k`).
+  No change; verified by the existing boundary test plus the newly added ones.
