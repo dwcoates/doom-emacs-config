@@ -549,6 +549,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Sidebar:      sidebarResolver,
 		Holds:        holdsResolver,
 		PromptsDir:   paths.PromptsDir,
+		CheckoutRoot: paths.Checkout,
 		Briefs:       merge.BriefsFrom(paths.PromptsDir),
 		SelfRepoDir:  paths.SelfRepo,
 		StateDir:     p.Layout.Dir(),

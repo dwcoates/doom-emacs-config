@@ -20,6 +20,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/paint"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/holds"
@@ -916,6 +917,13 @@ type harness struct {
 	// briefs answers the brief loader; a name absent from it is a LOUD failure,
 	// exactly as a missing file is.
 	briefs map[string][]string
+	// policy is what the repository's own `.agent-repl/prompts` holds, by
+	// brief name; policyErr fails one brief's read even though it is present.
+	policy    map[string]string
+	policyErr map[string]error
+	// repoRoot is the harness repository's main checkout root, which is where
+	// its policy directory would live.
+	repoRoot string
 	// pauseAfterCapture stands in for the production-nil admission seam.
 	pauseAfterCapture AdmissionPause
 	// briefValues records the values each brief was spliced with, which is how
@@ -979,22 +987,58 @@ func (t *fakeRollout) Trigger(_ context.Context, landed []gitclient.Commit) erro
 // theWorkspace is the workspace every harness merges.
 const theWorkspace = ids.WorkspaceID("ws-1")
 
+// theRepository is the repository every harness workspace belongs to. It is
+// registered because a merge resolves its repository's own merge policy, and
+// a workspace naming a repository the registry does not hold is a fault.
+const theRepository = ids.RepoID("repo-1")
+
+// harnessPolicy is the harness's policy probe: a repository states exactly the
+// briefs the harness put in `policy`, and nothing touches a disk.
+type harnessPolicy struct{ h *harness }
+
+func (p harnessPolicy) Missing(_ string, names []string) []string {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	var missing []string
+	for _, name := range names {
+		if _, ok := p.h.policy[name]; !ok {
+			missing = append(missing, name+prompts.Suffix)
+		}
+	}
+	return missing
+}
+
+func (p harnessPolicy) Text(_ string, name string) (string, error) {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	text, ok := p.h.policy[name]
+	if !ok {
+		return "", fmt.Errorf("no policy brief %q", name)
+	}
+	if err := p.h.policyErr[name]; err != nil {
+		return "", err
+	}
+	return text, nil
+}
+
 // newHarness builds an orchestrator whose admission is driven a step at a time,
 // so a queue's ordering is asserted without waiting on a goroutine.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
-		t:        t,
-		db:       newFakeDB(),
-		queue:    &fakeQueue{},
-		footer:   &fakeFooter{},
-		sidebar:  &fakeSidebar{},
-		holds:    &fakeHolds{},
-		runner:   &fakeRunner{},
-		logs:     dlog.NewTestSurfaces(),
-		stateDir: t.TempDir(),
-		now:      time.Unix(1700000000, 0).UTC(),
-		briefs:   map[string][]string{},
+		t:         t,
+		db:        newFakeDB(),
+		queue:     &fakeQueue{},
+		footer:    &fakeFooter{},
+		sidebar:   &fakeSidebar{},
+		holds:     &fakeHolds{},
+		runner:    &fakeRunner{},
+		logs:      dlog.NewTestSurfaces(),
+		stateDir:  t.TempDir(),
+		now:       time.Unix(1700000000, 0).UTC(),
+		briefs:    map[string][]string{},
+		policy:    map[string]string{},
+		policyErr: map[string]error{},
 	}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
@@ -1004,6 +1048,8 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "target_dir"}
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "target_dir", "failure_tail", "escalation_file", "escalation_marker"}
 
+	h.repoRoot = t.TempDir()
+	h.registerRepo(theRepository, h.repoRoot)
 	h.register(theWorkspace, "ws-one")
 	o, err := newOrchestrator(h.deps())
 	if err != nil {
@@ -1020,6 +1066,7 @@ func (h *harness) deps() Deps {
 	return Deps{
 		DB: h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
 		Sidebar: h.sidebar, Holds: h.holds, PromptsDir: "prompts",
+		Policy:      harnessPolicy{h: h},
 		Briefs:      h.loadBrief,
 		SelfRepoDir: "/self/checkout",
 		StateDir:    h.stateDir,
@@ -1132,7 +1179,7 @@ func (h *harness) loadBrief(name string, values map[string]string) (string, erro
 func (h *harness) register(ws ids.WorkspaceID, name string) {
 	h.db.mu.Lock()
 	defer h.db.mu.Unlock()
-	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: name, Dir: h.sourceD, Branch: "feature"}
+	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: name, Dir: h.sourceD, Branch: "feature", Repo: theRepository}
 	h.db.jobs[ws] = wsm.CreationJob{
 		Workspace: ws,
 		Layout: wsm.MergeLayout{
