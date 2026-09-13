@@ -4,6 +4,16 @@
   --fg: #1a1a1a;
   --muted: #6b7280;
   --border: #e5e7eb;
+  /* ONE STEP DARKER THAN `--border`, and derived from it rather than picked:
+     the rule that partitions two SECTIONS of one surface, where `--border`
+     delimits the rows inside a section. The footer's divider between the strip
+     and its expanded panel is the first user (owner ruling, 2026-09-13). The
+     mix is toward `--fg` rather than a literal black so the step is the same
+     step in either theme: the light theme's near-black `--fg` darkens the grey,
+     and the dark theme's pale `--fg` lifts it off the dark ground, which is
+     that theme's own "one step stronger". 15% is the smallest mix that still
+     reads as a distinct, heavier line beside `--border` at 1px. */
+  --border-strong: color-mix(in srgb, var(--border) 85%, var(--fg));
   /* Tool-card grey: the fill under every full-width response card (Bash, Read,
      etc.) and the badges/tickers riding on them. A notch darker than the old
      near-white #f9fafb, so a card lifts off the feed instead of melting into
@@ -3140,6 +3150,9 @@ pre {
 .pfooter-error.addressable:hover { text-decoration: underline; }
 
 /* The EXPANDED FOOTER: the session's agent and task roster, one row each.
+   It draws UNDER the strip (owner ruling, 2026-09-13), separated from it by
+   `.footer-divider` — which is why this rule carries no top border of its own:
+   the partition between the two sections is ONE line and the divider owns it.
 
    NO SESSION STATUS LIVES HERE. The rate-limit allowances and their resets, the
    open windows, and the merge's account are the strip's own cells to say, and
@@ -3156,7 +3169,6 @@ pre {
    their own spacing through the row height instead. */
 .pfooter-sheet {
   --pfooter-row-h: 1.45rem;
-  border-top: 1px solid var(--border);
   padding: 0 10px;
   color: var(--muted);
   font-size: 0.74rem;
@@ -4634,6 +4646,26 @@ body.draining #composer-input::placeholder {
 .footer-tokens-verdict.arm-complete { color: var(--ok); }
 .footer-tokens-verdict.arm-incomplete,
 .footer-tokens-verdict.arm-invalid { color: var(--err); }
+
+/* THE PARTITION between the strip and the expanded section (owner ruling,
+   2026-09-13). A rule element of its own rather than a border on either
+   neighbour, so it fully partitions the two sections: it is a child of
+   `.pfooter` and carries NO horizontal margin, padding or inset, so it spans
+   the dock edge to edge — the expanded section's own 10px side padding stops
+   at the section. `--border-strong` is one step darker than the `--border` the
+   section's row delimiters take, so the partition reads as heavier than the
+   lines inside it. */
+.footer-divider {
+  height: 0;
+  margin: 0;
+  padding: 0;
+  /* LONGHANDS, not the `border-top` shorthand: the suite asserts the token the
+     cascade hands this element, and a `var()` inside a shorthand is not
+     readable back through `getComputedStyle` under jsdom. */
+  border-top-width: 1px;
+  border-top-style: solid;
+  border-top-color: var(--border-strong);
+}
 
 /* THE EXPANDED PANELS. The sheet's geometry is `.pfooter-sheet`'s; these are
    the row shapes the five panels draw inside it, all sharing one layout so a
