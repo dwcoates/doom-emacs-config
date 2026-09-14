@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   findTreeRegion,
+  formatTree,
   isMetapromptTree,
+  lineText,
   looksLikeIntendedTree,
-  railOffsets,
   renderTreeHtml,
-  splitTreeLine,
+  TreeOverflowError,
+  visibleWidth,
 } from "../src/metaprompt-tree.js";
 
 const TREE = [
@@ -20,6 +22,17 @@ const TREE = [
 ].join("\n");
 
 const identity = (s: string): string => s;
+
+/**
+ * wrapBody is the oracle harness, mirroring the daemon treefmt suite's own
+ * `wrap` helper: format a bare tree body and return the wrapped text lines
+ * rejoined, so a case can be stated exactly as the Go test states it.
+ */
+function wrapBody(body: string, width: number): string {
+  return formatTree(body.split("\n"), width)
+    .lines.map(lineText)
+    .join("\n");
+}
 
 describe("isMetapromptTree", () => {
   it("detects a full tree with header and connectors", () => {
@@ -59,106 +72,172 @@ describe("isMetapromptTree", () => {
   });
 });
 
-describe("splitTreeLine", () => {
-  it("splits a connector branch at its content start", () => {
-    // Act + Assert
-    expect(splitTreeLine("├── 1.2 Second detail")).toEqual({
-      prefix: "├── 1.2 ",
-      content: "Second detail",
-    });
-  });
+// --- The wrap engine, checked against the daemon treefmt suite's own cases ---
+//
+// Each case below has the same input, width and expectation as the Go test it
+// mirrors (daemon/internal/treefmt/treefmt_test.go), so the TypeScript port is
+// checked against the daemon algorithm's own evidence rather than a rewrite of
+// it. The daemon used a fixed 105-column width; the port takes the width as an
+// argument, but the algorithm producing the wrap is identical.
 
-  it("keeps leading vertical bars in the prefix", () => {
+describe("visibleWidth (rendered width)", () => {
+  it.each([
+    { name: "plain ascii", raw: "abc", want: 3 },
+    { name: "tags contribute nothing", raw: `<a href="https://x/y">abc</a>`, want: 3 },
+    { name: "mark and bold contribute nothing", raw: "<mark><b>abc</b></mark>", want: 3 },
+    { name: "entity counts as one character", raw: "&lt;plugin&gt;", want: 8 },
+    { name: "ampersand entity counts as one", raw: "a&amp;b", want: 3 },
+    { name: "box drawing is single width", raw: "├── ", want: 4 },
+    { name: "wide emoji counts as two", raw: "🎯", want: 2 },
+    { name: "variation-selector emoji counts as two", raw: "✏️", want: 2 },
+    { name: "zero-width joiner is free", raw: "a‍b", want: 2 },
+  ])("$name", ({ raw, want }) => {
     // Act + Assert
-    expect(splitTreeLine("│   └── 1.1.1 Nested")).toEqual({
-      prefix: "│   └── 1.1.1 ",
-      content: "Nested",
-    });
-  });
-
-  it("includes the root emoji in the prefix", () => {
-    // Act + Assert
-    expect(splitTreeLine("1 🔧 Fixed the thing")).toEqual({
-      prefix: "1 🔧 ",
-      content: "Fixed the thing",
-    });
-  });
-
-  it("treats a plain header line as all content", () => {
-    // Act + Assert
-    expect(splitTreeLine("Response (✏️ changes made)")).toEqual({
-      prefix: "",
-      content: "Response (✏️ changes made)",
-    });
+    expect(visibleWidth(raw)).toBe(want);
   });
 });
 
-describe("railOffsets", () => {
-  it("gives a ├ connector a rail at its own column", () => {
+describe("wrap engine — the daemon algorithm, ported", () => {
+  it("leaves a branch that fits untouched", () => {
+    // Arrange — both branches are inside the width.
+    const body = "├── 1.1. Short enough.\n└── 1.2. Also short.";
     // Act + Assert
-    expect(railOffsets("├── 1.1 ")).toEqual([0]);
+    expect(wrapBody(body, 100)).toBe(body);
   });
 
-  it("gives a └ connector no rail — it ends the line", () => {
+  it("wraps a too-wide branch with a hanging indent under its text column", () => {
+    // Arrange — width 15 fits "├── 1.3. foo" (12 columns) but not " bar".
     // Act + Assert
-    expect(railOffsets("└── 1.2 ")).toEqual([]);
+    expect(wrapBody("├── 1.3. foo bar", 15)).toBe("├── 1.3. foo\n│        bar");
   });
 
-  it("keeps a leading vertical bar's rail through a └ branch", () => {
+  it("blanks a wrapped last child's connector column", () => {
     // Act + Assert
-    expect(railOffsets("│   └── 1.1.1 ")).toEqual([0]);
+    expect(wrapBody("└── 1.3. foo bar", 15)).toBe("└── 1.3. foo\n         bar");
   });
 
-  it("stacks leading-bar and ├ connector rails", () => {
+  it("aligns a wrapped root under its own text", () => {
     // Act + Assert
-    expect(railOffsets("│   ├── 1.1.1 ")).toEqual([0, 4]);
+    expect(wrapBody("1. foo bar", 8)).toBe("1. foo\n   bar");
   });
 
-  it("gives an emoji root no rails", () => {
+  it("extends every ancestor rule on a nested continuation", () => {
     // Act + Assert
-    expect(railOffsets("1 🔧 ")).toEqual([]);
+    expect(wrapBody("│   ├── 1.2.1. foo bar", 21)).toBe("│   ├── 1.2.1. foo\n│   │          bar");
+  });
+
+  it("holds open the column of a wrapped branch's own children", () => {
+    // Arrange — a wrap above a subtree keeps the child connector column busy.
+    const body = "├── 1.1. aaaa bbbb cccc\n│   └── 1.1.1. Leaf.";
+    // Act + Assert
+    expect(wrapBody(body, 22)).toBe("├── 1.1. aaaa bbbb\n│   │    cccc\n│   └── 1.1.1. Leaf.");
+  });
+
+  it("blanks the column when the next branch is a sibling, not a child", () => {
+    // Arrange.
+    const body = "├── 1.1. aaaa bbbb cccc\n└── 1.2. Leaf.";
+    // Act + Assert
+    expect(wrapBody(body, 22)).toBe("├── 1.1. aaaa bbbb\n│        cccc\n└── 1.2. Leaf.");
+  });
+
+  it("wraps repeatedly when one continuation is not enough", () => {
+    // Act + Assert
+    expect(wrapBody("├── 1.1. aaa bbb ccc ddd", 13)).toBe(
+      "├── 1.1. aaa\n│        bbb\n│        ccc\n│        ddd",
+    );
+  });
+
+  it("wraps an emoji-prefixed root under its emoji", () => {
+    // Act + Assert
+    expect(wrapBody("1. 🎯 goal here", 12)).toBe("1. 🎯 goal\n   here");
+  });
+
+  it("preserves a blank line between roots", () => {
+    // Arrange.
+    const body = "1. First.\n\n2. Second.";
+    // Act + Assert
+    expect(wrapBody(body, 100)).toBe(body);
+  });
+
+  it("never splits an inline element that fits on its own", () => {
+    // Arrange — field is 16 - 9 = 7 columns, so the anchor lands whole.
+    const body = `├── 1.1. see <a href="https://x/y">symbol</a> now`;
+    // Act + Assert
+    expect(wrapBody(body, 16)).toBe(
+      '├── 1.1. see\n│        <a href="https://x/y">symbol</a>\n│        now',
+    );
+  });
+
+  it("splits an overlong element with its tags closed and reopened", () => {
+    // Act + Assert
+    expect(wrapBody("1. <mark><b>alpha beta gamma</b></mark>", 13)).toBe(
+      "1. <mark><b>alpha beta</b></mark>\n   <mark><b>gamma</b></mark>",
+    );
+  });
+
+  it("measures entities as one character each", () => {
+    // Arrange — "&lt;plugin&gt;" renders as 8 columns, so it fits 12.
+    // Act + Assert
+    expect(wrapBody("1. &lt;plugin&gt;", 12)).toBe("1. &lt;plugin&gt;");
+  });
+
+  it("is idempotent: re-wrapping already-wrapped output changes nothing", () => {
+    // Arrange.
+    const once = wrapBody("├── 1.1. aaa bbb ccc\n└── 1.2. x", 13);
+    // Act + Assert
+    expect(wrapBody(once, 13)).toBe(once);
+  });
+
+  it("unwraps when re-wrapped at a wider limit", () => {
+    // Arrange.
+    const narrow = wrapBody("├── 1.1. aaa bbb ccc\n└── 1.2. x", 13);
+    // Act + Assert
+    expect(wrapBody(narrow, 100)).toBe("├── 1.1. aaa bbb ccc\n└── 1.2. x");
+  });
+
+  it("reports an unsplittable word wider than the limit rather than truncating it", () => {
+    // Act
+    const result = formatTree(["1. aaaaaaaaaaaaaaaaaaaa"], 10);
+    // Assert — the word is kept whole and named in overflows.
+    expect(result.overflows).toEqual(["aaaaaaaaaaaaaaaaaaaa"]);
+    expect(lineText(result.lines[0])).toContain("aaaaaaaaaaaaaaaaaaaa");
+  });
+
+  it("refuses a branch whose prefix alone exceeds the width", () => {
+    // Arrange — a prefix that leaves no room for any text.
+    // Act + Assert
+    expect(() => formatTree(["│   ├── 1.2.1. text"], 10)).toThrow(TreeOverflowError);
   });
 });
 
 describe("renderTreeHtml", () => {
-  it("renders each line as a prefix/content flex pair", () => {
+  it("renders a fitting branch as a prefix/content pair with real connectors", () => {
     // Act
-    const html = renderTreeHtml("├── 1.1 Detail", identity);
+    const html = renderTreeHtml("├── 1.1 Detail", identity, 100);
     // Assert
-    expect(html).toContain(`<span class="mp-prefix">├── 1.1 `);
+    expect(html).toContain(`<span class="mp-prefix">├── 1.1 </span>`);
     expect(html).toContain(`<span class="mp-content">Detail</span>`);
   });
 
-  it("paints a continuation rail inside a ├ branch's prefix", () => {
-    // Act
-    const html = renderTreeHtml("├── 1.1 Detail", identity);
-    // Assert — centered in the connector's ch cell.
-    expect(html).toContain(`<i class="mp-rail" style="left:0.5ch"></i></span>`);
-  });
-
-  it("paints no continuation rail for a └ branch", () => {
-    // Act + Assert
-    expect(renderTreeHtml("└── 1.2 Detail", identity)).not.toContain("mp-rail");
-  });
-
-  it("paints one rail per continuing column on nested branches", () => {
-    // Act
-    const html = renderTreeHtml("│   ├── 1.1.1 Deep detail", identity);
-    // Assert
-    expect(html).toContain(`<i class="mp-rail" style="left:0.5ch"></i>`);
-    expect(html).toContain(`<i class="mp-rail" style="left:4.5ch"></i>`);
+  it("emits real rail characters on a wrapped branch's continuation", () => {
+    // Arrange — 1.1 has a child, so the wrap holds a rail; force a wrap at 15.
+    const html = renderTreeHtml("├── 1.1 aaaa bbbb cccc\n│   └── 1.1.1 x", identity, 15);
+    // Assert — the continuation prefix carries the ancestor rail plus 1.1's own
+    // held-open child rail as REAL characters in the prefix span, no repaint.
+    expect(html).toContain(`<span class="mp-prefix">│   │`);
+    expect(html).not.toContain("mp-rail");
   });
 
   it("renders blank lines as spacer rows", () => {
     // Act
-    const html = renderTreeHtml("1 🔧 A\n\n2 ✅ B", identity);
+    const html = renderTreeHtml("1 🔧 A\n\n2 ✅ B", identity, 100);
     // Assert
     expect(html).toContain(`class="mp-line mp-blank"`);
   });
 
   it("escapes markup in tree content", () => {
     // Act
-    const html = renderTreeHtml("├── 1.1 <img src=x>", identity);
+    const html = renderTreeHtml("├── 1.1 <img src=x>", identity, 100);
     // Assert
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img src=x&gt;");
@@ -168,7 +247,18 @@ describe("renderTreeHtml", () => {
     // Arrange
     const shout = (s: string): string => s.toUpperCase();
     // Act + Assert
-    expect(renderTreeHtml("├── 1.1 detail", shout)).toContain("DETAIL");
+    expect(renderTreeHtml("├── 1.1 detail", shout, 100)).toContain("DETAIL");
+  });
+
+  it("falls back to unwrapped lines and surfaces the issue when a prefix cannot fit", () => {
+    // Arrange — a prefix wider than the width, and a spy for the issue callback.
+    const issues: string[] = [];
+    // Act
+    const html = renderTreeHtml("│   ├── 1.2.1 text", identity, 10, (message) => issues.push(message));
+    // Assert — the tree is still drawn, and the refusal was surfaced, not swallowed.
+    expect(html).toContain("text");
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("could not be wrapped");
   });
 });
 
@@ -247,6 +337,11 @@ describe("looksLikeIntendedTree", () => {
     // Act + Assert
     expect(looksLikeIntendedTree("Just prose here.\nMore prose.")).toBe(false);
   });
+
+  it("is false for text that is entirely blank, having no first line to read", () => {
+    // Act + Assert
+    expect(looksLikeIntendedTree("\n   \n\n")).toBe(false);
+  });
 });
 
 describe("dotted labels with more than one level", () => {
@@ -263,101 +358,5 @@ describe("dotted labels with more than one level", () => {
     ].join("\n");
     // Act + Assert
     expect(isMetapromptTree(text)).toBe(true);
-  });
-});
-
-describe("looksLikeIntendedTree: nothing to judge", () => {
-  it("is false for text that is entirely blank, having no first line to read", () => {
-    // Act + Assert
-    expect(looksLikeIntendedTree("\n   \n\n")).toBe(false);
-  });
-});
-
-/**
- * The daemon wraps a settled response's bare tree to 105 columns before it is
- * served (`daemon/internal/resolve/feed/tree.go`), so every consumer sees
- * branches split across a head line and CONTINUATION lines: the ancestors'
- * rails then the wrapped branch's label width in padding. A continuation is
- * neither a connector line nor an emoji root, and before this was pinned the
- * region ended at the first one — shearing the tree exactly where the daemon
- * wrapped it and dropping the rest onto the markdown path.
- */
-describe("daemon-wrapped continuation lines", () => {
-  const ROOT = "1 🌳 A bare Unicode tree, the shape the metaprompt answers in.";
-  // The exact lines `treefmt.FormatBlock(…, 105)` produces for the fake SDK's
-  // `!md` showcase tree, taken from that formatter rather than invented.
-  const WRAPPED = [
-    ROOT,
-    "├── 1.1 This branch is deliberately longer than the daemon's 105-column limit, so it is wrapped before it",
-    "│   │   is served, and every continuation line must still carry the rails of the branches around it.",
-    "│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.",
-    "└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too runs",
-    "        past the daemon's limit and wraps onto a second line.",
-  ].join("\n");
-
-  it("keeps a wrapped ├── branch's continuation inside the region", () => {
-    // Arrange — 1.1 wrapped, with 1.1.1 beneath it, so the continuation is
-    // rails-only (`│   │   `).
-    const text = [ROOT, WRAPPED.split("\n")[1], WRAPPED.split("\n")[2], WRAPPED.split("\n")[3]].join(
-      "\n",
-    );
-    // Act
-    const region = findTreeRegion(text);
-    // Assert — all four lines, not the two the shear left.
-    expect(region?.tree.split("\n")).toHaveLength(4);
-  });
-
-  it("keeps a wrapped └── last branch's spaces-only continuation inside the region", () => {
-    // Arrange — the last branch's continuation carries no rail at all.
-    // Act
-    const region = findTreeRegion(WRAPPED);
-    // Assert — including the trailing continuation, which ends the region.
-    expect(region).toEqual({ before: "", tree: WRAPPED, after: "" });
-  });
-
-  it.each([
-    { name: "a childless root, padded with spaces", cont: "  answers in." },
-    { name: "a root with children, whose first pad column is a rail", cont: "│ answers in." },
-  ])("keeps a wrapped root's continuation inside the region: $name", ({ cont }) => {
-    // Arrange
-    const text = ["1 🌳 A bare Unicode tree, the shape the metaprompt", cont, "├── 1.1 Detail"].join(
-      "\n",
-    );
-    // Act
-    const region = findTreeRegion(text);
-    // Assert
-    expect(region?.tree.split("\n")).toHaveLength(3);
-  });
-
-  it("never counts a continuation toward the two-core-lines minimum", () => {
-    // Arrange — one root that wrapped, and nothing else: still a lone branch.
-    const text = ["1 🌳 A bare Unicode tree, the shape the metaprompt", "  answers in."].join("\n");
-    // Act + Assert
-    expect(findTreeRegion(text)).toBeNull();
-  });
-
-  it("still ends the region at a plain prose line in column 0", () => {
-    // Arrange — prose starts at column 0, so it is no one's remainder.
-    const text = `${WRAPPED}\nThat is the whole demo.`;
-    // Act
-    const region = findTreeRegion(text);
-    // Assert
-    expect(region?.tree).toBe(WRAPPED);
-    expect(region?.after).toBe("That is the whole demo.");
-  });
-
-  it("reads a wrapped tree as a tree despite the continuations' share of its lines", () => {
-    // Arrange — two of the six lines are continuations; counting them as
-    // prose puts the tree-shaped ratio under TREE_LINE_RATIO.
-    // Act + Assert
-    expect(isMetapromptTree(WRAPPED)).toBe(true);
-  });
-
-  it("paints a rail at every │ column of a continuation's prefix", () => {
-    // Act — the rails-only continuation under a wrapped ├── branch.
-    const html = renderTreeHtml("│   │   is served, and every continuation line", identity);
-    // Assert — one hairline per rail column, centered in its ch cell.
-    expect(html).toContain(`<i class="mp-rail" style="left:0.5ch"></i>`);
-    expect(html).toContain(`<i class="mp-rail" style="left:4.5ch"></i>`);
   });
 });

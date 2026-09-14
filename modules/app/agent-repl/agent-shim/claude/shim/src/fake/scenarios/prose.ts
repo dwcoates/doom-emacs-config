@@ -39,23 +39,23 @@ export const MARKDOWN_SHOWCASE = [
   // showcase then draws as an ordinary markdown list rather than the tree it
   // exists to demonstrate.
   "1 🌳 A bare Unicode tree, the shape the metaprompt answers in.",
-  "├── 1.1 This branch is deliberately longer than the daemon's 105-column limit, so it is wrapped " +
-    "before it is served, and every continuation line must still carry the rails of the branches around it.",
+  "├── 1.1 This branch is deliberately longer than the bubble's live width, so the webapp wraps it " +
+    "before it is drawn, and every continuation line must still carry the rails of the branches around it.",
   "│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.",
   "└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too " +
-    "runs past the daemon's limit and wraps onto a second line.",
+    "runs past the bubble's width and wraps onto a second line.",
   "",
   "That is the whole demo.",
 ].join("\n");
 
 /**
- * The column limit the daemon wraps a settled response's tree to
- * (daemon/internal/resolve/feed/tree.go's `responseTreeWidth`, which is
- * treefmt's `DefaultWidth`). The showcase carries branches WIDER than this so
- * that the wrap is exercised by every consumer that draws `!md`; the test
- * beside this scenario pins that the showcase still does.
+ * The webapp's fallback wrap width for a metaprompt tree
+ * (webapp/src/metaprompt-tree.ts's `DEFAULT_TREE_COLS`, used when the bubble's
+ * live width cannot be measured). The showcase carries branches WIDER than this
+ * so that the webapp's wrap is exercised by every consumer that draws `!md`;
+ * the test beside this scenario pins that the showcase still does.
  */
-export const DAEMON_TREE_WRAP_COLUMNS = 105;
+export const WEBAPP_TREE_WRAP_COLUMNS = 105;
 
 /**
  * The default turn: several blocks, both thinking arms, one settled answer.

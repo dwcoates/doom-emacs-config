@@ -48,6 +48,23 @@ export function tick(el: Element, ticker: Ticker, fn: (nowMs: number) => void): 
 }
 
 /**
+ * Register DISPOSE to run when EL is discarded, through the SAME machinery a
+ * clock subscription uses, so `stopTicking` (called by whoever throws the DOM
+ * away) tears it down with no disposer for the renderer to hold. It is for the
+ * non-clock teardown a drawn element still needs — a `ResizeObserver` watching a
+ * bubble's width, say — which would otherwise outlive the element it observes.
+ */
+export function onDiscard(el: Element, dispose: () => void): void {
+  const existing = subscriptions.get(el);
+  if (existing === undefined) {
+    subscriptions.set(el, new Set([dispose]));
+  } else {
+    existing.add(dispose);
+  }
+  el.setAttribute(TICKING_ATTRIBUTE, "1");
+}
+
+/**
  * Drop every clock subscription EL and its descendants hold, and say HOW MANY
  * elements actually held one.
  *

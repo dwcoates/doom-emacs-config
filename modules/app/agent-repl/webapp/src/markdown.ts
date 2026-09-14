@@ -28,7 +28,7 @@
 import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
 import { escapeHtml, highlightCode } from "./highlight.js";
-import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
+import { DEFAULT_TREE_COLS, isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 
 /** Inline markup within one already-escaped line. Exported for the
  * metaprompt-tree renderer (and the question picker), which inject it
@@ -85,18 +85,26 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 // metaprompt tree to the hanging-indent tree renderer. highlightCode
 // escapes in both branches (hljs escapes its own output), so the
 // escape-first guarantee holds.
-md.renderer.rules.fence = (tokens, idx): string => {
+md.renderer.rules.fence = (tokens, idx, _options, env): string => {
   const token = tokens[idx];
   const lang = token.info.trim().split(/\s+/)[0] ?? "";
   const body = token.content.replace(/\n$/, "");
   if (lang === "" && isMetapromptTree(body)) {
-    return `<div class="mp-tree">${renderTreeHtml(body, inline)}</div>`;
+    // The wrap width rides the render env so a fenced tree re-flows to the same
+    // live width as a bare one (see renderMarkdown's treeCols).
+    const cols = (env as { treeCols?: number } | undefined)?.treeCols ?? DEFAULT_TREE_COLS;
+    return `<div class="mp-tree">${renderTreeHtml(body, inline, cols)}</div>`;
   }
   const html = highlightCode(body, lang);
   const langClass = lang === "" ? "" : ` lang-${escapeHtml(lang)}`;
   return `<pre class="md-code"><code class="hljs${langClass}">${html}</code></pre>`;
 };
 
-export function renderMarkdown(src: string): string {
-  return md.render(src);
+/**
+ * Render markdown to HTML. TREECOLS is the column limit a metaprompt tree wraps
+ * to — the live width the response bubble measured, or the default when no
+ * width is known — threaded to the fence rule through the render env.
+ */
+export function renderMarkdown(src: string, treeCols: number = DEFAULT_TREE_COLS): string {
+  return md.render(src, { treeCols });
 }
