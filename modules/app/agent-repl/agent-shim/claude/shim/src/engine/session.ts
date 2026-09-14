@@ -59,6 +59,7 @@ import type {
 } from "../sdk/types.js";
 import {
   hibernateAcked,
+  hibernateCompacting,
   hibernateRefused,
   killSessionClosed,
   killSessionRefused,
@@ -81,7 +82,13 @@ import {
   contextCutCompacted,
   contextCutFailed,
   readAmbient,
+  transcriptTailIsCompaction,
 } from "./compaction.js";
+import {
+  readCompactionMark,
+  transcriptBytes,
+  writeCompactionMark,
+} from "./compaction-mark.js";
 import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, underColdGateFloor, type TranscriptFacts } from "./cold.js";
 import { TranscriptTitleTail } from "./title.js";
 import { sessionTitleUpdate } from "../convert/session-title.js";
@@ -146,6 +153,14 @@ interface EngineDeps {
   readonly nowMs: () => number;
   /** Injected so a suite never waits on a clock. */
   readonly scheduler?: KeepaliveScheduler;
+  /**
+   * Announced when a hibernation compaction settles.
+   *
+   * Injected so a suite awaits the work the DAEMON does not await: the daemon
+   * has a next sweep pass and a test has no clock to wait on. Production leaves
+   * it absent; the compaction's own records are the operator's account.
+   */
+  readonly onHibernationCompactionSettled?: (outcome: { ok: boolean; error?: string }) => void;
   /** Injected so a suite substitutes a temp directory without a state dir. */
   readonly identityStore?: AgentIdentityStore;
   /** Injected so a suite can take no kernel lock. */
@@ -478,6 +493,27 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** The tail of the vendor child's stderr, kept for the start's own detail. */
   let vendorStderrTail = "";
   let loop: Promise<void> | undefined;
+  /**
+   * The hibernation compaction that is running past the directive that asked
+   * for it, if any.
+   *
+   * IT IS WHAT MAKES A SECOND ASK CHEAP. A sweep pass whose rpc deadline
+   * expired asks again on its next pass while the first compaction is still
+   * running, and without this the shim would start a second summary turn for
+   * the same transcript. Present means `compacting`; absent means the last
+   * one landed and left either a mark or {@link lastCompactionError}.
+   */
+  let compacting: Promise<{ ok: boolean; error?: string }> | undefined;
+  /**
+   * The wording of a hibernation compaction that failed, kept for the NEXT
+   * directive.
+   *
+   * The compaction outlives the rpc that started it, so there is no answer
+   * left to carry its failure at the moment it happens. Reported once, and
+   * cleared as it is reported, so the ask after it retries the compaction
+   * instead of reporting a stale failure forever.
+   */
+  let lastCompactionError: string | undefined;
   /** Rows the store never acked by the time the teardown finished. */
   let lostRowsAtStandDown = 0;
   /** Every open `WatchAgent` tail, so the teardown can conclude each honestly. */
@@ -3022,6 +3058,32 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     });
   }
 
+  /**
+   * The pre-hibernation directive. AT MOST ONE COMPACTION PER IDLE PERIOD, and
+   * the answer is bounded by the caller's deadline.
+   *
+   * THE LOOP THIS SHAPE EXISTS TO END (owner's workspace, 2026-09-14). The
+   * directive's answer used to BE the compaction's completion. A compaction is
+   * a real vendor summary turn; the daemon's stand bound is a sum of teardown
+   * bounds and is seconds. So every sweep pass: the daemon's deadline expired,
+   * the daemon recorded a failed directive and never stood the shim down, the
+   * shim finished the compaction anyway, and five minutes later the next pass
+   * ran the WHOLE summary turn again — thirteen of them between 09:02 and
+   * 10:03, each one appending another `compact_boundary` and another block of
+   * continuation notes the user watched land in the feed.
+   *
+   * Two invariants close it, and each is needed:
+   *
+   *   - ALREADY COMPACTED IS ACKED, NOT RECOMPACTED. A transcript whose tail is
+   *     this shim's own compaction pair, or whose persisted mark states the
+   *     length it currently has, needs no vendor turn at all. The mark is on
+   *     disk, so this survives a restart of either process.
+   *   - A COMPACTION THAT IS STARTED IS NOT AWAITED HERE. It runs to completion
+   *     regardless of this rpc's cancellation (it always did), and the answer
+   *     is `compacting`. The caller defers that pass without calling it a
+   *     failure and asks again; the ask after the work lands is acked by the
+   *     first invariant, at once.
+   */
   async function hibernate(): Promise<shimv1.HibernateResponse> {
     if (!started || identity === undefined) {
       return hibernateRefused({ kind: "noSession" });
@@ -3029,26 +3091,128 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (open !== undefined) {
       return hibernateRefused({ kind: "turnInFlight" });
     }
-    const facts = readTranscriptFacts(
-      transcriptPath(deps.env.configDir, deps.env.cwd, identity.vendorSessionId),
-    );
+    const vendorSessionId = identity.vendorSessionId;
+    const transcript = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
+    // A COMPACTION THIS SHIM IS ALREADY RUNNING IS THE ANSWER. Two passes can
+    // overlap -- the first pass's own rpc is cancelled by its deadline while
+    // the work continues -- and starting a second summary turn for the same
+    // transcript is the loop itself.
+    if (compacting !== undefined) {
+      LOGGER.debug(
+        { vendor_session_id: vendorSessionId },
+        "a hibernation compaction is already in flight; answering that it is under way",
+      );
+      return hibernateCompacting();
+    }
+    // A FAILURE IS REPORTED ONCE, TO THE NEXT ASK. The compaction that failed
+    // ran past the rpc that started it, so there was no answer left to carry
+    // its wording; this is where it surfaces, and clearing it here is what
+    // lets the ask after that retry rather than reporting the same failure
+    // forever.
+    const failed = lastCompactionError;
+    if (failed !== undefined) {
+      lastCompactionError = undefined;
+      return hibernateRefused({ kind: "compactionFailed", error: failed });
+    }
+    if (hibernationCompactionIsCurrent(vendorSessionId, transcript)) {
+      LOGGER.info(
+        { vendor_session_id: vendorSessionId },
+        "hibernated: the transcript is already compacted and nothing has been said since, so the daemon may stand this shim down without another summary turn",
+      );
+      return hibernateAcked();
+    }
+    const facts = readTranscriptFacts(transcript);
     if (facts === undefined) {
       return hibernateRefused({
         kind: "compactionFailed",
         error: "there is no transcript to compact",
       });
     }
-    const outcome = await compact(
-      identity.vendorSessionId,
-      facts,
-      effectiveModel,
-      conversationv1.SessionCompactScope.ALL,
+    startHibernationCompaction(vendorSessionId, transcript, facts);
+    return hibernateCompacting();
+  }
+
+  /**
+   * Whether this session's transcript is compacted AS IT NOW STANDS.
+   *
+   * Two independent readings, either of which settles it, because they fail in
+   * different ways: the persisted mark is a byte length this shim recorded and
+   * survives nothing being readable in the transcript, and the tail check reads
+   * the transcript itself and survives the mark being lost with its state
+   * directory. A transcript is append-only, so "as long as the mark says" and
+   * "nothing has been appended since" are the same statement.
+   */
+  function hibernationCompactionIsCurrent(vendorSessionId: string, transcript: string): boolean {
+    const mark = readCompactionMark(deps.env.stateDir, workspaceKey, vendorSessionId);
+    const bytes = transcriptBytes(transcript);
+    if (mark !== undefined && bytes !== undefined && mark.transcript_bytes === bytes) return true;
+    return transcriptTailIsCompaction(transcript);
+  }
+
+  /**
+   * Start the compaction and let it outlive the rpc that asked for it.
+   *
+   * DELIBERATELY NOT AWAITED. The caller is answered `compacting` while this
+   * runs; the outcome lands in {@link lastCompactionError} or in the mark, and
+   * the next ask reads whichever it is. Nothing is thrown out of here — a
+   * rejection this function did not catch would be an unhandled rejection that
+   * takes the shim's process down for a summary turn that failed.
+   */
+  function startHibernationCompaction(
+    vendorSessionId: string,
+    transcript: string,
+    facts: TranscriptFacts,
+  ): void {
+    LOGGER.info(
+      { vendor_session_id: vendorSessionId },
+      "compacting the session for hibernation; the work outlives this directive and the daemon is told it is under way",
     );
-    if (!outcome.ok) {
-      return hibernateRefused({ kind: "compactionFailed", error: outcome.error });
-    }
-    LOGGER.info({ vendor_session_id: identity.vendorSessionId }, "hibernated: the session is compacted and the daemon may stand this shim down");
-    return hibernateAcked();
+    compacting = (async () => {
+      try {
+        const outcome = await compact(
+          vendorSessionId,
+          facts,
+          effectiveModel,
+          conversationv1.SessionCompactScope.ALL,
+        );
+        if (!outcome.ok) {
+          lastCompactionError = outcome.error;
+          LOGGER.error(
+            { vendor_session_id: vendorSessionId, cause: outcome.error },
+            "the hibernation compaction failed; the next directive carries its wording",
+          );
+          return { ok: false as const, error: outcome.error };
+        }
+        const bytes = transcriptBytes(transcript);
+        if (bytes !== undefined) {
+          writeCompactionMark(deps.env.stateDir, workspaceKey, vendorSessionId, {
+            transcript_bytes: bytes,
+            compacted_at_ms: deps.nowMs(),
+          });
+        }
+        LOGGER.info(
+          { vendor_session_id: vendorSessionId, transcript_bytes: bytes ?? 0 },
+          "the hibernation compaction landed; the next directive acks without another summary turn",
+        );
+        return { ok: true as const };
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        lastCompactionError = error;
+        LOGGER.error(
+          { vendor_session_id: vendorSessionId, cause: error },
+          "the hibernation compaction threw; the next directive carries its wording",
+        );
+        return { ok: false as const, error };
+      } finally {
+        compacting = undefined;
+      }
+    })().then((outcome) => {
+      // THE SUITE'S SYNCHRONIZATION POINT, and only that: a test awaits the
+      // work the way the daemon does not, because the daemon has another pass
+      // and a test has no clock to wait on.
+      deps.onHibernationCompactionSettled?.(outcome);
+      return outcome;
+    });
   }
 
   /**

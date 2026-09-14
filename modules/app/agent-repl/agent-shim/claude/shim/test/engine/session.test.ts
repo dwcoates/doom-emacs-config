@@ -7,7 +7,7 @@
  * teardown resolves every pending callback as denied before anything else,
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
 import { nextPush } from "../next-push.js";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +54,15 @@ interface Harness {
   readonly released: string[];
   /** Every exit code the engine asked `main.ts` to end the process with. */
   readonly exits: number[];
+  /**
+   * The next hibernation compaction to SETTLE.
+   *
+   * `Hibernate` answers `compacting` and lets the work run past the rpc, so a
+   * test that needs the compaction to have LANDED awaits this rather than a
+   * clock. Already-settled compactions queue, so a test that asks after the
+   * fact is answered at once.
+   */
+  nextCompaction(): Promise<{ ok: boolean; error?: string }>;
 }
 
 function scratch(): string {
@@ -187,10 +196,15 @@ function harness(
      * from the same graph. Everything else gets this file's own engine.
      */
     engineFactory?: typeof createEngine;
+    /**
+     * Build over an EXISTING pair of directories, the way a restarted shim
+     * comes back over the state its predecessor left.
+     */
+    over?: { stateDir: string; configDir: string };
   } = {},
 ): Harness {
-  const stateDir = scratch();
-  const configDir = scratch();
+  const stateDir = options.over?.stateDir ?? scratch();
+  const configDir = options.over?.configDir ?? scratch();
   const cwd = "/ws";
   const persistence = new RecordingPersistence();
   const fold = new RecordingFold();
@@ -200,7 +214,14 @@ function harness(
   const released: string[] = [];
   const workspaceLocks: string[] = [];
   const exits: number[] = [];
+  const settledCompactions: { ok: boolean; error?: string }[] = [];
+  const compactionWaiters: ((outcome: { ok: boolean; error?: string }) => void)[] = [];
   const engine = (options.engineFactory ?? createEngine)({
+    onHibernationCompactionSettled: (outcome) => {
+      const waiting = compactionWaiters.shift();
+      if (waiting === undefined) settledCompactions.push(outcome);
+      else waiting(outcome);
+    },
     ...(options.withoutEndProcess === true ? {} : { endProcess: (code: number) => exits.push(code) }),
     persistence,
     fold,
@@ -287,6 +308,11 @@ function harness(
     workspaceLocks,
     released,
     exits,
+    nextCompaction: () => {
+      const ready = settledCompactions.shift();
+      if (ready !== undefined) return Promise.resolve(ready);
+      return new Promise((resolve) => compactionWaiters.push(resolve));
+    },
   };
 }
 
@@ -353,6 +379,34 @@ async function untilQuery(h: Harness, index: number): Promise<{ spec: QuerySpec;
 /** The pre-minted id a fresh binding carries. */
 function freshSessionId(spec: QuerySpec): string {
   return spec.binding.kind === "fresh" ? spec.binding.sessionId : "";
+}
+
+/** Append one more record to a transcript the vendor already wrote. */
+function appendToTranscript(
+  configDir: string,
+  cwd: string,
+  sessionId: string,
+  line: unknown,
+): void {
+  appendFileSync(
+    path.join(configDir, "projects", cwdSlug(cwd), `${sessionId}.jsonl`),
+    `${JSON.stringify(line)}\n`,
+    "utf8",
+  );
+}
+
+/**
+ * A started session with a transcript on disk — the state `Hibernate` acts on.
+ *
+ * The vendor session id comes back with it because every hibernation assertion
+ * is about THAT conversation's transcript and THAT conversation's mark.
+ */
+async function hibernatable(): Promise<Harness & { vendorSessionId: string }> {
+  const h = harness();
+  await started(h);
+  const vendorSessionId = freshSessionId((await untilQuery(h, 0)).spec);
+  writeTranscript(h.configDir, h.cwd, vendorSessionId, [assistantLine({ sessionId: vendorSessionId })]);
+  return { ...h, vendorSessionId };
 }
 
 /** Bring a fresh session up: start it, and answer the vendor's init. */
@@ -1632,16 +1686,107 @@ describe("Hibernate", () => {
     const first = await untilQuery(h, 0);
     const sessionId = first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
     writeTranscript(h.configDir, h.cwd, sessionId, [assistantLine({ sessionId })]);
-    const hibernating = h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
     const throwaway = await untilQuery(h, 1);
     throwaway.query.emit(resultMessage("33333333-3333-4333-8333-333333333333"));
-    await hibernating;
+    await h.nextCompaction();
 
     const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
 
     expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
       "idle",
     );
+  });
+
+  it("answers `compacting` rather than waiting the compaction out", async () => {
+    // THE DEADLINE THIS GUARDS. A compaction is a real vendor summary turn and
+    // the caller's stand bound is seconds, so an answer that IS the
+    // compaction's completion is an answer the caller never receives.
+    const h = await hibernatable();
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    expect(response.result.case).toBe("compacting");
+  });
+
+  it("acks a second directive without another vendor turn when nothing was appended", async () => {
+    // THE LOOP THIS GUARDS. Thirteen summary turns on one workspace in one
+    // morning, because every sweep pass recompacted a transcript that was
+    // already compacted.
+    const h = await hibernatable();
+    await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    (await untilQuery(h, 1)).query.emit(resultMessage("33333333-3333-4333-8333-333333333333"));
+    await h.nextCompaction();
+    const queriesAfterTheFirst = h.queries.length;
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    expect([response.result.case, h.queries.length]).toEqual(["success", queriesAfterTheFirst]);
+  });
+
+  it("compacts again once the transcript has grown since the last compaction", async () => {
+    // THE OTHER HALF OF IDEMPOTENCE. "Already compacted" is a statement about
+    // the transcript AS IT NOW STANDS, so a conversation that continued after
+    // a compaction is owed another one.
+    const h = await hibernatable();
+    await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    (await untilQuery(h, 1)).query.emit(resultMessage("33333333-3333-4333-8333-333333333333"));
+    await h.nextCompaction();
+    appendToTranscript(h.configDir, h.cwd, h.vendorSessionId, assistantLine({ sessionId: h.vendorSessionId, uuid: "u-2" }));
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    expect(response.result.case).toBe("compacting");
+  });
+
+  it("acks without a vendor turn after a RESTART over the same state", async () => {
+    // THE MARK IS ON DISK FOR EXACTLY THIS. A daemon bounce, or a shim
+    // restarted under one, must not buy the same summary a second time.
+    const first = await hibernatable();
+    await first.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    (await untilQuery(first, 1)).query.emit(resultMessage("33333333-3333-4333-8333-333333333333"));
+    await first.nextCompaction();
+    const revived = harness({ over: { stateDir: first.stateDir, configDir: first.configDir } });
+    const resumed = revived.engine.startSession(resumeRequest(first.vendorSessionId));
+    (await untilQuery(revived, 0)).query.emit(initMessage({ sessionId: first.vendorSessionId }));
+    await resumed;
+
+    const response = await revived.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    expect([response.result.case, revived.queries.length]).toEqual(["success", 1]);
+  });
+
+  it("carries a failed compaction's own wording on the NEXT directive", async () => {
+    // THE FAILURE OUTLIVES ITS RPC TOO. The directive that started the
+    // compaction was answered `compacting` long before the compaction failed,
+    // so there is no answer left to carry the wording: the next ask carries it.
+    const h = await hibernatable();
+    await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    (await untilQuery(h, 1)).query.emit({
+      ...(resultMessage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") as unknown as Record<string, unknown>),
+      subtype: "error_during_execution",
+    } as never);
+    await h.nextCompaction();
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    const error = response.result.case === "error" ? response.result.value : undefined;
+
+    expect(error?.kind.case === "compactionFailed" ? error.kind.value.error : undefined).toBe(
+      "the summarizing session ended as error_during_execution",
+    );
+  });
+
+  it("answers `compacting` to a directive that arrives while one is in flight", async () => {
+    // THE RACE THE SWEEP ACTUALLY RUNS. The first pass's rpc is cancelled by
+    // its own deadline while the work continues, and the next pass asks again
+    // before it has landed. A second summary turn there IS the loop.
+    const h = await hibernatable();
+    await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    await untilQuery(h, 1);
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    expect([response.result.case, h.queries.length]).toEqual(["compacting", 2]);
   });
 });
 
@@ -4938,32 +5083,6 @@ describe("the cold gate's COMPACT remediation", () => {
     expect(
       response.result.case === "failure" ? response.result.value.detail : undefined,
     ).toBe("the vendor refused another query");
-  });
-});
-
-describe("Hibernate's compaction failing", () => {
-  it("carries the summarizing session's own failure into the refusal", async () => {
-    const h = harness({
-      onQueryCreated: (query, _spec, index) => {
-        if (index === 1) {
-          query.emit({
-            ...(resultMessage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") as unknown as Record<string, unknown>),
-            subtype: "error_during_execution",
-          } as never);
-        }
-      },
-    });
-    await started(h);
-    const first = h.queries[0];
-    const sessionId = first?.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
-    writeTranscript(h.configDir, h.cwd, sessionId, [assistantLine({ sessionId })]);
-
-    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
-    const error = response.result.case === "error" ? response.result.value : undefined;
-
-    expect(error?.kind.case === "compactionFailed" ? error.kind.value.error : undefined).toBe(
-      "the summarizing session ended as error_during_execution",
-    );
   });
 });
 
