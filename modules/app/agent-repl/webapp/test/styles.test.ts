@@ -96,3 +96,195 @@ describe("the stylesheet's selectability contract", () => {
     expect([...ALLOWED.keys()].filter((selector) => !suppressing.has(selector))).toEqual([]);
   });
 });
+
+/**
+ * THE BUBBLE GEOMETRY (owner ruling, 2026-09-14).
+ *
+ * "make the max width of response bubbles about 10% wider, and also make the
+ * max response bubble length about 10% longer. Also ensure the scrollbar of the
+ * response bubble (and all bubbles, in fact) abuts (or close to) the right hand
+ * side of the bubble (currently there's quite a bit of gap), and starts UNDER
+ * the token count / metadata in the top right corner of the bubble."
+ *
+ * Plus the owner's addition: the bar must be VISIBLE whenever the box overflows
+ * and absent when it does not — the platform's hover-only overlay bar tells a
+ * reader nothing about whether the answer continues below the fold.
+ *
+ * These read the file's TEXT rather than a computed style: every figure here is
+ * written with `var()` and `calc()`, which jsdom hands back unresolved, so the
+ * declaration is the only thing an assertion can honestly pin.
+ */
+/** The declarations of the FIRST rule whose selector list contains SELECTOR. */
+function declarationsOf(selector: string): string | undefined {
+  return rulesOf(stylesheet).find((rule) => rule.selectors.includes(selector))?.declarations;
+}
+
+/** Every scroll box the ruling names, by the selector the sheet caps it with. */
+const SCROLL_BOXES: readonly string[] = [
+  ".bubble > .bubble-scroll",
+  ".tool-input",
+  ".tool-output",
+  ".tool-read-output",
+  ".bash-input",
+  ".bash-output",
+  ".diff-output",
+  ".skill-input",
+  ".skill-content",
+  ".fold-fixed > .agent-panel",
+];
+
+describe("the bubble geometry: the two caps", () => {
+  it("widens the agent column cap by exactly ten percent, 75% to 82.5%", () => {
+    // Arrange / Act
+    const column = declarationsOf("#main-col");
+
+    // Assert
+    expect(column).toMatch(/--agent-bubble-cap:\s*82\.5%/);
+  });
+
+  it("lengthens the shared visible-line budget by exactly ten percent, 25 to 27.5", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root");
+
+    // Assert
+    expect(root).toMatch(/--feed-cap-lines:\s*27\.5\s*;/);
+  });
+
+  it("leaves no second copy of the old 75% cap behind", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(
+      /--agent-bubble-cap:\s*75%/,
+    );
+  });
+
+  it("leaves no second copy of the old 25-line budget behind", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(
+      /--feed-cap-lines:\s*25\s*;/,
+    );
+  });
+});
+
+describe("the bubble geometry: the scrollbar on the inner edge", () => {
+  it("drops the bubble's own right inset to the shared gap, so the box reaches the edge", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect(bubble).toMatch(/padding:\s*0\.6rem\s+var\(--bubble-scroll-gap\)\s+0\.6rem\s+0\.9rem/);
+  });
+
+  it("keeps the gap itself hairline, so 'abuts' is a promise the token can keep", () => {
+    // Arrange / Act
+    const column = declarationsOf("#main-col");
+
+    // Assert
+    expect(column).toMatch(/--bubble-scroll-gap:\s*2px/);
+  });
+
+  it("gives the bubble's scroll box no horizontal padding of its own", () => {
+    // Arrange / Act
+    const scroll = declarationsOf(".bubble > .bubble-scroll");
+
+    // Assert
+    expect(scroll).toMatch(/padding-left:\s*0\s*;[\s\S]*padding-right:\s*0\s*;/);
+  });
+
+  it("hands the inset the bubble gave up to the CONTENT wrapper inside the box", () => {
+    // Arrange / Act
+    const body = declarationsOf(".bubble-body");
+
+    // Assert
+    expect(body).toMatch(/padding-right:\s*calc\(0\.9rem - var\(--bubble-scroll-gap\)\)/);
+  });
+
+  it("steps a tool card's scroll boxes out of the card's own inset", () => {
+    // Arrange / Act
+    const boxes = declarationsOf(".tool-card > .tool-output");
+
+    // Assert
+    expect(boxes).toMatch(/margin-right:\s*calc\(var\(--bubble-scroll-gap\) - 0\.75rem\)/);
+  });
+
+  it("caps the SCROLL BOX rather than the content wrapper, so the strip cannot scroll away", () => {
+    // Arrange / Act
+    const capped = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.includes(".bubble > .bubble-scroll"),
+    );
+
+    // Assert
+    expect(capped.some((rule) => /max-height:\s*calc\(var\(--cap-lines\)/.test(rule.declarations))).toBe(
+      true,
+    );
+  });
+
+  it("no longer caps the bubble body, which is now the content wrapper", () => {
+    // Arrange / Act / Assert
+    expect(rulesOf(stylesheet).some((rule) => rule.selectors.includes(".bubble > .bubble-body"))).toBe(
+      false,
+    );
+  });
+
+  it("retires the prompt bubble's one-cell grid, which put the stamp BESIDE the box", () => {
+    // Arrange / Act
+    const prompt = declarationsOf(".bubble.user");
+
+    // Assert
+    expect(prompt).not.toMatch(/display:\s*grid/);
+  });
+
+  it("stacks every bubble, so the metadata strip sits over the scroll box", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect(bubble).toMatch(/flex-direction:\s*column/);
+  });
+});
+
+describe("the bubble geometry: a scrollbar that is there whenever it can scroll", () => {
+  it.each(SCROLL_BOXES)("keeps %s on overflow-y: auto, never scroll", (selector) => {
+    // Arrange / Act
+    const capping = rulesOf(stylesheet).find(
+      (rule) => rule.selectors.includes(selector) && /overflow-y/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(capping?.declarations).toMatch(/overflow-y:\s*auto\s*;/);
+  });
+
+  it.each(SCROLL_BOXES)("paints a persistent bar on %s by sizing its scrollbar", (selector) => {
+    // Arrange / Act
+    const sized = rulesOf(stylesheet).find((rule) =>
+      rule.selectors.includes(`${selector}::-webkit-scrollbar`),
+    );
+
+    // Assert
+    expect(sized?.declarations).toMatch(/width:\s*8px/);
+  });
+
+  it.each(SCROLL_BOXES)("gives %s a track in the existing border token", (selector) => {
+    // Arrange / Act
+    const track = rulesOf(stylesheet).find((rule) =>
+      rule.selectors.includes(`${selector}::-webkit-scrollbar-track`),
+    );
+
+    // Assert
+    expect(track?.declarations).toMatch(/background:\s*var\(--border\)/);
+  });
+
+  it.each(SCROLL_BOXES)("gives %s a thumb in the existing muted token", (selector) => {
+    // Arrange / Act
+    const thumb = rulesOf(stylesheet).find((rule) =>
+      rule.selectors.includes(`${selector}::-webkit-scrollbar-thumb`),
+    );
+
+    // Assert
+    expect(thumb?.declarations).toMatch(/background:\s*var\(--muted\)/);
+  });
+
+  it("never parks a dead channel on a box that fits, which overflow-y: scroll would", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/overflow-y:\s*scroll/);
+  });
+});
