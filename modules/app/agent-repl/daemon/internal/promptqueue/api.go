@@ -35,6 +35,7 @@ import (
 //
 //	ErrMerging           → SubmitPromptError.merging
 //	ErrNoSession         → SubmitPromptError.no_session
+//	ErrColdGate          → SubmitPromptError.cold_gate
 //	ErrNoSuchHold        → UpdateHeldPromptError.no_such_hold
 //	ErrAlreadyDelivered  → UpdateHeldPromptError.already_delivered
 //	ErrAcceptNotApplicable → UpdateHeldPromptError.accept_not_applicable
@@ -46,6 +47,13 @@ var (
 	ErrMerging = errors.New("promptqueue: a merge is in flight for this workspace")
 	// ErrNoSession is a submission to a workspace with no live shim.
 	ErrNoSession = errors.New("promptqueue: the workspace has no session to submit to")
+	// ErrColdGate is a submission to a workspace whose session is PARKED AT
+	// ITS COLD GATE. It is deliberately NOT ErrNoSession: a session exists —
+	// the shim is up and serving, which is exactly why the gate could be
+	// raised — and it takes no prompt until the user answers the gate in the
+	// panel. The two were one answer until 2026-09-14, and every client
+	// consequently told the user the wrong thing about a session that was up.
+	ErrColdGate = errors.New("promptqueue: the session is parked at its cold gate")
 	// ErrNoSuchHold names a turn the queue holds nothing under.
 	ErrNoSuchHold = errors.New("promptqueue: no hold stands under that turn")
 	// ErrAlreadyDelivered is an action on a hold that already went to the shim.
@@ -209,6 +217,11 @@ type Deps struct {
 	// Watcher resolves a workspace's session watcher, which is what answers
 	// the in-flight turn and what an accepted turn is handed over to.
 	Watcher WatcherFunc
+	// ColdGate answers the STANDING cold gate's own account for a workspace,
+	// false when no gate stands. A gate is a refusal with a name of its own,
+	// and this is what lets the queue give it rather than reporting a missing
+	// session. Nil means no workspace is ever read as gated.
+	ColdGate ColdGateFunc
 	// ParkedRoute delivers a submission that arrived under a PARKED merge
 	// lease to the resolution agent as guidance. It is a FUNCTION, not the
 	// orchestrator, because the queue never imports merge.
@@ -232,6 +245,30 @@ type Deps struct {
 	// Log is the queue's logger.
 	Log dlog.Surfaces
 }
+
+// ColdGateRefusal is ErrColdGate carrying the GATE'S OWN sentence, which is
+// what the `cold_gate` arm's `detail` field is filled from. It is a type
+// rather than a wrapped error string so the arm carries the gate's account
+// alone, never this package's name prefixed to it.
+type ColdGateRefusal struct {
+	// Detail is the standing gate's own account of what was refused cold.
+	Detail string
+}
+
+// Error names the refusal, the gate's own sentence included.
+func (e *ColdGateRefusal) Error() string {
+	if e.Detail == "" {
+		return ErrColdGate.Error()
+	}
+	return ErrColdGate.Error() + ": " + e.Detail
+}
+
+// Unwrap answers the sentinel, so `errors.Is(err, ErrColdGate)` holds.
+func (e *ColdGateRefusal) Unwrap() error { return ErrColdGate }
+
+// ColdGateFunc answers the standing cold gate's detail for a workspace,
+// reporting false when no gate stands. workspace.Fleet.ColdGateDetail is it.
+type ColdGateFunc func(ws ids.WorkspaceID) (string, bool)
 
 // ClientFunc resolves a workspace's live shim client, reporting false when the
 // workspace has none. It is injected so the queue does not own the fleet.

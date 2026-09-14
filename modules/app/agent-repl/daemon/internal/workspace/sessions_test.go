@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,12 @@ type fakeClient struct {
 	// killSessionErr makes the session directive fail, which is what sends the
 	// verb down its escalation path.
 	killSessionErr error
+	// sessionFrames are the WatchSession frames this shim pushes WHILE its
+	// StartSession runs, and sessionStream is the channel the opened watch
+	// reads them from. watchSessionErr refuses the watch outright.
+	sessionFrames   []*shimv1.WatchSessionResponse
+	sessionStream   chan *shimv1.WatchSessionResponse
+	watchSessionErr error
 	// reaped makes the supervised process ALREADY GONE, which is how a test
 	// reaches the split between a session row and a live shim.
 	reaped bool
@@ -77,6 +84,17 @@ func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
 
 func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
 	c.requests = append(c.requests, req)
+	// THE SHIM PUSHES WHILE StartSession RUNS, which is the whole reason the
+	// phases need a watch opened before the call. The fake does the same: the
+	// sends are UNBUFFERED, so this returns only once the relay has taken
+	// every frame, and no test has to wait for one.
+	for _, frame := range c.sessionFrames {
+		select {
+		case c.sessionStream <- frame:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if c.entered != nil {
 		close(c.entered)
 		c.entered = nil
@@ -93,6 +111,39 @@ func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionR
 	}
 	return c.response, nil
 }
+
+// WatchSession opens the fake's session frame stream.
+func (c *fakeClient) WatchSession(ctx context.Context) (shimclient.Stream[*shimv1.WatchSessionResponse], error) {
+	if c.watchSessionErr != nil {
+		return nil, c.watchSessionErr
+	}
+	if c.sessionStream == nil {
+		c.sessionStream = make(chan *shimv1.WatchSessionResponse)
+	}
+	return &fakeSessionStream{frames: c.sessionStream, ctx: ctx, closed: make(chan struct{})}, nil
+}
+
+// fakeSessionStream is one opened WatchSession: it blocks for the next frame
+// and ends on the request's context or on Close, exactly as the real one does.
+type fakeSessionStream struct {
+	frames <-chan *shimv1.WatchSessionResponse
+	ctx    context.Context
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (s *fakeSessionStream) Recv() (*shimv1.WatchSessionResponse, error) {
+	select {
+	case frame := <-s.frames:
+		return frame, nil
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	case <-s.closed:
+		return nil, io.EOF
+	}
+}
+
+func (s *fakeSessionStream) Close() { s.once.Do(func() { close(s.closed) }) }
 
 // StandDown arms the fake's stand-down latch. It answers false for the
 // detached shape, exactly as the real client does.
@@ -2659,5 +2710,156 @@ func TestTheStartBoundDoesNotSpeakForTheCallersOwnCancellation(t *testing.T) {
 		if strings.Contains(r.Message, "did not answer inside its bound") {
 			t.Fatalf("a cancelled caller was reported as a shim that went quiet: %+v", r)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The compaction phases a remediated re-open relays.
+//
+// The gate's `compact` remediation runs INSIDE StartSession, so there is no
+// session watcher to carry its frames: the re-open opens a watch of its own
+// for the duration. Owner's report, 2026-09-14 — the compaction ran with the
+// daemon writing one record at the very end and nothing anywhere while it went.
+// ---------------------------------------------------------------------------
+
+// compactionFrame is one relayed phase, as the shim's stream carries it.
+func compactionFrame(
+	phase conversationv1.SessionCompactionPhase,
+	before, after uint64,
+) *shimv1.WatchSessionResponse {
+	return &shimv1.WatchSessionResponse{
+		Frame: &shimv1.WatchSessionResponse_Update{
+			Update: &conversationv1.SessionUpdate{
+				Update: &conversationv1.SessionUpdate_CompactionProgress{
+					CompactionProgress: &conversationv1.SessionCompactionProgress{
+						Phase: phase, TokensBefore: before, TokensAfter: after,
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestResumeColdRelaysEveryCompactionPhase(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.sessionFrames = []*shimv1.WatchSessionResponse{
+		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 101_600, 0),
+		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZED, 101_600, 12_400),
+		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400),
+	}
+	var seen []conversationv1.SessionCompactionPhase
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID, ColdResume{
+		VendorSessionID: "vendor-1",
+		Remediation:     payRemediation(),
+		OnPhase: func(p *conversationv1.SessionCompactionProgress) {
+			seen = append(seen, p.GetPhase())
+		},
+	}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	if len(seen) != 3 {
+		t.Fatalf("relayed phases = %v, want all three", seen)
+	}
+}
+
+func TestResumeColdRelaysThePhasesInOrder(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.sessionFrames = []*shimv1.WatchSessionResponse{
+		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 101_600, 0),
+		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400),
+	}
+	var seen []conversationv1.SessionCompactionPhase
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID, ColdResume{
+		VendorSessionID: "vendor-1",
+		Remediation:     payRemediation(),
+		OnPhase: func(p *conversationv1.SessionCompactionProgress) {
+			seen = append(seen, p.GetPhase())
+		},
+	}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	want := []conversationv1.SessionCompactionPhase{
+		conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING,
+		conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED,
+	}
+	if len(seen) != len(want) || seen[0] != want[0] || seen[1] != want[1] {
+		t.Fatalf("relayed phases = %v, want %v in order", seen, want)
+	}
+}
+
+func TestResumeColdRelaysTheFiguresTheShimStated(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.sessionFrames = []*shimv1.WatchSessionResponse{
+		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400),
+	}
+	var last *conversationv1.SessionCompactionProgress
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID, ColdResume{
+		VendorSessionID: "vendor-1",
+		Remediation:     payRemediation(),
+		OnPhase:         func(p *conversationv1.SessionCompactionProgress) { last = p },
+	}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	if last.GetTokensBefore() != 101_600 || last.GetTokensAfter() != 12_400 {
+		t.Fatalf("figures = (%d, %d), want the shim's own", last.GetTokensBefore(), last.GetTokensAfter())
+	}
+}
+
+func TestResumeColdStillReopensWhenTheWatchWillNotOpen(t *testing.T) {
+	// Arrange. The narration is additive; refusing to bring a session up
+	// because its commentary was unavailable would be the worse failure.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.watchSessionErr = errors.New("the stream would not open")
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID, ColdResume{
+		VendorSessionID: "vendor-1",
+		Remediation:     payRemediation(),
+		OnPhase:         func(*conversationv1.SessionCompactionProgress) {},
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ResumeCold: %v, want the re-open to stand without its phases", err)
+	}
+}
+
+func TestResumeColdOpensNoWatchWhenNobodyIsListening(t *testing.T) {
+	// Arrange. A nil OnPhase must not cost a stream.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.watchSessionErr = errors.New("WatchSession must not be called")
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ResumeCold: %v", err)
 	}
 }

@@ -443,6 +443,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Client:         fleet.Sender,
 		Revive:         fleet.Start,
 		Watcher:        fleet.Watcher,
+		ColdGate:       fleet.ColdGateDetail,
 		// A submission that arrives under a PARKED merge lease goes to the
 		// orchestrator as guidance. The queue never imports merge, so the
 		// route is a function; the orchestrator does not exist yet, so the

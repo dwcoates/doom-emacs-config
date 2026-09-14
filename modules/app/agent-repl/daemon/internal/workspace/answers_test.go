@@ -3,12 +3,14 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/health"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/topbar"
 )
 
@@ -712,5 +714,156 @@ func TestAnswerColdGateLeavesTheGateStandingWhenTheReopenFailed(t *testing.T) {
 	// Assert.
 	if f.cards.coldGate == nil {
 		t.Fatalf("the gate was retired by an answer whose re-open failed")
+	}
+}
+
+// ---- the cold gate's answer is a footer act, click to outcome -------------
+//
+// Owner's report, 2026-09-14: the gate's `compact and resume` was clicked, the
+// shim compacted, the session came back a minute later, and the strip said
+// nothing for the whole of it. The ruling is that the answer is a footer act
+// from the click to the outcome, so these fix the ORDER as well as the
+// content: the request reaches the strip BEFORE the shim is dialed, every
+// relayed phase is one more line, and the completion line is stated.
+
+// compactAnswer is the gate's `compact and resume`, answered against the menu
+// standingGate serves.
+func compactAnswer() *frontendv1.FeedColdGateResolved {
+	return &frontendv1.FeedColdGateResolved{
+		Choice: &frontendv1.FeedColdGateResolved_Compact{
+			Compact: &frontendv1.FeedColdGateResolvedCompact{
+				Model: &frontendv1.FeedColdGateModel{Model: &conversationv1.AgentModel{Name: "opus"}},
+			},
+		},
+	}
+}
+
+// phase is one relayed compaction phase.
+func phase(
+	p conversationv1.SessionCompactionPhase,
+	before, after uint64,
+) *conversationv1.SessionCompactionProgress {
+	return &conversationv1.SessionCompactionProgress{Phase: p, TokensBefore: before, TokensAfter: after}
+}
+
+func TestAnswerColdGatePublishesTheRequestBeforeTheShimIsDialed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	var atDial []string
+	f.fleet.observeResume = func() { atDial = f.footer.coldAnswerLines() }
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert.
+	if len(atDial) != 1 || !strings.Contains(atDial[0], "compaction requested") {
+		t.Fatalf("footer at the dial = %q, want the compaction request already standing", atDial)
+	}
+}
+
+func TestAnswerColdGatePublishesOneLinePerRelayedPhase(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumePhases = []*conversationv1.SessionCompactionProgress{
+		phase(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 101_600, 0),
+		phase(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZED, 101_600, 12_400),
+		phase(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_RESUMING, 101_600, 12_400),
+		phase(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400),
+	}
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert. The request, then one line per phase.
+	if got := len(f.footer.coldAnswerLines()); got != 5 {
+		t.Fatalf("footer lines = %d (%q), want the request plus one per phase",
+			got, f.footer.coldAnswerLines())
+	}
+}
+
+func TestAnswerColdGatePublishesTheCompletionLine(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumePhases = []*conversationv1.SessionCompactionProgress{
+		phase(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400),
+	}
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert.
+	lines := f.footer.coldAnswerLines()
+	last := lines[len(lines)-1]
+	if last != "compacted and resumed (101.6k → 12.4k)" {
+		t.Fatalf("completion line = %q, want the compacted-and-resumed figures", last)
+	}
+}
+
+func TestAnswerColdGateClearsTheActWhenTheAnswerLands(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert. The last thing the strip is told is that the act is over.
+	if last := f.footer.coldAnswers[len(f.footer.coldAnswers)-1]; last != nil {
+		t.Fatalf("last cold-gate answer = %+v, want the act cleared", last)
+	}
+}
+
+func TestAnswerColdGateClearsTheActWhenTheReopenFails(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumeErr = errors.New("the shim died")
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
+
+	// Assert.
+	asRefusal(t, err, ArmReopenFailed)
+	if last := f.footer.coldAnswers[len(f.footer.coldAnswers)-1]; last != nil {
+		t.Fatalf("last cold-gate answer = %+v, want the act cleared on the failure too", last)
+	}
+}
+
+func TestAnswerColdGateNamesTheRemediationInTheAct(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert.
+	if got := f.footer.coldAnswers[0].Choice; got != footer.ChoiceCompact {
+		t.Fatalf("act choice = %q, want %q", got, footer.ChoiceCompact)
 	}
 }
