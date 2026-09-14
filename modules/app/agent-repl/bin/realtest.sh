@@ -220,7 +220,8 @@ REALTEST_WORLDS='1|TestRealtestStartTheEditor|absent|any
 5|TestRealtestCreateWorkDeleteAWorkspace|absent|any
 6|TestRealtestRegisterAndReopen|absent|any
 7|TestRealtestForkAWorkspace|absent|any
-8|TestRealtestPriorityCloseReopenKill|absent|any'
+8|TestRealtestPriorityCloseReopenKill|absent|any
+9|TestRealtestSendAPrompt|absent|any'
 
 row_field() { printf '%s' "$1" | cut -d'|' -f"$2"; }
 
