@@ -66,7 +66,7 @@ import { stopTicking } from "./ticking.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedTurnEnded } from "./rows/turn-ended.js";
-import { drawFeedSessionSeparation } from "./rows/separation.js";
+import { drawFeedSessionSeparation, separationBoundsFeed } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../breathing.js";
@@ -313,7 +313,40 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     });
     adopt(row, known ? -1 : order.length);
+    truncateAtSeparation(row, id);
     announce();
+  }
+
+  /**
+   * THE FEED BEGINS AT THE NEWEST SEPARATION, on this side too.
+   *
+   * A compaction or a clear arriving on the tail says the rows above it are no
+   * longer the conversation — the daemon stops serving them from this moment,
+   * so a client that kept them on screen would be the only place they still
+   * existed, and after a second compaction the reader would be looking at two
+   * dividers and a superseded summary.
+   *
+   * The divider itself STAYS, and for a compaction so does the summary it
+   * carries: that summary is the whole of what survived, and it lives on this
+   * row rather than above it.
+   */
+  function truncateAtSeparation(row: FeedRow, id: string): void {
+    if (!separationBoundsFeed(row)) return;
+    const at = order.indexOf(id);
+    if (at <= 0) return;
+    const dropped = order.splice(0, at);
+    for (const gone of dropped) {
+      const state = states.get(gone);
+      if (state === undefined) continue;
+      state.bubble?.dispose();
+      stopTicking(state.element);
+      state.element.remove();
+      states.delete(gone);
+    }
+    log.info(`dropped ${dropped.length.toString()} rows above the newest separation`, {
+      operation: "feed.truncated-at-separation",
+      context: { feed: feedName(), row: id, dropped: dropped.length },
+    });
   }
 
   /**
