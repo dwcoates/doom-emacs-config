@@ -226,6 +226,64 @@ func TestAResponseWithNoObservedUsageDrawsNoStamp(t *testing.T) {
 	}
 }
 
+func TestTheUsageStampCarriesTheSettledInstant(t *testing.T) {
+	// Arrange: usage stated when the block opens.
+	h := newHarness(t)
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), noAddress())
+
+	// Act: the terminal frame, at the harness clock's instant.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
+		}, nil), noAddress())
+
+	// Assert: the settled bubble's stamp counts back from when it settled.
+	if got := h.response().GetUsage().GetAtMs(); got != h.nowMs {
+		t.Fatalf("usage at_ms = %d, want the settle instant %d", got, h.nowMs)
+	}
+}
+
+func TestTheUsageStampCarriesNoInstantWhileArriving(t *testing.T) {
+	// Arrange, Act: usage stated when the block opens, still arriving.
+	h := newHarness(t)
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), noAddress())
+
+	// Assert: there is no settled instant yet, so the corner carries a zero
+	// and the client reveals no timestamp.
+	if got := h.response().GetUsage().GetAtMs(); got != 0 {
+		t.Fatalf("usage at_ms = %d, want 0 while arriving", got)
+	}
+}
+
+func TestTheSettledInstantIsStampedOnceAcrossReDeliveries(t *testing.T) {
+	// Arrange: the block opens and settles at the first instant.
+	h := newHarness(t)
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
+		}, nil), noAddress())
+	first := h.response().GetUsage().GetAtMs()
+
+	// Act: the other plane re-delivers the same settle, later on the clock.
+	h.nowMs += 5_000
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
+		}, nil), noAddress())
+
+	// Assert: the first settle instant stands, never the replay time.
+	if got := h.response().GetUsage().GetAtMs(); got != first {
+		t.Fatalf("usage at_ms = %d, want the first settle instant %d", got, first)
+	}
+}
+
 func TestASynthesizedNoticeIsDrawnAsANoticeAndNotAsTheAgentsAnswer(t *testing.T) {
 	// Arrange: the vendor's own outage wording, which arrives in the same shape
 	// as an answer.

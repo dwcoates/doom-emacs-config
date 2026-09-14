@@ -122,6 +122,12 @@ type proseState struct {
 	// settled records that the terminal frame restated the whole, so a late
 	// fragment can never re-open a closed bubble.
 	settled bool
+	// settledAtMs is the instant the fold settled, epoch ms, stamped ONCE from
+	// the resolver's clock at the first terminal frame. The cost corner carries
+	// it so the client can reveal a relative timestamp counted back from it;
+	// stamping once keeps a re-delivery of the terminal (the file plane after
+	// the stream plane) serving the same instant rather than the replay time.
+	settledAtMs int64
 }
 
 // prose resolves a response's fold, creating it on first sight.
