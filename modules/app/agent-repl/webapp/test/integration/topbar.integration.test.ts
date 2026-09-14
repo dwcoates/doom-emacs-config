@@ -1133,22 +1133,21 @@ describe("the detached-unmodeled detail", () => {
 });
 
 /**
- * THE STRIP'S CENTERING, ON THE WHOLE MOUNTED PAGE.
+ * THE STRIP'S SPACING, ON THE WHOLE MOUNTED PAGE.
  *
- * The owner's report, 2026-09-13, verbatim: "the topbar format is wrong. it's
- * centered on the center section plus the chips. like this:
- * `<login>      <center><chips>            ` but the CENTER and ONLY the
- * center should be in the center. like this:
- * `<login>          <center>         <chips>`".
+ * The owner's ruling, 2026-09-14, verbatim: "the whitespace/padding on the
+ * left and right of the center text should be equal, which is subtly
+ * different than it being centered. Currently it is centered in the topbar's
+ * full span, but it'd be better if it was centered in the space between the
+ * login section (left) and the chips section (right)." It supersedes the
+ * "true center" rule of 2026-09-13 and the measured cap that served it.
  *
- * The cause was the row's own template. `1fr` is `minmax(auto, 1fr)`, whose
- * floor is that track's min-content, so a right group wider than the free
- * share floored ITS track while the left one kept the share: unequal flanks,
- * and the title pushed left by half the difference. jsdom lays nothing out, so
- * what is assertable here is the rule the cascade hands the mounted row —
- * which is where the defect lived.
+ * The flanks are `auto` — each sized to its own group — and the middle track
+ * is `minmax(0, 1fr)`, so the title takes exactly what is between them and
+ * `text-align: center` centers the text in that. jsdom lays nothing out, so
+ * what is assertable here is the rule the cascade hands the mounted row.
  */
-describe("the strip's centering", () => {
+describe("the strip's spacing", () => {
   /** The row as the mounted page has it, with the real stylesheet installed. */
   async function mountedRow(): Promise<Element> {
     // A WIDE RIGHT GROUP AND A NARROW LEFT ONE: the asymmetry the owner saw.
@@ -1189,21 +1188,21 @@ describe("the strip's centering", () => {
     return parts;
   }
 
-  it("gives the row's two flank tracks the same free size", async () => {
+  it("sizes each flank track to its own group", async () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       const row = await mountedRow();
       // Act
       const declared = tracks(cascadedValue(row, "grid-template-columns"));
-      // Assert: equal AND floorless — a floor is what made them differ.
-      expect([declared[0], declared[2]]).toEqual(["minmax(0, 1fr)", "minmax(0, 1fr)"]);
+      // Assert: `auto`, so neither flank spreads past what it holds.
+      expect([declared[0], declared[2]]).toEqual(["auto", "auto"]);
     } finally {
       teardown();
     }
   });
 
-  it("clamps the middle track so the title cannot reach either group", async () => {
+  it("gives the title the space between the two groups and no more", async () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -1211,7 +1210,21 @@ describe("the strip's centering", () => {
       // Act
       const declared = tracks(cascadedValue(row, "grid-template-columns"));
       // Assert
-      expect(declared[1]).toBe("fit-content(50%)");
+      expect(declared[1]).toBe("minmax(0, 1fr)");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("centers the title's text inside that middle track", async () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const row = await mountedRow();
+      const title = row.querySelector(".topbar-title");
+      if (!title) throw new Error("the topbar drew no title");
+      // Act / Assert: equal clear space either side is what this buys.
+      expect(cascadedValue(title, "text-align")).toBe("center");
     } finally {
       teardown();
     }

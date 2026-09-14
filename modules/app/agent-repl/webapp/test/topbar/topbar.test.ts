@@ -414,113 +414,116 @@ describe("the strip's layout", () => {
  * THE STRIP'S GEOMETRY, WORKED FROM THE TRACKS THE STYLESHEET DECLARES.
  *
  * jsdom lays out nothing, so the boxes are stubbed and placed here by the rule
- * `grid-template-columns: minmax(0, 1fr) fit-content(50%) minmax(0, 1fr)`
- * states: a content-sized middle track capped at half the row's content box,
- * and two free tracks with NO content floor of their own splitting whatever is
- * left, evenly. The zero floor is the correction the owner's report forced — a
- * bare `1fr` is `minmax(auto, 1fr)`, and the right group's own min-content
- * floored the right track above the left one's share, which is exactly how the
- * title came to sit against the chips. The template itself is asserted
- * alongside, so a change to it fails these tests rather than quietly leaving
- * them measuring a layout the app no longer has.
+ * `grid-template-columns: auto minmax(0, 1fr) auto` states: each flank sized
+ * to the group it holds, and the middle track taking everything between them,
+ * floored at zero so it compresses instead of pushing a flank off the strip.
+ * The title's TEXT is then centered inside that track (`text-align: center`),
+ * which is the owner's rule of 2026-09-14: equal clear space either side of
+ * the visible text, not a shared midpoint with the strip. The template itself
+ * is asserted alongside, so a change to it fails these tests rather than
+ * quietly leaving them measuring a layout the app no longer has.
  */
 interface StubWidths {
   readonly row: number;
   readonly padding: number;
   readonly gap: number;
-  /** What each group WANTS; below its track it compresses (`min-width: 0`). */
+  /** What each group WANTS; it gets exactly that while the strip has room. */
   readonly left: number;
   readonly right: number;
-  /** What the title wants; the cap and the free space are what it gets. */
+  /** What the title wants; the space between the groups is what it gets. */
   readonly title: number;
 }
 
 interface Placed {
   readonly left: { start: number; width: number };
+  /** The middle TRACK: the space between the two groups. */
   readonly title: { start: number; width: number };
+  /** The visible TEXT, centered inside that track. */
+  readonly text: { start: number; width: number };
   readonly right: { start: number; width: number };
 }
 
 function placeTracks(w: StubWidths): Placed {
-  // `fit-content(50%)` measures the percentage against the CONTENT BOX; the
-  // gaps come off the space the tracks then divide.
   const content = w.row - 2 * w.padding;
   const inner = content - 2 * w.gap;
-  const title = Math.max(0, Math.min(w.title, content / 2, inner));
-  // THE FREE TRACKS HAVE NO FLOOR: each is exactly half of what is left, and
-  // a group wider than its track compresses into it rather than spilling.
-  const share = Math.max(0, (inner - title) / 2);
-  const titleStart = w.padding + share + w.gap;
+  // THE FLANKS ARE `auto`: each takes its own content, compressing only when
+  // the two of them together outgrow the strip.
+  const flankRoom = Math.max(0, inner);
+  const scale = w.left + w.right > flankRoom ? flankRoom / (w.left + w.right) : 1;
+  const left = w.left * scale;
+  const right = w.right * scale;
+  // THE MIDDLE TRACK IS WHAT IS LEFT, floored at zero.
+  const track = Math.max(0, inner - left - right);
+  const trackStart = w.padding + left + w.gap;
+  // `text-align: center` inside it; a title wider than the track fills it and
+  // ellipsizes.
+  const text = Math.min(w.title, track);
   return {
-    left: { start: w.padding, width: share },
-    title: { start: titleStart, width: title },
-    right: { start: titleStart + title + w.gap, width: share },
+    left: { start: w.padding, width: left },
+    title: { start: trackStart, width: track },
+    text: { start: trackStart + (track - text) / 2, width: text },
+    right: { start: trackStart + track + w.gap, width: right },
   };
 }
 
 describe("the strip's geometry", () => {
-  it("lays the row out in three tracks whose outer two are free and floorless", () => {
-    expect(declaration(".topbar-row", "grid-template-columns")).toBe(
-      "minmax(0, 1fr) fit-content(50%) minmax(0, 1fr)",
-    );
+  it("lays the row out with content-sized flanks and a floorless middle track", () => {
+    expect(declaration(".topbar-row", "grid-template-columns")).toBe("auto minmax(0, 1fr) auto");
   });
 
-  // RULING 2. The title is centered on ITS OWN CONTENT against the whole
-  // strip: a wide right group and a narrow left one move it not at all.
-  it("centers the title on the whole strip with unequal left and right groups", () => {
+  // THE RULING. The clear space to the left of the visible text and the clear
+  // space to its right are the same measure, whatever the groups hold.
+  it("leaves equal clear space either side of the title with unequal groups", () => {
     // ARRANGE
     const w: StubWidths = { row: 1000, padding: 8, gap: 8, left: 120, right: 340, title: 60 };
     // ACT
     const placed = placeTracks(w);
     // ASSERT
-    expect(placed.title.start + placed.title.width / 2).toBe(w.row / 2);
+    expect(placed.text.start - placed.title.start).toBe(
+      placed.title.start + placed.title.width - (placed.text.start + placed.text.width),
+    );
   });
 
-  // THE DEFECT ITSELF. A right group wider than the free share used to floor
-  // its own track and leave the left one on the share; both tracks are the
-  // same size now, whatever either group holds.
-  it("keeps the flank tracks equal when the right group outgrows its share", () => {
+  // ...and that is SUBTLY DIFFERENT from centering on the strip: with a wider
+  // right group the text sits left of the strip's midpoint, on purpose.
+  it("centers the title between the groups rather than on the whole strip", () => {
+    // ARRANGE
+    const w: StubWidths = { row: 1000, padding: 8, gap: 8, left: 120, right: 340, title: 60 };
+    // ACT
+    const placed = placeTracks(w);
+    // ASSERT
+    expect(placed.text.start + placed.text.width / 2).toBeLessThan(w.row / 2);
+  });
+
+  // Each flank gets exactly the group it holds; neither spreads.
+  it("sizes each flank track to its own group", () => {
     // ARRANGE
     const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 90, right: 320, title: 240 };
     // ACT
     const placed = placeTracks(w);
     // ASSERT
-    expect(placed.left.width).toBe(placed.right.width);
+    expect([placed.left.width, placed.right.width]).toEqual([w.left, w.right]);
   });
 
-  // ...and the title stays centered in that same strip, which is what the
-  // equal tracks were for.
-  it("centers the title even when the right group outgrows its share", () => {
-    // ARRANGE
-    const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 90, right: 320, title: 240 };
-    // ACT
-    const placed = placeTracks(w);
-    // ASSERT
-    expect(placed.title.start + placed.title.width / 2).toBe(w.row / 2);
-  });
-
-  // THE CLAMP. The middle track is sized before the free ones, so an
-  // unbounded title would take the strip; half the content box is its ceiling
-  // and the other half is the flanks', split evenly.
-  it("clips a title too wide for the strip at half the row's content box", () => {
+  // The title can never reach a group: it gets what they left and no more.
+  it("gives an over-wide title exactly the space between the two groups", () => {
     // ARRANGE
     const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 200, right: 300, title: 900 };
     // ACT
     const placed = placeTracks(w);
     // ASSERT
-    expect(placed.title.width).toBe((w.row - 2 * w.padding) / 2);
+    expect(placed.text.width).toBe(w.row - 2 * w.padding - 2 * w.gap - w.left - w.right);
   });
 
-  it("leaves a quarter of the strip to each flank when the title is too wide", () => {
+  // ...and an over-wide title still clips symmetrically, because the box it
+  // clips in IS the space between the groups.
+  it("clips an over-wide title symmetrically inside the middle track", () => {
     // ARRANGE
     const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 200, right: 300, title: 900 };
     // ACT
     const placed = placeTracks(w);
     // ASSERT
-    expect([placed.left.width, placed.right.width]).toEqual([
-      (w.row - 2 * w.padding) / 2 / 2 - w.gap,
-      (w.row - 2 * w.padding) / 2 / 2 - w.gap,
-    ]);
+    expect(placed.text.start).toBe(placed.title.start);
   });
 
   it("ellipsis-clips the title rather than letting it wrap or spill", () => {

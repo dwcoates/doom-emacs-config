@@ -5326,65 +5326,46 @@ body.draining #composer-input::placeholder {
 
 /* ---- topbar (src/topbar) ------------------------------------------------ */
 
-/* THE STRIP. Left tight, center CONTENT-CENTERED, right tight — the flank
-   groups never spread, and all free width is split evenly on either side of
-   the title. `position: relative` makes the host the positioning context for
-   the reveal layer, which is why the reveals can be placed in the host's own
-   coordinates. */
+/* THE STRIP. Left tight, right tight, and the title in the space between them
+   with equal clear room either side of the text. `position: relative` makes
+   the host the positioning context for the reveal layer, which is why the
+   reveals can be placed in the host's own coordinates. */
 [data-component="topbar"] {
   position: relative;
 }
 
-/* THREE TRACKS, AND THE OUTER TWO ARE THE SAME SIZE, ALWAYS (owner ruling 2,
-   2026-09-13, corrected 2026-09-13 by the owner's report that the strip read
-   `<login>      <center><chips>` instead of `<login>    <center>    <chips>`).
-   The title is centered on ITS OWN CONTENT against the whole strip — the
-   middle character of a three-letter title sits at the strip's exact
-   midpoint — rather than on whatever the left and right groups leave over.
+/* THREE TRACKS: THE FLANKS TAKE THEIR CONTENT, THE TITLE TAKES WHAT IS
+   BETWEEN THEM (owner ruling, 2026-09-14, superseding the "true center" rule
+   of 2026-09-13). Verbatim: "the whitespace/padding on the left and right of
+   the center text should be equal, which is subtly different than it being
+   centered. Currently it is centered in the topbar's full span, but it'd be
+   better if it was centered in the space between the login section (left) and
+   the chips section (right)."
 
-   `minmax(0, 1fr)` twice is the entire mechanism, and the ZERO FLOOR is the
-   correction. A bare `1fr` is `minmax(auto, 1fr)`, whose floor is that track's
-   own min-content: whenever the free share fell below what the right group
-   (model, mode, fast mode, context, warnings) wanted, the right track was
-   floored at its content while the left one kept the share, the two flanks
-   stopped being equal, and the title was pushed left by exactly half the
-   difference — the strip the owner reported. Flooring both tracks at 0 makes
-   the two free shares equal by construction, whatever either group holds, so
-   the title's midpoint is the row's midpoint at every width.
+   So the rule is EQUAL CLEAR SPACE, not a shared midpoint. `auto` on each
+   flank sizes it to the group it holds; `minmax(0, 1fr)` in the middle hands
+   the title everything left over, and `text-align: center` on `.topbar-title`
+   centers the text INSIDE that middle track. The clear space either side of
+   the text is then the same measure by construction — half the track's slack
+   each — whatever the two groups measure, and the title's midpoint is the
+   midpoint of the space between the flanks rather than of the strip.
 
-   `fit-content(50%)` IS THE CLAMP, and it is why the title cannot reach a
-   flank. The middle track is content-sized, and a content-sized track is
-   sized BEFORE the free tracks get their share, so an unbounded title would
-   eat the strip and leave the two groups nothing — the title, not the groups,
-   is the greedy one here. Capping the middle at half the row's content box
-   leaves a quarter of it to each flank as a floor, and the title
-   ellipsis-clips at that cap instead of growing into either group. Losing the
-   title's tail is the concession; a collision never is.
+   The zero floor on the middle track is what makes it honest at every width:
+   below its content the title compresses and ellipsizes symmetrically instead
+   of pushing a flank off the strip. No clamp is needed on it either — a
+   `1fr` track takes only the space the two `auto` flanks left, so the title
+   can never grow into a group, and no measured cap is needed on top of the
+   grid because the grid now knows exactly what the groups measure.
 
-   The groups take `min-width: 0` for the same reason the title does: below
-   their quarter they compress and each cell clips by its own rule (the
-   account chip already ellipsizes) rather than spilling over the title.
+   The groups take `min-width: 0` so that in the last resort — a strip too
+   narrow for both groups — each cell clips by its own rule (the account chip
+   already ellipsizes) rather than spilling over the title.
 
    Grid rather than an absolutely centered title layer: absolute positioning
    cannot know either group's width, so it can only guess a max-width and
-   still overlap an asymmetric strip, where the tracks make both the centering
+   still overlap an asymmetric strip, where the tracks make both the spacing
    and the non-overlap facts of the layout. The reveal layer is unaffected
-   either way — it is the row's SIBLING inside the host, not a descendant.
-
-   THIS RULE CENTERS THE TRACK; IT DOES NOT CENTER THE TEXT, and the second
-   half of the job belongs to `src/topbar/title-cap.ts`. The tracks are equal
-   whatever the two groups hold, but the GROUPS inside them are not: measured
-   live at row width 1090px, the tracks came out 292.5 / 472.9 / 292.5 while
-   the left group was only 160px of its track and the right group filled its
-   own. A long title then fills its whole middle track, so its right edge sits
-   one gap from the chips with clear room still on the left — a centered track
-   reading as an off-center title. After every draw, `capTopbarTitle` measures
-   the two groups and sets an inline `max-width` on `.topbar-title` of
-   `rowWidth − 2 · edgePadding − 2 · max(leftWidth, rightWidth) − 2 · gap`,
-   the widest box that leaves EXACTLY the same clear space on both sides. Every
-   term the row spends is in it: this rule's own `padding` inset at each end,
-   then a flank group, then a `gap`, before the title's box begins. Everything below stays the
-   layout of record, so a page with no JS running still gets this strip. */
+   either way — it is the row's SIBLING inside the host, not a descendant. */
 /* The strip wrapper `mountTopbar` puts inside the header, and the header's
    ONE in-flow child. It is a flex item, so it is told to take the header's
    whole inline size rather than shrink-wrap the row it holds. */
@@ -5397,7 +5378,7 @@ body.draining #composer-input::placeholder {
    grid sizes to its content and everything packs to the left. */
 .topbar-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) fit-content(50%) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   width: 100%;
   min-width: 0;
   align-items: center;
@@ -5435,13 +5416,15 @@ body.draining #composer-input::placeholder {
   justify-self: end;
   min-width: 0;
 }
-/* THE MIDDLE TRACK. Sized to its content up to the template's half-row cap —
-   and, once the strip is laid out, to the measured cap `title-cap.ts` sets as
-   an inline `max-width` so the visible text clears both flanks equally. So
-   this rule carries only what happens when the content does not fit: ellipsis
-   rather than wrapping, because the strip is one line high by definition and
-   the whole title is in the tooltip. `text-align: center` is what keeps the
-   text centered INSIDE the capped box. */
+/* THE MIDDLE TRACK: THE SPACE BETWEEN THE FLANKS, AND THE TEXT CENTERED IN IT.
+   The track is whatever the two `auto` flanks left over, so `text-align:
+   center` puts the same clear space on the left and the right of the visible
+   text — the owner's rule of 2026-09-14. The rest of this rule is what happens
+   when the text does not fit that space: ellipsis rather than wrapping,
+   because the strip is one line high by definition and the whole title is in
+   the tooltip, and the clipping is symmetric because the box it clips in is
+   itself the space between the groups. `min-width: 0` is what lets the track
+   shrink below the title's content instead of pushing a flank off the strip. */
 .topbar-title {
   min-width: 0;
   overflow: hidden;
