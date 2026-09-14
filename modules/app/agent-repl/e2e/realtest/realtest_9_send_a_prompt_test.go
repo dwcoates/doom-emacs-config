@@ -520,7 +520,7 @@ func TestRealtestSendAPrompt(t *testing.T) {
 		t.Logf("the composer holds the typed prompt verbatim: %q", typed)
 	}
 	if strings.TrimSpace(typed) == "" {
-		t.Fatalf("the composer is empty after the prompt was typed, so `RET` would submit nothing "+
+		t.Fatalf("the composer is empty after the prompt was typed, so `RET` would submit nothing " +
 			"(`elisp.input.send-empty`) and every assertion below would be about a turn that never happened")
 	}
 
@@ -1319,12 +1319,12 @@ func rt9ReportSubmitDoor(t *testing.T, sources []Source, snap Snapshot, preserve
 		t.Logf("%s", note)
 		return
 	}
-	note := fmt.Sprintf("NO `daemon.promptqueue.submit` RECORD, AND THAT IS EXPECTED TODAY: on the ordinary "+
-		"path the queue writes only a DEBUG record at its own door "+
-		"(daemon/internal/promptqueue/submit.go, \"no lease stands; the submission takes the ordinary "+
-		"path\") and the deployed daemon runs at the contract's INFO default. The prompt reaching the daemon "+
-		"is asserted on the daemon's own durable `turns` row and on `daemon.promptqueue.deliver` instead. "+
-		"The missing INFO record at the submit door is a LOGGING DEFECT recorded in "+
+	note := fmt.Sprintf("NO `daemon.promptqueue.submit` RECORD, AND THAT IS EXPECTED TODAY: on the ordinary " +
+		"path the queue writes only a DEBUG record at its own door " +
+		"(daemon/internal/promptqueue/submit.go, \"no lease stands; the submission takes the ordinary " +
+		"path\") and the deployed daemon runs at the contract's INFO default. The prompt reaching the daemon " +
+		"is asserted on the daemon's own durable `turns` row and on `daemon.promptqueue.deliver` instead. " +
+		"The missing INFO record at the submit door is a LOGGING DEFECT recorded in " +
 		"docs/REALTEST-JUDGEMENT-CALLS.md")
 	manifest.Notes = append(manifest.Notes, note)
 	t.Logf("%s", note)
