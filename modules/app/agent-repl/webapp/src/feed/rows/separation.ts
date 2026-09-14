@@ -24,6 +24,7 @@ import { renderMarkdown } from "../../markdown.js";
 import { renderEditorLink } from "../../link.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
+  FeedRow,
   FeedContextCutCleared,
   FeedContextCutColdRead,
   FeedContextCutCompacted,
@@ -51,6 +52,27 @@ const ACCENTS = {
 
 /** Every separation arm this build draws, for the suite to hold to the schema. */
 export const SEPARATION_ARMS: readonly string[] = Object.keys(ACCENTS);
+
+/**
+ * Whether this row is a separation that CUT CONTEXT — and so is where the feed
+ * now begins.
+ *
+ * A compaction or a clear is the session saying that what came before it is no
+ * longer the conversation: after a compaction the surviving account is the
+ * summary THIS row carries, and after a clear there is no surviving account at
+ * all. The daemon stops delivering the rows above such a divider, and a client
+ * that already has them on screen drops them, so the two agree on where the
+ * feed starts without the daemon having to retire anything.
+ *
+ * `compactionFailed` cut NOTHING — that is the whole of what it says — and the
+ * worktree arms change no context, so neither may hide the conversation behind
+ * it.
+ */
+export function separationBoundsFeed(row: FeedRow): boolean {
+  if (row.row.case !== "separation") return false;
+  const kind = row.row.value.kind.case;
+  return kind === "cleared" || kind === "compacted";
+}
 
 /**
  * The divider.
