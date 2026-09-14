@@ -832,6 +832,17 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     const bubble = state.element.querySelector<HTMLElement>(".bubble.user");
     if (bubble === null) return;
     const turn = state.row.turn;
+    // REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave was reported as
+    // having "stopped", the suspected cause a premature settle clearing the
+    // mark before the answer landed. THIS is the only line that clears it, and
+    // it fires only for a turn already in `settled` (a turn_ended or a
+    // final-answer row) — so an early stop would surface here as this branch
+    // taken while the turn is still open. The investigation found the logic and
+    // CSS intact and unchanged since 668aad539 (the "stop" reproduced only under
+    // an environment-level render suspension / prefers-reduced-motion, not here),
+    // and locked the in-flight boundary in prompt-wave.integration.test.ts. If
+    // the glimmer stops early again, watch this clear and what populates
+    // `settledTurns`. Not a lock — the settlement rule may still change.
     if (turn !== undefined && settled.has(turn.value)) {
       bubble.removeAttribute(PROMPT_WAVE_ATTRIBUTE);
       return;
