@@ -1401,6 +1401,33 @@ describe("keep-alives", () => {
     );
   });
 
+  test("the rewind target is an ASSISTANT record of the transcript", async () => {
+    // THE REGRESSION OF 2026-09-14. The anchor used to be whatever message last
+    // carried a uuid, and `system:init` and `result` both carry one — so after
+    // a resume whose only non-keep-alive messages were the opening's, the shim
+    // handed the vendor a uuid that names no record. The vendor exited 1 with
+    // `No message found with message.uuid of: 19e047a0-…` and the prompt was
+    // lost. The target must be a record the transcript actually holds, and an
+    // assistant one, which is the only kind `resumeSessionAt` declares.
+    const shim = await spawnBeating();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" }));
+    await keepaliveTurnClosed(shim);
+    const atVendor = shim.log.record(
+      (record) => record.context.vendor_resume_session_at !== undefined,
+    );
+
+    turnStarted(
+      await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "and again" })),
+    );
+    const target = (await atVendor).context.vendor_resume_session_at;
+
+    const named = readTranscript(shim.dirs, started.vendorSessionId).find(
+      (record) => record.uuid === target,
+    );
+    expect(named?.type).toBe("assistant");
+  });
+
   test("a real prompt's transcript record carries NO keep-alive marker", async () => {
     // The half of the yield obligation that IS observable: the shim's own
     // prompts are marked, and a daemon-submitted prompt must never be.
