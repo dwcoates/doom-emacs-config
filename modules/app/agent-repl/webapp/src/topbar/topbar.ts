@@ -19,8 +19,9 @@
  *   track and ends one gap from the chips while the narrower flank leaves
  *   clear room — a centered track reading as an off-center title. After every
  *   draw `capTopbarTitle` (title-cap.ts) caps the title's width from the
- *   measured flanks, so the visible text keeps the same clear space on both
- *   sides and never touches either one.
+ *   measured flanks and the row's own insets — `rowWidth − 2 · edgePadding
+ *   − 2 · max(leftWidth, rightWidth) − 2 · gap` — so the visible text keeps
+ *   exactly the same clear space on both sides and never touches either one.
  *
  * The stylesheet stays the layout of record: the cap is an inline `max-width`
  * and nothing else, so a page with no JS running still gets today's strip.

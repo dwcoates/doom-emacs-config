@@ -13,10 +13,17 @@
  *
  * So after every draw the title's width is capped from the MEASURED flanks:
  *
- *   titleMax = rowWidth − 2 · max(leftWidth, rightWidth) − 2 · gap
+ *   titleMax = rowWidth − 2 · edgePadding − 2 · max(leftWidth, rightWidth)
+ *              − 2 · gap
  *
  * which is the widest box that keeps the same clear space on both sides of the
- * text whichever flank is the wider one. It lands as an inline `max-width` on
+ * text whichever flank is the wider one. EVERY TERM THE ROW SPENDS IS IN IT:
+ * the row's border box carries the strip's own edge inset at each end, then a
+ * flank group, then a track gap, before the title's box begins — so a cap that
+ * left the padding out would be one inset too wide on each side and the
+ * symmetry would be approximate rather than exact. The inset and the gap are
+ * the same token by declaration (`padding: 0 var(--topbar-cell-gap)`), and
+ * both are read from the row rather than assumed equal here. It lands as an inline `max-width` on
  * the title element; `text-align: center`, the ellipsis and the tooltip are
  * the stylesheet's and stay exactly as they were, so a page with no JS running
  * still gets today's layout rather than a broken one.
@@ -42,6 +49,8 @@ export interface TitleMetrics {
   width(el: Element): number;
   /** The row's computed `--topbar-cell-gap`, in px. */
   gap(row: HTMLElement): number;
+  /** The row's computed edge inset — its `padding-left` — in px. */
+  edgePadding(row: HTMLElement): number;
 }
 
 /** The real measurement: the browser's own boxes. */
@@ -57,6 +66,11 @@ export const LIVE_METRICS: TitleMetrics = {
     if (Number.isFinite(resolved)) return resolved;
     return Number.parseFloat(style.getPropertyValue("--topbar-cell-gap"));
   },
+  edgePadding: (row) => {
+    // The row is symmetric by declaration, so one side names the inset.
+    const resolved = Number.parseFloat(getComputedStyle(row).paddingLeft);
+    return Number.isFinite(resolved) ? resolved : 0;
+  },
 };
 
 /**
@@ -69,10 +83,12 @@ export function titleCapPx(
   leftWidth: number,
   rightWidth: number,
   gap: number,
+  edgePadding: number,
 ): number | null {
   if (!(rowWidth > 0)) return null;
   const flank = Math.max(leftWidth, rightWidth);
-  return Math.max(TITLE_CAP_FLOOR_PX, rowWidth - 2 * flank - 2 * gap);
+  const room = rowWidth - 2 * edgePadding - 2 * flank - 2 * gap;
+  return Math.max(TITLE_CAP_FLOOR_PX, room);
 }
 
 /**
@@ -92,7 +108,13 @@ export function capTopbarTitle(row: HTMLElement, metrics: TitleMetrics = LIVE_ME
   }
 
   const rowWidth = metrics.width(row);
-  const cap = titleCapPx(rowWidth, metrics.width(left), metrics.width(right), metrics.gap(row));
+  const cap = titleCapPx(
+    rowWidth,
+    metrics.width(left),
+    metrics.width(right),
+    metrics.gap(row),
+    metrics.edgePadding(row),
+  );
   if (cap === null) {
     // NOT A FAILURE AND NOT A WARNING. A workspace whose panel is not shown
     // draws its topbar all the same, and every box in it is zero until the
