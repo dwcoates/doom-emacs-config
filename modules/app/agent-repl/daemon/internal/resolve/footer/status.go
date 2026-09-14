@@ -77,7 +77,11 @@ func (r *resolver) status(s *wsState, log dlog.Logger) *frontendv1.FooterStatus 
 // degradation.
 func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if !s.linkSeen {
-		return nil
+		// NO LINK STATE YET IS NOT "SERVING". A standing fault that says the
+		// session cannot be reached is evidence in its own right — a bring-up
+		// that never produced a link edge at all is exactly the case row N1 1
+		// of the footer topology audit was about.
+		return r.disconnectedByFault(s, log)
 	}
 	arm := &frontendv1.FooterStatusDisconnected{}
 	switch {
@@ -125,8 +129,48 @@ func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterS
 			Degraded: &frontendv1.FooterSubStatusDisconnectedDegraded{}}
 	default:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
+		// THE LINK SERVES. Only a standing fault can still claim the status,
+		// and only one that says the session cannot be reached.
+		return r.disconnectedByFault(s, log)
+	}
+	arm.Activity = r.disconnectedActivity(s, log)
+	return &frontendv1.FooterStatus{
+		Status: &frontendv1.FooterStatus_Disconnected{Disconnected: arm}}
+}
+
+// disconnectedByFault resolves the disconnected step a STANDING FAULT claims,
+// where the link state itself claimed none. The bucket is the health package's
+// verdict (THE FAULT PARTITION, internal/health/footer.go), taken as given: no
+// mapping is derived here.
+//
+// A fault whose bucket is not one of the three disconnected steps claims
+// nothing: the four non-escalating kinds leave the status exactly as it stands
+// and take the activity cell alone, and a `blocked` fault is the blocked
+// arm's.
+func (r *resolver) disconnectedByFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	fault := r.standingFault(s)
+	if fault == nil || fault.Status != "disconnected" {
 		return nil
 	}
+	arm := &frontendv1.FooterStatusDisconnected{}
+	switch fault.SubStatus {
+	case "start_failed":
+		arm.Substatus = &frontendv1.FooterStatusDisconnected_StartFailed{
+			StartFailed: &frontendv1.FooterSubStatusDisconnectedStartFailed{}}
+	case "dead":
+		arm.Substatus = &frontendv1.FooterStatusDisconnected_Dead{
+			Dead: &frontendv1.FooterSubStatusDisconnectedDead{}}
+	case "severed":
+		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
+			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
+	default:
+		log.Warn("daemon.footer.fault_bucket_unknown",
+			"a standing fault claims the disconnected status with a step this resolver cannot draw",
+			dlog.Context{"kind": fault.Kind, "substatus": fault.SubStatus})
+		return nil
+	}
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch",
+		dlog.Context{"function": "status", "branch": "disconnected by standing fault", "kind": fault.Kind})
 	arm.Activity = r.disconnectedActivity(s, log)
 	return &frontendv1.FooterStatus{
 		Status: &frontendv1.FooterStatus_Disconnected{Disconnected: arm}}
@@ -196,7 +240,10 @@ func (r *resolver) loading(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 // blocked resolves the block, or nil when nothing blocks the session.
 func (r *resolver) blocked(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if s.blocked == nil {
-		return nil
+		// A DAEMON THAT CANNOT SERVE THIS SESSION BLOCKS IT. The vendor-side
+		// blocks above are the session's own; this one is the daemon's, and
+		// the shim may be perfectly healthy while it stands.
+		return r.blockedByFault(s, log)
 	}
 	arm := &frontendv1.FooterStatusBlocked{Activity: r.blockedActivity(s)}
 	switch s.blocked.kind {
@@ -222,6 +269,28 @@ func (r *resolver) blocked(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 			QueryDied: &frontendv1.FooterSubStatusBlockedQueryDied{}}
 	}
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Blocked{Blocked: arm}}
+}
+
+// blockedByFault resolves `blocked · daemon_impaired` when a standing fault
+// says the daemon owes this session a service it cannot give — its prompts
+// directory, its state client, its durable log sink, its own redeploy. The
+// bucket is the health package's verdict, taken as given.
+func (r *resolver) blockedByFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	fault := r.standingFault(s)
+	if fault == nil || fault.Status != "blocked" {
+		return nil
+	}
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch",
+		dlog.Context{"function": "status", "branch": "blocked by standing fault", "kind": fault.Kind})
+	return &frontendv1.FooterStatus{
+		Status: &frontendv1.FooterStatus_Blocked{
+			Blocked: &frontendv1.FooterStatusBlocked{
+				Substatus: &frontendv1.FooterStatusBlocked_DaemonImpaired{
+					DaemonImpaired: &frontendv1.FooterSubStatusBlockedDaemonImpaired{}},
+				Activity: r.blockedActivity(s),
+			},
+		},
+	}
 }
 
 // merging projects the merge orchestrator's facts onto the merging phase.

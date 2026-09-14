@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/health"
 	"claude-repld/internal/resolve/topbar"
 )
 
@@ -636,4 +637,80 @@ func TestASecondAnswerOfTheSameColdGateIsRefused(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmNoColdGate)
+}
+
+// A FAILED RE-OPEN IS AN ANSWER. The two incidents of 2026-09-13
+// (docs/FOOTER-TOPOLOGY-AUDIT.md section 4) took this branch: the shim's
+// StartSession errored, the daemon logged it four times and returned a bare
+// Connect internal, the webapp read "the daemon could not be reached" about a
+// daemon that had answered, and the gate stood on.
+func TestAnswerColdGateAnswersAFailedReopenWithItsOwnArm(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumeErr = errors.New("the producer has already written rows")
+	answer := &frontendv1.FeedColdGateResolved{
+		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
+	}
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmReopenFailed)
+	if got := refusal.Fields["detail"]; got != "the producer has already written rows" {
+		t.Fatalf("refusal detail = %v, want the failure's own account", got)
+	}
+}
+
+func TestAnswerColdGateOpensTheFaultThatPutsTheFailureOnTheFooter(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumeErr = errors.New("the producer has already written rows")
+	answer := &frontendv1.FeedColdGateResolved{
+		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
+	}
+
+	// Act.
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+	// Assert.
+	if len(f.health.opened) != 1 {
+		t.Fatalf("opened %d faults, want 1", len(f.health.opened))
+	}
+	fault := f.health.opened[0]
+	if fault.Kind != health.KindColdGateReopenFailed {
+		t.Fatalf("fault kind = %q, want %q", fault.Kind, health.KindColdGateReopenFailed)
+	}
+	if fault.Workspace == nil || *fault.Workspace != "w1" {
+		t.Fatalf("fault workspace = %v, want w1", fault.Workspace)
+	}
+	if got := fault.Evidence["cause"]; got != "the producer has already written rows" {
+		t.Fatalf("fault cause = %q, want the failure's own account", got)
+	}
+}
+
+func TestAnswerColdGateLeavesTheGateStandingWhenTheReopenFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumeErr = errors.New("the producer has already written rows")
+	answer := &frontendv1.FeedColdGateResolved{
+		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
+	}
+
+	// Act.
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+	// Assert.
+	if f.cards.coldGate == nil {
+		t.Fatalf("the gate was retired by an answer whose re-open failed")
+	}
 }

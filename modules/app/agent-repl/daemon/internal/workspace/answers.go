@@ -9,9 +9,11 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/topbar"
+	"claude-repld/internal/wsm"
 )
 
 // AnswerPermission delivers a permission card's verdict to the agent that
@@ -215,8 +217,15 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		if errors.As(err, &refusal) {
 			return err
 		}
+		// THE RE-OPEN FAILED, AND THAT IS AN ANSWER. It reaches the caller as
+		// AnswerColdGate's own `reopen_failed` arm and the user as a footer
+		// line, through the `cold_gate_reopen_failed` fault opened here — the
+		// two read the same sentence, because they are given the same one.
 		log.Error(opColdGate, "the re-open with the remediation failed", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("answer cold gate on %q: %w", ws, err)
+		v.noteColdGateReopenFailed(ctx, log, ws, err)
+		return refuseWith(log, "AnswerColdGate", ArmReopenFailed,
+			fmt.Sprintf("the re-open of workspace %q with the answered remediation failed: %v", ws, err),
+			false, map[string]any{"detail": err.Error()})
 	}
 
 	// THE GATE IS SPENT. A second answer against the same id must find nothing
@@ -302,5 +311,30 @@ func coldChoiceName(answer *frontendv1.FeedColdGateResolved) string {
 		return "compact"
 	default:
 		return "none"
+	}
+}
+
+// noteColdGateReopenFailed records the failed re-open as the workspace's OWN
+// fault, which is what puts its line on the footer.
+//
+// GROUNDED (docs/FOOTER-TOPOLOGY-AUDIT.md section 4): ResumeCold never called
+// noteStartFailed, so unlike an ordinary bring-up death this raised no fault,
+// no start-failed line and no dead link. The gate stayed standing, the strip
+// kept saying the session was parked, and the user's answer did nothing —
+// twice in one afternoon, with four daemon ERROR records and nothing drawn.
+func (v *verbs) noteColdGateReopenFailed(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, cause error) {
+	if ctx.Err() != nil {
+		// A CANCELLED CONTEXT IS A DAEMON STANDING DOWN, not a fault to file.
+		return
+	}
+	workspace := ws
+	if _, err := v.deps.Health.OpenFault(ctx, wsm.Fault{
+		Workspace: &workspace,
+		Kind:      health.KindColdGateReopenFailed,
+		Detail:    "the cold gate's answer re-opened the session and it did not come back",
+		Evidence:  map[string]string{"cause": cause.Error()},
+	}); err != nil {
+		log.Error(opColdGate, "could not record the failed cold-gate re-open",
+			dlog.Context{"cause": err.Error()})
 	}
 }

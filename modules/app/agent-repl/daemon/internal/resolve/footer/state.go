@@ -407,6 +407,10 @@ type wsState struct {
 	// is installed by the site that opens the `shim_start_failed` fault and
 	// cleared by the next successful link edge.
 	startFailed *startFailedState
+	// faults are this workspace's OWN standing faults, in the order they were
+	// opened. The strongest of them, folded together with the resolver's
+	// daemon-scoped ones, is what the strip draws.
+	faults []Fault
 	// blocked is the standing block, nil when nothing blocks the session.
 	blocked *blockedState
 

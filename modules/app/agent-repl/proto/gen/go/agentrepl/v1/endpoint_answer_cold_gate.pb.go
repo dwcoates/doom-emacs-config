@@ -411,6 +411,7 @@ type AnswerColdGateError struct {
 	//	*AnswerColdGateError_NoColdGate
 	//	*AnswerColdGateError_UnservedRemediation
 	//	*AnswerColdGateError_NoSession
+	//	*AnswerColdGateError_ReopenFailed
 	Cause         isAnswerColdGateError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -516,6 +517,15 @@ func (x *AnswerColdGateError) GetNoSession() *AnswerColdGateNoSession {
 	return nil
 }
 
+func (x *AnswerColdGateError) GetReopenFailed() *AnswerColdGateReopenFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerColdGateError_ReopenFailed); ok {
+			return x.ReopenFailed
+		}
+	}
+	return nil
+}
+
 type isAnswerColdGateError_Cause interface {
 	isAnswerColdGateError_Cause()
 }
@@ -555,6 +565,18 @@ type AnswerColdGateError_NoSession struct {
 	NoSession *AnswerColdGateNoSession `protobuf:"bytes,7,opt,name=no_session,json=noSession,proto3,oneof"`
 }
 
+type AnswerColdGateError_ReopenFailed struct {
+	// THE RE-OPEN THE ANSWER ASKED FOR FAILED. The gate was standing, the
+	// remediation was served, the daemon carried it out — and the session did
+	// not come back. Before this arm existed the whole branch answered a bare
+	// Connect internal, which the webapp words as "the daemon could not be
+	// reached" about a daemon that answered; the gate then stood on, unmoved,
+	// and the user's click did nothing twice in one afternoon
+	// (docs/FOOTER-TOPOLOGY-AUDIT.md section 4). It is a REFUSAL, not a
+	// transport failure, so it is an arm.
+	ReopenFailed *AnswerColdGateReopenFailed `protobuf:"bytes,8,opt,name=reopen_failed,json=reopenFailed,proto3,oneof"`
+}
+
 func (*AnswerColdGateError_UnknownWorkspace) isAnswerColdGateError_Cause() {}
 
 func (*AnswerColdGateError_WorkspaceRefMismatch) isAnswerColdGateError_Cause() {}
@@ -568,6 +590,8 @@ func (*AnswerColdGateError_NoColdGate) isAnswerColdGateError_Cause() {}
 func (*AnswerColdGateError_UnservedRemediation) isAnswerColdGateError_Cause() {}
 
 func (*AnswerColdGateError_NoSession) isAnswerColdGateError_Cause() {}
+
+func (*AnswerColdGateError_ReopenFailed) isAnswerColdGateError_Cause() {}
 
 type AnswerColdGateUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -839,6 +863,55 @@ func (*AnswerColdGateNoSession) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDescGZIP(), []int{13}
 }
 
+// The re-open failed.
+type AnswerColdGateReopenFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHY it failed, in the words of whatever refused it — the shim's own
+	// account of a refused StartSession, or the daemon's of a bring-up death.
+	// The SAME line the `cold_gate_reopen_failed` fault carries onto the
+	// footer, read from one place so the two surfaces cannot disagree.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerColdGateReopenFailed) Reset() {
+	*x = AnswerColdGateReopenFailed{}
+	mi := &file_agentrepl_v1_endpoint_answer_cold_gate_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerColdGateReopenFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerColdGateReopenFailed) ProtoMessage() {}
+
+func (x *AnswerColdGateReopenFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_cold_gate_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerColdGateReopenFailed.ProtoReflect.Descriptor instead.
+func (*AnswerColdGateReopenFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AnswerColdGateReopenFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_answer_cold_gate_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDesc = "" +
@@ -860,7 +933,7 @@ const file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.AnswerColdGateSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.AnswerColdGateErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15AnswerColdGateSuccess\"\x91\x05\n" +
+	"\x15AnswerColdGateSuccess\"\xe2\x05\n" +
 	"\x13AnswerColdGateError\x12[\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.AnswerColdGateUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.AnswerColdGateWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
@@ -870,7 +943,8 @@ const file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDesc = "" +
 	"noColdGate\x12d\n" +
 	"\x14unserved_remediation\x18\x06 \x01(\v2/.agentrepl.v1.AnswerColdGateUnservedRemediationH\x00R\x13unservedRemediation\x12F\n" +
 	"\n" +
-	"no_session\x18\a \x01(\v2%.agentrepl.v1.AnswerColdGateNoSessionH\x00R\tnoSessionB\a\n" +
+	"no_session\x18\a \x01(\v2%.agentrepl.v1.AnswerColdGateNoSessionH\x00R\tnoSession\x12O\n" +
+	"\rreopen_failed\x18\b \x01(\v2(.agentrepl.v1.AnswerColdGateReopenFailedH\x00R\freopenFailedB\a\n" +
 	"\x05cause\" \n" +
 	"\x1eAnswerColdGateUnknownWorkspace\"G\n" +
 	"\"AnswerColdGateWorkspaceRefMismatch\x12!\n" +
@@ -880,7 +954,9 @@ const file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDesc = "" +
 	"\x1bAnswerColdGateNotYetAdopted\"\x1a\n" +
 	"\x18AnswerColdGateNoColdGate\"#\n" +
 	"!AnswerColdGateUnservedRemediation\"\x19\n" +
-	"\x17AnswerColdGateNoSessionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x17AnswerColdGateNoSession\"4\n" +
+	"\x1aAnswerColdGateReopenFailed\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDescOnce sync.Once
@@ -894,7 +970,7 @@ func file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_answer_cold_gate_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_endpoint_answer_cold_gate_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_answer_cold_gate_proto_goTypes = []any{
 	(*AnswerColdGateRequest)(nil),              // 0: agentrepl.v1.AnswerColdGateRequest
 	(*AnswerColdGatePay)(nil),                  // 1: agentrepl.v1.AnswerColdGatePay
@@ -910,19 +986,20 @@ var file_agentrepl_v1_endpoint_answer_cold_gate_proto_goTypes = []any{
 	(*AnswerColdGateNoColdGate)(nil),           // 11: agentrepl.v1.AnswerColdGateNoColdGate
 	(*AnswerColdGateUnservedRemediation)(nil),  // 12: agentrepl.v1.AnswerColdGateUnservedRemediation
 	(*AnswerColdGateNoSession)(nil),            // 13: agentrepl.v1.AnswerColdGateNoSession
-	(*v1.WorkspaceRef)(nil),                    // 14: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                         // 15: frontend.v1.FeedId
-	(*v12.AgentModel)(nil),                     // 16: conversation.v1.AgentModel
-	(v12.SessionCompactScope)(0),               // 17: conversation.v1.SessionCompactScope
+	(*AnswerColdGateReopenFailed)(nil),         // 14: agentrepl.v1.AnswerColdGateReopenFailed
+	(*v1.WorkspaceRef)(nil),                    // 15: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                         // 16: frontend.v1.FeedId
+	(*v12.AgentModel)(nil),                     // 17: conversation.v1.AgentModel
+	(v12.SessionCompactScope)(0),               // 18: conversation.v1.SessionCompactScope
 }
 var file_agentrepl_v1_endpoint_answer_cold_gate_proto_depIdxs = []int32{
-	14, // 0: agentrepl.v1.AnswerColdGateRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	15, // 1: agentrepl.v1.AnswerColdGateRequest.gate:type_name -> frontend.v1.FeedId
+	15, // 0: agentrepl.v1.AnswerColdGateRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 1: agentrepl.v1.AnswerColdGateRequest.gate:type_name -> frontend.v1.FeedId
 	1,  // 2: agentrepl.v1.AnswerColdGateRequest.pay:type_name -> agentrepl.v1.AnswerColdGatePay
 	2,  // 3: agentrepl.v1.AnswerColdGateRequest.clear:type_name -> agentrepl.v1.AnswerColdGateClear
 	3,  // 4: agentrepl.v1.AnswerColdGateRequest.compact:type_name -> agentrepl.v1.AnswerColdGateCompact
-	16, // 5: agentrepl.v1.AnswerColdGateCompact.model:type_name -> conversation.v1.AgentModel
-	17, // 6: agentrepl.v1.AnswerColdGateCompact.scope:type_name -> conversation.v1.SessionCompactScope
+	17, // 5: agentrepl.v1.AnswerColdGateCompact.model:type_name -> conversation.v1.AgentModel
+	18, // 6: agentrepl.v1.AnswerColdGateCompact.scope:type_name -> conversation.v1.SessionCompactScope
 	5,  // 7: agentrepl.v1.AnswerColdGateResponse.success:type_name -> agentrepl.v1.AnswerColdGateSuccess
 	6,  // 8: agentrepl.v1.AnswerColdGateResponse.error:type_name -> agentrepl.v1.AnswerColdGateError
 	7,  // 9: agentrepl.v1.AnswerColdGateError.unknown_workspace:type_name -> agentrepl.v1.AnswerColdGateUnknownWorkspace
@@ -932,11 +1009,12 @@ var file_agentrepl_v1_endpoint_answer_cold_gate_proto_depIdxs = []int32{
 	11, // 13: agentrepl.v1.AnswerColdGateError.no_cold_gate:type_name -> agentrepl.v1.AnswerColdGateNoColdGate
 	12, // 14: agentrepl.v1.AnswerColdGateError.unserved_remediation:type_name -> agentrepl.v1.AnswerColdGateUnservedRemediation
 	13, // 15: agentrepl.v1.AnswerColdGateError.no_session:type_name -> agentrepl.v1.AnswerColdGateNoSession
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	14, // 16: agentrepl.v1.AnswerColdGateError.reopen_failed:type_name -> agentrepl.v1.AnswerColdGateReopenFailed
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_answer_cold_gate_proto_init() }
@@ -961,6 +1039,7 @@ func file_agentrepl_v1_endpoint_answer_cold_gate_proto_init() {
 		(*AnswerColdGateError_NoColdGate)(nil),
 		(*AnswerColdGateError_UnservedRemediation)(nil),
 		(*AnswerColdGateError_NoSession)(nil),
+		(*AnswerColdGateError_ReopenFailed)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -968,7 +1047,7 @@ func file_agentrepl_v1_endpoint_answer_cold_gate_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDesc), len(file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

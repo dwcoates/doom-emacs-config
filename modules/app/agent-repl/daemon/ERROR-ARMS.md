@@ -210,3 +210,13 @@ The `brief_missing` row for the one-shot finish hook went with it: the hook is
 gone, so that RPC no longer reads a brief at a turn's conclusion. A one-shot's
 briefs are read once, at create time, and their absence is
 `one_shot_policy_missing`.
+
+## `AnswerColdGateError.reopen_failed` landed, 2026-09-13
+
+The cold-gate re-open failure was never even an UNLANDED arm: it was a plain
+`error` that fell through to `fail()` and a bare `connect.CodeInternal`, so it
+never reached this ledger and the webapp read a daemon that answered as a
+daemon that could not be reached. `AnswerColdGateError.reopen_failed` (tag 8)
+now carries it, `internal/workspace/answers.go` raises it under
+`AnswerColdGate`'s OWN vocabulary, and the same failure opens the
+`cold_gate_reopen_failed` fault that puts the line on the footer.
