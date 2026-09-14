@@ -1032,13 +1032,19 @@ which is not what closing a panel says."
   :open-fn #'agent-repl--gui-open
   :boot-fn #'agent-repl--gui-boot
   :kill-fn #'agent-repl--gui-kill
-  ;; NO `:cancel-detached-fn'.  Stopping detached work is the `Interrupt'
-  ;; verb's `all_agents' target, and `Interrupt' is a FEED verb: its other
-  ;; targets are named by `frontend.v1.FeedId', vocabulary Emacs has no
-  ;; feed to hold.  Emacs calls no interrupt rpc at all (elisp-fanout
-  ;; ruling b) — the webapp footer owns the gesture, on the very page this
-  ;; frontend mounts.  The registry's dispatch says so loudly rather than
-  ;; sending an interrupt that provably could not reach detached work.
+  ;; NO `:cancel-detached-fn'.  Stopping DETACHED work is the `Interrupt'
+  ;; verb's `all_agents' and `detached' targets, and `Interrupt' is a FEED
+  ;; verb: the `detached' target is named by `frontend.v1.FeedId',
+  ;; vocabulary Emacs has no feed to hold, so the registry offers no
+  ;; per-frontend cancel of detached work and the fan-wide stop stays the
+  ;; webapp footer's, on the very page this frontend mounts.
+  ;;
+  ;; Emacs DOES call `Interrupt' for the `turn' target: `C-c C-k' in the
+  ;; composer (`agent-repl-interrupt-turn', verbs.el) is the clean
+  ;; turn stop, restored by owner order after the overhaul first routed the
+  ;; whole gesture to the footer.  The turn target needs no feed vocabulary
+  ;; — it names the running vendor query, not a bubble — so it reaches the
+  ;; daemon where a detached-work interrupt from Emacs could not.
   :running-p-fn #'agent-repl--gui-running-p
   :show-fn #'agent-repl--gui-show
   :hide-fn #'agent-repl--gui-hide
