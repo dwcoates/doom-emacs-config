@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- register repository: `SPC j .` also registers the repository's main worktree as an open workspace, through the same `internal/workspace.register` `RegisterWorkspace` runs, and the success carries `workspace`/`workspace_already_known` (owner ruling 2026-09-14: a repository registered from a file was not available for selection in `SPC p p`)
 - shim permission mode: `DEFAULT_PERMISSION_MODE` (`src/engine/permission-gate.ts`) is `auto`, so a `StartSession{fresh}` naming no mode and a resume stating none both reach the SDK query as `permissionMode: "auto"` rather than the vendor's `default` (owner ruling 2026-09-14: the default permission mode is auto for the SDK/shim)
 - daemon permission mode: a creation naming no mode mints `auto` onto the session row, `permissionMode()` maps an empty, unknown OR `default` name to the auto arm (so a row stored before the ruling is upgraded at the next start and rewritten by `recordFacts` from the shim's report), and `topbar.SwitchableModes` drops `default` and leads with `auto` (same ruling)
 - webapp permission mode: the picker's served options carry no `default` and lead with `auto`, and a live `default` is drawn as the current value with no option row, because the daemon serves it as current while leaving it out of the options (same ruling)
