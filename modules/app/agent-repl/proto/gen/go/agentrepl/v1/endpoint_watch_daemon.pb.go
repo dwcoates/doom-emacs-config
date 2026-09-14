@@ -74,6 +74,7 @@ type WatchDaemonResponse struct {
 	//	*WatchDaemonResponse_ShutdownAnnounced
 	//	*WatchDaemonResponse_DrainScheduled
 	//	*WatchDaemonResponse_DrainCancelled
+	//	*WatchDaemonResponse_MutationProgress
 	Push          isWatchDaemonResponse_Push `protobuf_oneof:"push"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -143,6 +144,15 @@ func (x *WatchDaemonResponse) GetDrainCancelled() *DaemonDrainCancelled {
 	return nil
 }
 
+func (x *WatchDaemonResponse) GetMutationProgress() *WorkspaceMutationProgress {
+	if x != nil {
+		if x, ok := x.Push.(*WatchDaemonResponse_MutationProgress); ok {
+			return x.MutationProgress
+		}
+	}
+	return nil
+}
+
 type isWatchDaemonResponse_Push interface {
 	isWatchDaemonResponse_Push()
 }
@@ -164,11 +174,24 @@ type WatchDaemonResponse_DrainCancelled struct {
 	DrainCancelled *DaemonDrainCancelled `protobuf:"bytes,3,opt,name=drain_cancelled,json=drainCancelled,proto3,oneof"`
 }
 
+type WatchDaemonResponse_MutationProgress struct {
+	// Staged progress for an in-flight workspace mutation, keyed on the
+	// client-minted op_id it echoes. Unlike the drain and shutdown arms —
+	// standing daemon STATE re-pushed to late subscribers — this is a
+	// transient EVENT: it rides a separate event topic merged onto this
+	// stream, exactly as the per-workspace web stream merges its transfer
+	// event beside its session-identity state, so a late subscriber replaying
+	// the state arms is never handed a stale progress event in their place.
+	MutationProgress *WorkspaceMutationProgress `protobuf:"bytes,4,opt,name=mutation_progress,json=mutationProgress,proto3,oneof"`
+}
+
 func (*WatchDaemonResponse_ShutdownAnnounced) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_DrainScheduled) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_DrainCancelled) isWatchDaemonResponse_Push() {}
+
+func (*WatchDaemonResponse_MutationProgress) isWatchDaemonResponse_Push() {}
 
 type DaemonShutdownAnnounced struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -569,12 +592,13 @@ var File_agentrepl_v1_endpoint_watch_daemon_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\n" +
-	"(agentrepl/v1/endpoint_watch_daemon.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/drain_reason.proto\"\x14\n" +
-	"\x12WatchDaemonRequest\"\x93\x02\n" +
+	"(agentrepl/v1/endpoint_watch_daemon.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/drain_reason.proto\x1a.agentrepl/v1/workspace_mutation_progress.proto\"\x14\n" +
+	"\x12WatchDaemonRequest\"\xeb\x02\n" +
 	"\x13WatchDaemonResponse\x12V\n" +
 	"\x12shutdown_announced\x18\x01 \x01(\v2%.agentrepl.v1.DaemonShutdownAnnouncedH\x00R\x11shutdownAnnounced\x12M\n" +
 	"\x0fdrain_scheduled\x18\x02 \x01(\v2\".agentrepl.v1.DaemonDrainScheduledH\x00R\x0edrainScheduled\x12M\n" +
-	"\x0fdrain_cancelled\x18\x03 \x01(\v2\".agentrepl.v1.DaemonDrainCancelledH\x00R\x0edrainCancelledB\x06\n" +
+	"\x0fdrain_cancelled\x18\x03 \x01(\v2\".agentrepl.v1.DaemonDrainCancelledH\x00R\x0edrainCancelled\x12V\n" +
+	"\x11mutation_progress\x18\x04 \x01(\v2'.agentrepl.v1.WorkspaceMutationProgressH\x00R\x10mutationProgressB\x06\n" +
 	"\x04push\"\xcd\x01\n" +
 	"\x17DaemonShutdownAnnounced\x12\x1d\n" +
 	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01\x127\n" +
@@ -622,24 +646,26 @@ var file_agentrepl_v1_endpoint_watch_daemon_proto_goTypes = []any{
 	(*DaemonShutdownImmediate)(nil),        // 6: agentrepl.v1.DaemonShutdownImmediate
 	(*DaemonDrainScheduled)(nil),           // 7: agentrepl.v1.DaemonDrainScheduled
 	(*DaemonDrainCancelled)(nil),           // 8: agentrepl.v1.DaemonDrainCancelled
-	(*DrainReason)(nil),                    // 9: agentrepl.v1.DrainReason
+	(*WorkspaceMutationProgress)(nil),      // 9: agentrepl.v1.WorkspaceMutationProgress
+	(*DrainReason)(nil),                    // 10: agentrepl.v1.DrainReason
 }
 var file_agentrepl_v1_endpoint_watch_daemon_proto_depIdxs = []int32{
 	2,  // 0: agentrepl.v1.WatchDaemonResponse.shutdown_announced:type_name -> agentrepl.v1.DaemonShutdownAnnounced
 	7,  // 1: agentrepl.v1.WatchDaemonResponse.drain_scheduled:type_name -> agentrepl.v1.DaemonDrainScheduled
 	8,  // 2: agentrepl.v1.WatchDaemonResponse.drain_cancelled:type_name -> agentrepl.v1.DaemonDrainCancelled
-	3,  // 3: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
-	4,  // 4: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
-	5,  // 5: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
-	6,  // 6: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
-	9,  // 7: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
-	9,  // 8: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
-	9,  // 9: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	9,  // 3: agentrepl.v1.WatchDaemonResponse.mutation_progress:type_name -> agentrepl.v1.WorkspaceMutationProgress
+	3,  // 4: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
+	4,  // 5: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
+	5,  // 6: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
+	6,  // 7: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
+	10, // 8: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
+	10, // 9: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
+	10, // 10: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_daemon_proto_init() }
@@ -648,10 +674,12 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 		return
 	}
 	file_agentrepl_v1_drain_reason_proto_init()
+	file_agentrepl_v1_workspace_mutation_progress_proto_init()
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[1].OneofWrappers = []any{
 		(*WatchDaemonResponse_ShutdownAnnounced)(nil),
 		(*WatchDaemonResponse_DrainScheduled)(nil),
 		(*WatchDaemonResponse_DrainCancelled)(nil),
+		(*WatchDaemonResponse_MutationProgress)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[2].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[3].OneofWrappers = []any{

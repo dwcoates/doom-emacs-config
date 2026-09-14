@@ -11,6 +11,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/drain_reason.proto";
+import "agentrepl/v1/workspace_mutation_progress.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -28,6 +29,14 @@ message WatchDaemonResponse {
     DaemonDrainScheduled drain_scheduled = 2;
     // The standing drain schedule was cancelled; take the banner down.
     DaemonDrainCancelled drain_cancelled = 3;
+    // Staged progress for an in-flight workspace mutation, keyed on the
+    // client-minted op_id it echoes. Unlike the drain and shutdown arms —
+    // standing daemon STATE re-pushed to late subscribers — this is a
+    // transient EVENT: it rides a separate event topic merged onto this
+    // stream, exactly as the per-workspace web stream merges its transfer
+    // event beside its session-identity state, so a late subscriber replaying
+    // the state arms is never handed a stale progress event in their place.
+    WorkspaceMutationProgress mutation_progress = 4;
   }
 }
 
