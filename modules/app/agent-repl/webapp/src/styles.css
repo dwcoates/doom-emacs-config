@@ -1557,26 +1557,19 @@ pre {
 .md .contains-task-list { list-style: none; padding-left: 0.2em; }
 .md .task-list-item-checkbox { margin: 0 0.4em 0 0; vertical-align: middle; }
 
-/* Metaprompt TLDR trees: each line is a flex row of a fixed bullet
-   prefix (connectors + dotted label + root emoji) and a flexing
-   content span, so a branch longer than the feed wraps INSIDE the
-   content column — a hanging indent at the first non-bullet character,
-   with no width measurement anywhere. */
-.mp-tree { font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.45; }
+/* Metaprompt TLDR trees: the webapp wraps each branch to the bubble's
+   live column width (metaprompt-tree.ts, a port of the daemon's
+   treefmt), so every line arrives here already fitted and the
+   continuation rails (│ / spaces under a wrapped branch) are REAL
+   characters the wrapper emitted, not rails the stylesheet repaints.
+   Each line is therefore a preformatted monospace line: no flexing, no
+   soft-wrap, no width reasoning left to CSS. overflow-x guards only the
+   degenerate case of an unsplittable word wider than the whole bubble,
+   which is served wider rather than truncated. */
+.mp-tree { font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.45; white-space: pre; overflow-x: auto; }
 .md .mp-tree { margin: 0.5em 0; }
-.mp-line { display: flex; }
-.mp-prefix { white-space: pre; flex: none; position: relative; }
-.mp-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.mp-prefix, .mp-content { white-space: pre; }
 .mp-blank { height: 0.7em; }
-/* Continuation rails: a wrapped branch's overflow lines must repaint
-   the tree's vertical rails (every leading │, and the connector column
-   when the connector is ├ — a └ ends its rail), or the wrap visually
-   severs the branch from the sibling below it. Each rail is a hairline
-   from the row's SECOND visual line (the first line's glyphs cover
-   line one) to the row's bottom, centered in its ch cell via the
-   inline left offset the renderer computes. Rows that never wrap give
-   the rail zero height, so it paints nothing. */
-.mp-rail { position: absolute; top: 1lh; bottom: 0; border-left: 1px solid currentColor; }
 
 .thinking {
   border-left: 3px solid var(--border);
