@@ -330,7 +330,16 @@ the sink interfaces above plus daemon-fact setters:
   `SetOutputAddress(ws, *OutputAddress)`, `UpsertSynthesized(ws, feed, FeedRow)`
   (merge tabs, cold gate, separations, mirrored user prompts),
   `RetireRow(ws, feed, FeedId)`. Page walks are per reader (connection),
-  never persisted. The mirror of an accepted prompt is a `user_prompt` row
+  never persisted. THE FEED BEGINS AT THE NEWEST SEPARATION: a `cleared` or
+  `compacted` divider bounds DELIVERY, so the first page starts at it, `next`
+  answers at_start there, and the rows above it are neither served nor pushed
+  (`feed/pages.go` `deliverable`). Nothing is retired and no feedid is reminted
+  — the store's book keeps every pointer — and the bound is read off the row
+  order at every page rather than remembered, so a replay and the live plane
+  cannot disagree about it. A compaction's surviving account rides the divider
+  row itself (`FeedContextCutCompacted.summary`), which is why the bound keeps
+  the summary without keeping the conversation. `compaction_failed` cut nothing
+  and the worktree arms cut no context, so neither bounds anything. The mirror of an accepted prompt is a `user_prompt` row
   stamped with the minted TurnId, drawn with the metaprompt sentinel spans
   stripped (the full text stays on the record).
 - footer: status tree resolution + R1 dwell retirement of `interrupted`/
