@@ -610,7 +610,7 @@ the armed rows (see `agent-repl--tab-palette-row')."
     (:degraded        . "blue")
     (:start-failed    . "blue")
 
-    (:vendor-blocked  . "purple")
+    (:vendor-blocked  . "blue")
 
     (:submitting      . "red")
     (:thinking        . "red")
@@ -663,8 +663,7 @@ hibernation.")
 (defconst agent-repl-status-tab-bar-color-overrides
   '((:merge-enqueuing . "purple")
     (:merge-queued    . "purple")
-    (:merging         . "purple")
-    (:vendor-blocked  . "blue"))
+    (:merging         . "purple"))
   "Where the TAB BAR paints an arm differently from the shared assignment.
 
 Emacs\='s corner of the fixture\='s `surface_overrides.emacs_tab_bar\='
@@ -682,10 +681,13 @@ user cannot act on the workspace until it resolves.  `merge_conflict\'
 wants the user and the other two are terminal, so none of them is
 overridden.
 
-`:vendor-blocked\=' is the fourth row, and it and the merge rows are ONE
-decision: purple can carry only one meaning on a surface this small, so
-vendor-blocked joins the blue band it already belongs beside — every way
-the route to a working session is compromised.")
+`:vendor-blocked\=' is NO LONGER an override.  It was one while the shared
+assignment painted it purple and this glyph-less surface could not tell
+two purples apart, so it borrowed blue here.  It is now blue in
+`agent-repl-status-color-table\=' itself — every way the route to a working
+session is compromised is blue — so the tab bar inherits blue with
+nothing to declare.  An override that repaints an arm the color it already
+has is not a divergence, and this table holds only real divergences.")
 
 (defconst agent-repl-status-tab-bar-color-table
   (mapcar (lambda (row)

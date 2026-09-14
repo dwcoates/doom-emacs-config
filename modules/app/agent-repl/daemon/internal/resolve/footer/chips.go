@@ -420,7 +420,7 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			s.hook = nil
 			s.interrupting = false
 			s.compacting = false
-			if failure != nil {
+			if FailureBlocks(failure) {
 				s.blocked = r.blockFor(failure)
 				return
 			}
@@ -454,6 +454,25 @@ func interruptedCause(interrupted *conversationv1.AgentInterrupted) interruptedK
 		return interruptedByHostShutdown
 	}
 	return interruptedByUser
+}
+
+// FailureBlocks reports whether a turn-ending agent failure leaves the session
+// standing-blocked. It is THE ONE classifier the footer's `blocked` arm and the
+// roster's `vendor_blocked` dot both consult — the footer here in
+// OnAgentTerminal, the roster in resolve/sidebar's vendorBlocked — so the strip
+// and the dot can never disagree about the same failure. That agreement is the
+// owner's 2026-09-14 ruling: blocked is blue, and the roster agrees with the
+// footer.
+//
+// EVERY classified failure blocks. A turn that ended in failure cannot proceed
+// until the user acts — a re-prompt, a re-auth, a wait for a limit to reset —
+// which is exactly what `blocked` says and what the roster paints blue. The
+// specific block KIND (auth, a usage limit, billing, or an unclassified vendor
+// error) is `blockFor`'s to name, because only the footer has a substatus to
+// spend it on; the roster needs only this yes-or-no. A nil failure — a turn
+// that SUCCEEDED — never blocks.
+func FailureBlocks(failure *conversationv1.AgentFailure) bool {
+	return failure != nil
 }
 
 // blockFor respells a turn's failure into the standing block it leaves behind.

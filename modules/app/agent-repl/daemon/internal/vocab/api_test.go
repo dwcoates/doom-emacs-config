@@ -393,24 +393,9 @@ func TestRosterStatusColorHonorsADeclaredSurfaceOverride(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
 
-	// Act.
-	got, err := c.RosterStatusColor("emacs_tab_bar", "vendor_blocked")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("RosterStatusColor: %v", err)
-	}
-	if got != "blue" {
-		t.Fatalf("RosterStatusColor = %q, want blue", got)
-	}
-}
-
-func TestRosterStatusColorTakesTheSharedAssignmentForASurfaceWithNoOverrides(t *testing.T) {
-	// Arrange.
-	c := loadColors(t)
-
-	// Act.
-	got, err := c.RosterStatusColor("webapp", "vendor_blocked")
+	// Act: the tab bar repaints the glyph-less in-flight merge arm, whose
+	// shared assignment is "none", to purple.
+	got, err := c.RosterStatusColor("emacs_tab_bar", "merging")
 
 	// Assert.
 	if err != nil {
@@ -418,6 +403,23 @@ func TestRosterStatusColorTakesTheSharedAssignmentForASurfaceWithNoOverrides(t *
 	}
 	if got != "purple" {
 		t.Fatalf("RosterStatusColor = %q, want purple", got)
+	}
+}
+
+func TestRosterStatusColorTakesTheSharedAssignmentForASurfaceWithNoOverrides(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act: vendor_blocked is blue in the shared assignment and the webapp
+	// declares no override, so it inherits blue verbatim.
+	got, err := c.RosterStatusColor("webapp", "vendor_blocked")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RosterStatusColor: %v", err)
+	}
+	if got != "blue" {
+		t.Fatalf("RosterStatusColor = %q, want blue", got)
 	}
 }
 

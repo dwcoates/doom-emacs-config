@@ -72,7 +72,7 @@
     "dead": "blue",
     "degraded": "blue",
     "start_failed": "blue",
-    "vendor_blocked": "purple",
+    "vendor_blocked": "blue",
     "submitting": "red",
     "thinking": "red",
     "clearing": "red",
@@ -115,7 +115,15 @@
     "assignments answer a narrower question than the roster's, and the two",
     "tables differ where the questions differ: footer 'merging' is purple",
     "(the system holds this session, and the footer has no glyph to say so),",
-    "where a merging ROSTER row is 'none' and reports itself with a glyph."
+    "where a merging ROSTER row is 'none' and reports itself with a glyph.",
+    "",
+    "'blocked' IS BLUE, like 'disconnected' and 'closing': a blocked session",
+    "cannot proceed until something outside it changes — a logged-out",
+    "account, a usage limit, a persistent vendor failure, a daemon that",
+    "cannot serve it — and every such state renders the agent unusable,",
+    "which is exactly what blue means. It reads the same as the roster's",
+    "'vendor_blocked', and the two are held together by ONE classifier so",
+    "the strip and the dot can never disagree about the same failure."
   ],
   "footer_status": {
     "idle": "green",
@@ -124,7 +132,7 @@
     "interrupted": "green",
     "merging": "purple",
     "background": "yellow",
-    "blocked": "purple",
+    "blocked": "blue",
     "disconnected": "blue",
     "closing": "blue",
     "loading": "red"
@@ -189,25 +197,24 @@
     "deliberately NOT overridden — a conflict wants the user, and the other",
     "two are terminal, so none of them is 'in flight'.",
     "",
-    "EMACS_TAB_BAR ALSO OVERRIDES vendor_blocked TO BLUE, and the two",
-    "overrides are one decision. Purple can carry only ONE meaning on a",
-    "surface with no glyph to tell two purples apart, so vendor_blocked",
-    "joins the blue band it already belongs beside: init, severed, dead,",
-    "degraded and start_failed are every way the route to a working session",
-    "is compromised, and an auth wall, a usage limit or a persistent vendor",
-    "failure is precisely that.",
+    "vendor_blocked TAKES NO OVERRIDE ANY MORE. It once needed one because it",
+    "was purple in the shared table and the glyph-less tab bar could not tell",
+    "two purples apart, so it borrowed blue here. It is now blue in the",
+    "shared assignment itself — every way the route to a working session is",
+    "compromised is blue, and an auth wall, a usage limit or a persistent",
+    "vendor failure is precisely that — so the tab bar inherits blue with",
+    "nothing to declare. An override that paints an arm the color it already",
+    "has is not a divergence, and this file admits only real divergences.",
     "",
     "The webapp takes NO overrides. Its rail carries a glyph and a status",
     "word beside every dot, so 'none' already reads as the merge pipeline",
-    "reporting itself, and it can spend purple on vendor_blocked without the",
-    "collision the tab bar has to resolve."
+    "reporting itself."
   ],
   "surface_overrides": {
     "emacs_tab_bar": {
       "merge_enqueuing": "purple",
       "merge_queued": "purple",
-      "merging": "purple",
-      "vendor_blocked": "blue"
+      "merging": "purple"
     }
   },
   "_failure_sides_comment": [
