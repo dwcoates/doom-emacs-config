@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // The footer's breathing signal: a size oscillation that never resets, and a
 // color ramp that steps once per daemon-resolved progress view. Plus the
 // prompt bubble's thinking wave, which shares the footer's epoch mechanic.
@@ -13,6 +14,9 @@ import {
   breathColor,
   bubbleWave,
   bubbleWaveStyle,
+  PROMPT_WAVE_ATTRIBUTE,
+  PROMPT_WAVE_WORKING,
+  startPromptWave,
 } from "../src/breathing.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
@@ -434,4 +438,25 @@ describe("AnimationEpoch: both animations really share it", () => {
       expect(got).toBe(0);
     });
   }
+});
+
+
+describe("startPromptWave: a fresh prompt bubble arrives waving", () => {
+  it("marks the bubble, so the stylesheet's wave rule reaches it", () => {
+    // Arrange
+    const bubble = document.createElement("div");
+    // Act
+    startPromptWave(bubble, NOW);
+    // Assert
+    expect(bubble.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
+  });
+
+  it("stamps the page-global phase, so the rebuilt node does not jump back", () => {
+    // Arrange
+    const bubble = document.createElement("div");
+    // Act
+    startPromptWave(bubble, NOW);
+    // Assert
+    expect(bubble.getAttribute("style")).toBe(bubbleWaveStyle(NOW));
+  });
 });

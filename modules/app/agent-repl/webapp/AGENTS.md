@@ -85,7 +85,7 @@ and are contract on the same terms:
 | `data-query-cause` | the line under a `queryDied` turn error | `unexpectedEof` \| `iteratorFailure` (absent when the cause is unset) | 10 |
 | `data-attention` | the cold gate row the model picker routed to | `coldGate` | 10 |
 | `data-footer-notice` | the footer notice drawn when no cold gate row is on the page | `coldGate` | 10 |
-| `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` (absent on every settled, failed, interrupted or turnless prompt) | int-fix-bubble-wave |
+| `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` — stamped at the bubble's DRAW, including on a prompt that names no turn yet, and absent once that turn settles (its final answer marked, or its `turn_ended` row arrived, whichever landed first) | int-fix-bubble-wave, redrawn by owner ruling 2026-09-14 |
 | `.held-right` class | every held-prompt card in the hold tray | — (the rail: a held prompt hangs where the `.bubble.user` it will become hangs) | owner ruling 1, 2026-09-13 |
 | `data-shown` | a sidebar row's expand chevron (`.chev`) | — (present exactly while the pointer is over the row, the keyboard focus is inside it, or the row's details are open; the chevron is `visibility: hidden` without it) | owner ruling 3, 2026-09-13 |
 | `data-client-verdict` | the `.pfooter` dock, while a client link verdict stands | the verdict's kind (`unary_transport`, `stream_ended`, `subscription_source_ended`, `unsubscribe_failed`, `client_log_failed`, `daemon_unreachable_card`, `frame_undecodable_card`, `feed_not_tailing`) — absent whenever the daemon's pushed view is the one drawn | webapp/footer-client-states |
