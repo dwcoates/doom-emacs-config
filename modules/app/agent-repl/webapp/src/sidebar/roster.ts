@@ -45,7 +45,7 @@ import {
   type SidebarContext,
 } from "./context.js";
 import { drawCreateWorkspaceControl } from "./create.js";
-import { drawRosterRow } from "./row.js";
+import { drawRosterRow, expandVisibleRows } from "./row.js";
 import {
   buildUpdateTaskRequest,
   drawCreateTaskControl,
@@ -178,7 +178,7 @@ export function drawRosterRepoSection(
   );
   header.appendChild(drawCreateWorkspaceControl(key, section, sc));
   section.appendChild(header);
-  section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`));
+  section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`, true));
   return section;
 }
 
@@ -205,7 +205,7 @@ export function drawRosterTaskSection(
       `${path}.header`,
     ),
   );
-  section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`));
+  section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`, true));
   return section;
 }
 
@@ -342,16 +342,27 @@ export function drawRosterTaskDone(u: RosterTaskDone, path: string): boolean {
   return u.done;
 }
 
-/** The rows region of a section, in the resolver's render order. */
+/**
+ * The rows region of a section, in the resolver's render order.
+ *
+ * `hideClosed` drops closed, killed and nuked workspaces from a live grouping
+ * (owner ruling, 2026-09-14) and hoists their live descendants up in their
+ * place. The recently-merged band leaves it OFF: its rows are `closed = true`
+ * by design and are exactly what that band exists to show.
+ */
 export function drawRosterRows(
   u: RosterRows,
   sc: SidebarContext,
   path: string,
+  hideClosed = false,
 ): HTMLElement {
   const rows = document.createElement("div");
   rows.className = "rows";
-  for (const [index, row] of u.rows.entries()) {
-    rows.appendChild(drawRosterRow(row, sc, `${path}.rows[${index}]`));
+  const drawn = hideClosed
+    ? expandVisibleRows(u.rows, `${path}.rows`)
+    : u.rows.map((row, index) => ({ row, path: `${path}.rows[${index}]` }));
+  for (const entry of drawn) {
+    rows.appendChild(drawRosterRow(entry.row, sc, entry.path));
   }
   return rows;
 }

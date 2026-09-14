@@ -46,12 +46,52 @@ import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
 import { buildSelectWorkspaceRequest, drawRowMenu, runVerb, type VerbTarget } from "./verbs.js";
 
+/** A row that survived the closed filter, carrying its own message path. */
+export interface VisibleRow {
+  row: RosterRow;
+  path: string;
+}
+
+/** Whether a row is CLOSED on the wire — closed, killed, or merged all read here. */
+export function rowIsClosed(u: RosterRow, path: string): boolean {
+  return drawRosterRowClosed(requireMessage(u.closed, `${path}.closed`), `${path}.closed`);
+}
+
+/**
+ * The rows to actually draw from a received list, with CLOSED rows dropped.
+ *
+ * A closed, killed or nuked workspace never appears in the rail (owner ruling,
+ * 2026-09-14): the daemon still EMITS a closed row because Emacs reconciles its
+ * tab set from the `closed` flag, so the omission is this renderer's, applied
+ * where a section's rows are laid out. Merged rows are also `closed = true` and
+ * are the whole point of the recently-merged band, so that band draws its rows
+ * directly and never through this filter.
+ *
+ * A dropped row's NON-CLOSED descendants are HOISTED into its place rather than
+ * vanishing with it: a live child cut from a killed parent's branch is still a
+ * live workspace and keeps its row, one level up.
+ */
+export function expandVisibleRows(rows: readonly RosterRow[], basePath: string): VisibleRow[] {
+  const out: VisibleRow[] = [];
+  rows.forEach((row, index) => {
+    const path = `${basePath}[${index}]`;
+    if (rowIsClosed(row, path)) {
+      out.push(...expandVisibleRows(row.children, `${path}.children`));
+      return;
+    }
+    out.push({ row, path });
+  });
+  return out;
+}
+
 /**
  * One roster row, with its family nested under it.
  *
  * Returns the WHOLE subtree — the row line, the detail panel and the children
  * — because a row IS its family in this view: nesting is the message's own
  * `children`, and a child is drawn by this same function, one generation down.
+ * A row's CLOSED children are hoisted away by `expandVisibleRows`, so a killed
+ * child never draws while its live siblings do.
  */
 export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): HTMLElement {
   const workspace = drawRosterRowWorkspace(
@@ -146,11 +186,12 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   // so the pointer can travel from the row into it without it closing.
   installHoverPanel(ws, line, sc, workspace.id);
 
-  if (u.children.length > 0) {
+  const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
+  if (visibleChildren.length > 0) {
     const kids = document.createElement("div");
     kids.className = "kids";
-    for (const [index, child] of u.children.entries()) {
-      kids.appendChild(drawRosterRow(child, sc, `${path}.children[${index}]`));
+    for (const child of visibleChildren) {
+      kids.appendChild(drawRosterRow(child.row, sc, child.path));
     }
     ws.appendChild(kids);
   }
