@@ -386,15 +386,16 @@ the filesystem to decide it.
 
 `docs/ONE-SHOT-POLICY.md` is the reference for a repository's authors.
 
-## A repository joins the roster on its own, from any path inside it
+## A repository joins the roster from any path inside it, with its main worktree
 
-`SPC j .` (`agent-repl-register-repository`) registers a REPOSITORY. It is not
-`SPC TAB C-n`, and the two are easy to confuse:
+`SPC j .` (`agent-repl-register-repository`) registers a REPOSITORY **and the
+repository's main worktree as a workspace**. It is not `SPC TAB C-n`, and the
+two are easy to confuse:
 
 | binding | command | rpc | what enters the roster |
 |---|---|---|---|
-| `SPC TAB C-n` | `agent-repl-add-project-workspace` ("Add project directory") | `RegisterWorkspace` | a WORKSPACE, whose repository row is minted as a side effect |
-| `SPC j .` | `agent-repl-register-repository` ("Register repository from file") | `RegisterRepository` | a REPOSITORY, with NO workspace under it |
+| `SPC TAB C-n` | `agent-repl-add-project-workspace` ("Add project directory") | `RegisterWorkspace` | a WORKSPACE at the DIRECTORY you name, whose repository row is minted as a side effect |
+| `SPC j .` | `agent-repl-register-repository` ("Register repository from file") | `RegisterRepository` | a REPOSITORY resolved from any path inside it, PLUS a workspace at its main worktree |
 
 It exists because a repository had exactly one way in — that side effect — so
 `agent-repl-verbs--read-repository` (the static create's picker, `SPC TAB N`)
@@ -404,10 +405,37 @@ nobody had worked in yet could not be named at all.
 THE GESTURE IS PICKING A FILE, not naming a repository root: `read-file-name`
 defaults to the buffer's own file, and the daemon resolves the repository's
 main worktree from ANY path inside it. Registering one the registry already
-holds is SUCCESS and says so (`already_known`), never a refusal. The registered
-repository draws an EMPTY SECTION on the roster — a header with no rows — which
-is the only evidence the registration landed, so neither the daemon's roster
-resolver nor the webapp's rail may drop it.
+holds is SUCCESS and says so (`already_known`), never a refusal.
+
+THE MAIN WORKTREE IS REGISTERED AS A WORKSPACE TOO (owner ruling, 2026-09-14:
+"I expect the main repo to be added as an actual workspace as well"). The first
+landing stopped at the repository row, and a repository with no workspace is
+NOT SELECTABLE: `SPC p p` (`agent-repl-switch-to-project`) completes over live
+workspaces, so registering the repository you were standing in still left you
+unable to switch to it.
+
+That registration is the SAME ONE `RegisterWorkspace` runs — `internal/workspace`'s
+unexported `register`, which both rpc bodies call — so the row gets the same
+mint, the same git-derived naming, the same roster row, the same session
+revival and the same refusals. Never write a second near-copy of it; one
+directory must not have two registration behaviors depending on which rpc
+announced it. The shared body raises its refusals with NO rpc name and each
+verb stamps its own through `namedRefusal`, so a `RegisterRepository` refusal
+never reaches the client naming `RegisterWorkspace`.
+
+The success carries both halves and both already-known bools
+(`workspace`/`workspace_already_known` beside `repository`/`already_known`),
+which are INDEPENDENT: a repository registered before this ruling landed is
+already known while its workspace is minted now. The ack says both.
+
+IT BECOMES SELECTABLE WHEN THE ROSTER PUSH LANDS, not when the command returns.
+The editor's registry is built by `agent-repl-roster-reconcile`, and the daemon
+republishes the roster as the LAST act of the registration — before it answers —
+so the push is on the wire ahead of the ack rather than waiting for a later one.
+
+A repository whose section is drawn with NO rows is still an ordinary state
+(every workspace under it closed), so neither the daemon's roster resolver nor
+the webapp's rail may drop an empty section.
 
 ## Implementers do not judge proto design
 
