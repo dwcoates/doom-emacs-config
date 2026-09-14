@@ -226,14 +226,20 @@
      pickers outsize the sidebar's plain title, and the two dividers drift apart.
      Comfortably clears the 0.85rem select at any renderer's control metrics. */
   --topbar-h: 2.75rem;
-  /* THE STRIP'S ONE SPACING TOKEN (owner ruling 1, 2026-09-13). The gap
-     between two topbar cells and the padding at the strip's own left and right
-     edges are the SAME distance, so they are the same token: the strip runs
-     from the window's left edge to its right edge, and its first and last
-     cells stand off those edges exactly as far as they stand off each other.
-     Two numbers here is how the strip drifted into a wide inset that read as a
-     centered band inside the header. */
+  /* THE STRIP'S FRAME MEASURE (owner ruling 1, 2026-09-13, narrowed
+     2026-09-14). The padding at the strip's own left and right edges and the
+     gap between the row's three TRACKS are the SAME distance, so they are the
+     same token: the strip runs from the window's left edge to its right edge,
+     and its first and last cells stand off those edges exactly as far as the
+     flanks stand off the title. Two numbers here is how the strip drifted into
+     a wide inset that read as a centered band inside the header. */
   --topbar-cell-gap: 0.5rem;
+  /* THE GAP BETWEEN CHIPS, and nothing else (owner ruling, 2026-09-14: "I want
+     a reasonable, and tight spacing between chips, and ALL extra space to be
+     around the center title section"). Chips inside one flank group are a run
+     of one thing, so they sit TIGHTER than the frame measure above; every
+     rem the chips give back falls to the title's own clear space. */
+  --topbar-chip-gap: 0.3rem;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -853,9 +859,9 @@ body::after {
      flush; horizontal padding only, with the height governing the vertical box.
      align-items: center keeps the pickers centered within it. */
   height: var(--topbar-h);
-  /* NO EDGE INSET OF ITS OWN. `.topbar-row` inside carries the strip's single
-     `--topbar-cell-gap` padding, and a second inset here stacked on top of it
-     is what held the strip's content off the window's edges. */
+  /* NO EDGE INSET OF ITS OWN. `.topbar-row` inside carries the strip's one
+     `--topbar-cell-gap` edge padding, and a second inset here stacked on top
+     of it is what held the strip's content off the window's edges. */
   padding: 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
@@ -5352,9 +5358,11 @@ body.draining #composer-input::placeholder {
   display: grid;
   grid-template-columns: minmax(0, 1fr) fit-content(50%) minmax(0, 1fr);
   align-items: center;
-  /* ONE TOKEN, BOTH DISTANCES (owner ruling 1). The gap between cells and the
-     inset at the strip's edges are the same measure by definition, so a change
-     to one is a change to both and they cannot drift apart. */
+  /* ONE TOKEN, BOTH FRAME DISTANCES (owner ruling 1). The gap between the
+     three TRACKS and the inset at the strip's edges are the same measure by
+     definition, so a change to one is a change to both and they cannot drift
+     apart. The gap between CHIPS is a separate, tighter token — see
+     `--topbar-chip-gap` on `.topbar-left` / `.topbar-right`. */
   gap: var(--topbar-cell-gap);
   height: var(--topbar-h);
   padding: 0 var(--topbar-cell-gap);
@@ -5367,18 +5375,20 @@ body.draining #composer-input::placeholder {
    declaration that differs is the whole point of the pair. `min-width: 0` is
    the same declaration in both: the tracks are floored at zero so the title
    stays centered, and a group that would not compress with its track would
-   spill out of it and over the title. */
+   spill out of it and over the title. The gap here is `--topbar-chip-gap`, NOT
+   the frame's `--topbar-cell-gap`: chip to chip is the tight distance, and the
+   room that buys goes to the title's flanks (owner ruling, 2026-09-14). */
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: var(--topbar-cell-gap);
+  gap: var(--topbar-chip-gap);
   justify-self: start;
   min-width: 0;
 }
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: var(--topbar-cell-gap);
+  gap: var(--topbar-chip-gap);
   justify-self: end;
   min-width: 0;
 }
@@ -5446,12 +5456,13 @@ body.draining #composer-input::placeholder {
 /* THE ACCOUNT CELL: the connectivity glyph and the account label, in that
    order, as ONE cell of the strip (owner ruling 3, 2026-09-13). The glyph is
    the account's own status indicator, so it stands CLOSER to the label than
-   two cells of the strip stand to each other — half the strip's gap — and the
-   pair is what a session-line reveal hangs under. */
+   two chips of the strip stand to each other — half the CHIP gap, since this
+   distance lives inside a chip group — and the pair is what a session-line
+   reveal hangs under. */
 .topbar-account-cell {
   display: inline-flex;
   align-items: center;
-  gap: calc(var(--topbar-cell-gap) / 2);
+  gap: calc(var(--topbar-chip-gap) / 2);
 }
 
 /* The connectivity glyph is a different CHARACTER per state and those

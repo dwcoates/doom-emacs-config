@@ -347,15 +347,46 @@ function declaration(selector: string, property: string): string {
   return (match?.[1] ?? "").trim();
 }
 
+/** The rem value of the root custom property NAME, as declared. */
+function token(name: string): number {
+  const match = new RegExp(`\\n\\s*${name}\\s*:\\s*([\\d.]+)rem\\s*;`).exec(STYLESHEET);
+  expect(match).not.toBeNull();
+  return Number.parseFloat(match?.[1] ?? "NaN");
+}
+
 describe("the strip's layout", () => {
   // RULING 1. Not "both are 0.5rem" — both are the SAME TOKEN, which is what
   // keeps them from drifting apart the next time one of them is tuned.
-  it("pads the strip's edges with the very token that gaps its cells", () => {
+  it("pads the strip's edges with the very token that gaps its tracks", () => {
     // ARRANGE / ACT
     const padding = declaration(".topbar-row", "padding");
     const gap = declaration(".topbar-row", "gap");
     // ASSERT
     expect(padding).toBe(`0 ${gap}`);
+  });
+
+  // THE 2026-09-14 RULING: "a reasonable, and tight spacing between chips, and
+  // ALL extra space to be around the center title section". The chips run on
+  // their own tighter token while the frame — edge inset and track gap — keeps
+  // the cell gap, so the room the chips give back falls to the title.
+  it("gaps the chips inside a flank with a tighter token than the row's frame", () => {
+    // ARRANGE / ACT
+    const flanks = [declaration(".topbar-left", "gap"), declaration(".topbar-right", "gap")];
+    const row = declaration(".topbar-row", "gap");
+    // ASSERT
+    expect([...flanks, row]).toEqual([
+      "var(--topbar-chip-gap)",
+      "var(--topbar-chip-gap)",
+      "var(--topbar-cell-gap)",
+    ]);
+  });
+
+  it("sets the chip gap tighter than the frame measure it was split from", () => {
+    // ARRANGE / ACT
+    const chip = token("--topbar-chip-gap");
+    const cell = token("--topbar-cell-gap");
+    // ASSERT
+    expect(chip).toBeLessThan(cell);
   });
 });
 
@@ -514,8 +545,8 @@ describe("the account cell", () => {
     ]);
   });
 
-  it("stands the glyph closer to its label than two cells of the strip stand apart", () => {
-    expect(declaration(".topbar-account-cell", "gap")).toBe("calc(var(--topbar-cell-gap) / 2)");
+  it("stands the glyph closer to its label than two chips of the strip stand apart", () => {
+    expect(declaration(".topbar-account-cell", "gap")).toBe("calc(var(--topbar-chip-gap) / 2)");
   });
 
   // ONE ELEMENT MEANS ONE ANCHOR: the options hang under the pair.
