@@ -34,6 +34,7 @@ import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
+import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
 import { terminalUpsertKey } from "../store/keys.js";
 import { PersistenceError } from "../store/persistence.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
@@ -727,6 +728,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       ...(open === undefined ? {} : { turnId: open.id }),
       keepalive: open?.keepalive === true,
       nowMs: deps.nowMs,
+      // DIAGNOSTIC-ONLY session facts the terminal's api-failure record reads.
+      // The config-dir is the ACCOUNT the failing token belonged to (a path,
+      // never a credential), and the model is what the turn ran under; neither
+      // crosses the wire.
+      claudeConfigDir: deps.env.configDir,
+      ...(effectiveModel === "" ? {} : { model: effectiveModel }),
       ...(lastChange === undefined ? {} : { lastChange }),
       pendingAsk: (toolUseId) => gate.pendingAsk(toolUseId),
       deniedCall: (toolUseId) => gate.deniedCall(toolUseId),
@@ -1625,6 +1632,31 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (!message.is_error) return;
     const said =
       message.subtype === "success" ? message.result : message.errors.join("; ");
+    // AUTH FAILURES AT START LAND HERE, before the session ever opened. When the
+    // opening refusal is a credential rejection or a model/resource-not-found,
+    // record the one greppable diagnostic line with the ACCOUNT (config-dir) the
+    // failing token belonged to and the model in effect — the only way to tell a
+    // clobbered/expired token apart from an account/scope mismatch after the
+    // fact. NO CREDENTIAL VALUE IS LOGGED: the config-dir is a path, the sentence
+    // is redacted of any token shape. The error reject below is untouched.
+    const startStatus = (message as unknown as { api_error_status?: number | null })
+      .api_error_status;
+    const startHttpStatus = typeof startStatus === "number" ? startStatus : undefined;
+    const startText = said ?? "";
+    const startKind = classifyVendorApiFailure(startHttpStatus, undefined, startText);
+    if (startKind === "shim.vendor.auth_rejected" || startKind === "shim.vendor.model_missing") {
+      LOGGER.info(
+        {
+          operation: startKind,
+          subtype: message.subtype,
+          http_status: startHttpStatus,
+          vendor_message: redactVendorMessage(startText),
+          claude_config_dir: deps.env.configDir,
+          model: effectiveModel === "" ? undefined : effectiveModel,
+        },
+        "the shim observed a vendor API failure while opening the session; recording the status, message, account config-dir and model for diagnosis",
+      );
+    }
     LOGGER.error(
       { subtype: message.subtype, detail: said },
       "the vendor answered the session's opening with an error result; the start is refused with its own text",
