@@ -39,23 +39,25 @@ ruling of 2026-09-13), `docs/REALTEST-PLAN.md` "Status", and
 - Store: schema 7, single serialized writer, read pool, ledger retention,
   no residue persisted, shape catalog (`make -C agent-shim/shim-store shapes`).
 
-## State after the fourth sweep with 9 (rt-run37, 2026-09-13 23:44)
+## State after the sixth sweep with 9 (rt-run39, 2026-09-14 00:10)
 
-- Landed and deployed: adoption of a starting shim (wsm layout 8), sidecar
-  change probe, rt9 answer wait (master 1e4bdcf60).
-- rt-run37: 1-8 green, GAP SCAN CLEAN; realtest 9 measured every phase but
-  the answer text: the deploy restarted the sidecar and its boot walk
-  (rewind of ~2900 transcripts, 2m24s) starved the poll tick, so the change
-  probe never ran and the rows reached the store ~63s after the turn.
+- Landed and deployed: sidecar boot walk scoped, poll pass sliced, identity
+  negative cache (master c46785d03). Sidecar steady-state CPU 2% (was 100%),
+  new transcripts picked up ~1s after they appear.
+- rt-run39: 1-8 green, gap scan clean; realtest 9 fails ONLY on the answer
+  text: the answer bubble IS drawn (final-answer-marked styled_bubble=true)
+  but the response renderer records nothing, and the harness waited for a
+  `feed.draw-text-block` that only prompt blocks emit.
 
 ## Agents in flight
 
-1. `fix/sidecar-boot-walk` (wt-bootwalk): rewind only files that can carry
-   a turn in flight; time-sliced poll pass so discovery runs every tick.
+1. `fix/feed-response-record` (wt-resp): `feed.draw-response` INFO with
+   characters/blocks; harness matches it and measures the phase.
+2. `fix/sidecar-workspace-cache` (wt-wscache): the sidecar's dir→workspace
+   ref cache is never invalidated; a re-registered dir carried the stale
+   id (forward refused "no longer registered").
 
-rt-run38 is running in steady state (no deploy before it) to test the
-answer path as it stands. Then: merge boot-walk, deploy, rerun to twice-green.
-The owner went to bed at ~23:50; realtest 9 is to be finished unattended.
+Then: merge both, deploy, rerun to twice-green, test-all, plan status.
 
 ## The loop for realtest 9
 
