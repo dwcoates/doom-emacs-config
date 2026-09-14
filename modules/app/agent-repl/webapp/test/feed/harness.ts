@@ -7,7 +7,7 @@
  * the same four verbs the same way, and so a row fixture is built once from the
  * generated schemas rather than a dozen times by hand.
  */
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
@@ -40,6 +40,7 @@ import {
   FeedMergeSchema,
   FeedPageSchema,
   FeedRowSchema,
+  FeedSessionSeparationSchema,
   FeedSubagentSchema,
   FeedTurnEndedSchema,
   FeedUserPromptSchema,
@@ -303,6 +304,33 @@ export function turnEndedRow(
               ? { case: "interrupted", value: {} }
               : { case: "concluded", value: {} },
       }),
+    },
+  });
+}
+
+/**
+ * A separation row: the divider a context cut left.
+ *
+ * ARM is what the cut was, and it is the whole of what decides whether the row
+ * BOUNDS the feed — a compaction and a clear do, and nothing else does.
+ */
+export function separationRow(
+  id: string,
+  arm: "cleared" | "compacted" | "compactionFailed" = "compacted",
+  summary = "what survived",
+): FeedRow {
+  type SeparationInit = MessageInitShape<typeof FeedSessionSeparationSchema>;
+  const kind: SeparationInit["kind"] =
+    arm === "cleared"
+      ? { case: "cleared", value: {} }
+      : arm === "compactionFailed"
+        ? { case: "compactionFailed", value: { error: "the summarizer refused" } }
+        : { case: "compacted", value: { summary: { markdown: summary }, fold: { folded: true } } };
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    row: {
+      case: "separation",
+      value: { label: { text: "context compacted" }, kind },
     },
   });
 }
