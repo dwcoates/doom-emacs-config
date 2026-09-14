@@ -843,3 +843,53 @@ func TestEachWorkspaceHoldsItsOwnFeedUniverse(t *testing.T) {
 		t.Fatalf("ws-2 rows = %d, want 1", otherRows)
 	}
 }
+
+// TestRowPlacedIsTracedAtFirstDraw pins the ordering-trace log: every row's
+// plane and seq are logged at INFO the moment it is first placed, so a "why did
+// this row sort here" question is answerable from the logs alone.
+func TestRowPlacedIsTracedAtFirstDraw(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act — draw one live prompt row.
+	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, textBlock("hello"))
+
+	// Assert — an INFO daemon.feed.row_placed carries the plane and a seq.
+	var placed *dlog.Record
+	for i := range h.records() {
+		rec := h.records()[i]
+		if rec.Level == "info" && rec.Operation == "daemon.feed.row_placed" {
+			placed = &rec
+			break
+		}
+	}
+	if placed == nil {
+		t.Fatalf("no INFO daemon.feed.row_placed record; records = %+v", h.records())
+	}
+	if placed.Context["plane"] != "live" {
+		t.Fatalf("plane = %v, want \"live\"", placed.Context["plane"])
+	}
+	if placed.Context["turn"] != "turn-1" {
+		t.Fatalf("turn = %v, want \"turn-1\"", placed.Context["turn"])
+	}
+	if _, ok := placed.Context["seq"]; !ok {
+		t.Fatalf("row_placed carried no seq; context = %+v", placed.Context)
+	}
+}
+
+// TestRowPlaneNames pins the human-readable plane names the trace log uses.
+func TestRowPlaneNames(t *testing.T) {
+	cases := []struct {
+		plane rowPlane
+		want  string
+	}{
+		{planePorted, "ported"},
+		{planeHistory, "history"},
+		{planeLive, "live"},
+	}
+	for _, tc := range cases {
+		if got := tc.plane.String(); got != tc.want {
+			t.Fatalf("plane %d = %q, want %q", tc.plane, got, tc.want)
+		}
+	}
+}
