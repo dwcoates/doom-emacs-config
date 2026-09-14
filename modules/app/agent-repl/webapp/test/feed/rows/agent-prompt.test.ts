@@ -10,6 +10,10 @@ import {
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { DELIVERY_WORDS, drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import {
+  PROMPT_WAVE_ATTRIBUTE,
+  PROMPT_WAVE_WORKING,
+} from "../../../src/breathing.js";
 
 function agentPrompt(address = "→ Explore", blocks: unknown[] = []) {
   return create(FeedAgentPromptSchema, {
@@ -25,6 +29,18 @@ describe("drawFeedAgentPrompt", () => {
 
   it("marks itself for the ORANGE border the schema names for it", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).classList.contains("prompt-agent")).toBe(true);
+  });
+
+  it("waves from the moment it is drawn, like the user kind it is a sibling of", () => {
+    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      PROMPT_WAVE_WORKING,
+    );
+  });
+
+  it("stamps the wave's phase inline, so a redraw does not jump it back", () => {
+    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute("style")).toMatch(
+      /animation-delay:-\d+ms/,
+    );
   });
 
   it("draws the composed address line verbatim, whichever end this feed is", () => {

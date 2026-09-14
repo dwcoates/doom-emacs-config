@@ -1291,10 +1291,12 @@ pre {
    conversation painted one band per prompt, saying that every turn it ever ran
    is still running, and leaving the page with no resting state at all — a
    screenshot of it can never be still, and a reader has no way to tell the
-   live turn from the thirty dead ones above it. `data-wave="working"` is set
-   by the feed on the prompt whose turn has no `turn_ended` row yet and cleared
-   the moment one arrives (`markWorkingPrompts` in feed-view.ts,
-   `PROMPT_WAVE_ATTRIBUTE` in breathing.ts).
+   live turn from the thirty dead ones above it. `data-wave="working"` is
+   stamped on a prompt bubble AT ITS DRAW (`startPromptWave` in breathing.ts)
+   and cleared when that turn settles — its final answer marked, or its
+   `turn_ended` row arrived, whichever the feed sees first
+   (`markWorkingPrompts` in feed-view.ts). So a prompt waves from the moment it
+   is on screen until its answer lands, and the scrollback above it rests.
 
    THE GRADIENT LIVES HERE WITH THE ANIMATION, not on the base rule, for the
    same reason the reduced-motion block below drops both together: a gradient
