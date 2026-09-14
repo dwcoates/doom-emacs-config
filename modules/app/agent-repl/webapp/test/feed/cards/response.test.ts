@@ -604,6 +604,34 @@ describe("the wrapped tree a settled response carries", () => {
     expect(prefixes.some((text) => text.startsWith("│   │"))).toBe(true);
   });
 
+  it("keeps an interior fenced code block opaque and never markdown-bolds it", () => {
+    // Arrange — the reproduction: a fenced block nested under a branch carrying
+    // `__name__` (which markdown would bold), with branches after it.
+    const markdown = [
+      "Response (✏️ changes made)",
+      "1 🔧 Subagent created `hello_world.py` at the repo root",
+      "├── 1.2 File contents",
+      "    ```python",
+      '    if __name__ == "__main__":',
+      "        main()",
+      "    ```",
+      "├── 1.3 Follows your Python conventions",
+      "└── 1.4 Verified by running `./hello_world.py`",
+    ].join("\n");
+    // Act
+    const host = document.createElement("div");
+    host.innerHTML = proseHtml(markdown, 105);
+    // Assert — one tree, the code opaque (in a <pre><code>, `__name__` literal
+    // and never bolded), and 1.4 kept a tree line rather than spilled into
+    // generic markdown after the tree.
+    const tree = host.querySelector(".mp-tree");
+    expect(tree).not.toBeNull();
+    expect(tree?.querySelector("pre code")).not.toBeNull();
+    expect(host.querySelector("strong")).toBeNull();
+    expect(host.textContent).toContain("__name__");
+    expect(host.textContent).toContain("1.4 Verified");
+  });
+
   it("re-wraps: a narrower width yields more lines than a wider one", () => {
     // Arrange
     const narrow = document.createElement("div");
