@@ -1,41 +1,63 @@
 /**
- * Metaprompt TLDR-tree detection and rendering.
+ * Metaprompt TLDR-tree detection and wrapping.
  *
  * The metaprompt renders final responses as a numbered Unicode tree
  * (├──/└──/│ connectors plus dotted labels like `2.1`, root nodes
- * emoji-prefixed). As plain <pre> text, a branch longer than the feed
- * width wraps to column 0, visually shearing the tree. Instead each
- * tree line renders as a flex row of a fixed-width PREFIX span (the
- * connectors, dotted label, and root emoji — everything up to the
- * first non-bullet character) and a flexing CONTENT span: the browser
- * wraps the content within its own column, so continuation lines get
- * a hanging indent at the content start with no width measurement at
- * all.
+ * emoji-prefixed). The tree arrives UNWRAPPED — one physical line per branch —
+ * and this module wraps every branch too wide for the live column limit onto
+ * continuation lines, so no line exceeds the width the bubble can show and the
+ * tree fills its bubble and re-flows on resize.
+ *
+ * THE WRAP ENGINE IS A ONE-TO-ONE PORT of the daemon's `treefmt` package
+ * (`daemon/internal/treefmt/treefmt.go`), which is itself the owner's
+ * format_trees.py ported to Go: the same parser, the same packer, the same
+ * width model, the same idempotence, the same error surface. The wrapping used
+ * to run in the daemon at a fixed 105 columns; it runs HERE now, at the live
+ * width the bubble measures, because the daemon cannot know how many characters
+ * fit a given pixel width and so cannot re-flow on resize. Each ported function
+ * carries its Go/Python name so the three can be read side by side.
+ *
+ * A wrapped branch's continuation lines
+ *
+ *   - start at the column where the branch text starts, so the wrapped
+ *     remainder reads as a hanging indent under its own branch, and
+ *   - carry the vertical connectors of every sibling branch the wrap now
+ *     bisects (`├── ` becomes `│   `, `└── ` becomes four spaces), and hold
+ *     open the connector column of the branch's own children when any are
+ *     rendered beneath the wrap, so the tree's vertical rules stay unbroken.
+ *
+ * The rails are therefore REAL characters the wrapper emits, not rails a
+ * renderer repaints: the continuation prefix is `│   ` / spaces text, so the
+ * wrapped output renders as ordinary monospace lines with no width reasoning
+ * left to the stylesheet.
+ *
+ * Width is measured in RENDERED columns, not source length: HTML tags
+ * contribute nothing, HTML entities count as the single character they denote,
+ * and emoji count as two columns. Inline elements are atomic, so a wrap never
+ * lands between a tag and its text; an element too long to fit alone is split
+ * with its tags closed at the end of one line and reopened at the start of the
+ * next.
  */
 
 import { escapeHtml } from "./highlight.js";
 
 /**
- * The bullet machinery at the start of one tree line: leading vertical
- * bars/space, one connector, the dotted hierarchical label, and the
- * root node's prefixing emoji. Every group is optional so plain lines
- * (e.g. the `Response (…)` header) split as all-content.
+ * The column limit used when the live width cannot be measured (a detached
+ * bubble, a test host with no layout). It is the daemon formatter's own former
+ * default, so an unmeasurable render falls back to what the daemon used to
+ * serve rather than to a broken width.
  */
-const PREFIX_RE =
-  /^([\s│]*(?:(?:├──|└──)\s+)?(?:\d+(?:\.\d+)*\s+)?(?:\p{Extended_Pictographic}\uFE0F?\s+)?)(.*)$/u;
+export const DEFAULT_TREE_COLS = 105;
 
-/** Minimum fraction of non-blank lines that must look tree-shaped. */
-const TREE_LINE_RATIO = 0.6;
-
-// --- Cheap, allocation-free line classification -----------------------------
+// ---------------------------------------------------------------------------
+// Cheap line classification (detection only)
+// ---------------------------------------------------------------------------
 //
 // Classifying tree lines runs on every assistant render (and drives the
 // tree-bounds scan below), so these helpers walk code points directly rather
 // than lean on Unicode regex: a connector is a leading │/space run then
-// ├──/└──, a root is a column-0 dotted label followed by a space and an
-// emoji, and the header is the mandated `Response (…)` opener. Bounds are
-// newline-delimited, so slicing the tree out of surrounding prose needs no
-// width or wrap reasoning at all.
+// ├──/└──, a root is a column-0 dotted label followed by a space and an emoji,
+// and the header is the mandated `Response (…)` opener.
 
 const CH_SPACE = 0x20;
 const CH_TAB = 0x09;
@@ -54,6 +76,9 @@ const CH_BACKTICK = 0x60;
 const EMOJI_FLOOR = 0x2190;
 
 const HEADER_PREFIX = "Response (";
+
+/** Minimum fraction of non-blank lines that must look tree-shaped. */
+const TREE_LINE_RATIO = 0.6;
 
 function isDigit(code: number): boolean {
   return code >= CH_ZERO && code <= CH_NINE;
@@ -97,10 +122,7 @@ function dottedLabelEnd(line: string): number {
   return i;
 }
 
-/**
- * A dotted label followed by whitespace, emoji not required. Mirrors the old
- * ROOT_LABEL_RE and feeds only the tree-shaped-line ratio, never the anchor.
- */
+/** A dotted label followed by whitespace, emoji not required. */
 function isDottedLabelLine(line: string): boolean {
   const end = dottedLabelEnd(line);
   if (end < 0) return false;
@@ -114,40 +136,6 @@ function isEmojiRootLine(line: string): boolean {
   if (end < 0) return false;
   if (line.charCodeAt(end) !== CH_SPACE) return false;
   return line.charCodeAt(end + 1) >= EMOJI_FLOOR;
-}
-
-/**
- * A CONTINUATION line: the remainder of a branch the DAEMON already wrapped
- * to its 105-column limit before serving it
- * (`daemon/internal/resolve/feed/tree.go`, via `treefmt`).
- *
- * The daemon writes such a remainder as the ancestors' rails followed by the
- * wrapped branch's own label width in padding — `│   │   rest` under a `├──`
- * branch that has children, eight spaces under a wrapped `└──` last branch,
- * `  rest` or `│ rest` under a wrapped root. So the rule here is exactly:
- *
- * - the line's leading run consists only of spaces and `│`,
- * - that run is NON-EMPTY (a column-0 line is prose, and ends the region),
- * - text follows the run,
- * - and the run is not followed by a connector (`├──`/`└──`), which would
- *   make the line a branch of its own rather than someone's remainder.
- *
- * A continuation is part of the tree but is not tree CORE: it anchors
- * nothing and is never counted toward the two-core-lines minimum, because a
- * lone branch that merely wrapped is still a lone branch.
- */
-function isContinuationLine(line: string): boolean {
-  let i = 0;
-  const n = line.length;
-  while (i < n) {
-    const c = line.charCodeAt(i);
-    if (c === CH_SPACE || c === CH_BAR) i++;
-    else break;
-  }
-  if (i === 0 || i >= n) return false;
-  const c = line.charCodeAt(i);
-  if (c === CH_TEE || c === CH_ELL) return false;
-  return true;
 }
 
 /** The mandated `Response (…)` opener that heads every metaprompt response. */
@@ -167,10 +155,10 @@ function isFenceDelimiter(line: string): boolean {
 }
 
 /**
- * Whether TEXT reads as a metaprompt TLDR tree: at least two non-blank
- * lines, most of them tree-shaped (connector or dotted-label start),
- * anchored by either a connector line or an emoji-prefixed root — the
- * two shapes ordinary prose and markdown lists never produce.
+ * Whether TEXT reads as a metaprompt TLDR tree: at least two non-blank lines,
+ * most of them tree-shaped (connector or dotted-label start), anchored by
+ * either a connector line or an emoji-prefixed root — the two shapes ordinary
+ * prose and markdown lists never produce.
  */
 export function isMetapromptTree(text: string): boolean {
   const lines = text.split("\n").filter((l) => l.trim() !== "");
@@ -180,10 +168,7 @@ export function isMetapromptTree(text: string): boolean {
   for (const line of lines) {
     const connector = isConnectorLine(line);
     const emojiRoot = isEmojiRootLine(line);
-    // A daemon-wrapped remainder is as tree-shaped as the branch it came
-    // from; counting it as prose sinks the ratio for a tree with several
-    // wraps, which is precisely the tree the daemon serves.
-    if (connector || emojiRoot || isDottedLabelLine(line) || isContinuationLine(line)) treeish++;
+    if (connector || emojiRoot || isDottedLabelLine(line)) treeish++;
     if (connector || emojiRoot) anchored = true;
   }
   return anchored && treeish / lines.length >= TREE_LINE_RATIO;
@@ -193,7 +178,7 @@ export function isMetapromptTree(text: string): boolean {
 export interface TreeRegion {
   /** Lines before the tree, kept on the markdown path (may be empty). */
   before: string;
-  /** The tree block itself, rendered as hanging-indent tree lines. */
+  /** The tree block itself, wrapped and rendered as tree lines. */
   tree: string;
   /** Lines after the tree, kept on the markdown path (may be empty). */
   after: string;
@@ -203,19 +188,17 @@ export interface TreeRegion {
  * Locate the metaprompt tree's line bounds inside TEXT and split it into the
  * prose BEFORE the tree, the TREE block, and the prose AFTER it. This lets a
  * tree survive stray prefix/postfix lines (or a stray fenced block) the model
- * emits around it despite the format: only the tree region renders as tree
- * lines, and the surrounding lines stay on the markdown path. Returns null
- * when TEXT carries no tree, i.e. fewer than two connector/root lines outside
- * any fence. Fence-aware: lines inside a ``` fence are never tree lines, so a
+ * emits around it despite the format: only the tree region is wrapped as tree
+ * lines, and the surrounding lines stay on the markdown path. Returns null when
+ * TEXT carries no tree, i.e. fewer than two connector/root lines outside any
+ * fence. Fence-aware: lines inside a ``` fence are never tree lines, so a
  * fenced tree is left for the markdown fence handler.
  */
 export function findTreeRegion(text: string): TreeRegion | null {
   const lines = text.split("\n");
   const n = lines.length;
-  // core[i]: a connector/root line outside any fence. cont[i]: a
-  // daemon-wrapped remainder of the branch above it. head[i]: the header.
+  // core[i]: a connector/root line outside any fence. head[i]: the header.
   const core: boolean[] = new Array<boolean>(n).fill(false);
-  const cont: boolean[] = new Array<boolean>(n).fill(false);
   const head: boolean[] = new Array<boolean>(n).fill(false);
   let inFence = false;
   for (let i = 0; i < n; i++) {
@@ -226,7 +209,6 @@ export function findTreeRegion(text: string): TreeRegion | null {
     }
     if (inFence) continue;
     if (isConnectorLine(line) || isEmojiRootLine(line)) core[i] = true;
-    else if (isContinuationLine(line)) cont[i] = true;
     else if (isHeaderLine(line)) head[i] = true;
   }
   // The first tree-core line anchors the region.
@@ -238,8 +220,7 @@ export function findTreeRegion(text: string): TreeRegion | null {
     }
   }
   if (start === -1) return null;
-  // Extend across interior blanks and across the daemon's own wrapped
-  // remainders; the first non-blank, non-core, non-continuation line (prose
+  // Extend across interior blanks; the first non-blank, non-core line (prose
   // or a fence) ends the region. `end` tracks the last line kept.
   let end = start;
   let coreCount = 0;
@@ -250,14 +231,6 @@ export function findTreeRegion(text: string): TreeRegion | null {
       continue;
     }
     if (lines[i].trim() === "") continue;
-    // A continuation belongs to the branch above it, so it stays in the
-    // region — including when it is the region's LAST line, which is what a
-    // wrapped `└──` last branch produces — but it is not core: it anchors
-    // nothing and never satisfies the two-core-lines minimum below.
-    if (cont[i]) {
-      end = i;
-      continue;
-    }
     break;
   }
   // A lone stray connector buried in prose is not a tree.
@@ -290,57 +263,709 @@ export function looksLikeIntendedTree(text: string): boolean {
   return false;
 }
 
-/** Split one tree line into its bullet PREFIX and its CONTENT text. */
-export function splitTreeLine(line: string): { prefix: string; content: string } {
-  const m = line.match(PREFIX_RE);
-  if (!m) return { prefix: "", content: line };
-  return { prefix: m[1], content: m[2] };
-}
+// ---------------------------------------------------------------------------
+// Rendered width (treefmt: StripTags / charWidth / textWidth / VisibleWidth)
+// ---------------------------------------------------------------------------
 
-/**
- * Character columns of PREFIX whose vertical rail must repaint on a
- * wrapped branch's continuation lines: every leading `│`, plus the
- * connector column when the connector is `├` (its rail continues down
- * to the next sibling). A `└` connector ENDS its rail, so it
- * contributes nothing — without this distinction a wrapped `├──`
- * branch visually severs from the sibling below it.
- *
- * Columns are ch offsets: every character preceding a rail char is a
- * space or `│`, single-width in the tree's monospace font.
- */
-export function railOffsets(prefix: string): number[] {
-  const cols: number[] = [];
-  for (let i = 0; i < prefix.length; i++) {
-    const ch = prefix[i];
-    if (ch === "│" || ch === "├") cols.push(i);
+const TAG_RE = /<[^>]*>/;
+const TAG_NAME_RE = /^<\/?\s*([A-Za-z][A-Za-z0-9]*)/;
+
+const VARIATION_SELECTOR_16 = "️";
+const ZERO_WIDTH_JOINER = "‍";
+
+const voidTags = new Set([
+  "br",
+  "hr",
+  "img",
+  "wbr",
+  "input",
+  "meta",
+  "link",
+]);
+
+// A code point that occupies no column of its own: a combining mark or a
+// format character (charWidth's Mn/Me/Cf test). The zero-width joiner is Cf and
+// so is covered here too.
+const ZERO_WIDTH_RE = /^(?:\p{Mn}|\p{Me}|\p{Cf})$/u;
+
+// East Asian Wide (W) and Fullwidth (F) ranges, the code points x/text/width
+// reports as two columns. Ambiguous (box drawing 2500–257F included) and
+// Narrow stay single-width, so the tree's own connectors count as one column
+// each. Emoji live in the astral pictographic ranges and count as two.
+const WIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x1100, 0x115f],
+  [0x231a, 0x231b],
+  [0x2329, 0x232a],
+  [0x23e9, 0x23ec],
+  [0x23f0, 0x23f0],
+  [0x23f3, 0x23f3],
+  [0x25fd, 0x25fe],
+  [0x2614, 0x2615],
+  [0x2648, 0x2653],
+  [0x267f, 0x267f],
+  [0x2693, 0x2693],
+  [0x26a1, 0x26a1],
+  [0x26aa, 0x26ab],
+  [0x26bd, 0x26be],
+  [0x26c4, 0x26c5],
+  [0x26ce, 0x26ce],
+  [0x26d4, 0x26d4],
+  [0x26ea, 0x26ea],
+  [0x26f2, 0x26f3],
+  [0x26f5, 0x26f5],
+  [0x26fa, 0x26fa],
+  [0x26fd, 0x26fd],
+  [0x2705, 0x2705],
+  [0x270a, 0x270b],
+  [0x2728, 0x2728],
+  [0x274c, 0x274c],
+  [0x274e, 0x274e],
+  [0x2753, 0x2755],
+  [0x2757, 0x2757],
+  [0x2795, 0x2797],
+  [0x27b0, 0x27b0],
+  [0x27bf, 0x27bf],
+  [0x2b1b, 0x2b1c],
+  [0x2b50, 0x2b50],
+  [0x2b55, 0x2b55],
+  [0x2e80, 0x303e],
+  [0x3041, 0x33ff],
+  [0x3400, 0x4dbf],
+  [0x4e00, 0x9fff],
+  [0xa000, 0xa4cf],
+  [0xa960, 0xa97f],
+  [0xac00, 0xd7a3],
+  [0xf900, 0xfaff],
+  [0xfe10, 0xfe19],
+  [0xfe30, 0xfe6f],
+  [0xff00, 0xff60],
+  [0xffe0, 0xffe6],
+  [0x1b000, 0x1b001],
+  [0x1f004, 0x1f004],
+  [0x1f0cf, 0x1f0cf],
+  [0x1f18e, 0x1f18e],
+  [0x1f191, 0x1f19a],
+  [0x1f200, 0x1f251],
+  [0x1f300, 0x1f64f],
+  [0x1f680, 0x1f6ff],
+  [0x1f900, 0x1f9ff],
+  [0x1fa70, 0x1faff],
+  [0x20000, 0x3fffd],
+];
+
+function isWideCodePoint(cp: number): boolean {
+  for (const [lo, hi] of WIDE_RANGES) {
+    if (cp < lo) return false;
+    if (cp <= hi) return true;
   }
-  return cols;
+  return false;
+}
+
+/** decode_entities: the HTML entities the width model must count as one char. */
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body: string) => {
+    if (body[0] === "#") {
+      const cp =
+        body[1] === "x" || body[1] === "X"
+          ? Number.parseInt(body.slice(2), 16)
+          : Number.parseInt(body.slice(1), 10);
+      if (!Number.isFinite(cp) || cp < 0 || cp > 0x10ffff) return whole;
+      try {
+        return String.fromCodePoint(cp);
+      } catch {
+        return whole;
+      }
+    }
+    const named = NAMED_ENTITIES[body];
+    return named ?? whole;
+  });
+}
+
+/** strip_tags: raw with HTML tags removed and entities decoded. */
+export function stripTags(raw: string): string {
+  return decodeEntities(raw.replace(new RegExp(TAG_RE.source, "g"), ""));
 }
 
 /**
- * Render TEXT as mp-line flex rows. INLINE post-processes the escaped
- * content span (markdown.ts's inline pass — injected rather than
- * imported so this module never depends back on markdown.ts); pass the
- * identity function for plain escaped text.
+ * char_width: the columns CHAR occupies. A character carrying the emoji
+ * variation selector renders as an emoji and takes two columns; the selector
+ * itself, combining marks and format characters take none.
+ */
+function charWidth(char: string, followedByVS16: boolean): number {
+  if (char === ZERO_WIDTH_JOINER || ZERO_WIDTH_RE.test(char)) return 0;
+  if (followedByVS16) return 2;
+  return isWideCodePoint(char.codePointAt(0) ?? 0) ? 2 : 1;
+}
+
+/** text_width: the rendered column width of already-decoded text. */
+function textWidth(text: string): number {
+  const chars = [...text];
+  let total = 0;
+  for (let i = 0; i < chars.length; i++) {
+    const next = i + 1 < chars.length ? chars[i + 1] : "";
+    total += charWidth(chars[i], next === VARIATION_SELECTOR_16);
+  }
+  return total;
+}
+
+/** visible_width: the rendered column width of RAW, which may contain markup. */
+export function visibleWidth(raw: string): number {
+  return textWidth(stripTags(raw));
+}
+
+// ---------------------------------------------------------------------------
+// Markup-aware tokenization (treefmt: Run / Subword / Atom / Tokenize)
+// ---------------------------------------------------------------------------
+
+interface Run {
+  raw: string;
+  isTag: boolean;
+}
+
+function runWidth(r: Run): number {
+  return r.isTag ? 0 : textWidth(decodeEntities(r.raw));
+}
+
+interface Subword {
+  raw: string;
+  width: number;
+  openAfter: string[];
+}
+
+interface Atom {
+  runs: Run[];
+}
+
+function atomRaw(a: Atom): string {
+  return a.runs.map((r) => r.raw).join("");
+}
+
+function atomWidth(a: Atom): number {
+  let total = 0;
+  for (const r of a.runs) total += runWidth(r);
+  return total;
+}
+
+/** tag_name: the lower-cased element name of TAG, or "". */
+function tagName(tag: string): string {
+  const m = TAG_NAME_RE.exec(tag);
+  return m ? m[1].toLowerCase() : "";
+}
+
+/** apply_tag: update STACK for the HTML tag, ignoring void and self-closing. */
+function applyTag(stack: string[], tag: string): void {
+  const m = TAG_NAME_RE.exec(tag);
+  if (!m) return;
+  const name = m[1].toLowerCase();
+  if (voidTags.has(name) || tag.endsWith("/>")) return;
+  if (tag.startsWith("</")) {
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (tagName(stack[i]) === name) {
+        stack.splice(i, 1);
+        return;
+      }
+    }
+    return;
+  }
+  stack.push(tag);
+}
+
+/** close_sequence: close every open element, innermost first. */
+function closeSequence(stack: string[]): string {
+  let out = "";
+  for (let i = stack.length - 1; i >= 0; i--) out += `</${tagName(stack[i])}>`;
+  return out;
+}
+
+/** open_sequence: reopen every open element in order. */
+function openSequence(stack: string[]): string {
+  return stack.join("");
+}
+
+/** str.isspace: every code point of S is white space, and S is not empty. */
+function isSpace(s: string): boolean {
+  return s !== "" && /^\s+$/u.test(s);
+}
+
+/**
+ * split_whitespace: alternating whitespace and non-whitespace segments, empties
+ * dropped (Python's re.split(r"(\s+)")).
+ */
+function splitWhitespace(text: string): string[] {
+  return text.match(/\s+|\S+/gu) ?? [];
+}
+
+/** parse_runs: split RAW into its markup and content runs. */
+function parseRuns(raw: string): Run[] {
+  const runs: Run[] = [];
+  const re = new RegExp(TAG_RE.source, "g");
+  let position = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    if (m.index > position) runs.push({ raw: raw.slice(position, m.index), isTag: false });
+    runs.push({ raw: m[0], isTag: true });
+    position = m.index + m[0].length;
+  }
+  if (position < raw.length) runs.push({ raw: raw.slice(position), isTag: false });
+  return runs;
+}
+
+/**
+ * Atom.subwords: split the atom into whitespace-delimited words, tracking the
+ * open tag stack. Used only as the fallback for an atom too wide to fit a line
+ * on its own; the tag stack lets each resulting line close and reopen whatever
+ * element the split lands inside.
+ */
+function atomSubwords(a: Atom): Subword[] {
+  const result: Subword[] = [];
+  const stack: string[] = [];
+  let pending = "";
+  let pendingWidth = 0;
+  const flush = (): void => {
+    if (pending !== "") {
+      result.push({ raw: pending, width: pendingWidth, openAfter: [...stack] });
+      pending = "";
+      pendingWidth = 0;
+    }
+  };
+  for (const r of a.runs) {
+    if (r.isTag) {
+      applyTag(stack, r.raw);
+      if (r.raw.startsWith("</") && pending === "" && result.length > 0) {
+        // A close tag separated from its text by whitespace still belongs to
+        // the word it closes, not to the word after it.
+        const last = result[result.length - 1];
+        result[result.length - 1] = { raw: last.raw + r.raw, width: last.width, openAfter: [...stack] };
+      } else {
+        pending += r.raw;
+      }
+      continue;
+    }
+    for (const segment of splitWhitespace(decodeEntities(r.raw))) {
+      if (isSpace(segment)) {
+        flush();
+      } else {
+        pending += segment;
+        pendingWidth += textWidth(segment);
+      }
+    }
+  }
+  flush();
+  return result;
+}
+
+/**
+ * tokenize: split branch text into the atoms a wrap may be placed between.
+ * Whitespace inside an inline element does not separate atoms, so an element
+ * stays whole; whitespace outside any element does.
+ */
+function tokenize(raw: string): Atom[] {
+  const atoms: Atom[] = [];
+  const stack: string[] = [];
+  let current: Atom = { runs: [] };
+  const flush = (): void => {
+    if (current.runs.length > 0) {
+      atoms.push(current);
+      current = { runs: [] };
+    }
+  };
+  for (const r of parseRuns(raw)) {
+    if (r.isTag) {
+      current.runs.push(r);
+      applyTag(stack, r.raw);
+      continue;
+    }
+    if (stack.length > 0) {
+      current.runs.push(r);
+      continue;
+    }
+    for (const segment of splitWhitespace(r.raw)) {
+      if (isSpace(segment)) flush();
+      else current.runs.push({ raw: segment, isTag: false });
+    }
+  }
+  flush();
+  return atoms;
+}
+
+// ---------------------------------------------------------------------------
+// Branch parsing (treefmt: Branch / parse_prefix / match_label / parse_branch)
+// ---------------------------------------------------------------------------
+
+const SEGMENT_WIDTH = 4;
+
+// segment_continuations: what must appear beneath each prefix segment on a
+// continuation line. A `├── ` connector means the branch has following
+// siblings, so the vertical rule continues past the wrap; a `└── ` connector
+// means it does not, so the column goes blank.
+const SEGMENT_CONTINUATIONS: Readonly<Record<string, string>> = {
+  "│   ": "│   ",
+  "|   ": "|   ",
+  "    ": "    ",
+  "├── ": "│   ",
+  "└── ": "    ",
+  "|-- ": "|   ",
+  "+-- ": "|   ",
+  "`-- ": "    ",
+};
+
+// connector_segments: the segments that terminate a prefix. A branch has
+// exactly one connector, and it is the last segment before the label.
+const CONNECTOR_SEGMENTS = new Set([
+  "├── ",
+  "└── ",
+  "|-- ",
+  "+-- ",
+  "`-- ",
+]);
+
+interface Branch {
+  prefix: string;
+  label: string;
+  body: string;
+}
+
+/** segments: cut PREFIX into its 4-code-point pieces. */
+function segments(prefix: string): string[] {
+  const cps = [...prefix];
+  const out: string[] = [];
+  for (let i = 0; i < cps.length; i += SEGMENT_WIDTH) {
+    out.push(cps.slice(i, i + SEGMENT_WIDTH).join(""));
+  }
+  return out;
+}
+
+/** Branch.continuation_prefix: the prefix a wrapped remainder carries. */
+function continuationPrefix(b: Branch): string {
+  let out = "";
+  for (const segment of segments(b.prefix)) out += SEGMENT_CONTINUATIONS[segment] ?? "";
+  return out;
+}
+
+/** Branch.text_column: the column at which the branch text starts. */
+function textColumn(b: Branch): number {
+  return visibleWidth(b.prefix) + visibleWidth(b.label);
+}
+
+/**
+ * Branch.continuation_indent: the full indent a wrapped remainder carries. The
+ * label's columns become padding, except that the first of them holds a
+ * vertical rule when the branch has children rendered beneath the wrap.
+ */
+function continuationIndent(b: Branch, hasChildren: boolean): string {
+  const labelWidth = visibleWidth(b.label);
+  const padding =
+    hasChildren && labelWidth > 0
+      ? "│" + " ".repeat(labelWidth - 1)
+      : " ".repeat(labelWidth);
+  return continuationPrefix(b) + padding;
+}
+
+/** Branch.is_parent_of: whether OTHER is a direct child of B. */
+function isParentOf(b: Branch, other: Branch): boolean {
+  const cont = continuationPrefix(b);
+  return (
+    other.prefix.startsWith(cont) &&
+    [...other.prefix].length === [...cont].length + SEGMENT_WIDTH
+  );
+}
+
+/** parse_prefix: split LINE into its tree prefix and the remainder after it. */
+function parsePrefix(line: string): { prefix: string; remainder: string } {
+  const cps = [...line];
+  let position = 0;
+  let collected = "";
+  for (;;) {
+    const segment = cps.slice(position, position + SEGMENT_WIDTH).join("");
+    if (!(segment in SEGMENT_CONTINUATIONS)) break;
+    collected += segment;
+    position += SEGMENT_WIDTH;
+    if (CONNECTOR_SEGMENTS.has(segment)) break;
+  }
+  return { prefix: collected, remainder: cps.slice(position).join("") };
+}
+
+const LABEL_RE = /^(\d+(?:\.\d+)*\.?\s+)/;
+
+/** match_label: LABEL_RE — the label (digits, dots, trailing whitespace). */
+function matchLabel(s: string): { label: string; end: number } | null {
+  const m = LABEL_RE.exec(s);
+  if (!m) return null;
+  return { label: m[1], end: m[1].length };
+}
+
+/** parse_branch: parse LINE as a branch head, or return null. */
+function parseBranch(line: string): Branch | null {
+  if (line.trim() === "") return null;
+  const { prefix, remainder } = parsePrefix(line);
+  const segs = segments(prefix);
+  const hasConnector = prefix !== "" && CONNECTOR_SEGMENTS.has(segs[segs.length - 1]);
+  const matched = matchLabel(remainder);
+  if (!matched) {
+    // A branch with no label is still a branch when it carries a connector.
+    if (!hasConnector) return null;
+    return { prefix, label: "", body: remainder.trim() };
+  }
+  return { prefix, label: matched.label, body: remainder.slice(matched.end).trim() };
+}
+
+/**
+ * parse_continuation: the (text column, text) of LINE if it can be a wrapped
+ * remainder. A continuation carries no connector and no label: it is vertical
+ * rules and blanks, then alignment padding, then text.
+ */
+function parseContinuation(line: string): { column: number; text: string } | null {
+  if (line.trim() === "") return null;
+  const { prefix, remainder } = parsePrefix(line);
+  if (prefix !== "") {
+    const segs = segments(prefix);
+    if (CONNECTOR_SEGMENTS.has(segs[segs.length - 1])) return null;
+  }
+  // The padding region may carry the branch's held-open child connector, so a
+  // leading vertical rule counts as padding rather than as text.
+  const stripped = remainder.replace(/^[ │|]+/, "");
+  const padding = [...remainder].length - [...stripped].length;
+  const text = stripped;
+  if (text === "") return null;
+  if (matchLabel(text)) return null;
+  return { column: visibleWidth(prefix) + padding, text: text.replace(/\s+$/u, "") };
+}
+
+// ---------------------------------------------------------------------------
+// Wrapping (treefmt: Overflow / Piece / to_pieces / pack / wrap_branch)
+// ---------------------------------------------------------------------------
+
+/** Overflow: a single branch whose prefix alone cannot fit the column limit. */
+export class TreeOverflowError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TreeOverflowError";
+  }
+}
+
+interface Piece {
+  raw: string;
+  width: number;
+  breakSuffix: string;
+  breakPrefix: string;
+}
+
+/** to_pieces: turn atoms into packer pieces, expanding any atom too wide. */
+function toPieces(atoms: Atom[], width: number): Piece[] {
+  const pieces: Piece[] = [];
+  for (const atom of atoms) {
+    if (atomWidth(atom) <= width) {
+      pieces.push({ raw: atomRaw(atom), width: atomWidth(atom), breakSuffix: "", breakPrefix: "" });
+      continue;
+    }
+    let stack: string[] = [];
+    for (const sw of atomSubwords(atom)) {
+      pieces.push({
+        raw: sw.raw,
+        width: sw.width,
+        breakSuffix: closeSequence(stack),
+        breakPrefix: openSequence(stack),
+      });
+      stack = sw.openAfter;
+    }
+  }
+  return pieces;
+}
+
+/**
+ * pack: greedily pack PIECES into lines of at most WIDTH rendered columns. It
+ * returns the packed lines plus every word that could not be made to fit, which
+ * the caller surfaces rather than silently truncating.
+ */
+function pack(pieces: Piece[], width: number): { lines: string[]; overflows: string[] } {
+  const lines: string[] = [];
+  const overflows: string[] = [];
+  let current = "";
+  let currentWidth = 0;
+  let placed = false;
+  for (const piece of pieces) {
+    if (placed && currentWidth + 1 + piece.width > width) {
+      lines.push(current + piece.breakSuffix);
+      current = piece.breakPrefix;
+      currentWidth = 0;
+      placed = false;
+    }
+    if (placed) {
+      current += " ";
+      currentWidth++;
+    } else if (piece.width > width) {
+      overflows.push(stripTags(piece.raw));
+    }
+    current += piece.raw;
+    currentWidth += piece.width;
+    placed = true;
+  }
+  if (placed) lines.push(current);
+  if (lines.length === 0) lines.push("");
+  return { lines, overflows };
+}
+
+/** One output line of a wrapped tree, split so inline markup applies to the
+ * body alone and the structural prefix is emitted verbatim. */
+export interface RenderLine {
+  /** Connectors + label (first line) or continuation indent (wrap lines);
+   * empty for a passed-through non-branch line. */
+  prefix: string;
+  /** The branch text on this line, or the whole line for a raw passthrough. */
+  body: string;
+  /** True for a non-branch line the wrapper passed through untouched. */
+  raw: boolean;
+}
+
+/** The exact text of one output line, matching the daemon formatter's output. */
+export function lineText(l: RenderLine): string {
+  return l.raw ? l.body : (l.prefix + l.body).replace(/\s+$/u, "");
+}
+
+/** wrap_branch: render BRANCH as one or more lines, none wider than WIDTH. */
+function wrapBranch(
+  branch: Branch,
+  width: number,
+  hasChildren: boolean,
+): { lines: RenderLine[]; overflows: string[] } {
+  const prefixWidth = textColumn(branch);
+  const field = width - prefixWidth;
+  if (field <= 0) {
+    throw new TreeOverflowError(
+      `branch prefix occupies ${prefixWidth} columns, leaving no room within ${width}: ${branch.prefix}${branch.label}`,
+    );
+  }
+  const packed = pack(toPieces(tokenize(branch.body), field), field);
+  const indent = continuationIndent(branch, hasChildren);
+  const lines: RenderLine[] = [{ prefix: branch.prefix + branch.label, body: packed.lines[0], raw: false }];
+  for (let i = 1; i < packed.lines.length; i++) {
+    lines.push({ prefix: indent, body: packed.lines[i], raw: false });
+  }
+  return { lines, overflows: packed.overflows };
+}
+
+// ---------------------------------------------------------------------------
+// Block formatting (treefmt: Entry / join_wrapped / format_block)
+// ---------------------------------------------------------------------------
+
+interface Entry {
+  branch: Branch | null;
+  raw: string;
+}
+
+/** join_wrapped: collapse already-wrapped branches back into one entry each. */
+function joinWrapped(lines: string[]): Entry[] {
+  const entries: Entry[] = [];
+  for (const line of lines) {
+    const branch = parseBranch(line);
+    if (branch) {
+      entries.push({ branch, raw: line });
+      continue;
+    }
+    const cont = parseContinuation(line);
+    const last = entries[entries.length - 1];
+    if (cont && last && last.branch) {
+      if (cont.column === textColumn(last.branch)) {
+        last.branch.body = (last.branch.body + " " + cont.text).trim();
+        continue;
+      }
+    }
+    entries.push({ branch: null, raw: line });
+  }
+  return entries;
+}
+
+/**
+ * format_block: wrap every branch in one block's lines. Throws
+ * TreeOverflowError when a branch's prefix alone exceeds WIDTH — the one
+ * condition the formatter refuses. Returns the rendered lines plus every word
+ * that could not be made to fit (served wider, never truncated).
+ */
+export function formatTree(lines: string[], width: number): { lines: RenderLine[]; overflows: string[] } {
+  const entries = joinWrapped(lines);
+  const out: RenderLine[] = [];
+  const overflows: string[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry.branch) {
+      out.push({ prefix: "", body: entry.raw, raw: true });
+      continue;
+    }
+    let hasChildren = false;
+    const next = entries[i + 1];
+    if (next && next.branch) hasChildren = isParentOf(entry.branch, next.branch);
+    const wrapped = wrapBranch(entry.branch, width, hasChildren);
+    out.push(...wrapped.lines);
+    overflows.push(...wrapped.overflows);
+  }
+  return { lines: out, overflows };
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+/** A callback the renderer surfaces a wrap issue through (the caller logs it). */
+export type TreeIssue = (message: string, context: Record<string, unknown>) => void;
+
+/**
+ * Render TEXT as wrapped tree lines at WIDTH columns. Each output line is an
+ * `.mp-line` div carrying its structural prefix verbatim and its branch body
+ * with INLINE markdown applied (markdown.ts's inline pass, injected rather than
+ * imported so this module never depends back on markdown.ts).
+ *
+ * When a branch's prefix alone exceeds WIDTH the wrapper refuses (the tree is
+ * too deep for the width); the issue is surfaced through ONISSUE and the tree is
+ * rendered unwrapped rather than not at all, so the reader still sees it.
  */
 export function renderTreeHtml(
   text: string,
   inline: (escaped: string) => string,
+  width: number,
+  onIssue?: TreeIssue,
 ): string {
-  return text
-    .split("\n")
-    .map((line) => {
-      if (line.trim() === "") return `<div class="mp-line mp-blank"></div>`;
-      const { prefix, content } = splitTreeLine(line);
-      // Rail hairlines: painted from the row's second visual line down
-      // (glyphs cover the first), centered in their ch cell. A row that
-      // never wraps gives them zero height — invisible.
-      const rails = railOffsets(prefix)
-        .map((col) => `<i class="mp-rail" style="left:${col + 0.5}ch"></i>`)
-        .join("");
-      return `<div class="mp-line"><span class="mp-prefix">${escapeHtml(
-        prefix,
-      )}${rails}</span><span class="mp-content">${inline(escapeHtml(content))}</span></div>`;
-    })
-    .join("");
+  const cols = width > 0 ? width : DEFAULT_TREE_COLS;
+  const sourceLines = text.split("\n");
+  let rendered: RenderLine[];
+  try {
+    const formatted = formatTree(sourceLines, cols);
+    rendered = formatted.lines;
+    if (onIssue && formatted.overflows.length > 0) {
+      onIssue("a metaprompt tree holds words wider than the column limit; served wider, never truncated", {
+        operation: "feed.cards.response.tree-overflow",
+        width: cols,
+        overflows: formatted.overflows.length,
+      });
+    }
+  } catch (err) {
+    if (!(err instanceof TreeOverflowError)) throw err;
+    if (onIssue) {
+      onIssue("a metaprompt tree could not be wrapped to the column limit and is rendered as it arrived", {
+        operation: "feed.cards.response.tree-unwrappable",
+        width: cols,
+        error: err.message,
+      });
+    }
+    rendered = sourceLines.map((line) => ({ prefix: "", body: line, raw: true }));
+  }
+  return rendered.map((l) => renderLine(l, inline)).join("");
+}
+
+function renderLine(l: RenderLine, inline: (escaped: string) => string): string {
+  if (l.raw && l.body.trim() === "") return `<div class="mp-line mp-blank"></div>`;
+  if (l.raw) {
+    return `<div class="mp-line"><span class="mp-content">${inline(escapeHtml(l.body))}</span></div>`;
+  }
+  return `<div class="mp-line"><span class="mp-prefix">${escapeHtml(
+    l.prefix,
+  )}</span><span class="mp-content">${inline(escapeHtml(l.body))}</span></div>`;
 }

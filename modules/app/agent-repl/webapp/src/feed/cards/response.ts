@@ -69,10 +69,15 @@ import { log } from "../../log.js";
 import { bubbleScroll } from "../bubble-scroll.js";
 import { formatAge } from "../../duration.js";
 import { renderMarkdown, inline } from "../../markdown.js";
-import { findTreeRegion, renderTreeHtml } from "../../metaprompt-tree.js";
+import {
+  DEFAULT_TREE_COLS,
+  findTreeRegion,
+  renderTreeHtml,
+  type TreeIssue,
+} from "../../metaprompt-tree.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
-import { tick } from "../ticking.js";
+import { onDiscard, tick } from "../ticking.js";
 import type { RowContext } from "./context.js";
 
 /** The attribute the shown length is carried on across a redraw. */
@@ -338,25 +343,106 @@ export function drawFeedResponseUsageStamp(
   return corner;
 }
 
+/** The webapp surfaces a wrap issue through the client logger. */
+const logTreeIssue: TreeIssue = (message, context) => {
+  log.debug(message, { operation: "feed.cards.response.tree", context });
+};
+
 /**
- * Markdown → HTML, with the metaprompt TLDR tree carved out.
+ * Markdown → HTML, with the metaprompt TLDR tree WRAPPED to COLS columns.
  *
- * A bare tree renders as hanging-indent tree lines rather than through the
- * markdown pipeline, which would shear its wrapped branches back to column 0.
- * Stray prose around the tree keeps the markdown path, so a model that wrapped
- * the tree in a sentence still reads correctly.
+ * The tree arrives unwrapped, one physical line per branch; the wrapper
+ * (metaprompt-tree.ts, a port of the daemon's treefmt) breaks every branch too
+ * wide for COLS onto continuation lines under its own text column, so the tree
+ * fills the bubble and re-flows when the bubble's width changes. Stray prose
+ * around the tree keeps the markdown path — which itself wraps a fenced tree to
+ * the same COLS — so a model that wrapped the tree in a sentence still reads
+ * correctly.
  */
-export function proseHtml(markdown: string): string {
+export function proseHtml(markdown: string, cols: number): string {
   const region = findTreeRegion(markdown);
-  if (region === null) return renderMarkdown(markdown);
-  const before = region.before.trim() === "" ? "" : renderMarkdown(region.before);
-  const after = region.after.trim() === "" ? "" : renderMarkdown(region.after);
-  return `${before}<div class="mp-tree">${renderTreeHtml(region.tree, inline)}</div>${after}`;
+  if (region === null) return renderMarkdown(markdown, cols);
+  const before = region.before.trim() === "" ? "" : renderMarkdown(region.before, cols);
+  const after = region.after.trim() === "" ? "" : renderMarkdown(region.after, cols);
+  return `${before}<div class="mp-tree">${renderTreeHtml(region.tree, inline, cols, logTreeIssue)}</div>${after}`;
 }
 
-/** Write the whole prose into the body, replacing whatever was there. */
+/**
+ * The live column limit the tree wraps to: the body's content-box width divided
+ * by one monospace column, measured in the body's own font so the count is the
+ * bubble's true width. A host that cannot lay out (a detached body, a test with
+ * no layout engine) yields no measurement and falls back to the default width.
+ */
+export function measureTreeCols(body: HTMLElement): number {
+  const doc = body.ownerDocument;
+  const view = doc?.defaultView;
+  if (view === null || view === undefined || typeof view.getComputedStyle !== "function") {
+    return DEFAULT_TREE_COLS;
+  }
+  const probe = doc.createElement("div");
+  probe.className = "mp-tree";
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0;";
+  probe.textContent = "0".repeat(100);
+  body.appendChild(probe);
+  const charPx = probe.getBoundingClientRect().width / 100;
+  probe.remove();
+  const style = view.getComputedStyle(body);
+  const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+  const contentPx = body.clientWidth - pad;
+  if (!(charPx > 0) || !(contentPx > 0)) return DEFAULT_TREE_COLS;
+  return Math.max(1, Math.floor(contentPx / charPx));
+}
+
+/**
+ * Re-run REPAINT whenever the body's width changes the column count. A
+ * `ResizeObserver` reports the box's new size before paint; the recompute is
+ * deferred to an animation frame so a burst of resizes coalesces, and it
+ * repaints only when the integer column count actually moved, so a height-only
+ * change (the prose growing) does no work. The observer is torn down with the
+ * bubble through `stopTicking` (see ticking.ts), so it never outlives the body
+ * it watches. A host with no `ResizeObserver` (a test) simply never re-wraps.
+ */
+function reflowOnResize(body: HTMLElement, repaint: (cols: number) => void, initialCols: number): void {
+  const view = body.ownerDocument?.defaultView;
+  if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return;
+  let lastCols = initialCols;
+  let scheduled = false;
+  const recompute = (): void => {
+    scheduled = false;
+    const cols = measureTreeCols(body);
+    if (cols === lastCols) return;
+    lastCols = cols;
+    repaint(cols);
+  };
+  const observer = new view.ResizeObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    const raf = view.requestAnimationFrame?.bind(view);
+    if (raf !== undefined) raf(recompute);
+    else recompute();
+  });
+  observer.observe(body);
+  onDiscard(body, () => observer.disconnect());
+}
+
+/**
+ * Write the whole settled prose into the body and keep it wrapped to the live
+ * width: paint once at the measured column count, then — ONLY when the prose
+ * actually drew a tree — re-wrap on every width change through the SAME path.
+ * Plain prose reflows on its own (CSS), so it takes no observer.
+ */
 function paintWhole(body: HTMLElement, markdown: string): void {
-  body.innerHTML = proseHtml(markdown);
+  const cols = measureTreeCols(body);
+  body.innerHTML = proseHtml(markdown, cols);
+  if (body.querySelector(".mp-tree") !== null) {
+    reflowOnResize(
+      body,
+      (next) => {
+        body.innerHTML = proseHtml(markdown, next);
+      },
+      cols,
+    );
+  }
 }
 
 /** Record the shown length, so the next draw of this row resumes from it. */
@@ -416,13 +502,34 @@ function animate(
   resumed: number,
   rc: RowContext,
 ): void {
+  // The arriving prose wraps through the SAME path as the settled whole, at the
+  // same live width, so nothing shrinks or re-wraps when the final lands.
+  let cols = measureTreeCols(body);
+  let lastShown = resumed;
+  // Wire the resize re-wrap once a tree has actually been drawn (a resize
+  // mid-stream re-wraps the slice already shown), and never for plain prose,
+  // which reflows on its own.
+  let reflowWired = false;
+  const wireReflow = (): void => {
+    if (reflowWired || body.querySelector(".mp-tree") === null) return;
+    reflowWired = true;
+    reflowOnResize(
+      body,
+      (next) => {
+        cols = next;
+        paint(lastShown);
+      },
+      cols,
+    );
+  };
   const paint = (shown: number): void => {
+    lastShown = shown;
     const prose = document.createElement("div");
-    prose.innerHTML = proseHtml(markdown.slice(0, shown));
+    prose.innerHTML = proseHtml(markdown.slice(0, shown), cols);
     body.replaceChildren(...prose.childNodes, arrivingIndicator());
     markRevealed(bubble, shown);
+    wireReflow();
   };
-
   const frame = globalThis.requestAnimationFrame?.bind(globalThis);
   if (frame === undefined) {
     log.debug("no animation frame host; drawing the arriving prose whole", {
