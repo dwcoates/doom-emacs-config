@@ -308,6 +308,53 @@ func (c *client) MainWorktree(ctx context.Context, dir string) (string, error) {
 	return "", err
 }
 
+// RepositoryOf probes which repository a directory is inside, answering that
+// repository's canonicalized main worktree.
+//
+// IT IS THE PROBE HALF of MainWorktree, and the two differ in ONE thing: what a
+// git that declines to answer means. MainWorktree is asked about a directory
+// the caller has already established is a worktree, so a refusal there is a
+// fault and is recorded as one. This is asked about a path a PERSON picked, so
+// "that is not in a repository" is the answer the question was asked to get,
+// and recording it at error would put a fault in the log every time somebody
+// picked the wrong file. Same reason BranchExists is a probe and ResolveRef is
+// not.
+//
+// The parse is MainWorktree's, for the same reason it is MainWorktree's: `git
+// worktree list --porcelain` lists the main worktree FIRST.
+func (c *client) RepositoryOf(ctx context.Context, dir string) (string, bool, error) {
+	const operation = "daemon.gitclient.repository_of"
+
+	in, err := c.runRaw(ctx, operation, dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", false, err
+	}
+	if in.exitCode != 0 {
+		c.log.Global().Debug(operation, "the path is inside no git repository", in.logContext())
+		return "", false, nil
+	}
+	for _, line := range strings.Split(in.stdout, "\n") {
+		path, ok := strings.CutPrefix(strings.TrimSpace(line), "worktree ")
+		if !ok {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			c.log.Global().Error(operation, "the main worktree could not be canonicalized", dlog.Context{
+				"dir": dir, "main_worktree": path, "cause": err.Error(),
+			})
+			return "", false, err
+		}
+		return filepath.Clean(resolved), true, nil
+	}
+	// A BARE REPOSITORY HAS NO MAIN WORKTREE, and to this probe's caller that
+	// is the same answer as no repository at all: there is no directory to
+	// record as the repository's. It is DEBUG rather than an error for the
+	// same reason the nonzero exit is.
+	c.log.Global().Debug(operation, "the repository has no main worktree", in.logContext())
+	return "", false, nil
+}
+
 // SameRepo reports whether two directories belong to one repository, by the
 // canonicalized common dir and by nothing else. A worktree and its parent
 // checkout are the SAME repository here, which is the answer the merge

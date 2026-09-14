@@ -125,6 +125,31 @@ func TestRepoSectionDrawsEvenWithNoRows(t *testing.T) {
 	}
 }
 
+// TestRepoSectionDrawsForARepositoryWithNoWorkspaceAtAll is the
+// just-registered repository: RegisterRepository mints a repository row on its
+// own, with nothing under it, and the section is the ONLY thing that says the
+// registration worked. It is a different case from the section whose workspaces
+// merged -- that one had rows once -- so it gets its own test.
+func TestRepoSectionDrawsForARepositoryWithNoWorkspaceAtAll(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry())
+
+	// Assert.
+	sections := latest(t, r).GetRepository().GetSections()
+	if len(sections) != 1 {
+		t.Fatalf("the repository view carried %d sections, want the registered repository's own", len(sections))
+	}
+	if got := sections[0].GetKey().GetRepository().GetId(); got != string(repo.ID) {
+		t.Fatalf("section key = %q, want the registered repository %q", got, repo.ID)
+	}
+	if rows := sections[0].GetRows().GetRows(); len(rows) != 0 {
+		t.Fatalf("the section drew %d rows, want none", len(rows))
+	}
+}
+
 func TestRecentlyMergedHoistsOutOfTheRepositoryGrouping(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)

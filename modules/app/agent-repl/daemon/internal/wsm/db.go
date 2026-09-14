@@ -36,6 +36,12 @@ type DB interface {
 	WorkspaceByDir(ctx context.Context, dir string) (Workspace, error)
 	// ListWorkspaces loads every workspace, all-or-nothing.
 	ListWorkspaces(ctx context.Context) ([]Workspace, error)
+	// RegisterRepository records a repository ON ITS OWN, with no workspace,
+	// idempotent by normalized main-worktree dir. It mints the RepoID on first
+	// sight; the bool reports whether the record was created. It is the same
+	// mint RegisterWorkspace performs through ensureRepo, reachable without a
+	// workspace to hang it on.
+	RegisterRepository(ctx context.Context, dir, defaultBranch string) (Repository, bool, error)
 	// ListRepositories loads every repository, all-or-nothing.
 	ListRepositories(ctx context.Context) ([]Repository, error)
 	// SetClosed records whether a workspace's editor state is torn down.
