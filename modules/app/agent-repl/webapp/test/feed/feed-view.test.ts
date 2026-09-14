@@ -20,10 +20,14 @@ import {
   type FeedController,
 } from "../../src/feed/feed-view.js";
 import { defaultBubbleBody, type RowContext } from "../../src/feed/renderers.js";
+import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import {
   agentPromptRow,
+  countingTicker,
   feedId,
   harness,
+  toolCallRow,
+  type CountingTicker,
   mergeRow,
   mergeTabRow,
   page,
@@ -1076,5 +1080,92 @@ describe("createFeedController: the walk's refusal does not accumulate", () => {
     await settle();
     // Assert: one refusal stands, not two.
     expect(host.querySelectorAll(".refusal")).toHaveLength(1);
+  });
+});
+
+describe("createFeedController: a card's clocks stop when its unit settles", () => {
+  /** A fixture drawing REAL tool-call cards on a ticker the test can count. */
+  function ticking(): Fixture & { ticker: CountingTicker } {
+    const ticker = countingTicker();
+    const f = fixture(harness({ ticker }), {}, { renderers: { simpleToolCall: drawFeedSimpleToolCall } });
+    return { ...f, ticker };
+  }
+
+  it("leaves nothing subscribed once the call has returned", () => {
+    // Arrange: a running call, holding its quiet-for clock.
+    const { controller, ticker } = ticking();
+    controller.applyPage(page([toolCallRow("t", "running")]), "replace");
+    expect(ticker.live()).toBe(1);
+    // Act: the terminal frame for the same row.
+    controller.upsert(toolCallRow("t", "returned"));
+    // Assert.
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("does not leak the previous subscription when a running row is re-pushed", () => {
+    // Arrange.
+    const { controller, ticker } = ticking();
+    controller.applyPage(page([toolCallRow("t", "running")]), "replace");
+    // Act: three more live frames of the same row.
+    for (let i = 0; i < 3; i += 1) controller.upsert(toolCallRow("t", "running"));
+    // Assert: one card, one clock — not one per push.
+    expect(ticker.live()).toBe(1);
+  });
+
+  it("stops every remaining clock in a turn when that turn's end lands", () => {
+    // Arrange: a call still drawn as running when its turn finishes.
+    const { controller, ticker } = ticking();
+    controller.applyPage(page([toolCallRow("t", "running", { turn: "turn-1" })]), "replace");
+    expect(ticker.live()).toBe(1);
+    // Act.
+    controller.upsert(turnEndedRow("e", "turn-1"));
+    // Assert.
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("freezes the reading the backstop stopped on, rather than blanking it", () => {
+    // Arrange.
+    vi.setSystemTime(10_000);
+    const { controller, host, ticker } = ticking();
+    controller.applyPage(
+      page([toolCallRow("t", "running", { turn: "turn-1", beatAtMs: 7000n })]),
+      "replace",
+    );
+    // Act.
+    controller.upsert(turnEndedRow("e", "turn-1"));
+    vi.advanceTimersByTime(60_000);
+    // Assert: the last reading stands, and no clock is running behind it.
+    expect(host.querySelector(".tool-quiet")?.textContent).toBe("quiet for 3s");
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("leaves another turn's clocks running, because only the ended turn ended", () => {
+    // Arrange: two running calls, in two different turns.
+    const { controller, ticker } = ticking();
+    controller.applyPage(
+      page([
+        toolCallRow("t1", "running", { turn: "turn-1" }),
+        toolCallRow("t2", "running", { turn: "turn-2" }),
+      ]),
+      "replace",
+    );
+    expect(ticker.live()).toBe(2);
+    // Act: only turn-1 ends.
+    controller.upsert(turnEndedRow("e", "turn-1"));
+    // Assert: turn-2's call is still counting.
+    expect(ticker.live()).toBe(1);
+  });
+
+  it("leaves a turnless row's clocks running, since no turn ended under it", () => {
+    // Arrange.
+    const { controller, ticker } = ticking();
+    controller.applyPage(
+      page([toolCallRow("t1", "running"), toolCallRow("t2", "running", { turn: "turn-1" })]),
+      "replace",
+    );
+    // Act.
+    controller.upsert(turnEndedRow("e", "turn-1"));
+    // Assert: the row that names no turn is untouched.
+    expect(ticker.live()).toBe(1);
   });
 });

@@ -48,22 +48,52 @@ export function tick(el: Element, ticker: Ticker, fn: (nowMs: number) => void): 
 }
 
 /**
- * Drop every clock subscription EL and its descendants hold.
+ * Drop every clock subscription EL and its descendants hold, and say HOW MANY
+ * elements actually held one.
  *
  * Called by whoever is discarding the DOM — the row controller replacing a
  * row's body, a bubble tearing down its sub-feed — so a renderer never has to
- * be handed a disposer to return.
+ * be handed a disposer to return. The COUNT is what lets a backstop say
+ * whether it stopped anything, rather than logging on every sweep.
  */
-export function stopTicking(el: Element): void {
-  release(el);
-  for (const descendant of el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)) release(descendant);
+export function stopTicking(el: Element): number {
+  let stopped = release(el);
+  for (const descendant of el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)) {
+    stopped += release(descendant);
+  }
+  return stopped;
 }
 
-/** One element's subscriptions, dropped and forgotten. */
-function release(el: Element): void {
+/**
+ * Put NEXT in HOST's place of children, stopping every child being DROPPED.
+ *
+ * THE ONE REPLACE HELPER. A bare `replaceChildren` detaches whatever it is
+ * throwing away without unsubscribing it, and a detached element that still
+ * holds a subscription ticks against a node nobody can see for as long as the
+ * page lives. Every site that replaces a host's children with a set drawn from
+ * live elements goes through here, so the stop cannot be forgotten at one of
+ * them. An element that appears in NEXT is being MOVED, not discarded, and
+ * keeps its subscriptions.
+ *
+ * Returns how many dropped elements were still ticking.
+ */
+export function replaceTicking(host: Element, next: readonly Node[] = []): number {
+  const kept = new Set<Node>(next);
+  let stopped = 0;
+  for (const child of [...host.children]) {
+    if (kept.has(child)) continue;
+    stopped += stopTicking(child);
+  }
+  host.replaceChildren(...next);
+  return stopped;
+}
+
+/** One element's subscriptions, dropped and forgotten. 1 if it held any. */
+function release(el: Element): number {
   const held = subscriptions.get(el);
-  if (held === undefined) return;
+  if (held === undefined) return 0;
   for (const unsubscribe of held) unsubscribe();
   subscriptions.delete(el);
   el.removeAttribute(TICKING_ATTRIBUTE);
+  return 1;
 }
