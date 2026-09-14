@@ -88,6 +88,7 @@
 (declare-function agent-repl-rpc-open-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-merge-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-restart-workspace "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-interrupt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-create-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
@@ -509,6 +510,73 @@ graceful restart is scheduled rather than immediate and takes none."
        ;; taken for a bounce that will never happen.
        (when force (agent-repl-host-release-restart-hold ws "restart-refused"))
        nil))))
+
+(defun agent-repl-verb-interrupt (ws &optional confirm-agents)
+  "Interrupt the running TURN of WS through the `Interrupt' verb.
+This is the clean turn stop the footer's stop button drives, NOT a forced
+restart: the session is not bounced and the agent is not resumed, only the
+in-flight vendor query is ended.
+
+THE OUTCOME IS THE ARM, and every arm reaches the user.  `interrupted_turn'
+says the turn was stopped; `nothing_running' is a SUCCESS arm, not a
+failure -- the daemon found the session already quiet -- so it is a calm
+message rather than an error.  `no_session' (the workspace never had a
+session) is a daemon refusal reported through the generic path, likewise as
+a message and never a raised error, so an idle workspace is a no-op with
+feedback either way.
+
+CONFIRM-AGENTS answers the `confirm_required' challenge: a turn stop while
+detached agents are live is refused once, naming the count, and re-sent
+with this set to also end them.  The challenge is surfaced to the user as a
+yes/no question here rather than swallowed -- declining leaves the turn
+running and says so.  Every other refusal (and the transport failure) is
+surfaced loudly by the shared dispatcher."
+  (let ((ref (agent-repl-verbs--ref ws)))
+    (agent-repl-verbs--send
+     #'agent-repl-rpc-interrupt (agent-repl-verbs--conn ws)
+     (list :workspace ref
+           :target (list :arm :turn :value nil)
+           :confirm-agents (and confirm-agents t))
+     :ws ws :op "interrupt"
+     :on-success
+     (lambda (value)
+       (pcase (plist-get value :arm)
+         (:interrupted-turn
+          (agent-repl--info ws "elisp.verbs.interrupt-stopped ws=%s" ws)
+          (message "agent-repl: turn stopped"))
+         (:nothing-running
+          (agent-repl--info ws "elisp.verbs.interrupt-nothing-running ws=%s" ws)
+          (message "agent-repl: nothing to interrupt"))
+         (:interrupted-detached
+          ;; A turn stop confirmed with live agents also ends them; the
+          ;; daemon may answer with the fan-wide count rather than the bare
+          ;; turn arm, so the count is stated when it comes.
+          (let ((count (plist-get (plist-get value :value) :count)))
+            (agent-repl--info ws "elisp.verbs.interrupt-detached ws=%s count=%S" ws count)
+            (message "agent-repl: turn stopped, %s agent%s also ended"
+                     (or count 0) (if (eql count 1) "" "s"))))
+         (arm
+          (agent-repl--error ws "elisp.verbs.interrupt-unknown-outcome ws=%s arm=%S" ws arm)
+          (message "agent-repl: the interrupt answer could not be read"))))
+     :on-error
+     (lambda (value)
+       ;; `confirm_required' is the ONE arm this verb claims: it is a
+       ;; CHALLENGE, not a dead end.  The user is asked whether to also stop
+       ;; the live agents and, on yes, the identical request is re-sent with
+       ;; `confirm_agents' set.  Declining is a decision, not a failure, so
+       ;; it is a message rather than a refusal.  Every other arm is left
+       ;; unclaimed (nil) and reported by the generic refusal path.
+       (let ((refusal (agent-repl-verbs--refusal-arm value)))
+         (when (eq (plist-get refusal :arm) :confirm-required)
+           (let ((count (plist-get (plist-get refusal :value) :live-agent-count)))
+             (agent-repl--warn ws "elisp.verbs.interrupt-confirm-required ws=%s count=%S" ws count)
+             (if (yes-or-no-p
+                  (format "Also stop %s live agent%s the turn started? "
+                          (or count 0) (if (eql count 1) "" "s")))
+                 (agent-repl-verb-interrupt ws t)
+               (agent-repl--info ws "elisp.verbs.interrupt-confirm-declined ws=%s" ws)
+               (message "agent-repl: turn left running")))
+           t))))))
 
 (defun agent-repl-verb-set-priority (ws priority)
   "Set WS's PRIORITY, or CLEAR it when PRIORITY is nil.
@@ -992,6 +1060,16 @@ A prefix argument makes it a FORCED restart: the live turn and every
 background task are interrupted, and the agent is not resumed."
   (interactive "P")
   (agent-repl-verb-restart (agent-repl-verbs--target-ws ws "Restart workspace: ") (and force t)))
+
+(defun agent-repl-interrupt-turn (&optional ws)
+  "Interrupt the running turn of the current workspace (`C-c C-k').
+The clean turn stop the footer's stop button drives: the in-flight vendor
+query is ended, the session is left standing and the agent is not resumed.
+When there is no turn in flight the daemon answers `nothing_running' and
+this is a message, not an error; when the stop would also end live detached
+agents the user is asked first."
+  (interactive)
+  (agent-repl-verb-interrupt (agent-repl-verbs--target-ws ws "Interrupt turn in workspace: ")))
 
 ;;;; ---- Priority ---------------------------------------------------------
 
