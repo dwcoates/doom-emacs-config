@@ -908,16 +908,16 @@ Returns the submission's idempotency key, or nil when nothing was sent."
     (unless ws
       (agent-repl--fatal '(:agent-repl-central "the record reports that no workspace exists") "elisp.input.no-workspace origin=%S prompt-supplied=%s"
                          origin (not (null prompt))))
-    (agent-repl--log ws "elisp.input.send ws=%s origin=%S force-metaprompt=%s from-buffer=%s"
-                     ws origin force-metaprompt (null prompt))
+    (agent-repl--info ws "elisp.input.send ws=%s origin=%S force-metaprompt=%s from-buffer=%s"
+                      ws origin force-metaprompt (null prompt))
     (agent-repl--input-check-gate ws)
     (let* ((raw (or prompt (agent-repl--read-input-buffer ws) ""))
            (attachments (agent-repl-input-attachments ws))
            (empty-p (and (string-empty-p (string-trim raw)) (null attachments))))
       (if empty-p
           (progn
-            (agent-repl--log ws "elisp.input.send-empty ws=%s origin=%S -- nothing to send"
-                             ws origin)
+            (agent-repl--info ws "elisp.input.send-empty ws=%s origin=%S -- nothing to send"
+                              ws origin)
             nil)
         (let* ((text (agent-repl--prepare-input ws raw force-metaprompt))
                (said (agent-repl--input-said text attachments)))

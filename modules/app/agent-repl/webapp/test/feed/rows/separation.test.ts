@@ -12,6 +12,7 @@ import {
   drawFeedSessionSeparation,
 } from "../../../src/feed/rows/separation.js";
 import { harness, rowContext, userPromptRow } from "../harness.js";
+import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -341,5 +342,17 @@ describe("drawFeedSessionSeparation: arms this build has no case for", () => {
     expect((thrown as MalformedView).detail).toBe(
       "arm 'archived' is not one this build can draw",
     );
+  });
+});
+
+describe("drawFeedSessionSeparation: the record of the row", () => {
+  it("records the drawn row at info, a row being drawn exactly once", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawFeedSessionSeparation(separation({ case: "cleared", value: {} }), ctxFor());
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-separation");
+    expect(record.level.case).toBe("info");
   });
 });
