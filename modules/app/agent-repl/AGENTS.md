@@ -386,6 +386,29 @@ the filesystem to decide it.
 
 `docs/ONE-SHOT-POLICY.md` is the reference for a repository's authors.
 
+## A repository joins the roster on its own, from any path inside it
+
+`SPC j .` (`agent-repl-register-repository`) registers a REPOSITORY. It is not
+`SPC TAB C-n`, and the two are easy to confuse:
+
+| binding | command | rpc | what enters the roster |
+|---|---|---|---|
+| `SPC TAB C-n` | `agent-repl-add-project-workspace` ("Add project directory") | `RegisterWorkspace` | a WORKSPACE, whose repository row is minted as a side effect |
+| `SPC j .` | `agent-repl-register-repository` ("Register repository from file") | `RegisterRepository` | a REPOSITORY, with NO workspace under it |
+
+It exists because a repository had exactly one way in — that side effect — so
+`agent-repl-verbs--read-repository` (the static create's picker, `SPC TAB N`)
+could offer only repositories some workspace had already minted, and a checkout
+nobody had worked in yet could not be named at all.
+
+THE GESTURE IS PICKING A FILE, not naming a repository root: `read-file-name`
+defaults to the buffer's own file, and the daemon resolves the repository's
+main worktree from ANY path inside it. Registering one the registry already
+holds is SUCCESS and says so (`already_known`), never a refusal. The registered
+repository draws an EMPTY SECTION on the roster — a header with no rows — which
+is the only evidence the registration landed, so neither the daemon's roster
+resolver nor the webapp's rail may drop it.
+
 ## Implementers do not judge proto design
 
 An implementation agent lands a proto shape that is already settled, or it lands
