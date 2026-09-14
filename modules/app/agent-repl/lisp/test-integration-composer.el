@@ -1246,10 +1246,15 @@ the one answer this assertion must never be able to fabricate."
 ;; audit-2 #32
 (ert-deftest agent-repl-itest-composer-no-session-refusal-keeps-everything ()
   "A `no_session' refusal keeps the text, the attachments and the posthooks.
-`endpoint_submit_prompt.proto' declares nine refusal arms; input.el's `_'
-branch logs `elisp.input.unknown-error-arm' at ERROR and reports
-\"submission refused\".  Undelivered user intent may never be discarded,
-so the refusal must leave the composer exactly as the user left it."
+`no_session' is a workspace with no session at all, which the daemon
+brings up itself; input.el records it at WARN as
+`elisp.input.refused-no-session' and tells the user the daemon is
+starting one.  Undelivered user intent may never be discarded, so the
+refusal must leave the composer exactly as the user left it.
+
+It used to fall through input.el's `_' branch and log
+`elisp.input.unknown-error-arm' at ERROR (owner's report, 2026-09-14);
+the arm is HANDLED now, and the record this waits on says so."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((noSession . ())))))
@@ -1268,7 +1273,7 @@ so the refusal must leave the composer exactly as the user left it."
               (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
               (agent-repl-itest--await-call daemon "SubmitPrompt")
               (agent-repl-itest-composer--await-log
-               daemon "elisp.input.unknown-error-arm" "error")
+               daemon "elisp.input.refused-no-session" "warn")
               ;; Assert.
               (should (equal (with-current-buffer buf (buffer-string)) "run the tests"))
               (should (agent-repl-input-attachments agent-repl-itest-composer--ws))
@@ -2093,10 +2098,16 @@ recall as though it had been delivered."
   "The generic refusal `message' names the exact refusing ARM, not just \"refused\".
 input.el: `(message \"agent-repl: submission refused (%S)\" arm)' -- a
 message that dropped the arm would tell the user nothing about WHICH
-refusal happened."
+refusal happened.
+
+The arm scripted here must be one the composer has NO treatment for, so
+it genuinely reaches that branch.  It was `no_session', which is handled
+on its own terms now (owner's report, 2026-09-14); `unknown_workspace'
+takes its place and the subject of the test is unchanged."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((noSession . ())))))
+    (agent-repl-itest--script daemon "SubmitPrompt"
+                              '((error . ((unknownWorkspace . ())))))
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       (let ((messages nil))
@@ -2108,10 +2119,10 @@ refusal happened."
           (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
           (agent-repl-itest--await-call daemon "SubmitPrompt")
           (agent-repl-itest--wait-until
-           (lambda () (member "agent-repl: submission refused (:no-session)" messages))
+           (lambda () (member "agent-repl: submission refused (:unknown-workspace)" messages))
            nil "the arm-naming refusal message")
           ;; Assert: the EXACT message, naming the arm.
-          (should (member "agent-repl: submission refused (:no-session)" messages)))))))
+          (should (member "agent-repl: submission refused (:unknown-workspace)" messages)))))))
 
 ;; audit-3 #51 (RULED, fixed in parallel -- EXPECTED RED until that lands)
 (ert-deftest agent-repl-itest-composer-explicit-text-send-does-not-erase-the-unrelated-draft ()
