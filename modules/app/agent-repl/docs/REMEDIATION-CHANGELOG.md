@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- realtest 9: `TestRealtestSendAPrompt` authored -- the composer's send driven entirely by real keys (`SPC o v`, the prompt typed character by character, `RET`), the turn watched to its end from real log edges, and four edges item 9 names that the product does not write recorded as logging defects instead of faked (docs/REALTEST-PLAN.md item 9; authored, not yet run)
 - daemon shimclient: the daemon-wide stand-down latch is a `newClient` CONSTRUCTOR argument, so a client built on any path (spawn or adopt) carries it, and every exit, adopted-witness and redial record states both latches as `stand_down_asked` and `daemon_stand_down` (adopted exit ERROR "shim died" with `stand_down_asked: false`, daemon pid 33686, 2026-09-13T19:20:55.55)
 - sidecar vanish: a file that disappears with nothing outstanding -- its whole tree removed, its spool past `[exited with code N]`/`[killed]`, or its committed offset equal to the last size a poll saw -- is stated at INFO with `reason=ended`/`fully_read`, and the WARNING is kept for a vanish that could have taken bytes past the committed offset (gap scan 2026-09-13T18:58, `file-vanished` x2 + `lost-policy` x2)
 
