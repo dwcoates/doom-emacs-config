@@ -539,10 +539,12 @@ func TestTwoCompactionsDeliverOnlyTheNewestDividerAndItsSummary(t *testing.T) {
 }
 
 func TestAClearDeliversTheDividerAndTheTurnsAfterIt(t *testing.T) {
-	// Arrange: a clear discards what came before and leaves no summary.
+	// Arrange: a clear discards what came before and leaves no summary. turn-2 is
+	// the /clear directive itself (its prompt draws no bubble); its cut is keyed
+	// on that turn.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "prompt")
-	h.deliverPrompt("turn-2", "prompt")
+	h.deliverPrompt("turn-2", "/clear")
 	h.cutAt("entry-clear", clearedCut())
 	h.deliverPrompt("turn-3", "prompt")
 
@@ -550,7 +552,8 @@ func TestAClearDeliversTheDividerAndTheTurnsAfterIt(t *testing.T) {
 	page, _ := h.openPage(rootFeed(), "reader-1")
 
 	// Assert: the divider, then the later turn, and nothing else. The clear
-	// arrived while turn-2 was in flight, so its divider is keyed on that turn.
+	// arrived while turn-2 (the directive) was in flight, so its divider is keyed
+	// on that turn.
 	got := rowIDs(pageRows(t, page))
 	want := []string{h.clearDividerRowID("turn-2"), h.promptRowID("turn-3")}
 	if len(got) != len(want) {
