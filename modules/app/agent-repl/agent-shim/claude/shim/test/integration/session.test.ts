@@ -1668,6 +1668,52 @@ describe("the vendor refusing a CONTROL call", () => {
     expect(shim.child.exitCode).toBeNull();
   });
 
+  test("StartSession settles against a vendor that withholds its init", async () => {
+    // THE REAL VENDOR'S SHAPE (grounded 2026-09-13, claude 2.1.220 and
+    // 2.1.270): no `system:init` until a first user message reaches the child,
+    // while control requests are answered throughout. This is the whole reason
+    // the start settles on a control round-trip instead — and with the old
+    // contract this call sat out its bound and refused.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
+
+    const response = await shim.clients.h1.startSession(freshSession());
+
+    expect(response.result.case).toBe("success");
+  });
+
+  test("a start with no init still carries the catalog the round-trip answered", async () => {
+    // The round-trip's answer IS the catalog, so an opening that never saw an
+    // init is not a degraded one: it states the same models a normal start does.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
+
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    expect(started.modelCatalog.length).toBeGreaterThan(0);
+  });
+
+  test("the first turn brings the init, and runs as any other turn does", async () => {
+    // AND THE SESSION IS REALLY LIVE. The init the first turn carries lands on
+    // an already-started session, and the turn it rode in on serves normally.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    const prompt = turnStarted(
+      await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" })),
+    );
+
+    expect(prompt.agent?.value).toBe(started.vendorSessionId);
+  });
+
+  test("an unrecognized init timing REFUSES the start rather than doing nothing", async () => {
+    // A KNOB THAT IS SILENTLY IGNORED IS WORSE THAN NO KNOB: a suite that
+    // misspelled it would pass while asserting the default's behavior.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "eventually" } });
+
+    const response = await shim.clients.h1.startSession(freshSession());
+
+    expect(startSessionCause(response)).toBe("vendorStartFailed");
+  });
+
   test("a retried start serves an ordinary turn", async () => {
     // The retry is not merely accepted, it WORKS: the session it produced is
     // indistinguishable from one whose first start had succeeded.
