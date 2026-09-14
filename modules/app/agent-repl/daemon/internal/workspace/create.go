@@ -68,6 +68,14 @@ const (
 //  6. bring the session up, forking the parent's transcript first when asked;
 //  7. submit the initial prompt through the QUEUE, with origin
 //     WORKSPACE_CREATED, only after the session is up.
+// reportCreateStage relays one stage to the spec's progress reporter, if it
+// set one. A create with no reporter (the synchronous form) emits nothing.
+func reportCreateStage(spec CreateSpec, stage CreateStage) {
+	if spec.Progress != nil {
+		spec.Progress.Stage(stage)
+	}
+}
+
 func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
 	global := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "one_shot": spec.OneShot})
 
@@ -221,6 +229,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		"parent":   parentID(parent),
 	})
 
+	reportCreateStage(spec, CreateStageCreatingWorktree)
 	if err := v.deps.Git.CreateWorktree(ctx, repoDir, branch, baseRef, worktreeDir); err != nil {
 		global.Error(opCreate, "could not materialize the worktree", dlog.Context{
 			"branch": branch, "worktree_dir": worktreeDir, "cause": err.Error(),
@@ -367,6 +376,11 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 		log.Debug(opCreate, "named the branch after the minted workspace id", dlog.Context{"branch": branch})
 		return branch, nil
 	}
+	// A NAMING CALL IS ABOUT TO RUN — the slow, model-backed step. Reported
+	// before it starts so a watching client shows "deriving name" while it
+	// waits, not after. Reached only on this branch: a supplied name or an
+	// empty prompt never derives one, so neither reports the stage.
+	reportCreateStage(spec, CreateStageDerivingName)
 	slug, err := v.mintName(ctx, log, repoDir, spec.InitialPrompt)
 	if err != nil {
 		var failure *namingFailure
