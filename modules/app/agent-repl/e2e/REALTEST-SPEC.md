@@ -579,7 +579,7 @@ rule above. The edges that exist are `elisp.input.send` (INFO, the one body
 every production send site shares), the daemon's own `turns` row carrying the
 prompt, `daemon.promptqueue.deliver` (INFO), `shim.engine.turn` "opened a turn"
 (INFO), the same `turns` row's `closed_at`, and the webapp's
-`feed.draw-user-prompt` and `feed.final-answer-marked`.
+`feed.draw-user-prompt`, `feed.final-answer-marked` and `feed.draw-response`.
 
 FOUR OF THE FACTS THE PLAN'S ITEM NAMES HAVE NO EDGE BEHIND THEM. The realtest
 asserts what exists, says in its own manifest what it could not assert, and each
@@ -591,7 +591,23 @@ gap is recorded as a LOGGING DEFECT in docs/REALTEST-JUDGEMENT-CALLS.md
 | `daemon.promptqueue.submit` | the ordinary path writes it at DEBUG and the deployed daemon runs at the contract's INFO default | the daemon's durable `turns` row and `daemon.promptqueue.deliver`; the submit record is scanned for and REPORTED |
 | the footer's status through the turn | the footer is drawn in the webview from a resolution whose only account of itself is `daemon.footer.status_decision` at DEBUG; elisp cannot read the webview | the same status vocabulary on the TAB ARM, with the manifest saying the strip itself was not read |
 | the tab arm's transitions | `elisp.status.tab-state` is log-verbose, so the arm's history is nowhere | the arm is SAMPLED every 150ms through the turn; the settled arm is asserted and the working arms are reported, because a transient shorter than one interval would be a flake and not a finding |
-| the answer's text in the feed | no log carries a feed row's prose, and the store that does hold it is 790MB — a snapshot-per-read this layer's one read path would take in minutes | `feed.final-answer-marked` (the feed marked an answering row) plus a `feed.draw-text-block` whose `characters` equals the length of the scenario's known opening sentence |
+| the answer's text in the feed | no log carries a feed row's prose, and the store that does hold it is 790MB — a snapshot-per-read this layer's one read path would take in minutes | `feed.final-answer-marked` (the feed marked an answering row) plus a `feed.draw-response` whose `characters` is at least the length of the scenario's known opening sentence and whose `blocks` is at least one |
+
+**THE ANSWER'S HALF NAMED A RECORD NOTHING WROTE, AND FOUR SWEEPS PAID FOR IT.**
+It waited for a `feed.draw-text-block` of exactly 21 characters. That record
+belongs to the PROMPT block vocabulary (`webapp/src/feed/rows/blocks.ts`); an
+assistant response is drawn by the response renderer, which recorded nothing at
+all — so rt-run36..39 waited out the ceiling for a record no code path emits,
+while `feed.final-answer-marked` in the same runs reported `styled_bubble:
+true`, the mark finding and styling the answering bubble. The remedy was the
+missing record and not a looser assertion (the module's "an invisible action is
+a logging defect" rule): the webapp now writes `feed.draw-response` — INFO on a
+row's first draw and on its settled one, DEBUG on the intermediate re-pushes the
+daemon's prose fold produces, all carrying `characters` and `blocks`. The
+comparison is `>=` because the fold grows one bubble past the opening sentence,
+and the wait is sequenced after the mark WITHOUT a timestamp floor under it: a
+settled response drawn before the turn's terminal row is the healthy ordering,
+and a floor would wait out the ceiling for a draw that had already happened.
 
 The turn's phases ship UNBUDGETED, for the reason "Budgets, and why they ship
 unmeasured" gives: they are measured from those edges and reported at the site
