@@ -667,14 +667,19 @@ func TestRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 	// named because it is the exact contamination -- the summarizer's mode,
 	// and the value this read answered before the compaction stated the
 	// session's own mode on the last record it appends.
+	//
+	// THE SESSION'S OWN MODE IS `auto` (owner ruling 2026-09-14), which is what
+	// the shim now starts under when nothing states a mode. The guarantee is
+	// unchanged: the revived turn runs under THE SESSION'S posture, whatever it
+	// is, and never the summarizer's.
 	ended := AwaitTurnEnded(t, w, ws, revived).GetTurnEnded()
 	concluded := ended.GetConcluded()
 	if concluded == nil {
 		t.Fatalf("the revived turn's outcome = %v, want a Concluded terminal", ended)
 	}
 	markdown := tlResponseMarkdown(t, tlOpenRows(t, w, ws), concluded.GetAnswer())
-	if !strings.Contains(markdown, "[mode=default]") {
-		t.Fatalf("the revived turn concluded %q, want it to run under [mode=default]: a revival must "+
+	if !strings.Contains(markdown, "[mode=auto]") {
+		t.Fatalf("the revived turn concluded %q, want it to run under [mode=auto]: a revival must "+
 			"restore the session's own posture, and [mode=plan] would be the compaction summarizer's "+
 			"throwaway query leaking through the transcript", markdown)
 	}
