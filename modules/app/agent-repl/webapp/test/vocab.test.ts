@@ -93,7 +93,10 @@ describe("footer_status is the FooterStatus.status arm set, row for row", () => 
 describe("rosterStatusColor", () => {
   const cases: ReadonlyArray<[string, string]> = [
     ["init", "blue"],
-    ["vendorBlocked", "purple"],
+    // vendor_blocked is blue: an auth wall, a usage limit or a persistent
+    // vendor failure renders the agent unusable, which is what blue means,
+    // and it reads the same as the footer's blocked.
+    ["vendorBlocked", "blue"],
     ["thinking", "red"],
     ["idleAsync", "yellow"],
     ["ready", "green"],
@@ -114,6 +117,11 @@ describe("footerStatusColor", () => {
   it("paints merging purple, unlike the roster's none", () => {
     expect(footerStatusColor("merging")).toBe("purple");
     expect(rosterStatusColor("merging")).toBe("none");
+  });
+
+  it("paints blocked blue, the same as the roster's vendor_blocked", () => {
+    expect(footerStatusColor("blocked")).toBe("blue");
+    expect(rosterStatusColor("vendorBlocked")).toBe("blue");
   });
 
   it("refuses an arm the vocabulary does not carry", () => {
