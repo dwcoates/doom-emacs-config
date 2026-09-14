@@ -155,8 +155,14 @@ export const SPOOL_ROOT_ENV = "AGENT_REPL_FAKE_SPOOL_ROOT";
  * the whole process reads rather than a prompt.
  *
  * Recognized verbs: `start` (createFakeQuery itself throws), `start-once`,
- * `start-eof`, `start-error-result`, `set_model`, `set_permission_mode`.
- * Anything else is a refusal to start rather than a silently ignored knob.
+ * `start-eof`, `start-error-result`, `start-auth-error`, `set_model`,
+ * `set_permission_mode`. Anything else is a refusal to start rather than a
+ * silently ignored knob.
+ *
+ * `start-auth-error` is `start-error-result`'s AUTHENTICATION shape: the vendor
+ * refuses the opening with a credential rejection carrying `api_error_status`
+ * 401, which is what the shim's start-path auth diagnostic reads. It exists so
+ * the diagnostic record can be driven at start without a real credential.
  *
  * `start-eof` and `start-error-result` are the two ways a query that WAS
  * created still never opens a session — the child exits, or the vendor answers
@@ -172,6 +178,7 @@ const REFUSABLE = new Set([
   "start-once",
   "start-eof",
   "start-error-result",
+  "start-auth-error",
   "set_model",
   "set_permission_mode",
 ]);
@@ -1305,6 +1312,23 @@ export function createFakeQuery(
       result({
         subtype: "error_during_execution",
         errors: [`No conversation found with session ID: ${sessionUuid}`],
+      });
+      out.end();
+      return;
+    }
+    if (refuse.has("start-auth-error")) {
+      // THE VENDOR REFUSED THE OPENING ON A CREDENTIAL. This is
+      // `start-error-result`'s authentication shape: an error result with a
+      // 401 and the vendor's own credential sentence, which is what the shim's
+      // start-path auth diagnostic reads. No real credential is involved.
+      LOGGER.info(
+        { claude_session_id: sessionUuid },
+        "the mocked vendor was told to REFUSE the session's opening with a credential rejection",
+      );
+      result({
+        subtype: "error_during_execution",
+        errors: ["the credential was rejected — sign in again"],
+        apiErrorStatus: 401,
       });
       out.end();
       return;

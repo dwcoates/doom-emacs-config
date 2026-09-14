@@ -89,7 +89,12 @@ import {
   convertThinkingTokens,
   type BlockState,
 } from "./stream-events.js";
-import { convertResult, isUserStop, type VendorApiError } from "./terminals.js";
+import {
+  classifyVendorApiFailure,
+  convertResult,
+  isUserStop,
+  type VendorApiError,
+} from "./terminals.js";
 import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
 import { createCallRegistry, cutOpenCalls, type CallRegistry } from "./tool-calls.js";
 import { TOOL_CONVERTERS } from "./tools/registry.js";
@@ -455,6 +460,21 @@ function rememberVendorApiError(
   const heldWait = retryAfterMs ?? previous?.retryAfterMs;
   if (heldWait !== undefined) merged.retryAfterMs = heldWait;
   state.vendorApiError = merged;
+  // EARLY VISIBILITY FOR THE TWO CLASSES THAT MATTER. The full diagnostic record
+  // is the terminal's (it alone reaches the status, the human sentence, the
+  // config-dir and the model), but a credential rejection or a
+  // model/resource-not-found is surfaced HERE the moment the vendor first names
+  // the class, at INFO so it shows without verbose. Every other class stays at
+  // the low-visibility verbose line so ordinary rate-limit retries do not flood
+  // the log. Coverage is preserved either way: exactly one record is written.
+  const kind = classifyVendorApiFailure(undefined, merged.errorClass, "");
+  if (kind === "shim.vendor.auth_rejected" || kind === "shim.vendor.model_missing") {
+    LOGGER.info(
+      { operation: kind, vendor_error: merged.errorClass, retry_after_ms: merged.retryAfterMs },
+      "the vendor stated an authentication or resource error class; held for the turn's terminal",
+    );
+    return;
+  }
   LOGGER.logVerbose(
     { vendor_error: merged.errorClass, retry_after_ms: merged.retryAfterMs },
     "the vendor stated an API failure class; held for the turn's terminal",
