@@ -111,7 +111,10 @@ message FeedRow {
     // A detached subagent's bubble — the same drawn component as a sync
     // spawn, placed by this wrapper because it outlives its turn.
     FeedDetachedSubagent detached_subagent = 8;
-    // A detached shell's bubble.
+    // A detached shell's spool BODY row — the output as it now stands, drawn
+    // ONLY on the shell's own sub-feed (the bubble's body), never top-level.
+    // The command, clock and stop live on the head (shell_head); this row is
+    // spool-only, so drawing them here too would duplicate them.
     FeedDetachedShell detached_shell = 9;
     // The turn blocked on consent.
     FeedPermission permission = 10;
@@ -143,6 +146,16 @@ message FeedRow {
     // forwards), carrying the "engineer support for it" offer. Synthesized
     // and non-durable, like command_panel.
     FeedCommandRefused command_refused = 16;
+    // A detached shell bubble's HEAD — the command, clock and stop — carried
+    // on the PARENT feed. THE BUBBLE IS A FEED, exactly as a subagent's is:
+    // its spool is never carried here, the client opens it as a sub-feed
+    // addressed by THIS ROW's own FeedId (OpenFeed on expand → the spool BODY
+    // rows on the shell's sub-feed, WatchFeed to follow; cancel on collapse).
+    // Both a born-detached shell and a foreground Bash that detaches draw this
+    // one head kind — the sync-vs-detached distinction is placement, never a
+    // second drawing — so a foreground→detached transition retires the running
+    // tool card and redraws THIS bubble in its place.
+    FeedShell shell_head = 17;
   }
 }
 
@@ -1053,9 +1066,13 @@ message FeedDetachedSubagent {
   FeedSubagent subagent = 1;
 }
 
-// A detached shell's placement wrapper.
+// A detached shell's spool BODY row, on the shell's own sub-feed. The client
+// draws ONLY the spool from the FeedShell it carries: the command, clock and
+// stop live on the head (FeedRow.shell_head), so drawing them here too would
+// duplicate them. Snapshot semantics — the daemon caps the tail and replaces
+// it whole on every push.
 message FeedDetachedShell {
-  // The shell bubble: command head + spool body. Body at its own increment.
+  // The shell whose spool this body draws. Only its spool is read here.
   FeedShell shell = 1;
 }
 
@@ -1151,10 +1168,14 @@ message FeedSubagentLostFileVanished {}
 message FeedSubagentLostWentSilent {}
 message FeedSubagentLostSweptUp {}
 
-// A SHELL BUBBLE: a background command and its spool. NOT a feed — a shell
-// has no rows, only output — so the body rides the row itself: the spool's
-// TAIL, capped by the daemon and replaced whole on every push (snapshot
-// semantics; the client renders what arrives and appends nothing).
+// A SHELL BUBBLE, drawn in two places from this one message. As the HEAD
+// (FeedRow.shell_head) the client draws the command, the clock and — while
+// live — the stop, and IGNORES the spool. As the BODY (FeedRow.detached_shell,
+// on the shell's own sub-feed) the client draws ONLY the spool's TAIL, capped
+// by the daemon and replaced whole on every push (snapshot semantics; the
+// client renders what arrives and appends nothing). THE BUBBLE IS A FEED: the
+// head carries no spool, and the body streams lazily on the sub-feed the head's
+// FeedId addresses — a collapsed bubble streams nothing.
 message FeedShell {
   // The command line, drawn verbatim ("$" chrome is the client's).
   FeedShellCommand command = 1;
