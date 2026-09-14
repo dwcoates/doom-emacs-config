@@ -377,6 +377,22 @@ const LIVE_WORK_COMPONENT = "store-live-work";
 const HISTORY_READ_COMPONENT = "shim-store-reader";
 /** The shim's own keep-alive prompt: transient, recovered by the next beat. */
 const KEEPALIVE_COMPONENT = "shim-engine-keepalive";
+/**
+ * The keep-alive REWIND: its own name, recovered by the next rewind that lands.
+ *
+ * Not {@link KEEPALIVE_COMPONENT}: a beat succeeding says nothing about whether
+ * the vendor will resume at the anchor, and sharing the name would let one
+ * clear the other's fault.
+ */
+const KEEPALIVE_REWIND_COMPONENT = "shim-engine-keepalive-rewind";
+
+/**
+ * What the vendor says when it will not resume at the uuid it was handed.
+ *
+ * Grounded on the owner's two dead sessions of 2026-09-14: the child exits 1
+ * having printed `No message found with message.uuid of: <uuid>`.
+ */
+const REWIND_REFUSAL_PHRASE = "No message found with message.uuid";
 
 /** How often the account's rate-limit windows are sampled. */
 const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
@@ -509,6 +525,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * {@link VENDOR_STDERR_KEPT}.
    */
   let vendorStderrTail = "";
+  /**
+   * The rewind the last real prompt rode in on, until the vendor proves it took.
+   *
+   * A REWIND THAT IS REFUSED MUST NOT COST THE PROMPT. The refusal arrives
+   * AFTER the prompt was queued -- as an error result, or as the child simply
+   * exiting 1 -- so the prompt has to be held here to be delivered again on a
+   * plain resume. Cleared the moment the rewound query answers.
+   */
+  let rewindWatch:
+    | { readonly anchorUuid: string; readonly anchorTurnId: string; readonly said: conversationv1.UserSaid }
+    | undefined;
   /**
    * How the vendor child ended, once it has.
    *
@@ -1398,6 +1425,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   // -- the message loop -----------------------------------------------------
 
   async function onSdkMessage(message: SdkMessage): Promise<void> {
+    // BEFORE THE FOLD. A rewind the vendor refused reaches us as this message,
+    // and recovering here is what keeps the refusal out of the feed and the
+    // prompt alive. A recovered message is consumed: the query it arrived on is
+    // already closed and the prompt already re-delivered on its replacement.
+    if (await noteRewindOutcome(message)) return;
+    noteRewindBoundary(message);
     notePreInitMessage(message);
     noteIdentityFacts(message);
     settleStartOnBlockingHook(message);
@@ -1417,8 +1450,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (OWNED_ARMS.has(arm)) continue;
       pushes.push(entry.item.update);
     }
-    const uuid = (message as { uuid?: string }).uuid;
-    if (typeof uuid === "string" && uuid !== "") rewind.noteRecord(uuid, open?.keepalive === true);
+    // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
+    // rewind itself refuses everything that is not an assistant record of the
+    // open real turn (see engine/keepalive.ts).
+    rewind.noteRecord(
+      message,
+      open === undefined ? undefined : { turnId: open.id.value, keepalive: open.keepalive },
+    );
     if (output.turnEnded !== undefined) {
       // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
       // WHOLE length: the messages that follow the refused one are the same
@@ -1878,6 +1916,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         }
         if (isStaleLoop(active)) return;
         if (!standingDown) {
+          // A QUERY THAT DIED BECAUSE ITS REWIND ANCHOR WAS REFUSED IS NOT A
+          // LOST SESSION. The child exits 1 having said so on stderr; the
+          // recovery reopens plainly and re-delivers the prompt.
+          if (await recoverFromRewindRefusal("the vendor query ended without being asked to")) return;
           pushes.push(
             create(conversationv1.SessionUpdateSchema, {
               update: {
@@ -1895,6 +1937,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         }
       } catch (err) {
         if (isStaleLoop(active)) return;
+        if (await recoverFromRewindRefusal(err instanceof Error ? err.message : String(err))) return;
         pushes.push(
           create(conversationv1.SessionUpdateSchema, {
             update: {
@@ -1960,7 +2003,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   async function submit(said: conversationv1.UserSaid, keepalive: boolean): Promise<void> {
     const text = saidText(said);
-    if (!keepalive) await yieldObligation();
+    if (!keepalive) await yieldObligation(said);
     const queue = prompts;
     if (queue === undefined) throw new Error("shim session: no query is accepting prompts");
     cadence?.pause();
@@ -1977,20 +2020,188 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * closed first: two queries on one conversation are two writers on one
    * transcript.
    */
-  async function yieldObligation(): Promise<void> {
+  async function yieldObligation(said: conversationv1.UserSaid): Promise<void> {
     const owed = rewind.obligation();
     if (owed === undefined) return;
     const current = identity;
     if (current === undefined) return;
-    LOGGER.debug(
-      { resume_session_at: owed.resumeSessionAt, discarded_keepalive_turns: owed.discardedKeepaliveTurns },
-      "REWINDING the vendor context past the trailing keep-alive turns before delivering a real prompt",
+    // INFO, WITH THE ANCHOR'S PROVENANCE. This is the one step that can lose a
+    // real prompt, and when it goes wrong the only evidence anyone has is this
+    // line naming which turn's assistant record the shim chose to resume at.
+    LOGGER.info(
+      {
+        resume_session_at: owed.resumeSessionAt,
+        anchor_turn_id: owed.anchorTurnId,
+        discarded_keepalive_turns: owed.discardedKeepaliveTurns,
+      },
+      "REWINDING the vendor context past the trailing keep-alive turns before delivering a real prompt; the anchor is the assistant record of that turn",
     );
-    await replaceQuery({
-      binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
-      resumeSessionAt: owed.resumeSessionAt,
-    });
+    try {
+      await replaceQuery({
+        binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
+        resumeSessionAt: owed.resumeSessionAt,
+      });
+    } catch (err) {
+      // THE REWIND FAILED TO START. The prompt has not been queued yet, so the
+      // recovery is simply a plain resume; `submit` pushes onto whatever query
+      // this leaves behind.
+      await abandonRewind(owed, current, err instanceof Error ? err.message : String(err));
+      return;
+    }
     rewind.settled();
+    // WATCH IT LAND. The vendor may still refuse the anchor asynchronously, and
+    // the prompt this rewind was performed FOR has to survive that.
+    rewindWatch = {
+      anchorUuid: owed.resumeSessionAt,
+      anchorTurnId: owed.anchorTurnId,
+      said,
+    };
+  }
+
+  /**
+   * The rewind is off: forget the anchor, reopen plainly, and say so.
+   *
+   * Used by the synchronous failure (the replaced query never started) and by
+   * the asynchronous one ({@link recoverFromRewindRefusal}). It never throws:
+   * the caller is on a path whose whole purpose is that the session survives.
+   */
+  async function abandonRewind(
+    owed: { resumeSessionAt: string; anchorTurnId: string },
+    current: SessionIdentity,
+    detail: string,
+  ): Promise<boolean> {
+    LOGGER.error(
+      {
+        resume_session_at: owed.resumeSessionAt,
+        anchor_turn_id: owed.anchorTurnId,
+        cause: detail,
+        vendor_stderr: vendorStderrTail.trim(),
+      },
+      "the vendor REFUSED the keep-alive rewind's anchor; reopening the query WITHOUT a rewind so the prompt is delivered rather than lost",
+    );
+    rewind.clearAnchor("the vendor refused to resume at it");
+    rewind.settled();
+    try {
+      await replaceQuery({ binding: { kind: "resume", resumeSessionId: current.vendorSessionId } });
+    } catch (err) {
+      // The plain resume failed too. Nothing here can save the session, and
+      // pretending otherwise would hide a dead query -- the caller's own loss
+      // path takes it from here.
+      LOGGER.error(
+        { cause: err instanceof Error ? err.message : String(err) },
+        "the plain resume that was to replace the refused rewind ALSO failed; the session's own loss path owns this now",
+      );
+      return false;
+    }
+    pushes.fault(
+      sessionFault(
+        { kind: "keepaliveFailed" },
+        KEEPALIVE_REWIND_COMPONENT,
+        `the vendor refused to resume at ${owed.resumeSessionAt}: ${detail}`,
+      ),
+    );
+    return true;
+  }
+
+  /**
+   * What the vendor said, when it is about the anchor this rewind named.
+   *
+   * Either the uuid itself appears in the words, or the vendor's own sentence
+   * for the condition does. Both are checked because the sentence reaches us on
+   * stderr and the uuid reaches us in an error result's `errors`.
+   */
+  function refusalNamesAnchor(words: string, anchorUuid: string): boolean {
+    const evidence = `${words}\n${vendorStderrTail}`;
+    return evidence.includes(REWIND_REFUSAL_PHRASE) || evidence.includes(anchorUuid);
+  }
+
+  /** An error result's words, or absence when the message is not one. */
+  function resultErrorWords(message: SdkMessage): string | undefined {
+    if (message.type !== "result" || message.subtype === "success") return undefined;
+    const errors = (message as { errors?: unknown }).errors;
+    const listed = Array.isArray(errors)
+      ? errors.map((entry) => (typeof entry === "string" ? entry : JSON.stringify(entry))).join("; ")
+      : "";
+    return listed === "" ? message.subtype : `${message.subtype}: ${listed}`;
+  }
+
+  /**
+   * Did this message settle the rewind the last real prompt rode in on?
+   *
+   * Answers TRUE only when the message was CONSUMED by a recovery: the query it
+   * arrived on is closed, the prompt is re-delivered on its replacement, and
+   * nothing downstream should see the refusal.
+   */
+  async function noteRewindOutcome(message: SdkMessage): Promise<boolean> {
+    const watch = rewindWatch;
+    if (watch === undefined) return false;
+    if (message.type === "assistant" || (message.type === "result" && message.subtype === "success")) {
+      rewindWatch = undefined;
+      LOGGER.info(
+        { resume_session_at: watch.anchorUuid, anchor_turn_id: watch.anchorTurnId },
+        "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the real prompt",
+      );
+      pushes.resolveComponent(KEEPALIVE_REWIND_COMPONENT, 0);
+      return false;
+    }
+    const words = resultErrorWords(message);
+    if (words === undefined) return false;
+    return recoverFromRewindRefusal(words);
+  }
+
+  /**
+   * The vendor refused the anchor after the prompt was already queued.
+   *
+   * THE PROMPT IS NEVER LOST. The query is reopened on a plain resume and the
+   * same prompt delivered onto it; the session keeps its open turn, and the
+   * footer gets a fault saying what happened.
+   */
+  async function recoverFromRewindRefusal(words: string): Promise<boolean> {
+    const watch = rewindWatch;
+    if (watch === undefined) return false;
+    if (!refusalNamesAnchor(words, watch.anchorUuid)) return false;
+    const current = identity;
+    if (current === undefined) return false;
+    rewindWatch = undefined;
+    if (!(await abandonRewind({ resumeSessionAt: watch.anchorUuid, anchorTurnId: watch.anchorTurnId }, current, words))) {
+      return false;
+    }
+    const queue = prompts;
+    if (queue === undefined) {
+      LOGGER.error(
+        { resume_session_at: watch.anchorUuid, detail: "the plain resume produced no prompt queue" },
+        "the plain resume left no prompt queue, so the prompt the refused rewind was carrying could not be re-delivered",
+      );
+      return false;
+    }
+    queue.push({
+      type: "user",
+      message: { role: "user", content: saidText(watch.said) },
+      parent_tool_use_id: null,
+    });
+    LOGGER.info(
+      { resume_session_at: watch.anchorUuid, anchor_turn_id: watch.anchorTurnId },
+      "the prompt the refused rewind was carrying was RE-DELIVERED on a plain resume; it was not lost",
+    );
+    return true;
+  }
+
+  /**
+   * A boundary the anchor cannot be trusted across.
+   *
+   * The vendor's own compaction and its conversation reset both move the file
+   * the uuid names out from under it, and neither replaces the query -- so
+   * neither is caught by {@link startQuery}'s clear.
+   */
+  function noteRewindBoundary(message: SdkMessage): void {
+    if (message.type === "conversation_reset") {
+      rewind.clearAnchor("the vendor reset the conversation");
+      rewindWatch = undefined;
+      return;
+    }
+    if (message.type !== "system" || message.subtype !== "compact_boundary") return;
+    rewind.clearAnchor("the vendor compacted the conversation");
+    rewindWatch = undefined;
   }
 
   async function replaceQuery(options: {
@@ -2011,6 +2222,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     binding: QuerySpec["binding"],
     resumeSessionAt?: string,
   ): Promise<QueryLike> {
+    // EVERY QUERY BINDING THAT IS NOT ITSELF THE REWIND DROPS THE ANCHOR. A
+    // session's opening, a cold-gate answer, a rotation, a restart and a plain
+    // replacement all put the vendor somewhere the remembered uuid may not
+    // exist; carrying it across one is how a dead uuid reaches `resumeSessionAt`.
+    if (resumeSessionAt === undefined) {
+      rewind.clearAnchor("the query was replaced without a rewind");
+      rewindWatch = undefined;
+    }
     const queue = new PromptQueue();
     const controller = new AbortController();
     const created = await deps.createQuery({
@@ -2688,6 +2907,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           permissionMode: toVendorPermissionMode(permissionMode),
         }),
       );
+      // THE COMPACTION IS A BOUNDARY. Whatever the anchor named is on the far
+      // side of the summary now, so the next real prompt after keep-alives
+      // carries them rather than resuming at a uuid this cut may have orphaned.
+      rewind.clearAnchor("the shim compacted the conversation");
+      rewindWatch = undefined;
       writeContextCut(
         contextCutCompacted({
           summary,

@@ -30,8 +30,26 @@
  * exists because we cannot safely do. The rewind is an explicit, tested step:
  * {@link KeepaliveRewind.obligation} answers whether one is owed and names the
  * uuid to resume at.
+ *
+ * THE ANCHOR IS AN ASSISTANT RECORD OF A REAL TURN (ruled 2026-09-14). The SDK
+ * states the type of the uuid it will accept: "The message ID should be from
+ * `SDKAssistantMessage.uuid`". Every OTHER message the vendor emits carries a
+ * `uuid` too — `system:init` and `result` both declare one as a REQUIRED field —
+ * and those uuids name no transcript record, so a query opened at one is
+ * refused by the vendor with `No message found with message.uuid of: <uuid>`
+ * and the session dies with the prompt it was carrying. It killed two of the
+ * owner's real sessions on 2026-09-14. So {@link KeepaliveRewind.noteRecord}
+ * takes the MESSAGE, not a uuid, and refuses everything that is not an
+ * `assistant` message of a REAL (non-keep-alive) open turn — the filter cannot
+ * be got wrong by a caller, because the caller never extracts the uuid.
+ *
+ * AND THE ANCHOR DOES NOT CROSS A BOUNDARY. A uuid from before a compaction, a
+ * conversation reset, or a fresh query binding may no longer be resumable, so
+ * every such event {@link KeepaliveRewind.clearAnchor}s it and the next real
+ * prompt after keep-alives simply carries them instead of rewinding.
  */
 import { bindLog } from "../log.js";
+import type { SdkMessage } from "../sdk/types.js";
 
 const LOGGER = bindLog({ component: "shim-engine-keepalive", operation: "shim.engine.keepalive" });
 
@@ -58,11 +76,21 @@ export function isKeepalivePrompt(text: string): boolean {
 }
 
 /** What a rewind needs: the record to resume at, and why. */
-interface RewindObligation {
+export interface RewindObligation {
   /** The vendor record uuid the next query resumes THROUGH, inclusive. */
   readonly resumeSessionAt: string;
+  /** The turn whose assistant record that uuid is — the anchor's provenance. */
+  readonly anchorTurnId: string;
   /** How many keep-alive turns are being discarded. */
   readonly discardedKeepaliveTurns: number;
+}
+
+/** The turn a record arrived under, as the rewind needs to see it. */
+export interface RecordTurn {
+  /** The turn's id, kept so the anchor can say which turn it came from. */
+  readonly turnId: string;
+  /** True when the shim opened this turn for its own keep-alive. */
+  readonly keepalive: boolean;
 }
 
 /**
@@ -73,13 +101,50 @@ interface RewindObligation {
  * turns since, which is what makes the obligation reportable.
  */
 export class KeepaliveRewind {
-  private anchor: string | undefined;
+  private anchor: { readonly uuid: string; readonly turnId: string } | undefined;
   private keepaliveTurns = 0;
 
-  /** A record arrived. `keepalive` says which kind of turn produced it. */
-  noteRecord(uuid: string, keepalive: boolean): void {
-    if (keepalive) return;
-    this.anchor = uuid;
+  /**
+   * A message arrived under `turn`; it becomes the anchor only if it qualifies.
+   *
+   * IT TAKES THE MESSAGE, NOT A UUID, on purpose: the one rule that matters —
+   * only an `assistant` message of a real, open turn may anchor a rewind — is
+   * then enforced here rather than trusted to every call site.
+   */
+  noteRecord(message: SdkMessage, turn: RecordTurn | undefined): void {
+    // Only an assistant record. `system:init`, `result`, the user echo, stream
+    // events, hooks and control messages all carry uuids the vendor will not
+    // resume at.
+    if (message.type !== "assistant") return;
+    // Only a REAL turn, and only while one is open. A keep-alive's own answer
+    // is exactly the material the rewind exists to discard, and a record with
+    // no open turn belongs to no turn this shim asked for.
+    if (turn === undefined || turn.keepalive) return;
+    const uuid = (message as { uuid?: unknown }).uuid;
+    if (typeof uuid !== "string" || uuid === "") return;
+    this.anchor = { uuid, turnId: turn.turnId };
+  }
+
+  /**
+   * A boundary the anchor cannot be trusted across: forget it.
+   *
+   * INFO, not debug: the next real prompt after keep-alives will then carry
+   * them rather than rewind, and an operator reading the feed has to be able to
+   * see why. Silent when there was no anchor — nothing happened.
+   */
+  clearAnchor(reason: string): void {
+    const held = this.anchor;
+    if (held === undefined) return;
+    this.anchor = undefined;
+    LOGGER.info(
+      { reason, anchor_uuid: held.uuid, anchor_turn_id: held.turnId },
+      "the keep-alive rewind anchor is CLEARED: a uuid from before this boundary may not be resumable",
+    );
+  }
+
+  /** The anchor as it stands, for a caller that needs to name it. */
+  anchorUuid(): string | undefined {
+    return this.anchor?.uuid;
   }
 
   /** A keep-alive turn ended; the context now carries material a real prompt must not see. */
@@ -98,13 +163,21 @@ export class KeepaliveRewind {
   obligation(): RewindObligation | undefined {
     if (this.keepaliveTurns === 0) return undefined;
     if (this.anchor === undefined) {
-      LOGGER.debug(
+      // INFO: keep-alive material is about to be CARRIED into a real turn,
+      // which is the thing the rewind exists to prevent. It is the right
+      // answer -- there is nothing safe to resume at -- but it is never
+      // invisible.
+      LOGGER.info(
         { keepalive_turns: this.keepaliveTurns },
-        "keep-alive turns ran before any real record: no rewind anchor exists, so the next real prompt proceeds without a rewind",
+        "no rewind anchor exists (none taken yet, or cleared at a boundary): the next real prompt proceeds WITHOUT a rewind and carries the keep-alive turns",
       );
       return undefined;
     }
-    return { resumeSessionAt: this.anchor, discardedKeepaliveTurns: this.keepaliveTurns };
+    return {
+      resumeSessionAt: this.anchor.uuid,
+      anchorTurnId: this.anchor.turnId,
+      discardedKeepaliveTurns: this.keepaliveTurns,
+    };
   }
 
   /** The rewind happened (or was found unnecessary); the debt is cleared. */
