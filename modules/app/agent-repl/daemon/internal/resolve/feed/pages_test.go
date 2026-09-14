@@ -626,3 +626,68 @@ func TestACompactionThatFailedDoesNotBoundTheFeed(t *testing.T) {
 		t.Fatalf("page rows = %v, want the turn above the failed compaction", got)
 	}
 }
+
+// ---- THE DELIVERY BOUND GOVERNS THE PUSH, NOT JUST THE PAGE ----
+//
+// A separation that cut context withholds every row above it from a first
+// page. The same must hold for the LIVE push: a row first drawn after the
+// divider yet sorting above it — a history/file-plane row the sidecar forwards
+// late — must be kept off the wire, or a client that appends by arrival lands
+// it below the divider where nothing retracts it. That was the "/clear dumped
+// all previous history" bug.
+
+func TestALateHistoryRowAboveAClearDividerIsKeptOffThePush(t *testing.T) {
+	// Arrange: a reader following the live feed, then a /clear divider.
+	h := newHarness(t)
+	_, token := h.openPage(rootFeed(), "reader-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	rows := tail.Rows(ctx)
+	h.cut(clearedCut())
+
+	// Act: a history page replays a prompt (history plane) AFTER the divider,
+	// so it sorts above the divider; then a live prompt lands below it.
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-old", "from above the cut")))
+	h.deliverPrompt("turn-new", "below the cut")
+
+	// Assert: the tail's first two pushes are the divider and the live prompt,
+	// in that order — the withheld history row never reached the wire. Were it
+	// pushed, it would arrive between them (deliveries are FIFO per reader).
+	got := map[string]bool{}
+	got[(<-rows).GetId().GetValue()] = true
+	got[(<-rows).GetId().GetValue()] = true
+	if !got[h.promptRowID("turn-new")] {
+		t.Fatalf("the live prompt below the cut was not among the first two pushes: %v", got)
+	}
+	if got[h.promptRowID("turn-old")] {
+		t.Fatalf("a history row above the /clear divider was pushed to the reader")
+	}
+}
+
+func TestAWithheldRowStaysStoredForPaging(t *testing.T) {
+	// Arrange: a /clear divider, then a history row replayed above it.
+	h := newHarness(t)
+	h.cut(clearedCut())
+
+	// Act.
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-old", "from above the cut")))
+
+	// Assert: withholding from the push is recorded, and the row is still in
+	// the feed's order (stored, so a walk back to it still orders it).
+	if !h.hasRecord("info", "daemon.feed.push_withheld") {
+		t.Fatal("withholding a row above the bound was not recorded at INFO")
+	}
+	stored := false
+	for _, id := range rowIDs(h.rows(rootFeed())) {
+		if id == h.promptRowID("turn-old") {
+			stored = true
+		}
+	}
+	if !stored {
+		t.Fatal("the withheld row was dropped from the feed order; it must stay stored for paging")
+	}
+}
