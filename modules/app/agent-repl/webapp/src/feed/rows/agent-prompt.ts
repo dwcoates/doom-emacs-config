@@ -14,6 +14,7 @@
  */
 import { bubbleWaveStyle } from "../../breathing.js";
 import { log } from "../../log.js";
+import { bubbleScroll } from "../bubble-scroll.js";
 import { armName } from "../renderers.js";
 import { requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -57,8 +58,12 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
   bubble.className = "bubble user prompt-agent";
   bubble.setAttribute("style", bubbleWaveStyle());
   bubble.append(drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`)));
+  // The address line is the metadata strip and the body hangs in the shared
+  // scroll box beneath it, exactly as a person's own prompt does.
   bubble.append(
-    drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
+    bubbleScroll(
+      drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
+    ),
   );
   // AN UNSET DELIVERY DRAWS NOTHING. The oneof is absent on every recipient
   // copy, which is not a missing fact but the absence of one.

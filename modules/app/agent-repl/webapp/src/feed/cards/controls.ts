@@ -19,6 +19,7 @@
  * outlive the row it described.
  */
 import { log } from "../../log.js";
+import { bubbleScroll } from "../bubble-scroll.js";
 import type { RowContext } from "../renderers.js";
 
 /** The attribute a fold's toggle carries its state on. */
@@ -150,9 +151,12 @@ export function agenticBubble(opts: {
   bubble.className = `bubble assistant md ${AGENTIC_CLASS}`;
   bubble.setAttribute("data-state", opts.state);
 
+  // The body is the content wrapper; the bubble's own child is the scroll box
+  // that holds it, so the purple bubbles scroll exactly where the response
+  // bubble does (see bubble-scroll.ts).
   const body = document.createElement("div");
   body.className = "bubble-body";
-  bubble.append(body);
+  bubble.append(bubbleScroll(body));
 
   if (opts.heading !== undefined) {
     const heading = document.createElement("div");
