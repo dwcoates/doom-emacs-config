@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- shim store reader: every open goes on the read half's retry schedule, an unreachable attempt and an unasked watch ending inside the budget are INFO, and the ERROR is the schedule or the budget being spent (2 `shim.store.reader` records in the chess960 shim log after a deploy kickstarted the store under a live shim, gap scan 2026-09-13)
 - realtest 9: the focus act is written for the toggle `SPC o v` really is (read where the editor stands, press, assert the predicted landing, press again from the webview) and its selection probe reads `(window-buffer (selected-window))` instead of the transport's own temp buffer (rt-run34, rt9FocusTheComposer)
 - webapp topbar: the strip's row is `minmax(0, 1fr) fit-content(50%) minmax(0, 1fr)`, so both flank tracks are equal and floorless and the title sits at the strip's true center whatever the flanks hold (owner report, "the CENTER and ONLY the center should be in the center", 2026-09-13)
 - daemon dlog: a workspace logger resolves its sink at write time instead of pinning it, and a close releases the handle without poisoning, so a record emitted after `Evict` re-opens the remembered target and appends while a nuked directory takes the central fallback at DEBUG (21 `daemon.dlog.sink_failure` errors across 7 workspaces, realtest 9 first run, 2026-09-13)
