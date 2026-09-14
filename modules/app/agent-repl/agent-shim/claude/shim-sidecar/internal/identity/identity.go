@@ -37,6 +37,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -107,11 +110,31 @@ type Index struct {
 	// does: the defect is a property of the file, not of the pass that saw it.
 	warned map[string]bool
 
-	// THERE IS NO NEGATIVE CACHE, deliberately. "No record names this id" is the
-	// answer that goes stale the instant a rotation writes one, and remembering
-	// it is exactly how a mid-tail rotation stays mis-booked until a restart.
-	// A miss costs one readdir of `<state>/shim` per rescan, which is the price
-	// of never being wrong about a book.
+	// unlinked remembers the ids the fallback glob looked for and did not find
+	// SINCE THE LAST REFRESH, so a miss costs one glob per refresh rather than
+	// one per poll tick.
+	//
+	// THE MISS USED TO BE RE-CHECKED EVERY TIME, and that was a defensible
+	// reading of a cost that turned out to be wrong. "No record names this id"
+	// is indeed the answer a rotation invalidates, but the re-check is not
+	// per-rescan: `rekeyRotations` runs it FOR EVERY WATCHER ON EVERY POLL TICK.
+	// On the owner's machine that is ~2900 globs a second, ~1100 of them for
+	// cold runs whose ids will never resolve — a 10s `sample` of the live
+	// sidecar (pid 96084) found it holding 76-101% of a core in steady state,
+	// inside filepath.Glob under Resolve, with poll ticks running seconds long.
+	//
+	// THE CACHE IS BOUNDED BY THE ONE EVENT THAT CAN FALSIFY IT: a link file
+	// appearing. `RecheckLinks` asks the LINK DIRECTORIES whether that has
+	// happened — one readdir of `<state>/shim` and one stat per workspace, a
+	// constant per tick rather than one glob per watcher — and clears the map
+	// when it has; `Refresh` clears it outright alongside the other two. A
+	// positive answer the fallback glob finds is still cached exactly as before,
+	// and a miss is still re-globbed the moment anything writes a link.
+	unlinked map[string]bool
+	// linkStamp fingerprints the link directories as of the last RecheckLinks:
+	// each `<state>/shim/*/vendor-id` and its mtime, which moves when a file is
+	// created in it. An empty stamp means no check has run yet.
+	linkStamp string
 }
 
 // New builds an index over one state root. An empty stateDir builds an index
@@ -123,6 +146,7 @@ func New(stateDir string, log *logging.Bound) *Index {
 		log:       log,
 		links:     map[string]Resolution{},
 		originals: map[string]string{},
+		unlinked:  map[string]bool{},
 		warned:    map[string]bool{},
 	}
 }
@@ -142,6 +166,10 @@ func (i *Index) Refresh() {
 	// a link nobody stands behind any more.
 	i.links = map[string]Resolution{}
 	i.originals = map[string]string{}
+	// The negative cache goes with them, and for the same reason: an id nothing
+	// linked before this refresh may be linked by a record this refresh reads.
+	i.unlinked = map[string]bool{}
+	i.linkStamp = i.linkFingerprint()
 
 	for _, path := range i.glob(filepath.Join(i.stateDir, "shim", "*", "agent-id.json")) {
 		var record agentIDRecord
@@ -174,13 +202,18 @@ func (i *Index) Refresh() {
 
 // Resolve answers which book a transcript carrying vendorSessionID writes to.
 //
-// A MISS IS RE-CHECKED ON DISK BEFORE IT IS BELIEVED. The index is refreshed on
-// the rescan interval, and a rotation's link file can land between two
-// refreshes — in the exact window where the rotated transcript is first
-// discovered. A lookup of the known path (the shim's own "resolve any transcript
-// to its book with one stat instead of a scan") closes that window. A HIT is
-// remembered; a MISS is not, because "nothing links this id" is precisely the
-// answer a rotation invalidates.
+// A MISS IS RE-CHECKED ON DISK ONCE PER REFRESH. The index is refreshed at every
+// rescan and on every poll tick where the change probe found something, and a
+// rotation's link file can land between two refreshes — in the exact window
+// where the rotated transcript is first discovered. A lookup of the known path
+// (the shim's own "resolve any transcript to its book with one stat instead of a
+// scan") closes that window.
+//
+// IT IS AN IN-MEMORY LOOKUP ON THE POLL PATH, which is what `unlinked` buys.
+// `rekeyRotations` calls this for EVERY WATCHER ON EVERY TICK; re-globbing each
+// miss made a steady-state sidecar spend a whole core on filepath.Glob for ids
+// that were never going to resolve. A miss now costs one glob per refresh, and
+// the refresh is the only event that can make yesterday's miss wrong.
 func (i *Index) Resolve(vendorSessionID string) Resolution {
 	if vendorSessionID == "" || i.stateDir == "" {
 		return Resolution{Original: vendorSessionID, Source: SourceUnrecorded}
@@ -190,6 +223,9 @@ func (i *Index) Resolve(vendorSessionID string) Resolution {
 	}
 	if key, ok := i.originals[vendorSessionID]; ok {
 		return Resolution{Original: vendorSessionID, Source: SourceAgentIDRecord, WorkspaceKey: key}
+	}
+	if i.unlinked[vendorSessionID] {
+		return Resolution{Original: vendorSessionID, Source: SourceUnrecorded}
 	}
 	for _, path := range i.glob(filepath.Join(i.stateDir, "shim", "*", "vendor-id", vendorSessionID+".json")) {
 		record, ok := i.readLink(path)
@@ -204,7 +240,68 @@ func (i *Index) Resolve(vendorSessionID string) Resolution {
 		i.links[record.VendorSessionID] = resolution
 		return resolution
 	}
+	i.unlinked[vendorSessionID] = true
 	return Resolution{Original: vendorSessionID, Source: SourceUnrecorded}
+}
+
+// RecheckLinks drops the remembered misses IF the shim's link directories have
+// changed since the last check, and is the poll path's whole answer to "has a
+// rotation happened since I last looked".
+//
+// IT ASKS THE DIRECTORY, NOT THE FILES — the same shape the discovery change
+// probe already uses, and for the same reason. A link file lands INSIDE
+// `<state>/shim/<key>/vendor-id/`, so creating one moves that directory's mtime;
+// one readdir of `<state>/shim` plus one stat per workspace therefore answers
+// for every id at once. That is a constant per poll tick, against the ~2900
+// per-watcher globs a second that re-checking each miss cost.
+//
+// IT IS WHY THE NEGATIVE CACHE DOES NOT COST A GUARANTEE. "The link that appears
+// mid-tail moves the book on the very next poll" is a rule about a rotation
+// while a transcript is being read, and this is the event that rule turns on —
+// not the rescan cadence, which would have delayed it by a whole rescan.
+//
+// It is ALLOWED TO MISS, and Refresh is why that is safe: a write inside the
+// microseconds between the stat and the readdir, or a filesystem whose mtime
+// granularity swallowed one, is found by the next full refresh, exactly as the
+// discovery probe's misses are found by the next full scan.
+func (i *Index) RecheckLinks() {
+	if i.stateDir == "" {
+		return
+	}
+	stamp := i.linkFingerprint()
+	if stamp == i.linkStamp {
+		return
+	}
+	i.linkStamp = stamp
+	if len(i.unlinked) == 0 {
+		return
+	}
+	i.log.With(logging.Context{Operation: "identity-recheck", Repeat: logging.Repeat(len(i.unlinked))}).LogVerbose(
+		"the shim's link directories changed since the last check; %d remembered miss(es) are dropped so the next lookup asks the disk again", len(i.unlinked))
+	i.unlinked = map[string]bool{}
+}
+
+// linkFingerprint renders the link directories and their mtimes, in a stable
+// order, so two checks over an unchanged tree read identically.
+//
+// A DIRECTORY THAT CANNOT BE STAT'D IS RENDERED AS SUCH rather than skipped: a
+// workspace whose records became unreadable is a CHANGE, and skipping it would
+// make the tree look untouched.
+func (i *Index) linkFingerprint() string {
+	dirs := i.glob(filepath.Join(i.stateDir, "shim", "*"))
+	sort.Strings(dirs)
+	var out strings.Builder
+	for _, dir := range dirs {
+		linkDir := filepath.Join(dir, "vendor-id")
+		out.WriteString(linkDir)
+		if info, err := os.Stat(linkDir); err == nil {
+			out.WriteString("|" + strconv.FormatInt(info.ModTime().UnixNano(), 10))
+		} else {
+			out.WriteString("|absent")
+		}
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 // readLink reads and validates one vendor-session pointer file.
