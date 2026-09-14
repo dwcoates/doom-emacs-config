@@ -25,6 +25,13 @@ import (
 type tokenState struct {
 	// usage is the last usage seen for each unit that carried any.
 	usage map[string]*conversationv1.TokenUsage
+	// unitAgent files which agent produced each usage-carrying unit. It is the
+	// KEY to carrying a still-running DETACHED agent's spend across a turn
+	// boundary: a unit belongs to the turn that must reset it unless the agent
+	// that produced it is still live and detached, in which case reset keeps it
+	// (see reset). Keyed by unit, exactly like `usage`, so the two are dropped
+	// together.
+	unitAgent map[string]string
 	// responses files this turn's units under the API RESPONSE each arrived
 	// in, and is the verdict's denominator. THE RECONCILIATION IS PER API
 	// RESPONSE, NEVER PER UNIT: usage rides exactly one unit per API response,
@@ -54,20 +61,64 @@ type tokenState struct {
 func newTokenState() tokenState {
 	return tokenState{
 		usage:         map[string]*conversationv1.TokenUsage{},
-		responses:     apiresponses.New(),
+		unitAgent:     map[string]string{},
 		responseStart: map[string]time.Time{},
+		responses:     apiresponses.New(),
 	}
 }
 
-// reset clears the accounting for a new turn. The alarm is cleared here and
-// nowhere else: the contract keeps the glyph until the NEXT turn starts.
-func (t *tokenState) reset() { *t = newTokenState() }
+// reset clears the accounting for a new turn, EXCEPT the usage of units that a
+// still-live detached agent produced: those agents run in the background across
+// turn boundaries and their uncached input is real input the account is still
+// paying for, so wiping it at the next turn start is what made the strip's
+// figure fall back to the new turn alone and read as though the background work
+// cost nothing. `keep` is the set of agent ids that are live and detached RIGHT
+// NOW (the resolver derives it from the live agents chip); a unit whose agent
+// is in it carries forward, everything else — the concluded turn's own units,
+// the alarm, the response ledger, the latency — is cleared.
+//
+// The alarm is cleared here and nowhere else: the contract keeps the glyph
+// until the NEXT turn starts.
+//
+// DOUBLE-COUNTING IS STILL STRUCTURALLY PREVENTED: a carried-over unit keeps
+// its own key, so a later frame of it still UPSERTS rather than adds, exactly
+// as within a turn.
+func (t *tokenState) reset(keep map[string]struct{}) {
+	fresh := newTokenState()
+	for unit, agent := range t.unitAgent {
+		if _, live := keep[agent]; !live {
+			continue
+		}
+		if u, ok := t.usage[unit]; ok {
+			fresh.usage[unit] = u
+			fresh.unitAgent[unit] = agent
+		}
+	}
+	*t = fresh
+}
+
+// forgetAgent drops every usage unit a now-retired agent produced, so a
+// detached agent's spend stops counting the instant its run settles rather than
+// standing in the figure for the rest of the session. Called from the chip's
+// own retirement, the one place a run is known to be over.
+func (t *tokenState) forgetAgent(agent string) {
+	if agent == "" {
+		return
+	}
+	for unit, owner := range t.unitAgent {
+		if owner == agent {
+			delete(t.usage, unit)
+			delete(t.unitAgent, unit)
+		}
+	}
+}
 
 // observeUsage records one unit's usage, replacing whatever that unit reported
-// before. A unit whose usage CHANGES between frames is a producer
-// contradiction and is recorded as one rather than silently taking the later
-// value.
-func (t *tokenState) observeUsage(unit string, u *conversationv1.TokenUsage) {
+// before, and files the agent that produced it so reset can carry a live
+// detached agent's units across the turn boundary. A unit whose usage CHANGES
+// between frames is a producer contradiction and is recorded as one rather than
+// silently taking the later value.
+func (t *tokenState) observeUsage(unit, agent string, u *conversationv1.TokenUsage) {
 	if u == nil {
 		return
 	}
@@ -80,6 +131,9 @@ func (t *tokenState) observeUsage(unit string, u *conversationv1.TokenUsage) {
 			fmt.Sprintf("unit %s reports more thinking tokens than output tokens", unit))
 	}
 	t.usage[unit] = u
+	if agent != "" {
+		t.unitAgent[unit] = agent
+	}
 }
 
 // sameUsage compares two usage records field for field.
