@@ -51,7 +51,7 @@ func normalizeDir(dir string) (string, error) {
 
 // workspaceColumns is the one select list every workspace read shares, so a
 // column added to the row can never be decoded by only some of them.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, merged_at, created_at`
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, merged_at, spawned_shim_pid, created_at`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -63,10 +63,22 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		task     sql.NullString
 		selected sql.NullInt64
 		merged   sql.NullInt64
+		spawned  sql.NullInt64
 		created  int64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &merged, &created); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &merged, &spawned, &created); err != nil {
 		return Workspace{}, err
+	}
+	if spawned.Valid {
+		// A NON-POSITIVE RECORDED PID IS A CORRUPT ROW, never a silently
+		// dropped one: the whole point of the value is that a successor probes
+		// the process it names, and kill(0) on a non-positive pid addresses
+		// a process GROUP or every process this daemon may signal.
+		if spawned.Int64 <= 0 {
+			return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "spawned_shim_pid", Err: errors.New("a recorded spawned shim pid is positive")}
+		}
+		pid := int(spawned.Int64)
+		ws.SpawnedShimPID = &pid
 	}
 	if parent.Valid {
 		id := WorkspaceID(parent.String)
@@ -302,6 +314,39 @@ func requireOneRow(res sql.Result, what string) error {
 // SetClosed records whether a workspace's editor state is torn down.
 func (s *store) SetClosed(ctx context.Context, id WorkspaceID, closed bool) error {
 	return s.setWorkspaceField(ctx, "daemon.wsm.set_closed", "closed", id, closed, dlog.Context{"closed": closed})
+}
+
+// SetSpawnedShimPID records, or clears with nil, the pid of a shim a daemon
+// SPAWNED for this workspace.
+//
+// IT IS WRITTEN AT THE FORK, not at a started session, and that is the whole
+// point of it. A shim's socket is bound by Node several tens of milliseconds
+// after the fork returns, and its two conversation locks are taken later still
+// (inside StartSession), so for that whole window the spawn leaves NO KERNEL
+// TRACE: a successor daemon booting into it reads "lock free, socket absent",
+// concludes no shim survives, and spawns a SECOND shim onto one session
+// socket, which the shim itself then refuses at bind and dies. Measured
+// 2026-09-13: shim spawned at T+0, daemon killed at T+60ms, successor booted
+// at T+65ms and spawned its own at T+80ms, the first bound at T+110ms and the
+// second died at T+190ms. This column is that missing trace.
+//
+// A NON-POSITIVE PID IS REFUSED at the write, the same way Session.ShimPID is:
+// the value exists to be handed to kill(pid, 0), where 0 and negatives address
+// process groups rather than the one process meant.
+func (s *store) SetSpawnedShimPID(ctx context.Context, id WorkspaceID, pid *int) error {
+	const op = "daemon.wsm.set_spawned_shim_pid"
+	fields := dlog.Context{"workspace": string(id)}
+	var stored any
+	if pid != nil {
+		if *pid <= 0 {
+			err := fmt.Errorf("wsm: workspace %s: a recorded spawned shim pid is positive, got %d", id, *pid)
+			s.log.Error(op, "refused a non-positive spawned shim pid", withError(fields, err))
+			return err
+		}
+		fields["shim_pid"] = *pid
+		stored = int64(*pid)
+	}
+	return s.setWorkspaceField(ctx, op, "spawned_shim_pid", id, stored, fields)
 }
 
 // SetAttention sets or clears the roster's attention marker.

@@ -70,6 +70,17 @@ type Workspace struct {
 	MergedAt *time.Time
 	// CreatedAt is when the record was minted.
 	CreatedAt time.Time
+	// SpawnedShimPID is the pid of a shim a daemon SPAWNED for this workspace,
+	// recorded at the instant the fork returned and cleared when that spawn is
+	// stood down. Nil means no daemon has a spawn outstanding here.
+	//
+	// IT IS NOT Session.ShimPID. That one names the shim SERVING A SESSION and
+	// is written once a session exists; this one exists precisely so the
+	// window BEFORE a session -- between the fork and the shim's first bound
+	// socket -- has a durable trace. A successor daemon that finds the
+	// workspace lock free and the socket absent reads this pid before
+	// concluding no shim survives.
+	SpawnedShimPID *int
 }
 
 // Repository is one repository's durable record.
