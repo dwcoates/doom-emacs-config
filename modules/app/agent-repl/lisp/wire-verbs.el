@@ -1416,14 +1416,32 @@ mints the identity, which the response returns."
   "Decode RegisterRepositorySuccess's `repository' use site from JSON."
   (agent-repl-wire-decode-repository-ref json))
 
+(defun agent-repl-wire-decode-register-repository-success-workspace (json)
+  "Decode RegisterRepositorySuccess\='s `workspace\=' use site from JSON."
+  (agent-repl-wire-decode-workspace-ref json))
+
 (defun agent-repl-wire-decode-register-repository-success (json)
-  "Decode RegisterRepositorySuccess from JSON into (:repository REF :already-known BOOL)."
+  "Decode RegisterRepositorySuccess from JSON.
+The plist is (:repository REF :already-known BOOL :workspace REF
+:workspace-already-known BOOL).  BOTH refs are REQUIRED on a success: the
+endpoint registers the repository\='s main worktree as a workspace through
+the same registration `RegisterWorkspace\=' runs (owner ruling,
+2026-09-14), and never answers without one.  The two already-known bools
+are INDEPENDENT -- a repository minted by an earlier RegisterWorkspace is
+already known while its workspace is too, and a repository registered
+before that ruling landed is already known while its workspace is fresh."
   (let ((message "RegisterRepositorySuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(repository alreadyKnown))
+    (agent-repl-wire-verbs--check-keys
+     message json '(repository alreadyKnown workspace workspaceAlreadyKnown))
     (list :repository (agent-repl-wire-decode-register-repository-success-repository
                        (agent-repl-wire-verbs--require
                         message "repository" (cdr (assq 'repository json))))
-          :already-known (agent-repl-wire--decode-bool message 'alreadyKnown json))))
+          :already-known (agent-repl-wire--decode-bool message 'alreadyKnown json)
+          :workspace (agent-repl-wire-decode-register-repository-success-workspace
+                      (agent-repl-wire-verbs--require
+                       message "workspace" (cdr (assq 'workspace json))))
+          :workspace-already-known
+          (agent-repl-wire--decode-bool message 'workspaceAlreadyKnown json))))
 
 (defun agent-repl-wire-decode-register-repository-not-in-a-repository (json)
   "Decode RegisterRepositoryNotInARepository from JSON.  Empty: the path is
