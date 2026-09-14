@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- sidecar rotation subject: `TestARotationLinkThatAppearsMidTailMovesTheBook` awaits the reader's own `identity-rekey` book-move record before appending the tail, matching it by ids rather than by path, so the mid-tail ordering it is named for is forced rather than hoped for (a `-race ./...` run booked the tail under the rotated id once in ~30)
 - sidecar logging: the daemonclient's workspace cache is keyed per directory and dated, so a ref past one poll interval is re-read and a `no longer registered` refusal re-resolves and retries once before the record is reported undelivered (rt-run39, a directory registered again as `54578ede3d834dea` kept forwarding against the forgotten `af24557b1ddd4b9c`)
 - sidecar identity: `Resolve` remembers the ids nothing links and `RecheckLinks` drops those misses off the link directories' mtimes once per tick, so the poll path is an in-memory lookup instead of one glob per watcher (rt-run37 follow-up, `sample` of pid 96084 holding 76-101% of a core inside filepath.Glob under Resolve)
 - sidecar poll: `pollAll` walks a pass in a stable order for at most half a poll interval and resumes on the next tick, with a file discovered mid-pass enrolled at the head, so discovery and a new file's first read keep their own clock during a boot walk (rt-run37, a turn concluding inside the 2m24s walk had its answer rows land a minute later)
