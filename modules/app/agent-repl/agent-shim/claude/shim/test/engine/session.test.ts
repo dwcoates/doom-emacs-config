@@ -344,6 +344,13 @@ function freshRequest(): shimv1.StartSessionRequest {
   });
 }
 
+/** A fresh start naming NEITHER model nor permission mode. */
+function freshRequestNoFacts(): shimv1.StartSessionRequest {
+  return create(shimv1.StartSessionRequestSchema, {
+    source: { case: "fresh", value: create(shimv1.StartSessionFreshSchema, {}) },
+  });
+}
+
 /** A fresh start naming NO model: the SDK's own default takes effect. */
 function freshRequestNoModel(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
@@ -528,6 +535,22 @@ describe("StartSession, fresh", () => {
     await pending;
 
     expect(h.queries[0]?.spec.model).toBeUndefined();
+  });
+
+  it("passes auto to the SDK when the fresh start named NO permission mode", async () => {
+    // Owner ruling 2026-09-14: the unstated mode is `auto`, never the vendor's
+    // `default`.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequestNoFacts());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+      }),
+    );
+    await pending;
+
+    expect(h.queries[0]?.spec.permissionMode).toBe("auto");
   });
 
   it("leaves effective_model UNSTATED when none was named and no init has landed", async () => {
