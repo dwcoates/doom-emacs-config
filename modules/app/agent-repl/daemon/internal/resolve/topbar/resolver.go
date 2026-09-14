@@ -230,9 +230,14 @@ func fastMode(s *wsState) *frontendv1.TopbarFastMode {
 }
 
 // title composes the title line: the workspace's name, plus the branch when the
-// branch is worth showing. A workspace sitting on its repository's DEFAULT
-// branch is named by its name alone — the branch would say nothing — so the
-// comparison is what decides, never the branch's mere presence.
+// branch is worth showing. A branch is worth showing when it says something the
+// title does not already say, so two comparisons drop it: a workspace sitting on
+// its repository's DEFAULT branch is named by its name alone, and so is one
+// whose branch reads exactly like THE NAME ALREADY SHOWN — every worktree
+// workspace whose branch is minted from its name would otherwise print that
+// name twice and fill the strip's title cap with the repetition. The comparison
+// is against the name as shown, after the session-title and naming fallbacks,
+// because what is doubled is what the reader sees.
 func (r *resolver) title(s *wsState) string {
 	// THE TITLE IS THE WORKSPACE SUMMARY when the vendor has one (owner
 	// ruling, 2026-09-13). The vendor writes its own one-line summary of the
@@ -248,7 +253,7 @@ func (r *resolver) title(s *wsState) string {
 		name = s.naming.Slug
 	}
 	branch := s.naming.Branch
-	if branch == "" || branch == s.naming.DefaultBranch {
+	if branch == "" || branch == s.naming.DefaultBranch || branch == name {
 		return name
 	}
 	return joinNonEmpty(" · ", name, branch)
