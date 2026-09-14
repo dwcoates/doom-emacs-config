@@ -95,13 +95,14 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// THE TERMINAL RESTATES THE WHOLE. Whatever the fold accumulated is
 		// replaced outright, which is what makes a lost fragment harmless.
 		//
-		// AND THE WHOLE IS WRAPPED HERE, ONCE. The response is the tree the
-		// metaprompt prescribes, and the daemon is the one place both clients
-		// read it from, so the tree is wrapped to its column limit before it
-		// is served rather than by each client for itself (tree.go). Only the
-		// settled whole is wrapped: a streaming delta is a fragment of a line
-		// the formatter has not yet seen the end of.
-		fold.markdown = formatResponseTree(log, unit, state.Success.GetProse().GetMarkdown())
+		// THE PROSE IS SERVED VERBATIM, exactly as the streaming delta arm and
+		// the failure arm serve it. The response is the tree the metaprompt
+		// prescribes, but the daemon no longer wraps it: only the webapp can
+		// wrap the tree to the bubble's true live pixel width and re-flow it on
+		// resize, which a fixed daemon column limit cannot, so the wrapping is
+		// the webapp's alone (webapp/src/metaprompt-tree.ts, a port of the
+		// former daemon treefmt engine).
+		fold.markdown = state.Success.GetProse().GetMarkdown()
 		fold.settled = true
 		r.stampSettled(fold)
 		if notice, ok := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice); ok {

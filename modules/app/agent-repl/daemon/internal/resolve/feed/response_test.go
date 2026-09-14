@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -464,4 +465,67 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+// THE SETTLED TREE IS NO LONGER WRAPPED BY THE DAEMON. A response under the
+// metaprompt is one bare Unicode tree; the daemon serves it VERBATIM on the
+// settled arm, exactly as it serves the streaming delta and the failure arm,
+// because only the webapp can wrap the tree to the bubble's true live width
+// and re-flow it on resize (webapp/src/metaprompt-tree.ts).
+
+// settle delivers one settled response carrying markdown and answers what the
+// bubble now holds.
+func (h *harness) settle(markdown string) string {
+	h.t.Helper()
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: markdown},
+		}, nil), noAddress())
+	return h.response().GetSuccess().GetProse().GetMarkdown()
+}
+
+func TestASettledTreeWiderThanTheOldLimitIsServedVerbatim(t *testing.T) {
+	// Arrange: one branch whose body runs well past the daemon's former
+	// 105-column limit, which the daemon used to wrap and now must not touch.
+	h := newHarness(t)
+	tree := "1. 🎯 Root\n├── 1.1. " + strings.TrimSpace(strings.Repeat("word ", 30))
+
+	// Act.
+	got := h.settle(tree)
+
+	// Assert: served exactly as it arrived, one line per branch, no wrapping.
+	if got != tree {
+		t.Fatalf("settled tree was altered: %q", got)
+	}
+}
+
+func TestASettledTreeInsideTheOldLimitIsAlsoServedVerbatim(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	tree := "1. 🎯 Root\n├── 1.1. Short.\n└── 1.2. Also short."
+	got := h.settle(tree)
+
+	// Assert.
+	if got != tree {
+		t.Fatalf("settled tree changed: %q", got)
+	}
+}
+
+func TestASettledArmMatchesTheStreamingDeltaArmForTheSameProse(t *testing.T) {
+	// Arrange: a start, one delta, then the settled whole of the same tree.
+	h := newHarness(t)
+	tree := "1. 🎯 Root\n├── 1.1. " + strings.TrimSpace(strings.Repeat("word ", 30))
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: tree}, nil), noAddress())
+	delta := h.response().GetUpdate().GetProse().GetMarkdown()
+
+	// Act: the settled success restates the whole.
+	got := h.settle(tree)
+
+	// Assert: both arms carry the identical verbatim prose.
+	if got != delta {
+		t.Fatalf("settled %q does not match streamed %q", got, delta)
+	}
 }
