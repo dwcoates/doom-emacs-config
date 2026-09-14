@@ -75,6 +75,25 @@ import (
 // Dedups by FeedId, since a row's upsert key can in principle be re-pushed.
 func awaitClearedSeparations(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, n int) []*frontendv1.FeedRow {
 	t.Helper()
+	return awaitClearedSeparationsWhere(t, w, ws, n, func(*frontendv1.FeedRow) bool { return true })
+}
+
+// awaitClearedSeparationsWhere is the same wait, narrowed to the dividers WANT
+// accepts.
+//
+// It exists because THE FEED BEGINS AT ITS NEWEST SEPARATION: a second clear
+// puts the first clear's divider above it, and the feed stops delivering
+// everything above it — so "wait for two cleared dividers" is a wait that can
+// never come true, and what a caller after a second clear actually wants is
+// "the divider that is not the one I already have".
+func awaitClearedSeparationsWhere(
+	t *testing.T,
+	w *World,
+	ws *workspacev1.WorkspaceRef,
+	n int,
+	want func(*frontendv1.FeedRow) bool,
+) []*frontendv1.FeedRow {
+	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
 		t.Fatalf("OpenFeed: %v", err)
@@ -87,7 +106,7 @@ func awaitClearedSeparations(t *testing.T, w *World, ws *workspacev1.WorkspaceRe
 	seen := map[string]bool{}
 	var found []*frontendv1.FeedRow
 	take := func(row *frontendv1.FeedRow) {
-		if row.GetSeparation().GetCleared() == nil {
+		if row.GetSeparation().GetCleared() == nil || !want(row) {
 			return
 		}
 		id := row.GetId().GetValue()
@@ -220,14 +239,46 @@ func TestSecondRotateUnderRotatedIdentity(t *testing.T) {
 		t.Fatalf("second !rotate TurnEnded = %v, want concluded", secondRow.GetTurnEnded())
 	}
 
-	// Assert: a SECOND, distinct cleared-context divider landed on the
-	// feed — the first rotation's divider is untouched.
-	bothCleared := awaitClearedSeparations(t, w, ws, 2)
-	if len(bothCleared) < 2 {
-		t.Fatalf("cleared-context separations = %d, want at least 2", len(bothCleared))
+	// Assert: the second rotation drew its OWN divider, distinct from the
+	// first's — the two clears are two cuts and neither is the other.
+	firstID := firstCleared[0].GetId().GetValue()
+	secondCleared := awaitClearedSeparationsWhere(t, w, ws, 1, func(row *frontendv1.FeedRow) bool {
+		return row.GetId().GetValue() != firstID
+	})
+
+	// Assert: AND THE FEED NOW BEGINS AT IT. A clear says everything before it
+	// is no longer the conversation, so the first rotation's divider is above
+	// the second's and is no longer delivered. This is why the assertion is
+	// "one divider, and it is the new one" rather than "two": consecutive
+	// clears do not stack up in the feed.
+	delivered := irOpenFeedRows(t, w, ws)
+	var cleared []string
+	for _, row := range delivered {
+		if row.GetSeparation().GetCleared() != nil {
+			cleared = append(cleared, row.GetId().GetValue())
+		}
 	}
-	if bothCleared[0].GetId().GetValue() != firstCleared[0].GetId().GetValue() {
-		t.Fatalf("the first cleared divider's id changed across the second rotation: %q -> %q",
-			firstCleared[0].GetId().GetValue(), bothCleared[0].GetId().GetValue())
+	if len(cleared) != 1 || cleared[0] != secondCleared[0].GetId().GetValue() {
+		t.Fatalf("cleared dividers delivered = %v, want only the second rotation's %q",
+			cleared, secondCleared[0].GetId().GetValue())
 	}
+	if delivered[0].GetId().GetValue() != secondCleared[0].GetId().GetValue() {
+		t.Fatalf("the first delivered row = %q, want the newest divider %q",
+			delivered[0].GetId().GetValue(), secondCleared[0].GetId().GetValue())
+	}
+}
+
+// irOpenFeedRows answers the rows the workspace's root feed DELIVERS on a
+// fresh open — which, after a cut, begins at the cut's divider.
+func irOpenFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
+	t.Helper()
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
+	}
+	return success.GetPage().GetSuccess().GetRows()
 }
