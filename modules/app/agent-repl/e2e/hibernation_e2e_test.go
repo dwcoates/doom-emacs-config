@@ -528,18 +528,35 @@ func TestRevivalAfterHibernate(t *testing.T) {
 	// Assert: the feed shows exactly turn1 then turn2, in that order, with no
 	// third turn (a leaked keep-alive, or anything else) ever appearing
 	// between or around them.
+	//
+	// THE FEED BEGINS AT ITS NEWEST SEPARATION, and the revival's own
+	// compaction draws one — so the pre-hibernation turn can be legitimately
+	// BEHIND that divider and delivered not at all. That is the invariant
+	// working, not a turn going missing, and it is the one thing this
+	// assertion must allow for. Everything else it said still holds: no turn
+	// but these two ever appears, no row of the post-revival turn is delivered
+	// above a delivered row of the pre-hibernation one, and a pre-hibernation
+	// turn that IS delivered is delivered with its ending.
+	sawTurn1 := false
 	sawTurn1End := false
+	sawTurn2 := false
 	for _, r := range feedRows(t, w, ws) {
 		switch id := r.GetTurn().GetValue(); id {
 		case "":
 			// Non-turn rows (separators, cold gates, etc.) carry no turn id
 			// and are not this assertion's subject.
 		case turn1.GetValue():
+			sawTurn1 = true
 			if r.GetTurnEnded() != nil {
 				sawTurn1End = true
 			}
+			if sawTurn2 {
+				t.Fatalf("a feed row for the pre-hibernation turn (%s) was delivered below the post-revival turn (%s)",
+					turn1.GetValue(), turn2.GetValue())
+			}
 		case turn2.GetValue():
-			if !sawTurn1End {
+			sawTurn2 = true
+			if sawTurn1 && !sawTurn1End {
 				t.Fatalf("a feed row for the post-revival turn (%s) appeared before the pre-hibernation turn (%s) ended",
 					turn2.GetValue(), turn1.GetValue())
 			}
@@ -548,9 +565,14 @@ func TestRevivalAfterHibernate(t *testing.T) {
 				id, turn1.GetValue(), turn2.GetValue())
 		}
 	}
-	if !sawTurn1End {
-		t.Fatalf("the feed never showed the pre-hibernation turn (%s) ending", turn1.GetValue())
+	if sawTurn1 && !sawTurn1End {
+		t.Fatalf("the feed delivered the pre-hibernation turn (%s) without ever showing it end", turn1.GetValue())
 	}
+	if !sawTurn2 {
+		t.Fatalf("the feed never showed the post-revival turn (%s)", turn2.GetValue())
+	}
+	t.Logf("across the hibernate/revive boundary the feed delivered the post-revival turn, and the pre-hibernation turn %s",
+		map[bool]string{true: "with it", false: "not at all — it is behind the revival's own separation"}[sawTurn1])
 }
 
 // TestSweepRecordSinceIgnoresARecordBeforeTheMark is the marking rule itself,

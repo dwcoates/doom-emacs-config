@@ -318,7 +318,13 @@ export async function driveTurn(
   // `data-feed-row` and an upsert keeps it, so the ids that were not standing
   // before are exactly this turn's rows.
   const standing = new Set(rows(app, kind, unit).map(rowID));
-  const beforeTurns = rows(app, "turnEnded").length;
+  // THE TURN'S END IS IDENTIFIED TOO, for the same reason the family's row is
+  // and for one more: a scenario that CUTS CONTEXT — `!compact`, `!rotate` —
+  // makes the page drop every row above its divider, so the terminal row count
+  // after the turn can be LOWER than the count before it. A "one more than
+  // before" wait then never comes true and the turn reads as never having
+  // ended, which is how this helper first met the feed's own start bound.
+  const standingTurns = new Set(rows(app, "turnEnded").map(rowID));
   const what = `${kind}${unit === undefined ? "" : "." + unit}`;
   await submit(app, `!${scenario}`);
   await awaitDrawn(
@@ -327,7 +333,7 @@ export async function driveTurn(
     () => rows(app, kind, unit).some((row) => !standing.has(rowID(row))),
   );
   await awaitDrawn(app, `the turn for !${scenario} to end`, () =>
-    rows(app, "turnEnded").length > beforeTurns,
+    rows(app, "turnEnded").some((row) => !standingTurns.has(rowID(row))),
   );
   const drawn = rows(app, kind, unit).filter((row) => !standing.has(rowID(row)));
   const last = drawn[drawn.length - 1];
