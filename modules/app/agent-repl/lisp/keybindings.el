@@ -205,6 +205,7 @@ Doom\='s `global-map\=' numerals structurally; see the commentary above."
        :desc "NUKE workspace (deletes data)"       "X"   #'agent-repl-nuke-workspace
        :desc "Workspace notes"                    "n"   #'agent-repl-notes-open
        :desc "Reload agent-repl config"            "R"   #'agent-repl-reload-config
+       :desc "Register repository from file"       "."   #'agent-repl-register-repository
        (:prefix ("h" . "help")
         :desc "Copy workspace name" "y" #'agent-repl-copy-workspace-name)
        (:prefix ("e" . "explain")
