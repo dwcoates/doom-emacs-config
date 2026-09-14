@@ -8,6 +8,26 @@
  * final-answer treatment is not this module's to apply: `turn-ended.ts` names
  * the answering row and marks it with its own `FINAL_RESPONSE_CLASS`.
  *
+ * THE DRAW IS RECORDED, AND THE RECORD IS `feed.draw-response`. The agent's
+ * answer appearing in the feed is an action a person watches for, so it cannot
+ * be the one drawn thing with nothing but per-fragment DEBUG behind it: before
+ * this record the only evidence a response had been drawn at all was
+ * `feed.final-answer-marked` finding a `.bubble.assistant` to style, which says
+ * a row exists and never says what it holds. The level follows the module's own
+ * rule — INFO for the draws a reader would ask about, DEBUG for the loop body:
+ *
+ *   - the FIRST draw of a row (no `previous` body) is INFO: the bubble appearing;
+ *   - a SETTLED draw (`success` or `error`, the row's terminal shape) is INFO:
+ *     the answer standing whole, which is the edge a turn's readers wait on;
+ *   - every intermediate re-push of an arriving row is DEBUG, because the daemon
+ *     re-pushes the WHOLE row on every fragment and those are the fragments.
+ *
+ * Both carry the same fields, so one reader reads either: `characters`, the
+ * prose the row drew, and `blocks`, how many prose blocks it drew — ONE, always,
+ * because the daemon folds a response's fragments into a single bubble row (its
+ * "THE PROSE FOLD"). The field is stated rather than assumed so a reader can
+ * tell a fold that grew a second block from a schema they misread.
+ *
  * THE ERROR ARM CARRIES NO REASON, deliberately: it says only that this bubble
  * is the one the death cut short. WHY the turn died is `turn_ended.errored`'s to
  * draw, so a reason sentence here would be the same fact worded twice, in two
@@ -55,18 +75,22 @@ import type { RowContext } from "./context.js";
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
 
+/**
+ * How many prose blocks one response row draws.
+ *
+ * The daemon folds every fragment of a response into ONE bubble row and
+ * re-pushes the whole row (daemon/internal/resolve/feed/response.go, "THE PROSE
+ * FOLD"), and `FeedResponseProse` is a single markdown string — so a drawn
+ * response is exactly one block. It is a named constant rather than a literal
+ * because the record states it, and a reader of the record is entitled to know
+ * where the number comes from.
+ */
+const RESPONSE_PROSE_BLOCKS = 1;
+
 /** The prose bubble. */
 export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const path = "FeedResponse";
   const result = requireCase(u.result, `${path}.result`);
-  log.debug("drawing a response bubble", {
-    operation: "feed.cards.response",
-    context: {
-      state: result.case,
-      usage: u.usage !== undefined,
-      notice: u.notice !== undefined,
-    },
-  });
 
   const bubble = document.createElement("div");
   bubble.className = "bubble assistant md";
@@ -92,14 +116,16 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   }
   bubble.appendChild(corner);
 
+  let characters: number;
   switch (result.case) {
     case "update":
-      drawFeedResponseUpdate(result.value, rc, `${path}.update`, bubble, body);
+      characters = drawFeedResponseUpdate(result.value, rc, `${path}.update`, bubble, body);
       break;
     case "success": {
       const markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
       paintWhole(body, markdown);
       markRevealed(bubble, markdown.length);
+      characters = markdown.length;
       break;
     }
     case "error": {
@@ -108,6 +134,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       paintWhole(body, markdown);
       markRevealed(bubble, markdown.length);
       bubble.appendChild(cutShortMarker());
+      characters = markdown.length;
       break;
     }
     default: {
@@ -118,7 +145,50 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       return unreachableArm(`${path}.result`, other.case);
     }
   }
+  recordDraw(u, rc, result.case, characters);
   return bubble;
+}
+
+/**
+ * State the draw, at the level the draw deserves.
+ *
+ * It runs AFTER the body is drawn, never before it: a row whose arm this build
+ * cannot read refuses above and must not have claimed a draw on its way out.
+ *
+ * FIRST IS "NO PREVIOUS BODY", which is the same fact the feed core already
+ * uses to decide whether this row has been drawn before — a module-level set of
+ * drawn `FeedId`s would be a second answer to that question, and one that
+ * outlives the rows it describes (see `RowContext`'s own note on `previous`).
+ */
+function recordDraw(
+  u: FeedResponse,
+  rc: RowContext,
+  state: "update" | "success" | "error",
+  characters: number,
+): void {
+  const first = rc.previous === undefined;
+  const settled = state !== "update";
+  const context = {
+    row: rc.row.id?.value ?? "unset",
+    state,
+    characters,
+    blocks: RESPONSE_PROSE_BLOCKS,
+    first_draw: first,
+    settled,
+    usage: u.usage !== undefined,
+    notice: u.notice !== undefined,
+  };
+  if (first || settled) {
+    log.info(
+      settled ? "drew a response bubble settled" : "drew a response bubble for the first time",
+      { operation: "feed.draw-response", context },
+    );
+    return;
+  }
+  log.debug("redrew an arriving response bubble", {
+    operation: "feed.draw-response",
+    context,
+  });
 }
 
 /**
@@ -127,6 +197,9 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
  * The reveal resumes from the previous draw's shown length and stops the moment
  * it reaches the frontier; a redraw whose prose did not grow therefore does no
  * animation at all.
+ *
+ * It answers the prose's length — what ARRIVED, not what is shown yet — so the
+ * draw record states the same figure in every arm.
  */
 export function drawFeedResponseUpdate(
   u: FeedResponseUpdate,
@@ -134,7 +207,7 @@ export function drawFeedResponseUpdate(
   path: string,
   bubble: HTMLElement,
   body: HTMLElement,
-): void {
+): number {
   const markdown = drawFeedResponseProse(requireMessage(u.prose, `${path}.prose`), `${path}.prose`);
   const resumed = revealedSoFar(rc.previous, markdown.length);
   log.debug("drawing an arriving response", {
@@ -143,6 +216,7 @@ export function drawFeedResponseUpdate(
   });
   body.appendChild(arrivingIndicator());
   animate(bubble, body, markdown, resumed, rc);
+  return markdown.length;
 }
 
 /** The settled state: the whole markdown. */
