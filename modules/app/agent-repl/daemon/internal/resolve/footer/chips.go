@@ -29,7 +29,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			// whether THIS frame carried usage to decide which API response
 			// the unit belongs to, and folding first would tell it nothing new.
 			s.tok.responses.Observe(unit, act.GetUsage() != nil)
-			s.tok.observeUsage(unit, act.Usage)
+			s.tok.observeUsage(unit, agent.GetValue(), act.Usage)
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
 			r.applyActivity(ws, s, unit, act)
 		})
@@ -440,10 +440,19 @@ func (r *resolver) retireAgent(s *wsState, agent *conversationv1.AgentId) {
 	if id == "" {
 		return
 	}
+	retired := false
 	for unit, row := range s.agents {
 		if row.createdAgent == id {
 			delete(s.agents, unit)
+			retired = true
 		}
+	}
+	// A retired subagent's token units stop counting with it. Gated on a row
+	// having actually matched, so the MAIN agent's own terminal -- which retires
+	// no chip row -- never drops the settled turn's figure early: that figure
+	// stands until the next turn resets it.
+	if retired {
+		s.tok.forgetAgent(id)
 	}
 }
 
@@ -673,6 +682,8 @@ func retireWork(s *wsState, id string) {
 	s.retiredWork[id] = struct{}{}
 	for unit, row := range s.agents {
 		if unit == id || row.work == id || row.spawnUnit == id || row.createdAgent == id {
+			// A retired detached run's token units stop counting with it.
+			s.tok.forgetAgent(row.createdAgent)
 			delete(s.agents, unit)
 		}
 	}

@@ -410,6 +410,107 @@ func TestPanelFiguresAreUnsetUntilAnyUsageIsKnown(t *testing.T) {
 	}
 }
 
+// detachedAgent is the created-agent id a detached run's own-book frames arrive
+// under, distinct from the main agent's.
+var detachedAgent = &conversationv1.AgentId{Value: "agent-2"}
+
+func TestALiveDetachedAgentsUsageSurvivesTheTurnReset(t *testing.T) {
+	// Arrange: a detached subagent is live and has reported real usage on its
+	// own book.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "Explore"))
+	h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 5_000, 0, 0, 0)))
+
+	// Act: a new main turn opens, which resets the turn's accounting.
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert: the detached agent is still burning that input, so its figure
+	// stands rather than falling back to the new turn's zero.
+	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
+	if got != "5k in" {
+		t.Fatalf("cell = %q, want the live detached agent's usage carried across the reset", got)
+	}
+}
+
+func TestTheTurnResetKeepsTheDetachedAgentButDropsTheMainTurn(t *testing.T) {
+	// Arrange: both the main turn and a live detached agent have spent input.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 3_000, 0, 0, 0)))
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "Explore"))
+	h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 5_000, 0, 0, 0)))
+
+	// Act: the next turn opens.
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert: the reset is SELECTIVE — the concluded turn's own units go, the
+	// live detached agent's stay, so the figure is the detached 5k alone.
+	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
+	if got != "5k in" {
+		t.Fatalf("cell = %q, want the detached 5k with the main turn's 3k wiped", got)
+	}
+}
+
+func TestARetiredDetachedAgentsUsageStopsCounting(t *testing.T) {
+	// Arrange: a detached subagent has spent input.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "Explore"))
+	h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 5_000, 0, 0, 0)))
+
+	// Act: the run reaches its own terminal.
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
+
+	// Assert: a settled run charges nothing more, so its units leave the figure
+	// rather than standing in it for the rest of the session.
+	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
+	if got != "0 in" {
+		t.Fatalf("cell = %q, want the retired detached agent's usage dropped", got)
+	}
+}
+
+func TestADetachedAgentsUsageIsNotDoubleCountedAcrossAReset(t *testing.T) {
+	// Arrange: a detached agent's usage is carried across a turn reset.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "Explore"))
+	frame := responseFrame("det-1", "update", usage(0, 5_000, 0, 0, 0))
+	h.r.OnActivity(testWS, detachedAgent, frame)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act: the same unit re-reports the same usage after the reset.
+	h.r.OnActivity(testWS, detachedAgent, frame)
+
+	// Assert: the carried unit keeps its key, so the re-report UPSERTS rather
+	// than adding — 5k, never 10k.
+	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
+	if got != "5k in" {
+		t.Fatalf("cell = %q, want 5k: a carried unit is replaced, never added", got)
+	}
+}
+
+func TestAnInTurnSubagentsUsageDoesNotSurviveTheTurnReset(t *testing.T) {
+	// Arrange: an IN-TURN subagent (no detached handle) has spent input on its
+	// own book — it is the turn's own progress, not background work.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", detachedAgent.GetValue(), "Explore", ""))
+	h.r.OnActivity(testWS, detachedAgent, responseFrame("sub-1", "success", usage(0, 5_000, 0, 0, 0)))
+
+	// Act: the next turn opens.
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert: only DETACHED agents are carried; an in-turn subagent resets with
+	// the turn that owned it.
+	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
+	if got != "0 in" {
+		t.Fatalf("cell = %q, want the in-turn subagent's usage wiped with the turn", got)
+	}
+}
+
 func TestTheCacheSplitIsDrawnOnItsOwnLines(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
