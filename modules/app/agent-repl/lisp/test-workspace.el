@@ -565,6 +565,32 @@ to avoid surfacing killed workspaces."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--live-ws-names))))
 
+(ert-deftest agent-repl-test-live-ws-names-excludes-persp-nil-name ()
+  "`persp-nil-name' (\"none\") is never a workspace candidate."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-nil-name "none"))
+      (agent-repl--ws-put "none" :ref "persp-own")
+      (agent-repl--ws-put "real-ws" :project-dir "/tmp/real")
+      ;; Act
+      (let ((names (agent-repl--live-ws-names)))
+        ;; Assert
+        (should-not (member "none" names))
+        (should (member "real-ws" names))))))
+
+(ert-deftest agent-repl-test-live-ws-names-excludes-doom-main ()
+  "Doom's startup perspective is never a workspace candidate."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((+workspaces-main "main"))
+      (agent-repl--ws-put "main" :ref "doom-own")
+      (agent-repl--ws-put "real-ws" :project-dir "/tmp/real")
+      ;; Act
+      (let ((names (agent-repl--live-ws-names)))
+        ;; Assert
+        (should-not (member "main" names))
+        (should (member "real-ws" names))))))
+
 ;;;; ---- Tests: ws-registered-names ---------------------------------------
 
 (ert-deftest agent-repl-test-ws-registered-names-includes-live-and-tombstoned ()
@@ -621,17 +647,35 @@ to avoid surfacing killed workspaces."
     (should-not (agent-repl--ws-project-pollable-p "unknown"))))
 
 (ert-deftest agent-repl-test-ws-project-poll-partition-separates-placeholders ()
-  "Project poll partition excludes tombstones and reports live placeholders."
+  "Project poll partition excludes tombstones and reports live placeholders.
+The placeholders are registered workspaces that have not yet been given a
+`:project-dir'.  persp-mode's own perspectives are NOT among them: they are
+no longer workspace candidates anywhere, so the poller never sees them."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "project" :project-dir "/tmp/project")
-    (agent-repl--ws-put "main" :agent-state :idle)
-    (agent-repl--ws-put "none" :repl-state :inactive)
+    (agent-repl--ws-put "pending-a" :agent-state :idle)
+    (agent-repl--ws-put "pending-b" :repl-state :inactive)
     (agent-repl--ws-put "dead" :project-dir "/tmp/dead")
     (agent-repl--ws-del "dead")
     (pcase-let ((`(,pollable . ,placeholders)
                  (agent-repl--ws-project-poll-partition)))
       (should (equal pollable '("project")))
-      (should (equal (sort placeholders #'string<) '("main" "none"))))))
+      (should (equal (sort placeholders #'string<) '("pending-a" "pending-b"))))))
+
+(ert-deftest agent-repl-test-ws-project-poll-partition-omits-pseudo-perspectives ()
+  "A pseudo perspective is not even a placeholder: it is not a candidate."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-nil-name "none")
+          (+workspaces-main "main"))
+      (agent-repl--ws-put "none" :repl-state :inactive)
+      (agent-repl--ws-put "main" :agent-state :idle)
+      ;; Act
+      (pcase-let ((`(,pollable . ,placeholders)
+                   (agent-repl--ws-project-poll-partition)))
+        ;; Assert
+        (should-not pollable)
+        (should-not placeholders)))))
 
 ;;;; ---- Tests: --ws-dir-owner ----
 
@@ -886,6 +930,20 @@ dead shadow never counts as the owner."
         (should (member "known-and-open" result))
         (should-not (member "known-not-open" result))
         (should-not (member "unknown-in-cache" result))))))
+
+(ert-deftest agent-repl-test-ws-list-names-excludes-doom-main ()
+  "The tab-bar iteration source drops Doom's startup perspective."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((+workspaces-main "main")
+          (persp-names-cache '("main" "real-ws")))
+      (agent-repl--ws-put "main" :ref "doom-own")
+      (agent-repl--ws-put "real-ws" :project-dir "/tmp/y")
+      ;; Act
+      (let ((result (agent-repl--ws-list-names)))
+        ;; Assert
+        (should-not (member "main" result))
+        (should (member "real-ws" result))))))
 
 (ert-deftest agent-repl-test-ws-list-names-excludes-persp-nil-name ()
   "The persp-nil-name sentinel is filtered out even when it appears in cache and would be known."
