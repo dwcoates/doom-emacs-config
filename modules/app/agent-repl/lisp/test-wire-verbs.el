@@ -52,6 +52,12 @@ logging rung that never signals, so the stub is a no-op: the typed
              ((symbol-function 'agent-repl-wire-encode-repository-ref)
               (lambda (ref) (list (cons 'id (plist-get ref :id))
                                   (cons 'dir (plist-get ref :dir)))))
+             ((symbol-function 'agent-repl-wire-decode-repository-ref)
+              (lambda (json) (list :id (cdr (assq 'id json))
+                                   :dir (cdr (assq 'dir json)))))
+             ((symbol-function 'agent-repl-wire--decode-bool)
+              (lambda (_message field json)
+                (eq (cdr (assq field json)) t)))
              ((symbol-function 'agent-repl-wire-encode-user-said)
               (lambda (said) (list (cons 'said (plist-get said :text)))))
              ((symbol-function 'agent-repl-wire-encode-prompt-origin)
@@ -100,7 +106,8 @@ logging rung that never signals, so the stub is a no-op: the typed
     ("agentrepl/v1/endpoint_update_shutdown_schedule.pb.go" "UpdateShutdownScheduleResponse")
     ("agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueResponse")
     ("agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonHealthResponse")
-    ("agentrepl/v1/endpoint_session_health.pb.go" "SessionHealthResponse"))
+    ("agentrepl/v1/endpoint_session_health.pb.go" "SessionHealthResponse")
+    ("agentrepl/v1/endpoint_register_repository.pb.go" "RegisterRepositoryResponse"))
   "Every response whose result oneof this codec decodes, with its binding.")
 
 
@@ -2327,3 +2334,98 @@ carries."
 (provide 'test-wire-verbs)
 
 ;;; test-wire-verbs.el ends here
+
+;;;; ---- RegisterRepository ----------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-request-carries-the-path ()
+  "The request is ONE field: any path inside the repository."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-register-repository-request '(:path "/r/one/README.md"))
+                   '((path . "/r/one/README.md"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-request-refuses-a-blank-path ()
+  "A blank path is not a path: the request is refused before it can be sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-register-repository-request '(:path ""))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-request-refuses-an-unset-path ()
+  "An unset path is a contract breach, never an empty string on the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-register-repository-request nil)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-success-carries-the-ref ()
+  "The success carries the daemon-minted RepositoryRef."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-register-repository-success
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}"))
+                   '(:repository (:id "repo-1" :dir "/r/one") :already-known nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-success-carries-already-known ()
+  "`already_known' is an ANSWER, so it decodes rather than being inferred."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-register-repository-success
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"alreadyKnown\":true}"))
+                   '(:repository (:id "repo-1" :dir "/r/one") :already-known t)))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-success-without-a-ref-is-a-breach ()
+  "A success naming no repository says nothing the caller can use."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-register-repository-success
+                   (agent-repl-test-wire-verbs--parse "{\"alreadyKnown\":true}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-error-not-in-a-repository-arm ()
+  "RegisterRepositoryError's `not_in_a_repository' arm decodes as an empty arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-register-repository-error
+                    (agent-repl-test-wire-verbs--parse "{\"notInARepository\":{}}"))
+                   '(:cause (:arm :not-in-a-repository :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-error-unreadable-path-arm ()
+  "RegisterRepositoryError's `unreadable_path' arm decodes as an empty arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-register-repository-error
+                    (agent-repl-test-wire-verbs--parse "{\"unreadablePath\":{}}"))
+                   '(:cause (:arm :unreadable-path :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-error-unset-cause-is-a-breach ()
+  "An error with no arm set says nothing actionable, so it is a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-register-repository-error
+                   (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-error-unknown-arm-is-a-breach ()
+  "An arm this codec does not declare is refused, never guessed at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-register-repository-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-response-success-arm ()
+  "The response's `success' arm decodes through the shared result oneof."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-register-repository-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}}"))
+                   '(:arm :success
+                     :value (:repository (:id "repo-1" :dir "/r/one") :already-known nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-response-error-arm ()
+  "The response's `error' arm decodes through the shared result oneof."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-register-repository-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"unreadablePath\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :unreadable-path :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-cause-arms-pinned ()
+  "RegisterRepositoryError's cause oneof has exactly the arms this codec decodes."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_register_repository.pb.go"
+                        "RegisterRepositoryError")
+                       #'string<)
+                 '("notInARepository" "unreadablePath"))))
