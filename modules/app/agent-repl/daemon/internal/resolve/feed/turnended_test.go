@@ -45,6 +45,92 @@ func (h *harness) terminalRow(turn string) *frontendv1.FeedTurnEnded {
 	return nil
 }
 
+// interruptedByUser is the success terminal a stop — the footer's stop button,
+// or a /clear cutting the turn — produces on the wire.
+func interruptedByUser() *conversationv1.AgentSuccess {
+	return &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Interrupted{Interrupted: &conversationv1.AgentInterrupted{
+			Cause: &conversationv1.AgentInterrupted_ByUser{ByUser: &conversationv1.AgentInterruptedByUser{}},
+		}},
+	}
+}
+
+// hasTerminalRow reports whether a terminal row was drawn for a turn.
+func (h *harness) hasTerminalRow(turn string) bool {
+	h.t.Helper()
+	want := testEncode(feedid.Ref{
+		WS: testWorkspace, Feed: rootFeed(),
+		Row: feedid.RowKey{Kind: feedid.KindTurnEnded, ID: turn},
+	}).GetValue()
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetId().GetValue() == want {
+			return true
+		}
+	}
+	return false
+}
+
+// A /clear's interrupt is the cut, not a bubble. Once the clear is confirmed by
+// its ContextCut, the turn's interrupted terminal draws NO "response cut short"
+// card below the divider.
+func TestAConfirmedClearTurnDrawsNoTerminalBubble(t *testing.T) {
+	// Arrange: a confirmed clear.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnContextCut(testWorkspace, mainAgent(),
+		&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}},
+		&conversationv1.HistoryPointer{Value: "entry-clear"}, noAddress())
+
+	// Act: the interrupted terminal the clear left arrives.
+	h.terminal("turn-2", interruptedByUser(), nil)
+
+	// Assert: no terminal bubble below the divider.
+	if h.hasTerminalRow("turn-2") {
+		t.Fatal("a confirmed /clear drew a terminal bubble; the divider is its only outcome")
+	}
+}
+
+// A USER STOP IS NOT A CLEAR. A turn the user stopped with no context cut still
+// draws its "interrupted" terminal — the suppression is for clears alone.
+func TestAUserStopWithoutAClearStillDrawsInterrupted(t *testing.T) {
+	// Arrange: an ordinary running turn — no clear.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+
+	// Act: the user stops it.
+	h.terminal("turn-1", interruptedByUser(), nil)
+
+	// Assert: the stop is drawn as the interrupted terminal it is.
+	if h.terminalRow("turn-1").GetInterrupted() == nil {
+		t.Fatalf("outcome = %T, want interrupted", h.terminalRow("turn-1").GetOutcome())
+	}
+}
+
+// A CLEAR THAT FAILED SURFACES ITS FAILURE. When a clear turn ends with a
+// failure and no cut ever confirmed it, the optimistic bar is retired and the
+// errored terminal is drawn — the failure is never swallowed.
+func TestAFailedClearRetiresItsBarAndDrawsTheError(t *testing.T) {
+	// Arrange: the optimistic bar is up and the clear turn is running.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act: the turn ends on a failure, with no cut ever delivered.
+	h.terminal("turn-2", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}},
+	})
+
+	// Assert: the phantom bar is gone and the failure is drawn.
+	if got := len(h.separationRows()); got != 0 {
+		t.Fatalf("separation rows = %d, want the phantom bar retired on a failed clear", got)
+	}
+	if h.terminalRow("turn-2").GetErrored() == nil {
+		t.Fatalf("outcome = %T, want the failure surfaced", h.terminalRow("turn-2").GetOutcome())
+	}
+}
+
 func TestAConcludedTurnNamesItsAnsweringRow(t *testing.T) {
 	// Arrange: a turn whose prose the producer named as the answer.
 	h := newHarness(t)
