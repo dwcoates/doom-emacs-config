@@ -1704,6 +1704,21 @@ describe("the vendor refusing a CONTROL call", () => {
     expect(prompt.agent?.value).toBe(started.vendorSessionId);
   });
 
+  test("the first turn's init is RECORDED, with the facts it carried", async () => {
+    // AN ACTION NOBODY CAN SEE IS A LOGGING DEFECT. The init landing on an
+    // already-started session is the moment the model, the mode and the agent
+    // binary version become known, and nothing else in the log says so.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
+    await shim.clients.h1.startSession(freshSession());
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    const record = await shim.log.record(
+      (line) => line.context["after_start"] === true && line.message.includes("its init with the first turn"),
+    );
+
+    expect(record.context["agent_binary_version"]).not.toBe("");
+  });
+
   test("an unrecognized init timing REFUSES the start rather than doing nothing", async () => {
     // A KNOB THAT IS SILENTLY IGNORED IS WORSE THAN NO KNOB: a suite that
     // misspelled it would pass while asserting the default's behavior.
