@@ -58,7 +58,7 @@ import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import type { StopControls } from "./stop.js";
+import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
   allowanceUnreadSentence,
   drawFooterAllowance,
@@ -130,11 +130,28 @@ export function drawFooterExpanded(
         ...drawFooterExpandedTokens(requireMessage(u.tokens, `${path}.tokens`), `${path}.tokens`),
         ...drawFooterUsageRows(deps.activity, deps.ctx, "FooterStatus.activity"),
       ]);
-    case "agents":
-      return panel(
-        selection,
-        drawFooterExpandedAgents(requireMessage(u.agents, `${path}.agents`), deps, `${path}.agents`),
-      );
+    case "agents": {
+      // THE AGENTS PANEL FOLDS AWAY WHEN NOTHING IS RUNNING. Its header carries
+      // the fan-wide "stop all" control, so drawing the panel with an empty row
+      // list left a "stop all" (and an empty expanded region) standing after
+      // every subagent had resolved — a control for work that no longer exists.
+      // The daemon ships an empty `rows` exactly when no unresolved, non-lost
+      // subagent is live (the agents chip is unset in the same view), so an
+      // empty list is the fold signal: the expanded region collapses rather than
+      // offering a stop for nothing. The panel returns the instant a live agent
+      // is back in `rows`.
+      //
+      // THE ONE EXCEPTION IS A STOP THAT JUST ANSWERED. "stop all" empties the
+      // live set, so the push it causes carries no rows — and that push is
+      // exactly when the fan-wide control is carrying its outcome ("stopped 4
+      // agents"), the one statement of that count anywhere (see `stop.ts`,
+      // G51). Folding on empty would erase it the instant it landed, so the
+      // panel stays drawn while the control holds an answer; the answer expires
+      // on its own timer (`expireOutcome`), and the next push then folds.
+      const agents = requireMessage(u.agents, `${path}.agents`);
+      if (agents.rows.length === 0 && !stopControlHasAnswer(deps.stops.allAgents)) return null;
+      return panel(selection, drawFooterExpandedAgents(agents, deps, `${path}.agents`));
+    }
     case "tasks":
       return panel(
         selection,

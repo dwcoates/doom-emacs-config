@@ -64,6 +64,28 @@ function mount(h: Harness = harness()) {
   return { host, h, footer };
 }
 
+/** One live agent row, so the agents panel has something to draw and does not
+ * fold away. The daemon ships the chip count and the expanded rows together,
+ * so a chip count rides with a matching row. */
+const AGENT_ROW = {
+  target: { value: "bubble-1" },
+  label: { text: "Explore" },
+  tokens: { text: "0 tok" },
+  runtime: { startedAtMs: BigInt(NOW) },
+};
+
+/** A view whose agents chip and expanded panel both carry `count` live agents. */
+function withAgents(count = 1): ReturnType<typeof footerView> {
+  const rows = Array.from({ length: count }, (_unused, i) => ({
+    ...AGENT_ROW,
+    target: { value: `bubble-${i + 1}` },
+  }));
+  return footerView({
+    strip: strip({ liveWork: { agents: { count } } }),
+    expanded: expanded({ agents: rows }),
+  });
+}
+
 describe("buildWatchFooterRequest", () => {
   it("addresses the stream to this page's workspace", () => {
     expect(buildWatchFooterRequest(harness().ctx).workspace).toEqual(WORKSPACE);
@@ -216,7 +238,7 @@ describe("mountFooter: the panel selection", () => {
   it("opens a panel on a chip click, with NO round trip", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { agents: { count: 1 } } }) })));
+    h.tail.push(pushView(withAgents()));
     await settle();
     host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
     expect(host.querySelector('.footer-expanded[data-panel="agents"]')).not.toBeNull();
@@ -226,24 +248,44 @@ describe("mountFooter: the panel selection", () => {
   it("closes the open panel when its chip is clicked again", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { agents: { count: 1 } } }) })));
+    h.tail.push(pushView(withAgents()));
     await settle();
     const click = (): void =>
       host
         .querySelector<HTMLElement>('[data-chip="agents"]')
         ?.dispatchEvent(new MouseEvent("click")) as never;
     click();
+    expect(host.querySelector('.footer-expanded[data-panel="agents"]')).not.toBeNull();
     click();
     expect(host.querySelector(".footer-expanded")).toBeNull();
+  });
+
+  it("folds the agents panel away when the last agent resolves", async () => {
+    // Arrange: the agents panel is open with a live agent.
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(withAgents()));
+    await settle();
+    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    expect(host.querySelector('.footer-expanded[data-panel="agents"]')).not.toBeNull();
+
+    // Act: every agent resolves — the chip is unset and the rows are empty.
+    h.tail.push(pushView(footerView()));
+    await settle();
+
+    // Assert: the expanded region collapses whole; no "stop all" is left behind.
+    expect(host.querySelector(".footer-expanded")).toBeNull();
+    expect(host.querySelector(".footer-stop-all")).toBeNull();
+    expect(host.querySelector(".footer-divider")).toBeNull();
   });
 
   it("SURVIVES a push: a redraw must not close what the reader opened", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { agents: { count: 1 } } }) })));
+    h.tail.push(pushView(withAgents()));
     await settle();
     host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
-    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { agents: { count: 2 } } }) })));
+    h.tail.push(pushView(withAgents(2)));
     await settle();
     expect(host.querySelector('.footer-expanded[data-panel="agents"]')).not.toBeNull();
   });
@@ -477,7 +519,7 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
   async function openPanel(): Promise<HTMLElement> {
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { agents: { count: 1 } } }) })));
+    h.tail.push(pushView(withAgents()));
     await settle();
     host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
     return host;
