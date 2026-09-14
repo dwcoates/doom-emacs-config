@@ -466,31 +466,20 @@ func terminalOutcome(success *conversationv1.AgentSuccess, failure *conversation
 	}
 }
 
-// vendorBlocked reports whether a failure is the VENDOR's or the ACCOUNT's
-// rather than agent-repl's, which is what the roster's vendor_blocked dot says
-// and what render-colors resolves PURPLE.
+// vendorBlocked reports whether a failure leaves the session unusable, which is
+// what the roster's vendor_blocked dot says and what render-colors resolves
+// BLUE.
 //
-// The first two arms are "the vendor will not serve this account right now".
-// The four below them are the run's OWN terminals, whose failure.proto evidence
-// messages (FailureVendorMaxTurns, FailureVendorMaxBudget,
-// FailureVendorExecutionError, FailureVendorTurnFailed) each state that they
-// resolve the workspace PURPLE — landing 8, which gave them a wire path.
-// stop_hook_prevented is deliberately NOT here: its evidence message is
-// FeedTurnErrorStopHookPrevented, not a FailureVendor* one, because a Stop hook
-// is the user's own configuration rather than the vendor refusing. Every other
-// failure is a run that failed, not a session that cannot proceed.
+// IT IS NOT ITS OWN CLASSIFIER. The verdict is the footer's `footer.FailureBlocks`,
+// the ONE predicate the footer's `blocked` arm also consults, so the dot and the
+// strip cannot disagree about the same failure — the owner's 2026-09-14 ruling
+// that the roster agrees with the footer. The roster once kept a private
+// allowlist of run terminals here, which drifted from the footer: an
+// authentication_failed failure the footer painted `blocked` fell through this
+// list to `done`/`ready` (green) on the roster. Sharing the predicate is what
+// makes that drift unrepresentable rather than merely fixed.
 func vendorBlocked(failure *conversationv1.AgentFailure) bool {
-	switch failure.GetFailure().(type) {
-	case *conversationv1.AgentFailure_BlockingLimit,
-		*conversationv1.AgentFailure_RapidRefillBreaker,
-		*conversationv1.AgentFailure_MaxTurns,
-		*conversationv1.AgentFailure_BudgetExhausted,
-		*conversationv1.AgentFailure_ExecutionError,
-		*conversationv1.AgentFailure_StructuredOutputRetryExhausted:
-		return true
-	default:
-		return false
-	}
+	return footer.FailureBlocks(failure)
 }
 
 // anyWindowOpen reports whether the diagnostics carry an open degraded window,
