@@ -1,3 +1,4 @@
+- daemon(drain): the idle sweep hibernates a session after 12 hours unengaged, not 4 (2026-09-14)
 - webapp: the purple response and blue prompt bubbles cap 15% below their prior widths (82.5%→70.125%, 60%→51%), max-width only; other bubbles and both bubbles' margins unchanged (owner ruling 2026-09-14).
 # Remediation changelog
 
