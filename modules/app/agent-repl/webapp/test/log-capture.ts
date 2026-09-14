@@ -8,6 +8,7 @@
  * logger whose sink discards; this one keeps what it was handed.
  */
 import type { ClientLogRecord } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
+import type { ClientLogLevel } from "../src/log.js";
 import { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } from "../src/log.js";
 
 export interface LogCapture {
@@ -15,8 +16,18 @@ export interface LogCapture {
   sent: ClientLogRecord[];
 }
 
-/** Replace the suite's discarding logger with one whose records the test reads. */
-export function captureLogRecords(): LogCapture {
+/**
+ * Replace the suite's discarding logger with one whose records the test reads.
+ *
+ * MINIMUM is the deployment threshold the capture stands in for, and it
+ * defaults to the contract's `info` because that is what the deployed page
+ * runs at: a test that says nothing about the level is asking whether the
+ * record survives the real threshold. A test whose subject IS a debug record
+ * passes "debug", the level a page booted with `log_level=debug` carries — a
+ * capture that admitted every level by default would report a debug record as
+ * forwarded on a deployment that drops it.
+ */
+export function captureLogRecords(minimum: ClientLogLevel = "info"): LogCapture {
   const sent: ClientLogRecord[] = [];
   const logger = new ForwardingLogger(
     async (record) => {
@@ -24,6 +35,8 @@ export function captureLogRecords(): LogCapture {
       return "accepted";
     },
     () => undefined,
+    {},
+    minimum,
   );
   resetLoggingForTests();
   setLogger(logger);
