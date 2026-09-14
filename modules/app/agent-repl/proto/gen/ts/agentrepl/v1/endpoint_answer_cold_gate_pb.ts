@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_answer_cold_gate.proto.
  */
 export const file_agentrepl_v1_endpoint_answer_cold_gate: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX2NvbGRfZ2F0ZS5wcm90bxIMYWdlbnRyZXBsLnYxIo8CChVBbnN3ZXJDb2xkR2F0ZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIhCgRnYXRlGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEi4KA3BheRgDIAEoCzIfLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVBheUgAEjIKBWNsZWFyGAQgASgLMiEuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ2xlYXJIABI2Cgdjb21wYWN0GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ29tcGFjdEgAQggKBmNob2ljZSITChFBbnN3ZXJDb2xkR2F0ZVBheSIVChNBbnN3ZXJDb2xkR2F0ZUNsZWFyIngKFUFuc3dlckNvbGRHYXRlQ29tcGFjdBIqCgVtb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjMKBXNjb3BlGAIgASgOMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21wYWN0U2NvcGUijgEKFkFuc3dlckNvbGRHYXRlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZUVycm9ySABCCAoGcmVzdWx0IhcKFUFuc3dlckNvbGRHYXRlU3VjY2VzcyKcBAoTQW5zd2VyQ29sZEdhdGVFcnJvchJJChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIsLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjAuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIsLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVOb3RZZXRBZG9wdGVkSAASPgoMbm9fY29sZF9nYXRlGAUgASgLMiYuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlTm9Db2xkR2F0ZUgAEk8KFHVuc2VydmVkX3JlbWVkaWF0aW9uGAYgASgLMi8uYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlVW5zZXJ2ZWRSZW1lZGlhdGlvbkgAEjsKCm5vX3Nlc3Npb24YByABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVOb1Nlc3Npb25IAEIHCgVjYXVzZSIgCh5BbnN3ZXJDb2xkR2F0ZVVua25vd25Xb3Jrc3BhY2UiOgoiQW5zd2VyQ29sZEdhdGVXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMQoeQW5zd2VyQ29sZEdhdGVUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHQobQW5zd2VyQ29sZEdhdGVOb3RZZXRBZG9wdGVkIhoKGEFuc3dlckNvbGRHYXRlTm9Db2xkR2F0ZSIjCiFBbnN3ZXJDb2xkR2F0ZVVuc2VydmVkUmVtZWRpYXRpb24iGQoXQW5zd2VyQ29sZEdhdGVOb1Nlc3Npb25CKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed, file_conversation_v1_api, file_conversation_v1_session]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX2NvbGRfZ2F0ZS5wcm90bxIMYWdlbnRyZXBsLnYxIo8CChVBbnN3ZXJDb2xkR2F0ZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIhCgRnYXRlGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEi4KA3BheRgDIAEoCzIfLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVBheUgAEjIKBWNsZWFyGAQgASgLMiEuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ2xlYXJIABI2Cgdjb21wYWN0GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ29tcGFjdEgAQggKBmNob2ljZSITChFBbnN3ZXJDb2xkR2F0ZVBheSIVChNBbnN3ZXJDb2xkR2F0ZUNsZWFyIngKFUFuc3dlckNvbGRHYXRlQ29tcGFjdBIqCgVtb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjMKBXNjb3BlGAIgASgOMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21wYWN0U2NvcGUijgEKFkFuc3dlckNvbGRHYXRlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZUVycm9ySABCCAoGcmVzdWx0IhcKFUFuc3dlckNvbGRHYXRlU3VjY2VzcyLfBAoTQW5zd2VyQ29sZEdhdGVFcnJvchJJChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIsLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjAuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIsLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVOb3RZZXRBZG9wdGVkSAASPgoMbm9fY29sZF9nYXRlGAUgASgLMiYuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlTm9Db2xkR2F0ZUgAEk8KFHVuc2VydmVkX3JlbWVkaWF0aW9uGAYgASgLMi8uYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlVW5zZXJ2ZWRSZW1lZGlhdGlvbkgAEjsKCm5vX3Nlc3Npb24YByABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVOb1Nlc3Npb25IABJBCg1yZW9wZW5fZmFpbGVkGAggASgLMiguYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlUmVvcGVuRmFpbGVkSABCBwoFY2F1c2UiIAoeQW5zd2VyQ29sZEdhdGVVbmtub3duV29ya3NwYWNlIjoKIkFuc3dlckNvbGRHYXRlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjEKHkFuc3dlckNvbGRHYXRlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG0Fuc3dlckNvbGRHYXRlTm90WWV0QWRvcHRlZCIaChhBbnN3ZXJDb2xkR2F0ZU5vQ29sZEdhdGUiIwohQW5zd2VyQ29sZEdhdGVVbnNlcnZlZFJlbWVkaWF0aW9uIhkKF0Fuc3dlckNvbGRHYXRlTm9TZXNzaW9uIiwKGkFuc3dlckNvbGRHYXRlUmVvcGVuRmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed, file_conversation_v1_api, file_conversation_v1_session]);
 
 /**
  * @generated from message agentrepl.v1.AnswerColdGateRequest
@@ -249,6 +249,21 @@ export type AnswerColdGateError = Message<"agentrepl.v1.AnswerColdGateError"> & 
      */
     value: AnswerColdGateNoSession;
     case: "noSession";
+  } | {
+    /**
+     * THE RE-OPEN THE ANSWER ASKED FOR FAILED. The gate was standing, the
+     * remediation was served, the daemon carried it out — and the session did
+     * not come back. Before this arm existed the whole branch answered a bare
+     * Connect internal, which the webapp words as "the daemon could not be
+     * reached" about a daemon that answered; the gate then stood on, unmoved,
+     * and the user's click did nothing twice in one afternoon
+     * (docs/FOOTER-TOPOLOGY-AUDIT.md section 4). It is a REFUSAL, not a
+     * transport failure, so it is an arm.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateReopenFailed reopen_failed = 8;
+     */
+    value: AnswerColdGateReopenFailed;
+    case: "reopenFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -361,4 +376,28 @@ export type AnswerColdGateNoSession = Message<"agentrepl.v1.AnswerColdGateNoSess
  */
 export const AnswerColdGateNoSessionSchema: GenMessage<AnswerColdGateNoSession> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 13);
+
+/**
+ * The re-open failed.
+ *
+ * @generated from message agentrepl.v1.AnswerColdGateReopenFailed
+ */
+export type AnswerColdGateReopenFailed = Message<"agentrepl.v1.AnswerColdGateReopenFailed"> & {
+  /**
+   * WHY it failed, in the words of whatever refused it — the shim's own
+   * account of a refused StartSession, or the daemon's of a bring-up death.
+   * The SAME line the `cold_gate_reopen_failed` fault carries onto the
+   * footer, read from one place so the two surfaces cannot disagree.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerColdGateReopenFailed.
+ * Use `create(AnswerColdGateReopenFailedSchema)` to create a new message.
+ */
+export const AnswerColdGateReopenFailedSchema: GenMessage<AnswerColdGateReopenFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 14);
 
