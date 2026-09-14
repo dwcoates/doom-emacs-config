@@ -66,6 +66,7 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
+import { bubbleScroll } from "../bubble-scroll.js";
 import { renderMarkdown, inline } from "../../markdown.js";
 import { findTreeRegion, renderTreeHtml } from "../../metaprompt-tree.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -96,6 +97,17 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   bubble.className = "bubble assistant md";
   bubble.setAttribute("data-state", result.case);
 
+  // THE METADATA STRIP COMES FIRST, and the scroll box under it (owner ruling,
+  // 2026-09-14). The corner stamp is a full-width strip above the prose rather
+  // than a column beside it, so the body's scrollbar starts BENEATH the token
+  // figure instead of running the bubble's whole height next to it.
+  const corner = document.createElement("span");
+  corner.className = "turn-meta";
+  if (u.usage !== undefined) {
+    corner.appendChild(drawFeedResponseUsageStamp(u.usage, `${path}.usage`));
+  }
+  bubble.appendChild(corner);
+
   // BEFORE the body, and outside it: the body is rewritten whole by the prose
   // painters (and by every frame of the type-out), so a heading placed inside it
   // would be wiped by the first repaint of an arriving response.
@@ -105,16 +117,11 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     bubble.appendChild(drawFeedResponseNotice(u.notice, `${path}.notice`));
   }
 
+  // The body is the CONTENT WRAPPER; the element appended to the bubble is the
+  // scroll box that holds it (see bubble-scroll.ts).
   const body = document.createElement("div");
   body.className = "bubble-body";
-  bubble.appendChild(body);
-
-  const corner = document.createElement("span");
-  corner.className = "turn-meta";
-  if (u.usage !== undefined) {
-    corner.appendChild(drawFeedResponseUsageStamp(u.usage, `${path}.usage`));
-  }
-  bubble.appendChild(corner);
+  bubble.appendChild(bubbleScroll(body));
 
   let characters: number;
   switch (result.case) {
