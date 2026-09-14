@@ -244,6 +244,18 @@ func AsRefusal(err error) (*Refusal, bool) {
 	return nil, false
 }
 
+// namedRefusal names the rpc a SHARED raiser's refusal surfaced under, leaving
+// every other error untouched. A helper both RegisterWorkspace and
+// RegisterRepository run cannot know which of them is answering, so it raises
+// its refusals with no rpc and each caller states its own -- which is what
+// WithRpc's copy-on-rename exists for.
+func namedRefusal(err error, rpc string) error {
+	if r, ok := AsRefusal(err); ok {
+		return r.WithRpc(rpc)
+	}
+	return err
+}
+
 // refuse records the refusal at INFO and returns it. Every refusal site in this
 // package goes through here, so every verb's refusal is recorded the same way.
 func refuse(log dlog.Logger, rpc, arm, reason string, notFound bool) *Refusal {
