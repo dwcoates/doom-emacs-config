@@ -60,20 +60,25 @@ func (r *resolver) notificationLine(s *wsState) *frontendv1.FooterStatusActivity
 // allowance, or a vendor that reported none) the weekly allowance is drawn
 // ABSENT rather than synthesized: FooterStatusActivityRateLimited.weekly is a
 // message field, so an unset weekly is representable, and stating a figure
-// nobody reported would be worse than stating none.
+// nobody reported would be worse than stating none. THE OVERAGE WINDOW IS THE
+// SAME: most accounts never report one, so it is unfigured and draws absent,
+// and the accounts that do report one get the vendor's figure rather than a
+// log record nobody reads.
 func (r *resolver) rateLine(s *wsState) *frontendv1.FooterStatusActivityRateLimited {
 	session := r.allowance(&s.rate.session)
 	weekly := r.allowance(&s.rate.weekly)
+	overage := r.allowance(&s.rate.overage)
 	unreadable := s.rate.sampleUnread
-	if session == nil && weekly == nil && !unreadable {
+	if session == nil && weekly == nil && overage == nil && !unreadable {
 		return nil
 	}
-	if !session.GetNewsworthy() && !weekly.GetNewsworthy() && !unreadable {
+	if !session.GetNewsworthy() && !weekly.GetNewsworthy() && !overage.GetNewsworthy() && !unreadable {
 		return nil
 	}
 	return &frontendv1.FooterStatusActivityRateLimited{
 		Session: session,
 		Weekly:  weekly,
+		Overage: overage,
 		Sample:  s.rate.sample,
 	}
 }
