@@ -14,7 +14,7 @@ import {
   SUBAGENT_SETTLED_ARMS,
   drawFeedSubagent,
 } from "../../../src/feed/rows/subagent.js";
-import { harness, rowContext, subagentRow, type Harness } from "../harness.js";
+import { countingTicker, harness, rowContext, subagentRow, type Harness } from "../harness.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 beforeEach(() => {
@@ -404,5 +404,29 @@ describe("drawFeedSubagent: the record of the head", () => {
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-subagent");
     expect(record.level.case).toBe("info");
+  });
+});
+
+describe("drawFeedSubagent: a settled head's clocks", () => {
+  it("subscribes to nothing once the subagent has settled", () => {
+    // Arrange: a ticker whose live subscriptions the test can count.
+    const ticker = countingTicker();
+    // Act.
+    drawRow(
+      subagentRow("s", { settled: { endedAtMs: 12_000n, outcome: "succeeded" } }),
+      harness({ ticker }),
+    );
+    // Assert.
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("freezes the settled figure at the message's own span, not the wall clock", () => {
+    const { el } = drawRow(
+      subagentRow("s", { startedAtMs: 1000n, settled: { endedAtMs: 8000n, outcome: "succeeded" } }),
+    );
+    document.body.append(el);
+    vi.advanceTimersByTime(60_000);
+    expect(el.querySelector(".subagent-clock")?.textContent).toBe("7s");
+    el.remove();
   });
 });

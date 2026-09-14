@@ -16,11 +16,13 @@ import {
   type FeedSimpleToolCall,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { createTicker } from "../../../src/clock.js";
+import { createTicker, type Ticker } from "../../../src/clock.js";
 import type { FailureSink } from "../../../src/failure/sink.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
+import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
+import { countingTicker } from "../harness.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   DIAGNOSTICS_VISIBLE,
@@ -34,7 +36,7 @@ import {
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
 /** A row context whose only verb is the external open a link click makes. */
-function rowContext(): RowContext {
+function rowContext(ticker: Ticker = createTicker(1000)): RowContext {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       openExternal: () =>
@@ -45,7 +47,7 @@ function rowContext(): RowContext {
     ctx: testAppContext({
       client: createAgentReplClient(transport),
       workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
-      ticker: createTicker(1000),
+      ticker,
       failures: SINK,
       composerEnabled: false,
     }),
@@ -286,6 +288,24 @@ describe("the running state", () => {
     expect(el.querySelector(".tool-quiet")?.textContent).toBe("quiet for 5s");
   });
 
+  it("marks the quiet clock, so a stop from outside the card can reach it", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: { lastProgress: { atMs: 7000n } } } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-quiet")?.hasAttribute(TICKING_ATTRIBUTE)).toBe(true);
+  });
+
+  it("is stopped by stopTicking on the card, which a direct subscription defeated", () => {
+    const ticker = countingTicker();
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: { lastProgress: { atMs: 7000n } } } }),
+      rowContext(ticker),
+    );
+    stopTicking(el);
+    expect(ticker.live()).toBe(0);
+  });
+
   it("stops ticking once the card has left the document", () => {
     vi.setSystemTime(10_000);
     const el = drawFeedSimpleToolCall(
@@ -297,6 +317,34 @@ describe("the running state", () => {
     el.remove();
     vi.advanceTimersByTime(5000);
     expect(el.querySelector(".tool-quiet")?.textContent).toBe("quiet for 4s");
+  });
+});
+
+describe("a terminal draw's clocks", () => {
+  it("subscribes to nothing when the call has returned", () => {
+    const ticker = countingTicker();
+    drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: { verdict: { case: "succeeded", value: {} }, form: { case: "text", value: { text: "ok" } } },
+        },
+      }),
+      rowContext(ticker),
+    );
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("subscribes to nothing when the call was denied", () => {
+    const ticker = countingTicker();
+    drawFeedSimpleToolCall(card({ outcome: { case: "denied", value: {} } }), rowContext(ticker));
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("subscribes to nothing when the call was handed off to a detached shell", () => {
+    const ticker = countingTicker();
+    drawFeedSimpleToolCall(card({ outcome: { case: "moved", value: {} } }), rowContext(ticker));
+    expect(ticker.live()).toBe(0);
   });
 });
 

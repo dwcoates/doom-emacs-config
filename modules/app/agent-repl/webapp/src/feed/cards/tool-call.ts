@@ -61,6 +61,7 @@ import { renderExternalLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { paintSpanClass } from "./paint.js";
+import { stopTicking, tick, TICKING_ATTRIBUTE } from "../ticking.js";
 import type { RowContext } from "./context.js";
 
 /**
@@ -111,6 +112,12 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
 
   card.appendChild(drawFeedToolCallInput(requireMessage(u.input, `${path}.input`), rc, `${path}.input`));
   for (const element of parts.body) card.appendChild(element);
+  // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. Every arm but `running`
+  // is terminal — the call returned, was denied, or was handed off to a
+  // detached shell — and a terminal draw owns no clock, so whatever this
+  // element still holds (a live clock a previous draw left on a REUSED
+  // element) is dropped here rather than left to a replace site upstream.
+  if (outcome.case !== "running") stopTicking(card);
   return card;
 }
 
@@ -346,11 +353,18 @@ export function drawFeedToolCallRunning(
 /**
  * The last-observed-progress clock, ticking client-side off the shared ticker.
  *
- * IT UNSUBSCRIBES ITSELF. A re-push replaces the card whole, so the element
- * this subscription writes into leaves the document; the first tick that finds
- * it detached drops the subscription rather than ticking a node nobody can see.
- * That is what keeps a long-running turn from accumulating one live clock per
- * push of the same row.
+ * IT IS SUBSCRIBED THROUGH `tick`, NOT DIRECTLY. A subscription taken straight
+ * off the ticker is invisible to `stopTicking`: it carries no mark, holds no
+ * entry, and so no replace site, no dispose and no turn-end backstop can reach
+ * it — its only stop was noticing, on some later tick, that the element had
+ * left the document, which never happens while the card stays on screen. That
+ * is exactly the clock that went on counting under a finished turn. Going
+ * through `tick` puts it where every stop can find it.
+ *
+ * IT STILL UNSUBSCRIBES ITSELF when the element is discarded without a stop:
+ * the first tick that finds it detached drops the subscription rather than
+ * ticking a node nobody can see. The MARK is what tells a real tick from the
+ * first paint `tick` runs before the element is marked or mounted.
  */
 export function drawFeedToolCallLastProgress(
   u: FeedToolCallLastProgress,
@@ -361,16 +375,12 @@ export function drawFeedToolCallLastProgress(
   const quiet = document.createElement("div");
   quiet.className = "tool-quiet";
   quiet.setAttribute("data-since-ms", String(since));
-  const paint = (nowMs: number): void => {
-    quiet.textContent = `quiet for ${formatTickedAge(nowMs - since)}`;
-  };
-  paint(rc.ctx.ticker.now());
-  const stop = rc.ctx.ticker.subscribe((nowMs) => {
-    if (!quiet.isConnected) {
-      stop();
+  tick(quiet, rc.ctx.ticker, (nowMs) => {
+    if (quiet.hasAttribute(TICKING_ATTRIBUTE) && !quiet.isConnected) {
+      stopTicking(quiet);
       return;
     }
-    paint(nowMs);
+    quiet.textContent = `quiet for ${formatTickedAge(nowMs - since)}`;
   });
   log.debug("drawing a tool call quiet-for clock", {
     operation: "feed.cards.tool-call.last-progress",

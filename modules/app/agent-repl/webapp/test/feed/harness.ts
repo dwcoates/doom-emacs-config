@@ -49,7 +49,7 @@ import {
   type FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
-import { createTicker } from "../../src/clock.js";
+import { createTicker, type Ticker } from "../../src/clock.js";
 import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
@@ -57,6 +57,40 @@ import { testAppContext } from "../rpc/app-context.js";
 import type { RowContext, RowRenderers } from "../../src/feed/renderers.js";
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
+
+/** A ticker that reports how many subscriptions are LIVE right now. */
+export interface CountingTicker extends Ticker {
+  /** Subscriptions taken and not yet dropped. A leak is this number, not zero. */
+  live(): number;
+}
+
+/**
+ * A ticker whose live subscriptions a test can COUNT.
+ *
+ * A stopped clock is not the same as a frozen reading: an element can go on
+ * holding a subscription that repaints the same text forever, which is exactly
+ * the defect this wrapper exists to make assertable. The count is the
+ * assertion; the rendered text is the symptom.
+ */
+export function countingTicker(inner: Ticker = createTicker(1000)): CountingTicker {
+  let live = 0;
+  return {
+    now: () => inner.now(),
+    subscribe(fn: (nowMs: number) => void): () => void {
+      live += 1;
+      const unsubscribe = inner.subscribe(fn);
+      let dropped = false;
+      return () => {
+        if (!dropped) {
+          dropped = true;
+          live -= 1;
+        }
+        unsubscribe();
+      };
+    },
+    live: () => live,
+  };
+}
 
 /** Records every failure the feed reports, so a test can assert the arms. */
 export class RecordingSink implements FailureSink {
@@ -124,6 +158,8 @@ export interface FeedScript {
   channels?: Map<string, Channel<WatchFeedResponse>>;
   getFeedPage?: (req: GetFeedPageRequest) => GetFeedPageResponse;
   interrupt?: (req: InterruptRequest) => InterruptResponse;
+  /** The page's clock. Pass a `countingTicker` to assert on live subscriptions. */
+  ticker?: Ticker;
 }
 
 /** Every request the scripted daemon received, in order. */
@@ -187,7 +223,7 @@ export function harness(script: FeedScript = {}): Harness {
   const ctx = testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
-    ticker: createTicker(1000),
+    ticker: script.ticker ?? createTicker(1000),
     failures: sink,
     composerEnabled: false,
   });
@@ -318,6 +354,45 @@ export function responseRow(id: string, markdown = "hi", parent?: string): FeedR
         unit: {
           case: "response",
           value: { result: { case: "success", value: { prose: { markdown } } } },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * A tool-call row: running with an observed beat (which ticks), or returned.
+ *
+ * The beat is what makes a running card hold a clock, so a test about clocks
+ * has to ask for one — an unset `last_progress` draws no clock at all.
+ */
+export function toolCallRow(
+  id: string,
+  state: "running" | "returned",
+  opts: { turn?: string; beatAtMs?: bigint } = {},
+): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    turn: opts.turn === undefined ? undefined : create(TurnIdSchema, { value: opts.turn }),
+    row: {
+      case: "activity",
+      value: {
+        unit: {
+          case: "simpleToolCall",
+          value: {
+            name: { text: "Bash" },
+            input: { text: "$ ls" },
+            outcome:
+              state === "running"
+                ? { case: "running", value: { lastProgress: { atMs: opts.beatAtMs ?? 0n } } }
+                : {
+                    case: "returned",
+                    value: {
+                      verdict: { case: "succeeded", value: {} },
+                      form: { case: "text", value: { text: "ok" } },
+                    },
+                  },
+          },
         },
       },
     },

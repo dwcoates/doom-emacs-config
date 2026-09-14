@@ -38,7 +38,7 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { tick } from "../ticking.js";
+import { stopTicking, tick } from "../ticking.js";
 
 /** What each query-died cause says. */
 export const QUERY_CAUSE_WORDS = {
@@ -299,8 +299,19 @@ function drawRetryCountdown(
   el.setAttribute("data-retry-countdown", "ticking");
   tick(el, rc.ctx.ticker, (nowMs) => {
     const remaining = deadlineMs - nowMs;
-    el.textContent =
-      remaining > 0 ? `retry in ${formatDurationCeil(remaining)}` : "ready to retry";
+    if (remaining > 0) {
+      el.textContent = `retry in ${formatDurationCeil(remaining)}`;
+      return;
+    }
+    // A TIMER STOPS THE MOMENT IT EXPIRES. "ready to retry" is terminal — the
+    // wait is over and nothing after it can change the line — so the
+    // subscription goes rather than rewriting the same sentence every second
+    // for as long as the page is open.
+    // `data-retry-countdown` keeps its contract value: the hook names which
+    // FORM the line took (a countdown rather than the unstated one), and that
+    // does not change when the countdown reaches its end.
+    el.textContent = "ready to retry";
+    stopTicking(el);
   });
   return el;
 }

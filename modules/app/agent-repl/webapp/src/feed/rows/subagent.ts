@@ -173,6 +173,10 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
           ? `${SETTLED_WORDS.lost}${lostCauseClause(outcome.value)}`
           : SETTLED_WORDS[outcome.case];
       el.append(word);
+      // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. The settled clock is
+      // frozen at the span the MESSAGE reports, and this element carries no
+      // live subscription onward from a terminal draw.
+      stopTicking(el);
       return el;
     }
     default:
