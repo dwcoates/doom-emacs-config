@@ -23,6 +23,8 @@ function metrics(widths: Record<string, number>, gap: number): TitleMetrics {
   return {
     width: (el) => widths[el.className] ?? 0,
     gap: () => gap,
+    // The row's edge inset is the same token as its gap, by declaration.
+    edgePadding: () => gap,
   };
 }
 
@@ -41,8 +43,8 @@ describe("capTopbarTitle", () => {
     // ACT.
     capTopbarTitle(el, m);
 
-    // ASSERT: 1090 − 2 · 292 − 2 · 8.
-    expect(titleMaxWidth(el)).toBe("490px");
+    // ASSERT: 1090 − 2 · 8 (the edge insets) − 2 · 292 − 2 · 8.
+    expect(titleMaxWidth(el)).toBe("474px");
   });
 
   it("caps to the same width when the LEFT group is the wider one", () => {
@@ -54,7 +56,7 @@ describe("capTopbarTitle", () => {
     capTopbarTitle(el, m);
 
     // ASSERT.
-    expect(titleMaxWidth(el)).toBe("490px");
+    expect(titleMaxWidth(el)).toBe("474px");
   });
 
   it("takes the floor when the flanks leave less than it", () => {
@@ -65,7 +67,7 @@ describe("capTopbarTitle", () => {
     // ACT.
     capTopbarTitle(el, m);
 
-    // ASSERT: 600 − 590 − 16 is negative, so the floor stands.
+    // ASSERT: 600 − 16 − 590 − 16 is negative, so the floor stands.
     expect(titleMaxWidth(el)).toBe(`${TITLE_CAP_FLOOR_PX}px`);
   });
 
