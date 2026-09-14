@@ -1038,10 +1038,11 @@ describe("the tail against a malformed or ending watch", () => {
     expect(reopened[1]?.value).toBe("7");
   });
 
-  it("records the store ending a standing watch as the unasked ending it is", async () => {
-    // THE SILENCE WAS THE DEFECT. The daemon reported the severed link and the
-    // shim's own log -- the only place that could say what ended the stream --
-    // held nothing at any level it runs at.
+  it("records an unasked ending inside the budget as the recovery it is", async () => {
+    // THE SILENCE WAS THE DEFECT, and so was the WARN that replaced it: an
+    // ORDERED store restart ends every standing watch once and this side
+    // re-opens on its own budget, so the record is lifecycle at INFO. The
+    // fault is the BUDGET being spent, and that record is still ERROR.
     // Arrange.
     let opens = 0;
     const reader = readerOver({
@@ -1064,9 +1065,10 @@ describe("the tail against a malformed or ending watch", () => {
     // Assert.
     expect(recordsSince(before)).toContainEqual(
       expect.objectContaining({
-        level: "warn",
+        level: "info",
         message:
           "the store ended a standing watch that nothing asked it to end; re-opening the book from the last served pointer",
+        context: expect.objectContaining({ attempt: 1, budget: 3 }),
       }),
     );
   });
@@ -2204,5 +2206,101 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     await expect(reader.readFirstPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The store, restarted under a live shim
+//
+// A deploy kickstarts the store's launchd service while every shim keeps
+// running. The socket goes down, comes back, and the read half is built to
+// ride it out -- so the ATTEMPTS are INFO and only the schedule running out is
+// an ERROR.
+// ---------------------------------------------------------------------------
+
+/** The transport error a store whose socket is down answers with. */
+function unreachable(): ConnectError {
+  return new ConnectError("the store socket is not listening", Code.Unavailable);
+}
+
+describe("an open that meets a restarting store", () => {
+  it("records the unreachable attempt at info and opens on the next one", async () => {
+    // Arrange. The first open lands while the store's socket is down; the
+    // second lands after it came back, exactly as a kickstart looks.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        if (opens === 1) throw unreachable();
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, 10);
+    const records = recordsSince(before);
+    session.close();
+
+    // Assert.
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message:
+          "the store could not be reached to open an agent's book; replaying the open on the read retry schedule",
+      }),
+    );
+  });
+
+  it("serves the book the second attempt opened", async () => {
+    // The re-open is not merely quiet: it has to produce the session the
+    // caller asked for, or the restart still severs the WatchAgent.
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        if (opens === 1) throw unreachable();
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, 10);
+    session.close();
+
+    // Assert.
+    expect(session.page.entries.map(unitOf)).toEqual(["unit-a"]);
+  });
+
+  it("raises the store's own arm once the retry schedule is spent", async () => {
+    // Arrange. A store that never comes back.
+    const reader = readerOver({ openAgentSession: async () => Promise.reject(unreachable()) });
+
+    // Act, Assert.
+    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+
+  it("records giving up once the store stayed unreachable for the whole schedule", async () => {
+    // Arrange.
+    const reader = readerOver({ openAgentSession: async () => Promise.reject(unreachable()) });
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    await expect(reader.openAgentPage(BOOK, 10)).rejects.toBeInstanceOf(PersistenceError);
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message:
+          "gave up reading an agent's book: the store stayed unreachable for the whole read retry schedule",
+        context: expect.objectContaining({ read: "openAgentBook" }),
+      }),
+    );
   });
 });
