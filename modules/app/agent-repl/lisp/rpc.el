@@ -62,6 +62,8 @@
 (declare-function agent-repl-wire-decode-watch-workspace-roster-response "wire-roster" (alist))
 (declare-function agent-repl-wire-encode-create-workspace-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-create-workspace-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-register-repository-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-register-repository-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-open-workspace-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-open-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-close-workspace-request "wire-verbs" (request))
@@ -244,6 +246,17 @@ Called on the NEW connection after the old daemon's host stream pushed
 Emacs holds no creation machinery: the request carries the facts and the
 resulting workspace arrives through the roster stream, not through this
 answer.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-register-repository
+  "RegisterRepository"
+  agent-repl-wire-encode-register-repository-request
+  agent-repl-wire-decode-register-repository-response
+  "Hand the daemon ANY path inside a repository and receive the repository
+identity it resolves and mints.
+Idempotent by the resolved main-worktree dir: re-registering answers one
+success carrying the same ref, with `already-known' set.  A repository
+registered this way has NO workspace; it appears on the roster as an empty
+section, and every later create can name it.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-open-workspace
   "OpenWorkspace"
