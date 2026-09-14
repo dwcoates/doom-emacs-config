@@ -1342,3 +1342,93 @@ func TestClientLogStampsTheMintedID(t *testing.T) {
 		t.Fatalf("workspace_id = %v, want the minted %q", records[0]["workspace_id"], mintedTestID(dir))
 	}
 }
+
+// TestARetainedWorkspaceLoggerReopensTheSinkAfterEvict pins the fix for the
+// realtest-9 sink_failure flood: a component that took its workspace logger
+// once and outlives the workspace's close still writes into that workspace's
+// own log, because the logger resolves its sink at write time.
+func TestARetainedWorkspaceLoggerReopensTheSinkAfterEvict(t *testing.T) {
+	// Arrange: one logger, taken before the eviction and held across it.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	log.Info("daemon.workspace.opened", "opened", nil)
+	link := filepath.Join(dir, ".claude", "emacs", "daemon.log")
+	before, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if err := s.Evict(dir); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Act: the retained logger writes after the eviction.
+	log.Info("daemon.shimclient.kill", "the workspace's session was stopped", nil)
+
+	// Assert: the same target, carrying both records.
+	after, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("readlink after eviction: %v", err)
+	}
+	if after != before {
+		t.Fatalf("target = %q, want the remembered %q", after, before)
+	}
+	records := workspaceRecords(t, dir, "daemon")
+	if !hasOperation(records, "daemon.workspace.opened") {
+		t.Fatal("the pre-eviction record is gone from the workspace's log")
+	}
+	if !hasOperation(records, "daemon.shimclient.kill") {
+		t.Fatal("the post-eviction record did not append to the workspace's log")
+	}
+}
+
+// TestARetainedWorkspaceLoggerLandsCentrallyWhenTheDirectoryIsGone covers the
+// nuke: the workspace directory the logger names no longer exists, so its sink
+// cannot be re-opened. That is the ordinary outcome WorkspaceOrCentral
+// documents -- the record goes to the central sink and the condition is
+// reported once, at debug -- and never an error.
+func TestARetainedWorkspaceLoggerLandsCentrallyWhenTheDirectoryIsGone(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if err := s.Evict(dir); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("nuke the workspace directory: %v", err)
+	}
+
+	// Act.
+	log.Info("daemon.shimclient.kill", "the workspace's session was stopped", nil)
+
+	// Assert.
+	records := readRecords(t, runLogPath)
+	if !hasOperation(records, "daemon.shimclient.kill") {
+		t.Fatal("the record of a nuked workspace did not land in the central sink")
+	}
+	fallbacks := 0
+	for _, rec := range records {
+		if rec["level"] == LevelError {
+			t.Fatalf("a record about a nuked workspace produced an error: %v", rec)
+		}
+		if rec["operation"] == "daemon.dlog.central_fallback" {
+			fallbacks++
+			if rec["level"] != LevelDebug {
+				t.Fatalf("central_fallback level = %v, want %q", rec["level"], LevelDebug)
+			}
+		}
+	}
+	if fallbacks != 1 {
+		t.Fatalf("central_fallback notices = %d, want 1", fallbacks)
+	}
+}

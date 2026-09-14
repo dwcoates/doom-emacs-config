@@ -721,3 +721,84 @@ func TestOpenSinkKeepsAppendingToADirectoryHashNamedTarget(t *testing.T) {
 		t.Fatalf("target contents = %q, want %q", raw, want)
 	}
 }
+
+// TestCloseDoesNotPoisonTheSink pins that releasing the descriptor is not a
+// failure: poison outlives the runtime and is reserved for what ErrPoisoned
+// documents, so an evicted sink must be re-openable.
+func TestCloseDoesNotPoisonTheSink(t *testing.T) {
+	// Arrange.
+	dir, id := newWorkspace(t)
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(s.target) })
+
+	// Act.
+	if err := s.close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Assert.
+	if poison := s.poisoned(); poison != nil {
+		t.Fatalf("poison = %v, want a closed sink to carry none", poison)
+	}
+}
+
+// TestAClosedSinkRefusesARecordWithoutPoisoning pins the guard on a handle
+// retained somewhere else: the write is refused, and the refusal says the sink
+// is closed rather than poisoned.
+func TestAClosedSinkRefusesARecordWithoutPoisoning(t *testing.T) {
+	// Arrange.
+	dir, id := newWorkspace(t)
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(s.target) })
+	if err := s.close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Act.
+	err = s.write([]byte("{\"n\":1}\n"))
+
+	// Assert.
+	if !errors.Is(err, ErrSinkClosed) {
+		t.Fatalf("error = %v, want ErrSinkClosed", err)
+	}
+	if errors.Is(err, ErrPoisoned) {
+		t.Fatalf("error = %v, want a closed sink not to report as poisoned", err)
+	}
+}
+
+// TestAWriteFailureStillPoisonsAfterTheCloseChange pins the other half: the
+// cap-maintenance failure ErrPoisoned exists for still takes the sink out of
+// service for good.
+func TestAWriteFailureStillPoisonsAfterTheCloseChange(t *testing.T) {
+	// Arrange: a sink at its cap whose canonical link the daemon no longer
+	// owns, so the rotation the next record needs must refuse.
+	dir, id := newWorkspace(t)
+	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", 8, 2)
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { s.close(); os.Remove(s.target) })
+	if err := os.Remove(s.link); err != nil {
+		t.Fatalf("remove link: %v", err)
+	}
+	if err := s.write([]byte("12345678")); err != nil {
+		t.Fatalf("fill target: %v", err)
+	}
+
+	// Act.
+	err = s.write([]byte("{\"n\":1}\n"))
+
+	// Assert.
+	if !errors.Is(err, ErrPoisoned) {
+		t.Fatalf("error = %v, want ErrPoisoned", err)
+	}
+	if poison := s.poisoned(); poison == nil {
+		t.Fatal("the sink did not stay poisoned after a failed write")
+	}
+}
