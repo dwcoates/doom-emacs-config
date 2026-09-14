@@ -80,6 +80,8 @@
 (declare-function agent-repl-wire-decode-set-workspace-priority-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-submit-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-submit-prompt-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-interrupt-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-interrupt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-update-shutdown-schedule-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-shutdown-schedule-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-update-merge-queue-request "wire-verbs" (request))
@@ -312,6 +314,18 @@ The request carries the `UserSaid' content, an idempotency key and the
 REQUIRED origin naming the send site.  There is no precondition: the
 daemon starts or revives the session implicitly and answers with its own
 refusal arms when it will not run the prompt.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-interrupt
+  "Interrupt"
+  agent-repl-wire-encode-interrupt-request
+  agent-repl-wire-decode-interrupt-response
+  "Stop running work in a workspace: the one \"stop that\" verb.
+THE ARM IS THE TARGET -- `turn' interrupts the running vendor query,
+`all_agents' the fan-wide stop -- and the response's ARM IS THE OUTCOME.
+`nothing_running' is a SUCCESS arm (the session was already quiet), while
+the refusal arms live in the error oneof; a turn stop with live detached
+agents is refused once as `confirm_required' and answered by re-sending
+with `confirm_agents' set.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-update-shutdown-schedule
   "UpdateShutdownSchedule"
