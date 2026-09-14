@@ -94,7 +94,11 @@ logging rung that never signals, so the stub is a no-op: the typed
   "The verbs whose request is {workspace} and whose result arms are both empty.")
 
 (defconst agent-repl-test-wire-verbs--result-oneofs
-  '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse")
+  ;; A third element, when present, is the arm set this codec decodes instead of
+  ;; the usual two: CreateWorkspaceResponse carries the option-B `accepted' ack
+  ;; beside success and error.
+  '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse"
+     ("accepted" "error" "success"))
     ("agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceResponse")
     ("agentrepl/v1/endpoint_close_workspace.pb.go" "CloseWorkspaceResponse")
     ("agentrepl/v1/endpoint_kill_workspace.pb.go" "KillWorkspaceResponse")
@@ -1030,11 +1034,12 @@ logging rung returns normally, and the typed signal follows it."
 ;;;; ---- Arm lists pinned against the generated Go bindings --------------
 
 (ert-deftest agent-repl-test-wire-verbs-result-arms-pinned ()
-  "Every response's result oneof has exactly the two arms this codec decodes."
+  "Every response's result oneof has exactly the arms this codec decodes."
   (dolist (entry agent-repl-test-wire-verbs--result-oneofs)
-    (should (equal (sort (agent-repl-test--generated-oneof-arms (nth 0 entry) (nth 1 entry))
-                         #'string<)
-                   '("error" "success")))))
+    (let ((want (or (nth 2 entry) '("error" "success"))))
+      (should (equal (sort (agent-repl-test--generated-oneof-arms (nth 0 entry) (nth 1 entry))
+                           #'string<)
+                     (sort (copy-sequence want) #'string<))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-form-arms-pinned ()
   "CreateWorkspaceRequest's form oneof has exactly the two arms encoded here."

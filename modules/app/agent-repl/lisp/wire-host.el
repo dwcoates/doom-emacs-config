@@ -39,6 +39,9 @@
 (declare-function agent-repl-wire--fail "wire-common")
 (declare-function agent-repl-wire--object "wire-common")
 (declare-function agent-repl-wire-decode-drain-reason "wire-common")
+(declare-function agent-repl-wire-decode-workspace-ref "wire-common")
+(declare-function agent-repl-wire-decode-create-workspace-error "wire-verbs")
+(declare-function agent-repl-wire--raw "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-unknown "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "wire-common")
@@ -950,6 +953,77 @@ The standing schedule, re-pushed to late subscribers."
   "Decode VALUE as the empty `DaemonDrainCancelled' — presence is the fact."
   (agent-repl-wire--decode-empty "DaemonDrainCancelled" value))
 
+;;;; ---- Workspace-mutation progress ------------------------------------
+
+(defun agent-repl-wire-decode-workspace-create-stage (value)
+  "Decode `WorkspaceCreateStage''s protojson enum-name VALUE into a keyword.
+Enums travel as their string names; an unknown one is a contract breach,
+not a stage to guess at."
+  (pcase value
+    ("WORKSPACE_CREATE_STAGE_DERIVING_NAME" :deriving-name)
+    ("WORKSPACE_CREATE_STAGE_CREATING_WORKTREE" :creating-worktree)
+    (_ (agent-repl-wire--fail "WorkspaceCreateStage" 'stage
+                              (format "unknown enum value %S" value)))))
+
+(defun agent-repl-wire-decode-workspace-create-succeeded (value)
+  "Decode `WorkspaceCreateSucceeded' from VALUE into `(:workspace REF :name N)'.
+The minted identity a client selects and the name it announces."
+  (let ((object (agent-repl-wire--object "WorkspaceCreateSucceeded" value)))
+    (agent-repl-wire--check-keys "WorkspaceCreateSucceeded" object '(workspace name))
+    (agent-repl-wire--decoded
+     "WorkspaceCreateSucceeded"
+     (list :workspace (agent-repl-wire--decode-message
+                       "WorkspaceCreateSucceeded" 'workspace object
+                       #'agent-repl-wire-decode-workspace-ref)
+           :name (agent-repl-wire--decode-string
+                  "WorkspaceCreateSucceeded" 'name object)))))
+
+(defun agent-repl-wire-decode-workspace-create-failed-refusal (value)
+  "Decode `WorkspaceCreateFailed''s `refusal' arm — a CreateWorkspaceError."
+  (agent-repl-wire-decode-create-workspace-error value))
+
+(defun agent-repl-wire-decode-workspace-create-failed (value)
+  "Decode `WorkspaceCreateFailed' from VALUE into `(:arm ARM :value V)'.
+THE ARM IS THE KIND OF FAILURE: a typed `refusal' the synchronous form
+would answer, or an `internal' sentence it would fail the rpc with."
+  (let ((object (agent-repl-wire--object "WorkspaceCreateFailed" value)))
+    (agent-repl-wire--check-keys "WorkspaceCreateFailed" object '(refusal internal))
+    (agent-repl-wire--decode-oneof
+     "WorkspaceCreateFailed" 'cause object
+     '((refusal :refusal agent-repl-wire-decode-workspace-create-failed-refusal)
+       (internal :internal identity)))))
+
+(defun agent-repl-wire-decode-workspace-create-progress (value)
+  "Decode `WorkspaceCreateProgress' from VALUE into `(:arm STEP :value V)'.
+THE ARM IS THE STEP: an intermediate `stage', or a terminal `succeeded' or
+`failed'."
+  (let ((object (agent-repl-wire--object "WorkspaceCreateProgress" value)))
+    (agent-repl-wire--check-keys "WorkspaceCreateProgress" object '(stage succeeded failed))
+    (agent-repl-wire--decode-oneof
+     "WorkspaceCreateProgress" 'step object
+     '((stage :stage agent-repl-wire-decode-workspace-create-stage)
+       (succeeded :succeeded agent-repl-wire-decode-workspace-create-succeeded)
+       (failed :failed agent-repl-wire-decode-workspace-create-failed)))))
+
+(defun agent-repl-wire-decode-workspace-mutation-progress-create (value)
+  "Decode `WorkspaceMutationProgress''s `create' event arm from VALUE."
+  (agent-repl-wire-decode-workspace-create-progress value))
+
+(defun agent-repl-wire-decode-workspace-mutation-progress (value)
+  "Decode `WorkspaceMutationProgress' from VALUE.
+Returns `(:op-id ID :event (:arm ARM :value V))'.  THE OP ID IS THE
+CORRELATION KEY: a client matches this push to the operation it issued by
+it, and drops any it does not recognize."
+  (let ((object (agent-repl-wire--object "WorkspaceMutationProgress" value)))
+    (agent-repl-wire--check-keys "WorkspaceMutationProgress" object '(opId create))
+    (agent-repl-wire--decoded
+     "WorkspaceMutationProgress"
+     (list :op-id (agent-repl-wire--decode-string "WorkspaceMutationProgress" 'opId object)
+           :event (agent-repl-wire--decode-oneof
+                   "WorkspaceMutationProgress" 'event object
+                   '((create :create
+                             agent-repl-wire-decode-workspace-mutation-progress-create)))))))
+
 (defun agent-repl-wire-decode-watch-daemon-response-push (value)
   "Decode `WatchDaemonResponse''s `push' oneof from the object VALUE."
   (agent-repl-wire--decode-oneof
@@ -957,14 +1031,16 @@ The standing schedule, re-pushed to late subscribers."
    '((shutdownAnnounced :shutdown-announced
                         agent-repl-wire-decode-daemon-shutdown-announced)
      (drainScheduled :drain-scheduled agent-repl-wire-decode-daemon-drain-scheduled)
-     (drainCancelled :drain-cancelled agent-repl-wire-decode-daemon-drain-cancelled))))
+     (drainCancelled :drain-cancelled agent-repl-wire-decode-daemon-drain-cancelled)
+     (mutationProgress :mutation-progress
+                       agent-repl-wire-decode-workspace-mutation-progress))))
 
 (defun agent-repl-wire-decode-watch-daemon-response (value)
   "Decode VALUE as `WatchDaemonResponse', the push oneof plist."
   (let ((object (agent-repl-wire--object "WatchDaemonResponse" value)))
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
-     '(shutdownAnnounced drainScheduled drainCancelled))
+     '(shutdownAnnounced drainScheduled drainCancelled mutationProgress))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))
