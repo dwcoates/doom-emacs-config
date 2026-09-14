@@ -1605,12 +1605,25 @@ export const degradedWindowClosedWarning = (): WarningInit => ({
 
 export const TOPBAR_ACCOUNT_ARMS = ["loggedIn", "loggedOut"] as const;
 
-/** The permission modes the picker lists; SetPermissionMode echoes `mode`. */
+/**
+ * The permission modes the picker lists; SetPermissionMode echoes `mode`.
+ *
+ * `auto` LEADS AND `default` IS ABSENT, mirroring what the daemon's
+ * `topbar.SwitchableModes` now serves (owner ruling 2026-09-14). A fixture
+ * offering `default` would be a view no daemon can publish.
+ */
 export const PERMISSION_MODES = [
-  { mode: "default", displayName: "default" },
+  { mode: "auto", displayName: "auto" },
   { mode: "acceptEdits", displayName: "accept edits" },
   { mode: "plan", displayName: "plan" },
 ] as const;
+
+/**
+ * The vendor's `default`, as a session started BEFORE the ruling still reports
+ * it: a mode in force that the served set does not carry, so the picker draws
+ * it as the current value and offers no row for it.
+ */
+export const LIVE_DEFAULT_MODE = { mode: "default", displayName: "default" } as const;
 
 /**
  * The account root the fixture daemon serves, and the second one a switch
@@ -1732,7 +1745,9 @@ export function topbarView(init?: TopbarInit): TopbarView {
       ).map(accountOption),
     },
     permissionModePicker: {
-      current: PERMISSION_MODES.find((m) => m.mode === (init?.permissionMode ?? "default")),
+      current:
+        PERMISSION_MODES.find((m) => m.mode === (init?.permissionMode ?? "auto")) ??
+        (init?.permissionMode === LIVE_DEFAULT_MODE.mode ? { ...LIVE_DEFAULT_MODE } : undefined),
       options: PERMISSION_MODES.map((m) => ({ ...m })),
     },
   });

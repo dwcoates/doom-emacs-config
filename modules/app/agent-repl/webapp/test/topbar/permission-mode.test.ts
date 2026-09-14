@@ -18,7 +18,7 @@ import { oneofArms } from "../arms.js";
 import { RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
 const picker = (
-  current = { mode: "default", displayName: "default" },
+  current = { mode: "auto", displayName: "auto" },
   options: Array<{ mode: string; displayName: string }> = [
     { mode: "acceptEdits", displayName: "accept edits" },
   ],
@@ -32,12 +32,43 @@ function mountPicker(tc: ReturnType<typeof topbarContext>["tc"], host: HTMLEleme
 describe("drawTopbarPermissionModePicker", () => {
   it("shows the mode in force by its display name", () => {
     const { host, tc } = topbarContext();
-    expect(mountPicker(tc, host).textContent).toBe("default");
+    expect(mountPicker(tc, host).textContent).toBe("auto");
   });
 
   it("carries the mode's wire spelling as a hook", () => {
     const { host, tc } = topbarContext();
-    expect(mountPicker(tc, host).getAttribute("data-mode")).toBe("default");
+    expect(mountPicker(tc, host).getAttribute("data-mode")).toBe("auto");
+  });
+
+  // A SESSION STARTED BEFORE THE 2026-09-14 AUTO RULING still runs under the
+  // vendor's `default`, and the daemon serves that as the current value while
+  // leaving it out of the options. The picker must state it rather than draw a
+  // mode nobody is running.
+  it("states a live default as the mode in force even though nothing offers it", () => {
+    const { host, tc } = topbarContext();
+    const button = mountPicker(
+      tc,
+      host,
+      picker({ mode: "default", displayName: "default" }, [{ mode: "auto", displayName: "auto" }]),
+    );
+    expect(button.textContent).toBe("default");
+  });
+
+  it("offers no row for a live default", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    const button = mountPicker(
+      tc,
+      host,
+      picker({ mode: "default", displayName: "default" }, [{ mode: "auto", displayName: "auto" }]),
+    );
+    // ACT
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    const modes = Array.from(openPanel(host)!.querySelectorAll("[data-mode-option]")).map((el) =>
+      el.getAttribute("data-mode-option"),
+    );
+    expect(modes).toEqual(["auto"]);
   });
 
   it("lists exactly the served options, in the served order", () => {
