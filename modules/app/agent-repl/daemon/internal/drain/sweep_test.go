@@ -1125,3 +1125,167 @@ func TestRunLevelsTheScheduleReadByWhetherTheLoopWasCancelled(t *testing.T) {
 		})
 	}
 }
+
+// TestSweepDefersOnACompactingAnswer is the first half of the two-phase
+// directive. A compaction is a real vendor turn and StandBound is a sum of
+// TEARDOWN bounds, so the shim answers that the work has STARTED and finishes
+// it past the rpc. This pass has nothing to stand down yet.
+func TestSweepDefersOnACompactingAnswer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.answer[ws] = compactingAnswer()
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want the pass deferred behind a compaction in flight", hibernated)
+	}
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("stand-down calls while a compaction was in flight = %+v, want none", killed)
+	}
+}
+
+// TestACompactingAnswerIsRecordedAtDebugAndNotAsAFailure is the defect this
+// arm exists for. While the answer WAS the compaction's completion, every
+// sweep pass hit its own deadline, recorded a failed directive, never stood
+// the session down, and re-ran the whole summary turn five minutes later --
+// thirteen of them on one workspace in one morning, each with an ERROR beside
+// it naming nothing anybody could fix.
+func TestACompactingAnswerIsRecordedAtDebugAndNotAsAFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.answer[ws] = compactingAnswer()
+
+	// Act
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	deferred := false
+	for _, r := range records(h.log, opSweep) {
+		if r.Level == "error" || r.Level == "warn" {
+			t.Fatalf("a compaction in flight was recorded at %s: %q", r.Level, r.Message)
+		}
+		if r.Level == "debug" && r.Message == "compaction in flight; deferring the hibernation" {
+			deferred = true
+		}
+	}
+	if !deferred {
+		t.Fatal("the sweep deferred behind a compaction without recording that it had")
+	}
+}
+
+// TestTheNextPassStandsDownOnceTheCompactionHasLanded is the other half: the
+// deferral is only correct because the ask after it is ACKED, and the shim
+// never compacts one transcript twice.
+func TestTheNextPassStandsDownOnceTheCompactionHasLanded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.answer[ws] = compactingAnswer()
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("the first Sweep: %v", err)
+	}
+	delete(h.stand.answer, ws)
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("hibernated = %v, want %s stood down on the pass after the compaction landed", hibernated, ws)
+	}
+}
+
+// TestAFailedDirectiveIsStillAnError pins what the compacting arm did NOT
+// soften. A directive that fails for any other reason is a shim that stopped
+// answering, and that is still worth finding.
+func TestAFailedDirectiveIsStillAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.hibernateErr[ws] = errFake
+
+	// Act
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	found := false
+	for _, r := range records(h.log, opSweep) {
+		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the hibernation" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a failed hibernate directive was not recorded as an error")
+	}
+}
+
+// TestSweepDefersOnAnArmItCannotRead covers the answer nobody here understood.
+// Standing a session down on one would kill a session whose transcript was
+// never compacted, which is the one thing the directive exists to prevent.
+func TestSweepDefersOnAnArmItCannotRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.answer[ws] = &shimv1.HibernateResponse{}
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want an unreadable answer deferred", hibernated)
+	}
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("stand-down calls after an unreadable answer = %+v, want none", killed)
+	}
+}
+
+// TestAnArmItCannotReadIsRecordedAsAnError is that deferral's account: a shim
+// speaking a contract this daemon was not taught is a deployment fault.
+func TestAnArmItCannotReadIsRecordedAsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.answer[ws] = &shimv1.HibernateResponse{}
+
+	// Act
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	found := false
+	for _, r := range records(h.log, opSweep) {
+		if r.Level == "error" && r.Message == "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the hibernation" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("an unreadable hibernate answer was deferred without being recorded")
+	}
+}
+
+// compactingAnswer is the shim's "the work has started and outlives this rpc".
+func compactingAnswer() *shimv1.HibernateResponse {
+	return &shimv1.HibernateResponse{
+		Result: &shimv1.HibernateResponse_Compacting{Compacting: &shimv1.HibernateCompacting{}},
+	}
+}

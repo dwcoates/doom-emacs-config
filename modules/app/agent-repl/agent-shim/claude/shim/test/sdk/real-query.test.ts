@@ -8,7 +8,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { realQueryOptions, type RealQuerySpec } from "../../src/sdk/real-query.js";
+import {
+  realQueryOptions,
+  vendorSpawner,
+  type RealQuerySpec,
+  type SpawnChild,
+  type VendorChildExit,
+} from "../../src/sdk/real-query.js";
 import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH } from "../../src/metaprompt.js";
 
 function homeWithMetaprompt(text: string): string {
@@ -307,5 +313,163 @@ describe("createRealQuery", () => {
 
     // Assert.
     expect(created).toBe(query);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// the spawner that watches the child end
+// ---------------------------------------------------------------------------
+
+/**
+ * A child that spawns nothing.
+ *
+ * IT IS A FAKE AND NOT A REAL PROCESS ON PURPOSE: this suite tests what the
+ * spawner DOES with a child, and spawning a real one to learn that would make
+ * a unit test wait on the operating system.
+ */
+class FakeChild {
+  readonly exitListeners: ((code: number | null, signal: NodeJS.Signals | null) => void)[] = [];
+  readonly stderrListeners: ((chunk: string) => void)[] = [];
+  encoding = "";
+  readonly stderr = {
+    setEncoding: (encoding: string): void => {
+      this.encoding = encoding;
+    },
+    on: (_event: string, listener: (chunk: string) => void): void => {
+      this.stderrListeners.push(listener);
+    },
+  };
+  once(_event: string, listener: (code: number | null, signal: NodeJS.Signals | null) => void): void {
+    this.exitListeners.push(listener);
+  }
+  exit(code: number | null, signal: NodeJS.Signals | null): void {
+    for (const listener of this.exitListeners) listener(code, signal);
+  }
+  say(chunk: string): void {
+    for (const listener of this.stderrListeners) listener(chunk);
+  }
+}
+
+function spawnOptions(): Parameters<SpawnChild>[0] {
+  return {
+    command: "claude",
+    args: ["--print"],
+    cwd: "/ws",
+    env: {},
+    signal: new AbortController().signal,
+  };
+}
+
+describe("the vendor spawner", () => {
+  it("reports the child's exit code", () => {
+    // Arrange.
+    const child = new FakeChild();
+    const seen: VendorChildExit[] = [];
+    const spawner = vendorSpawner((exit) => seen.push(exit), undefined, () => child as never);
+
+    // Act.
+    spawner(spawnOptions());
+    child.exit(137, null);
+
+    // Assert.
+    expect(seen).toEqual([{ code: 137, signal: null }]);
+  });
+
+  it("reports the signal that killed the child", () => {
+    // Arrange.
+    const child = new FakeChild();
+    const seen: VendorChildExit[] = [];
+    const spawner = vendorSpawner((exit) => seen.push(exit), undefined, () => child as never);
+
+    // Act.
+    spawner(spawnOptions());
+    child.exit(null, "SIGKILL");
+
+    // Assert.
+    expect(seen).toEqual([{ code: null, signal: "SIGKILL" }]);
+  });
+
+  it("keeps feeding the stderr callback the SDK would otherwise feed", () => {
+    // THE REGRESSION THIS EXISTS TO PREVENT. `SpawnedProcess` declares no
+    // stderr, so a custom spawner is exactly where `Options.stderr` stops
+    // being fed -- and the vendor's own refusals are printed there and
+    // nowhere else.
+    // Arrange.
+    const child = new FakeChild();
+    const said: string[] = [];
+    const spawner = vendorSpawner(() => undefined, (chunk) => said.push(chunk), () => child as never);
+
+    // Act.
+    spawner(spawnOptions());
+    child.say("No conversation found with session ID x");
+
+    // Assert.
+    expect(said).toEqual(["No conversation found with session ID x"]);
+  });
+
+  it("reads the child's stderr as text", () => {
+    // Arrange.
+    const child = new FakeChild();
+    const spawner = vendorSpawner(() => undefined, () => undefined, () => child as never);
+
+    // Act.
+    spawner(spawnOptions());
+
+    // Assert.
+    expect(child.encoding).toBe("utf8");
+  });
+
+  it("hands the SDK the child it spawned", () => {
+    // Arrange.
+    const child = new FakeChild();
+    const spawner = vendorSpawner(() => undefined, undefined, () => child as never);
+
+    // Act.
+    const spawned = spawner(spawnOptions());
+
+    // Assert.
+    expect(spawned).toBe(child as never);
+  });
+});
+
+describe("the options' choice between the stderr callback and the spawner", () => {
+  it("installs the spawner when the caller wants the child's exit", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec({ onChildExit: () => undefined }));
+
+    // Assert.
+    expect(typeof options.spawnClaudeCodeProcess).toBe("function");
+  });
+
+  it("leaves the SDK's own spawn alone when the caller does not", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec({ onStderr: () => undefined }));
+
+    // Assert.
+    expect(options.spawnClaudeCodeProcess).toBeUndefined();
+  });
+
+  it("never sets both the stderr callback and the spawner", () => {
+    // NEVER BOTH, or the same chunk is reported twice: the spawner takes the
+    // callback over rather than running beside it.
+    // Arrange, Act.
+    const options = realQueryOptions(
+      spec({ onStderr: () => undefined, onChildExit: () => undefined }),
+    );
+
+    // Assert.
+    expect(options.stderr).toBeUndefined();
+  });
+
+  it("keeps the stderr callback when there is no spawner to carry it", () => {
+    // Arrange.
+    const said: string[] = [];
+
+    // Act.
+    const options = realQueryOptions(spec({ onStderr: (chunk) => said.push(chunk) }));
+    options.stderr?.("boom");
+
+    // Assert.
+    expect(said).toEqual(["boom"]);
   });
 });

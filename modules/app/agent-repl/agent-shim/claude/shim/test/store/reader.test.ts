@@ -74,6 +74,18 @@ async function seeded(name: string, count: number) {
   return { started, client, plane };
 }
 
+/**
+ * `expect.objectContaining`, TYPED.
+ *
+ * The matcher's own declaration answers `any`, so nesting one inside an object
+ * literal is an unsafe assignment — the linter's complaint is exactly right:
+ * an `any` there would let a typo in the OUTER shape pass unchecked. Naming
+ * the result `unknown` keeps the matcher and gives the literal a type.
+ */
+function containing(shape: Record<string, unknown>): unknown {
+  return expect.objectContaining(shape);
+}
+
 describe("openAgentPage", () => {
   it("serves the newest entries first", async () => {
     const { plane } = await seeded("page-order", 3);
@@ -1068,7 +1080,7 @@ describe("the tail against a malformed or ending watch", () => {
         level: "info",
         message:
           "the store ended a standing watch that nothing asked it to end; re-opening the book from the last served pointer",
-        context: expect.objectContaining({ attempt: 1, budget: 3 }),
+        context: containing({ attempt: 1, budget: 3 }),
       }),
     );
   });
@@ -2299,7 +2311,7 @@ describe("an open that meets a restarting store", () => {
         level: "error",
         message:
           "gave up reading an agent's book: the store stayed unreachable for the whole read retry schedule",
-        context: expect.objectContaining({ read: "openAgentBook" }),
+        context: containing({ read: "openAgentBook" }),
       }),
     );
   });

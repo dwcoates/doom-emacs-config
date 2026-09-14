@@ -40,8 +40,8 @@ import {
   writtenEntries,
 } from "../integration-support/store.js";
 import {
-  hibernateAcked,
   hibernateKind,
+  hibernateUntilAcked,
   killSessionCause,
   killSessionLive,
   sessionKilled,
@@ -1005,15 +1005,38 @@ describe("Hibernate", () => {
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
 
-    const response = await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    await hibernateUntilAcked(() =>
+      shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    );
 
-    hibernateAcked(response);
     const records = readTranscript(shim.dirs, started.vendorSessionId);
     expect(
       records.some(
         (record) => record.type === "system" && record.subtype === "compact_boundary",
       ),
     ).toBe(true);
+  });
+
+  test("a second hibernation of an unchanged transcript writes no second boundary", async () => {
+    // THE LOOP THIS GUARDS (owner's workspace, 2026-09-14). The idle sweep asks
+    // every five minutes, and while nothing made a second compaction a no-op it
+    // bought a whole vendor summary turn each time: thirteen boundaries and
+    // thirteen blocks of continuation notes in the feed in one morning.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await hibernateUntilAcked(() =>
+      shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    );
+
+    const asks = await hibernateUntilAcked(() =>
+      shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    );
+
+    const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
+      (record) => record.type === "system" && record.subtype === "compact_boundary",
+    );
+    expect([asks, boundaries.length]).toEqual([1, 1]);
   });
 
   test("KillSession after a hibernation still tears the session down and exits", async () => {
@@ -1028,7 +1051,9 @@ describe("Hibernate", () => {
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await stream.next();
-    hibernateAcked(await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})));
+    await hibernateUntilAcked(() =>
+      shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    );
 
     const response = await shim.clients.h1.killSession(
       create(shimv1.KillSessionRequestSchema, { force: false }),
@@ -1462,7 +1487,9 @@ describe("Hibernate and revival", () => {
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
-    hibernateAcked(await first.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})));
+    await hibernateUntilAcked(() =>
+      first.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    );
     // STOOD DOWN, NOT SIGKILLED. The ack says the compaction happened; the
     // graceful stand-down is what the daemon does next, and it is the half
     // that guarantees the rows describing the compaction actually landed.

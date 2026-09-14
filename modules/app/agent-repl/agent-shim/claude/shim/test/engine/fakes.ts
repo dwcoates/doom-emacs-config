@@ -37,6 +37,8 @@ import type { BashRunStanding } from "../../src/store/reader.js";
 export class ScriptedQuery implements QueryLike {
   private readonly queued: SdkMessage[] = [];
   private waiting: ((value: IteratorResult<SdkMessage>) => void) | undefined;
+  /** The parked consumer's rejection, so a failure THROWS rather than ending. */
+  private waitingReject: ((reason: Error) => void) | undefined;
   private ended = false;
   private failure: Error | undefined;
 
@@ -62,6 +64,7 @@ export class ScriptedQuery implements QueryLike {
     if (this.waiting !== undefined) {
       const resolve = this.waiting;
       this.waiting = undefined;
+      this.waitingReject = undefined;
       resolve({ value: message, done: false });
       return;
     }
@@ -74,14 +77,27 @@ export class ScriptedQuery implements QueryLike {
     if (this.waiting !== undefined) {
       const resolve = this.waiting;
       this.waiting = undefined;
+      this.waitingReject = undefined;
       resolve({ value: undefined, done: true });
     }
   }
 
-  /** End the stream by throwing out of the iterator. */
+  /**
+   * End the stream by THROWING out of the iterator.
+   *
+   * It rejects a consumer that is already parked in `next`, which is the only
+   * state a live session's message loop is ever in. Delegating to `end()` made
+   * this fake report an orderly EOF for a death instead — so the shim's own
+   * "the vendor query is gone" record named the stream ending, not the vendor's
+   * error, for every test that used it.
+   */
   fail(error: Error): void {
     this.failure = error;
-    this.end();
+    this.ended = true;
+    const reject = this.waitingReject;
+    this.waiting = undefined;
+    this.waitingReject = undefined;
+    if (reject !== undefined) reject(error);
   }
 
   [Symbol.asyncIterator](): AsyncIterator<SdkMessage> {
@@ -91,8 +107,9 @@ export class ScriptedQuery implements QueryLike {
         if (next !== undefined) return Promise.resolve({ value: next, done: false });
         if (this.failure !== undefined) return Promise.reject(this.failure);
         if (this.ended) return Promise.resolve({ value: undefined, done: true });
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
           this.waiting = resolve;
+          this.waitingReject = reject;
         });
       },
     };
