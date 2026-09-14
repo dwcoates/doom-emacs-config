@@ -332,11 +332,23 @@ func (r *resolver) permissionModePicker(s *wsState) *frontendv1.TopbarPermission
 }
 
 // SwitchableModes is the vendor's fixed switchable permission-mode set, in
-// display order — exactly the arms conversation.v1 AgentPermissionMode spells,
-// in their wire spelling. It is a CONSTANT rather than a catalog because the
+// display order — the arms conversation.v1 AgentPermissionMode spells, in
+// their wire spelling. It is a CONSTANT rather than a catalog because the
 // vendor states no catalog: SessionStarted carries a model catalog and nothing
 // for modes.
-var SwitchableModes = []string{"default", "accept_edits", "plan", "bypass", "dont_ask", "auto"}
+//
+// `auto` LEADS AND `default` IS NOT OFFERED (owner ruling 2026-09-14: "there
+// should be no `default` option in the dropdown in the topbar, it should just
+// default to 'auto' in the dropdown"). Every session this daemon starts runs
+// under `auto` unless the reader picks otherwise, so offering `default` would
+// offer a mode nothing here selects.
+//
+// A SESSION THE VENDOR REPORTS AS `default` IS STILL DRAWN AS `default`.
+// permissionModePicker fills the current option from the mode in force and
+// falls back to a synthesized option when the served set does not carry it —
+// so a pre-ruling session shows the vendor's own word, unselectable, until its
+// next start moves it to auto. The picker never lies about what is running.
+var SwitchableModes = []string{"auto", "accept_edits", "plan", "bypass", "dont_ask"}
 
 // switchablePermissionModes builds the served picker from the fixed set. The
 // current option is filled in by permissionModePicker from the mode in force.

@@ -107,7 +107,12 @@ import {
   REAL_SCHEDULER,
   type KeepaliveScheduler,
 } from "./keepalive.js";
-import { fromVendorPermissionMode, PermissionGate, toVendorPermissionMode } from "./permission-gate.js";
+import {
+  DEFAULT_PERMISSION_MODE,
+  fromVendorPermissionMode,
+  PermissionGate,
+  toVendorPermissionMode,
+} from "./permission-gate.js";
 import { SessionPushes } from "./pushes.js";
 import { TurnEngine, promptEntry, buildPrompt, saidText, textSaid, type OpenTurn, type SessionContext } from "./turn.js";
 
@@ -482,7 +487,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let prompts: PromptQueue | undefined;
   let open: OpenTurn | undefined;
   let effectiveModel = "";
-  let permissionMode: conversationv1.AgentPermissionMode = fromVendorPermissionMode("default");
+  /**
+   * The mode in force. `auto` IS THE UNSTATED MODE (owner ruling 2026-09-14):
+   * a `StartSession{fresh}` that names no mode, and a resume whose transcript
+   * states none, both run under the classifier-gated `auto` rather than the
+   * vendor's own `default`. The gate is kept either way — `auto` decides each
+   * ask with a model instead of the user — so nothing is dropped by the
+   * choice, and `createQuery` therefore always passes `permissionMode: "auto"`
+   * when the daemon stated nothing.
+   */
+  let permissionMode: conversationv1.AgentPermissionMode =
+    fromVendorPermissionMode(DEFAULT_PERMISSION_MODE);
   let modelCatalog: conversationv1.ModelOption[] = [];
   let started = false;
   /**

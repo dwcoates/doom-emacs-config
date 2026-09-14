@@ -31,6 +31,7 @@ import { isKnownTone, RENDER_COLORS } from "./vocab";
 import {
   ACCOUNT_CONFIG_DIR,
   OTHER_ACCOUNT_CONFIG_DIR,
+  LIVE_DEFAULT_MODE,
   PERMISSION_MODES,
   TOPBAR_ACCOUNT_ARMS,
   TOPBAR_WARNING_ARMS,
@@ -406,6 +407,35 @@ describe("the permission-mode picker", () => {
     expect(harness.$$("[data-mode-option]").map((el) => el.dataset.modeOption)).toEqual(
       PERMISSION_MODES.map((m) => m.mode),
     );
+  });
+
+  it("offers no default option", async () => {
+    // Arrange
+    await withTopbar({});
+    // Act
+    await harness.click(".topbar-mode");
+    // Assert
+    expect(harness.$$("[data-mode-option]").map((el) => el.dataset.modeOption)).not.toContain(
+      "default",
+    );
+  });
+
+  it("lists auto first", async () => {
+    // Arrange
+    await withTopbar({});
+    // Act
+    await harness.click(".topbar-mode");
+    // Assert
+    expect(harness.$$("[data-mode-option]")[0]?.dataset.modeOption).toBe("auto");
+  });
+
+  it("draws a live default as the current mode without offering it", async () => {
+    // Arrange: a session started before the 2026-09-14 auto ruling.
+    await withTopbar({ permissionMode: LIVE_DEFAULT_MODE.mode });
+    // Act
+    await harness.click(".topbar-mode");
+    // Assert
+    expect(harness.text(".topbar-mode-button")).toBe(LIVE_DEFAULT_MODE.displayName);
   });
 
   it("draws each option's display name verbatim", async () => {

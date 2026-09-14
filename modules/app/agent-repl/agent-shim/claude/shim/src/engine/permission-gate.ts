@@ -55,6 +55,17 @@ const DENIED_MEMORY = 256;
 // permission mode, both ways
 // ---------------------------------------------------------------------------
 
+/**
+ * THE MODE A SESSION RUNS UNDER WHEN NOTHING STATES ONE (owner ruling
+ * 2026-09-14: "the default permission mode should be auto for the SDK/shim").
+ *
+ * NOT the vendor's `default`. `auto` keeps the gate — a classifier decides
+ * each ask rather than the user — so choosing it as the unstated mode drops no
+ * consent; `default` remains a mode the vendor can REPORT, and both conversion
+ * tables below carry it, but this shim never picks it for anyone.
+ */
+export const DEFAULT_PERMISSION_MODE: PermissionModeLike = "auto";
+
 /** The vendor's mode word for a wire mode. Total: the two vocabularies are 1:1. */
 export function toVendorPermissionMode(mode: conversationv1.AgentPermissionMode): PermissionModeLike {
   switch (mode.mode.case) {

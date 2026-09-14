@@ -910,3 +910,22 @@ func TestCreateSurfacesARegistryReadFailureRatherThanRefusing(t *testing.T) {
 		t.Fatalf("Create() = %v, want a plain failure rather than a refusal arm", err)
 	}
 }
+
+func TestCreateMintsAutoWhenTheCreationNamesNoMode(t *testing.T) {
+	// Arrange: owner ruling 2026-09-14 — the unstated mode is auto, and the
+	// row says so rather than staying empty.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	spec.PermissionMode = ""
+
+	// Act.
+	created, err := f.verbs.Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.sessions[created.ID].PermissionMode; got != "auto" {
+		t.Fatalf("minted permission mode = %q, want auto", got)
+	}
+}

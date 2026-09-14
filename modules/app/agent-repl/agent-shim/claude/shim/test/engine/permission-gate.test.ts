@@ -14,6 +14,7 @@ import type { PersistEntry } from "../../src/store/persistence.js";
 import type { PermissionResultLike, PermissionUpdateLike } from "../../src/sdk/types.js";
 import {
   ASK_USER_QUESTION_TOOL,
+  DEFAULT_PERMISSION_MODE,
   fromStanding,
   fromVendorPermissionMode,
   PermissionGate,
@@ -100,6 +101,24 @@ describe("permission mode, both ways", () => {
       expect(toVendorPermissionMode(fromVendorPermissionMode(vendor as never))).toBe(vendor);
     });
   }
+
+  it("maps the vendor's auto onto the auto arm", () => {
+    expect(fromVendorPermissionMode("auto").mode.case).toBe("auto");
+  });
+
+  it("maps the auto arm onto the vendor's auto", () => {
+    expect(
+      toVendorPermissionMode(
+        create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "auto", value: create(conversationv1.AgentPermissionModeAutoSchema, {}) },
+        }),
+      ),
+    ).toBe("auto");
+  });
+
+  it("names auto as the mode a session runs under when nothing states one", () => {
+    expect(DEFAULT_PERMISSION_MODE).toBe("auto");
+  });
 
   it("refuses a mode with no arm rather than sending a default the caller did not ask for", () => {
     expect(() => toVendorPermissionMode(create(conversationv1.AgentPermissionModeSchema, {}))).toThrow(

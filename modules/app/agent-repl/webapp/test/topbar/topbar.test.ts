@@ -22,7 +22,7 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
     connectivity: { tone: "green", glyph: "●", title: "connected" },
     modelSelector: { options: [{ model: { name: "opus" }, displayName: "Opus" }] },
     permissionModePicker: {
-      current: { mode: "default", displayName: "default" },
+      current: { mode: "auto", displayName: "auto" },
       options: [{ mode: "plan", displayName: "plan" }],
     },
     context: { text: "142.3k", breakdown: { sections: [] } },
