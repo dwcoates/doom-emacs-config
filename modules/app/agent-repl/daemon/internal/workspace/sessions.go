@@ -26,6 +26,7 @@ import (
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
+	"claude-repld/internal/startingshim"
 	"claude-repld/internal/wsm"
 )
 
@@ -138,6 +139,13 @@ type FleetDeps struct {
 	// DefaultStartSessionBound, which is where the sizing is stated; it is a
 	// field for the same reason AdoptBound is.
 	StartBound time.Duration
+	// Clock drives the wait for a PREDECESSOR'S STARTING SHIM to announce
+	// itself on its socket. Nil means startingshim.SystemClock; it is a field
+	// so a test of that wait drives time rather than sleeping through it.
+	Clock startingshim.Clock
+	// ShimAlive reports whether a recorded spawned pid names a live process.
+	// Nil means startingshim.Alive, which is kill(pid, 0).
+	ShimAlive func(pid int) bool
 	// PublishHost recomposes and republishes one workspace's HOST view. The
 	// fleet owns the edges that move it and the server cannot see them: a
 	// session coming up, a session going away, a shim replaced. Nil means no
@@ -190,6 +198,10 @@ type Fleet struct {
 	adoptBound time.Duration
 	// startBound bounds ONE StartSession; see DefaultStartSessionBound.
 	startBound time.Duration
+	// starting waits for a predecessor's still-starting shim to announce
+	// itself, so a bring-up never spawns a second shim onto one session
+	// socket. See startingshim.
+	starting startingshim.Waiter
 	// socketGoneBound bounds the wait for a stopped shim's socket to
 	// disappear; see stopFailedStart. It is shimclient.GracefulKillBound --
 	// the whole of a graceful stop's worst case -- and it is a field only so a
@@ -344,6 +356,12 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		now:         now,
 		adoptBound:  adoptBound,
 		startBound:  startBound,
+
+		starting: startingshim.Waiter{
+			Alive: deps.ShimAlive,
+			Probe: socketProbe,
+			Clock: deps.Clock,
+		},
 
 		socketGoneBound: shimclient.GracefulKillBound,
 		sessions:        map[ids.WorkspaceID]*live{},
@@ -1008,6 +1026,22 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 		return nil, pathNone, fmt.Errorf("start session for %q: the shim socket at %q could not be probed: %w", ws, socketPath, socketErr)
 	}
+	// A PREDECESSOR'S SHIM MAY BE STILL STARTING. A free lock and an absent
+	// socket are also what a shim spawned moments ago looks like: it takes its
+	// conversation locks inside StartSession and its socket is bound by Node
+	// tens of milliseconds after the fork. The registry's recorded spawn pid
+	// is the only witness, and it is consulted BEFORE the spawn branch below
+	// concludes there is nothing here. See startingshim.
+	if !inert && state == sessionlock.StateFree {
+		announced, path, err := f.awaitStartingSurvivor(ctx, log, ws, udsPath)
+		if err != nil {
+			f.noteStartFailed(ctx, log, ws, err)
+			return nil, pathNone, err
+		}
+		if announced {
+			socketPath, socket, inert = path, shimsocket.StateLive, true
+		}
+	}
 	if inert {
 		if err := f.refuseAdoptingOurOwnSpawn(ctx, log, ws, socketPath, "inert_survivor"); err != nil {
 			return nil, pathNone, err
@@ -1103,6 +1137,10 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			Fake:         f.deps.Fake,
 			LogSink:      sink.File(),
 			ForbidVendor: f.deps.ForbidVendor,
+			// THE PID IS DURABLE FROM THE FORK. Spawn blocks until the shim
+			// has bound and answered; a daemon killed inside that window
+			// leaves a shim its successor cannot tell from no shim at all.
+			Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
 		})
 		if err != nil {
 			log.Error(opBringUp, "the shim did not come up", dlog.Context{"cause": err.Error()})
