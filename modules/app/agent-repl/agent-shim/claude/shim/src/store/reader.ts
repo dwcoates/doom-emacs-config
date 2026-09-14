@@ -29,7 +29,7 @@ import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
 import { PersistenceError, type AgentPageSession } from "./persistence.js";
-import { readWithRetry, type ReadRetryOptions } from "./retry.js";
+import { isRetryableRead, readWithRetry, type ReadRetryOptions } from "./retry.js";
 
 const LOGGER = bindLog({ component: "shim-store-reader", operation: "shim.store.reader" });
 
@@ -499,9 +499,16 @@ export function createReader(options: ReaderOptions): Reader {
         }),
       );
     } catch (error) {
-      LOGGER.error(
+      // A STORE RESTART IS THE ORDINARY SHAPE OF THIS FAILURE, NOT A FAULT.
+      // Every caller here replays the open on {@link onReadRetrySchedule},
+      // which is exactly what an ORDERED restart -- `launchctl kickstart` on
+      // the store, under a live shim -- needs from this side: the socket is
+      // down for as long as the store takes to come back, and the schedule is
+      // there to absorb it. So the attempt is INFO, and the ERROR belongs to
+      // the schedule being SPENT, which the wrapper says once.
+      LOGGER.info(
         { agent: agent.value, detail: String(error) },
-        "the store could not be reached to open an agent's book",
+        "the store could not be reached to open an agent's book; replaying the open on the read retry schedule",
       );
       throw transportFailure(error);
     }
@@ -518,6 +525,36 @@ export function createReader(options: ReaderOptions): Reader {
       "store_unavailable",
       "the store answered OpenAgentSession with no result arm set",
     );
+  };
+
+  /**
+   * One store read, on the read half's retry schedule, with the EXHAUSTION said
+   * once and loudly.
+   *
+   * THE ATTEMPTS ARE NOT THE FAULT; THE SCHEDULE RUNNING OUT IS. A store
+   * restarting under a live shim -- the ordered `launchctl kickstart` a deploy
+   * performs -- refuses every call it meets for as long as its socket is down,
+   * and the read half exists to ride that out: the attempts are INFO at the
+   * site that made them, and this is the one place that says the store never
+   * came back. The error itself is re-thrown exactly as it stood, so the
+   * caller's typed arm and the engine's fault are unchanged.
+   */
+  const onReadRetrySchedule = async <T>(
+    what: string,
+    agent: conversationv1.AgentId,
+    read: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await readWithRetry(what, read, options);
+    } catch (error) {
+      if (isRetryableRead(error)) {
+        LOGGER.error(
+          { agent: agent.value, read: what, detail: String(error) },
+          "gave up reading an agent's book: the store stayed unreachable for the whole read retry schedule",
+        );
+      }
+      throw error;
+    }
   };
 
   /** One book, opened from the store as it stands. Refuses a book with no rows. */
@@ -663,8 +700,13 @@ export function createReader(options: ReaderOptions): Reader {
                   "without delivering a line; the tail cannot be kept standing",
               );
             }
-            // warn: a defect because the store ended a standing watch nothing on this side had asked it to end.
-            LOGGER.warn(
+            // info: an ordered store restart ends every standing watch once,
+            // and this side recovers from it on its own budget. The record is
+            // the lifecycle of that recovery -- the store went away, the book
+            // is being re-opened from the last served pointer, attempt N of M
+            // -- and it is a fault only once the budget above is spent, which
+            // the ERROR there says.
+            LOGGER.info(
               {
                 agent: agent.value,
                 served_through: servedThrough?.value,
@@ -678,10 +720,8 @@ export function createReader(options: ReaderOptions): Reader {
           // because it is RESTARTING will refuse this open for as long as it is
           // down, and a single attempt would turn a restart the schedule is
           // there to absorb into a severed WatchAgent on every live session.
-          const reopened = await readWithRetry(
-            "reopenAgentTail",
-            () => openSession(agent, CATCHUP_PAGE_SIZE, servedThrough),
-            options,
+          const reopened = await onReadRetrySchedule("reopenAgentTail", agent, () =>
+            openSession(agent, CATCHUP_PAGE_SIZE, servedThrough),
           );
           if (reopened.watch === undefined) {
             throw new PersistenceError(
@@ -820,7 +860,13 @@ export function createReader(options: ReaderOptions): Reader {
           continue;
         }
         try {
-          return await openBookNow(agent, pageSize, knownThrough);
+          // ON THE READ HALF'S SCHEDULE, for the reason the tail's re-open is:
+          // a store restarting under a live shim refuses this open for as long
+          // as its socket is down, and one attempt would turn a restart the
+          // schedule absorbs into a deferred book that never opens.
+          return await onReadRetrySchedule("openDeferredAgentBook", agent, () =>
+            openBookNow(agent, pageSize, knownThrough),
+          );
         } catch (error) {
           if (!(error instanceof PersistenceError) || error.kind !== "unknown_agent") throw error;
           if (closed) return undefined;
@@ -946,7 +992,12 @@ export function createReader(options: ReaderOptions): Reader {
       return deferredBook(agent, pageSize, knownThrough, known);
     }
     try {
-      return await openBookNow(agent, pageSize, knownThrough);
+      // ON THE READ HALF'S SCHEDULE. This is the open a WatchAgent stands its
+      // whole tail on, and a deploy that kickstarts the store under a live
+      // shim used to fail it terminally on the first unreachable attempt.
+      return await onReadRetrySchedule("openAgentBook", agent, () =>
+        openBookNow(agent, pageSize, knownThrough),
+      );
     } catch (error) {
       if (known === undefined || !(error instanceof PersistenceError)) throw error;
       if (error.kind !== "unknown_agent" || !known()) throw error;
@@ -1030,10 +1081,8 @@ export function createReader(options: ReaderOptions): Reader {
     knownThrough?: conversationv1.HistoryPointer,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> =>
-    readWithRetry(
-      "readFirstPage",
-      () => readFirstPageOnce(agent, pageSize, knownThrough, known),
-      options,
+    onReadRetrySchedule("readFirstPage", agent, () =>
+      readFirstPageOnce(agent, pageSize, knownThrough, known),
     );
 
   /**
@@ -1057,9 +1106,12 @@ export function createReader(options: ReaderOptions): Reader {
         }),
       );
     } catch (error) {
-      LOGGER.error(
+      // AS ON THE OPEN ABOVE: this read is replayed on the retry schedule, so
+      // one unreachable attempt is the expected shape of a store restart and
+      // the ERROR is the schedule running out.
+      LOGGER.info(
         { agent: agent.value, detail: String(error) },
-        "the store could not be reached to read an older page",
+        "the store could not be reached to read an older page; replaying the read on the retry schedule",
       );
       throw transportFailure(error);
     }
@@ -1100,7 +1152,9 @@ export function createReader(options: ReaderOptions): Reader {
     },
 
     readAgentPage(agent, pageSize, after) {
-      return readWithRetry("readAgentPage", () => readAgentPageOnce(agent, pageSize, after), options);
+      return onReadRetrySchedule("readAgentPage", agent, () =>
+        readAgentPageOnce(agent, pageSize, after),
+      );
     },
     async openBashRun(work, announcement) {
       // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
