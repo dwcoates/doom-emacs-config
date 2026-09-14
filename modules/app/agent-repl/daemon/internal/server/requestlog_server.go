@@ -615,6 +615,23 @@ func (s *requestLoggingServer) RegisterWorkspace(
 	return s.server.RegisterWorkspace(ctx, req)
 }
 
+func (s *requestLoggingServer) RegisterRepository(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RegisterRepositoryRequest],
+) (resp *connect.Response[agentreplv1.RegisterRepositoryResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "RegisterRepository", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	boundary.log.Debug("daemon.server.register_repository", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.register_repository", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.RegisterRepository(ctx, req)
+}
+
 func (s *requestLoggingServer) SelectWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SelectWorkspaceRequest],

@@ -175,6 +175,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :restart))
                 ((symbol-function 'agent-repl-rpc-create-workspace)
                  (agent-repl-test-verbs--stub :create))
+                ((symbol-function 'agent-repl-rpc-register-repository)
+                 (agent-repl-test-verbs--stub :register-repository))
                 ((symbol-function 'agent-repl-rpc-set-workspace-priority)
                  (agent-repl-test-verbs--stub :set-priority))
                 ((symbol-function 'agent-repl-rpc-update-shutdown-schedule)
@@ -1840,3 +1842,143 @@ came back CLOSED left behind."
       (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
       ;; Assert.
       (should (equal (agent-repl--panels-take-arrival-reason "ws-id-1") "arrived")))))
+
+;;;; ---- RegisterRepository ----
+;;
+;; `SPC j .': a repository joins the roster on its own, picked as a FILE
+;; inside it.  A repository used to enter only as a side effect of
+;; registering a workspace, so a checkout nobody had worked in yet could not
+;; be named at all.
+
+(defun agent-repl-test-verbs--register-repository-answer (&optional already-known)
+  "Return the answers alist for a RegisterRepository that SUCCEEDED.
+ALREADY-KNOWN non-nil scripts the idempotent answer."
+  (list (cons :register-repository
+              (list :response
+                    (list :arm :success
+                          :value (list :repository (agent-repl-test-verbs--repo-ref)
+                                       :already-known already-known))))))
+
+(defmacro agent-repl-test-verbs--picking-file (path &rest body)
+  "Run BODY with `read-file-name' answering PATH."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'read-file-name) (lambda (&rest _) ,path)))
+     ,@body))
+
+(ert-deftest agent-repl-verbs-register-repository-sends-the-picked-path ()
+  "The request carries the FILE the user picked, verbatim."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/lisp/verbs.el"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (equal (agent-repl-test-verbs--request :register-repository)
+                     (list :path "/tmp/agent-repl-test/repo/lisp/verbs.el"))))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-a-fresh-registration ()
+  "A repository the daemon minted is echoed as registered, by its resolved dir."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "registered repository /tmp/agent-repl-test/repo")))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-one-already-known ()
+  "`already_known' is an ANSWER: the command says so rather than claiming a mint."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer t)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "already known repository /tmp/agent-repl-test/repo")))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-a-path-in-no-repository ()
+  "The `not_in_a_repository' arm reaches the user as its own sentence."
+  ;; Arrange.
+  (agent-repl-test-verbs--with
+      (list (cons :register-repository
+                  (list :response
+                        (list :arm :error
+                              :value (list :cause (list :arm :not-in-a-repository
+                                                        :value nil))))))
+    (agent-repl-test-verbs--picking-file "/tmp/elsewhere/loose.txt"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "that path is not inside a git repository: /tmp/elsewhere/loose.txt")))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-an-unreadable-path ()
+  "The `unreadable_path' arm reaches the user as its own sentence."
+  ;; Arrange.
+  (agent-repl-test-verbs--with
+      (list (cons :register-repository
+                  (list :response
+                        (list :arm :error
+                              :value (list :cause (list :arm :unreadable-path
+                                                        :value nil))))))
+    (agent-repl-test-verbs--picking-file "/tmp/absent.txt"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "that path cannot be read: /tmp/absent.txt")))))
+
+(ert-deftest agent-repl-verbs-register-repository-falls-through-an-arm-it-has-no-sentence-for ()
+  "An arm this command does not know still reports, through the generic path.
+A refusal the daemon adds later must reach the user the day it ships."
+  ;; Arrange.
+  (agent-repl-test-verbs--with
+      (list (cons :register-repository
+                  (list :response
+                        (list :arm :error
+                              :value (list :cause (list :arm :some-future-arm
+                                                        :value nil))))))
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "register-repository refused: some-future-arm")))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-a-transport-failure ()
+  "Nobody answering is a different fact from the daemon refusing."
+  ;; Arrange.
+  (agent-repl-test-verbs--with
+      (list (cons :register-repository (list :failure (list :detail "no daemon"))))
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "register-repository failed -- the daemon did not answer")))))
+
+(ert-deftest agent-repl-verbs-register-repository-defaults-to-the-buffers-own-file ()
+  "The buffer you are looking at is almost always in the repository you mean."
+  ;; Arrange.
+  (let (prompted-default)
+    (cl-letf (((symbol-function 'buffer-file-name) (lambda (&rest _) "/tmp/repo/a/b.el"))
+              ((symbol-function 'read-file-name)
+               (lambda (_prompt _dir default &rest _) (setq prompted-default default) default)))
+      ;; Act.
+      (agent-repl-verbs--register-repository-read-path))
+    ;; Assert.
+    (should (equal prompted-default "/tmp/repo/a/b.el"))))
+
+(ert-deftest agent-repl-verbs-register-repository-falls-back-to-the-default-directory ()
+  "A buffer visiting no file still has a directory, which is a complete answer."
+  ;; Arrange.
+  (let ((default-directory "/tmp/repo/a/")
+        prompted-default)
+    (cl-letf (((symbol-function 'buffer-file-name) (lambda (&rest _) nil))
+              ((symbol-function 'read-file-name)
+               (lambda (_prompt _dir default &rest _) (setq prompted-default default) default)))
+      ;; Act.
+      (agent-repl-verbs--register-repository-read-path))
+    ;; Assert.
+    (should (equal prompted-default "/tmp/repo/a/"))))

@@ -47,6 +47,14 @@ type Git interface {
 	// workspace's merge targets. A bare repository has none, which is an
 	// error, never an empty answer.
 	MainWorktree(ctx context.Context, dir string) (string, error)
+	// RepositoryOf reports the MAIN WORKTREE of the repository a directory is
+	// inside, and whether it is inside one at all. It is a PROBE, not a
+	// resolution: a directory outside every repository is an ORDINARY ANSWER
+	// (false, nil error) and never an error record, which is what registering
+	// a repository from a path the user picked asks of it. MainWorktree is the
+	// resolution for a directory the caller already knows is a worktree; this
+	// is the question "is it one, and whose".
+	RepositoryOf(ctx context.Context, dir string) (string, bool, error)
 	// SameRepo reports whether two directories belong to one repository. The
 	// merge orchestrator keys its two methods on it.
 	SameRepo(ctx context.Context, a, b string) (bool, error)
