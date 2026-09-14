@@ -32,6 +32,7 @@
  */
 import "./styles.css";
 import { createTicker } from "./clock.js";
+import { installCopyFallback } from "./copy.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
 import { createRowRenderers } from "./feed/renderers.js";
 import { mountFeed } from "./feed/feed.js";
@@ -172,6 +173,11 @@ export async function boot(): Promise<void> {
     const shell = shellElements(document);
 
     overlay = mountFailureOverlay(shell.failureOverlay);
+
+    // Copying is a page-wide affordance, not a component's: it is installed
+    // once, here, so every surface mounted below is copyable from its first
+    // paint. See src/copy.ts for why the page carries a fallback at all.
+    installCopyFallback(document);
 
     const ticker = createTicker();
     const ctx = createAppContext({

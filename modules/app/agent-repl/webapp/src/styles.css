@@ -398,10 +398,24 @@ body::after {
   overflow: hidden;
   background: var(--sidebar-bg);
   box-shadow: var(--sidebar-shadow);
-  user-select: none;
   font-size: 14px;
 }
 #ws-sidebar[hidden] { display: none; }
+
+/* THE RAIL'S TEXT IS INFORMATION AND IS THEREFORE SELECTABLE (owner ruling,
+   2026-09-14: "ensure that everything in the webapp (all text) can be copied
+   to clipboard; I need to be able to do this to easily relay errors"). The
+   rail used to carry a blanket `user-select: none`, which made workspace
+   names, repo headers, task lines and the rail's own error text impossible to
+   drag-select — exactly the text a reader needs to relay. The suppression now
+   lives ONLY on the two fold glyphs, whose character ("▸"/"▾") is a control's
+   state and carries no information a reader would ever quote, and where a
+   stray selection during a double-click-to-fold is pure noise. */
+#ws-sidebar .row .chev,
+#ws-sidebar [data-section-fold],
+#ws-sidebar .repo-head .tri {
+  user-select: none;
+}
 
 #ws-sidebar .sb-head {
   display: flex;
@@ -881,9 +895,14 @@ body::after {
    over the whole topbar, so it sits at true center regardless of how wide
    the left cluster or the right pickers grow. Bounded to the middle band
    and ellipsis-clipped so a long objective cannot reach — and overwrite —
-   either cluster; the full text is in its `title` tooltip. `pointer-events:
-   none` keeps it from stealing clicks from anything it may overlap when the
-   panel is narrow. Empty content collapses it to nothing. */
+   either cluster; the full text is in its `title` tooltip. It TAKES POINTER
+   EVENTS (owner ruling, 2026-09-14: all visible text is copyable): it used to
+   be `pointer-events: none`, which made the objective — a sentence a reader
+   would want to relay — impossible to drag-select at all, since a pointer
+   passes straight through it. The click-stealing this guarded against is
+   bounded by the box itself, which shrink-wraps its text inside the middle
+   44% band and so covers nothing but the objective's own glyphs.
+   Empty content collapses it to nothing. */
 #task-summary {
   position: absolute;
   left: 50%;
@@ -892,7 +911,6 @@ body::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  pointer-events: none;
   color: var(--tool-title);
   font-style: italic;
 }
@@ -1525,7 +1543,12 @@ pre {
   color: var(--muted);
   font-size: 0.85rem;
 }
-.thinking summary { cursor: pointer; user-select: none; }
+/* The fold keeps its click-to-toggle, and its TEXT stays selectable: the
+   summary line is the only label the folded thinking has, so a reader
+   relaying it must be able to drag across it. Only the disclosure MARKER —
+   a glyph, not information — opts out. */
+.thinking summary { cursor: pointer; user-select: text; }
+.thinking summary::marker { user-select: none; }
 
 .tool-card {
   border: 1px solid var(--border);
