@@ -462,6 +462,10 @@ export function createFakeQuery(
   opts: FakeQueryOpts,
 ): QueryLike {
   const refuse = refusedVerbs();
+  // READ AND VALIDATED HERE, beside the refusals, so an unrecognized value is a
+  // refusal to start rather than a knob that turns out to have done nothing
+  // several seconds into a session.
+  const initAfterFirstTurn = initTiming() === "after-first-turn";
   if (refuse.has("start")) {
     // The vendor could not be started at all. StartSession turns this into
     // `vendor_start_failed`, which is otherwise unreachable behind `--fake`.
@@ -1286,7 +1290,6 @@ export function createFakeQuery(
     // THE INIT MAY BE OWED TO THE FIRST TURN RATHER THAN TO THE OPENING. The
     // real vendor withholds it until an input message arrives; the lever
     // reproduces that, and `at-start` keeps the corpus's own shape.
-    const initAfterFirstTurn = initTiming() === "after-first-turn";
     if (!initAfterFirstTurn) emitInit();
     LOGGER.info(
       {

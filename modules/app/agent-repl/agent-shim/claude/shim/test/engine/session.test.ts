@@ -4522,6 +4522,160 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   });
 });
 
+/**
+ * THE PROVEN-LIVE SIGNAL A START SETTLES ON.
+ *
+ * WHAT THIS GUARDS: that `StartSession` never again waits for a message the
+ * vendor does not send until it is prompted. Grounded 2026-09-13 against
+ * claude 2.1.220 AND 2.1.270, driven exactly as this shim drives them: the
+ * child answers control requests in ~300ms and emits no `system:init` at all
+ * until a first user message arrives. A start that waited for `init` before it
+ * would accept a prompt therefore deadlocked on every real session.
+ */
+describe("the proven-live signal a start settles on", () => {
+  it("settles the start on the control round-trip, with no init at all", async () => {
+    const h = harness();
+
+    const response = await h.engine.startSession(freshRequest());
+
+    expect(response.result.case).toBe("success");
+  });
+
+  it("proves the child live by ASKING it something, not by waiting", async () => {
+    // The round-trip is the whole proof, and it has to have actually happened:
+    // a start that answered success without asking would be asserting nothing.
+    const h = harness();
+
+    await h.engine.startSession(freshRequest());
+
+    expect(h.queries[0]?.query.calls).toContain("supportedModels");
+  });
+
+  it("spends ONE control call on the catalog, not two", async () => {
+    // The round-trip's answer IS `SessionStarted.model_catalog`, so the opening
+    // reads it once. A second read here would spend a vendor call to learn what
+    // the start already knows.
+    const h = harness();
+
+    await h.engine.startSession(freshRequest());
+
+    expect(h.queries[0]?.query.calls.filter((call) => call === "supportedModels")).toHaveLength(1);
+  });
+
+  it("carries the catalog the round-trip answered into the opening", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.models = [{ value: "claude-opus-5", displayName: "O", description: "d" }];
+      },
+    });
+
+    const response = await h.engine.startSession(freshRequest());
+
+    expect(
+      response.result.case === "success"
+        ? response.result.value.session?.modelCatalog.map((option) => option.model?.name)
+        : undefined,
+    ).toEqual(["claude-opus-5"]);
+  });
+
+  it("states the agent binary version from the SDK's manifest, with no init", async () => {
+    // `SessionRuntime.agent_binary_version` is non-optional and init is what
+    // used to state it. The SDK's own bundled manifest states it too, which is
+    // why an opening that never sees an init is still a legal message.
+    const h = harness();
+
+    const response = await h.engine.startSession(freshRequest());
+
+    expect(
+      response.result.case === "success"
+        ? response.result.value.session?.runtime?.agentBinaryVersion
+        : undefined,
+    ).toBe("2.1.999");
+  });
+
+  it("still settles on `init` when a vendor announces one FIRST", async () => {
+    // THE OLDER VENDOR'S SHAPE, unchanged. The live signal is held so init is
+    // provably what settles this start rather than racing it.
+    const h = harness({ holdLiveSignal: true, liveSignalTimeoutMs: 60_000 });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
+    first.query.releaseModels();
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("applies the permission mode the first turn's init reports", async () => {
+    // AN INIT FACT LEARNED LATE IS STILL LEARNED. The start asked for `default`
+    // and the vendor answered on `plan`, which nothing else would ever say.
+    const h = harness();
+    await h.engine.startSession(freshRequest());
+
+    const seen = await pushedUpdates(
+      h,
+      (update) =>
+        update.case === "permissionModeChanged"
+          ? update.value.permissionMode?.mode.case
+          : undefined,
+      async () => {
+        h.queries[0]?.query.emit({
+          ...initMessage({ sessionId: freshSessionId(h.queries[0].spec) }),
+          permissionMode: "plan",
+        } as SdkMessage);
+        await vi.waitFor(() => {
+          expect(h.fold.seen.length).toBeGreaterThan(0);
+        });
+      },
+    );
+
+    expect(seen).toContain("plan");
+  });
+
+  it("says nothing when the first turn's init merely RESTATES the start's facts", async () => {
+    // The ordinary case: init agrees with what the opening already announced,
+    // and a push for a fact that did not change is noise on every surface. The
+    // one entry here is the fan-out REPLAYING the mode to a joining consumer,
+    // which is the start's own push and not a second statement of it.
+    const h = harness();
+    await h.engine.startSession(freshRequest());
+
+    const seen = await pushedUpdates(
+      h,
+      (update) =>
+        update.case === "permissionModeChanged"
+          ? update.value.permissionMode?.mode.case
+          : undefined,
+      async () => {
+        h.queries[0]?.query.emit(initMessage({ sessionId: freshSessionId(h.queries[0].spec) }));
+        await vi.waitFor(() => {
+          expect(h.fold.seen.length).toBeGreaterThan(0);
+        });
+      },
+    );
+
+    expect(seen).toEqual(["default"]);
+  });
+
+  it("rotates the identity when the first turn's init names another session id", async () => {
+    // The vendor's own id wins, whenever it states one — and it now states it
+    // for the first time AFTER the start already announced the minted id.
+    const h = harness();
+    await h.engine.startSession(freshRequest());
+
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "identityRotated" ? update.value.vendorSessionId : undefined),
+      async () => {
+        h.queries[0]?.query.emit(initMessage({ sessionId: "22222222-2222-4222-8222-222222222222" }));
+        await vi.waitFor(() => {
+          expect(h.fold.seen.length).toBeGreaterThan(0);
+        });
+      },
+    );
+
+    expect(seen).toContain("22222222-2222-4222-8222-222222222222");
+  });
+});
 describe("StartSession's remaining refusals", () => {
   it("refuses vendor_start_failed when the vendor answers nothing at all", async () => {
     // A CHILD THAT ANSWERS NEITHER ITS CONTROL CHANNEL NOR ITS STREAM. Without
