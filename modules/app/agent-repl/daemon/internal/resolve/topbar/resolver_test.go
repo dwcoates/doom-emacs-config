@@ -292,6 +292,51 @@ func TestTheTitleShowsABranchThatDiffersFromTheDefault(t *testing.T) {
 	}
 }
 
+func TestTheTitleDropsABranchThatSaysNothing(t *testing.T) {
+	tests := []struct {
+		name         string
+		naming       Naming
+		sessionTitle string
+		want         string
+	}{
+		{
+			name:   "the default branch says nothing",
+			naming: Naming{Title: "fix-flaky-reconnect", Branch: "main", DefaultBranch: "main", ConfigDir: "/root"},
+			want:   "fix-flaky-reconnect",
+		},
+		{
+			name:   "a branch equal to the name shown says nothing",
+			naming: Naming{Title: "DWC/chess960-review-failures-enm", Branch: "DWC/chess960-review-failures-enm", DefaultBranch: "main", ConfigDir: "/root"},
+			want:   "DWC/chess960-review-failures-enm",
+		},
+		{
+			name:         "a branch equal to the slug still differs from the vendor title shown",
+			naming:       Naming{Slug: "DWC/chess960-review-failures-enm", Branch: "DWC/chess960-review-failures-enm", DefaultBranch: "main", ConfigDir: "/root"},
+			sessionTitle: "Add SPC j keybinding support",
+			want:         "Add SPC j keybinding support · DWC/chess960-review-failures-enm",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			h.r.SetNaming(testWS, tt.naming)
+			if tt.sessionTitle != "" {
+				h.r.OnSessionUpdate(testWS, sessionTitle(tt.sessionTitle))
+			}
+
+			// Assert
+			if got := h.view(t).GetTitle().GetText(); got != tt.want {
+				t.Fatalf("title = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTheTitleFallsBackToTheSlug(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
