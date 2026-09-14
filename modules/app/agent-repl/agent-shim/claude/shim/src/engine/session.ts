@@ -539,6 +539,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * instead of reporting a stale failure forever.
    */
   let lastCompactionError: string | undefined;
+  /**
+   * What the cold gate's own compaction measured, kept for the phases AFTER it.
+   *
+   * `resuming` and `started` are pushed from `StartSession`, which is not where
+   * the figures are read — the compaction is. Carrying them here is what lets
+   * those two frames restate the same before/after pair the `summarized` frame
+   * stated, rather than a second reading that could disagree with it. Absent
+   * means no cold-gate compaction has landed in this process.
+   */
+  let coldCompactionFigures: { tokensBefore: number; tokensAfter: number } | undefined;
   /** Rows the store never acked by the time the teardown finished. */
   let lostRowsAtStandDown = 0;
   /** Every open `WatchAgent` tail, so the teardown can conclude each honestly. */
@@ -1002,6 +1012,60 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         }),
       },
     });
+  }
+
+  /**
+   * WHERE A COLD-GATE COMPACTION HAS GOT TO.
+   *
+   * The compaction the cold gate performs runs INSIDE `StartSession`, so it has
+   * no turn to narrate through and no frame of its own: without this arm a user
+   * who answered the gate with "compact and resume" watches a minute of nothing
+   * anywhere. Each phase is one frame, and a consumer draws the last one stated.
+   *
+   * THE FIGURES ARE ONLY EVER STATED WHERE THE COMPACTION KNOWS THEM. `0` is
+   * what the proto documents as "not known yet" and is never an estimate: the
+   * before figure is the transcript's own, as the gate read it, and the after
+   * figure is the summary's output tokens, which is what remains in context.
+   */
+  function compactionProgressUpdate(
+    phase: conversationv1.SessionCompactionPhase,
+    figures: { tokensBefore?: number; tokensAfter?: number; error?: string } = {},
+  ): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "compactionProgress",
+        value: create(conversationv1.SessionCompactionProgressSchema, {
+          phase,
+          tokensBefore: asInt64(figures.tokensBefore ?? 0, "compaction.tokensBefore"),
+          tokensAfter: asInt64(figures.tokensAfter ?? 0, "compaction.tokensAfter"),
+          ...(figures.error === undefined ? {} : { error: figures.error }),
+        }),
+      },
+    });
+  }
+
+  /**
+   * One cold-gate compaction phase, said to the fan-out and to the log at once.
+   *
+   * The two phases `StartSession` itself owns — `resuming` and `started` —
+   * restate the figures {@link coldCompactionFigures} kept from the compaction
+   * rather than reading the transcript again, so the whole sequence carries one
+   * pair of numbers.
+   */
+  function pushColdCompactionPhase(
+    which: conversationv1.SessionCompactionPhase,
+    said: string,
+  ): void {
+    const figures = coldCompactionFigures;
+    pushes.push(compactionProgressUpdate(which, figures ?? {}));
+    LOGGER.info(
+      {
+        phase: conversationv1.SessionCompactionPhase[which],
+        tokens_before: figures?.tokensBefore ?? 0,
+        tokens_after: figures?.tokensAfter ?? 0,
+      },
+      said,
+    );
   }
 
   /**
@@ -2139,6 +2203,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     let vendorSessionId: string;
     let clearedTo: string | undefined;
     let facts: TranscriptFacts | undefined;
+    /**
+     * Did this start compact the conversation on its way in?
+     *
+     * Only a cold-gate compaction narrates, and only this attempt's own: a
+     * `pay` or `clear` answer to the same gate cut nothing, and a resume with
+     * no gate at all has no compaction to be the `started` phase of.
+     */
+    let coldCompacted = false;
     // No initializer: BOTH source arms below set it, and a third arm that
     // forgot to would be a compile error rather than a silent empty model.
     let requestedModel: string;
@@ -2184,6 +2256,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const remedy = await applyColdRemediation(remediation, vendorSessionId, facts, requestedModel);
       if (remedy.kind === "failed") {
         return startSessionRefused({ kind: "vendorStartFailed" }, remedy.detail);
+      }
+      // THE HANDOVER FROM THE REMEDIATION TO THE SESSION ITSELF. Said here
+      // rather than inside `compact`, because the compaction's own work is
+      // over: what remains is the resume this whole gate answer was for, and
+      // it is the second half of the wait the user is sitting through.
+      if (remediation?.remediation.case === "compact") {
+        coldCompacted = true;
+        pushColdCompactionPhase(
+          conversationv1.SessionCompactionPhase.RESUMING,
+          "the cold gate's compaction is done; resuming the session from its summary",
+        );
       }
       if (remedy.kind === "cleared") {
         clearedTo = remedy.vendorSessionId;
@@ -2437,8 +2520,27 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       },
       "session started",
     );
+    // THE LAST PHASE, AND ONLY ON THE PATH THAT HAD A COMPACTION. It is pushed
+    // after the start is whole so a consumer that draws `started` is drawing a
+    // session it can immediately prompt.
+    if (coldCompacted) {
+      pushColdCompactionPhase(
+        conversationv1.SessionCompactionPhase.STARTED,
+        "the session resumed from the cold gate's compaction is up",
+      );
+    }
     return startSessionStarted(started_);
   }
+
+  /**
+   * WHICH COMPACTION THIS IS, and therefore whether it narrates.
+   *
+   * The cold gate's compaction is one the USER is waiting on, so it pushes its
+   * phases; hibernation's runs behind a directive the daemon has already been
+   * answered for, with nobody waiting on a progress frame it would never see
+   * completed. One function serves both, and this is the only difference.
+   */
+  type CompactionOrigin = "cold_gate" | "hibernation";
 
   type Remedy =
     | { kind: "none" }
@@ -2470,6 +2572,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           facts,
           remediation.remediation.value.model?.name ?? requestedModel,
           remediation.remediation.value.scope,
+          "cold_gate",
         );
         return outcome.ok ? { kind: "none" } : { kind: "failed", detail: outcome.error };
       }
@@ -2490,12 +2593,50 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     facts: TranscriptFacts,
     model: string,
     scope: conversationv1.SessionCompactScope,
+    origin: CompactionOrigin,
   ): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
     const transcript = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
     const startedAtMs = deps.nowMs();
     const queue = new PromptQueue();
     const controller = new AbortController();
     let throwaway: QueryLike | undefined;
+    /** Narrate one phase, to the fan-out and to the log, for the cold gate only. */
+    const phase = (
+      which: conversationv1.SessionCompactionPhase,
+      figures: { tokensBefore?: number; tokensAfter?: number; error?: string },
+      said: string,
+    ): void => {
+      if (origin !== "cold_gate") return;
+      pushes.push(compactionProgressUpdate(which, figures));
+      LOGGER.info(
+        {
+          vendor_session_id: vendorSessionId,
+          phase: conversationv1.SessionCompactionPhase[which],
+          tokens_before: figures.tokensBefore ?? 0,
+          tokens_after: figures.tokensAfter ?? 0,
+          ...(figures.error === undefined ? {} : { cause: figures.error }),
+        },
+        said,
+      );
+    };
+    /** A compaction that did not complete, said once to both surfaces. */
+    const failed = (error: string): { ok: false; error: string } => {
+      phase(
+        conversationv1.SessionCompactionPhase.FAILED,
+        { tokensBefore: facts.contextTokens, error },
+        "the cold gate's compaction did not complete",
+      );
+      return { ok: false, error };
+    };
+    if (origin === "cold_gate") coldCompactionFigures = undefined;
+    // BEFORE THE QUERY, NOT AFTER IT. Creating the throwaway query is itself
+    // part of the minute the user is waiting through, so a frame that waited
+    // for the query to exist would leave the opening of the wait unnarrated.
+    phase(
+      conversationv1.SessionCompactionPhase.SUMMARIZING,
+      { tokensBefore: facts.contextTokens },
+      "the cold gate is summarizing the conversation on a throwaway query",
+    );
     try {
       throwaway = await deps.createQuery({
         binding: { kind: "resume", resumeSessionId: vendorSessionId },
@@ -2515,13 +2656,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       for await (const message of throwaway) {
         if (message.type !== "result") continue;
         if (message.subtype !== "success") {
-          return { ok: false, error: `the summarizing session ended as ${message.subtype}` };
+          return failed(`the summarizing session ended as ${message.subtype}`);
         }
         summary = message.result;
         outputTokens = message.usage.output_tokens;
         break;
       }
-      if (summary === "") return { ok: false, error: "the summarizing session produced no summary" };
+      if (summary === "") return failed("the summarizing session produced no summary");
       const durationMs = deps.nowMs() - startedAtMs;
       appendCompactionLines(
         transcript,
@@ -2556,11 +2697,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           requested: true,
         }),
       );
+      if (origin === "cold_gate") {
+        coldCompactionFigures = { tokensBefore: facts.contextTokens, tokensAfter: outputTokens };
+      }
+      phase(
+        conversationv1.SessionCompactionPhase.SUMMARIZED,
+        { tokensBefore: facts.contextTokens, tokensAfter: outputTokens },
+        "the cold gate's summary came back and the compaction boundary was appended to the transcript",
+      );
       return { ok: true, summary };
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       writeContextCut(contextCutFailed(error));
-      return { ok: false, error };
+      return failed(error);
     } finally {
       queue.close();
       controller.abort();
@@ -3230,6 +3379,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           facts,
           effectiveModel,
           conversationv1.SessionCompactScope.ALL,
+          "hibernation",
         );
         if (!outcome.ok) {
           lastCompactionError = outcome.error;
