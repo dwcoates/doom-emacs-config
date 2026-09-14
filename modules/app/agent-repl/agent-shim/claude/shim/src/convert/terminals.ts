@@ -53,6 +53,74 @@ export interface VendorApiError {
   readonly retryAfterMs?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostic classification for a vendor API failure
+// ---------------------------------------------------------------------------
+
+/**
+ * A GREPPABLE operation name for what the vendor refused.
+ *
+ * DIAGNOSTIC, NOT A CLASSIFICATION THAT DECIDES AN ARM — {@link apiFailureKind}
+ * is the one that maps to the proto and nothing here changes it. This exists so
+ * the owner's two recurring failures ("the credential was rejected — sign in
+ * again" and "the model or resource does not exist") land under a stable
+ * operation a harvest can grep, without reading each free-text sentence:
+ *
+ *   - `shim.vendor.auth_rejected` — a credential/authentication refusal,
+ *   - `shim.vendor.model_missing` — a model/resource-not-found refusal,
+ *   - `shim.vendor.api_error` — every other recorded API failure.
+ *
+ * It reads the vendor's own class first, then the status, then the human
+ * sentence, so a failure that named a class is not overruled by loose text.
+ */
+export type VendorApiFailureKind =
+  | "shim.vendor.auth_rejected"
+  | "shim.vendor.model_missing"
+  | "shim.vendor.api_error";
+
+export function classifyVendorApiFailure(
+  status: number | undefined,
+  errorClass: string | undefined,
+  message: string,
+): VendorApiFailureKind {
+  const haystack = `${errorClass ?? ""} ${message}`.toLowerCase();
+  if (
+    status === 401 ||
+    status === 403 ||
+    /\bauth|credential|unauthor|forbidden|sign[\s-]?in|oauth|api[\s-]?key/.test(haystack)
+  ) {
+    return "shim.vendor.auth_rejected";
+  }
+  if (
+    status === 404 ||
+    /not[\s-]?found|does not exist|no such|unknown model|resource/.test(haystack)
+  ) {
+    return "shim.vendor.model_missing";
+  }
+  return "shim.vendor.api_error";
+}
+
+/** The upper bound on the vendor sentence a diagnostic record carries. */
+export const VENDOR_MESSAGE_MAX = 500;
+
+/**
+ * The vendor's human sentence, made SAFE to log.
+ *
+ * The message is a diagnostic prize — it is the sentence the owner sees — but a
+ * credential must never ride it into the logs. The vendor should embed none,
+ * yet a bearer token, an `sk-` key or a JWT that leaked into the text would be
+ * logged verbatim otherwise, so any run of a credential SHAPE is masked before
+ * the record is bounded. The mask is the only thing removed; the sentence is
+ * otherwise the vendor's own words, truncated to {@link VENDOR_MESSAGE_MAX}.
+ */
+export function redactVendorMessage(message: string): string {
+  const masked = message
+    .replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9._-]{6,}/g, "[redacted-jwt]")
+    .replace(/\bsk-[A-Za-z0-9-]{8,}/gi, "[redacted-key]")
+    .replace(/\bBearer\s+[A-Za-z0-9._-]{8,}/gi, "Bearer [redacted]");
+  return masked.length > VENDOR_MESSAGE_MAX ? `${masked.slice(0, VENDOR_MESSAGE_MAX)}…` : masked;
+}
+
 /**
  * The vendor API's recorded failure, in its own declared taxonomy.
  *
@@ -358,6 +426,28 @@ export function convertResult(
         retry_after_ms: vendorApiError.retryAfterMs,
       },
       "the turn ended on a recorded API failure",
+    );
+    // THE ONE DIAGNOSTIC RECORD, at INFO so it shows without verbose. The
+    // owner intermittently sees a credential rejection or a "model or resource
+    // does not exist" and the cause — a clobbered token, an expired one, an
+    // account/scope mismatch — is only recoverable after the fact with the
+    // class, the status, the vendor's own sentence, the ACCOUNT (config-dir)
+    // the failing token belonged to, and the model, all on one greppable line.
+    // NO CREDENTIAL VALUE IS LOGGED: the config-dir is a path, and the sentence
+    // is redacted of any token shape before it is bounded.
+    const vendorMessage = errors[errors.length - 1] ?? "";
+    LOGGER.info(
+      {
+        operation: classifyVendorApiFailure(status, vendorApiError.errorClass, vendorMessage),
+        turn: context.turnId?.value,
+        vendor_error: vendorApiError.errorClass,
+        http_status: status,
+        vendor_message: redactVendorMessage(vendorMessage),
+        claude_config_dir: context.claudeConfigDir,
+        model: context.model,
+        retry_after_ms: vendorApiError.retryAfterMs,
+      },
+      "the shim observed a vendor API failure; recording the class, status, message, account config-dir and model for diagnosis",
     );
     const result: conversationv1.AgentFrame["result"] = {
       case: "failure",

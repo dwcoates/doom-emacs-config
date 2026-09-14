@@ -50,6 +50,25 @@ export interface FoldContext {
   /** The clock, injected so conversions are testable without one. */
   readonly nowMs: () => number;
   /**
+   * The ACCOUNT this session runs as: `CLAUDE_CONFIG_DIR`, a directory PATH.
+   *
+   * DIAGNOSTIC ONLY, and never on the wire. A vendor credential rejection or a
+   * "model or resource does not exist" cannot be told apart — a clobbered token,
+   * an expired one, an account/scope mismatch — without knowing WHICH config-dir
+   * the failing token belonged to, so the terminal's api-failure record names it.
+   * It is a directory name, not a secret, and no credential VALUE is ever logged.
+   * Optional: a fold driven without an engine (unit tests) may state none.
+   */
+  readonly claudeConfigDir?: string;
+  /**
+   * The model the turn is running under, when one is in effect.
+   *
+   * DIAGNOSTIC ONLY. A "model or resource does not exist" failure is only
+   * legible beside the model that provoked it, so the terminal's api-failure
+   * record names it. Optional: unset until the session has an effective model.
+   */
+  readonly model?: string;
+  /**
    * The pending ask for a gated call, if the shim is blocking on one.
    *
    * This is what tells a `permission_denied` record whether it is the vendor

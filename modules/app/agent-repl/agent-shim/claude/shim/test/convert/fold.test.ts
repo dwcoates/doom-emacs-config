@@ -6,12 +6,33 @@
  * captures the way the SDK emits one. A converter that agrees only with our own
  * idea of the vendor's shapes fails here.
  */
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import { EMPTY_FOLD_OUTPUT, createFold } from "../../src/convert/fold.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { activityOf, foldContext, residueOf, streamMessage } from "./fold-harness.js";
+
+const mockedWriteSync = vi.mocked(writeSync);
+
+/** Every JSONL record the shim persisted to fd 3 since the last clear. */
+function persistedRecords(): Array<{
+  operation: string;
+  message: string;
+  verbosity: string;
+  context: Record<string, unknown>;
+}> {
+  return (mockedWriteSync.mock.calls as unknown as Array<[number, Buffer, number, number]>).map(
+    ([, bytes, offset, length]) =>
+      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
+        operation: string;
+        message: string;
+        verbosity: string;
+        context: Record<string, unknown>;
+      },
+  );
+}
 
 /** An assistant message the SDK would emit for one API response. */
 function assistant(
@@ -1589,5 +1610,58 @@ describe("two api_retry records that each state only half the account", () => {
 
     // Assert
     expect(failed.kind.value).toMatchObject({ retryAfterMs: 900n });
+  });
+});
+
+/**
+ * The fold's EARLY-WARNING visibility for a vendor API failure CLASS.
+ *
+ * The terminal owns the full diagnostic record; this is the moment the vendor
+ * first NAMES the class, surfaced at INFO for the two classes that matter and
+ * kept at the low-visibility verbose line for every other so ordinary
+ * rate-limit retries do not flood the log.
+ */
+describe("remembering the vendor's API failure class", () => {
+  it("surfaces an authentication_failed class at INFO under shim.vendor.auth_rejected", () => {
+    // Arrange.
+    const fold = createFold();
+    mockedWriteSync.mockClear();
+
+    // Act.
+    fold.onSdkMessage(
+      assistant("msg-auth", [{ type: "text", text: "API Error" }], {
+        error: "authentication_failed",
+      }),
+      foldContext(),
+    );
+
+    // Assert.
+    const record = persistedRecords().find(
+      (candidate) => candidate.operation === "shim.vendor.auth_rejected",
+    );
+    expect(record?.context.vendor_error).toBe("authentication_failed");
+    expect(record?.verbosity).toBe("normal");
+  });
+
+  it("keeps an ordinary rate_limit class at the verbose line, not at INFO", () => {
+    // Arrange.
+    const fold = createFold();
+    mockedWriteSync.mockClear();
+
+    // Act.
+    fold.onSdkMessage(
+      assistant("msg-rate", [{ type: "text", text: "API Error" }], { error: "rate_limit" }),
+      foldContext(),
+    );
+
+    // Assert.
+    const records = persistedRecords();
+    expect(records.some((candidate) => candidate.operation.startsWith("shim.vendor."))).toBe(false);
+    const held = records.find(
+      (candidate) =>
+        candidate.message === "the vendor stated an API failure class; held for the turn's terminal",
+    );
+    expect(held?.verbosity).toBe("verbose");
+    expect(held?.context.vendor_error).toBe("rate_limit");
   });
 });
