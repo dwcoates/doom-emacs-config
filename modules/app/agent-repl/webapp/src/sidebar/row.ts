@@ -107,7 +107,6 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     toggleRowMenu(ws, { sc, workspace, name });
   });
 
-  line.appendChild(drawExpandChevron(ws, line, sc, workspace.id));
   line.appendChild(drawStatusMark(status.case, `${path}.status`));
 
   const label = document.createElement("span");
@@ -143,6 +142,9 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   ws.appendChild(
     drawRosterRowDetail(requireMessage(u.detail, `${path}.detail`), `${path}.detail`),
   );
+  // AFTER the panel is in the tree: the hover wiring listens on the panel too,
+  // so the pointer can travel from the row into it without it closing.
+  installHoverPanel(ws, line, sc, workspace.id);
 
   if (u.children.length > 0) {
     const kids = document.createElement("div");
@@ -357,82 +359,116 @@ export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement
 }
 
 /**
- * The detail panel's toggle. Local, persisted, and never on the wire.
+ * The detail panel opens on HOVER. There is no chevron (owner ruling,
+ * 2026-09-14): "in the sidebar, when you hover a workspace, the chevron
+ * appears. There should be no chevron. Hovering the workspace should have the
+ * same effect as opening the chevron currently does."
  *
- * IT IS HOVER-ONLY (owner ruling 3, 2026-09-13). The chevron is invisible at
- * rest and appears when the pointer is over the row, when the keyboard focus
- * is inside it, or when the row's details are already open — an open panel
- * must always show the control that closes it. The reveal is `visibility`,
- * not `display`, so the glyph keeps its slot and the name beside it does not
- * shift the moment the pointer arrives.
+ * Two delays, and they are the whole mechanism. `HOVER_OPEN_DELAY_MS` is
+ * intent: a pointer crossing the rail on its way somewhere else passes over
+ * several rows in a few milliseconds, and opening on the bare `mouseenter`
+ * flickers a panel under each of them. `HOVER_CLOSE_GRACE_MS` is travel: the
+ * panel hangs BELOW the row rather than touching it, so the pointer is
+ * briefly over neither on its way in, and a close on the bare `mouseleave`
+ * would snatch the panel away as it is being reached for.
  *
- * `data-shown` is the ONE fact the stylesheet reads, and it is maintained
- * here rather than left to `:hover` alone, because "the row is expanded" is
- * not a CSS state the chevron can see from its own selector — and two
- * sources for one appearance is how the two drift.
+ * Openness is still the row's `.open` class and still persisted through
+ * `prefs`, exactly as the chevron's click left it, so a redraw arriving while
+ * the pointer rests on a row keeps that row's panel open.
+ *
+ * The keyboard gets the same panel through `focusin`/`focusout`, without the
+ * intent delay — a focus move is deliberate in a way a pointer's path is not.
  */
-function drawExpandChevron(
+export const HOVER_OPEN_DELAY_MS = 150;
+export const HOVER_CLOSE_GRACE_MS = 120;
+
+function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
   sc: SidebarContext,
   workspaceId: string,
-): HTMLElement {
-  const chevron = document.createElement("span");
-  chevron.className = "chev";
-  chevron.textContent = "▸";
-
-  let pointerOver = false;
+): void {
+  let pointerOverRow = false;
+  let pointerOverPanel = false;
   let focusWithin = false;
-  const sync = (): void => {
-    const shown = pointerOver || focusWithin || ws.classList.contains("open");
-    if (shown === chevron.hasAttribute("data-shown")) return;
-    log.debug("the row's expand chevron changed visibility", {
-      operation: "sidebar.row.chevron",
-      verbosity: "verbose",
-      context: { workspace: workspaceId, shown, pointer: pointerOver, focus: focusWithin },
+  let openTimer: ReturnType<typeof setTimeout> | undefined;
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const cancelTimers = (): void => {
+    if (openTimer !== undefined) {
+      clearTimeout(openTimer);
+      openTimer = undefined;
+    }
+    if (closeTimer !== undefined) {
+      clearTimeout(closeTimer);
+      closeTimer = undefined;
+    }
+  };
+
+  const setOpen = (open: boolean, via: string): void => {
+    if (ws.classList.contains("open") === open) return;
+    ws.classList.toggle("open", open);
+    sc.prefs.setExpanded(workspaceId, open);
+    log.debug("toggling a row's detail panel", {
+      operation: "sidebar.row.detail-toggle",
+      context: { workspace: workspaceId, open, via },
     });
-    if (shown) chevron.setAttribute("data-shown", "");
-    else chevron.removeAttribute("data-shown");
+    // The panel is fixed-positioned, so it is placed the moment it is shown,
+    // measured where it now stands rather than where the last draw left it.
+    if (open) placeRowDetail(ws);
+  };
+
+  const scheduleOpen = (): void => {
+    cancelTimers();
+    openTimer = setTimeout(() => {
+      openTimer = undefined;
+      setOpen(true, "hover");
+    }, HOVER_OPEN_DELAY_MS);
+  };
+
+  const scheduleClose = (): void => {
+    cancelTimers();
+    closeTimer = setTimeout(() => {
+      closeTimer = undefined;
+      if (pointerOverRow || pointerOverPanel || focusWithin) return;
+      setOpen(false, "leave");
+    }, HOVER_CLOSE_GRACE_MS);
   };
 
   line.addEventListener("mouseenter", () => {
-    pointerOver = true;
-    sync();
+    pointerOverRow = true;
+    if (ws.classList.contains("open")) cancelTimers();
+    else scheduleOpen();
   });
   line.addEventListener("mouseleave", () => {
-    pointerOver = false;
-    sync();
+    pointerOverRow = false;
+    scheduleClose();
   });
+
+  const detail = ws.querySelector<HTMLElement>(":scope > .detail");
+  if (detail !== null) {
+    detail.addEventListener("mouseenter", () => {
+      pointerOverPanel = true;
+      cancelTimers();
+    });
+    detail.addEventListener("mouseleave", () => {
+      pointerOverPanel = false;
+      scheduleClose();
+    });
+  }
+
   line.addEventListener("focusin", () => {
     focusWithin = true;
-    sync();
+    cancelTimers();
+    setOpen(true, "focus");
   });
   // `focusout` fires BEFORE the next element takes focus, so `activeElement`
   // is not yet the answer; the event's own `relatedTarget` is.
   line.addEventListener("focusout", (event) => {
     const next = event.relatedTarget;
     focusWithin = next instanceof Node && line.contains(next);
-    sync();
+    if (!focusWithin) scheduleClose();
   });
-
-  chevron.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const open = !ws.classList.contains("open");
-    ws.classList.toggle("open", open);
-    sc.prefs.setExpanded(workspaceId, open);
-    log.debug("toggling a row's detail panel", {
-      operation: "sidebar.row.detail-toggle",
-      context: { workspace: workspaceId, open },
-    });
-    // The panel is fixed-positioned, so it is placed the moment it is shown,
-    // measured where it now stands rather than where the last draw left it.
-    if (open) placeRowDetail(ws);
-    sync();
-  });
-
-  sync();
-  return chevron;
 }
 
 /**

@@ -5,6 +5,8 @@ import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
+  HOVER_CLOSE_GRACE_MS,
+  HOVER_OPEN_DELAY_MS,
   drawRosterRow,
   drawRosterRowWhen,
   drawStatusMark,
@@ -27,6 +29,22 @@ import {
 const SELECT_OK = create(SelectWorkspaceResponseSchema, {
   result: { case: "success", value: {} },
 });
+
+/** The row line: what the pointer and the keyboard focus are read from. */
+const lineOf = (drawn: HTMLElement): HTMLElement =>
+  drawn.querySelector(":scope > .row") as HTMLElement;
+
+/** This row's own detail panel. */
+const panelOf = (drawn: HTMLElement): HTMLElement =>
+  drawn.querySelector(":scope > .detail") as HTMLElement;
+
+function hoverIn(drawn: HTMLElement): void {
+  lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+}
+
+function hoverOut(drawn: HTMLElement): void {
+  lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+}
 
 async function click(control: Element): Promise<void> {
   (control as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -264,18 +282,35 @@ describe("the detail panel", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("opens on the chevron", async () => {
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    await click(drawn.querySelector(".chev") as Element);
-    expect(drawn.classList.contains("open")).toBe(true);
+  it("opens on hover, once the intent delay has passed", () => {
+    // ARRANGE
+    vi.useFakeTimers();
+    try {
+      const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+      // ACT
+      hoverIn(drawn);
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ASSERT
+      expect(drawn.classList.contains("open")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("remembers the expansion, keyed by the workspace id", async () => {
-    const prefs = memoryPrefs();
-    const sc = sidebarContext(appContext(), prefs);
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
-    await click(drawn.querySelector(".chev") as Element);
-    expect(prefs.state.expanded["ws-1"]).toBe(true);
+  it("remembers the expansion, keyed by the workspace id", () => {
+    // ARRANGE
+    vi.useFakeTimers();
+    try {
+      const prefs = memoryPrefs();
+      const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(appContext(), prefs), "R");
+      // ACT
+      hoverIn(drawn);
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ASSERT
+      expect(prefs.state.expanded["ws-1"]).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("draws a remembered expansion open on the next push", () => {
@@ -284,19 +319,9 @@ describe("the detail panel", () => {
     expect(drawn.classList.contains("open")).toBe(true);
   });
 
-  it("does not select the workspace when the chevron is clicked", async () => {
-    let calls = 0;
-    const sc = sidebarContext(
-      appContext({
-        selectWorkspace: () => {
-          calls += 1;
-          return SELECT_OK;
-        },
-      }),
-    );
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
-    await click(drawn.querySelector(".chev") as Element);
-    expect(calls).toBe(0);
+  it("carries no chevron at all", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    expect(drawn.querySelector(".chev")).toBeNull();
   });
 });
 
@@ -588,99 +613,139 @@ describe("the row menu toggle", () => {
   });
 });
 
-describe("the expand chevron is hover-only", () => {
-  /** The row line, which is what the pointer and the focus are read from. */
-  const lineOf = (drawn: HTMLElement): HTMLElement =>
-    drawn.querySelector(":scope > .row") as HTMLElement;
-  const chevronOf = (drawn: HTMLElement): HTMLElement =>
-    drawn.querySelector(".chev") as HTMLElement;
-
-  it("is hidden on a resting row", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+describe("the detail panel opens on hover", () => {
+  /**
+   * Owner ruling, 2026-09-14: there is no chevron; hovering the row does what
+   * opening the chevron did. NO REAL TIMERS — the two delays are advanced.
+   */
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it("shows while the pointer is over the row", () => {
+  it("opens nothing on a resting row", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    expect(drawn.classList.contains("open")).toBe(false);
+  });
+
+  it("does not open on a pass-through shorter than the intent delay", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    // ACT
-    lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    // ACT: the pointer crosses the row on its way somewhere else.
+    hoverIn(drawn);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS - 1);
+    hoverOut(drawn);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS + HOVER_CLOSE_GRACE_MS);
     // ASSERT
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
+    expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("hides again when the pointer leaves the row", () => {
+  it("closes once the pointer has left the row and the grace has run out", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    hoverIn(drawn);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
     // ACT
-    lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+    hoverOut(drawn);
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
     // ASSERT
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+    expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("shows while the keyboard focus is inside the row", () => {
+  it("is still open inside the grace, so the pointer can travel to the panel", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    hoverIn(drawn);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+    // ACT
+    hoverOut(drawn);
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS - 1);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(true);
+  });
+
+  it("stays open while the pointer is inside the panel", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    hoverIn(drawn);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+    hoverOut(drawn);
+    // ACT: the pointer arrives in the panel before the grace runs out.
+    panelOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS * 10);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(true);
+  });
+
+  it("closes when the pointer leaves the panel too", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    hoverIn(drawn);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+    hoverOut(drawn);
+    panelOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    // ACT
+    panelOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(false);
+  });
+
+  it("opens at once when the keyboard focus reaches the row", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
     lineOf(drawn).dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     // ASSERT
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
+    expect(drawn.classList.contains("open")).toBe(true);
   });
 
-  it("hides again when the focus leaves the row entirely", () => {
+  it("closes again when the focus leaves the row entirely", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     lineOf(drawn).dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
-    // ACT: nothing inside the row takes the focus next.
+    // ACT
     lineOf(drawn).dispatchEvent(
       new FocusEvent("focusout", { bubbles: true, relatedTarget: document.body }),
     );
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
     // ASSERT
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+    expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("keeps showing while the focus moves BETWEEN the row's own controls", () => {
+  it("keeps the panel open while the focus moves BETWEEN the row's own controls", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     const line = lineOf(drawn);
     line.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
-    // ACT: the verb control inside this same row takes the focus.
+    // ACT
     line.dispatchEvent(
-      new FocusEvent("focusout", {
-        bubbles: true,
-        relatedTarget: line.querySelector(".sb-more"),
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: line.querySelector(".sb-more") }),
+    );
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(true);
+  });
+
+  it("still selects the workspace when the row itself is clicked", async () => {
+    // ARRANGE
+    vi.useRealTimers();
+    let calls = 0;
+    const sc = sidebarContext(
+      appContext({
+        selectWorkspace: () => {
+          calls += 1;
+          return SELECT_OK;
+        },
       }),
     );
-    // ASSERT
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
-  });
-
-  it("shows on a row drawn with its details already expanded", () => {
-    const prefs = memoryPrefs({ expanded: { "ws-1": true } });
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(appContext(), prefs), "R");
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
-  });
-
-  it("stays shown after the pointer leaves a row the click expanded", async () => {
-    // ARRANGE
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
     // ACT
-    await click(chevronOf(drawn));
-    lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+    await click(lineOf(drawn));
     // ASSERT
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(true);
-  });
-
-  it("hides again once the click has collapsed a row the pointer never entered", async () => {
-    // ARRANGE
-    const prefs = memoryPrefs({ expanded: { "ws-1": true } });
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(appContext(), prefs), "R");
-    // ACT
-    await click(chevronOf(drawn));
-    // ASSERT
-    expect(chevronOf(drawn).hasAttribute("data-shown")).toBe(false);
+    expect(calls).toBe(1);
   });
 });
 
@@ -733,9 +798,6 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
     rects.set(drawn.querySelector(":scope > .detail") as Element, panel);
     return drawn;
   }
-
-  const panelOf = (drawn: HTMLElement): HTMLElement =>
-    drawn.querySelector(":scope > .detail") as HTMLElement;
 
   it("hangs the panel directly under the row's own line", () => {
     // ARRANGE: a rail-width row at the window's left edge.
@@ -798,24 +860,30 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
     expect(panelOf(drawn).style.top).toBe("");
   });
 
-  it("places the panel the moment the chevron opens it", async () => {
-    // ARRANGE: a resting row, expanded by the click rather than by the draw.
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }),
-      sidebarContext(),
-      "R",
-    );
-    rects.set(
-      drawn.querySelector(":scope > .row") as Element,
-      rect({ left: 8, top: 200, width: 190, height: 24 }),
-    );
-    rects.set(
-      drawn.querySelector(":scope > .detail") as Element,
-      rect({ left: 0, top: 0, width: 320, height: 90 }),
-    );
-    // ACT
-    await click(drawn.querySelector(".chev") as Element);
-    // ASSERT
-    expect(panelOf(drawn).style.top).toBe("224px");
+  it("places the panel the moment the hover opens it", () => {
+    // ARRANGE: a resting row, expanded by the hover rather than by the draw.
+    vi.useFakeTimers();
+    try {
+      const drawn = drawRosterRow(
+        row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }),
+        sidebarContext(),
+        "R",
+      );
+      rects.set(
+        drawn.querySelector(":scope > .row") as Element,
+        rect({ left: 8, top: 200, width: 190, height: 24 }),
+      );
+      rects.set(
+        drawn.querySelector(":scope > .detail") as Element,
+        rect({ left: 0, top: 0, width: 320, height: 90 }),
+      );
+      // ACT
+      hoverIn(drawn);
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ASSERT
+      expect(panelOf(drawn).style.top).toBe("224px");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
