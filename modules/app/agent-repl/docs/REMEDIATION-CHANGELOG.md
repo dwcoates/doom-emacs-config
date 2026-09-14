@@ -1,3 +1,4 @@
+- model: a session the user never modeled launches under opus (daemon freshModel defaults to "opus") and the shim omits any catalog row whose value is the synthetic marker or empty, so `<synthetic>` is never a selectable option and the default the dropdown shows is the real one (owner ruling 2026-09-14).
 - webapp: the purple response and blue prompt bubbles cap 15% below their prior widths (82.5%→70.125%, 60%→51%), max-width only; other bubbles and both bubbles' margins unchanged (owner ruling 2026-09-14).
 # Remediation changelog
 
