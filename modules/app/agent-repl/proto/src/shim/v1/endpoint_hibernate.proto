@@ -4,6 +4,18 @@
 // compaction mechanism — a throwaway summarizing session rewriting the
 // transcript), then acks. Only after the ack does the daemon stand the
 // shim down, so a later revival never pays a cold context.
+//
+// THE DIRECTIVE IS TWO-PHASE, BECAUSE A COMPACTION OUTLIVES THE CALLER'S
+// DEADLINE. A compaction is a real vendor turn and takes as long as one; the
+// daemon's stand bound is a sum of TEARDOWN bounds and is seconds. While the
+// answer was the compaction's own completion, the caller's deadline expired
+// first, the daemon recorded a failed directive, the shim finished compacting
+// anyway, and the next sweep pass ran the WHOLE compaction again — 13 vendor
+// summary turns in one morning on one workspace (2026-09-14). So the answer
+// is now bounded by the call: `compacting` says the work STARTED and is
+// running past this rpc, `success` says there is nothing left to do. The
+// shim's compaction is idempotent per transcript, so the pass that gets
+// `compacting` simply defers and the next one gets `success` at once.
 
 syntax = "proto3";
 
@@ -19,11 +31,19 @@ message HibernateResponse {
   oneof result {
     HibernateSuccess success = 1;
     HibernateError error = 2;
+    HibernateCompacting compacting = 3;
   }
 }
 
 // The session is compacted; the daemon may stand the shim down.
 message HibernateSuccess {
+}
+
+// The compaction has STARTED and outlives this rpc. Not a failure and not an
+// ack: the daemon defers this pass without standing the shim down, and asks
+// again. The shim acks the next ask the moment the compaction has landed,
+// because a transcript already compacted is never compacted twice.
+message HibernateCompacting {
 }
 
 // Not hibernated. THE ARM IS WHY.
