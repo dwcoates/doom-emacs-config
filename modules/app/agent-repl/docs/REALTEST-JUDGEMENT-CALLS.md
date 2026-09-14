@@ -15,6 +15,15 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Register a repository from a file (2026-09-14)
+
+Owner request, quoted: "`SPC j .` registers a REPOSITORY (not a workspace) in
+the daemon's known-repository list, chosen by picking any file under it."
+
+| call | what was decided |
+|---|---|
+| how the repository is resolved, and what a git that will not answer means | The path is stat'ed (a file resolves to its own directory), then the repository is its MAIN WORKTREE, asked of git — the same thing `RegisterWorkspace` derives, because `workspace.v1`'s `RepositoryRef.dir` is "the repository's normalized main-worktree directory" and two mints of one directory must agree. `gitclient` gained `RepositoryOf`, a PROBE beside the existing `MainWorktree`: a path outside every repository is an ordinary `false`, never an error record, because a person picks this path and "that is not in a repository" is the answer the question was asked to get. `MainWorktree` keeps its ERROR, since it is asked only about a directory already established as a worktree. Two typed arms, `not_in_a_repository` and `unreadable_path`; a blank path is `InvalidArgument`, because an empty string is not a path. Re-registering is SUCCESS carrying `already_known`, so the command can echo "registered" or "already known" rather than inventing a refusal. The repository has NO workspace, and the roster resolver and the webapp rail both already drew a repository section with no rows — that section is the only evidence the registration landed, and each now has a test pinning it. |
+
 ## Copyable text (2026-09-14)
 
 Owner ruling, quoted: "ensure that everything in the webapp (all text) can be
