@@ -247,9 +247,10 @@ func TestPermissionToolNameFallsBackToTheDisplayName(t *testing.T) {
 	}
 }
 
-// TestRouteContextCut covers the cut: the feed draws the separation divider
-// and the footer needs the same record, because it is the END signal for the
-// compacting state SessionUpdate.compacting opened.
+// TestRouteContextCut covers the cut: the feed draws the separation divider,
+// the footer needs the same record because it is the END signal for the
+// compacting state SessionUpdate.compacting opened, and the topbar needs it to
+// drop the context figure the cut just invalidated.
 func TestRouteContextCut(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
@@ -263,7 +264,7 @@ func TestRouteContextCut(t *testing.T) {
 	})
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnContextCut", "footer.OnContextCut"})
+	assertNames(t, got, []string{"feed.OnContextCut", "footer.OnContextCut", "topbar.OnContextCut"})
 }
 
 // TestRouteContextBudgetWarning covers the arm's plane: the vendor's

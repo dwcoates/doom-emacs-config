@@ -621,6 +621,105 @@ func TestTheContextChipShrinksOnACompaction(t *testing.T) {
 	}
 }
 
+// cutAgent is the agent a context cut arrives addressed to. The chip is
+// session-scoped, so its value is immaterial, but the sink takes one.
+var cutAgent = &conversationv1.AgentId{Value: "main"}
+
+// clearedCut is the /clear arm of a context cut.
+func clearedCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
+	}
+}
+
+// compactedCut is the completed-compaction arm of a context cut.
+func compactedCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
+	}
+}
+
+// compactionFailedCut is the failed-compaction arm: nothing was cut.
+func compactionFailedCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_CompactionFailed{
+			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the vendor refused"},
+		},
+	}
+}
+
+func TestAClearDropsTheStaleContextFigure(t *testing.T) {
+	// Arrange: the chip is stating a real pre-clear total.
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act: a /clear discards the transcript that total was read off.
+	h.r.OnContextCut(testWS, cutAgent, clearedCut())
+
+	// Assert: the chip states the count is unknown rather than the stale total.
+	if got := h.view(t).GetContext().GetText(); got != contextUnknownText {
+		t.Fatalf("chip = %q, want the unknown dash after a clear, never the stale total", got)
+	}
+}
+
+func TestACompletedCompactionDropsTheStaleContextFigure(t *testing.T) {
+	// Arrange: the chip is stating the pre-compaction total.
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act: a completed compaction discards the transcript that total described.
+	h.r.OnContextCut(testWS, cutAgent, compactedCut())
+
+	// Assert: the chip states the count is unknown until the post-compaction
+	// reading lands.
+	if got := h.view(t).GetContext().GetText(); got != contextUnknownText {
+		t.Fatalf("chip = %q, want the unknown dash during the compaction window", got)
+	}
+}
+
+func TestAFailedCompactionKeepsTheContextFigure(t *testing.T) {
+	// Arrange: the chip is stating a real total.
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act: a compaction that FAILED cut nothing, so the context is unchanged.
+	h.r.OnContextCut(testWS, cutAgent, compactionFailedCut())
+
+	// Assert: the chip keeps the figure the last reading stated.
+	if got := h.view(t).GetContext().GetText(); got != "142.3k" {
+		t.Fatalf("chip = %q, want the figure kept when nothing was cut", got)
+	}
+}
+
+func TestANilContextCutLeavesTheChipUntouched(t *testing.T) {
+	// Arrange: the chip is stating a real total.
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act: a nil cut carries no arm to react to.
+	h.r.OnContextCut(testWS, cutAgent, nil)
+
+	// Assert: the chip is unchanged.
+	if got := h.view(t).GetContext().GetText(); got != "142.3k" {
+		t.Fatalf("chip = %q, want the figure left standing on a nil cut", got)
+	}
+}
+
+func TestTheFreshReadingReplacesTheUnknownDashAfterAClear(t *testing.T) {
+	// Arrange: a clear has dropped the chip to the unknown dash.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.OnContextCut(testWS, cutAgent, clearedCut())
+
+	// Act: the vendor's fresh reading for the cut context arrives.
+	h.r.OnSessionUpdate(testWS, contextUsage(40_000, 200_000, 20, "claude-opus-5"))
+
+	// Assert: the chip states the fresh near-baseline figure, not the dash.
+	if got := h.view(t).GetContext().GetText(); got != "40k" {
+		t.Fatalf("chip = %q, want the fresh post-clear reading", got)
+	}
+}
+
 func TestTheChipsBreakdownIsAlwaysPopulated(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
