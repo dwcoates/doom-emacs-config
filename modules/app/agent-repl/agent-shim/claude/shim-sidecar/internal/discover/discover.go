@@ -1,8 +1,17 @@
 // Package discover enumerates the vendor's on-disk artifacts across BOTH
 // account config roots and the task-spool root, and classifies each path into a
 // tail Target: file kind, identity, codec, and the companion meta file a kind
-// requires. Scan is the sole discovery path: a periodic full rescan, not
-// fsnotify — the sidecar polls rather than watches.
+// requires.
+//
+// THERE ARE TWO DISCOVERY PATHS AND NEITHER IS FSNOTIFY — the sidecar polls
+// rather than watches, and holds no descriptor open for any file it has not
+// read:
+//
+//   - Scan is the full enumeration, run on RescanInterval. It is the backstop
+//     and the authority: everything is found here eventually.
+//   - ScanChanged (change.go) is the accelerator, run on PollInterval. It stats
+//     the directories Scan enumerated and re-enumerates only those whose mtime
+//     moved, so a NEW file is discovered within one poll instead of one rescan.
 //
 // FOUR KINDS OF FILE, all written by the vendor's agent binary:
 //
@@ -189,6 +198,17 @@ type Discoverer struct {
 	summaryInterval time.Duration
 	lastSummary     time.Time
 
+	// probed is the change probe's candidate directory set: every directory the
+	// globs enumerate, valued by the mtime the probe last ENUMERATED it at. One
+	// stat per entry per poll answers "is there anything new under here" for
+	// every file under it at once, which is how a new transcript is found within
+	// one poll rather than one rescan (change.go).
+	probed map[string]time.Time
+	// probeFailures remembers the last failure stated for a candidate directory,
+	// so a directory the process cannot read states its condition once rather
+	// than once per poll forever.
+	probeFailures map[string]string
+
 	// statedUnclassifiable remembers which spools have already had their
 	// classification defect stated.
 	//
@@ -219,6 +239,9 @@ func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer
 
 		now:             time.Now,
 		summaryInterval: DefaultHoldSummaryInterval,
+
+		probed:        map[string]time.Time{},
+		probeFailures: map[string]string{},
 
 		statedUnclassifiable: map[string]bool{},
 	}
@@ -251,12 +274,18 @@ func (d *Discoverer) Scan() []Target {
 		out = append(out, t)
 	}
 	for _, root := range d.configRoots {
+		// The scan is also what seeds the CHANGE PROBE's candidate directory set
+		// (change.go): every directory these globs enumerate becomes one stat per
+		// poll, so a file that appears under a directory already scanned once is
+		// found on the next poll rather than at the next rescan.
+		d.registerProjectsRoot(root)
 		for _, match := range globAll(
 			filepath.Join(root, "projects", "*", "*.jsonl"),
 			filepath.Join(root, "projects", "*", "*", "subagents", "agent-*.jsonl"),
 			filepath.Join(root, "projects", "*", "*", "subagents", "workflows", "wf_*", "journal.jsonl"),
 			filepath.Join(root, "projects", "*", "*", "subagents", "workflows", "wf_*", "agent-*.jsonl"),
 		) {
+			d.registerAncestors(filepath.Dir(Normalize(match)), filepath.Join(root, "projects"))
 			add(d.Classify(match))
 		}
 	}
@@ -270,6 +299,7 @@ func (d *Discoverer) Scan() []Target {
 		filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output"),
 		filepath.Join(d.spoolRoot, "*", "*", "tasks", "*.output"),
 	) {
+		d.registerSpool(Normalize(match))
 		add(d.Classify(match))
 	}
 	d.reportHolds()
