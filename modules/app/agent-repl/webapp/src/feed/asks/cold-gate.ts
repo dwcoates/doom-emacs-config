@@ -33,6 +33,7 @@ import { log } from "../../log.js";
 import {
   AnswerColdGateResponseSchema,
   type AnswerColdGateResponse,
+  type AnswerColdGateReopenFailed,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
 import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb";
 import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
@@ -515,6 +516,16 @@ const OWN_CAUSES = {
   noColdGate: () => "no cold gate is standing for this workspace",
   unservedRemediation: () => "the gate never offered that remediation",
   noSession: () => "the workspace has no session to answer",
+  // THE RE-OPEN THE CLICK ASKED FOR FAILED, and the daemon says why. Before
+  // this arm existed the whole branch arrived as a Connect internal and the
+  // line beside the buttons read "the daemon could not be reached" about a
+  // daemon that had answered — twice on 2026-09-13
+  // (docs/FOOTER-TOPOLOGY-AUDIT.md section 4). The gate stays answerable and
+  // the footer carries the same sentence as a standing fault.
+  reopenFailed: (v: AnswerColdGateReopenFailed) =>
+    v.detail === ""
+      ? "the session did not come back from the re-open"
+      : `the session did not come back from the re-open: ${v.detail}`,
 } as unknown as SentenceTable;
 
 /** Nothing on success (the gate re-pushes resolved); the refusal on error. */
