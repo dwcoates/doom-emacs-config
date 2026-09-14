@@ -6658,6 +6658,83 @@ describe("the session's own beats once the vendor query is gone", () => {
   });
 });
 
+describe("the record a dead vendor leaves", () => {
+  /**
+   * Bring a session up, let its child say something and end, then break the
+   * stream — the order a real death arrives in.
+   */
+  async function died(options: { said: string; code: number | null; signal: string | null }): Promise<void> {
+    const h = harness();
+    await started(h);
+    const child = h.queries[0];
+    child?.spec.onStderr?.(options.said);
+    child?.spec.onChildExit?.({ code: options.code, signal: options.signal });
+    child?.query.fail(new Error("ProcessTransport is not ready for writing"));
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  it("names the cause the stream reported", async () => {
+    const before = logCursor();
+
+    await died({ said: "", code: 1, signal: null });
+
+    expect(logContextFor(before, "the vendor query is gone")?.cause).toBe(
+      "ProcessTransport is not ready for writing",
+    );
+  });
+
+  it("carries the child's exit code", async () => {
+    // THE FACT THAT WAS MISSING. A vendor died on 2026-09-14 and the immediate
+    // cause could not be recovered from any log afterwards.
+    const before = logCursor();
+
+    await died({ said: "", code: 137, signal: null });
+
+    expect(logContextFor(before, "the vendor query is gone")?.vendor_exit_code).toBe(137);
+  });
+
+  it("carries the signal that killed the child", async () => {
+    const before = logCursor();
+
+    await died({ said: "", code: null, signal: "SIGKILL" });
+
+    expect(logContextFor(before, "the vendor query is gone")?.vendor_exit_signal).toBe("SIGKILL");
+  });
+
+  it("carries the last words the child wrote to stderr", async () => {
+    const before = logCursor();
+
+    await died({ said: "out of memory\n", code: 137, signal: null });
+
+    expect(logContextFor(before, "the vendor query is gone")?.vendor_stderr).toBe("out of memory");
+  });
+
+  it("distinguishes a child that never ended from one that exited zero", async () => {
+    // -1 AND NOT AN OMITTED FIELD. A field that disappears makes "the child
+    // exited 0" and "no child ever ended" the same record, and those are
+    // opposite diagnoses.
+    const h = harness();
+    await started(h);
+    const before = logCursor();
+    h.queries[0]?.query.fail(new Error("the vendor stream broke"));
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(logContextFor(before, "the vendor query is gone")?.vendor_exit_code).toBe(-1);
+  });
+
+  it("records the death at ERROR", async () => {
+    const before = logCursor();
+
+    await died({ said: "", code: 1, signal: null });
+
+    expect(logLevelFor(before, "the vendor query is gone")).toBe("error");
+  });
+});
+
 describe("SetSessionModel's remaining arms", () => {
   it("throws when it reaches the engine with no model at all", async () => {
     const h = harness();
