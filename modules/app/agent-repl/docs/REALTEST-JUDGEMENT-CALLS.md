@@ -1611,3 +1611,26 @@ hover-only overlay bar.
 | tool cards, shell and subagent bubbles | `.tool-card`'s scroll boxes take `margin-right: calc(var(--bubble-scroll-gap) - 0.75rem)` with the same figure back as padding | A card has a dozen non-scrolling children that all need its 0.75rem inset, so the card keeps its padding and the scroll boxes step OUT of it instead — the mirror of the bubble's arrangement, and the text does not move. The shell's tail and the subagent's sub-feed panel needed nothing beyond the bubble's own right inset dropping: their heads are already siblings above them. |
 | the always-visible bar | new `::-webkit-scrollbar` / `-track` / `-thumb` rules, 8px, `var(--border)` / `var(--muted)` | Styling `::-webkit-scrollbar` at all opts WebKit out of the fading overlay bar and into a classic one, painted for as long as the box overflows and laid out in its own gutter (so content is never under it). `overflow-y` stays `auto`, never `scroll`: `auto` is what keeps a short bubble bar-free, and the suite forbids `scroll` anywhere in the sheet. No new color token. |
 | what was NOT done | — | The subagent bubble's sub-feed panel still carries no line cap of its own, so it has nothing to scroll; only its POSITION was corrected. Adding a cap there is a behavior change the ruling did not order. |
+
+## The thinking-status substatus lifecycle (2026-09-14)
+
+Owner ruling: status `thinking` carries the substatus lifecycle
+`submitting → [classifying] → working`. No `receipt` substatus — "received"
+is the entry edge of `submitting` (the directive-type check between them is
+synchronous and sub-millisecond), so it earns no arm.
+
+- `submitting` — the daemon has the prompt, has acked all clients, and is
+  delivering to the shim; the shim has not taken it. Set on RECEIPT, for all
+  clients (footer + roster + tab-bar), before the shim call.
+- `classifying` — the prompt is parked behind a running turn and the LLM judge
+  is deciding auto-interrupt vs hold-for-turn-end (promptqueue `ArmClassifying`).
+  A NEW footer substatus arm. Only reachable when something is ahead in the
+  queue.
+- `working` — the shim accepted the turn (StartTurn success); it is running.
+  Renders as the text "working" (the existing thinking substatus arm).
+
+A StartTurn failure after the receipt ack surfaces loudly (a failed/blocked
+status), never a silent revert to idle.
+
+The auto-interrupt classifier already exists end to end (classify.go: judge →
+interject → KillTurn, with the footer's waiting-interrupting state).
