@@ -2311,3 +2311,132 @@ func TestAVanishedFileIsWarnedAboutOnlyWhenSomethingWasOutstanding(t *testing.T)
 		})
 	}
 }
+
+// projectsRoot creates the config root's projects directory, which exists on
+// every real machine before the sidecar starts and is where the vendor puts a
+// FRESH workspace's own directory. A probe candidate has to exist to be stat'd,
+// so a subject about a directory appearing UNDER it stages it first.
+func projectsRoot(t *testing.T, h *harness) string {
+	t.Helper()
+	dir := filepath.Join(h.rootA, "projects")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", dir, err)
+	}
+	return dir
+}
+
+// bumpProjectDir moves a directory's mtime by hand.
+//
+// THE PROBE'S WHOLE DECISION IS THAT MTIME, so a subject about the changed arm
+// states the change explicitly rather than trusting the host filesystem's
+// timestamp granularity to have noticed the write it just made.
+func bumpProjectDir(t *testing.T, dir string) {
+	t.Helper()
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat %s: %v", dir, err)
+	}
+	stamp := info.ModTime().Add(time.Second)
+	if err := os.Chtimes(dir, stamp, stamp); err != nil {
+		t.Fatalf("stamping %s: %v", dir, err)
+	}
+}
+
+// TestTheChangeProbeWatchesANewTranscriptBeforeAnyRescan pins the whole point of
+// the per-poll probe: the file the vendor wrote one instant after the last scan
+// is read on the NEXT POLL, not thirty seconds later at the next rescan. That
+// thirty seconds is what realtest 9 measured — the answer text of a fresh
+// workspace's first turn reaching the store a full rescan after the turn ended.
+func TestTheChangeProbeWatchesANewTranscriptBeforeAnyRescan(t *testing.T) {
+	// Arrange: a cycle that has already scanned, and a transcript that appears
+	// afterwards.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	projects := projectsRoot(t, h)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	path := h.transcript(t, "sess-1", promptLine, assistantLine)
+	bumpProjectDir(t, projects)
+
+	// Act: one poll tick — the probe, then the read. No rescan runs.
+	h.sc.discoverChanged()
+	h.sc.pollAll()
+
+	// Assert: the file is watched and its first records are already durable.
+	if _, watched := h.sc.watchers[path]; !watched {
+		t.Fatalf("the new transcript is not watched; watchers=%v", h.sc.watchers)
+	}
+	if len(store.writes) == 0 {
+		t.Fatal("the newly discovered transcript's first records did not reach the store on the tick that found it")
+	}
+}
+
+// TestTheChangeProbeStatesWhatItStartedWatching pins the one normal-verbosity
+// record this path is allowed: a directory change that LED SOMEWHERE, naming the
+// directory and how many files it put under a reader.
+func TestTheChangeProbeStatesWhatItStartedWatching(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	projects := projectsRoot(t, h)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.transcript(t, "sess-1", promptLine)
+	bumpProjectDir(t, projects)
+
+	// Act.
+	h.sc.discoverChanged()
+
+	// Assert: the record names the directory the new file turned up IN, which is
+	// the project directory the probe enumerated on the spot.
+	rec := h.requireOnce(t, "discover-change", "info")
+	if got, want := rec.Context["path"], normalized(filepath.Join(projects, "proj")); got != want {
+		t.Fatalf("the record names path %v, want the changed directory %q", got, want)
+	}
+	if got, want := rec.Context["repeat_count"], float64(1); got != want {
+		t.Fatalf("the record counts %v newly watched file(s), want %v", got, want)
+	}
+}
+
+// TestAnIdleChangeProbeStatesNothing pins the other half: the probe runs once
+// per second for the life of the process, so a tick that found nothing may not
+// contribute a line to a normal-verbosity log.
+func TestAnIdleChangeProbeStatesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	*h.logs = nil
+
+	// Act.
+	h.sc.discoverChanged()
+
+	// Assert.
+	for _, rec := range h.records(t) {
+		if rec.Verbosity != "verbose" {
+			t.Fatalf("an idle probe wrote a non-verbose %s/%s record: %s", rec.Operation, rec.Level, rec.Message)
+		}
+	}
+}
+
+// TestTheChangeProbeRefusesToBuildATailerWithoutCursors pins that the probe is
+// bound by the store-unreachable invariant exactly as the rescan is: it is the
+// second caller of the only tailer-building path, and a second caller that
+// forgot the assertion is the silent cold start the whole cycle exists to
+// prevent.
+func TestTheChangeProbeRefusesToBuildATailerWithoutCursors(t *testing.T) {
+	// Arrange: production suspended, so there are no cursors.
+	h := newHarness(t, nil)
+	h.transcript(t, "sess-1", promptLine)
+
+	// Act + Assert.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("the change probe built tailers with no recovered cursors")
+		}
+	}()
+	h.sc.discoverChanged()
+}
