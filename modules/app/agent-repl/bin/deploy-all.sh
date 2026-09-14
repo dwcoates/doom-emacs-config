@@ -55,10 +55,14 @@
 #                       Emacs coordinator observes a new process identity. A
 #                       stale running binary fails the deployment with its pid
 #                       and the deployed/source revision stamps.
-#   6. elisp reload     with `--elisp <git-range>`: hot-load every non-test
-#                       .el under modules/app/agent-repl changed in the range
-#                       into the running Emacs (test-*.el is batch-only and is
-#                       never loaded interactively).
+#   6. elisp reload     BY DEFAULT (no flag), hot-load the whole canonical
+#                       module set into the running Emacs, so a deploy live-
+#                       reloads Emacs (owner ruling 2026-09-14): the deployed
+#                       checkout is the source of truth, so no git range is
+#                       needed or guessed. With `--elisp <git-range>`, narrow
+#                       to just the non-test .el changed in the range instead
+#                       (test-*.el is batch-only and is never loaded
+#                       interactively).
 #
 #                       When the change set contains core.el, the load list is
 #                       EXPANDED to the full module set in config.el's
@@ -723,40 +727,55 @@ canonical_module_files() {
     done
 }
 
-if [ -n "$ELISP_RANGE" ] && [ "$EMACS_AVAILABLE" -eq 1 ]; then
-    log "elisp: reloading non-test .el changed in $ELISP_RANGE..."
-
-    CHANGED=()
-    CORE_IN_SET=0
-    # Two pathspecs: the sources live in `$MOD_REL/lisp/', while config.el /
-    # packages.el / doctor.el stay at `$MOD_REL/' where Doom's module loader
-    # resolves them.
-    while IFS= read -r rel; do
-        base="$(basename "$rel")"
-        case "$base" in test-*.el) continue ;; esac   # batch-only harness files
-        [ -f "$REPO_ROOT/$rel" ] || continue          # deleted in range
-        [ "$base" = "core.el" ] && CORE_IN_SET=1
-        CHANGED+=("$rel")
-    done < <(git -C "$REPO_ROOT" diff --name-only "$ELISP_RANGE" \
-                 -- "$MOD_REL/*.el" "$MOD_REL/lisp/*.el")
-
+if [ "$EMACS_AVAILABLE" -eq 1 ]; then
     LOAD_LIST=()
-    if [ "$CORE_IN_SET" -eq 1 ]; then
+    if [ -z "$ELISP_RANGE" ]; then
+        # DEFAULT: a plain deploy hot-loads the WHOLE module set, so the running
+        # Emacs always runs the elisp this deploy just built — deploy live-
+        # reloads Emacs (owner ruling, 2026-09-14). No git range is needed or
+        # guessed: the deployed checkout IS the source of truth, and the full
+        # set is the same heartbeat-safe set the core.el-in-change-set path
+        # below expands to (core.el cancels every module timer at load and the
+        # owners re-arm them, so a partial set is the unsafe one — the full set
+        # is not). `--elisp <range>` still narrows to a targeted reload.
         while IFS= read -r rel; do
             LOAD_LIST+=("$rel")
         done < <(canonical_module_files)
-        # Anything changed that the loader does not name (config.el itself,
-        # for instance) still gets loaded, after the canonical set.
-        for rel in ${CHANGED[@]+"${CHANGED[@]}"}; do
-            found=0
-            for c in ${LOAD_LIST[@]+"${LOAD_LIST[@]}"}; do
-                [ "$c" = "$rel" ] && { found=1; break; }
-            done
-            [ "$found" -eq 0 ] && LOAD_LIST+=("$rel")
-        done
-        log "elisp: core.el in change set — expanding to full module reload (${#LOAD_LIST[@]} files)"
+        log "elisp: full module reload (default — the deployed elisp is hot-loaded into the running Emacs; ${#LOAD_LIST[@]} files)..."
     else
-        LOAD_LIST=(${CHANGED[@]+"${CHANGED[@]}"})
+        log "elisp: reloading non-test .el changed in $ELISP_RANGE..."
+
+        CHANGED=()
+        CORE_IN_SET=0
+        # Two pathspecs: the sources live in `$MOD_REL/lisp/', while config.el /
+        # packages.el / doctor.el stay at `$MOD_REL/' where Doom's module loader
+        # resolves them.
+        while IFS= read -r rel; do
+            base="$(basename "$rel")"
+            case "$base" in test-*.el) continue ;; esac   # batch-only harness files
+            [ -f "$REPO_ROOT/$rel" ] || continue          # deleted in range
+            [ "$base" = "core.el" ] && CORE_IN_SET=1
+            CHANGED+=("$rel")
+        done < <(git -C "$REPO_ROOT" diff --name-only "$ELISP_RANGE" \
+                     -- "$MOD_REL/*.el" "$MOD_REL/lisp/*.el")
+
+        if [ "$CORE_IN_SET" -eq 1 ]; then
+            while IFS= read -r rel; do
+                LOAD_LIST+=("$rel")
+            done < <(canonical_module_files)
+            # Anything changed that the loader does not name (config.el itself,
+            # for instance) still gets loaded, after the canonical set.
+            for rel in ${CHANGED[@]+"${CHANGED[@]}"}; do
+                found=0
+                for c in ${LOAD_LIST[@]+"${LOAD_LIST[@]}"}; do
+                    [ "$c" = "$rel" ] && { found=1; break; }
+                done
+                [ "$found" -eq 0 ] && LOAD_LIST+=("$rel")
+            done
+            log "elisp: core.el in change set — expanding to full module reload (${#LOAD_LIST[@]} files)"
+        else
+            LOAD_LIST=(${CHANGED[@]+"${CHANGED[@]}"})
+        fi
     fi
 
     for rel in ${LOAD_LIST[@]+"${LOAD_LIST[@]}"}; do
