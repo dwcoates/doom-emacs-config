@@ -299,7 +299,8 @@ of 2026-09-13.
 | 6 | PASSED 2026-09-13 (rt-run21 and rt-run23) — TWICE-GREEN; rt-run22's chord was lost to a `<triple-wheel-up>` flood in the key ring, not a product finding | `TestRealtestRegisterAndReopen`; same C-g resolution |
 | 7 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestForkAWorkspace`; the phantom shim adoption is gone; same C-g resolution |
 | 8 | PASSED 2026-09-13 (rt-run21 and rt-run22), clean harvest both times — TWICE-GREEN | `TestRealtestPriorityCloseReopenKill`; same C-g resolution |
-| 9–14 | not yet authored; owner-rules-first | Conversation — the next section |
+| 9 | AUTHORED, NOT YET RUN | `TestRealtestSendAPrompt`; the send is real keys throughout — `SPC o v`, the prompt typed character by character, `RET` in the composer. Four edges item 9 names are not written by the product and are recorded as logging defects (docs/REALTEST-JUDGEMENT-CALLS.md, "Authoring realtest 9") |
+| 10–14 | not yet authored; the lead's to run and remediate alone (owner ruling, 2026-09-13 evening) | Conversation — the rest of the section |
 | 15–16 | not yet authored | Panels and windows |
 | 17–19 | not yet authored | Daemon lifecycle |
 | 20–22 | not yet authored | Failure |
@@ -332,6 +333,41 @@ against a live session — and it is not needed here.
 
 Realtest 8 needs nothing extra either: nothing in it submits a prompt, and its
 reopen's bring-up spawns a fake shim for the same reason.
+
+### Running realtest 9
+
+It is the first realtest whose SUBJECT is a turn, and the first where text is
+TYPED rather than supplied. Three things about it are worth having in hand
+before a run.
+
+- **The whole act is real keys.** `SPC o v` selects the workspace's composer,
+  the prompt goes in one key event per character, and `RET` — the composer's
+  own send key (`lisp/input.el`, `agent-repl-input-mode-map`, `:ni "RET"`) — is
+  the act. Nothing about the send is supplied through the probe transport:
+  `agent-repl-send` reads the COMPOSER rather than taking an argument, so a
+  prompt inserted through a probe would be testing the send with the composer
+  removed from it. The composer is read back before the send, so a dropped
+  character is a stated harness finding and the turn is still judged against
+  the prompt the editor actually holds.
+- **The vendor guard alone answers the prompt, exactly as it does for realtest
+  7.** Nothing extra is stated on the launch. The prompt names no `!scenario`,
+  so the fake answers from the DEFAULT PROSE SCENARIO
+  (`agent-shim/claude/shim/src/fake/scenarios/prose.ts`), which thinks on both
+  arms, opens with a fixed sentence and concludes by echoing the prompt
+  verbatim — a turn that thinks briefly and answers with a known text, in
+  microseconds. No scenario was added for this realtest.
+- **Four of the facts item 9 names have no log edge behind them**, and the
+  realtest asserts what exists rather than faking them: the queue's submit door
+  writes only DEBUG, the footer's resolved status is neither logged at INFO nor
+  readable from elisp, nothing records the tab arm's transitions, and no log
+  anywhere carries a feed row's prose. Each is recorded as a LOGGING DEFECT in
+  docs/REALTEST-JUDGEMENT-CALLS.md for the lead to dispatch, and the run's own
+  manifest says which assertion each one cost. THE TURN'S PHASES SHIP
+  UNBUDGETED for the standing reason (`AGENTS.md`, "Test wait/timeout bounds
+  are measured, not guessed"): they are measured from real log edges and
+  reported, and become budgets — a small multiple of the observed healthy
+  maximum, with the runs behind it named — once accumulated runs have sized
+  them.
 
 ### Running realtests 2 and 3
 
