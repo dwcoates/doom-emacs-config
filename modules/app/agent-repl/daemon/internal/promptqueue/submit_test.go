@@ -611,3 +611,71 @@ func TestSubmitStillRefusesAWorkspaceTheStateStoreWillNotName(t *testing.T) {
 		t.Fatal("Submit(unknown workspace) = nil error, want the refusal surfaced")
 	}
 }
+
+// ---- the cold gate refuses by its own name -------------------------------
+//
+// Owner's report, 2026-09-14: three prompts to a workspace parked at its cold
+// gate were answered `no_session`, about a session that was up and serving.
+// A gate is a fact of its own and it is named as one.
+
+func TestSubmitRefusesAColdGatedWorkspaceByTheGatesOwnName(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.coldGate = "the conversation is cold at 101600 context tokens"
+	// Act
+	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+	// Assert
+	if !errors.Is(err, ErrColdGate) {
+		t.Fatalf("err = %v, want ErrColdGate", err)
+	}
+}
+
+func TestSubmitsColdGateRefusalIsNotTheNoSessionRefusal(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.coldGate = "the conversation is cold at 101600 context tokens"
+	// Act
+	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+	// Assert
+	if errors.Is(err, ErrNoSession) {
+		t.Fatalf("err = %v, want a cold gate refusal and NOT no_session", err)
+	}
+}
+
+func TestSubmitsColdGateRefusalCarriesTheGatesOwnSentence(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.coldGate = "the conversation is cold at 101600 context tokens"
+	// Act
+	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+	// Assert
+	var refusal *ColdGateRefusal
+	if !errors.As(err, &refusal) || refusal.Detail != h.coldGate {
+		t.Fatalf("err = %v, want the gate's own sentence carried", err)
+	}
+}
+
+func TestSubmitIsUnaffectedWhenNoColdGateStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+	// Assert
+	if err != nil || !got.Delivered {
+		t.Fatalf("Submit = (%+v, %v), want an ordinary delivery", got, err)
+	}
+}
+
+func TestSubmitDoesNotReviveAColdGatedWorkspace(t *testing.T) {
+	// Arrange. A gated workspace's shim is UP; a revival would be a bring-up
+	// of a session that already exists and is refusing on purpose.
+	h := newHarness(t)
+	h.coldGate = "the conversation is cold at 101600 context tokens"
+	// Act
+	_, _ = h.q.Submit(context.Background(), submission("t1", "hello"))
+	h.waitRevivals()
+	// Assert
+	if h.revivals != 0 {
+		t.Fatalf("revivals = %d, want none for a gated workspace", h.revivals)
+	}
+}

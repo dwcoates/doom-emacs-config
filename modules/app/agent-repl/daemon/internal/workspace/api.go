@@ -336,6 +336,16 @@ type ColdResume struct {
 	VendorSessionID string
 	// Remediation is the answered gate's choice.
 	Remediation *conversationv1.SessionColdRemediation
+	// OnPhase is called for every compaction phase the SHIM relays while the
+	// remediated re-open runs, in order, on the caller's behalf.
+	//
+	// WHY A CALLBACK AND NOT A SINK. The compaction the gate's `compact`
+	// remediation spends happens INSIDE StartSession, before any session
+	// watcher exists to carry its frames, so the fleet opens a watch of its
+	// own for the duration and hands the phases back to the verb that is
+	// drawing them. The verb owns the surface; the fleet owns the stream.
+	// Nil is legal and means nobody is watching.
+	OnPhase func(*conversationv1.SessionCompactionProgress)
 }
 
 // FreenessFunc answers what is running in one workspace. The bool is false
@@ -422,6 +432,11 @@ type ServedQuestion struct {
 type ServedColdGate struct {
 	// VendorSessionID is the conversation the gate parked.
 	VendorSessionID string
+	// Detail is the gate's own account of what was refused cold — the SAME
+	// sentence the footer's cold-gate line carries, composed once at the raise
+	// so the strip, the gate card and a prompt's `cold_gate` refusal cannot
+	// give three accounts of one gate.
+	Detail string
 	// Models are the models the compact menu served.
 	Models []*conversationv1.AgentModel
 	// Scopes are the compaction scopes the menu served.

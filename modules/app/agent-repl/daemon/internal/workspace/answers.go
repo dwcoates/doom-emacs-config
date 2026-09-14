@@ -196,6 +196,27 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		return err
 	}
 
+	// THE ANSWER IS A FOOTER ACT FROM THE CLICK TO THE OUTCOME (owner ruling,
+	// 2026-09-14). The request is published BEFORE the shim is dialed — the
+	// click is acknowledged first, then the phases refine it — because the act
+	// it starts can run for a minute, and for that minute the only thing the
+	// owner had was a card whose buttons had gone inert.
+	//
+	// IT IS CLEARED ON EVERY WAY OUT, success and failure alike: a progress
+	// sentence outliving the act it narrates is the same defect as no sentence
+	// at all. On the way out of a SUCCESS the session is up, so the ordinary
+	// session state takes the strip back; on the way out of a FAILURE the gate
+	// is still standing and the strip says so again, under the `reopen_failed`
+	// fault this verb opens.
+	choice := coldChoiceName(answer)
+	v.spendingColdGate(ws, choice, footer.CompactionRequestLine(choice, served.Detail))
+	defer v.deps.Footer.SetColdGateAnswer(ws, nil)
+
+	// THE RECORD IS WRITTEN AT THE START AS WELL AS THE END. The one at the
+	// end is the outcome; this one is the ACT, and without it the daemon's own
+	// log could not say a minute-long compaction had even been asked for.
+	log.Info(opColdGate, "answering the cold gate: "+choice, dlog.Context{"choice": choice})
+
 	// THE RE-OPEN IS A SESSION BRING-UP, not a bare shim call, so it goes
 	// through the fleet's one start path: the remediated resume must leave the
 	// workspace with its session facts recorded, its session watcher installed
@@ -207,6 +228,12 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	if err := v.deps.Sessions.ResumeCold(ctx, ws, ColdResume{
 		VendorSessionID: served.VendorSessionID,
 		Remediation:     remediation,
+		// EVERY PHASE THE SHIM RELAYS BECOMES THIS ACT'S LINE. The daemon
+		// composes the sentence (footer.CompactionLine) so the vendor's own
+		// auto-compaction and this one read identically.
+		OnPhase: func(progress *conversationv1.SessionCompactionProgress) {
+			v.spendingColdGate(ws, choice, footer.CompactionLine(progress))
+		},
 	}); err != nil {
 		// A TYPED REFUSAL IS ALREADY RECORDED, by `refuse` itself and under the
 		// arm it names, and it is returned UNWRAPPED so the server still reads
@@ -241,8 +268,13 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	// returns; retiring the gate here is what lets them.
 	v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
 
-	log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": coldChoiceName(answer)})
+	log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": choice})
 	return nil
+}
+
+// spendingColdGate publishes one line of the act a gate's answer is spending.
+func (v *verbs) spendingColdGate(ws ids.WorkspaceID, choice, line string) {
+	v.deps.Footer.SetColdGateAnswer(ws, &footer.ColdGateAnswer{Choice: choice, Text: line})
 }
 
 // coldRemediation translates the answered gate into the shim's remediation,

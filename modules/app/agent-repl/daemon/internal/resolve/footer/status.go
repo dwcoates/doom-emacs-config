@@ -33,8 +33,13 @@ var allowanceArms = []string{"allowed", "allowed_warning", "rejected"}
 //  4. loading — MOMENTARY, retired by the R1 dwell.
 //  5. blocked — the session cannot proceed until something outside it changes.
 //  6. merging — the daemon holds this session for a merge.
-//  7. waiting — interrupting, then permission, then question, then cold gate.
-//  8. thinking — a turn is in flight.
+//  7. thinking·<the answered remediation> — a standing cold gate's answer is
+//     being SPENT. It outranks `waiting` because the gate it answers is not
+//     lifted until the re-open lands, and drawing the question over the answer
+//     is exactly what made a minute-long compaction look like a dead button
+//     (owner's report, 2026-09-14).
+//  8. waiting — interrupting, then permission, then question, then cold gate.
+//  9. thinking — a turn is in flight.
 //  9. background — detached work runs while the main thread is free.
 //  10. waiting·wakeup — the fallback the contract admits ONLY where the footer
 //     would otherwise read idle, which is why it ranks below background.
@@ -56,6 +61,9 @@ func (r *resolver) status(s *wsState, log dlog.Logger) *frontendv1.FooterStatus 
 		return arm
 	}
 	if arm := r.merging(s, log); arm != nil {
+		return arm
+	}
+	if arm := r.coldGateAnswer(s, log); arm != nil {
 		return arm
 	}
 	if arm := r.waiting(s, log); arm != nil {
@@ -391,6 +399,38 @@ func (r *resolver) waiting(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	}
 	arm.Activity = r.waitingActivity(s)
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Waiting{Waiting: arm}}
+}
+
+// coldGateAnswer resolves a cold gate's answer while it is being spent, or nil
+// when no answer is in flight.
+//
+// IT INVENTS NO VOCABULARY (owner ruling, 2026-09-14). The status is
+// `thinking`; the step is the one the chosen remediation already has — the
+// SAME `compacting` step the vendor's auto-compaction takes, so the two read
+// alike — and the line is the daemon's own progress sentence.
+func (r *resolver) coldGateAnswer(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	if s.coldAnswer == nil {
+		return nil
+	}
+	arm := &frontendv1.FooterStatusThinking{Activity: r.thinkingActivity(s)}
+	switch s.coldAnswer.Choice {
+	case ChoiceCompact:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with compact"})
+		arm.Substatus = &frontendv1.FooterStatusThinking_Compacting{
+			Compacting: &frontendv1.FooterSubStatusThinkingCompacting{}}
+	case ChoiceClear:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with clear"})
+		arm.Substatus = &frontendv1.FooterStatusThinking_Clearing{
+			Clearing: &frontendv1.FooterSubStatusThinkingClearing{}}
+	default:
+		// A PAID RESUME SUBMITS THE CONVERSATION AND NOTHING ELSE, which is
+		// what `submitting` already says; an unrecognized choice reads the
+		// same rather than falling out of the tree unpainted.
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with pay"})
+		arm.Substatus = &frontendv1.FooterStatusThinking_Submitting{
+			Submitting: &frontendv1.FooterSubStatusThinkingSubmitting{}}
+	}
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{Thinking: arm}}
 }
 
 // wakeup resolves the self-scheduled wakeup fallback, which the contract

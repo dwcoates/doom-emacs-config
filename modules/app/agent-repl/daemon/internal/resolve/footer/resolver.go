@@ -325,6 +325,42 @@ func (r *resolver) SetColdGate(ws ids.WorkspaceID, gate ColdGate) {
 		dlog.Context{"standing": gate.Standing}, func(s *wsState) { s.coldGate = gate })
 }
 
+// SetColdGateAnswer installs the gate answer in flight, nil to clear it.
+func (r *resolver) SetColdGateAnswer(ws ids.WorkspaceID, answer *ColdGateAnswer) {
+	r.mutate(ws, "daemon.footer.set_cold_gate_answer", "the footer took the cold gate's answer",
+		dlog.Context{"in_flight": answer != nil, "choice": choiceOf(answer), "line": lineOf(answer)},
+		func(s *wsState) {
+			s.coldAnswer = answer
+			// THE ANSWER'S OWN LINE IS THE COMPACTION LINE while it stands, so
+			// the gate's compaction and the vendor's read identically (owner
+			// ruling, 2026-09-14). Clearing the answer clears the line with it:
+			// a stale progress sentence outliving its act is the same defect
+			// as no sentence at all.
+			if answer == nil {
+				s.compaction = nil
+				return
+			}
+			s.compaction = &standing{text: answer.Text, at: r.opts.clock.Now()}
+		})
+}
+
+// choiceOf names the answered remediation for the record, "none" when no
+// answer is in flight.
+func choiceOf(answer *ColdGateAnswer) string {
+	if answer == nil {
+		return "none"
+	}
+	return answer.Choice
+}
+
+// lineOf is the answer's composed line for the record, empty when none stands.
+func lineOf(answer *ColdGateAnswer) string {
+	if answer == nil {
+		return ""
+	}
+	return answer.Text
+}
+
 // SetInterrupting fires waiting·interrupting the moment an interrupt registers.
 func (r *resolver) SetInterrupting(ws ids.WorkspaceID, on bool) {
 	r.mutate(ws, "daemon.footer.set_interrupting", "the footer took the interrupt registration",
@@ -447,6 +483,21 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		return "compacting", func(s *wsState) {
 			r.logSessionArm(ws, s, "compacting")
 			s.compacting = true
+			// THE VENDOR'S COMPACTION GETS A LINE TOO. Presence is the whole
+			// fact this arm carries — no phase, no figure — so the line says
+			// exactly that and nothing it does not know (owner ruling,
+			// 2026-09-14: both compactions read the same).
+			s.compaction = &standing{text: vendorCompactionLine, at: r.opts.clock.Now()}
+		}
+	case *conversationv1.SessionUpdate_CompactionProgress:
+		return "compaction_progress", func(s *wsState) {
+			r.logSessionArm(ws, s, "compaction_progress")
+			progress := u.CompactionProgress
+			s.compaction = &standing{text: CompactionLine(progress), at: r.opts.clock.Now()}
+			// A FAILED PHASE IS THE END OF THE COMPACTION, not a compaction
+			// still running; every other phase is one still in flight.
+			s.compacting = progress.GetPhase() !=
+				conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED
 		}
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics", func(s *wsState) {
@@ -766,6 +817,10 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	s.turn = nil
 	s.turnEverRan = true
 	s.compacting = false
+	// THE LINE GOES WITH THE ACT IT NARRATED. The cut is the compaction's end
+	// signal, so its progress sentence stops standing here; a failed cut still
+	// says what went wrong, through the context-budget line below.
+	s.compaction = nil
 	s.tok.settled = true
 	if failed != nil {
 		s.contextBudget = &standing{
