@@ -121,6 +121,63 @@ message FooterStrip {
 //   OUTRANKS every competing activity; the status-bound kinds rank next, by
 //   the daemon's judgment; rate_limited is SECOND-LOWEST; context_budget is
 //   LOWEST — shown only when nothing else stands.
+//
+// THE FAULT PARTITION — where every daemon fault kind lands on the strip.
+//
+// The owner's ruling of 2026-09-13: EVERY daemon fault kind reaches the
+// footer. Three rules shape the mapping and are worked out here once.
+//
+//  1. STATUS IS REUSED, never invented. `disconnected` carries the faults that
+//     mean the session cannot be reached; `blocked` carries the faults that
+//     mean the daemon cannot serve it. Nothing else needed a new status.
+//  2. SUBSTATUS IS A BUCKET, onto the activity values: several fault kinds
+//     land in one substatus, and no substatus was minted to match a kind
+//     one-for-one. Four of the five buckets below already existed.
+//  3. ACTIVITY IS THE LEAST GENERAL: the kind's own name and its detail line,
+//     carried by FooterStatusActivityFault (or, for `shim_start_failed`
+//     alone, by the richer FooterStatusActivityStartFailed).
+//
+// ESCALATING FAULTS — the fault DECIDES the status, because the session
+// cannot serve while it stands:
+//
+//   | status       | substatus         | fault kinds                        |
+//   |--------------|-------------------|------------------------------------|
+//   | disconnected | start_failed      | shim_start_failed, resume_failed,  |
+//   |              |                   | relaunch_resume_failed,            |
+//   |              |                   | adoption_window_expired (session), |
+//   |              |                   | cold_gate_reopen_failed            |
+//   | disconnected | dead              | shim_died, bounce_died,            |
+//   |              |                   | session_absent                     |
+//   | disconnected | severed           | link_severed, watch_open_refused   |
+//   | blocked      | daemon_impaired   | prompts_dir_missing, wsm_read_only,|
+//   |              |                   | log_sink_poisoned,                 |
+//   |              |                   | deploy_script_failed,              |
+//   |              |                   | successor_spawn_failed,            |
+//   |              |                   | daemon_state_unreadable,           |
+//   |              |                   | adoption_window_expired (daemon)   |
+//
+// NON-ESCALATING FAULTS — the session IS serving, so the status is left
+// exactly as it was and the fault stands as the ACTIVITY line alone:
+//
+//   | status     | substatus | fault kinds                                  |
+//   |------------|-----------|----------------------------------------------|
+//   | (whatever  | (whatever | shim_reported, classifier_failed,            |
+//   |  stands)   |  stands)  | bounce_unknown, conversation_abandoned       |
+//
+// WHY THOSE FOUR DO NOT ESCALATE, since the ruling's worked example put them
+// under `disconnected · degraded`: the shim answered in every one of them. A
+// shim that PUSHED a diagnostic is alive; a classifier run is a headless side
+// errand; an undetermined bounce disposition is an accounting question for a
+// human; an abandoned conversation is the record of what a SUCCESSFUL fresh
+// bring-up left behind. Saying `disconnected` of any of them would be false,
+// and it is not only a wording question: `disconnected` CLOSES THE COMPOSER
+// (webapp/src/main.ts), so escalating them would lock the user out of a
+// session that is serving perfectly. The fault still reaches the footer —
+// which is what the ruling asked for — as the activity line.
+//
+// `bounce_disposition` is the one recorded kind with no footer cell, for the
+// same reason it has no wire arm: it is opened and closed in one breath as
+// per-session accounting, and never stands.
 message FooterStatus {
   // What the session is doing now, at the coarsest resolution. Exactly one
   // arm is set; a frame with none is malformed and rejected loudly.
@@ -179,6 +236,13 @@ message FooterStatusIdleActivity {
     FooterStatusActivityContextBudget context_budget = 3;
     // A newsworthy rate-limit report.
     FooterStatusActivityRateLimited rate_limited = 4;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 5;
   }
 }
 // Never ran a turn this session.
@@ -222,6 +286,13 @@ message FooterStatusThinkingActivity {
     FooterStatusActivityContextBudget context_budget = 6;
     // A newsworthy rate-limit report.
     FooterStatusActivityRateLimited rate_limited = 7;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 8;
   }
 }
 // The prompt is being delivered.
@@ -298,6 +369,13 @@ message FooterStatusWaitingActivity {
     // The interrupting line, composed by the daemon ("stopping the
     // current turn…"), standing until the teardown resolves.
     FooterStatusActivityInterrupting interrupting = 10;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 11;
   }
 }
 // The composed interrupting line.
@@ -351,6 +429,13 @@ message FooterStatusInterruptedActivity {
     // The vendor's context-budget warning; LOWEST precedence — shown only
     // when nothing else stands.
     FooterStatusActivityContextBudget context_budget = 4;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 5;
   }
 }
 
@@ -434,6 +519,13 @@ message FooterStatusMergingActivity {
     // The vendor's context-budget warning; LOWEST precedence — shown only
     // when nothing else stands.
     FooterStatusActivityContextBudget context_budget = 5;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 6;
   }
 }
 
@@ -458,6 +550,13 @@ message FooterStatusBackgroundActivity {
     // The vendor's context-budget warning; LOWEST precedence — shown only
     // when nothing else stands.
     FooterStatusActivityContextBudget context_budget = 4;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 5;
   }
 }
 
@@ -478,6 +577,12 @@ message FooterStatusBlocked {
     // prompt restarts the query. Distinct from disconnected, which is the
     // daemon<->shim link.
     FooterSubStatusBlockedQueryDied query_died = 6;
+    // The DAEMON itself is impaired: a fault stands that costs this session
+    // something it needs from the daemon — its prompts directory, its state
+    // client, its durable log sink, its own redeploy. The session's shim may
+    // be perfectly healthy; what it cannot get is the daemon's service. See
+    // THE FAULT PARTITION above.
+    FooterSubStatusBlockedDaemonImpaired daemon_impaired = 7;
   }
   // OPTIONAL BY EVIDENCE: the auth prompt line exists only on the auth
   // step; the other steps have no standing line beyond the step itself.
@@ -511,8 +616,17 @@ message FooterStatusBlockedActivity {
     // The vendor's context-budget warning; LOWEST precedence — shown only
     // when nothing else stands.
     FooterStatusActivityContextBudget context_budget = 6;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 7;
   }
 }
+// The daemon itself is impaired; the fault line says how.
+message FooterSubStatusBlockedDaemonImpaired {}
 // The dead-query line.
 message FooterStatusActivityQueryDied {
   // The composed line, drawn verbatim.
@@ -530,6 +644,30 @@ message FooterStatusActivityStartFailed {
   // none. A session that never came up can never deliver a held prompt, so the
   // hold is retired rather than left standing, and the count is what says so.
   uint32 dropped_prompts = 2;
+}
+
+// A STANDING DAEMON FAULT, as one drawn line.
+//
+// ONE LEAF FOR EVERY FAULT FAMILY BUT ONE. Rule 3 of the owner's ruling makes
+// activity the LEAST general cell — one activity kind per fault family — and
+// then admits that a single kind serves several families where their payloads
+// do not differ. Every fault kind but `shim_start_failed` carries exactly a
+// kind and a detail line, so they share this leaf and name themselves in
+// `kind`; `shim_start_failed` keeps FooterStatusActivityStartFailed, whose
+// payload genuinely differs (it also counts the held prompts the failure
+// dropped).
+message FooterStatusActivityFault {
+  // The fault kind, spelled exactly as the daemon's fault vocabulary spells
+  // it (`resume_failed`, `bounce_unknown`, `prompts_dir_missing`, ...). The
+  // client renders it lowercase with spaces, never underscores — the same
+  // rule the status and substatus cells follow — and holds no table keyed on
+  // it: the status and substatus cells beside it are already resolved.
+  string kind = 1;
+  // WHAT the fault says, composed by the daemon out of the fault's own
+  // evidence. Drawn verbatim. EMPTY IS LEGAL: some kinds are wholly said by
+  // their name, and an empty detail draws the kind alone rather than an
+  // invented sentence.
+  string detail = 2;
 }
 
 // The daemon's link to the session's shim is not serving.
@@ -580,6 +718,13 @@ message FooterStatusDisconnectedActivity {
     // The vendor's context-budget warning; LOWEST precedence — shown only
     // when nothing else stands.
     FooterStatusActivityContextBudget context_budget = 4;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 6;
   }
 }
 
@@ -614,6 +759,13 @@ message FooterStatusClosingActivity {
     // The vendor's context-budget warning; LOWEST precedence — shown only
     // when nothing else stands.
     FooterStatusActivityContextBudget context_budget = 5;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 6;
   }
 }
 
@@ -658,6 +810,13 @@ message FooterStatusLoadingActivity {
     // The vendor's context-budget warning; LOWEST precedence — shown only
     // when nothing else stands.
     FooterStatusActivityContextBudget context_budget = 5;
+    // A STANDING DAEMON FAULT — the fault line, drawn under whatever status
+    // holds. STATUS-INDEPENDENT: every status arm carries it, because a fault
+    // stands whatever the session is doing. It OUTRANKS a notification while
+    // it stands, the same precedence `start_failed` has and for the same
+    // reason — it is the condition the user has to be told about. See THE
+    // FAULT PARTITION above for which fault kind lands on which cell.
+    FooterStatusActivityFault fault = 6;
   }
 }
 
