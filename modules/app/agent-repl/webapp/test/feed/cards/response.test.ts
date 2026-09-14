@@ -24,6 +24,7 @@ import {
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
 import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
+import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
@@ -576,40 +577,80 @@ describe("a host with no animation frames", () => {
 });
 
 /**
- * What the DAEMON actually serves for the fake SDK's `!md` showcase: its bare
- * tree wrapped to 105 columns by `treefmt`, so branch 1.1 and branch 1.2 each
- * arrive as a head line plus a continuation line. These are that formatter's
- * own output, not an invented shape.
+ * The metaprompt's `!md` showcase tree, as the vendor emits it and the daemon
+ * now serves it: BARE and UNWRAPPED, one physical line per branch. The webapp
+ * wraps it to the bubble's live width. Branch 1.1 (with a child) and branch 1.2
+ * (the last branch) each run well past any reasonable bubble width, so each
+ * wraps onto a continuation line.
  */
-const WRAPPED_SHOWCASE_TREE = [
+const SHOWCASE_TREE = [
   "1 🌳 A bare Unicode tree, the shape the metaprompt answers in.",
-  "├── 1.1 This branch is deliberately longer than the daemon's 105-column limit, so it is wrapped before it",
-  "│   │   is served, and every continuation line must still carry the rails of the branches around it.",
-  "│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.",
-  "└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too runs",
-  "        past the daemon's limit and wraps onto a second line.",
+  "├── 1.1 This branch is deliberately much longer than one hundred and five rendered columns, so the webapp must wrap it onto a continuation line beneath its own text column right here.",
+  "│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing here too.",
+  "└── 1.2 The last branch, also long enough to run past the limit and wrap, whose continuation carries no rail because nothing follows it once the wrap lands.",
 ].join("\n");
 
 describe("the wrapped tree a settled response carries", () => {
-  it("draws every line of the daemon-wrapped showcase tree as a tree line", () => {
+  it("wraps a too-wide branch onto continuation lines with real ancestor rails", () => {
     // Arrange
     const host = document.createElement("div");
-    // Act
-    host.innerHTML = proseHtml(WRAPPED_SHOWCASE_TREE);
-    // Assert — six drawn rows: four branches and the two continuations the
-    // daemon's wrap added. A sheared region drops the tree to two.
-    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)")).toHaveLength(6);
+    // Act — width 105, the fallback the bubble measures to under jsdom.
+    host.innerHTML = proseHtml(SHOWCASE_TREE, 105);
+    const prefixes = [...host.querySelectorAll(".mp-prefix")].map((el) => el.textContent ?? "");
+    // Assert — 1.1 wrapped, and its continuation carries the ancestor rail plus
+    // 1.1's own held-open child rail as REAL characters, so the wrap does not
+    // sever 1.1 from the 1.1.1 beneath it.
+    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBeGreaterThan(4);
+    expect(prefixes.some((text) => text.startsWith("│   │"))).toBe(true);
   });
 
-  it("carries the wrapped branch's rails on its continuation row's prefix", () => {
+  it("re-wraps: a narrower width yields more lines than a wider one", () => {
     // Arrange
-    const host = document.createElement("div");
+    const narrow = document.createElement("div");
+    const wide = document.createElement("div");
+    // Act — the same tree at two widths, the mechanism a resize drives.
+    narrow.innerHTML = proseHtml(SHOWCASE_TREE, 40);
+    wide.innerHTML = proseHtml(SHOWCASE_TREE, 200);
+    // Assert
+    const narrowLines = narrow.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length;
+    const wideLines = wide.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length;
+    expect(narrowLines).toBeGreaterThan(wideLines);
+  });
+
+  it("renders streaming and settled identically at the same measured width", () => {
+    // Arrange — with no animation frames, the arriving draw paints the whole
+    // prose at once, so it is comparable to the settled draw of the same text.
+    vi.stubGlobal("requestAnimationFrame", undefined);
     // Act
-    host.innerHTML = proseHtml(WRAPPED_SHOWCASE_TREE);
-    const prefixes = [...host.querySelectorAll(".mp-prefix")].map((el) => el.textContent ?? "");
-    // Assert — the rails of 1.1's ancestors and of 1.1 itself, so the wrap
-    // does not sever 1.1 from the 1.1.1 beneath it.
-    expect(prefixes.some((text) => text.startsWith("│   │"))).toBe(true);
+    const settled = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const streaming = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    // Assert — the tree element is byte-for-byte the same on both paths.
+    expect(streaming.querySelector(".mp-tree")?.outerHTML).toBe(
+      settled.querySelector(".mp-tree")?.outerHTML,
+    );
+  });
+
+  it("subscribes a resize observer to the bubble body and tears it down with it", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    // Act + Assert — a resize reaches an attached observer (fireResize throws
+    // when nothing observes the element), and the tree survives the re-wrap.
+    expect(() => fireResize(body)).not.toThrow();
+    expect(el.querySelector(".mp-tree")).not.toBeNull();
+    // And discarding the bubble disconnects the observer.
+    stopTicking(el);
+    expect(() => fireResize(body)).toThrow();
   });
 });
 
