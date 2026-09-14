@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- realtest 9: the feed assertion WAITS for the answer's own `feed.draw-text-block` on `rt9FeedCeiling` instead of scanning once the final-answer mark is up, and reports a new `turn concluded -> answer text drawn` phase (rt-run36, "the feed drew no text block of 21 characters ... the blocks it did draw were [31]")
 - realtest 9: every edge wait after the registration scans a source set re-enumerated against the CURRENT workspace set, so the minted workspace's own shim, daemon, webapp and sidecar sinks are read (rt-run35 waited 3m0s for a `shim.engine.turn` its log already held, and reported the feed as silent)
 - elisp input: `elisp.input.send` and `elisp.input.send-empty` are `agent-repl--info` records, so a send a person made survives the deployment's INFO threshold (rt-run35, a sent prompt left no `elisp.input.send` on disk)
 - webapp feed: the row-draw records `feed.draw-user-prompt`, `feed.draw-agent-prompt`, `feed.draw-text-block`, `feed.draw-image-block`, `feed.draw-turn-ended`, `feed.draw-turn-error`, `feed.draw-subagent`, `feed.draw-separation` and `feed.final-answer-marked` are `log.info`, per-token and per-delta records staying debug (rt-run35, a completed turn left no `feed.*` record for the workspace)
