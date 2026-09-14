@@ -115,6 +115,50 @@ describe("SubmitPrompt refused while merging", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// A COLD-GATED SESSION REFUSES BY ITS OWN NAME (owner's report, 2026-09-14)
+//
+// A workspace parked at its cold gate HAS a session — that is why a gate could
+// be raised — so `no_session` is the wrong arm and the wrong sentence. The gate
+// is answered in the panel, and the refusal says so.
+// ---------------------------------------------------------------------------
+
+describe("SubmitPrompt refused by the cold gate", () => {
+  /** Boot a composer and send one prompt into a cold-gated workspace. */
+  const send = async (): Promise<void> => {
+    harness = await startHarness({ composer: true });
+    harness.fake.refuse("submitPrompt", "coldGate");
+    const input = harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement;
+    input.value = "a prompt at the gate";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await harness.settle();
+    await harness.click("[data-composer-send]");
+  };
+
+  it("labels the refusal with the cold-gate arm", async () => {
+    // Arrange / Act
+    await send();
+    // Assert
+    expect(harness.$(".composer-refusal[data-arm]")?.dataset.arm).toBe("coldGate");
+  });
+
+  it("says the session is parked at its gate rather than missing", async () => {
+    // Arrange / Act
+    await send();
+    // Assert
+    expect(harness.text(".composer-refusal")).toContain("parked at its cold gate");
+  });
+
+  it("preserves the submitted text so nothing is lost", async () => {
+    // Arrange / Act
+    await send();
+    // Assert
+    expect((harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement).value).toBe(
+      "a prompt at the gate",
+    );
+  });
+});
+
 describe("Interrupt refused for confirmation", () => {
   it("draws the refusal at the clicked control", async () => {
     // Arrange
