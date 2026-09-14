@@ -24,7 +24,7 @@ func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 	f := r.feed(s, feed)
 	log := r.logger(ws)
 
-	durable := durableOrder(f)
+	durable, _ := r.deliverable(s, f, "open_page")
 	start := len(durable) - r.deps.PageSize
 	if start < 0 {
 		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start < 0"})
@@ -62,9 +62,20 @@ func (r *resolver) NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 		return nil, ErrNoWalk
 	}
 
-	durable := durableOrder(f)
+	durable, bounded := r.deliverable(s, f, "next_page")
+	if w.oldest > len(durable) {
+		// THE BOUND MOVED UNDER THE WALK. A separation drawn between this
+		// reader's last page and this one shortened the delivered order, and a
+		// walk index taken against the longer one now points past its end. The
+		// reader is at the start of what is delivered, which is what the bound
+		// says it should see.
+		log.Info("daemon.feed.walk_clamped_to_bound",
+			"a walk stood past the delivered order after a separation moved the feed's start, so it was clamped to it",
+			dlog.Context{"feed": f.key, "reader": string(reader), "stood_at": w.oldest, "rows": len(durable)})
+		w.oldest = len(durable)
+	}
 	if w.oldest <= 0 {
-		if f.historyMore != nil {
+		if f.historyMore != nil && !bounded {
 			// The walk reached the oldest row the replay delivered, and the
 			// record says older history exists: what is on screen has a HOLE
 			// in it, and saying so is the honest answer.
@@ -81,9 +92,9 @@ func (r *resolver) NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 				},
 			}}, nil
 		}
-		log.Debug("daemon.feed.next_page",
-			"a reader's walk is already at the feed's start",
-			dlog.Context{"feed": f.key, "reader": string(reader)})
+		log.Info("daemon.feed.next_page_nothing_older",
+			"a reader asked for an older page and there is nothing older: the walk stands at the feed's start",
+			dlog.Context{"feed": f.key, "reader": string(reader), "bounded_by_separation": bounded})
 		return r.composePage(s, f, durable, 0), nil
 	}
 
@@ -111,6 +122,69 @@ func (r *resolver) CloseReader(ws ids.WorkspaceID, reader ReaderID) {
 	delete(s.readers, reader)
 	r.logger(ws).Debug("daemon.feed.close_reader",
 		"a reader's page walk was dropped", dlog.Context{"reader": string(reader), "had_walk": had})
+}
+
+// THE FEED BEGINS AT THE NEWEST SEPARATION.
+//
+// A compaction or a clear is the session saying that what came before it is no
+// longer the conversation: after a compaction the surviving account IS the
+// summary the divider carries, and after a clear there is no surviving account
+// at all. Delivering the rows above such a divider offers a reader a
+// conversation the agent no longer has — and, with two compactions in a row,
+// draws the older divider and its now-superseded summary above the newer one.
+//
+// So the bound is a DELIVERY bound and nothing more. No row is retired, no
+// feedid is minted twice, and the store's book keeps every pointer it had: the
+// rows above the newest separation are simply not served in a page and not
+// walked back to. Moving the bound is therefore always safe — a separation
+// drawn later just makes the delivered order shorter.
+//
+// WHICH SEPARATIONS BOUND. Only the two that cut context: `cleared` and
+// `compacted`. A `compaction_failed` divider cut NOTHING — that is the whole
+// of what it says — and the worktree arms change no context at all, so neither
+// may hide the conversation behind it.
+//
+// It is computed from the order rather than remembered as a pointer because a
+// history replay and the live plane draw into the same feed by different
+// routes: the NEWEST bounding separation is a fact about the row order, and
+// reading it off the order cannot disagree with the order.
+func (r *resolver) deliverable(s *wsState, f *feedState, action string) ([]string, bool) {
+	durable := durableOrder(f)
+	at := boundIndex(f, durable)
+	if at <= 0 {
+		return durable, at == 0
+	}
+	r.logger(s.id).Info("daemon.feed.bound_at_separation",
+		"the feed's delivery begins at its newest separation; the rows before it were not served",
+		dlog.Context{
+			"feed": f.key, "action": action, "row": durable[at],
+			"withheld": at, "delivered": len(durable) - at,
+		})
+	return durable[at:], true
+}
+
+// boundIndex is the index in ORDER of the newest separation delivery begins
+// at, or -1 when this feed has none.
+func boundIndex(f *feedState, order []string) int {
+	for i := len(order) - 1; i >= 0; i-- {
+		if boundsDelivery(f.rows[order[i]]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// boundsDelivery reports whether a row is a separation that CUT CONTEXT.
+func boundsDelivery(row *frontendv1.FeedRow) bool {
+	separation := row.GetSeparation()
+	if separation == nil {
+		return false
+	}
+	switch separation.GetKind().(type) {
+	case *frontendv1.FeedSessionSeparation_Cleared, *frontendv1.FeedSessionSeparation_Compacted:
+		return true
+	}
+	return false
 }
 
 // durableOrder is the feed's row order with the non-durable rows removed. A

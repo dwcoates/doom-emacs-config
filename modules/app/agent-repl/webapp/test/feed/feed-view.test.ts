@@ -32,6 +32,7 @@ import {
   mergeTabRow,
   page,
   responseRow,
+  separationRow,
   stubRenderers,
   subagentRow,
   turnEndedRow,
@@ -39,6 +40,7 @@ import {
   type Harness,
 } from "./harness.js";
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -239,6 +241,60 @@ describe("createFeedController: upserts", () => {
   it("refuses a row with no id, the id being the upsert key", () => {
     const { controller } = fixture();
     expect(() => controller.upsert(create(FeedRowSchema, {}))).toThrow(MalformedView);
+  });
+});
+
+// THE FEED BEGINS AT THE NEWEST SEPARATION. A compaction or a clear arriving on
+// the tail says the rows above it are no longer the conversation; the daemon
+// stops serving them, and the client stops showing them.
+
+describe("createFeedController: the newest separation bounds the feed", () => {
+  it("drops every row above a compaction that arrives", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    controller.upsert(separationRow("cut"));
+    expect(drawnIds(host)).toEqual(["cut"]);
+  });
+
+  it("drops every row above a clear that arrives", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")]), "replace");
+    controller.upsert(separationRow("cut", "cleared"));
+    expect(drawnIds(host)).toEqual(["cut"]);
+  });
+
+  it("keeps the rows that arrive after the separation", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")]), "replace");
+    controller.upsert(separationRow("cut"));
+    controller.upsert(responseRow("b"));
+    expect(drawnIds(host)).toEqual(["cut", "b"]);
+  });
+
+  it("collapses consecutive compactions onto the newest divider", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")]), "replace");
+    controller.upsert(separationRow("cut-1"));
+    controller.upsert(responseRow("b"));
+    controller.upsert(separationRow("cut-2"));
+    expect(drawnIds(host)).toEqual(["cut-2"]);
+  });
+
+  it("keeps the rows above a compaction that FAILED, which cut nothing", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")]), "replace");
+    controller.upsert(separationRow("cut", "compactionFailed"));
+    expect(drawnIds(host)).toEqual(["a", "cut"]);
+  });
+
+  it("records the drop at INFO with the count it dropped", async () => {
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    controller.upsert(separationRow("cut"));
+    const record = await forwardedRecord(capture, "feed.truncated-at-separation");
+    expect(record.level.case).toBe("info");
+    expect(record.context).toMatchObject({ dropped: 2 });
   });
 });
 

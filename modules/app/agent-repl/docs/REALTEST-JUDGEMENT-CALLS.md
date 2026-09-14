@@ -86,6 +86,23 @@ final response is delivered)."
 | the turn-end backstop exempts the turn's own end row | Its retry countdown is a clock about what happens NEXT, not about work that has stopped, and it stops itself when it expires. Everything else in the turn is swept. |
 | relative-age stamps inside an ended turn freeze | An answered permission card's "3m ago", a question's and a resolved cold gate's, all stop when their turn's end row lands. The owner's invariant says EVERY timer in a turn, and an ended turn's rows are history. If a growing age on a finished turn is wanted back, this is the line to reverse. |
 | the backstop logs, because a stop there is a defect signal | Rule one should have stopped the card already, so a backstop stop means some card did not. It records one DEBUG (`feed.turn-end-stopped-clocks`) naming the turn and the row ids it stopped, and only when it actually stopped something — a sweep that finds nothing is silent. |
+## The feed begins at the newest separation (2026-09-14)
+
+Owner ruling, quoted: "after compaction, nothing in the feed is rendered above
+the orange divider and the compaction summary. E.g., you shouldn't see
+consecutive compactions in the feed. clear = everything before the clear is no
+longer shown/delivered (not including the divider bar), and same for compaction
+with the exception that we want to see the compaction summary."
+
+| call | what was decided |
+|---|---|
+| which separation arms bound the feed | `cleared` and `compacted` only. `compaction_failed` cut NOTHING — that is the whole of what its divider says — and the two worktree arms change no context, so neither may hide the conversation behind it. |
+| where the compaction summary lives | On the divider row itself (`FeedContextCutCompacted.summary`), as the feed already modelled it. Nothing was moved or added: keeping the divider is what keeps the summary, which is why "the divider and its summary" is one row and not two. |
+| a delivery bound, not a purge | No row is retired, no `feedid` is reminted, and the store's book pointers are untouched. The daemon simply does not serve or push what is above the bound. A `FeedSessionSeparation` push moves it forward, and the webapp drops every row above it from the DOM (INFO `feed.truncated-at-separation`). |
+| the bound is derived, never stored | `deliverable` reads the newest bounding separation off the row order at every page rather than remembering a pointer. A history replay and the live plane draw into the same feed by different routes, so a remembered pointer could disagree with the order; a derived one cannot. A walk left standing past a bound that moved under it is clamped to the new start at INFO. |
+| what `load-older` answers at the bound | The EXISTING "no older page" answer — `FeedPageSuccess.at_start` — never a new arm and never the `history_replay_truncated` error, which is reserved for a hole the feed did not choose. |
+| the separation fold toggle stays | It was never what hid the rows above: what it folds is the compaction's summary INSIDE the divider. It is untouched, and so is the divider's look. |
+| three e2e cases were amended | They asserted over a feed that kept everything: a per-turn terminal COUNT that a context cut makes go down, "two cleared dividers" (precisely what the ruling forbids), and a pre-hibernation turn that revival's own compaction now legitimately puts behind the divider. Each was restated in terms the ruling permits rather than weakened — see the commit. |
 
 ## The cold gate's feedback (2026-09-14)
 

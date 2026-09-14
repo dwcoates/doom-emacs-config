@@ -120,10 +120,26 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 	log.Debug("daemon.feed.separation",
 		"a session separation divider was drawn",
 		dlog.Context{"row": id.GetValue(), "kind": separationArm(separation)})
-	r.upsert(s, at, &frontendv1.FeedRow{
+	row := &frontendv1.FeedRow{
 		Id:  id,
 		Row: &frontendv1.FeedRow_Separation{Separation: separation},
-	}, true)
+	}
+	r.upsert(s, at, row, true)
+
+	// THE FEED NOW BEGINS HERE (see `deliverable`). The bound is read off the
+	// order at every page, so there is nothing to store; what is recorded is
+	// the MOMENT it moved, and how much of the feed a reader is about to stop
+	// being served — the count a client's own truncation should match.
+	if boundsDelivery(row) {
+		f := r.feed(s, at.feed)
+		withheld := boundIndex(f, durableOrder(f))
+		log.Info("daemon.feed.delivery_bound_moved",
+			"a context cut moved the feed's delivery bound: nothing above this divider is served or pushed from here on",
+			dlog.Context{
+				"feed": f.key, "row": id.GetValue(),
+				"kind": separationArm(separation), "withheld": withheld,
+			})
+	}
 }
 
 // compactionLabel words a compaction's divider. A MANUAL compaction is
