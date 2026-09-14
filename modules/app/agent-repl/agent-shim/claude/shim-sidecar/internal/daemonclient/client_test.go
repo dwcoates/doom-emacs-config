@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -119,6 +121,10 @@ func TestForwardCachesTheRosterRefForTheSameDaemonAndWorkspace(t *testing.T) {
 	client, server := serveClientLog(t, &agentreplv1.ClientLogResponse{
 		Result: &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}},
 	})
+	// The cache is only consulted INSIDE the freshness bound, so the bound is
+	// injected rather than raced: a machine slow enough to spend a second
+	// between two loopback calls would otherwise read the roster twice.
+	onFakeClock(client, newFakeClock())
 	record := logging.ForwardRecord{
 		Level: "info", Operation: "sidecar.tail.read", Message: "read",
 		WorkspaceDir: server.workspace.GetDir(), WorkspaceID: "deadbeef",
@@ -773,5 +779,381 @@ func TestProcessAliveReportsTheOwnProcessAliveAndAReapedChildDead(t *testing.T) 
 	}
 	if !processAlive(os.Getpid()) {
 		t.Fatal("processAlive(os.Getpid()) = false, want the running test process to read as alive")
+	}
+}
+
+// --- the roster moves under a cached ref ------------------------------------
+//
+// A DIRECTORY'S WORKSPACE REF IS ONLY EVER USED WHILE THE ROSTER STILL HOLDS
+// IT. Realtest 9, sweep rt-run39: realtest 7 registered a scratch directory as
+// workspace af24557b1ddd4b9c and forgot it, realtest 9 registered THE SAME
+// directory as 54578ede3d834dea half a minute later, and the sidecar forwarded
+// that directory's whole session against the dead id — refused, and written
+// unattributed. The cases below are the four edges of the invariant that
+// closed it.
+
+// fakeClock is the injected time source every freshness assertion below is
+// decided by, so a bound is STATED rather than waited out.
+type fakeClock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{at: time.Date(2026, 9, 14, 0, 12, 0, 0, time.UTC)}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(d)
+}
+
+// rosterDaemon is a fake daemon whose roster CONTENTS and ClientLog verdict
+// both change between calls, which is the whole shape a re-registration takes:
+// the same directory, a new id, and a refusal for the id that just died.
+type rosterDaemon struct {
+	mu sync.Mutex
+	// refs is the roster's current snapshot, replayed whole to every fresh
+	// subscriber exactly as the daemon's roster topic does.
+	refs []*workspacev1.WorkspaceRef
+	// unknown is the set of workspace ids ClientLog answers unknown_workspace
+	// for; every other id succeeds.
+	unknown        map[string]struct{}
+	rosterRequests int
+	requests       []*agentreplv1.ClientLogRequest
+}
+
+func (d *rosterDaemon) setRoster(refs ...*workspacev1.WorkspaceRef) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.refs = refs
+}
+
+func (d *rosterDaemon) refuse(ids ...string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.unknown = map[string]struct{}{}
+	for _, id := range ids {
+		d.unknown[id] = struct{}{}
+	}
+}
+
+func (d *rosterDaemon) rosterReads() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.rosterRequests
+}
+
+func (d *rosterDaemon) lastRequest(t *testing.T) *agentreplv1.ClientLogRequest {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.requests) == 0 {
+		t.Fatal("the fake daemon received no ClientLog request")
+	}
+	return d.requests[len(d.requests)-1]
+}
+
+// startRosterDaemon stands one rosterDaemon up on loopback and publishes its
+// address into stateDir, so a test can point one Client at two daemons in turn.
+func startRosterDaemon(t *testing.T, stateDir string) *rosterDaemon {
+	t.Helper()
+	daemon := &rosterDaemon{}
+	mux := http.NewServeMux()
+	mux.Handle(agentreplv1connect.AgentReplWatchWorkspaceRosterProcedure,
+		connect.NewServerStreamHandler(agentreplv1connect.AgentReplWatchWorkspaceRosterProcedure,
+			func(_ context.Context, _ *connect.Request[agentreplv1.WatchWorkspaceRosterRequest], stream *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error {
+				daemon.mu.Lock()
+				daemon.rosterRequests++
+				refs := append([]*workspacev1.WorkspaceRef(nil), daemon.refs...)
+				daemon.mu.Unlock()
+				return stream.Send(rosterResponseFor(refs))
+			}))
+	mux.Handle(agentreplv1connect.AgentReplClientLogProcedure,
+		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure,
+			func(_ context.Context, req *connect.Request[agentreplv1.ClientLogRequest]) (*connect.Response[agentreplv1.ClientLogResponse], error) {
+				daemon.mu.Lock()
+				daemon.requests = append(daemon.requests, proto.Clone(req.Msg).(*agentreplv1.ClientLogRequest))
+				_, refused := daemon.unknown[req.Msg.GetWorkspace().GetId()]
+				daemon.mu.Unlock()
+				if refused {
+					return connect.NewResponse(&agentreplv1.ClientLogResponse{
+						Result: &agentreplv1.ClientLogResponse_Error{Error: &agentreplv1.ClientLogError{
+							Cause: &agentreplv1.ClientLogError_UnknownWorkspace{
+								UnknownWorkspace: &agentreplv1.ClientLogUnknownWorkspace{},
+							},
+						}},
+					}), nil
+				}
+				return connect.NewResponse(&agentreplv1.ClientLogResponse{
+					Result: &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}},
+				}), nil
+			}))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for fake daemon: %v", err)
+	}
+	server := &http.Server{Handler: mux}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
+	writeAdvertisement(t, stateDir, listener.Addr().String(), os.Getpid())
+	return daemon
+}
+
+// rosterResponseFor replays a whole snapshot, which is what the roster topic
+// hands a fresh subscriber: one row per registered workspace, or none at all.
+func rosterResponseFor(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
+	rows := make([]*frontendv1.RosterRow, 0, len(refs))
+	for _, ref := range refs {
+		rows = append(rows, &frontendv1.RosterRow{
+			Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
+		})
+	}
+	return &agentreplv1.WatchWorkspaceRosterResponse{Roster: &frontendv1.WorkspaceRoster{
+		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
+			Rows: &frontendv1.RosterRows{Rows: rows},
+		}}},
+	}}
+}
+
+// tempWorkspaceDir is a directory spelled the way the roster spells it, so a
+// macOS /var -> /private/var symlink cannot make a match look like a miss.
+func tempWorkspaceDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("normalize a fixture workspace dir: %v", err)
+	}
+	return dir
+}
+
+func forwardFor(dir string) logging.ForwardRecord {
+	return logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.pickup", Message: "pickup",
+		WorkspaceDir: dir, WorkspaceID: "deadbeef",
+	}
+}
+
+// onFakeClock points a Client at an injected clock and states the freshness
+// bound the case is exercising, so no test waits out a real one.
+func onFakeClock(client *Client, clock *fakeClock) {
+	client.now = clock.Now
+	client.freshness = time.Second
+}
+
+// A directory FORGOTTEN AND REGISTERED AGAIN is attributed to the id the roster
+// holds now, not the one it held when the ref was first read.
+func TestForwardAttributesTheNewRefAfterTheSameDirIsRegisteredAgain(t *testing.T) {
+	// Arrange.
+	stateDir := t.TempDir()
+	daemon := startRosterDaemon(t, stateDir)
+	dir := tempWorkspaceDir(t)
+	daemon.setRoster(&workspacev1.WorkspaceRef{Id: "af24557b1ddd4b9c", Dir: dir})
+	clock := newFakeClock()
+	client := New(stateDir)
+	onFakeClock(client, clock)
+	var replacements [][3]string
+	client.SetRefReplacedObserver(func(d, oldID, newID string) {
+		replacements = append(replacements, [3]string{d, oldID, newID})
+	})
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the first Forward returned %v", err)
+	}
+
+	// Act: the workspace is forgotten and the SAME dir registered under a new
+	// id, and the cached ref ages past the freshness bound.
+	daemon.setRoster(&workspacev1.WorkspaceRef{Id: "54578ede3d834dea", Dir: dir})
+	clock.Advance(2 * time.Second)
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the Forward after re-registration returned %v", err)
+	}
+
+	// Assert.
+	if got := daemon.lastRequest(t).GetWorkspace().GetId(); got != "54578ede3d834dea" {
+		t.Fatalf("forwarded workspace id = %q, want the re-registered %q", got, "54578ede3d834dea")
+	}
+	want := [3]string{dir, "af24557b1ddd4b9c", "54578ede3d834dea"}
+	if len(replacements) != 1 || replacements[0] != want {
+		t.Fatalf("ref-replaced observations = %v, want exactly %v", replacements, want)
+	}
+}
+
+// A REFUSED forward whose ref the daemon no longer holds re-resolves ONCE and
+// lands, rather than reporting the record undelivered.
+func TestForwardRetriesOnceWithAFreshRefWhenTheCachedOneIsRefused(t *testing.T) {
+	// Arrange: the ref is cached and still inside the freshness bound, so only
+	// the refusal itself can make the forwarder look at the roster again.
+	stateDir := t.TempDir()
+	daemon := startRosterDaemon(t, stateDir)
+	dir := tempWorkspaceDir(t)
+	daemon.setRoster(&workspacev1.WorkspaceRef{Id: "af24557b1ddd4b9c", Dir: dir})
+	clock := newFakeClock()
+	client := New(stateDir)
+	onFakeClock(client, clock)
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the first Forward returned %v", err)
+	}
+	daemon.setRoster(&workspacev1.WorkspaceRef{Id: "54578ede3d834dea", Dir: dir})
+	daemon.refuse("af24557b1ddd4b9c")
+
+	// Act.
+	_, err := client.Forward(forwardFor(dir))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Forward after a refused cached ref = %v, want the retry to have landed", err)
+	}
+	if got := daemon.lastRequest(t).GetWorkspace().GetId(); got != "54578ede3d834dea" {
+		t.Fatalf("retried workspace id = %q, want the ref the roster holds now", got)
+	}
+	if got := daemon.rosterReads(); got != 2 {
+		t.Fatalf("roster reads = %d, want the cached read plus exactly one re-read", got)
+	}
+}
+
+// A directory the roster GENUINELY no longer holds still reports undelivered,
+// after the one re-read — the refusal classification is not weakened by it.
+func TestForwardStaysUnresolvableWhenTheFreshRosterLacksTheDir(t *testing.T) {
+	// Arrange.
+	stateDir := t.TempDir()
+	daemon := startRosterDaemon(t, stateDir)
+	dir := tempWorkspaceDir(t)
+	daemon.setRoster(&workspacev1.WorkspaceRef{Id: "af24557b1ddd4b9c", Dir: dir})
+	clock := newFakeClock()
+	client := New(stateDir)
+	onFakeClock(client, clock)
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the first Forward returned %v", err)
+	}
+	daemon.setRoster()
+	daemon.refuse("af24557b1ddd4b9c")
+
+	// Act.
+	_, err := client.Forward(forwardFor(dir))
+
+	// Assert.
+	if !errors.Is(err, logging.ErrForwardWorkspaceUnresolvable) {
+		t.Fatalf("Forward for a dir the roster dropped = %v, want ErrForwardWorkspaceUnresolvable", err)
+	}
+}
+
+// A DIFFERENT DAEMON IS A DIFFERENT ROSTER: ids are minted per daemon, so a
+// handover drops every cached ref rather than carrying one across.
+func TestForwardDropsEveryCachedRefWhenTheDaemonAddressChanges(t *testing.T) {
+	// Arrange.
+	stateDir := t.TempDir()
+	first := startRosterDaemon(t, stateDir)
+	dir := tempWorkspaceDir(t)
+	first.setRoster(&workspacev1.WorkspaceRef{Id: "first-daemon-id", Dir: dir})
+	clock := newFakeClock()
+	client := New(stateDir)
+	onFakeClock(client, clock)
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the Forward against the first daemon returned %v", err)
+	}
+
+	// Act: a successor daemon publishes over daemon.addr, well inside the
+	// freshness bound the cached ref would otherwise still be used under.
+	second := startRosterDaemon(t, stateDir)
+	second.setRoster(&workspacev1.WorkspaceRef{Id: "second-daemon-id", Dir: dir})
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the Forward against the successor daemon returned %v", err)
+	}
+
+	// Assert.
+	if got := second.lastRequest(t).GetWorkspace().GetId(); got != "second-daemon-id" {
+		t.Fatalf("forwarded workspace id = %q, want the successor daemon's own ref", got)
+	}
+}
+
+// THE CACHE IS KEYED PER DIRECTORY. One slot meant two directories forwarding
+// in turn evicted each other and re-read the roster for every single record.
+func TestForwardKeepsOneCachedRefPerDirectory(t *testing.T) {
+	// Arrange.
+	stateDir := t.TempDir()
+	daemon := startRosterDaemon(t, stateDir)
+	one, two := tempWorkspaceDir(t), tempWorkspaceDir(t)
+	daemon.setRoster(
+		&workspacev1.WorkspaceRef{Id: "workspace-one", Dir: one},
+		&workspacev1.WorkspaceRef{Id: "workspace-two", Dir: two},
+	)
+	clock := newFakeClock()
+	client := New(stateDir)
+	onFakeClock(client, clock)
+
+	// Act: alternate between the two directories inside one freshness window.
+	for _, dir := range []string{one, two, one, two} {
+		if _, err := client.Forward(forwardFor(dir)); err != nil {
+			t.Fatalf("Forward for %q returned %v", dir, err)
+		}
+	}
+
+	// Assert.
+	if got := daemon.rosterReads(); got != 2 {
+		t.Fatalf("roster reads = %d, want one per directory", got)
+	}
+}
+
+// A CACHED REF OLDER THAN THE FRESHNESS BOUND IS RE-READ before it is used
+// again, which is what makes the staleness window finite when no refusal ever
+// arrives to expose it.
+func TestForwardRereadsTheRosterForARefOlderThanTheFreshnessBound(t *testing.T) {
+	// Arrange.
+	stateDir := t.TempDir()
+	daemon := startRosterDaemon(t, stateDir)
+	dir := tempWorkspaceDir(t)
+	daemon.setRoster(&workspacev1.WorkspaceRef{Id: "af24557b1ddd4b9c", Dir: dir})
+	clock := newFakeClock()
+	client := New(stateDir)
+	onFakeClock(client, clock)
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the first Forward returned %v", err)
+	}
+
+	// Act.
+	clock.Advance(time.Second)
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the Forward past the freshness bound returned %v", err)
+	}
+
+	// Assert.
+	if got := daemon.rosterReads(); got != 2 {
+		t.Fatalf("roster reads = %d, want the aged ref read again", got)
+	}
+}
+
+// AN UNCHANGED REF IS NOT A REPLACEMENT. The INFO exists to name a roster that
+// MOVED, so a re-read that confirms the same id must state nothing at all.
+func TestForwardStatesNoReplacementWhenARereadConfirmsTheSameRef(t *testing.T) {
+	// Arrange.
+	stateDir := t.TempDir()
+	daemon := startRosterDaemon(t, stateDir)
+	dir := tempWorkspaceDir(t)
+	daemon.setRoster(&workspacev1.WorkspaceRef{Id: "af24557b1ddd4b9c", Dir: dir})
+	clock := newFakeClock()
+	client := New(stateDir)
+	onFakeClock(client, clock)
+	replacements := 0
+	client.SetRefReplacedObserver(func(_, _, _ string) { replacements++ })
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the first Forward returned %v", err)
+	}
+
+	// Act.
+	clock.Advance(2 * time.Second)
+	if _, err := client.Forward(forwardFor(dir)); err != nil {
+		t.Fatalf("the Forward past the freshness bound returned %v", err)
+	}
+
+	// Assert.
+	if replacements != 0 {
+		t.Fatalf("ref-replaced observations = %d, want none for an unchanged ref", replacements)
 	}
 }
