@@ -4031,6 +4031,17 @@ body.draining #composer-input::placeholder {
   justify-content: flex-end;
   max-width: 100%;
   overflow: hidden;
+  /* Enlarge the hover/hit region to roughly 4x its area — 2x wide and 2x tall
+     for a typical token figure — so the timestamp is easier to summon (owner
+     ruling, 2026-09-14). The padding grows the hoverable box; the equal and
+     opposite negative margin cancels it in layout, so the token figure stays
+     in exactly the same place and no neighbor shifts. The added left/right
+     padding (~one figure-width total) and top/bottom padding (~one line total)
+     are the extra hit area. `overflow: hidden` still clips the collapsed
+     timestamp — it clips to the (now larger) padding box, which the reveal
+     never fills. */
+  padding: 0.4rem 1.25rem;
+  margin: -0.4rem -1.25rem;
 }
 /* The cost corner's figure, drawn verbatim in the token amber the footer's
    token cell wears, so the same idea reads the same color wherever it appears. */
