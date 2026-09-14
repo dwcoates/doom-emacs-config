@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- webapp topbar: the header's one in-flow child `.topbar-strip` takes `flex: 1 1 0; min-width: 0` and `.topbar-row` takes `width: 100%`, so the three-track grid spans the whole strip instead of shrink-wrapping to its content (owner screenshot: the whole strip packed into the left half, chips near the middle)
 - daemon topbar resolver: `title()` drops the branch when it equals the name already shown, not only when it equals the default branch, so a workspace on a branch minted from its own name is named once (owner report: the title read `DWC/chess960-review-failures-enm · DWC/chess960-review-failures-enm`)
 - webapp topbar: the chips inside `.topbar-left` / `.topbar-right` gap on their own tighter `--topbar-chip-gap: 0.3rem` while the row's edge inset and track gap keep `--topbar-cell-gap: 0.5rem` (owner ruling: tight spacing between chips, all extra space around the center title)
 - webapp topbar: after every draw (and on a rAF-debounced window resize) `capTopbarTitle` sets an inline `max-width` of `rowWidth - 2 * edgePadding - 2 * max(leftWidth, rightWidth) - 2 * gap` on `.topbar-title`, so the visible title is symmetric about the strip's midpoint instead of filling a centered track (owner report: the strip still read `<login>      <center><chips>` with the equal-track grid shipped)
