@@ -15,6 +15,26 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Response token count reveals its timestamp on hover (2026-09-14)
+
+Owner ruling, quoted: "hovering over the token count in the top-right corner of
+response bubbles should show the timestamp (relative timestamp, normalized
+human-readable like '5m 30s ago'). It should be shown in grey, slightly smaller
+font, and should emanate from the right-hand side as the token count slides out
+of the way to make room for it. The whole animation takes about half a second —
+the token count continually slides to the left to make room as the timestamp
+slides into view, continuously. Moving the mouse away does the reverse animation
+(does not snap back)."
+
+| call | what was decided |
+|---|---|
+| where the instant comes from | The daemon's own clock. `AgentResponse` and its `AgentActivity` envelope carry no settled instant on the wire, so `FeedResponseUsageStamp.at_ms` is filled from `resolve/feed/response.go`'s `deps.Now()` — the same clock `question.go` and `coldgate.go` already stamp from — at the moment the fold settles. It is stamped ONCE (`stampSettled` guards on zero), so the file plane re-delivering the stream plane's settle keeps the first instant rather than moving the "N ago" to the replay time. |
+| what the corner shows while still arriving | Nothing. The cost corner rides every arm, but `at_ms` is zero until the fold settles, and the client draws no `.usage-ago` element (takes no clock) for a zero. The relative timestamp is a settled-response affordance only. |
+| which formatter | `formatAge`, per the ruling's "5m 30s ago". Not `formatTickedAge` (the rounding count-up for clocks a draw starts): a stamped "N ago" is anchored to a wire instant and truncates, which is `formatAge`'s own documented contract. The label ticks through the shared clock so it stays current while shown. |
+| grey and slightly smaller | Grey is the existing `--muted` token (theme-aware, no new color). Slightly smaller is `font-size: 0.85em` — a relative step off the corner's own size, no new absolute size. |
+| how the slide is one continuous half second in both directions | The `.usage-ago` element transitions `max-width` (0 → 8rem, which slides the figure left as the row widens), `transform` (translateX(100%) → 0, which emanates the text from the right edge) and `opacity` over `0.5s`. Hover/focus adds the reveal state; mouse-leave/blur drops it, and the SAME transition runs backwards for free — no snap, no reset. `prefers-reduced-motion: reduce` drops the transition so it shows/hides instantly. |
+| focus as well as hover | The corner is `tabindex="0"` and toggles a `usage-corner--revealed` state class on `mouseenter`/`mouseleave`/`focusin`/`focusout`, so a keyboard focus reveals the same timestamp a hover does; the stylesheet also keys the reveal off `:hover`/`:focus-within` directly. |
+
 ## Permission mode defaults to auto (2026-09-14)
 
 Owner ruling, quoted: "the default permission mode should be auto for the

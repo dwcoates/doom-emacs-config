@@ -3254,7 +3254,14 @@ func (x *FeedResponseProse) GetMarkdown() string {
 type FeedResponseUsageStamp struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The formatted figure, drawn verbatim.
-	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	// When the response SETTLED, epoch ms — the instant the relative timestamp
+	// the client reveals on hover counts back from ("5m 30s ago"). Filled by the
+	// daemon from the same clock every other feed timestamp uses, at the moment
+	// the fold settles; a settle is stamped ONCE, so a re-push serves the same
+	// instant. UNSET (zero) while the response is still arriving: there is no
+	// settled instant yet, and the client reveals no timestamp for a zero.
+	AtMs          int64 `protobuf:"varint,2,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3294,6 +3301,13 @@ func (x *FeedResponseUsageStamp) GetText() string {
 		return x.Text
 	}
 	return ""
+}
+
+func (x *FeedResponseUsageStamp) GetAtMs() int64 {
+	if x != nil {
+		return x.AtMs
+	}
+	return 0
 }
 
 // The grey tool-call bubble: one shared shell — head (name + badge), the
@@ -16143,9 +16157,10 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x11FeedResponseError\x124\n" +
 	"\x05prose\x18\x01 \x01(\v2\x1e.frontend.v1.FeedResponseProseR\x05prose\"/\n" +
 	"\x11FeedResponseProse\x12\x1a\n" +
-	"\bmarkdown\x18\x01 \x01(\tR\bmarkdown\",\n" +
+	"\bmarkdown\x18\x01 \x01(\tR\bmarkdown\"A\n" +
 	"\x16FeedResponseUsageStamp\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xfa\x02\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12\x13\n" +
+	"\x05at_ms\x18\x02 \x01(\x03R\x04atMs\"\xfa\x02\n" +
 	"\x12FeedSimpleToolCall\x121\n" +
 	"\x04name\x18\x01 \x01(\v2\x1d.frontend.v1.FeedToolCallNameR\x04name\x124\n" +
 	"\x05input\x18\x02 \x01(\v2\x1e.frontend.v1.FeedToolCallInputR\x05input\x12<\n" +

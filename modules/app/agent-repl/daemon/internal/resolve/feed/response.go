@@ -88,6 +88,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// the formatter has not yet seen the end of.
 		fold.markdown = formatResponseTree(log, unit, state.Success.GetProse().GetMarkdown())
 		fold.settled = true
+		r.stampSettled(fold)
 		if notice, ok := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice); ok {
 			// THE VENDOR SYNTHESIZES ERROR NOTICES AS ASSISTANT PROSE. Drawing
 			// one as the agent's answer would present an outage as something
@@ -123,12 +124,21 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		fold.markdown = state.Failure.GetProse().GetMarkdown()
 		fold.settled = true
+		r.stampSettled(fold)
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}
 	default:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawResponse", "branch": "default"})
 		return nil, errNotARow
+	}
+
+	// THE STAMP'S INSTANT RIDES THE SETTLE, not the push. The corner is drawn
+	// from the fold's figure in every arm, but its instant is meaningful only
+	// once the fold settled; set after the switch so a settling frame carries
+	// the instant it just stamped, and a still-arriving frame carries zero.
+	if bubble.Usage != nil {
+		bubble.Usage.AtMs = fold.settledAtMs
 	}
 
 	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})
@@ -139,6 +149,18 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 			Unit: &frontendv1.FeedTurnActivity_Response{Response: bubble},
 		}},
 	}, nil
+}
+
+// stampSettled records the instant a fold reached its terminal state, ONCE.
+// The same clock every other feed timestamp is drawn from; a second terminal
+// frame for the same fold (the file plane replaying the stream plane's settle)
+// keeps the first instant rather than moving the corner's "N ago" to the
+// replay time.
+func (r *resolver) stampSettled(fold *proseState) {
+	if fold.settledAtMs != 0 {
+		return
+	}
+	fold.settledAtMs = r.deps.Now().UnixMilli()
 }
 
 // noticeHeading composes the notice register's heading. It is a HEADING, not
