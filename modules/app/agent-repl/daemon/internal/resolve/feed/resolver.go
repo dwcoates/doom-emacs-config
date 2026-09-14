@@ -227,6 +227,21 @@ const (
 	planeLive
 )
 
+// String names a plane for a log record. The feed orders by plane THEN seq, so
+// a row's plane and seq are the whole story of where it landed relative to
+// every other row — which is what a "why did this row sort here" trace needs.
+func (p rowPlane) String() string {
+	switch p {
+	case planePorted:
+		return "ported"
+	case planeHistory:
+		return "history"
+	case planeLive:
+		return "live"
+	}
+	return "unknown"
+}
+
 // rowRank is one row's place in its feed's order.
 type rowRank struct {
 	plane rowPlane
@@ -583,6 +598,22 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	if !seen {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!seen"})
 		f.insert(id, rowRank{plane: s.plane, seq: f.seq})
+		// THE ORDERING TRACE. A row's plane and seq are fixed HERE, at first
+		// draw, and the feed sorts by (plane, seq) forever after — so this one
+		// line per row is the whole account of why any row landed where it did
+		// relative to every other (e.g. a directive prompt re-delivered on the
+		// live plane after a later prompt sorts AFTER it, by a higher seq in the
+		// same plane). At INFO so it survives at normal verbosity; the row id
+		// encodes the feed, kind and key, and the turn ties it to its turn.
+		r.logger(s.id).Info("daemon.feed.row_placed",
+			"a row was placed in the feed order at first draw",
+			dlog.Context{
+				"feed":  f.key,
+				"row":   id,
+				"plane": s.plane.String(),
+				"seq":   f.seq,
+				"turn":  row.GetTurn().GetValue(),
+			})
 	}
 	f.rows[id] = snapshot
 	if !durable {
