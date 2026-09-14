@@ -291,6 +291,10 @@ describe("drawFooterStatusActivity", () => {
     ["blocked", "auth", "authenticating", { line: "open the login" }, "open the login"],
     ["blocked", "queryDied", "queryDied", { text: "the next prompt restarts it" }, "the next prompt restarts it"],
     ["closing", "blocked", "closeBlocked", { text: "a turn is in flight" }, "a turn is in flight"],
+    ["disconnected", "startFailed", "fault", { kind: "resume_failed", detail: "the shim refused" }, "resume failed \u00b7 the shim refused"],
+    ["blocked", "daemonImpaired", "fault", { kind: "prompts_dir_missing", detail: "no ~/.claude/prompts" }, "prompts dir missing \u00b7 no ~/.claude/prompts"],
+    ["idle", null, "fault", { kind: "conversation_abandoned", detail: "no transcript on disk" }, "conversation abandoned \u00b7 no transcript on disk"],
+    ["thinking", "thinking", "fault", { kind: "classifier_failed", detail: "the run died" }, "classifier failed \u00b7 the run died"],
   ])("draws the %s/%s %s line verbatim", (statusCase, subCase, kindCase, value, expected) => {
     const { row } = drawStrip({
       status: withActivity(statusCase, subCase, kindCase, value),
@@ -970,5 +974,56 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
       deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx) },
     });
     expect(row.querySelector(".footer-tokens")?.textContent).toContain("12.3k in");
+  });
+});
+
+// ---- the standing daemon fault, on every status arm ------------------------
+
+describe("the fault activity: every daemon fault kind reaches the strip", () => {
+  it("draws the kind lowercase with spaces, never underscores", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "fault", {
+        kind: "watch_open_refused",
+        detail: "handle 7",
+      }),
+    });
+    expect(row.querySelector(".footer-activity")?.textContent).not.toContain("_");
+  });
+
+  it("draws the kind alone when the fault carries no detail", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "fault", { kind: "session_absent", detail: "" }),
+    });
+    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe("session absent");
+  });
+
+  it("draws it in the fault's own cell class, beside the bring-up failure's", () => {
+    const { row } = drawStrip({
+      status: withActivity("disconnected", "dead", "fault", { kind: "shim_died", detail: "exit 1" }),
+    });
+    expect(row.querySelector(".footer-activity-fault")).not.toBeNull();
+  });
+
+  it.each([
+    ["idle", null],
+    ["thinking", "thinking"],
+    ["waiting", "permission"],
+    ["interrupted", "byUser"],
+    ["merging", "merge"],
+    ["background", null],
+    ["blocked", "daemonImpaired"],
+    ["disconnected", "dead"],
+    ["closing", "blocked"],
+    ["loading", "memory"],
+  ])("stands under the %s arm", (statusCase, subCase) => {
+    const { row } = drawStrip({
+      status: withActivity(statusCase, subCase, "fault", {
+        kind: "shim_reported",
+        detail: "the shim said so",
+      }),
+    });
+    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe(
+      "shim reported \u00b7 the shim said so",
+    );
   });
 });

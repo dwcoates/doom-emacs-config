@@ -784,6 +784,52 @@ agents chip opens and closes it rather than dropping a roster of its own, and
 the per-bubble agent strips inside feed cards are a different thing entirely:
 they are scoped to one bubble's own call.
 
+## Every daemon fault kind reaches the footer, and this is where each lands
+
+The owner's ruling of 2026-09-13. Before it, three of the nineteen fault kinds
+reached the strip, by bespoke paths beside the fault rather than derived from
+it; the other sixteen rode only `WatchHostWorkspace`, which Emacs subscribes to
+and the webapp does not.
+
+**THE MAPPING IS DECIDED IN ONE PLACE**, `daemon/internal/health/footer.go`, and
+stated normatively in `proto/src/frontend/v1/footer.proto`'s `FooterStatus`
+header. The resolver TAKES that verdict and draws it; it derives no mapping of
+its own, and a new fault kind added to the vocabulary without a row in that
+table draws nothing at all.
+
+**THE FOOTER LEARNS FROM THE ONE PLACE FAULTS ARE WRITTEN.**
+`health.ObserveFaults` decorates the state client every raise site shares, so a
+fault opened anywhere lands on the strip. Do NOT add a footer call beside a
+raise: that is exactly how three kinds came to have a path and sixteen did not.
+
+| status | substatus | fault kinds |
+| --- | --- | --- |
+| `disconnected` | `start_failed` | `shim_start_failed`, `resume_failed`, `relaunch_resume_failed`, `adoption_window_expired` (session scope), `cold_gate_reopen_failed` |
+| `disconnected` | `dead` | `shim_died`, `bounce_died`, `session_absent` |
+| `disconnected` | `severed` | `link_severed`, `watch_open_refused` |
+| `blocked` | `daemon_impaired` | `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `deploy_script_failed`, `successor_spawn_failed`, `daemon_state_unreadable`, `adoption_window_expired` (daemon scope) |
+| unchanged | unchanged | `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned` — NON-ESCALATING |
+
+The activity cell is `FooterStatusActivityFault{kind, detail}` in every case but
+`shim_start_failed`, which keeps `FooterStatusActivityStartFailed` because it
+also counts the held prompts the failure dropped.
+
+**THE FOUR NON-ESCALATING KINDS LEAVE THE STATUS ALONE** and take the activity
+cell only. The shim ANSWERED in every one of them: a shim that pushed a
+diagnostic is alive, a classifier run is a headless side errand, an undetermined
+bounce disposition is an accounting question for a human, and an abandoned
+conversation is what a SUCCESSFUL fresh bring-up left behind. It is not a
+wording question — `disconnected` closes the webapp's composer
+(`webapp/src/main.ts`), so escalating any of them would lock the user out of a
+session that is serving perfectly.
+
+**A DAEMON-SCOPED FAULT STANDS ON EVERY WORKSPACE'S STRIP**, because it is every
+workspace that is owed the service the daemon cannot give.
+
+**THE LINK STATE STILL OUTRANKS A FAULT** for the disconnected step: the link
+state is the live truth about the link, and a fault is the standing record
+beside it.
+
 ## Hibernation is the memory knob, and it is gated on real elapsed quiet
 
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of
