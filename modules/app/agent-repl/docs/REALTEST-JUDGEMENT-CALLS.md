@@ -15,6 +15,13 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Footer overage allowance (2026-09-13)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | The overage allowance now opens the rate-limit line like any other window, but the strip draws only `session` and `weekly` — so an overage event arriving before the first usage sample would leave the strip drawing an EMPTY line. Widen the strip to three figures, or let the daemon's gate ignore overage? | Neither: the strip draws the overage window ONLY when neither of the pair is figured | Three figures on a line that already loses its second to the cut at 1280 would push the pair a reader needs off the glass, and a gate that ignored overage would make a newsworthy overage invisible on an account with no sample yet — the finding this change exists to close. The fallback is the same `drawFooterAllowance` cell in the same slot, so nothing is restyled and nothing is added beside the pair | Drop the `present.length === 0` branch in `orderedAllowances` (`webapp/src/footer/strip.ts`) and its two strip tests |
+| 2026-09-13 | `TestRateLimitOverageWindowIsDroppedLoudly` (e2e) asserted the `daemon.footer.rate_limit_overage` warn record as its whole observable. The warn is gone with the cell landing. Amend the test, or keep a warn nobody needs? | Amend it, to `TestRateLimitOverageWindowIsBelowTheNewsworthyGate` | The warning WAS the absence of the cell; keeping it would warn about a contract that now carries the figure. The scenario's figure (0.79) is below the newsworthy gate, so the negative it already asserted still stands on its own, and the harness's warning sweep — which fails on any undeclared warn — is now what holds the record gone | Restore the `ExpectWarnings` call and the `AwaitLogRecord` assertion in `e2e/sessionfacts_e2e_test.go` |
+
 ## Realtest 9, first run (2026-09-13)
 
 | Date | Question | Decision | Why | How to reverse |

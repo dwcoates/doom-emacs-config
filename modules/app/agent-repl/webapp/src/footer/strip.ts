@@ -731,14 +731,58 @@ export interface LabelledAllowance {
  *
  * Stable within each group, so with nothing newsworthy the pair keeps the
  * contract's own session-then-weekly order and nothing moves under a reader
- * for no reason. Exported because the tokens sheet draws the same windows in
- * the same order — a reader who opens the sheet must find the line they were
- * reading on the strip, not a reshuffled one.
+ * for no reason.
+ *
+ * THE STRIP'S TWO WINDOWS, AND THE OVERAGE ONE ONLY WHEN IT IS ALL THERE IS.
+ * The contract carries a third window, `overage`, and the tokens sheet draws
+ * it as a row of its own (`orderedSheetAllowances`, which says why the strip
+ * does not): a third figure on a line that already loses its second to the
+ * cut would push the pair a reader needs off the glass. But the daemon opens
+ * this line for a newsworthy overage like any other window, and an overage
+ * event can land before the first usage sample has figured EITHER of the
+ * two above — so without the fallback the strip would draw a line with
+ * nothing in it. The fallback is the same allowance cell in the same slot,
+ * never a third figure beside the pair.
  */
 export function orderedAllowances(u: FooterStatusActivityRateLimited): LabelledAllowance[] {
   const present: LabelledAllowance[] = [];
   if (u.session !== undefined) present.push({ label: "session", value: u.session });
   if (u.weekly !== undefined) present.push({ label: "weekly", value: u.weekly });
+  if (present.length === 0 && u.overage !== undefined) {
+    present.push({ label: "overage", value: u.overage });
+  }
+  return newsworthyFirst(present);
+}
+
+/**
+ * THE SHEET'S WINDOWS: the strip's two, plus the OVERAGE window when the
+ * vendor reported one.
+ *
+ * The overage allowance is the third window the vendor bills, and most
+ * accounts never have one — so it is unset far more often than it is set. It
+ * is drawn in the sheet and not on the strip for the reason the sheet exists
+ * at all: the strip is one line capped at the response bubble's width, and it
+ * already loses its SECOND window to that cut at 1280. A third figure there
+ * would push the pair a reader needs off the glass to make room for one they
+ * usually do not have. The sheet has no width to fight, so the window lands
+ * there, in the same row and the same order as the other two.
+ */
+export function orderedSheetAllowances(
+  u: FooterStatusActivityRateLimited,
+): LabelledAllowance[] {
+  const present: LabelledAllowance[] = [];
+  if (u.session !== undefined) present.push({ label: "session", value: u.session });
+  if (u.weekly !== undefined) present.push({ label: "weekly", value: u.weekly });
+  if (u.overage !== undefined) present.push({ label: "overage", value: u.overage });
+  return newsworthyFirst(present);
+}
+
+/**
+ * The newsworthy windows first, stable within each group — so with nothing
+ * newsworthy the windows keep the contract's own order and nothing moves
+ * under a reader for no reason.
+ */
+function newsworthyFirst(present: LabelledAllowance[]): LabelledAllowance[] {
   return [
     ...present.filter((a) => a.value.newsworthy),
     ...present.filter((a) => !a.value.newsworthy),

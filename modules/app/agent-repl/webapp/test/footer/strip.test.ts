@@ -441,6 +441,36 @@ describe("the ticking activity figures", () => {
     );
   });
 
+  // THE OVERAGE WINDOW STAYS OFF THE STRIP while either of the pair is
+  // figured: a third figure on a line that already loses its second to the
+  // cut would push the pair a reader needs off the glass. The tokens sheet
+  // draws it instead.
+  it("keeps the overage window off the strip beside the two it draws", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "rateLimited", {
+        session: { newsworthy: true, utilization: 0.72, resetsAtS: BigInt((NOW + 3_900_000) / 1000) },
+        weekly: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
+        overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
+      }),
+    });
+    expect(row.querySelector('[data-allowance="overage"]')).toBeNull();
+  });
+
+  // AN OVERAGE EVENT CAN LAND BEFORE THE FIRST USAGE SAMPLE, leaving neither
+  // of the pair figured. The line the daemon opened would then have nothing
+  // in it, so the overage window takes the slot rather than the strip drawing
+  // a blank.
+  it("draws the overage window when it is the only one figured", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "rateLimited", {
+        overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
+      }),
+    });
+    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).toBe(
+      "overage 91% · resets in 2h",
+    );
+  });
+
   it("emphasizes the newsworthy allowance", () => {
     const { row } = drawStrip({
       status: withActivity("idle", null, "rateLimited", {

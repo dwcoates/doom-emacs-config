@@ -512,47 +512,44 @@ func TestRateLimitSevenDayWindowDrawsTheWeeklyAllowance(t *testing.T) {
 // `allowed_warning` event on the `overage` window at utilization 0.79 with a
 // surpassed threshold).
 //
-// footer.proto gives the strip TWO allowance cells and no third:
-// FooterStatusActivityRateLimited carries `session` and `weekly` only. The
-// daemon therefore refuses to draw the overage window against a cell it is
-// not about, and says so LOUDLY rather than silently
-// (daemon/internal/resolve/footer/resolver.go observeRateLimitStatus: "The
-// overage window has no cell in the contract, so it is logged and dropped
-// rather than drawn against a window it is not about"). That warning is this
-// scenario's whole observable contract, so it is declared to the harness's
-// warning sweep and then asserted — a declared-and-unasserted warning would
-// let the drop go silent.
+// footer.proto gives the strip THREE allowance cells:
+// FooterStatusActivityRateLimited carries `session`, `weekly` and, since
+// 2026-09-13, `overage`. The overage window is no longer dropped — it files
+// onto its own cell like the other two — so this scenario is now about the
+// NEWSWORTHINESS GATE alone: at utilization 0.79 the overage allowance is
+// below the gate (0.8) and no rate-limit line is drawn, exactly as an
+// unremarkable session or weekly figure would not be.
+//
+// THE SILENCE IS PART OF THE CONTRACT. The daemon used to warn
+// `daemon.footer.rate_limit_overage` here, and that warning was this
+// scenario's observable; the cell it complained about now exists, so the
+// warning is gone and the harness's own warning sweep — which fails on any
+// warn record this test does not declare — is what asserts it stays gone.
 // ===========================================================================
 
-func TestRateLimitOverageWindowIsDroppedLoudly(t *testing.T) {
+func TestRateLimitOverageWindowIsBelowTheNewsworthyGate(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w, ws, workspaceDir := sfNewWorkspace(t)
-	w.ExpectWarnings("daemon.footer.rate_limit_overage")
+	w, ws, _ := sfNewWorkspace(t)
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit")
 
 	// Assert
 	sfAwaitConclusion(t, w, ws, turn, "The account is approaching its overage threshold.")
-	w.AwaitLogRecord(harness.WorkspaceLogPath(workspaceDir, "daemon"),
-		"the footer resolver to drop the overage window loudly",
-		func(r harness.LogRecord) bool {
-			return r.Operation == "daemon.footer.rate_limit_overage" && r.Level == "warn"
-		})
 
-	// Assert: nothing was drawn for it. The overage figure (0.79) is below
-	// the newsworthiness gate in any case, so this is the drop and the gate
-	// agreeing — a daemon that filed overage onto the weekly cell would
-	// still not draw at 0.79, which is why the log record above, not this
-	// negative alone, is the load-bearing assertion.
+	// Assert: nothing is drawn, because 0.79 is not news. The overage figure
+	// itself landing on its own allowance is the daemon resolver suite's
+	// table case (TestEveryRateLimitWindowMatchesItsAllowance); what this
+	// scenario holds is that a below-gate overage draws no line and files no
+	// warning.
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	view := harness.AwaitView(t, ctx, footerOf(t, w, ws), "the footer after the overage event", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip() != nil
 	})
 	if line := sfRateLimited(view); line != nil {
-		t.Errorf("the footer drew a rate-limit line for the overage window: %v", line)
+		t.Errorf("the footer drew a rate-limit line for an overage figure below the gate: %v", line)
 	}
 }
 
