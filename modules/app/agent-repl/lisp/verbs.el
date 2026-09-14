@@ -1085,6 +1085,18 @@ refusal the daemon adds later still reaches the user correctly."
       (message "agent-repl: %s: %s" sentence path)
       t)))
 
+(defun agent-repl-verbs--workspace-display-name (ref)
+  "Return the name a `WorkspaceRef\=' REF is reported to the user under.
+A `WorkspaceRef\=' carries only an id and a dir, and the id is an opaque
+echo token nobody reads aloud, so the name is the directory\='s last
+segment -- the SAME derivation the daemon makes when a registration
+supplies no name of its own, so the ack names the workspace the roster
+will draw."
+  (let ((dir (plist-get ref :dir)))
+    (if (and (stringp dir) (not (string-empty-p dir)))
+        (file-name-nondirectory (directory-file-name dir))
+      "")))
+
 (defun agent-repl-verbs--register-repository-read-path ()
   "Read the file the repository is registered FROM.
 The default is the current buffer\='s own file, because the buffer you are
@@ -1106,9 +1118,24 @@ already minted.
 THE GESTURE IS PICKING A FILE, not naming a repository root: the daemon
 resolves the repository from any path inside it, so the file you happen to
 be looking at is a complete answer.  Registering one already known is
-success and says so.  The registered repository has NO workspace; it draws
-an empty section on the roster and is pickable by
-`agent-repl-verbs--read-repository\=' from then on."
+success and says so.
+
+THE REPOSITORY\='S MAIN WORKTREE COMES WITH IT, as an open workspace (owner
+ruling, 2026-09-14).  The first landing registered the repository ALONE,
+and a repository with no workspace is not selectable: `SPC p p\='
+(`agent-repl-switch-to-project\=') completes over LIVE WORKSPACES, so
+registering the repository you were standing in still left you unable to
+switch to it.  The daemon registers the main worktree through the same
+registration `SPC TAB C-n\=' runs, so the row is an ordinary workspace row
+in every respect.
+
+IT BECOMES SELECTABLE WHEN THE ROSTER PUSH LANDS, not when this command
+returns.  The editor\='s registry is built by the roster reconcile
+(`agent-repl-roster-reconcile\='), and the daemon republishes the roster as
+the LAST act of the registration -- before it answers -- so the push is on
+the wire ahead of this ack rather than waiting for a later one.  The ack
+names both facts because the two halves are independently new: the
+repository may be already known while the workspace is freshly opened."
   (interactive)
   (let ((path (agent-repl-verbs--register-repository-read-path)))
     (agent-repl-verbs--send
@@ -1117,10 +1144,14 @@ an empty section on the roster and is pickable by
      :op "register-repository"
      :on-success
      (lambda (value)
-       (let ((dir (plist-get (plist-get value :repository) :dir)))
-         (message "agent-repl: %s repository %s"
+       (let ((dir (plist-get (plist-get value :repository) :dir))
+             (workspace (plist-get value :workspace)))
+         (message "agent-repl: %s repository %s; workspace %s %s"
                   (if (plist-get value :already-known) "already known" "registered")
-                  dir)))
+                  dir
+                  (agent-repl-verbs--workspace-display-name workspace)
+                  (if (plist-get value :workspace-already-known)
+                      "already known" "opened"))))
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
