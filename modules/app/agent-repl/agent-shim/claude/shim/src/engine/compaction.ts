@@ -82,10 +82,27 @@ interface TranscriptAmbient {
 }
 
 /**
- * Read the ambient fields off the transcript's own last parseable line.
+ * Read the ambient fields off the transcript, each from the LAST line to state
+ * it.
  *
- * The LAST line, not the first: `gitBranch` and `slug` change over a
+ * The LAST value, not the first: `gitBranch` and `slug` change over a
  * conversation's life, and the records this writer appends belong at its end.
+ *
+ * PER FIELD, AND NOT PER LINE. A transcript's last line is very often not a
+ * conversation record at all — the CLI writes `last-prompt`, `queue-operation`
+ * and `summary` bookkeeping lines carrying `sessionId` and nothing else — and
+ * while this function rebuilt the whole accumulator from each line, ONE such
+ * line at the end erased every field the conversation had already stated.
+ *
+ * That is not hypothetical: all 63 compactions on the owner's
+ * chess960-review-failures-enm transcript (2026-09-14) landed right after a
+ * `last-prompt` line, and every boundary the shim wrote there carries
+ * `sessionId` alone — no `cwd`, `version`, `gitBranch`, `userType`,
+ * `entrypoint` or `slug`, and, worst of the set, no `logicalParentUuid`, which
+ * is the field the vendor's own boundary uses to say where the chain restarts.
+ * The observed vendor boundary
+ * (`testdata/corpus/transcript-lines/system-compact_boundary.jsonl`) carries
+ * all seven.
  */
 export function readAmbient(file: string): TranscriptAmbient {
   const contents = readFileSync(file, "utf8");
@@ -101,7 +118,10 @@ export function readAmbient(file: string): TranscriptAmbient {
     }
     const pick = (key: string): string | undefined =>
       typeof record[key] === "string" ? (record[key]) : undefined;
+    // MERGED ONTO WHAT IS ALREADY KNOWN. A line that does not state a field
+    // says nothing about it; only a line that DOES may change it.
     ambient = {
+      ...ambient,
       sessionId: pick("sessionId") ?? ambient.sessionId,
       ...(pick("cwd") === undefined ? {} : { cwd: pick("cwd") }),
       ...(pick("version") === undefined ? {} : { version: pick("version") }),
@@ -109,6 +129,9 @@ export function readAmbient(file: string): TranscriptAmbient {
       ...(pick("userType") === undefined ? {} : { userType: pick("userType") }),
       ...(pick("entrypoint") === undefined ? {} : { entrypoint: pick("entrypoint") }),
       ...(pick("slug") === undefined ? {} : { slug: pick("slug") }),
+      // THE LAST RECORD THAT IS A CHAIN NODE, which is the last one carrying a
+      // `uuid`. The bookkeeping lines have none, and the boundary's
+      // `logicalParentUuid` has to name a record the loader can find.
       ...(pick("uuid") === undefined ? {} : { lastUuid: pick("uuid") }),
     };
   }
@@ -258,4 +281,62 @@ export function contextCleared(): conversationv1.ContextCut {
   return create(conversationv1.ContextCutSchema, {
     cut: { case: "cleared", value: create(conversationv1.ContextClearedSchema, {}) },
   });
+}
+
+// ---------------------------------------------------------------------------
+// reading a compaction back off the transcript
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether this transcript's LAST two records are a compaction's own pair.
+ *
+ * THE SECOND WAY TO KNOW A CONVERSATION IS ALREADY COMPACTED, beside the mark
+ * `engine/compaction-mark.ts` persists. The mark is authoritative and cheap;
+ * this reads the transcript itself, so it still answers for a session whose
+ * mark was never written, was lost with its state directory, or belongs to a
+ * transcript some other process compacted.
+ *
+ * THE TAIL AND NOTHING ELSE. A `compact_boundary` anywhere earlier in the file
+ * is a compaction with a whole conversation after it, which is precisely the
+ * case that DOES need compacting again — so the question is only ever about
+ * the last two records.
+ */
+export function transcriptTailIsCompaction(file: string): boolean {
+  let contents: string;
+  try {
+    contents = readFileSync(file, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      // AT INFO: this reading is an optimization, and an unreadable transcript
+      // resolves here to "compact it again". The condition itself is reported
+      // where it is fatal -- `readTranscriptFacts` re-throws it.
+      LOGGER.info(
+        { transcript: file, cause: err instanceof Error ? err.message : String(err) },
+        "could not read the transcript to see whether it already ends in a compaction",
+      );
+    }
+    return false;
+  }
+  const tail: Record<string, unknown>[] = [];
+  for (const raw of contents.split("\n")) {
+    const line = raw.trim();
+    if (line === "") continue;
+    try {
+      tail.push(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      // A line this build cannot parse is still a line the vendor wrote, so it
+      // breaks the tail rather than being skipped past: skipping it would let
+      // a compaction pair with a real conversation after it read as the end.
+      tail.push({});
+    }
+    if (tail.length > 2) tail.shift();
+  }
+  if (tail.length < 2) return false;
+  const [boundary, summary] = tail as [Record<string, unknown>, Record<string, unknown>];
+  return (
+    boundary.type === "system" &&
+    boundary.subtype === "compact_boundary" &&
+    summary.type === "user" &&
+    summary.isCompactSummary === true
+  );
 }
