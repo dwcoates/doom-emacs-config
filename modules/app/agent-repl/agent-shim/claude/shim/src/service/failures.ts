@@ -208,6 +208,22 @@ export function hibernateAcked(): shimv1.HibernateResponse {
   });
 }
 
+/**
+ * `shim.v1.HibernateResponse` — the compaction has STARTED and outlives this
+ * rpc.
+ *
+ * NEITHER AN ACK NOR A REFUSAL. The caller's deadline is seconds and a
+ * compaction is a real vendor turn, so the answer cannot be the work's
+ * completion: it is the fact that the work is under way. The caller defers this
+ * pass and asks again, and the next ask acks at once because a transcript
+ * already compacted is never compacted twice.
+ */
+export function hibernateCompacting(): shimv1.HibernateResponse {
+  return create(shimv1.HibernateResponseSchema, {
+    result: { case: "compacting", value: create(shimv1.HibernateCompactingSchema, {}) },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // KillSession
 // ---------------------------------------------------------------------------
