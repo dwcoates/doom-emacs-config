@@ -5,6 +5,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/ids"
 )
 
 // THE PROSE FOLD: the daemon accumulates and re-pushes the whole row, so the
@@ -35,6 +37,87 @@ func responseFrame(unit string, result any, usage *conversationv1.TokenUsage) *c
 func (h *harness) response() *frontendv1.FeedResponse {
 	h.t.Helper()
 	return h.only(rootFeed()).GetActivity().GetResponse()
+}
+
+// responseRows answers every prose bubble on the root feed, for the tests whose
+// subject is whether one was drawn at all.
+func (h *harness) responseRows() []*frontendv1.FeedRow {
+	h.t.Helper()
+	var out []*frontendv1.FeedRow
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetActivity().GetResponse() != nil {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// A /clear (or /compact) DRAWS NO RESPONSE BUBBLE. The vendor emits an empty
+// "(no content)" response for the directive turn, which the webapp would draw as
+// a cut-short card; the directive's only visible outcome is its separation bar.
+func TestAClearTurnsResponseDrawsNoBubble(t *testing.T) {
+	// Arrange: the /clear turn is registered and running.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act: the directive's empty response arrives.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: ""},
+		}, nil), noAddress())
+
+	// Assert: no response bubble.
+	if got := h.responseRows(); len(got) != 0 {
+		t.Fatalf("response rows = %d, want none for a /clear directive", len(got))
+	}
+}
+
+// THE SUPPRESSION SURVIVES THE OTHER PLANE'S LATE RE-DELIVERY. The response
+// re-arrives from the file plane after the terminal cleared the in-flight turn;
+// it must still draw nothing, keyed on the unit the directive turn produced.
+func TestAClearTurnsResponseStaysSuppressedOnLateRedelivery(t *testing.T) {
+	// Arrange: the directive's response was suppressed during the turn, then the
+	// turn ended.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: ""},
+		}, nil), noAddress())
+	h.cutAt("entry-clear", clearedContextCut())
+	h.terminal("turn-2", interruptedByUser(), nil)
+
+	// Act: the file plane re-delivers the same response with no turn in flight.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: ""},
+		}, nil), noAddress())
+
+	// Assert: still no response bubble.
+	if got := h.responseRows(); len(got) != 0 {
+		t.Fatalf("response rows = %d, want none however many planes deliver the directive's response", len(got))
+	}
+}
+
+// A GENUINE USER-STOP KEEPS ITS RESPONSE. A real turn the user stopped mid-prose
+// is not a directive, so its partial answer still draws — only a /clear draws
+// nothing.
+func TestAUserStoppedTurnsPartialResponseStillDraws(t *testing.T) {
+	// Arrange: an ordinary turn with partial prose.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "partial answer"}, nil), noAddress())
+
+	// Act: the user stops it — no context cut.
+	h.terminal("turn-1", interruptedByUser(), nil)
+
+	// Assert: the partial response is still drawn.
+	if got := h.responseRows(); len(got) != 1 {
+		t.Fatalf("response rows = %d, want the user-stopped turn's partial answer kept", len(got))
+	}
 }
 
 func TestResponseStartDrawsTheEmptyBubble(t *testing.T) {

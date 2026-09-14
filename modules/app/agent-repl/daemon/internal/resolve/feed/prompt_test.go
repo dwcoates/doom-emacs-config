@@ -348,3 +348,53 @@ func TestAnOrdinaryPromptStillDrawsItsBubble(t *testing.T) {
 		t.Fatalf("user-prompt rows = %d, want the ordinary prompt's bubble", len(got))
 	}
 }
+
+// THE DIRECTIVE'S PROMPT STAYS SUPPRESSED WHEN THE OTHER PLANE RE-DELIVERS IT
+// LATE. The file plane's copy of the /clear prompt lands after the turn's
+// terminal; a suppression that forgot the turn at the terminal let it draw a
+// stale bubble below the bar. It must draw nothing on every delivery.
+func TestAClearsPromptStaysSuppressedOnLateRedelivery(t *testing.T) {
+	// Arrange: a /clear ran to completion — stream prompt suppressed, cut
+	// confirmed, terminal taken.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+	h.deliverPrompt("turn-2", "/clear")
+	h.cutAt("entry-clear", clearedContextCut())
+	h.terminal("turn-2", interruptedByUser(), nil)
+
+	// Act: the file plane re-delivers the /clear prompt, now with no turn in
+	// flight.
+	h.deliverPrompt("turn-2", "/clear")
+
+	// Assert: still no prompt bubble.
+	if got := h.userPromptRows(); len(got) != 0 {
+		t.Fatalf("user-prompt rows = %d, want none however many planes deliver the /clear", len(got))
+	}
+}
+
+// A /clear FOLLOWED BY A NORMAL PROMPT LEAVES ONLY THE NORMAL PROMPT'S BUBBLE.
+// The owner saw the /clear bubble render AFTER a later "hello" because the file
+// plane's late /clear prompt leaked once the terminal had forgotten the turn.
+func TestAClearThenANormalPromptDrawsOnlyTheNormalBubble(t *testing.T) {
+	// Arrange: a /clear ran, then a normal prompt was delivered.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+	h.deliverPrompt("turn-2", "/clear")
+	h.cutAt("entry-clear", clearedContextCut())
+	h.terminal("turn-2", interruptedByUser(), nil)
+	h.deliverPrompt("turn-3", "hello")
+
+	// Act: the file plane's late /clear prompt arrives after the normal one.
+	h.deliverPrompt("turn-2", "/clear")
+
+	// Assert: exactly one prompt bubble, the normal "hello".
+	rows := h.userPromptRows()
+	if len(rows) != 1 {
+		t.Fatalf("user-prompt rows = %d, want only the normal prompt's bubble", len(rows))
+	}
+	if rows[0].GetId().GetValue() != h.promptRowID("turn-3") {
+		t.Fatalf("prompt row = %q, want the normal prompt turn-3", rows[0].GetId().GetValue())
+	}
+}
