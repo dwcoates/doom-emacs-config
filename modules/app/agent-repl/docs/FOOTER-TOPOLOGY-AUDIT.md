@@ -80,7 +80,7 @@ reaches the footer or the feed.
 | rpc | call site | refusal drawn | transport failure drawn | footer/feed? |
 |---|---|---|---|---|
 | `SubmitPrompt` | `webapp/src/composer/composer.ts:204` | control | control (`:290`) | no |
-| `AnswerColdGate` | `webapp/src/feed/asks/cold-gate.ts:485` | control (`:526`) | control (`:495`) | no |
+| `AnswerColdGate` | `webapp/src/feed/asks/cold-gate.ts:485` | control (`:526`) | control (`:495`) | **yes, since 2026-09-14** — the answer is a footer ACT from the click to the outcome: `thinking · <the chosen remediation>` with the daemon's own progress line, published before the shim is dialed and updated for every compaction phase the shim relays. The card draws the SAME sentence in its own slot. `daemon/internal/workspace/answers.go`; `daemon/internal/resolve/footer/compaction.go`; `webapp/src/footer/progress.ts` |
 | `AnswerPermission` | `webapp/src/feed/asks/permission.ts:349` | control | control (`:362`) | no |
 | `AnswerQuestion` | `webapp/src/feed/asks/question.ts:395` | control | control (`:405`) | no |
 | `AnswerHeldOffer` | `webapp/src/tray/held-offer.ts:140` | control (`:160`) | control (`:170`) | no |

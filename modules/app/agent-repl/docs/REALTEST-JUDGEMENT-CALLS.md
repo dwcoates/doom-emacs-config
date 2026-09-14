@@ -15,6 +15,34 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The cold gate's feedback (2026-09-14)
+
+Three defects, reported by the owner off the `explanation-engine` workspace
+(id `99808d49`, context 101.6k): prompts at 11:13:20-11:13:33 refused
+`no_session` against a session that was up and parked at its gate, with no
+daemon record of any of them; and a "compact and resume" click at 11:14:18
+whose compaction and re-open finished at 11:14:19 with `answer_cold_gate`
+"answered the cold gate" as the ONLY daemon record, written last, and nothing
+on the footer for the whole of it.
+
+The owner ruled the shape; these are the calls made inside it.
+
+| # | call | why |
+|---|---|---|
+| 1 | `SubmitPromptError.cold_gate` took tag **12**, not the 10 the report named | 10 and 11 are already `duplicate_submission` and `bubble_refused`. The arm is what was ruled; the tag is the next free one. |
+| 2 | The footer's new activity arm is `FooterStatusThinkingActivity.compaction`, and BOTH compactions draw it | The owner's vocabulary ruling: status `thinking`, substatus `compacting`, activity = the phase's progress text, applied to the vendor's auto-compaction as well so the two read the same. `FooterSubStatusThinkingCompacting` already existed and was reused; no status and no substatus was invented. |
+| 3 | The cold gate's answer is a new accumulated footer fact (`SetColdGateAnswer`), NOT a `SetTurn` with `ActCompact` | `SetTurn(ActCompact)` OR-s `compacting` in and only a `ContextCut` clears it, so an answer that mints no turn would have left the strip compacting forever. The new fact is set at the click and cleared on every way out, success and failure alike. |
+| 4 | The answer OUTRANKS the standing gate in the status tree | The gate is not lifted until the re-open lands, and `waiting` outranks `thinking`, so without this the strip kept drawing the question over the answer — which is exactly what the owner saw. |
+| 5 | `pay` and `clear` answers take `submitting` and `clearing`, not `compacting` | They cut nothing and summarize nothing. The existing steps already say what each does; the ruling's "reuse whatever existing activity kinds fit" is read literally. |
+| 6 | The phases ride a WatchSession the re-open opens FOR ITSELF, closed when `StartSession` answers | The compaction runs inside `StartSession`, before any session watcher exists. A watch opened after the call would subscribe to a fan-out that had already sent everything. |
+| 7 | A watch that will not open costs the re-open its narration and nothing else | Refusing to bring a session up because its commentary was unavailable would be a worse failure than the silence being fixed. Recorded at WARN. |
+| 8 | HIBERNATION compactions do NOT push phases; only the cold gate's does | A hibernation compaction runs behind an already-answered directive and never reaches `RESUMING`/`STARTED`, so it would push a pair that never completes. Left unlanded rather than decided — if the owner wants hibernation narrated, its terminal phase has to be ruled first. |
+| 9 | Every typed SubmitPrompt refusal is filed under `daemon.prompthandler.submit`, not under the rpc name every other refusal uses | The op the report named. A refused submission belongs beside the delivery path's own records. `refusal.Op` was added for it; every other rpc's refusals are untouched and stay at DEBUG under their rpc. |
+| 10 | The gate's sentence is composed ONCE, at the raise (`coldGateDetail`), and read by the footer, the served gate and the `cold_gate` arm | Three surfaces wording one gate three ways is how a user comes to think they are looking at three problems. |
+| 11 | The stale `lisp/input.el` comment was CORRECTED, not made true | Making it true would mean SubmitPrompt answering a cold gate implicitly — spending the user's money without asking, which is the one thing the gate exists to prevent. The comment now states the cold-gate exception. |
+| 12 | The elisp `SubmitPromptError` codec gained the `coldGate` arm | Two arm-pinning tests in the unit run were already RED against the landed proto, and without the codec arm the new `:cold-gate` branch is unreachable: the decoder refuses an unknown key. Deriving a settled shape, not choosing one. |
+| 13 | The webapp's progress slot reuses `.hibernation-pending` and is `hidden` while empty | No new class and no new colour (the "no look-and-feel changes" rule); the class carries a top margin, so an always-present empty slot would add a permanent gap under the buttons. |
+
 ## The hibernate loop (2026-09-14)
 
 The timeline, read off the owner's live workspace `chess960-review-failures-enm`
