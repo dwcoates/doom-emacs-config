@@ -6,7 +6,109 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/ids"
 )
+
+// THE /clear TWO-STAGE DIVIDER. A /clear is reflected the instant the daemon
+// accepts it — the red bar and the cleared feed appear before the shim is asked
+// — and the shim's later ContextCut confirms that SAME row with its subtext. A
+// terminal below the bar (the "response cut short" bubble) is never drawn, and a
+// clear that fails recovers the feed rather than leaving a phantom bar.
+
+// clearedContextCut is the cut a /clear produces on the wire.
+func clearedContextCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
+	}
+}
+
+func TestAClearReceivedDrawsItsDividerBeforeAnyShimRoundTrip(t *testing.T) {
+	// Arrange: a conversation stands.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act: the daemon accepts a /clear — no cut has come back from the shim.
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+
+	// Assert: the red bar is already drawn, with no subtext yet, and it bounds
+	// delivery so the feed is cleared.
+	sep := h.separationRow().GetSeparation()
+	if sep.GetCleared() == nil {
+		t.Fatalf("kind = %T, want cleared", sep.GetKind())
+	}
+	if sep.GetLabel().GetText() != "" {
+		t.Fatalf("label = %q, want empty until the shim confirms", sep.GetLabel().GetText())
+	}
+}
+
+func TestAClearsSubtextArrivesOnlyWhenTheShimConfirms(t *testing.T) {
+	// Arrange: the optimistic bar is up and the clear turn is running.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act: the shim's ContextCut confirms the clear.
+	h.cutAt("entry-clear", clearedContextCut())
+
+	// Assert: the same bar now carries the "context cleared" subtext.
+	sep := h.separationRow().GetSeparation()
+	if sep.GetLabel().GetText() != "context cleared" {
+		t.Fatalf("label = %q, want the confirmed subtext", sep.GetLabel().GetText())
+	}
+}
+
+func TestTheOptimisticDividerAndTheConfirmedCutAreOneRow(t *testing.T) {
+	// Arrange: the optimistic bar is up and the clear turn is running.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	before := h.separationRow().GetId().GetValue()
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act: the shim confirms the clear.
+	h.cutAt("entry-clear", clearedContextCut())
+
+	// Assert: exactly one divider, and its id is the one the receipt drew.
+	if got := len(h.separationRows()); got != 1 {
+		t.Fatalf("separation rows = %d, want the optimistic and confirmed to be one row", got)
+	}
+	if after := h.separationRow().GetId().GetValue(); after != before {
+		t.Fatalf("confirmed row id = %q, want the optimistic row's %q", after, before)
+	}
+}
+
+func TestTheSecondPlaneDeliveryOfAClearStaysOneRow(t *testing.T) {
+	// Arrange: a confirmed clear.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+	h.cutAt("entry-clear", clearedContextCut())
+	// The turn ends, so no turn is in flight when the other plane re-delivers.
+	h.terminal("turn-2", interruptedByUser(), nil)
+
+	// Act: the file plane delivers the SAME cut at the SAME store pointer.
+	h.cutAt("entry-clear", clearedContextCut())
+
+	// Assert: still one divider — the pointer maps back to the one turn-keyed row.
+	if got := len(h.separationRows()); got != 1 {
+		t.Fatalf("separation rows = %d, want one however many planes deliver the clear", got)
+	}
+}
+
+func TestAClearAbortedBeforeTheShimRetiresItsDivider(t *testing.T) {
+	// Arrange: the optimistic bar is up.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act: the shim refused the turn before it ever ran.
+	h.resolver.OnContextCutAborted(testWorkspace, ids.TurnID("turn-2"))
+
+	// Assert: the phantom bar is gone and the feed recovers.
+	if got := len(h.separationRows()); got != 0 {
+		t.Fatalf("separation rows = %d, want the phantom bar retired", got)
+	}
+}
 
 // ONE ROW KIND FOR EVERY SEPARATION — context cuts and worktree moves alike —
 // because one renderer subroutine draws them all and an arm selects only its

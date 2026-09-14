@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
@@ -287,5 +288,63 @@ func TestAPromptWhileAnOutputAddressIsInForceStaysAUserPrompt(t *testing.T) {
 	}
 	if got := rows[0].GetUserPrompt().GetAuthor().GetLabel(); got != "Merge" {
 		t.Fatalf("author = %q, want Merge", got)
+	}
+}
+
+// userPromptRows answers every user-prompt row on the root feed, for the tests
+// whose subject is whether a bubble was drawn.
+func (h *harness) userPromptRows() []*frontendv1.FeedRow {
+	h.t.Helper()
+	var out []*frontendv1.FeedRow
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetUserPrompt() != nil {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// A /clear IS A DIRECTIVE, NOT A PROMPT. Its only visible outcome is the
+// separation bar; the shim's own prompt frame draws no user-prompt bubble.
+func TestAClearDirectiveDrawsNoPromptBubble(t *testing.T) {
+	// Arrange: the daemon accepted a /clear and registered its turn.
+	h := newHarness(t)
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act: the shim's prompt frame for the /clear arrives.
+	h.deliverPrompt("turn-2", "/clear")
+
+	// Assert: no prompt bubble — only the bar the receipt drew.
+	if got := h.userPromptRows(); len(got) != 0 {
+		t.Fatalf("user-prompt rows = %d, want none for a /clear directive", len(got))
+	}
+}
+
+// /compact IS ALSO A DIRECTIVE. It draws no optimistic bar and no prompt bubble;
+// its divider follows the shim's compaction.
+func TestACompactDirectiveDrawsNoPromptBubble(t *testing.T) {
+	// Arrange: the daemon accepted a /compact and registered its turn.
+	h := newHarness(t)
+	h.resolver.OnCompactReceived(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act: the shim's prompt frame for the /compact arrives.
+	h.deliverPrompt("turn-2", "/compact")
+
+	// Assert: no prompt bubble.
+	if got := h.userPromptRows(); len(got) != 0 {
+		t.Fatalf("user-prompt rows = %d, want none for a /compact directive", len(got))
+	}
+}
+
+// AN ORDINARY PROMPT STILL DRAWS ITS BUBBLE. The suppression is for directives
+// alone, so a conversational prompt is unaffected.
+func TestAnOrdinaryPromptStillDrawsItsBubble(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello there")
+
+	// Assert.
+	if got := h.userPromptRows(); len(got) != 1 {
+		t.Fatalf("user-prompt rows = %d, want the ordinary prompt's bubble", len(got))
 	}
 }
