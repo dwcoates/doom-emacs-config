@@ -615,6 +615,55 @@ way a refusal does.
      conclusion by observing it on the `AgentPageSession` it registers with the
      session, which is what the teardown concludes through.
 
+## The keep-alive rewind: what may anchor it, and what happens when it fails
+
+The shim submits its own keep-alive prompt every four minutes to keep the
+vendor's five-minute prompt cache warm (`src/engine/keepalive.ts`). A real
+prompt must never build on that housekeeping, so before one is delivered the
+vendor context is ROLLED BACK: the query is closed and reopened with `resume`
+plus `resumeSessionAt: <uuid>`, the SDK's one declared surface for truncating a
+conversation without rewriting the vendor's file.
+
+**THE ANCHOR IS AN ASSISTANT RECORD OF A REAL TURN, AND NOTHING ELSE.** The SDK
+says so at the option itself — "The message ID should be from
+`SDKAssistantMessage.uuid`" — and every other SDK message carries a `uuid`
+anyway: `system:init` and `result` both DECLARE one as required, and those uuids
+name no transcript record. `KeepaliveRewind.noteRecord` therefore takes the
+MESSAGE and the turn it arrived under, not a uuid, and refuses everything that
+is not an `assistant` message of an open, non-keep-alive turn. The call site
+never extracts a uuid at all, so the filter cannot be got wrong by a caller.
+
+This was paid for on the owner's workspace on 2026-09-14: twice, the second real
+prompt after a resume died at once with the vendor exiting 1 on `No message
+found with message.uuid of: 19e047a0-…` (and earlier `b64f2741-…`) — uuids in no
+transcript, taken from the init and control messages that were the only
+non-keep-alive traffic a cold-gate resume had produced.
+
+**AND THE ANCHOR DOES NOT CROSS A BOUNDARY.** A uuid from before a compaction,
+a conversation reset, or a query rebinding may no longer be resumable, so each
+CLEARS it: `startQuery` drops it on every binding that is not itself the rewind
+(the opening, a cold-gate answer, a rotation, a restart, a plain replacement),
+the vendor's `compact_boundary` and `conversation_reset` drop it as they arrive,
+and the shim's own compaction drops it as it lands. After a clear the next real
+prompt CARRIES the keep-alive turns rather than rewinding — the existing "no
+anchor" branch — and says so at INFO.
+
+**THE REWIND IS VISIBLE.** The "REWINDING…" record names the anchor's uuid, the
+turn it came from, and the keep-alive turns being discarded; a rewind that lands
+says so; a cleared anchor says why. All INFO. When a rewind goes wrong the only
+evidence anyone has is which uuid the shim chose, so none of it is debug.
+
+**AND IT IS SURVIVABLE. THE PROMPT IS NEVER LOST.** If the replaced query fails
+to start, or the vendor refuses the anchor afterwards — an error result naming
+the uuid, or the child ending its stream having printed
+`No message found with message.uuid` — the shim does NOT let the session die. It
+records one ERROR with the anchor and the vendor's own words, forgets the
+anchor, reopens the query WITHOUT `resumeSessionAt` (a plain resume), delivers
+the SAME prompt onto it, and raises a `keepaliveFailed` fault on its own
+component (`shim-engine-keepalive-rewind`, cleared by the next rewind that
+lands) so the footer says what happened. The refusal never reaches the fold, so
+the feed shows the answer rather than "the run broke while executing".
+
 ## The hibernate contract: at most one compaction per idle period
 
 `Hibernate` is the daemon's pre-hibernation directive, and the shim's answer to
