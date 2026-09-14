@@ -34,6 +34,38 @@ const RECLASSIFIED_SITES: readonly ExpectedSite[] = [
   { file: "convert/hooks.ts", message: "a hook was cancelled before it finished", level: "info" },
   { file: "convert/terminals.ts", message: "the turn ended on a recorded API failure", level: "info" },
   { file: "engine/identity.ts", message: "the vendor session id rotated; the main agent identity is unchanged", level: "info" },
+  // THE KEEP-ALIVE REWIND IS VISIBLE (2026-09-14). The rewind is the one step
+  // that can lose a real prompt, and its two dead anchors were diagnosable only
+  // because the shim had said which uuid it resumed at.
+  {
+    file: "engine/session.ts",
+    message:
+      "REWINDING the vendor context past the trailing keep-alive turns before delivering a real prompt; the anchor is the assistant record of that turn",
+    level: "info",
+  },
+  {
+    file: "engine/session.ts",
+    message: "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the real prompt",
+    level: "info",
+  },
+  {
+    file: "engine/session.ts",
+    message:
+      "the prompt the refused rewind was carrying was RE-DELIVERED on a plain resume; it was not lost",
+    level: "info",
+  },
+  {
+    file: "engine/keepalive.ts",
+    message:
+      "the keep-alive rewind anchor is CLEARED: a uuid from before this boundary may not be resumable",
+    level: "info",
+  },
+  {
+    file: "engine/keepalive.ts",
+    message:
+      "no rewind anchor exists (none taken yet, or cleared at a boundary): the next real prompt proceeds WITHOUT a rewind and carries the keep-alive turns",
+    level: "info",
+  },
 ] as const;
 
 const SOURCE_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
