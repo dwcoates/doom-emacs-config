@@ -657,3 +657,40 @@ func TestACutWithNoPositionStillDrawsAndIsReported(t *testing.T) {
 		t.Fatal("an unpositioned cut drew its divider silently; the fault must be recorded")
 	}
 }
+
+// A LATE FILE-PLANE /clear CUT DOES NOT RE-KEY ONTO A LATER PROMPT. The file
+// plane forwards the /clear envelope late — after the user has sent the next
+// prompt — and it is delivered on the SAME store pointer as the stream plane's
+// cut. It must upsert the ONE divider keyed on the clear turn, never draw a
+// second bar below the new prompt nor suppress that prompt's own turn.
+func TestALateFilePlaneClearDoesNotRekeyOntoALaterPrompt(t *testing.T) {
+	// Arrange: a /clear turn ran to completion; the stream cut landed at a
+	// pointer; then a normal prompt was delivered and is now the turn in flight.
+	h := newHarness(t)
+	h.deliverPrompt("turn-clear", "/clear")
+	h.cutAt("entry-clear", clearedContextCut())
+	h.terminal("turn-clear", interruptedByUser(), nil)
+	h.deliverPrompt("turn-hello", "hello")
+
+	// Act: the file plane's late copy of the SAME cut arrives while turn-hello
+	// is in flight.
+	h.cutAt("entry-clear", clearedContextCut())
+
+	// Assert: still one divider, keyed on the clear turn — no second bar below
+	// the new prompt.
+	rows := h.separationRows()
+	if len(rows) != 1 {
+		t.Fatalf("separation rows = %d, want one — the late file-plane cut upserts the clear turn's divider", len(rows))
+	}
+	if got := rows[0].GetId().GetValue(); got != h.clearDividerRowID("turn-clear") {
+		t.Fatalf("divider row = %q, want it keyed on the clear turn, not the later prompt", got)
+	}
+	// The later prompt's turn is untouched: it was not marked cleared, so its own
+	// terminal will still draw.
+	if h.resolver.state(testWorkspace).clearConfirmed[ids.TurnID("turn-hello")] {
+		t.Fatal("the late /clear cut marked the later prompt's turn cleared; its terminal would be wrongly suppressed")
+	}
+	if got := len(h.userPromptRows()); got != 1 {
+		t.Fatalf("user-prompt rows = %d, want only the normal 'hello' (the /clear draws none)", got)
+	}
+}
