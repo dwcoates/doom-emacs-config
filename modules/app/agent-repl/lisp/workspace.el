@@ -24,7 +24,8 @@
 ;;   - `agent-repl--ws-del'                tombstone (preserves identity)
 ;;   - `agent-repl--ws-forget'             hard-remove a tombstone (archived first)
 ;;   - `agent-repl--ws-live-p'             entry exists AND not tombstoned
-;;   - `agent-repl--live-ws-names'         live names (filtered)
+;;   - `agent-repl--live-ws-names'         live names (no tombstones, no
+;;                                          persp-mode pseudo perspectives)
 ;;   - `agent-repl--ws-registered-names'   all keys (live + tombstoned)
 ;;   - `agent-repl--ws-project-pollable-p' live entry with project dir
 ;;   - `agent-repl--ws-project-poll-partition'
@@ -479,9 +480,20 @@ distinguishing `key absent' from `key bound to ()'."
 Single helper for callers that previously did
 `(hash-table-keys agent-repl--workspaces)' as a stand-in for `live
 workspaces' — that idiom now over-includes tombstones, so route
-through this filter instead."
-  (cl-remove-if-not #'agent-repl--ws-live-p
-                    (hash-table-keys agent-repl--workspaces)))
+through this filter instead.
+
+A PSEUDO PERSPECTIVE IS NEVER A WORKSPACE CANDIDATE ANYWHERE.  persp-mode's
+own perspectives — `persp-nil-name' (\"none\") and Doom's startup
+perspective (\"main\") — are auto-vivified into the registry by a persp
+hook and were live entries here, so every reader of this list carried
+them: the `SPC p p' switcher OFFERED \"main\" and \"none\" as workspaces to
+switch to, and the link-up walked them.  They are excluded at this source
+rather than screened by each reader, so no reader can forget."
+  (cl-remove-if-not
+   (lambda (ws)
+     (and (agent-repl--ws-live-p ws)
+          (not (agent-repl--pseudo-workspace-name-p ws))))
+   (hash-table-keys agent-repl--workspaces)))
 
 (defun agent-repl--ws-registered-names ()
   "Return every registered workspace name, live and tombstoned.
@@ -719,8 +731,9 @@ when `persp-names-cache' is unbound (vanilla Emacs / pre-persp init)."
 (defun agent-repl--ws-list-names ()
   "Return the list of workspace names visible in the tab-bar.
 Intersection of `persp-names-cache' membership and
-`agent-repl--workspaces' registration, minus the `persp-nil-name'
-sentinel.  Equivalent to \"all names for which `--ws-open-p' returns
+`agent-repl--workspaces' registration, minus persp-mode's own
+perspectives (`agent-repl--pseudo-workspace-name-p': \"none\" and Doom's
+startup \"main\").  Equivalent to \"all names for which `--ws-open-p' returns
 non-nil\" but computed in one pass.
 
 This is the canonical iteration source for any renderer that
@@ -741,11 +754,10 @@ agent-repl UI and should reflect agent-repl's worldview.
 
 Returns nil when `persp-names-cache' is unbound."
   (when (boundp 'persp-names-cache)
-    (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name)))
-      (cl-loop for name in persp-names-cache
-               when (and (not (and nil-name (equal name nil-name)))
-                         (agent-repl--ws-known-p name))
-               collect name))))
+    (cl-loop for name in persp-names-cache
+             when (and (not (agent-repl--pseudo-workspace-name-p name))
+                       (agent-repl--ws-known-p name))
+             collect name)))
 
 (defun agent-repl--ws-all-names ()
   "Return the raw list of ALL workspace names known to persp-mode.
