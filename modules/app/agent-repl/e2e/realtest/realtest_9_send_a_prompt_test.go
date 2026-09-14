@@ -657,7 +657,8 @@ func TestRealtestSendAPrompt(t *testing.T) {
 
 	// ---- The feed ------------------------------------------------------
 
-	rt9AssertTheAnswerIsInTheFeed(ctx, t, turnSources, snapshot, preserved, pressedAt, ws, wsName, &manifest)
+	answerDrawnAt, answerDrawnOK := rt9AssertTheAnswerIsInTheFeed(
+		ctx, t, turnSources, snapshot, preserved, pressedAt, ws, wsName, &manifest)
 
 	// ---- The arm, through the whole turn -------------------------------
 
@@ -676,6 +677,8 @@ func TestRealtestSendAPrompt(t *testing.T) {
 		OpenedOK:    openedOK,
 		Concluded:   concludedAt,
 		ConcludedOK: concluded.ID != "",
+		AnswerDrawn: answerDrawnAt,
+		AnswerOK:    answerDrawnOK,
 	})
 
 	// ---- The harvest ---------------------------------------------------
@@ -1235,8 +1238,22 @@ func rt9AssertTheArm(ctx context.Context, t *testing.T, client *Client, watch *r
 // panel drew nothing, or the webapp's records are not persisted at the level
 // this deployment runs, and a reader needs to know which question to ask before
 // they read three failures that all have the same cause.
+//
+// THE TWO HALVES ARE WAITED FOR SEPARATELY, because they arrive by different
+// paths and the second one is LATER. The final-answer mark is drawn from the
+// turn-end path the instant the turn concludes; the answer's text blocks come
+// the long way round — vendor transcript, sidecar, store, daemon, feed — and
+// land after it. Scanning for the blocks once the mark is up read the blocks
+// that existed at that instant, which in rt-run36 was the USER PROMPT'S own
+// 31-character block and nothing else, and the run failed saying the feed had
+// drawn no 21-character block. So the block is WAITED for on its own ceiling.
+// Nothing is excluded by ordering: the prompt's block being in the list
+// alongside the answer's is the ordinary case.
+//
+// It returns the instant the answer's own text block was drawn, so the turn's
+// last phase can be measured from the conclusion to it.
 func rt9AssertTheAnswerIsInTheFeed(ctx context.Context, t *testing.T, sources []Source, snap Snapshot,
-	preserved []Source, since time.Time, ws Workspace, wsName string, manifest *Manifest) {
+	preserved []Source, since time.Time, ws Workspace, wsName string, manifest *Manifest) (time.Time, bool) {
 	t.Helper()
 
 	// The feed is downstream of the conclusion, so its records are waited for
@@ -1252,7 +1269,7 @@ func rt9AssertTheAnswerIsInTheFeed(ctx context.Context, t *testing.T, sources []
 	any, err := rt9Scan(sources, snap, preserved, since, rt9FeedAnyRe)
 	if err != nil {
 		t.Errorf("read the webapp's feed records for workspace %s (%q): %v", ws.ID, wsName, err)
-		return
+		return time.Time{}, false
 	}
 	if !rt9AnyNaming(any, ws) {
 		note := fmt.Sprintf("THE FEED WROTE NOTHING. No `feed.*` record inside the run window is attributed to "+
@@ -1263,7 +1280,7 @@ func rt9AssertTheAnswerIsInTheFeed(ctx context.Context, t *testing.T, sources []
 			"not depend on this", ws.ID, wsName)
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
-		return
+		return time.Time{}, false
 	}
 
 	userPrompt, err := rt9Scan(sources, snap, preserved, since, rt9FeedUserPromptRe)
@@ -1288,37 +1305,50 @@ func rt9AssertTheAnswerIsInTheFeed(ctx context.Context, t *testing.T, sources []
 		t.Logf("the feed marked the turn's answering row with the final-answer treatment")
 	}
 
-	blocks, err := rt9Scan(sources, snap, preserved, since, rt9FeedTextBlockRe)
-	if err != nil {
-		t.Errorf("read the feed's text-block records for workspace %s (%q): %v", ws.ID, wsName, err)
-		return
-	}
+	// THE ANSWER'S TEXT BLOCK IS WAITED FOR, NOT SCANNED FOR ONCE. It comes by
+	// a different path from the mark above and lands after it, so the mark
+	// standing says nothing about the block being drawn yet.
 	want := len([]rune(rt9AnswerOpening))
-	found := false
-	lengths := make([]int, 0, len(blocks))
-	for _, hit := range blocks {
-		if !hit.Names(ws) {
-			continue
+	drawnAt, drawn := rt9AwaitEdge(ctx, t,
+		fmt.Sprintf("the webapp to draw the answer's own text block of %d characters in the feed", want),
+		rt9FeedCeiling, sources, snap, preserved, since, rt9FeedTextBlockRe,
+		func(hit rt9Hit) bool {
+			if !hit.Names(ws) {
+				return false
+			}
+			characters, ok := hit.ContextInt("characters")
+			return ok && characters == want
+		})
+	if !drawn {
+		// The diagnostic names every block the feed DID draw, which is what
+		// tells a reader whether the wrong text arrived or none did.
+		blocks, scanErr := rt9Scan(sources, snap, preserved, since, rt9FeedTextBlockRe)
+		if scanErr != nil {
+			t.Errorf("read the feed's text-block records for workspace %s (%q): %v", ws.ID, wsName, scanErr)
+			return time.Time{}, false
 		}
-		characters, ok := hit.ContextInt("characters")
-		if !ok {
-			continue
+		lengths := make([]int, 0, len(blocks))
+		for _, hit := range blocks {
+			if !hit.Names(ws) {
+				continue
+			}
+			characters, ok := hit.ContextInt("characters")
+			if !ok {
+				continue
+			}
+			lengths = append(lengths, characters)
 		}
-		lengths = append(lengths, characters)
-		if characters == want {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("the feed drew no text block of %d characters for workspace %s (%q), which is the length of "+
-			"the fake vendor's known opening sentence %q. The blocks it did draw were %v characters long. No "+
-			"log carries a feed row's prose, so the length is the only thing that ties a drawn block to a "+
-			"known text; a mismatch here says the answer that reached the feed is not the one the scenario "+
-			"produced", want, ws.ID, wsName, rt9AnswerOpening, lengths)
-		return
+		t.Errorf("the feed drew no text block of %d characters for workspace %s (%q) within %s of the turn "+
+			"concluding, which is the length of the fake vendor's known opening sentence %q. The blocks it "+
+			"did draw were %v characters long. No log carries a feed row's prose, so the length is the only "+
+			"thing that ties a drawn block to a known text; a mismatch here says the answer that reached the "+
+			"feed is not the one the scenario produced", want, ws.ID, wsName, rt9FeedCeiling,
+			rt9AnswerOpening, lengths)
+		return time.Time{}, false
 	}
 	t.Logf("the feed drew a text block of %d characters, the length of the scenario's known opening sentence",
 		want)
+	return drawnAt, true
 }
 
 // rt9ReportSubmitDoor scans for the queue's own submit record and reports what
@@ -1369,6 +1399,8 @@ type rt9Timings struct {
 	OpenedOK    bool
 	Concluded   time.Time
 	ConcludedOK bool
+	AnswerDrawn time.Time
+	AnswerOK    bool
 }
 
 // rt9ReportPhases measures the turn and writes the measurements into the
@@ -1408,6 +1440,13 @@ func rt9ReportPhases(t *testing.T, manifest *Manifest, timings rt9Timings) {
 			timings.SubmittedOK && timings.ConcludedOK,
 			"`elisp.input.send` to the daemon's `closed_at` being readable; an UPPER BOUND, since the " +
 				"end is when the run read the stamp and not the stamp itself"},
+		{"turn concluded -> answer text drawn", timings.Concluded, timings.AnswerDrawn,
+			timings.ConcludedOK && timings.AnswerOK,
+			"the daemon's `closed_at` being readable to the `feed.draw-text-block` record for the " +
+				"answer's own opening sentence; an OBSERVATION CEILING and not a budget, like every " +
+				"phase here. Its start is the run's READ of the stamp rather than the stamp, so a block " +
+				"already drawn when the run got round to reading reports as a negative delta — which is " +
+				"itself the answer to the question the phase exists to ask"},
 	}
 	lines := make([]string, 0, len(phases))
 	for _, p := range phases {
