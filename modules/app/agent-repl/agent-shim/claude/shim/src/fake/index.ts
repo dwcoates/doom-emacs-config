@@ -33,7 +33,7 @@
  * this is the single documented place where that is admitted.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname } from "node:path";
 
 import { bindLog } from "../log.js";
@@ -177,16 +177,39 @@ const REFUSABLE = new Set([
 ]);
 
 /**
- * How many starts `start-once` has already refused.
+ * Where `start-once` records that it has spent its one refusal.
  *
  * `start` refuses forever, which proves the arm but can never show what happens
  * AFTER the condition clears — and "a failed start leaves the engine as it
  * found it" is only observable when the retry actually succeeds. `start-once`
- * refuses the first query this process is asked for and allows every later one,
- * which is exactly the daemon's story: something was wrong, it was fixed, the
- * same warm shim serves the conversation.
+ * refuses the FIRST start under an account root and allows every later one,
+ * which is exactly the daemon's story: something was wrong, it was fixed, and
+ * the conversation is served.
+ *
+ * THE MARK IS A FILE, NOT A PROCESS COUNTER, and it has to be: the daemon STOPS
+ * the shim of a failed start, so the retry reaches a NEW shim process. A
+ * counter in module state would be zero again in that process, refuse a second
+ * time, and the recovery half of the arm could never be reached. The account
+ * root is the scope because it is what one world owns: a suite gives each world
+ * its own `CLAUDE_CONFIG_DIR`, so one world's spent refusal cannot reach
+ * another's, and every shim of THAT world shares the one mark.
  */
-let startOnceRefusals = 0;
+const START_ONCE_MARK = ".agent-repl-fake-start-once";
+
+/**
+ * Spend `start-once`'s single refusal, or report it already spent.
+ *
+ * A mark that cannot be written is a HARD failure rather than a second
+ * refusal: a lever that silently degrades into `start` would make the recovery
+ * half of the arm look broken and say nothing about why.
+ */
+function spendStartOnce(configDir: string): boolean {
+  const mark = `${configDir}/${START_ONCE_MARK}`;
+  if (existsSync(mark)) return false;
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(mark, "spent\n", "utf8");
+  return true;
+}
 
 /** Which control verbs this process was told to refuse. */
 function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
@@ -203,6 +226,39 @@ function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string>
     }
   }
   return new Set(named);
+}
+
+/**
+ * WHEN THE MOCKED VENDOR ANNOUNCES ITS `system:init`.
+ *
+ * `at-start` (the default) is the OLDER vendor's shape and the shape every
+ * captured corpus was recorded under: init leads, and the rest of the session
+ * follows it. `after-first-turn` is what claude 2.1.220 and 2.1.270 ACTUALLY
+ * do when driven as this shim drives them (grounded 2026-09-13): the child
+ * answers control requests within ~300ms and emits no init at all until a
+ * first user message reaches it.
+ *
+ * The lever exists because the two shapes exercise different halves of the
+ * start contract — the live signal settling a start with no init in sight, and
+ * the init facts being applied to an ALREADY-STARTED session — and neither can
+ * be reached from a prompt, because the timing is decided before any prompt
+ * exists.
+ */
+const INIT_TIMING_ENV = "AGENT_REPL_FAKE_INIT_TIMING";
+
+/** The values {@link INIT_TIMING_ENV} may take. */
+const INIT_TIMINGS = new Set(["at-start", "after-first-turn"]);
+
+/** When this process's mocked vendor announces its init. */
+function initTiming(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = (env[INIT_TIMING_ENV] ?? "at-start").trim();
+  const named = raw === "" ? "at-start" : raw;
+  if (!INIT_TIMINGS.has(named)) {
+    throw new Error(
+      `${INIT_TIMING_ENV}: ${JSON.stringify(named)} is not a recognized init timing (expected one of ${[...INIT_TIMINGS].join(", ")})`,
+    );
+  }
+  return named;
 }
 
 /** How often a parked gate re-checks when no edge has arrived. */
@@ -429,18 +485,21 @@ export function createFakeQuery(
   opts: FakeQueryOpts,
 ): QueryLike {
   const refuse = refusedVerbs();
+  // READ AND VALIDATED HERE, beside the refusals, so an unrecognized value is a
+  // refusal to start rather than a knob that turns out to have done nothing
+  // several seconds into a session.
+  const initAfterFirstTurn = initTiming() === "after-first-turn";
+  const cwd = opts.cwd ?? process.cwd();
+  const configDir =
+    opts.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME ?? ""}/.claude`;
   if (refuse.has("start")) {
     // The vendor could not be started at all. StartSession turns this into
     // `vendor_start_failed`, which is otherwise unreachable behind `--fake`.
     throw new Error("the mocked vendor was told to refuse to start");
   }
-  if (refuse.has("start-once") && startOnceRefusals === 0) {
-    startOnceRefusals += 1;
+  if (refuse.has("start-once") && spendStartOnce(configDir)) {
     throw new Error("the mocked vendor was told to refuse the FIRST start only");
   }
-  const cwd = opts.cwd ?? process.cwd();
-  const configDir =
-    opts.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME ?? ""}/.claude`;
   const spoolRoot = opts.spoolRoot ?? process.env[SPOOL_ROOT_ENV] ?? defaultSpoolRoot();
   const nowMs = opts.nowMs ?? ((): number => Date.now());
 
@@ -1250,10 +1309,14 @@ export function createFakeQuery(
       out.end();
       return;
     }
-    emitInit();
+    // THE INIT MAY BE OWED TO THE FIRST TURN RATHER THAN TO THE OPENING. The
+    // real vendor withholds it until an input message arrives; the lever
+    // reproduces that, and `at-start` keeps the corpus's own shape.
+    if (!initAfterFirstTurn) emitInit();
     LOGGER.info(
       {
         claude_session_id: sessionUuid,
+        init_timing: initAfterFirstTurn ? "after-first-turn" : "at-start",
         resumed: opts.resume !== undefined,
         workspace_dir: cwd,
         // THE REWIND TARGET, as the vendor received it. PRESENT ONLY WHEN THE
@@ -1269,7 +1332,20 @@ export function createFakeQuery(
         ? "fake vendor session STARTED"
         : "fake vendor session RESUMED; init reports the resumed id and re-emits NO history",
     );
+    let initOwed = initAfterFirstTurn;
     for await (const userMessage of prompt) {
+      // THE FIRST TURN IS WHAT BRINGS THE INIT, and it arrives BEFORE the turn
+      // it rode in on produces anything — which is the order the real vendor
+      // emits them in, and the order that makes the init facts land on a
+      // session the shim has already announced as started.
+      if (initOwed) {
+        initOwed = false;
+        LOGGER.info(
+          { claude_session_id: sessionUuid },
+          "the mocked vendor announces its init NOW, with the first user message, as the real vendor does",
+        );
+        emitInit();
+      }
       turn++;
       interrupted = false;
       resultEmitted = false;

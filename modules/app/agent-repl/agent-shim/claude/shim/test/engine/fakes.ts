@@ -112,9 +112,36 @@ export class ScriptedQuery implements QueryLike {
     this.calls.push(`setModel:${model ?? ""}`);
     return this.setModelRejects === undefined ? Promise.resolve() : Promise.reject(this.setModelRejects);
   }
-  supportedModels(): Promise<ModelInfoLike[]> {
+  /**
+   * PARK `supportedModels` UNTIL A SUITE RELEASES IT.
+   *
+   * That call is the start's PROVEN-LIVE SIGNAL, so a query that answers it
+   * settles the start the moment the engine asks. Every suite whose subject is
+   * something that settles a start BEFORE the live signal — a blocking hook, an
+   * error result, a stream that ends, the silence bound — has to hold the
+   * signal to reach its own subject at all, and this is how.
+   */
+  holdModels(): void {
+    this.modelsGate = new Promise<void>((resolve) => {
+      this.releaseModelsGate = resolve;
+    });
+  }
+
+  /** Let a held {@link holdModels} answer. A no-op when nothing is held. */
+  releaseModels(): void {
+    const release = this.releaseModelsGate;
+    this.releaseModelsGate = undefined;
+    this.modelsGate = undefined;
+    release?.();
+  }
+
+  private modelsGate: Promise<void> | undefined;
+  private releaseModelsGate: (() => void) | undefined;
+
+  async supportedModels(): Promise<ModelInfoLike[]> {
     this.calls.push("supportedModels");
-    return Promise.resolve(this.models);
+    if (this.modelsGate !== undefined) await this.modelsGate;
+    return this.models;
   }
   supportedCommands(): Promise<SlashCommandLike[]> {
     return Promise.resolve([]);

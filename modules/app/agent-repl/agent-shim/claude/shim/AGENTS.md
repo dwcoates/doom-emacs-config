@@ -109,7 +109,8 @@ means the daemon and this build disagree about the contract.
     overrides it at the binary that suite built.
   - `AGENT_REPL_FORBID_VENDOR_CALLS` — the guard (see below).
   - `AGENT_REPL_FAKE_TURN_GATE`, `AGENT_REPL_FAKE_TURN_GATE_TEXT`,
-    `AGENT_REPL_FAKE_SPOOL_ROOT`, `AGENT_REPL_FAKE_REFUSE` — `--fake` only.
+    `AGENT_REPL_FAKE_SPOOL_ROOT`, `AGENT_REPL_FAKE_REFUSE`,
+    `AGENT_REPL_FAKE_INIT_TIMING` — `--fake` only.
 - **Startup order**: parse argv → resolve env → configure the log on fd 3 →
   bind the UDS → serve. **NO LOCK IS TAKEN AT STARTUP.** A shim that has served
   but has no session is **INERT** and holds neither kernel lock, which is what
@@ -131,27 +132,54 @@ means the daemon and this build disagree about the contract.
   "another process holds it" answer, and anything else is a hard failure —
   never `conversation_owned`.
 - **`StartSession` ALWAYS ANSWERS.** The verb is unsettled from the moment the
-  query is created until the vendor's `system:init` lands, and five things
-  settle it: `init` itself; a hook that comes back BLOCKING before it (the only
-  hooks that can fire that early are the vendor's `SessionStart` ones, and a
-  blocked one gets no further answer, so its blocking text IS the start's
-  failure reason); a `result` carrying `is_error` (the vendor refusing the
-  opening, whose own text is the reason); the QUERY ENDING before `init` (an
-  exited child, an ended stream, a throwing iterator); or `INIT_TIMEOUT_MS`, the
-  shim's own bound, sized UNDER the daemon's bring-up bound so the shim — which
-  knows why — answers before the daemon, which does not. All five end as
+  query is created, and SIX things settle it: the PROVEN-LIVE SIGNAL (below);
+  `init`, for a vendor that still announces one first; a hook that comes back
+  BLOCKING before either (the only hooks that can fire that early are the
+  vendor's `SessionStart` ones, and a blocked one gets no further answer, so its
+  blocking text IS the start's failure reason); a `result` carrying `is_error`
+  (the vendor refusing the opening, whose own text is the reason); the QUERY
+  ENDING before either (an exited child, an ended stream, a throwing iterator);
+  or `INIT_TIMEOUT_MS`, the shim's own last-resort bound, sized UNDER the
+  daemon's bring-up bound so the shim — which knows why — answers before the
+  daemon, which does not. The first two are successes; the other four end as
   `StartSession{vendor_start_failed}` with the reason in `detail`.
+- **A START SETTLES ON A PROVEN-LIVE SIGNAL, NOT ON `init`.**
   **THE VENDOR ANNOUNCES `system:init` ONLY ONCE A FIRST TURN REACHES IT** —
   grounded 2026-09-13 against claude 2.1.220 AND 2.1.270, driven exactly as this
   shim drives them (`--input-format stream-json`): the child answers control
-  requests (`supportedCommands`, `setPermissionMode`) within 300ms and emits no
-  `init` at all until an input message arrives, while feeding one turn produces
-  `init` in ~600ms in the same directory. Reproduced with the full option set
-  and with a bare one, fresh and resume, in three directories and three account
-  roots (a pristine one with no plugins or hooks included). A start that waits
-  for `init` before prompting therefore cannot settle, and the bound is what
-  ends it; the refusal's detail names this rather than the quiet.
-  **THE BOUND IS FOR SILENCE ONLY.** Every conclusive answer settles the start
+  requests (`supportedModels`, `supportedCommands`, `setPermissionMode`) within
+  300ms and emits no `init` at all until an input message arrives, while feeding
+  one turn produces `init` in ~600ms in the same directory. Reproduced with the
+  full option set and with a bare one, fresh and resume, in three directories and
+  three account roots (a pristine one with no plugins or hooks included). A start
+  that waited for `init` before prompting therefore deadlocked on every real
+  session and failed at the bound.
+  The signal is ONE CONTROL ROUND-TRIP answered inside `LIVE_SIGNAL_TIMEOUT_MS`
+  (3s, ten times the observed ~300ms, stated at the constant). A child that
+  answers one is spawned, connected and taking work, which is exactly what
+  `endpoint_start_session.proto` says this verb resolves on: a prompt can be
+  ACCEPTED. `supportedModels()` is the call, because the opening owes it anyway —
+  its answer IS `SessionStarted.model_catalog`, so the proof costs nothing extra
+  and the catalog is in hand before the opening returns. A round-trip that is
+  REFUSED or that misses its bound refuses the start, naming the call and the
+  bound; once the start has settled, the same failure is the catalog component's
+  own `SessionFault`, which a later re-read lifts.
+- **THE INIT FACTS ARE LEARNED WHEN INIT ARRIVES, WITH THE FIRST TURN.** Session
+  id rotation, model, permission mode, agent binary version and the fast-mode
+  facts are applied to the live session then, each pushed as the `SessionUpdate`
+  it already maps to (`identity_rotated`, `model_changed`,
+  `permission_mode_changed`, `fast_mode`) — and a fact init merely RESTATES
+  pushes nothing. Until then the fixed schema's absence is what a surface draws:
+  `effective_model` is unstated on a fresh start that named no model, and the
+  topbar's cells show their no-session dashes. `SessionRuntime` is still whole at
+  the opening because `agent_binary_version` also comes from the SDK's bundled
+  manifest; init's `claude_code_version` OVERWRITES it, since the running binary
+  outranks the packaged declaration. It has no `SessionUpdate` arm and rides only
+  `SessionStarted`, so a late correction is recorded and logged, not pushed.
+  **THE LAST-RESORT BOUND IS FOR SILENCE ONLY**, and after the live signal it is
+  silence of a kind the round-trip's own 3s bound already catches — it survives
+  for the one case with no bound of its own: a child that answers neither its
+  control channel nor its stream. Every conclusive answer settles the start
   at once; waiting the bound out on an answer already in hand is what lets the
   daemon's bound fire first and blame the shim. The vendor child's stderr is
   captured (`Options.stderr`) and appended to the refusal's `detail`, because a
@@ -193,13 +221,26 @@ comma-separated:
 | Value | What the mocked vendor does | The arm it makes reachable |
 | --- | --- | --- |
 | `start` | `createFakeQuery` throws before any message, every time | `StartSession{vendor_start_failed}` |
-| `start-once` | the FIRST `createFakeQuery` throws; every later one succeeds | a retry after `vendor_start_failed` succeeding on the same shim |
+| `start-once` | the FIRST start under the account root throws; every later one succeeds. The one refusal is marked by a FILE in the config root, not a process counter, because the daemon STOPS the shim of a failed start and the retry therefore reaches a NEW process | a retry after `vendor_start_failed` succeeding — on the same warm shim, or on the replacement the daemon spawns |
 | `start-eof` | the query is created and its stream ENDS with no `init` at all | `StartSession{vendor_start_failed}` settled by the query's end, not by the init bound |
 | `start-error-result` | the query answers the opening with an error `result` and ends | `StartSession{vendor_start_failed}` carrying the vendor's own refusal text |
 | `set_model` | `setModel()` rejects | `SetSessionModel{vendor_refused}` |
 | `set_permission_mode` | `setPermissionMode()` rejects | `SetSessionPermissionMode{vendor_refused}` |
 
 An unrecognized verb is a refusal to start, never a silently ignored knob.
+
+`AGENT_REPL_FAKE_INIT_TIMING` is the other whole-process lever, and it is not a
+refusal at all: it says WHEN the mocked vendor announces its `system:init`.
+
+| Value | What the mocked vendor does | What it reaches |
+| --- | --- | --- |
+| `at-start` (default) | init leads, and the rest of the session follows it | the OLDER vendor's shape, and the shape every captured corpus was recorded under — an init that settles a start before the live signal |
+| `after-first-turn` | no init until a first user message arrives; control requests are answered throughout | the REAL vendor's shape (claude 2.1.220 and 2.1.270, grounded 2026-09-13) — a start settling on the live signal alone, and the init facts landing on an already-started session |
+
+An unrecognized value is a refusal to start, exactly as an unrecognized refuse
+verb is. The default is `at-start` deliberately: the corpus and every scenario
+were captured with init leading, so flipping the default would re-record the
+suite rather than test the contract.
 
 ## Mocked vendor: prompt → scenario table
 
