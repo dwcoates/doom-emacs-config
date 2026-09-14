@@ -255,6 +255,15 @@ type sidecar struct {
 	// moment: keyed by path, a rename bought the same file a second rewind and
 	// a second re-read of its in-progress turn.
 	rewound map[string]bool
+	// rewindWalked and rewindSkipped count what the boot rewind DID with the
+	// corpus: how many transcripts could still have been carrying a turn in
+	// flight and were scanned backward, and how many were at rest and were
+	// watched from their cursor with no backward scan and no re-read. They are
+	// stated as one INFO summary at the catch-up edge, beside the other
+	// summaries the boot walk owes, because the per-file decision is verbose
+	// and thousands of verbose lines say nothing about the SHAPE of the walk.
+	rewindWalked  int
+	rewindSkipped int
 	// Workspace attribution is read once per session's main transcript. Many
 	// sidechain files can share it, so rediscovery reuses the proven identity.
 	workspaceBySession map[string]workspaceAttribution
@@ -994,7 +1003,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 	tailer := tail.New(target.Path, target.Codec(), s.newHandler(target.Kind, bound), ctx, bound)
 	if cursor != nil {
 		tailer.Restore(cursor)
-		s.rewindOnce(target, identity, tailer)
+		s.rewindOnce(target, identity, tailer, now)
 	}
 	s.watchers[target.Path] = &watched{target: target, tailer: tailer, ctx: ctx}
 	s.trackDetached(target, now)
@@ -1214,20 +1223,76 @@ func (s *sidecar) bookFor(target discover.Target) string {
 // process, moving a restored cursor back to the first record of the in-progress
 // turn so the converter's in-memory joins re-warm over one re-read turn.
 //
+// THE REWIND IS FOR FILES THAT CAN CARRY A TURN IN FLIGHT, NOT FOR THE CORPUS.
+// The joins it re-warms exist only for a turn this reader was half-way through
+// when it stopped. A transcript that last grew hours ago, whose restored cursor
+// already sits at its end, cannot be holding one: nothing has been appended
+// since long before this process existed, and there is no half-converted turn
+// to re-read. Rewinding it anyway bought nothing and cost the whole boot walk —
+// realtest 9, sweep rt-run37: 1353 transcripts rewound and re-read, 1132 of them
+// last grown over 108 hours earlier, a startup catch-up that ran 2m24s, and a
+// new workspace's answer rows reaching the store a minute after its turn ended.
+//
+// DISCOVERY IS NOT NARROWED BY THIS. Every file is still enumerated, classified
+// and watched; a file at rest is simply watched FROM ITS CURSOR, with no
+// backward scan and no re-read. The moment it grows, the ordinary poll reads
+// the new bytes exactly as it always did.
+//
 // Spools are never rewound: they carry no turns, and their deltas are already
 // offset-carrying.
-func (s *sidecar) rewindOnce(target discover.Target, identity string, tailer *tail.Tailer) {
+func (s *sidecar) rewindOnce(target discover.Target, identity string, tailer *tail.Tailer, now time.Time) {
 	if s.rewound[identity] {
 		return
 	}
 	s.rewound[identity] = true
 	switch target.Kind {
 	case tail.KindSessionTranscript, tail.KindAgentTranscript:
-		tailer.RewindToTurnStart(tail.DefaultRewindWindow, tail.IsUserPromptRecord)
 	default:
 		s.log.With(logging.Context{Operation: "boot-rewind", Path: target.Path}).
 			LogVerbose("no rewind for kind=%s: it carries no turns", target.Kind)
+		return
 	}
+	if reason, atRest := s.atRest(target.Path, tailer.Offset(), now); atRest {
+		s.rewindSkipped++
+		s.log.With(logging.Context{Operation: "boot-rewind", Path: target.Path}).LogVerbose(
+			"no rewind: %s, so no turn of it can be in flight; it is watched from its cursor and not re-read", reason)
+		return
+	}
+	s.rewindWalked++
+	tailer.RewindToTurnStart(tail.DefaultRewindWindow, tail.IsUserPromptRecord)
+}
+
+// atRest answers whether a transcript can be ruled out as carrying a turn in
+// flight, and says in words why.
+//
+// TWO FACTS HAVE TO HOLD, AND THE SECOND IS THE ONE THAT MAKES IT SAFE. The
+// file must have stopped growing longer ago than the LOST tracker's own
+// agent-silence window — the bound this process already uses for "an agent has
+// stopped working on this", reused rather than duplicated as a second knob —
+// AND its restored cursor must already be at the file's end. A cursor BEHIND
+// the end means there are durable bytes this reader has not converted, so the
+// turn they belong to is exactly the half-converted one the rewind is for, and
+// the file is rewound however old it is.
+func (s *sidecar) atRest(path string, offset int64, now time.Time) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		// NOTHING HERE CAN PROVE THE FILE COLD, so it is rewound exactly as it
+		// was before this test existed. The read path states the failure again
+		// with its own context; this states why the rewind ran unconditionally.
+		s.log.With(logging.Context{Operation: "boot-rewind", Path: path, Level: "warn"}).Log(
+			"rewinding without the at-rest test: this file's mtime and size could not be read: %v", err)
+		return "", false
+	}
+	silence := s.tracker.Windows().AgentSilence
+	age := now.Sub(info.ModTime())
+	if age <= silence {
+		return "", false
+	}
+	if offset < info.Size() {
+		return "", false
+	}
+	return fmt.Sprintf("this file last grew %s ago, beyond the %s agent-silence window, and its restored cursor is already at its end (offset %d of %d bytes)",
+		age.Truncate(time.Second), silence, offset, info.Size()), true
 }
 
 // trackDetached starts the LOST policy's clock for a file that IS a detached
@@ -1356,6 +1421,7 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 	}
 	s.catchupEnded = true
 	s.log.EndCatchup()
+	s.stateBootRewindSummary()
 	s.summarizeWithheldResidue()
 	// THE END OF CATCH-UP IS AN EDGE, AND IT IS STATED. It is written after the
 	// summaries, so a reader that has seen this record has seen every total the
@@ -1364,6 +1430,26 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 	// steady state rather than racing the boot walk.
 	s.log.With(logging.Context{Operation: "catchup-end"}).Log(
 		"startup catch-up is over: the first poll pass drained the corpus, and every catch-up operation is stated per record from here")
+}
+
+// stateBootRewindSummary states, once at the catch-up edge, HOW MUCH OF THE
+// CORPUS THE BOOT REWIND ACTUALLY RE-READ.
+//
+// The per-file decision is verbose on both arms — a boot walk makes it once per
+// transcript, which on the owner's machine is over a thousand lines — so nothing
+// at normal verbosity would otherwise say whether the walk re-read two files or
+// two thousand. That number is the whole cost of the walk, and it is the first
+// thing to look at when a restart is slow. A process that rewound nothing and
+// skipped nothing states nothing, exactly as every other catch-up summary does.
+func (s *sidecar) stateBootRewindSummary() {
+	if s.rewindWalked == 0 && s.rewindSkipped == 0 {
+		return
+	}
+	s.log.With(logging.Context{
+		Operation: "boot-rewind-summary", Repeat: logging.Repeat(s.rewindWalked + s.rewindSkipped),
+	}).Log(
+		"the boot rewind scanned %d transcript(s) that could still be carrying a turn in flight; %d more were at rest — last grown beyond the %s agent-silence window with the cursor already at their end — and were watched from their cursor without a backward scan or a re-read",
+		s.rewindWalked, s.rewindSkipped, s.tracker.Windows().AgentSilence)
 }
 
 // summarizeWithheldResidue states ONE INFO record per file for the residue the
