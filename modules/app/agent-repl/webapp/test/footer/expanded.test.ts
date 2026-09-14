@@ -87,6 +87,16 @@ function rateLimited(): FooterActivity {
   });
 }
 
+/** The same activity, with the overage window the vendor reported too. */
+function rateLimitedWithOverage(): FooterActivity {
+  return activity("rateLimited", {
+    session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
+    weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
+    overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
+    sample: { outcome: { case: "serviceUnavailable", value: {} } },
+  });
+}
+
 describe("drawFooterUsageRows: what the strip could not fit", () => {
   // THE SECOND WINDOW. The strip cuts it off at 1280 by design; the sheet is
   // where a reader gets to see it.
@@ -118,6 +128,35 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
     expect(
       panel.querySelector("[data-usage-allowance]")?.getAttribute("data-usage-allowance"),
     ).toBe("session");
+  });
+
+  // THE OVERAGE WINDOW. It has no room on the strip at all, so the sheet is
+  // its only drawn home — one more allowance row of exactly the kind the
+  // other two windows already draw.
+  it("carries the overage window the strip has no room for", () => {
+    const panel = drawTokensPanelWith(rateLimitedWithOverage());
+    expect(
+      panel.querySelector('[data-usage-allowance="overage"]')?.textContent,
+    ).toContain("overage 91%");
+  });
+
+  // AN UNSET OVERAGE DRAWS NOTHING EXTRA. Most accounts never have an overage
+  // window, and a row for one nobody reported would state a figure the vendor
+  // never gave.
+  it("draws no overage row when the vendor reported no overage window", () => {
+    const panel = drawTokensPanelWith(rateLimited());
+    expect(panel.querySelector('[data-usage-allowance="overage"]')).toBeNull();
+  });
+
+  it("draws the same allowance rows with and without an overage window, bar the overage one", () => {
+    const without = drawTokensPanelWith(rateLimited());
+    const with_ = drawTokensPanelWith(rateLimitedWithOverage());
+    const labels = (panel: HTMLElement) =>
+      [...panel.querySelectorAll("[data-usage-allowance]")].map((row) =>
+        row.getAttribute("data-usage-allowance"),
+      );
+    expect(labels(without)).toEqual(["session", "weekly"]);
+    expect(labels(with_)).toEqual(["session", "overage", "weekly"]);
   });
 
   it("carries the context-budget sentence whole", () => {
