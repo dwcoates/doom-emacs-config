@@ -625,9 +625,37 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "len(f.log) > f.retention"})
 		f.log = f.log[len(f.log)-f.retention:]
 	}
+	// THE DELIVERY BOUND GOVERNS THE PUSH, NOT JUST THE PAGE. A separation
+	// that cut context withholds every row that sorts ABOVE it: a page walk
+	// clamps to it (see pages.go), and the live push must too. Without this a
+	// row first drawn AFTER the divider yet sorting above it — a file-plane
+	// history row the sidecar forwards late — would be pushed to every tail,
+	// which appends by arrival and so lands it BELOW the divider on screen,
+	// where nothing retracts it. It stays stored (order, rank, log) so a later
+	// walk still orders it correctly; it is only kept off the wire.
+	if r.pushWithheldByBound(s, f, id) {
+		return
+	}
 	for sub := range f.subs {
 		sub.enqueue(snapshot)
 	}
+}
+
+// pushWithheldByBound reports whether ID sorts above the feed's newest
+// context-cutting separation and must therefore be kept off the live push.
+// The separation itself, and every row below it, always pushes.
+func (r *resolver) pushWithheldByBound(s *wsState, f *feedState, id string) bool {
+	bi := boundIndex(f, f.order)
+	if bi < 0 {
+		return false
+	}
+	if !f.rank[id].before(f.rank[f.order[bi]]) {
+		return false
+	}
+	r.logger(s.id).Info("daemon.feed.push_withheld",
+		"a row sorting above the newest context-cut divider was stored but kept off the live push",
+		dlog.Context{"feed": f.key, "row": id, "bound": f.order[bi]})
+	return true
 }
 
 // retire removes a row from a feed. A retired row stops appearing in pages;
