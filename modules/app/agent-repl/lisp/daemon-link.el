@@ -68,6 +68,7 @@
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 (declare-function agent-repl-connect-failure-message "connect" (detail))
 (declare-function agent-repl-rpc-watch-daemon "rpc" (conn on-push on-close &optional on-open))
+(declare-function agent-repl-mutation-progress-handle "mutation-progress" (progress))
 
 ;;;; ---- Customization ----
 
@@ -546,6 +547,10 @@ of a STANDING stream, which the contract calls a transport failure; and
       (:shutdown-announced (agent-repl-link--shutdown-announced conn value))
       (:drain-scheduled (agent-repl-link--drain-scheduled value))
       (:drain-cancelled (agent-repl-link--drain-cancelled))
+      ;; Workspace-mutation progress rides this daemon-level stream because it
+      ;; PRECEDES the workspace's existence; the correlation seat matches it to
+      ;; the command that minted its op id.
+      (:mutation-progress (agent-repl-mutation-progress-handle value))
       (_ (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.unknown-daemon-push arm=%S push=%S"
                             arm push)))))
 
