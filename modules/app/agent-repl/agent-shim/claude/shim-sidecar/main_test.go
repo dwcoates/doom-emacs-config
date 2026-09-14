@@ -700,3 +700,66 @@ func TestOpenLoggerWritesNothingToTheTerminal(t *testing.T) {
 		t.Fatalf("the record did not reach the durable sink (%d bytes, err=%v)", len(durable), err)
 	}
 }
+
+// readDurable reads the records one test's logger wrote to its durable sink.
+func readDurable(t *testing.T, logPath string) []logRecord {
+	t.Helper()
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read the durable sink: %v", err)
+	}
+	return parseLogLines(t, strings.Split(string(raw), "\n"))
+}
+
+// A DIRECTORY RE-REGISTERED UNDER A NEW WORKSPACE REF IS AN ORDINARY EVENT, and
+// the two ids are the only thing that joins the records written before it to
+// the records written after. It is stated once, at info — never at warn, which
+// is reserved for the directory the roster genuinely no longer holds.
+func TestRefReplacedIsStatedOnceAtInfo(t *testing.T) {
+	// Arrange.
+	base := t.TempDir()
+	logPath := filepath.Join(base, "sidecar.log")
+	logf, closeLog, err := openLoggerTo(&bytes.Buffer{}, filepath.Join(base, "store.sock"), base, logPath)
+	if err != nil {
+		t.Fatalf("openLoggerTo: %v", err)
+	}
+
+	// Act.
+	refReplacedObserver(logf)("/work/repo", "af24557b1ddd4b9c", "54578ede3d834dea")
+	closeLog()
+
+	// Assert.
+	record := requireOnceIn(t, readDurable(t, logPath), "workspace-ref-replaced", "info")
+	for _, want := range []string{"/work/repo", "af24557b1ddd4b9c", "54578ede3d834dea"} {
+		if !strings.Contains(record.Message, want) {
+			t.Fatalf("the replacement record does not name %q: %q", want, record.Message)
+		}
+	}
+}
+
+// THE REPLACEMENT RECORD IS GLOBAL, NOT FILE-SCOPED. A record carrying
+// `workspace_dir` is QUEUED FOR FORWARDING, and this one is written from inside
+// the forwarder — including inside the bounded drain at Close, where enqueuing
+// another forward panics the process.
+func TestRefReplacedIsGlobalSoItIsNeverQueuedForForwarding(t *testing.T) {
+	// Arrange.
+	base := t.TempDir()
+	logPath := filepath.Join(base, "sidecar.log")
+	logf, closeLog, err := openLoggerTo(&bytes.Buffer{}, filepath.Join(base, "store.sock"), base, logPath)
+	if err != nil {
+		t.Fatalf("openLoggerTo: %v", err)
+	}
+
+	// Act.
+	refReplacedObserver(logf)("/work/repo", "af24557b1ddd4b9c", "54578ede3d834dea")
+	closeLog()
+
+	// Assert.
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read the durable sink: %v", err)
+	}
+	if strings.Contains(string(raw), `"workspace_dir"`) {
+		t.Fatalf("the replacement record is file-scoped and would be forwarded: %s", raw)
+	}
+}

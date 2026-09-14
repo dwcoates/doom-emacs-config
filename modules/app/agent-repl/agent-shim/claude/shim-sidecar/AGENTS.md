@@ -925,10 +925,49 @@ foreground harnesses may use `logging.NewAtLevel`.
 - FILE-SCOPED DIAGNOSTICS GO THROUGH `agentrepl.v1.AgentRepl.ClientLog` with
   the `sidecar` runtime arm, the sidecar's timestamp and verbosity class, its
   PID and Claude session in context, and the complete daemon-minted workspace
-  ref read from `WatchWorkspaceRoster`. The most recently used ref is cached at
-  constant size; the daemon address is still re-read from
+  ref read from `WatchWorkspaceRoster`. The daemon address is re-read from
   `<state-dir>/daemon.addr` for every record so handover changes the destination
   without a sidecar restart.
+- A DIRECTORY'S WORKSPACE REF IS ONLY EVER USED WHILE THE ROSTER STILL HOLDS IT.
+  Nothing pushes a roster change into `internal/daemonclient`, and the roster
+  moves under it: a workspace is forgotten and the SAME directory is registered
+  again under a NEW daemon-minted id. Realtest 9, sweep rt-run39, is what that
+  cost — one cached `(address, dir)` slot, re-read only when the cached DIR
+  differed, so a directory re-registered as `54578ede3d834dea` kept forwarding
+  against the forgotten `af24557b1ddd4b9c` and had every one of its file-scoped
+  diagnostics refused and written unattributed. Four rules hold the invariant,
+  and none of them is a subscription:
+  - THE CACHE IS A MAP KEYED PER NORMALIZED DIRECTORY. One slot also meant two
+    directories forwarding in turn evicted each other and re-read the roster for
+    every single record.
+  - EVERY ENTRY CARRIES THE INSTANT ITS ROSTER WAS DELIVERED, and an entry older
+    than `workspaceRefFreshness` is re-read before it is used again. The bound is
+    the sidecar's own poll interval: a ref may be at most one poll pass behind
+    the roster, the same granularity everything else about a pickup is read at.
+  - A DIFFERENT DAEMON ADDRESS DROPS THE WHOLE MAP. Ids are minted per daemon and
+    mean nothing across a handover.
+  - A `no longer registered` REFUSAL IS THE ONLY PUSH THIS CACHE WILL EVER GET,
+    so `Forward` acts on it: the directory's entry is expired, the roster is read
+    ONCE more, and the record is sent again with the ref the roster holds now,
+    before anything is reported `forward_undelivered`. One re-read, not a ladder
+    — a refusal that survives the fresh ref is a directory the roster genuinely
+    no longer holds, which is the `ErrForwardWorkspaceUnresolvable` path below,
+    unchanged.
+
+  A replacement is stated ONCE, at `info`, as `workspace-ref-replaced` carrying
+  the directory and both ids. It is GLOBAL rather than file-scoped on purpose: a
+  record carrying `workspace_dir` is queued for forwarding, and this one is
+  written from inside the forwarder, including inside the bounded drain at Close
+  where enqueuing another forward panics. Nothing about an ordinary
+  re-registration is a `warn`.
+- THE STORE ROWS NEVER CARRIED THE MINTED ID, and that is why the fix above is
+  the whole fix. `tail.Context.WorkspaceID` — the `workspace_id` on every
+  `tail-pickup`, and what `handler.attribute` copies onto a conversion — is the
+  SHARED DIRECTORY DIGEST, `md5hex(clean(abs(dir)))[:8]`, derived once in
+  `internal/discover.ResolveWorkspace` from the transcript's authoritative `cwd`.
+  It is a function of the PATH, so a directory registered again under a new
+  daemon id keeps the identical digest, and `store.v1` carries no workspace field
+  at all. The daemon-minted ref is a ClientLog DESTINATION and nothing else.
 - GENUINELY GLOBAL SERVICE RECORDS stay in the global rotating sink only. A
   forwarding failure writes one global record per daemon address and outage
   window and never fails the file-plane operation that produced the diagnostic.
