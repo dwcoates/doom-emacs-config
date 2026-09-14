@@ -185,6 +185,9 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     ["interrupted", "byUser", "by user"],
     ["interrupted", "hostShutdown", "host shutdown"],
     ["blocked", "queryDied", "query died"],
+    // The running step of a thinking turn reads "working", never "thinking
+    // · thinking".
+    ["thinking", "thinking", "working"],
   ])("spells %s/%s as '%s'", (statusCase, subCase, expected) => {
     expect(subStatusWords(statusCase, subCase)).toBe(expected);
   });

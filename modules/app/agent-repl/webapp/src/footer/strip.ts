@@ -1246,11 +1246,16 @@ export function statusWords(armCase: string): string {
  * STATUS in this same strip — a close that cannot proceed would read exactly
  * like a session the vendor has blocked. The message's own name
  * (`FooterSubStatusCloseBlocked`) is what the schema calls it, so the cell
- * draws that. This is deliberately a single declared exception rather than a
- * per-arm label table: every other arm's name is already its label.
+ * draws that.
+ *
+ * The RUNNING step of a thinking turn is spelled `thinking` in the schema, but
+ * "thinking · thinking" says the status twice; the running turn reads as
+ * "thinking · working" instead. These are declared exceptions, not a per-arm
+ * label table: every other arm's name is already its label.
  */
 export function subStatusWords(statusCase: string, subCase: string): string {
   if (statusCase === "closing" && subCase === "blocked") return "close blocked";
+  if (statusCase === "thinking" && subCase === "thinking") return "working";
   return statusWords(subCase);
 }
 
