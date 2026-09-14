@@ -22,6 +22,7 @@ import {
   proseHtml,
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
+import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -480,5 +481,133 @@ describe("the wrapped tree a settled response carries", () => {
     // Assert — the rails of 1.1's ancestors and of 1.1 itself, so the wrap
     // does not sever 1.1 from the 1.1.1 beneath it.
     expect(prefixes.some((text) => text.startsWith("│   │"))).toBe(true);
+  });
+});
+
+describe("the record of the drawn response", () => {
+  it("records a row's FIRST draw at info, the bubble appearing being the action", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "arriving" } } } }),
+      rowContext(),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-response");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("records an intermediate re-push at debug, the daemon re-pushing per fragment", async () => {
+    // Arrange — a page booted at `log_level=debug`, which is the only level
+    // that admits the record this test is about.
+    const capture = captureLogRecords("debug");
+    const previous = document.createElement("div");
+    // Act
+    drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "arriving still" } } } }),
+      rowContext(previous),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-response");
+    expect(record.level.case).toBe("debug");
+  });
+
+  it("records the SETTLED draw of an already-drawn row at info, the answer standing whole", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const previous = document.createElement("div");
+    // Act
+    drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
+      rowContext(previous),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-response");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("records the SETTLED draw of a cut-short row at info, a broken bubble being terminal too", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const previous = document.createElement("div");
+    // Act
+    drawFeedResponse(
+      response({ result: { case: "error", value: { prose: { markdown: "half an ans" } } } }),
+      rowContext(previous),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-response");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("carries the prose's character count, which is what ties a draw to a known text", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "Here is what I found." } } } }),
+      rowContext(),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-response");
+    expect(record.context).toMatchObject({ characters: 21 });
+  });
+
+  it("carries the prose block count, which the daemon's fold makes exactly one", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "one block" } } } }),
+      rowContext(),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-response");
+    expect(record.context).toMatchObject({ blocks: 1 });
+  });
+
+  it("carries the row the draw is attributed to, so a reader can follow one bubble", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      rowContext(),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-response");
+    expect(record.context).toMatchObject({ row: "row-1" });
+  });
+
+  it("states the arriving prose's arrived length, not the length the type-out has shown", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act — nothing is revealed on the first frame, and the record is about
+    // what ARRIVED.
+    drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "0123456789" } } } }),
+      rowContext(),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-response");
+    expect(record.context).toMatchObject({ characters: 10 });
+  });
+
+  it("records nothing for a row whose arm this build cannot read, since it drew none", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    let thrown: unknown;
+    try {
+      drawFeedResponse(response({}), rowContext());
+    } catch (err) {
+      thrown = err;
+    }
+    // Assert
+    expect(thrown).toBeInstanceOf(MalformedView);
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.some((rec) => rec.operation === "feed.draw-response")).toBe(false);
   });
 });
