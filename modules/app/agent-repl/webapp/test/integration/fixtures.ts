@@ -1326,6 +1326,7 @@ export const FOOTER_ACTIVITY_KINDS: Record<string, object> = {
   questionLead: { text: "How far should the port go?" },
   blockedOnUser: { detail: "answer the permission card" },
   coldGateCost: { text: "184k tokens uncached" },
+  compaction: { text: "compacting · summarizing 412 messages" },
   interrupting: { text: "stopping 3 agents" },
   mergingCommit: { sha: "abc1234", subject: "port the transport" },
   authenticating: { line: "opening the login terminal" },
@@ -1336,7 +1337,15 @@ export const FOOTER_ACTIVITY_KINDS: Record<string, object> = {
 /** Which activity kinds each status arm legally carries. */
 export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
   idle: ["notification", "contextBudget", "rateLimited"],
-  thinking: ["hook", "retrying", "contextInjected", "notification", "contextBudget", "rateLimited"],
+  thinking: [
+    "hook",
+    "retrying",
+    "contextInjected",
+    "compaction",
+    "notification",
+    "contextBudget",
+    "rateLimited",
+  ],
   waiting: [
     "wakeup",
     "gatedCall",

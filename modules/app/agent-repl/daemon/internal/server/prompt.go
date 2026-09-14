@@ -33,7 +33,7 @@ func (s *server) SubmitPrompt(
 		return nil, fail(s.log, rpc, err)
 	}
 	if r != nil {
-		return answer(resp, s.refuse(s.log, rpc, resp, *r))
+		return answer(resp, s.refuse(s.log, rpc, resp, submitRefusal(*r)))
 	}
 
 	// The FeedId is decoded HERE, before the handler is called: a value that
@@ -43,18 +43,18 @@ func (s *server) SubmitPrompt(
 	if req.Msg.Feed != nil {
 		ref, decodeErr := feedid.Decode(req.Msg.GetFeed())
 		if decodeErr != nil {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
+			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
 				Arm: "feed_undecodable",
 				Reason: fmt.Sprintf("the feed id %q does not decode: %v",
 					req.Msg.GetFeed().GetValue(), decodeErr),
-			})))
+			}))))
 		}
 		if ref.WS != subject.Record.ID {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
+			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
 				Arm: "feed_not_in_workspace",
 				Reason: fmt.Sprintf("the feed id %q belongs to workspace %q",
 					req.Msg.GetFeed().GetValue(), ref.WS),
-			})))
+			}))))
 		}
 		target = &ref
 	}
@@ -63,7 +63,7 @@ func (s *server) SubmitPrompt(
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, bubbleRefused(refused)))
+			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(bubbleRefused(refused))))
 		}
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -136,10 +136,10 @@ func (s *server) encodeSubmitOutcome(
 		return nil
 	default:
 		if arm := outcome.Disposition.RefusedArm; arm != "" {
-			return s.refuse(log, "SubmitPrompt", resp, s.fill(refusal{
+			return s.refuse(log, "SubmitPrompt", resp, submitRefusal(s.fill(refusal{
 				Arm:    arm,
 				Reason: "the delivery path refused the submission",
-			}))
+			})))
 		}
 		log.Debug("daemon.server.submit_prompt", "answered the minted turn",
 			dlog.Context{"turn": string(outcome.Turn), "parked": outcome.Disposition.Parked()})
@@ -192,6 +192,27 @@ func (s *server) RequestCommandSupport(
 // refOf renders a registry record as the ref clients echo back.
 func refOf(record wsm.Workspace) *workspacev1.WorkspaceRef {
 	return &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir}
+}
+
+// opSubmit is the operation EVERY typed refusal of SubmitPrompt is filed
+// under. It is the prompt handler's own op, deliberately: a refused submission
+// is part of the prompt's account and belongs beside the delivery path's
+// records rather than under a name of its own.
+const opSubmit = "daemon.prompthandler.submit"
+
+// submitRefusal marks one SubmitPrompt refusal as the RECORDED ANSWER it is.
+//
+// GROUNDED (owner's report, 2026-09-14): three prompts were refused inside
+// thirteen seconds and the daemon wrote NO record of any of them — the refusal
+// path logs at DEBUG, and production runs at INFO, so the whole episode existed
+// only in the editor's log. A refusal is an answer the daemon gave; an answer
+// nothing records is an invisible action, which is a logging defect. Every arm
+// is now one INFO record naming the arm, exactly as AdoptWebWorkspace's
+// ordinary refusal has been since it was ruled one.
+func submitRefusal(r refusal) refusal {
+	r.Info = true
+	r.Op = opSubmit
+	return r
 }
 
 // The bubble-addressed submit refusals the SHIM makes, and the kind each one

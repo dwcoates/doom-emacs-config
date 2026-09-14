@@ -287,6 +287,7 @@ describe("drawFooterStatusActivity", () => {
     ["waiting", "coldGate", "coldGateCost", { text: "182k to re-read" }, "182k to re-read"],
     ["waiting", "interrupting", "interrupting", { text: "stopping the turn…" }, "stopping the turn…"],
     ["thinking", "thinking", "hook", { name: "protect-master" }, "protect-master"],
+    ["thinking", "compacting", "compaction", { text: "compacting · 412 of 900 messages" }, "compacting · 412 of 900 messages"],
     ["thinking", "thinking", "contextInjected", { text: "webapp/CLAUDE.md" }, "webapp/CLAUDE.md"],
     ["blocked", "auth", "authenticating", { line: "open the login" }, "open the login"],
     ["blocked", "queryDied", "queryDied", { text: "the next prompt restarts it" }, "the next prompt restarts it"],

@@ -1238,17 +1238,34 @@ workspace's dwell clear another composer's badge."
 (defvar agent-repl-test-input--debug nil
   "Messages the stubbed `agent-repl--log' (debug) rung received, newest first.")
 
+(defvar agent-repl-test-input--warn nil
+  "Messages the stubbed `agent-repl--warn' rung received, newest first.")
+
+(defvar agent-repl-test-input--error nil
+  "Messages the stubbed `agent-repl--error' rung received, newest first.")
+
 (defmacro agent-repl-test-input--capturing-rungs (&rest body)
-  "Run BODY with the `info' and debug logging rungs captured separately."
+  "Run BODY with each logging rung captured separately.
+The `error' and `warn' rungs are captured alongside `info' and debug
+because a refusal the composer HAS a treatment for must be recorded at
+WARN and must never reach the `unknown-error-arm' ERROR branch."
   (declare (indent 0))
   `(let ((agent-repl-test-input--info nil)
-         (agent-repl-test-input--debug nil))
+         (agent-repl-test-input--debug nil)
+         (agent-repl-test-input--warn nil)
+         (agent-repl-test-input--error nil))
      (cl-letf (((symbol-function 'agent-repl--info)
                 (lambda (_ws fmt &rest args)
                   (push (apply #'format fmt args) agent-repl-test-input--info)))
                ((symbol-function 'agent-repl--log)
                 (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--debug))))
+                  (push (apply #'format fmt args) agent-repl-test-input--debug)))
+               ((symbol-function 'agent-repl--warn)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-input--warn)))
+               ((symbol-function 'agent-repl--error)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-input--error))))
        ,@body)))
 
 (defun agent-repl-test-input--rung-has-p (messages prefix)
@@ -1300,6 +1317,196 @@ workspace's dwell clear another composer's badge."
       ;; Assert.
       (should-not (agent-repl-test-input--rung-has-p
                    agent-repl-test-input--debug "elisp.input.send-empty ws=")))))
+
+;;;; ---- The cold gate, and the session that is simply absent ----
+
+;; Owner's report, 2026-09-14: three prompts to a workspace parked at its cold
+;; gate were answered `no_session' and fell through this composer's catch-all,
+;; which recorded `elisp.input.unknown-error-arm' at ERROR and echoed
+;; "submission refused (:no-session)".  Both arms are ANSWERS with a place to
+;; go -- the panel, and the daemon's own bring-up -- so both are handled here,
+;; at WARN, without queueing and without costing the user their text.
+
+(defconst agent-repl-test-input--cold-gate-detail
+  "context cold -- 412k tokens would be re-read"
+  "A cold gate's own account, as the daemon states it.")
+
+(defun agent-repl-test-input--cold-gate-answer (detail)
+  "Return a scripted `cold_gate' refusal carrying DETAIL."
+  (list :response (list :arm :error
+                        :value (list :reason (list :arm :cold-gate
+                                                   :value (list :detail detail))))))
+
+(defconst agent-repl-test-input--no-session-answer
+  '(:response (:arm :error :value (:reason (:arm :no-session :value nil))))
+  "A scripted `no_session' refusal: a workspace with no session at all.")
+
+(ert-deftest agent-repl-input-cold-gate-flashes-the-panel-sentence ()
+  "The gate is answered in the panel, so the flash names the panel."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          (agent-repl-test-input--cold-gate-answer
+           agent-repl-test-input--cold-gate-detail))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (buffer-local-value 'agent-repl-input-notice
+                                       agent-repl-test-input--buffer)
+                   "cold gate: answer it in the panel (clear / compact / resume)"))))
+
+(ert-deftest agent-repl-input-cold-gate-echoes-the-daemons-detail ()
+  "The gate's own account rides into the echo area verbatim."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          (agent-repl-test-input--cold-gate-answer
+           agent-repl-test-input--cold-gate-detail))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (seq-some (lambda (text)
+                        (string-match-p
+                         (regexp-quote
+                          (format "(%s)" agent-repl-test-input--cold-gate-detail))
+                         text))
+                      agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-cold-gate-omits-an-empty-detail ()
+  "An empty detail leaves the flash sentence alone, with no dangling parens."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer (agent-repl-test-input--cold-gate-answer ""))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not (seq-some (lambda (text) (string-match-p "()" text))
+                          agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-cold-gate-records-at-warn ()
+  "A standing the user answers is a WARN, under its own operation token."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          (agent-repl-test-input--cold-gate-answer
+           agent-repl-test-input--cold-gate-detail))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      ;; Assert
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--warn
+               "elisp.input.refused-cold-gate ws=ws-one")))))
+
+(ert-deftest agent-repl-input-cold-gate-never-reaches-the-unknown-error-arm ()
+  "The arm is HANDLED, so the catch-all's ERROR record must not fire."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          (agent-repl-test-input--cold-gate-answer
+           agent-repl-test-input--cold-gate-detail))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      ;; Assert
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--error
+                   "elisp.input.unknown-error-arm")))))
+
+(ert-deftest agent-repl-input-cold-gate-does-not-queue-the-prompt ()
+  "A re-drive would meet the same gate, so nothing is held."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          (agent-repl-test-input--cold-gate-answer
+           agent-repl-test-input--cold-gate-detail))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-cold-gate-keeps-the-text ()
+  "Nothing landed, so the user keeps every word they wrote."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          (agent-repl-test-input--cold-gate-answer
+           agent-repl-test-input--cold-gate-detail))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+
+(ert-deftest agent-repl-input-no-session-flashes-the-bring-up-sentence ()
+  "The daemon owns the bring-up, so the flash says so rather than refusing."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer agent-repl-test-input--no-session-answer)
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (buffer-local-value 'agent-repl-input-notice
+                                       agent-repl-test-input--buffer)
+                   "no session; the daemon is starting it"))))
+
+(ert-deftest agent-repl-input-no-session-echoes-the-sentence-plainly ()
+  "The echo says the same thing the flash does, with nothing appended."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer agent-repl-test-input--no-session-answer)
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (member "agent-repl: no session; the daemon is starting it"
+                    agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-no-session-records-at-warn ()
+  "A session the daemon is bringing up is a WARN, under its own token."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer agent-repl-test-input--no-session-answer)
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      ;; Assert
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--warn
+               "elisp.input.refused-no-session ws=ws-one")))))
+
+(ert-deftest agent-repl-input-no-session-never-reaches-the-unknown-error-arm ()
+  "The owner's report was exactly this ERROR record; it must not fire."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer agent-repl-test-input--no-session-answer)
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      ;; Assert
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--error
+                   "elisp.input.unknown-error-arm")))))
+
+(ert-deftest agent-repl-input-no-session-does-not-queue-the-prompt ()
+  "It is an ANSWER, not an outage, so the hold queue is not involved."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer agent-repl-test-input--no-session-answer)
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not agent-repl-test-input--queued)))
 
 (provide 'test-input)
 

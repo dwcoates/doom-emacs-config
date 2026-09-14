@@ -388,11 +388,20 @@ type wsState struct {
 	sawActivity bool
 	// compacting reports a vendor-initiated auto-compaction in flight.
 	compacting bool
+	// compaction is the compaction's own progress line, from whichever
+	// producer is compacting — the vendor's auto-compaction or the cold gate's
+	// answered remediation. Nil when nothing is compacting.
+	compaction *standing
 
 	// interrupting is the registered-interrupt flag SetInterrupting installs.
 	interrupting bool
 	// coldGate is the standing cold-context gate.
 	coldGate ColdGate
+	// coldAnswer is the gate answer in flight, nil when none is being spent.
+	// It OUTRANKS coldGate: the gate stays standing until the re-open lands,
+	// and drawing the question over the answer is what made the answer look
+	// like it had done nothing.
+	coldAnswer *ColdGateAnswer
 	// permissions are the open consent asks, by permission id.
 	permissions map[string]string
 	// permissionOrder is the order they were opened in.
