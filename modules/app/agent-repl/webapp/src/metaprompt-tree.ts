@@ -39,7 +39,7 @@
  * next.
  */
 
-import { escapeHtml } from "./highlight.js";
+import { escapeHtml, highlightCode } from "./highlight.js";
 
 /**
  * The column limit used when the live width cannot be measured (a detached
@@ -220,17 +220,44 @@ export function findTreeRegion(text: string): TreeRegion | null {
     }
   }
   if (start === -1) return null;
-  // Extend across interior blanks; the first non-blank, non-core line (prose
-  // or a fence) ends the region. `end` tracks the last line kept.
+  // Extend across interior blanks; the first non-blank, non-core line ends the
+  // region — EXCEPT an interior fenced block, which the metaprompt allows
+  // attached beneath a branch. A fence delimiter is not itself a tree-core line,
+  // so a fenced code block nested under a branch (and every branch after it) must
+  // be spanned rather than treated as a hard boundary. The region absorbs such a
+  // block and RESUMES tree detection past its close. A fence still ends the
+  // region when it is NOT followed by more tree-core lines: a genuinely trailing
+  // fenced block after the tree stays in `after`. `end` tracks the last line kept.
   let end = start;
   let coreCount = 0;
-  for (let i = start; i < n; i++) {
+  let i = start;
+  while (i < n) {
     if (core[i]) {
       end = i;
       coreCount++;
+      i++;
       continue;
     }
-    if (lines[i].trim() === "") continue;
+    if (lines[i].trim() === "") {
+      i++;
+      continue;
+    }
+    if (isFenceDelimiter(lines[i])) {
+      // Find the matching close (or the end of text for an unterminated fence).
+      let close = i + 1;
+      while (close < n && !isFenceDelimiter(lines[close])) close++;
+      // Peek past the close for the next non-blank line: only a tree-core line
+      // there makes this an INTERIOR block worth spanning.
+      let peek = close + 1;
+      while (peek < n && lines[peek].trim() === "") peek++;
+      if (close < n && peek < n && core[peek]) {
+        end = close;
+        i = close + 1;
+        continue;
+      }
+      // Trailing or unterminated fenced block: it is `after`, not the tree.
+      break;
+    }
     break;
   }
   // A lone stray connector buried in prose is not a tree.
@@ -934,30 +961,133 @@ export function renderTreeHtml(
   onIssue?: TreeIssue,
 ): string {
   const cols = width > 0 ? width : DEFAULT_TREE_COLS;
-  const sourceLines = text.split("\n");
-  let rendered: RenderLine[];
-  try {
-    const formatted = formatTree(sourceLines, cols);
-    rendered = formatted.lines;
-    if (onIssue && formatted.overflows.length > 0) {
-      onIssue("a metaprompt tree holds words wider than the column limit; served wider, never truncated", {
-        operation: "feed.cards.response.tree-overflow",
-        width: cols,
-        overflows: formatted.overflows.length,
-      });
+  const segments = splitTreeSegments(text.split("\n"));
+  const parts: string[] = [];
+  let overflowCount = 0;
+  for (const segment of segments) {
+    if (segment.kind === "fence") {
+      // An interior fenced block is opaque: verbatim, escaped, NOT run through
+      // the inline pass or the tree wrapper — no rails, no hanging indent.
+      parts.push(renderFenceBlock(segment));
+      continue;
     }
-  } catch (err) {
-    if (!(err instanceof TreeOverflowError)) throw err;
-    if (onIssue) {
-      onIssue("a metaprompt tree could not be wrapped to the column limit and is rendered as it arrived", {
-        operation: "feed.cards.response.tree-unwrappable",
-        width: cols,
-        error: err.message,
-      });
+    let rendered: RenderLine[];
+    try {
+      const formatted = formatTree(segment.lines, cols);
+      rendered = formatted.lines;
+      overflowCount += formatted.overflows.length;
+    } catch (err) {
+      if (!(err instanceof TreeOverflowError)) throw err;
+      if (onIssue) {
+        onIssue("a metaprompt tree could not be wrapped to the column limit and is rendered as it arrived", {
+          operation: "feed.cards.response.tree-unwrappable",
+          width: cols,
+          error: err.message,
+        });
+      }
+      rendered = segment.lines.map((line) => ({ prefix: "", body: line, raw: true }));
     }
-    rendered = sourceLines.map((line) => ({ prefix: "", body: line, raw: true }));
+    parts.push(rendered.map((l) => renderLine(l, inline)).join(""));
   }
-  return rendered.map((l) => renderLine(l, inline)).join("");
+  if (onIssue && overflowCount > 0) {
+    onIssue("a metaprompt tree holds words wider than the column limit; served wider, never truncated", {
+      operation: "feed.cards.response.tree-overflow",
+      width: cols,
+      overflows: overflowCount,
+    });
+  }
+  return parts.join("");
+}
+
+/** A run of tree lines, wrapped and rendered as tree lines. */
+interface TreeLineSegment {
+  kind: "tree";
+  lines: string[];
+}
+
+/** An interior fenced code block, rendered opaquely as a code block. */
+interface FenceSegment {
+  kind: "fence";
+  /** The language tag after the opening ``` (may be ""). */
+  lang: string;
+  /** The dedented code lines between the fence delimiters. */
+  code: string[];
+}
+
+type TreeSegment = TreeLineSegment | FenceSegment;
+
+/**
+ * Split a tree region's lines into runs of tree lines and interior fenced
+ * blocks, in order. The fence delimiters themselves are consumed; a fence's
+ * body is dedented by the opening delimiter's own indentation so the code reads
+ * as a plain block rather than carrying the branch's tree nesting. An
+ * unterminated fence takes every remaining line as its body.
+ */
+function splitTreeSegments(lines: string[]): TreeSegment[] {
+  const segments: TreeSegment[] = [];
+  let treeLines: string[] = [];
+  const flushTree = (): void => {
+    if (treeLines.length > 0) {
+      segments.push({ kind: "tree", lines: treeLines });
+      treeLines = [];
+    }
+  };
+  let i = 0;
+  const n = lines.length;
+  while (i < n) {
+    if (isFenceDelimiter(lines[i])) {
+      flushTree();
+      const indent = leadingSpaces(lines[i]);
+      const lang = fenceLanguage(lines[i]);
+      const code: string[] = [];
+      let j = i + 1;
+      while (j < n && !isFenceDelimiter(lines[j])) {
+        code.push(dedent(lines[j], indent));
+        j++;
+      }
+      segments.push({ kind: "fence", lang, code });
+      // Skip the closing delimiter too, when there is one.
+      i = j < n ? j + 1 : j;
+      continue;
+    }
+    treeLines.push(lines[i]);
+    i++;
+  }
+  flushTree();
+  return segments;
+}
+
+/** The count of leading space characters on LINE. */
+function leadingSpaces(line: string): number {
+  let i = 0;
+  while (line.charCodeAt(i) === CH_SPACE) i++;
+  return i;
+}
+
+/** The language tag following the ``` of a fence delimiter, or "". */
+function fenceLanguage(line: string): string {
+  const rest = line.slice(leadingSpaces(line) + 3);
+  return rest.trim().split(/\s+/)[0] ?? "";
+}
+
+/** Strip up to WIDTH leading spaces from LINE. */
+function dedent(line: string, width: number): string {
+  let i = 0;
+  while (i < width && line.charCodeAt(i) === CH_SPACE) i++;
+  return line.slice(i);
+}
+
+/**
+ * Render an interior fenced block as an opaque code block: the body escaped (or
+ * syntax-highlighted for a known language, which also escapes), never run
+ * through the markdown/inline pass, so tokens like `__name__` and `->` stay
+ * literal. It carries the same `md-code` shape a markdown fence renders as.
+ */
+function renderFenceBlock(segment: FenceSegment): string {
+  const body = segment.code.join("\n");
+  const html = highlightCode(body, segment.lang);
+  const langClass = segment.lang === "" ? "" : ` lang-${escapeHtml(segment.lang)}`;
+  return `<pre class="md-code"><code class="hljs${langClass}">${html}</code></pre>`;
 }
 
 function renderLine(l: RenderLine, inline: (escaped: string) => string): string {
