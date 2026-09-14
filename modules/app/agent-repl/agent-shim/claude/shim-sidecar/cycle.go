@@ -304,6 +304,10 @@ type sidecar struct {
 	// summaries were already stated.
 	drainedPass  bool
 	catchupEnded bool
+	// pass is the poll walk currently in progress, spread across as many ticks
+	// as its slice bound needs. Nil between passes: the next tick opens a fresh
+	// one over whatever is watched then.
+	pass *pollPass
 	// suspensionStated remembers that the WARNING opening this outage has been
 	// written. THE OUTAGE IS STATED ONCE, and a process that starts with no
 	// store is in an outage exactly like one whose store died mid-run — so the
@@ -324,6 +328,33 @@ type sidecar struct {
 	jitter func(time.Duration) time.Duration
 	// bootTimeMs is the machine boot time, injectable for the boot sweep's test.
 	bootTimeMs func() int64
+}
+
+// pollPass is ONE walk over every watcher, which on a boot walk is minutes of
+// reading and therefore cannot be one tick's work.
+//
+// WHY A PASS IS SLICED AT ALL. `pollAll` used to walk the whole watched set to
+// completion inside one tick. During a restart's corpus walk that tick lasted
+// minutes, and nothing else on the poll timer ran while it did: not the change
+// probe, so no new transcript was discovered, and not the first poll of a file
+// that had been discovered, so nothing new was read either. Realtest 9, sweep
+// rt-run37: a fresh workspace's turn concluded at 23:46:41, inside a boot walk
+// that ran from 23:44:21 to 23:46:45, and its answer rows reached the store at
+// ~23:47:44. A pass that yields the tick back keeps discovery and a new file's
+// first read on their own one-second clock however large the corpus is.
+//
+// THE PASS IS THE UNIT `drainedPass` IS ABOUT, not the tick. The startup
+// catch-up window closes on a pass that walked EVERY watcher, and that fact now
+// spans slices: `seen` is the roster the pass enrolled and `pending` what it has
+// left, so the window closes when the last of them has been polled and not one
+// tick earlier.
+type pollPass struct {
+	// pending are the paths this pass has still to poll, in walk order.
+	pending []string
+	// seen is every path this pass has enrolled, polled or not. It is what makes
+	// a mid-pass discovery distinguishable from a watcher the pass already
+	// walked.
+	seen map[string]bool
 }
 
 func newSidecar(options Options, log *logging.Bound) *sidecar {
@@ -593,6 +624,12 @@ func (s *sidecar) suspend(operation string, cause error) {
 	// resume from a position the NEXT cycle's store never handed us, which is
 	// the one thing the invariant forbids.
 	s.watchers = map[string]*watched{}
+	// THE PASS GOES WITH THE WATCHERS IT WAS WALKING. Its roster names tailers
+	// that no longer exist, and a resumed cycle rebuilds every one of them from
+	// the position the new cycle's store hands it — so the walk starts over,
+	// which is also why an outage cannot close the catch-up window on a pass
+	// that never finished.
+	s.pass = nil
 	s.store.Close()
 	s.suspendedSince = s.now()
 	s.attempts = 0
@@ -1341,7 +1378,32 @@ func (s *sidecar) pollAll() {
 	s.requireCursors("pollAll")
 	s.rekeyRotations()
 	nowMs := s.now().UnixMilli()
-	for path, w := range s.watchers {
+	s.enrollWatchers()
+	slice := s.pollSlice()
+	deadline := s.now().Add(slice)
+	polled := 0
+	for s.pass != nil && len(s.pass.pending) > 0 {
+		// THE FIRST WATCHER OF A TICK IS ALWAYS POLLED, whatever the slice says:
+		// a bound so small that it expires before any work is done would be a
+		// pass that never advances, which is a corpus never read.
+		if polled > 0 && !s.now().Before(deadline) {
+			s.log.With(logging.Context{
+				Operation: "poll-slice", Repeat: logging.Repeat(polled),
+			}).LogVerbose(
+				"this tick's %s slice is spent after %d watcher(s); %d remain and the pass resumes at them on the next tick",
+				slice, polled, len(s.pass.pending))
+			return
+		}
+		path := s.pass.pending[0]
+		s.pass.pending = s.pass.pending[1:]
+		w, watching := s.watchers[path]
+		if !watching {
+			// The watcher went away mid-pass (a LOST run whose file vanished).
+			// It has still been WALKED — there is nothing left to read from it —
+			// so the pass may still drain.
+			continue
+		}
+		polled++
 		if s.parked[path] {
 			continue
 		}
@@ -1402,9 +1464,75 @@ func (s *sidecar) pollAll() {
 			FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
 		}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
 	}
-	// EVERY WATCHER WAS POLLED. Only this exit reaches here: an abandoned pass
-	// returns early above, and an abandoned pass has not drained the corpus.
+	if s.pass == nil {
+		// PRODUCTION WAS SUSPENDED FROM INSIDE THE LOOP — a cancelled terminal's
+		// write found the store gone — and `suspend` retired the pass along with
+		// the tailers it was walking. That pass did not drain the corpus, so the
+		// catch-up window stays open exactly as it does for every other
+		// abandonment.
+		return
+	}
+	// EVERY WATCHER WAS POLLED — across however many slices the pass took. Only
+	// this exit reaches here: an abandoned pass and a spent slice both return
+	// early above, and neither has drained the corpus. The pass is retired so
+	// the next tick enrolls the watched set afresh.
+	s.pass = nil
 	s.drainedPass = true
+}
+
+// pollSliceFraction is the share of ONE poll interval a single pass may spend
+// before it yields the tick back. A half leaves the other half for the change
+// probe, the rekey and the tick's own overhead, and it means a resumed pass
+// gets a fresh slice every interval rather than starving.
+const pollSliceFraction = 2
+
+// pollSlice is how long one tick's poll may run for.
+//
+// IT IS DERIVED, NOT CONFIGURED. Every window in this process that an operator
+// can move is one more thing that can be set to a value the invariant does not
+// survive; this one is a fraction of the poll interval the operator already
+// chose, so a faster poll automatically takes finer slices and the relationship
+// between them cannot be misconfigured.
+func (s *sidecar) pollSlice() time.Duration {
+	interval := s.options.PollInterval
+	if interval <= 0 {
+		interval = DefaultPollInterval
+	}
+	return interval / pollSliceFraction
+}
+
+// enrollWatchers brings the watched set into the current pass, starting one if
+// none is open.
+//
+// A FILE DISCOVERED MID-PASS GOES TO THE FRONT, and that is the whole point of
+// the ordering. The boot walk's pass is thousands of watchers long; a transcript
+// the change probe found on this tick would otherwise wait behind all of them,
+// which is precisely the minutes-late answer the probe exists to prevent. It is
+// enrolled at the head, read on the tick it was found, and the boot walk resumes
+// behind it.
+//
+// EVERY OTHER WATCHER IS WALKED IN A STABLE ORDER, because a pass that resumes
+// must not re-walk what it already did nor skip what it has not: `seen` is the
+// pass's roster and `pending` what is left of it, so "every watcher, exactly
+// once, across as many slices as it takes" is a property of the two together
+// rather than of map iteration luck.
+func (s *sidecar) enrollWatchers() {
+	if s.pass == nil {
+		s.pass = &pollPass{seen: make(map[string]bool, len(s.watchers))}
+	}
+	fresh := make([]string, 0, len(s.watchers)-len(s.pass.seen))
+	for path := range s.watchers {
+		if s.pass.seen[path] {
+			continue
+		}
+		s.pass.seen[path] = true
+		fresh = append(fresh, path)
+	}
+	if len(fresh) == 0 {
+		return
+	}
+	sort.Strings(fresh)
+	s.pass.pending = append(fresh, s.pass.pending...)
 }
 
 // endCatchupOnFirstDrainedPass closes the startup catch-up window the first time
