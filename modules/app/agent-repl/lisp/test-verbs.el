@@ -784,21 +784,41 @@ refusal it sits next to."
                                 :initial-prompt "fix the flaky login test")))
     (should (member "warn" levels))))
 
-(ert-deftest agent-repl-verbs-create-messages-the-naming-phase ()
-  "A create that supplies NO name echoes the naming phase before the rpc is
-issued: the daemon's naming call is part of the user's wait and
-`CreateWorkspace' is unary, so the phase has nowhere else to show."
+(ert-deftest agent-repl-verbs-create-acks-immediately ()
+  "A create echoes the ack the instant it runs, before any slow work: under
+option B the minibuffer reflects the create at once and the real outcome
+rides the progress channel."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                             :initial-prompt "fix the flaky login test")
-    (should (agent-repl-test-verbs--messaged-p "agent-repl: naming the workspace..."))))
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating workspace..."))))
 
-(ert-deftest agent-repl-verbs-create-with-a-supplied-name-skips-the-naming-phase ()
-  "A create that supplies a name makes no naming call, so it announces none."
+(ert-deftest agent-repl-verbs-create-sends-an-op-id ()
+  "Every create carries a client-minted op_id -- the token that correlates it
+to the staged progress the daemon pushes on the WatchDaemon channel."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                             :name "chosen-name")
-    (should-not (agent-repl-test-verbs--messaged-p "naming the workspace"))))
+    (should (plist-get (agent-repl-test-verbs--request :create) :op-id))))
+
+(ert-deftest agent-repl-verbs-create-stage-message-renders-deriving-name ()
+  "The deriving-name stage renders the owner's exact minibuffer line."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verbs--create-stage-message :deriving-name)
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: deriving workspace name..."))))
+
+(ert-deftest agent-repl-verbs-create-stage-message-renders-creating-worktree ()
+  "The creating-worktree stage renders the owner's exact minibuffer line."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verbs--create-stage-message :creating-worktree)
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating workspace git worktree..."))))
+
+(ert-deftest agent-repl-verbs-create-failure-internal-messages-the-error ()
+  "An internal failure event surfaces the daemon's sentence loudly."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verbs--create-failure :internal "materialize worktree: boom")
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation failed: materialize worktree: boom"))))
 
 (ert-deftest agent-repl-verbs-missing-ref-refuses-before-sending ()
   "A workspace with no daemon identity cannot be addressed at all."

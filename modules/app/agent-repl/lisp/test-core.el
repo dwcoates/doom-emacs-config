@@ -439,10 +439,16 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user the interrupt left the turn running")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
-    ("verbs.el" agent-repl-verb-create "agent-repl: naming the workspace..."
-     "announces the daemon's naming call, which is part of the create's wait")
-    ("verbs.el" agent-repl-verb-create "agent-repl: workspace requested"
-     "confirms the user's create command")
+    ("verbs.el" agent-repl-verb-create "agent-repl: workspace created: %s"
+     "announces the created workspace's name when the background create succeeds")
+    ("verbs.el" agent-repl-verb-create "agent-repl: creating workspace..."
+     "the option-B ack: reflects the create in the minibuffer the instant it runs")
+    ("verbs.el" agent-repl-verbs--create-stage-message "agent-repl: %s"
+     "echoes each staged phase of a background create as the daemon reaches it")
+    ("verbs.el" agent-repl-verbs--create-failure "agent-repl: workspace creation failed: %s"
+     "surfaces a background create's internal failure loudly to the user")
+    ("verbs.el" agent-repl-verbs--create-failure "agent-repl: workspace creation failed"
+     "surfaces a background create's failure when its kind is unrecognized")
     ("verbs.el" agent-repl-verbs--create-naming-refusal
      "create refused: the workspace could not be named (%s, %s attempt%s)%s"
      "tells the user why the workspace could not be named and what the model last said")
