@@ -351,6 +351,17 @@ func validateRegisterWorkspaceRequest(req *agentreplv1.RegisterWorkspaceRequest)
 	return nil
 }
 
+// validateRegisterRepositoryRequest is RegisterRepositoryRequest's base
+// function. A blank path is a VALIDATION failure rather than an arm: the two
+// arms are about what a real path turned out to be, and an empty string is not
+// a path at all.
+func validateRegisterRepositoryRequest(req *agentreplv1.RegisterRepositoryRequest) *connect.Error {
+	if req.GetPath() == "" {
+		return invalid("path", "a path inside the repository is required")
+	}
+	return nil
+}
+
 // validateCreateTaskRequest is CreateTaskRequest's base function. A blank title
 // is a REFUSAL arm rather than a validation failure, so only the unset field is
 // checked here.

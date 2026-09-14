@@ -480,6 +480,13 @@ func (g *fakeGit) MainWorktree(_ context.Context, dir string) (string, error) {
 	return dir, nil
 }
 
+// RepositoryOf is MainWorktree's probe half. The merge suite never asks it;
+// it exists so this fake still satisfies the whole interface.
+func (g *fakeGit) RepositoryOf(_ context.Context, dir string) (string, bool, error) {
+	g.record("repository_of")
+	return dir, true, nil
+}
+
 func (g *fakeGit) SameRepo(context.Context, string, string) (bool, error) {
 	g.record("same_repo")
 	return g.sameRepo, g.sameRepoErr

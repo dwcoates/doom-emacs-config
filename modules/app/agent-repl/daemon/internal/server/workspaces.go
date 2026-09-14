@@ -191,6 +191,36 @@ func (s *server) RegisterWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
+// RegisterRepository records a repository on its own, resolved from any path
+// inside it. It is NOT a per-workspace verb -- there is no workspace, which is
+// the whole point -- so no ownership refusal applies.
+func (s *server) RegisterRepository(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RegisterRepositoryRequest],
+) (*connect.Response[agentreplv1.RegisterRepositoryResponse], error) {
+	const rpc = "RegisterRepository"
+	if err := validateRegisterRepositoryRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.RegisterRepositoryResponse{}
+	record, alreadyKnown, err := s.deps.Verbs.RegisterRepository(ctx, req.Msg.GetPath())
+	if err != nil {
+		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
+	}
+	s.log.Info("daemon.server.register_repository", "registered a repository",
+		dlog.Context{
+			"path": req.Msg.GetPath(), "repository": string(record.ID), "dir": record.Dir,
+			"already_known": alreadyKnown,
+		})
+	resp.Result = &agentreplv1.RegisterRepositoryResponse_Success{
+		Success: &agentreplv1.RegisterRepositorySuccess{
+			Repository:   &workspacev1.RepositoryRef{Id: string(record.ID), Dir: record.Dir},
+			AlreadyKnown: alreadyKnown,
+		},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // OpenWorkspace spawns a registered-but-closed workspace's session.
 func (s *server) OpenWorkspace(
 	ctx context.Context,
