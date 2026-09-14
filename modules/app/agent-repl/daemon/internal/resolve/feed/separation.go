@@ -9,7 +9,119 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/figures"
+	"claude-repld/internal/ids"
 )
+
+// clearCutRowID is the divider identity for a /clear the daemon issued. It is
+// keyed on the TURN — a fact the daemon holds at receipt, before the shim has
+// rotated to any new session — so the optimistic red bar and the shim's later
+// ContextCut resolve to ONE row. The `clear:` segment keeps it disjoint from
+// the pointer-keyed identity every other cut takes.
+func clearCutRowID(turn ids.TurnID) string {
+	return "context_cut:clear:" + string(turn)
+}
+
+// clearTurnFor answers the /clear turn a cleared cut belongs to, if any. A
+// conversation reset only ever happens as a /clear, so a cleared cut arriving
+// while a turn is in flight IS that turn's clear — which is true whether the
+// frame is watched live or replayed from history, so the recognition needs no
+// in-memory registration and survives a restart. The pointer map catches the
+// SECOND plane's delivery of the same cut, which can land after the turn's
+// terminal has already cleared the in-flight fact.
+func (r *resolver) clearTurnFor(s *wsState, pointer *conversationv1.HistoryPointer) (ids.TurnID, bool) {
+	if s.turnInFlight != nil {
+		return *s.turnInFlight, true
+	}
+	if p := pointer.GetValue(); p != "" {
+		if turn, ok := s.clearedTurnByPointer[p]; ok {
+			return turn, true
+		}
+	}
+	return "", false
+}
+
+// OnClearReceived draws the cleared divider the MOMENT the daemon accepts a
+// /clear, before it is dispatched to the shim. The red bar and the cleared feed
+// are what a user should see instantly; the shim's ContextCut later confirms it
+// in place with the "context cleared" subtext. Its label is empty until then:
+// the bar without the subtext is exactly the not-yet-confirmed state.
+func (r *resolver) OnClearReceived(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	log := r.logger(ws)
+	s.clearTurns[turn] = true
+	// A /clear draws no user-prompt bubble: it is a directive, and its only
+	// visible outcome is this divider.
+	s.directiveTurns[turn] = true
+
+	at := r.place(s, nil)
+	id := r.rowID(ws, at.feed, feedid.RowKey{Kind: feedid.KindSeparation, ID: clearCutRowID(turn)})
+	row := &frontendv1.FeedRow{
+		Id: id,
+		Row: &frontendv1.FeedRow_Separation{Separation: &frontendv1.FeedSessionSeparation{
+			// NO SUBTEXT YET: the bar stands for a clear the shim has not
+			// confirmed. drawContextCut fills the label in when the cut lands.
+			Label: &frontendv1.FeedSessionSeparationLabel{Text: ""},
+			Kind:  &frontendv1.FeedSessionSeparation_Cleared{Cleared: &frontendv1.FeedContextCutCleared{}},
+		}},
+	}
+	log.Info("daemon.feed.clear_received",
+		"a /clear was accepted; its cleared divider was drawn optimistically before the shim round-trip",
+		dlog.Context{"turn": string(turn), "row": id.GetValue()})
+	r.upsert(s, at, row, true)
+
+	// The optimistic bar bounds delivery at once, which is what CLEARS the feed
+	// for the reader; the same fact drawContextCut records when a cut confirms.
+	if boundsDelivery(row) {
+		f := r.feed(s, at.feed)
+		withheld := boundIndex(f, durableOrder(f))
+		log.Info("daemon.feed.delivery_bound_moved",
+			"an optimistic /clear divider moved the feed's delivery bound: nothing above it is served or pushed from here on",
+			dlog.Context{"feed": f.key, "row": id.GetValue(), "kind": "cleared", "withheld": withheld})
+	}
+}
+
+// OnCompactReceived registers a /compact as a directive turn so it, like a
+// /clear, draws no user-prompt bubble. It draws NO optimistic divider: a
+// compaction's divider carries the summary the vendor produces, which does not
+// exist until the shim compacts, so the bar appears when the shim confirms the
+// cut rather than on receipt.
+func (r *resolver) OnCompactReceived(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	s.directiveTurns[turn] = true
+	r.logger(ws).Info("daemon.feed.compact_received",
+		"a /compact was accepted; it draws no prompt bubble and its divider follows the shim's compaction",
+		dlog.Context{"turn": string(turn)})
+}
+
+// OnContextCutAborted undoes a directive turn the shim refused before any turn
+// ran: it retires the optimistic /clear divider (a no-op for a /compact, which
+// drew none) and forgets the turn, so no phantom bar is left and the feed
+// recovers to exactly what it showed before.
+func (r *resolver) OnContextCutAborted(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.retireOptimisticClear(s, turn, "the context cut was refused before it reached the shim")
+	delete(s.clearTurns, turn)
+	delete(s.clearConfirmed, turn)
+	delete(s.directiveTurns, turn)
+}
+
+// retireOptimisticClear removes the turn-keyed red bar a /clear drew. Called
+// when a clear FAILS — refused before dispatch, or ended without ever cutting
+// context — so the divider does not outlive the clear it promised.
+func (r *resolver) retireOptimisticClear(s *wsState, turn ids.TurnID, why string) {
+	at := r.place(s, nil)
+	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindSeparation, ID: clearCutRowID(turn)})
+	removed := r.retire(s, at.feed, id.GetValue())
+	r.logger(s.id).Info("daemon.feed.clear_bar_retired",
+		"an optimistic /clear divider was retired because the clear did not happen",
+		dlog.Context{"turn": string(turn), "row": id.GetValue(), "found": removed, "why": why})
+}
 
 // ⑤ THE SEPARATION DIVIDER: the session changed shape or place here, and a
 // reader scrolling back must see where. ONE row kind for every arm — context
@@ -61,10 +173,15 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 			"a context cut arrived with no store pointer, so its divider is keyed on an arrival counter and a second delivery of the same cut would draw a second row",
 			dlog.Context{"agent": agent.GetValue()})
 	}
-	id := r.rowID(s.id, at.feed, feedid.RowKey{
-		Kind: feedid.KindSeparation,
-		ID:   "context_cut:" + key,
-	})
+	// The pointer-keyed identity is the default: the entry's position is the
+	// cut's identity, so the two producing planes' deliveries of one cut land on
+	// one row. A CLEAR the daemon itself issued overrides this below, keying its
+	// cut on the turn so the shim's confirmation collapses onto the optimistic
+	// red bar the receipt path already drew.
+	cutRowID := "context_cut:" + key
+
+	var confirmedClearTurn ids.TurnID
+	var confirmsClear bool
 
 	separation := &frontendv1.FeedSessionSeparation{}
 	switch arm := cut.GetCut().(type) {
@@ -74,6 +191,15 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		// none is drawn: an invented figure would be worse than none.
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "context cleared"}
 		separation.Kind = &frontendv1.FeedSessionSeparation_Cleared{Cleared: &frontendv1.FeedContextCutCleared{}}
+		// THE SHIM'S CUT CONFIRMS THE OPTIMISTIC RED BAR. When this cleared cut
+		// belongs to a turn the daemon opened as a /clear, it reuses that turn's
+		// divider row so the bar drawn on receipt gains its "context cleared"
+		// subtext in place rather than a second red bar appearing beside it.
+		if turn, ok := r.clearTurnFor(s, pointer); ok {
+			cutRowID = clearCutRowID(turn)
+			confirmedClearTurn = turn
+			confirmsClear = true
+		}
 	case *conversationv1.ContextCut_Compacted:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_Compacted"})
 		compacted := arm.Compacted
@@ -117,6 +243,11 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		return
 	}
 
+	id := r.rowID(s.id, at.feed, feedid.RowKey{
+		Kind: feedid.KindSeparation,
+		ID:   cutRowID,
+	})
+
 	log.Debug("daemon.feed.separation",
 		"a session separation divider was drawn",
 		dlog.Context{"row": id.GetValue(), "kind": separationArm(separation)})
@@ -125,6 +256,20 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		Row: &frontendv1.FeedRow_Separation{Separation: separation},
 	}
 	r.upsert(s, at, row, true)
+
+	if confirmsClear {
+		// The clear SUCCEEDED: mark it confirmed so its turn's terminal is
+		// suppressed, and remember the pointer→turn mapping so the OTHER plane's
+		// later delivery of the same cut — which can land after the terminal, with
+		// no turn in flight — still resolves to this one row.
+		s.clearConfirmed[confirmedClearTurn] = true
+		if p := pointer.GetValue(); p != "" {
+			s.clearedTurnByPointer[p] = confirmedClearTurn
+		}
+		log.Info("daemon.feed.clear_confirmed",
+			"a /clear's context cut confirmed the optimistic divider; its terminal will draw no bubble",
+			dlog.Context{"turn": string(confirmedClearTurn), "row": id.GetValue()})
+	}
 
 	// THE FEED NOW BEGINS HERE (see `deliverable`). The bound is read off the
 	// order at every page, so there is nothing to store; what is recorded is

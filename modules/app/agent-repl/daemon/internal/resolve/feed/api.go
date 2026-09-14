@@ -92,6 +92,23 @@ type Resolver interface {
 	// SetOutputAddress installs the address a lease holder wants this
 	// session's rows stamped with; nil restores the root feed.
 	SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.OutputAddress)
+
+	// OnClearReceived draws a /clear's cleared divider the moment the daemon
+	// accepts it, BEFORE the shim round-trip: the red bar and the cleared feed
+	// appear instantly, and the shim's later ContextCut confirms the same row in
+	// place with its "context cleared" subtext. It also registers the turn as a
+	// directive so it draws no user-prompt bubble and its terminal draws no
+	// "response cut short" bubble.
+	OnClearReceived(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnCompactReceived registers a /compact as a directive turn so it, too,
+	// draws no user-prompt bubble. It draws no optimistic divider — a
+	// compaction's divider carries a summary that does not exist until the shim
+	// compacts.
+	OnCompactReceived(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnContextCutAborted undoes a directive turn the shim refused before any
+	// turn ran: it retires the optimistic /clear divider and forgets the turn, so
+	// no phantom bar is left and the feed recovers to what it showed before.
+	OnContextCutAborted(ws ids.WorkspaceID, turn ids.TurnID)
 	// UpsertSynthesized upserts a daemon-synthesized row: a merge tab, the
 	// cold gate, a session separation, or the mirror of an accepted user
 	// prompt. The mirror is a user_prompt row stamped with the minted TurnId

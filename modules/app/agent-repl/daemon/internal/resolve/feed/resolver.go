@@ -145,6 +145,31 @@ type wsState struct {
 	// row that belongs to no turn" — so the death keeps the stamp standing
 	// while an ordinary terminal clears it.
 	turnStamp *ids.TurnID
+	// clearTurns is the set of turns the daemon opened as a `/clear`. A clear's
+	// visible outcome is the cleared divider it leaves, NOT a terminal row: the
+	// turn is interrupted to make the cut, and drawing that interrupt as a
+	// bubble below the divider is the "response cut short" card a clear must
+	// never leave. Membership is what lets drawTerminal suppress that bubble and
+	// lets drawContextCut recognise the cut as the confirmation of the optimistic
+	// red bar the receipt path drew.
+	clearTurns map[ids.TurnID]bool
+	// clearConfirmed records that a clear turn's ContextCut(Cleared) actually
+	// arrived — the clear SUCCEEDED. Only a confirmed clear suppresses its
+	// terminal; a clear that never confirmed FAILED, and its failure is surfaced
+	// loudly while its optimistic red bar is retired.
+	clearConfirmed map[ids.TurnID]bool
+	// clearedTurnByPointer maps a confirmed clear cut's store pointer back to the
+	// turn it belongs to, so the SECOND plane's delivery of the same cut — which
+	// can land after the turn's terminal, with no turn in flight — still resolves
+	// to the one turn-keyed divider row rather than minting a second red bar.
+	clearedTurnByPointer map[string]ids.TurnID
+	// directiveTurns is the set of turns the daemon opened as a context-cut
+	// DIRECTIVE — /clear or /compact. A directive is not a conversational prompt,
+	// so it draws no user-prompt bubble: its only visible outcome is the
+	// separation bar and the feed it clears. The set is what lets drawAgentPrompt
+	// skip the bubble the shim's own prompt frame would otherwise draw below the
+	// optimistic divider.
+	directiveTurns map[ids.TurnID]bool
 	// answerRows maps a response activity id to the row it drew, so the turn's
 	// conclusion can name its answering row.
 	answerRows map[string]*frontendv1.FeedId
@@ -350,27 +375,31 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		return s
 	}
 	s = &wsState{
-		id:              ws,
-		feeds:           map[string]*feedState{},
-		feedAddrs:       map[string]feedid.Feed{},
-		subFeeds:        map[string]*subFeedHead{},
-		agentFeeds:      map[string]string{},
-		readers:         map[ReaderID]*walk{},
-		units:           map[string]*unitState{},
-		responses:       map[string]*proseState{},
-		plans:           map[string]*planState{},
-		planUnits:       map[string]*planState{},
-		shells:          map[string]*shellState{},
-		detachedUnits:   map[string]string{},
-		subagents:       map[string]*subagentState{},
-		standing:        map[string]*conversationv1.AgentPermissionStanding{},
-		permissionRows:  map[string]*permissionState{},
-		questionAsks:    map[string]*questionState{},
-		gatedCalls:      map[string]string{},
-		turnEvidence:    map[string][]turnEvidenceLine{},
-		turnRefusals:    map[string]bool{},
-		turnQueryDeaths: map[string]*conversationv1.SessionQueryDied{},
-		answerRows:      map[string]*frontendv1.FeedId{},
+		id:                   ws,
+		feeds:                map[string]*feedState{},
+		feedAddrs:            map[string]feedid.Feed{},
+		subFeeds:             map[string]*subFeedHead{},
+		agentFeeds:           map[string]string{},
+		readers:              map[ReaderID]*walk{},
+		units:                map[string]*unitState{},
+		responses:            map[string]*proseState{},
+		plans:                map[string]*planState{},
+		planUnits:            map[string]*planState{},
+		shells:               map[string]*shellState{},
+		detachedUnits:        map[string]string{},
+		subagents:            map[string]*subagentState{},
+		standing:             map[string]*conversationv1.AgentPermissionStanding{},
+		permissionRows:       map[string]*permissionState{},
+		questionAsks:         map[string]*questionState{},
+		gatedCalls:           map[string]string{},
+		turnEvidence:         map[string][]turnEvidenceLine{},
+		turnRefusals:         map[string]bool{},
+		turnQueryDeaths:      map[string]*conversationv1.SessionQueryDied{},
+		clearTurns:           map[ids.TurnID]bool{},
+		clearConfirmed:       map[ids.TurnID]bool{},
+		clearedTurnByPointer: map[string]ids.TurnID{},
+		directiveTurns:       map[ids.TurnID]bool{},
+		answerRows:           map[string]*frontendv1.FeedId{},
 
 		unitAPIResponse:  map[string]uint64{},
 		apiResponseUsage: map[uint64]string{},
