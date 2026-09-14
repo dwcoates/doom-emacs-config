@@ -15,15 +15,17 @@ trace is §4; the log records are §7.
 Nothing here is decided. Where a remediation needs a proto change it is
 described, not chosen.
 
-## 1. Three structural facts
+## 1. Four structural facts
 
-These decide every row below, so they are stated once.
+The first three decide every row below; the fourth ties the roster's verdict to
+the footer's. They are stated once.
 
 | # | fact | evidence |
 |---|---|---|
 | F1 | **The footer is written by the daemon, and — since the owner's ruling of 2026-09-13 — by the CLIENT'S OWN LINK VERDICT.** `FooterView` arrives on `WatchFooter` and the webapp replaces the whole dock from it; there was no client-side write path into the footer at all, so nothing the CLIENT observed — a transport failure, a stream ending, an unreadable frame — could reach it. That is now the one carved exception: every failing client site reports through `reportClientFailure`, and while a verdict stands the footer composes its three status cells locally (`disconnected`, the kind's substatus, the site's ad-hoc line) over the daemon's last clock, tokens and chips. Every N2 and N3 row below is therefore **drawn: footer (client verdict)**. | `webapp/src/rpc/link.ts`; `webapp/src/footer/footer.ts` (`draw`'s verdict branch); `webapp/src/footer/strip.ts` (`drawClientDisconnectedStrip`) |
 | F2 | **`FooterStatusDisconnected` is about the daemon→shim link, not the webapp→daemon link.** Its five substatuses (`starting`, `degraded`, `severed`, `dead`, `start_failed`) all describe the shim. A webapp that cannot reach the daemon has no arm to be drawn in, and could not be pushed one if it had — which is why the client's own substatus is a locally composed WORD ("daemon unreachable", "feed not tailing", "frame unreadable") and not a sixth arm. **No proto change was made or needed.** | `proto/src/frontend/v1/footer.proto:536-564` |
 | F3 | **The daemon's fault table reaches Emacs, not the webapp.** Open faults are rendered as `HostFault` onto `WatchHostWorkspace`, which only the elisp host subscribes to. `WatchWebWorkspace` carries exactly two arms, `transferred` and `session_identity`. `frontend.v1.FailureKind`'s eleven daemon-minted arms — `session_start_failed` among them — are imported by the webapp only in its own client-local failure sink. | `daemon/internal/server/host.go:418-446`; `proto/src/agentrepl/v1/endpoint_watch_web_workspace.proto:27`; `webapp/src/failure/sink.ts:24`, and `sessionStartFailed` appears nowhere under `webapp/src` |
+| F4 | **The roster's `vendor_blocked` and the footer's `blocked` are ONE classifier (owner ruling 2026-09-14).** A turn-ending failure decides both through `footer.FailureBlocks`, called by the footer in `OnAgentTerminal` and by the roster's `vendorBlocked`, so the strip and the rail dot cannot disagree about the same failure. `render-colors.json` then paints both blue: `footer_status.blocked` and `roster_status.vendor_blocked` are `blue`, the "unusable agent" color it shares with `disconnected`/`severed`/`dead`/`degraded`/`start_failed`. The bug this closed was the drift — the roster kept a private allowlist that omitted `authentication_failed`, so a session the footer painted `blocked` read `done`/`ready` (green) on the sidebar. | `daemon/internal/resolve/footer/chips.go` (`FailureBlocks`, `blockFor`); `daemon/internal/resolve/sidebar/resolver.go` (`vendorBlocked`); `proto/vocab/render-colors.json` |
 
 ## 2. Vector table
 
