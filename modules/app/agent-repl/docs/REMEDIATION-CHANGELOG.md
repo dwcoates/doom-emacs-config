@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- webapp topbar: the chips inside `.topbar-left` / `.topbar-right` gap on their own tighter `--topbar-chip-gap: 0.3rem` while the row's edge inset and track gap keep `--topbar-cell-gap: 0.5rem` (owner ruling: tight spacing between chips, all extra space around the center title)
 - webapp topbar: after every draw (and on a rAF-debounced window resize) `capTopbarTitle` sets an inline `max-width` of `rowWidth - 2 * edgePadding - 2 * max(leftWidth, rightWidth) - 2 * gap` on `.topbar-title`, so the visible title is symmetric about the strip's midpoint instead of filling a centered track (owner report: the strip still read `<login>      <center><chips>` with the equal-track grid shipped)
 - webapp feed: the response renderer records its draw as `feed.draw-response` -- INFO on a row's first draw and on its settled one, DEBUG on the intermediate re-pushes, all carrying `characters` and `blocks` (rt-run36..39, a drawn answer with no record but `feed.final-answer-marked`'s `styled_bubble: true`)
 - realtest 9: the answer assertion waits for `feed.draw-response` with `characters` >= the opening sentence and `blocks` >= 1 instead of a `feed.draw-text-block` of exactly 21 that no path emits, and `rt9AnswerDrawn` is unit-tested over a fixture record (rt-run36..39, 60s spent per sweep on a record the product never wrote)
