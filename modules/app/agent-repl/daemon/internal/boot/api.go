@@ -32,6 +32,7 @@ import (
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
+	"claude-repld/internal/startingshim"
 	"claude-repld/internal/stateroot"
 	"claude-repld/internal/wsm"
 )
@@ -216,6 +217,13 @@ type Deps struct {
 	// Now supplies the instant an orphan close is stamped with; nil means
 	// time.Now.
 	Now func() time.Time
+	// Clock drives the wait for a PREDECESSOR'S STARTING SHIM to announce
+	// itself on its socket; nil means startingshim.SystemClock. It is a field
+	// so a test of that wait drives time rather than sleeping through it.
+	Clock startingshim.Clock
+	// ShimAlive reports whether a recorded spawned pid names a live process;
+	// nil means startingshim.Alive, which is kill(pid, 0).
+	ShimAlive func(pid int) bool
 	// Log is the boot logger.
 	Log dlog.Surfaces
 }
@@ -301,5 +309,8 @@ func New(deps Deps) (Sequence, error) {
 	if adoptBound <= 0 {
 		adoptBound = DefaultAdoptBound
 	}
-	return &sequence{deps: deps, probe: probe, socketProbe: socketProbe, now: now, adoptBound: adoptBound}, nil
+	return &sequence{
+		deps: deps, probe: probe, socketProbe: socketProbe, now: now, adoptBound: adoptBound,
+		starting: startingshim.Waiter{Alive: deps.ShimAlive, Probe: socketProbe, Clock: deps.Clock},
+	}, nil
 }

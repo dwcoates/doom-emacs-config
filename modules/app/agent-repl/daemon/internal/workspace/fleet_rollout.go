@@ -214,6 +214,9 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		Fake:         f.deps.Fake,
 		LogSink:      sink.File(),
 		ForbidVendor: f.deps.ForbidVendor,
+		// THE PRELAUNCH IS A SPAWN LIKE ANY OTHER, and it spends the same
+		// Node startup unrecorded. See Spec.Spawned.
+		Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
 	})
 	if err != nil {
 		log.Error(opFleetRollout, "the inert prelaunch did not come up", dlog.Context{
