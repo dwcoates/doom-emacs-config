@@ -254,8 +254,25 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	// a turn opening.
 	s.compacting = s.compacting || turn.Act == ActCompact
 	s.retrying = nil
-	s.tok.reset()
+	s.tok.reset(liveDetachedAgents(s))
 	r.cancelMomentary(s)
+}
+
+// liveDetachedAgents is the set of created-agent ids for the subagents that are
+// live AND detached right now — the runs still burning tokens in the background
+// as this turn opens. It is what the token accounting carries across the turn
+// reset so a detached agent's uncached input stays in the figure while it runs;
+// an in-turn subagent (no work handle) is the turn's own progress and resets
+// with it. The key is the created-agent id, because that is the id an agent's
+// own-book usage frames arrive under (chips.go OnActivity).
+func liveDetachedAgents(s *wsState) map[string]struct{} {
+	keep := make(map[string]struct{}, len(s.agents))
+	for _, row := range s.agents {
+		if row.work != "" && row.createdAgent != "" {
+			keep[row.createdAgent] = struct{}{}
+		}
+	}
+	return keep
 }
 
 // SetMerge installs the merge facts the footer draws.
