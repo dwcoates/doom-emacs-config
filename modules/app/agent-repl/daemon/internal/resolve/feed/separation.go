@@ -21,21 +21,27 @@ func clearCutRowID(turn ids.TurnID) string {
 	return "context_cut:clear:" + string(turn)
 }
 
-// clearTurnFor answers the /clear turn a cleared cut belongs to, if any. A
-// conversation reset only ever happens as a /clear, so a cleared cut arriving
-// while a turn is in flight IS that turn's clear — which is true whether the
-// frame is watched live or replayed from history, so the recognition needs no
-// in-memory registration and survives a restart. The pointer map catches the
-// SECOND plane's delivery of the same cut, which can land after the turn's
-// terminal has already cleared the in-flight fact.
+// clearTurnFor answers the /clear turn a cleared cut belongs to, if any.
+//
+// THE CUT'S OWN IDENTITY WINS OVER WHATEVER IS RUNNING NOW. A /clear's cut is
+// delivered on BOTH planes at one store pointer, and the FILE plane's copy is
+// forwarded LATE — after the identity rotation and keep-alive rewind, often
+// after the user has already sent the next prompt. By then the turn in flight is
+// that NEXT turn, not the clear; keying the late cut on the turn in flight would
+// draw a second divider below the new prompt and suppress that prompt's own
+// terminal. So a cut already attributed keeps its turn (the pointer map), and
+// only a FRESH cut — one no plane has attributed yet — takes the turn in flight,
+// and then only when that turn is itself a directive (a cleared cut belongs to a
+// /clear turn, never to an ordinary one). The directive is recognised from the
+// prompt text on every path, so this holds on a fresh-resolver replay too.
 func (r *resolver) clearTurnFor(s *wsState, pointer *conversationv1.HistoryPointer) (ids.TurnID, bool) {
-	if s.turnInFlight != nil {
-		return *s.turnInFlight, true
-	}
 	if p := pointer.GetValue(); p != "" {
 		if turn, ok := s.clearedTurnByPointer[p]; ok {
 			return turn, true
 		}
+	}
+	if s.turnInFlight != nil && s.directiveTurns[*s.turnInFlight] {
+		return *s.turnInFlight, true
 	}
 	return "", false
 }
