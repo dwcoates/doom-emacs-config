@@ -49,7 +49,7 @@ export const DELIVERY_WORDS = {
  * draws its author.
  */
 export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
-  log.debug("drawing an agent prompt row", {
+  log.info("drawing an agent prompt row", {
     operation: "feed.draw-agent-prompt",
     context: {},
   });

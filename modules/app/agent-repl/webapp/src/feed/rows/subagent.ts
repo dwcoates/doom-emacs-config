@@ -116,7 +116,7 @@ export function drawFeedDetachedSubagent(
 /** The head line. */
 export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement {
   const state = requireCase(msg.state, `${PATH}.state`);
-  log.debug(`drawing a subagent head as ${state.case}`, {
+  log.info(`drawing a subagent head as ${state.case}`, {
     operation: "feed.draw-subagent",
     context: { arm: state.case, detached: isDetachedRow(rc) },
   });

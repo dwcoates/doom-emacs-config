@@ -14,6 +14,7 @@ import {
   drawFeedTurnEndedErrored,
 } from "../../../src/feed/rows/turn-ended.js";
 import { feedId, harness, rowContext, userPromptRow } from "../harness.js";
+import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -444,5 +445,49 @@ describe("drawFeedTurnEnded: an arm this build has no case for", () => {
     expect((thrown as MalformedView).detail).toBe(
       "arm 'abandoned' is not one this build can draw",
     );
+  });
+});
+
+describe("drawFeedTurnEnded: the records of the turn's end", () => {
+  it("records the drawn terminal row at info, a turn ending exactly once", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawFeedTurnEnded(ended({ case: "concluded", value: {} }), contextWithRow(null));
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-turn-ended");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("records the final-answer marking at info, it happening once per turn", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawFeedTurnEnded(
+      ended({ case: "concluded", value: { answer: feedId("r1") } }),
+      contextWithRow(document.createElement("article")),
+    );
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.final-answer-marked");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("records the drawn error arm at info, an errored end being one row too", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawFeedTurnEnded(
+      ended({
+        case: "errored",
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "the query died" },
+          error: { case: "queryDied", value: {} },
+        }),
+      }),
+      contextWithRow(null),
+    );
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-turn-error");
+    expect(record.level.case).toBe("info");
   });
 });

@@ -9,6 +9,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { DELIVERY_WORDS, drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
+import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 function agentPrompt(address = "→ Explore", blocks: unknown[] = []) {
   return create(FeedAgentPromptSchema, {
@@ -120,5 +121,17 @@ describe("drawFeedAgentPrompt", () => {
   it("refuses a prompt with no body", () => {
     const msg = create(FeedAgentPromptSchema, { address: { text: "→ x" } });
     expect(() => drawFeedAgentPrompt(msg)).toThrow(MalformedView);
+  });
+});
+
+describe("drawFeedAgentPrompt: the record of the row", () => {
+  it("records the drawn row at info, a row being drawn exactly once", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawFeedAgentPrompt(agentPrompt());
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-agent-prompt");
+    expect(record.level.case).toBe("info");
   });
 });
