@@ -93,6 +93,32 @@ describe("the sections", () => {
     expect(pane(drawn, "repository").querySelector(".sb-label")?.textContent).toBe("doom");
   });
 
+  // A JUST-REGISTERED REPOSITORY HAS NO ROWS. RegisterRepository (SPC j .)
+  // mints a repository with no workspace under it, and the section IS the only
+  // evidence the registration landed -- so it draws, header and all, rather
+  // than being skipped as an empty band the way recently-merged is.
+  it("draws a repository section with no rows at all", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-new", label: "just-registered", rows: [] })] }),
+      sidebarContext(),
+    );
+    const section = pane(drawn, "repository").querySelector(
+      ".repo:not(.merged-section)",
+    ) as HTMLElement;
+    expect(section).not.toBeNull();
+    expect(section.hidden).toBe(false);
+  });
+
+  it("draws the label of a repository section with no rows", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-new", label: "just-registered", rows: [] })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector(".sb-label")?.textContent).toBe(
+      "just-registered",
+    );
+  });
+
   it("draws one section per task", () => {
     const drawn = drawWorkspaceRoster(
       roster({ tasks: [taskSection({ id: "task-1" }), taskSection({ id: "task-2" })] }),
