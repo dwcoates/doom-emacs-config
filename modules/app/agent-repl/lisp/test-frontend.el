@@ -1748,6 +1748,41 @@ panel, not a browser."
           (should (null (buffer-local-value 'header-line-format buf))))
       (kill-buffer buf))))
 
+(ert-deftest agent-repl-test-frontend-adopt-remaps-stock-history-reload ()
+  "Adoption remaps the broken stock `xwidget-webkit-history-reload' to ours.
+The stock command calls `xwidget-webkit-back-forward-list', void in this
+Emacs build, so an adopted panel routes the reload keystroke to
+`agent-repl-frontend-reload-webview' instead."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt-remap-hist*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf (use-local-map (make-sparse-keymap)))
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer
+           buf "*agent-repl-test-adopted-remap-hist*" "ws-1")
+          ;; Assert
+          (with-current-buffer buf
+            (should (eq (command-remapping 'xwidget-webkit-history-reload)
+                        #'agent-repl-frontend-reload-webview))))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-frontend-adopt-remaps-stock-reload ()
+  "Adoption also remaps the sibling stock `xwidget-webkit-reload' to ours."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt-remap-reload*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf (use-local-map (make-sparse-keymap)))
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer
+           buf "*agent-repl-test-adopted-remap-reload*" "ws-1")
+          ;; Assert
+          (with-current-buffer buf
+            (should (eq (command-remapping 'xwidget-webkit-reload)
+                        #'agent-repl-frontend-reload-webview))))
+      (kill-buffer buf))))
+
 ;;;; ---- The composer mounts at a fixed height -------------------------------
 ;;
 ;; The owner's report: the composer is not a consistent height —
