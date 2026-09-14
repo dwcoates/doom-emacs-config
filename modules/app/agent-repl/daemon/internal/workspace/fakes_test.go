@@ -106,6 +106,28 @@ type fakeDB struct {
 	// in; dbClosed records the ids CloseFault was called with.
 	dbFaults []wsm.Fault
 	dbClosed []ids.FaultID
+
+	// spawnedPIDs records every SetSpawnedShimPID in order, nil for a clear,
+	// so a test can pin that the fork's pid was made durable and that a failed
+	// start retracted it. The workspace row is updated with it, which is what
+	// the starting-survivor probe reads back.
+	spawnedPIDs []*int
+	// spawnedPIDErr fails the write, which the fake's own map cannot.
+	spawnedPIDErr error
+}
+
+func (d *fakeDB) SetSpawnedShimPID(_ context.Context, id ids.WorkspaceID, pid *int) error {
+	if d.spawnedPIDErr != nil {
+		return d.spawnedPIDErr
+	}
+	d.spawnedPIDs = append(d.spawnedPIDs, pid)
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return errors.New("no such workspace")
+	}
+	ws.SpawnedShimPID = pid
+	d.workspaces[id] = ws
+	return nil
 }
 
 func (d *fakeDB) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, error) {

@@ -128,6 +128,11 @@ func (f *Fleet) stopFailedStart(ctx context.Context, log dlog.Logger, ws ids.Wor
 		log.Error(opBringUp, "the failed start's shim is still reachable on the workspace socket after the stop", fields)
 		return
 	}
+	// THE RECORDED SPAWN GOES WITH THE PROCESS. The pid was made durable at
+	// the fork so a successor would wait for this shim rather than spawn over
+	// it; left behind, that successor would wait out its whole adoption bound
+	// for a process this daemon has just stopped.
+	f.clearSpawnedShimPID(ctx, log, ws)
 	log.Info(opBringUp, "stopped the shim of a failed start", fields)
 }
 

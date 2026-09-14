@@ -15,6 +15,7 @@ import (
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
+	"claude-repld/internal/startingshim"
 	"claude-repld/internal/wsm"
 )
 
@@ -29,6 +30,9 @@ type sequence struct {
 	// runs, so an unbounded adoption is a daemon that listens and never
 	// accepts.
 	adoptBound time.Duration
+	// starting waits for a PREDECESSOR'S still-starting shim to announce
+	// itself before this boot concludes no shim survives. See startingshim.
+	starting startingshim.Waiter
 }
 
 // Joining reports whether this daemon was spawned as a successor. The
@@ -270,6 +274,23 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			log.Warn("daemon.boot.adopt", "the shim socket probe could not tell; never read as free", context)
 			report.Undetermined = append(report.Undetermined, ws.ID)
 			continue
+		}
+		// A PREDECESSOR'S SHIM MAY BE STILL STARTING. A free lock and a socket
+		// nothing is listening on are also what a shim spawned moments ago
+		// looks like -- it takes its lock inside StartSession and Node binds
+		// its socket tens of milliseconds after the fork -- and the registry's
+		// recorded spawn pid is the only witness that tells the two apart. It
+		// is consulted BEFORE the free branch clears the socket path and
+		// declares the workspace client-less. See startingshim.
+		if state == sessionlock.StateFree {
+			announced, path, undetermined := s.awaitStartingSurvivor(ctx, log, ws, socketPath)
+			switch {
+			case undetermined:
+				report.Undetermined = append(report.Undetermined, ws.ID)
+				continue
+			case announced:
+				socketPath, state, inert = path, sessionlock.StateHeld, true
+			}
 		}
 		switch {
 		case state == sessionlock.StateHeld:
@@ -663,4 +684,65 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 		"failed":          len(report.BringUpFailed),
 	})
 	return report
+}
+
+// awaitStartingSurvivor answers whether a shim a PREVIOUS daemon spawned for
+// this workspace is merely still starting, waiting out the adoption bound for
+// it to bind its socket. It reports whether one announced itself, the path it
+// announced on, and whether the workspace must be left UNDETERMINED.
+//
+// It is called on exactly one state: the workspace lock reads FREE and no
+// generation of the socket is live. That is what a client-less workspace looks
+// like, and it is also what a shim spawned tens of milliseconds ago looks
+// like — startingshim carries the measured timeline. The registry's recorded
+// spawn pid, written at the instant of the fork, is what separates them.
+//
+// AN EXPIRED BOUND IS UNDETERMINED, exactly as an unreadable lock is: a live
+// process that may bind the path at any instant is what a second shim must not
+// race. Such a workspace is neither adopted nor orphan-closed, no shim is
+// spawned onto it, the boot goes on and the daemon serves.
+func (s *sequence) awaitStartingSurvivor(ctx context.Context, log dlog.Logger, ws wsm.Workspace, socketPath string) (bool, string, bool) {
+	if ws.SpawnedShimPID == nil {
+		return false, "", false
+	}
+	pid := *ws.SpawnedShimPID
+	if !s.shimAlive(pid) {
+		log.Debug("daemon.boot.adopt", "the recorded spawn's process is gone; nothing survives to wait for", dlog.Context{
+			"workspace_id": string(ws.ID), "shim_pid": pid,
+		})
+		return false, "", false
+	}
+	log.Info("daemon.boot.adopt", "a shim spawned for this workspace is still starting; waiting for it to announce itself rather than declaring the workspace client-less",
+		dlog.Context{
+			"workspace_id": string(ws.ID), "shim_pid": pid,
+			"socket_path": socketPath, "bound_ms": s.adoptBound.Milliseconds(),
+		})
+	path, outcome := s.starting.Await(ctx, &pid, socketPath, s.adoptBound)
+	switch outcome {
+	case startingshim.OutcomeAnnounced:
+		log.Info("daemon.boot.adopt", "the starting shim announced itself; adopting it as the inert survivor it is", dlog.Context{
+			"workspace_id": string(ws.ID), "shim_pid": pid, "socket_path": path,
+		})
+		return true, path, false
+	case startingshim.OutcomeSpawnDead:
+		log.Info("daemon.boot.adopt", "the starting shim died before it announced itself; the workspace is client-less", dlog.Context{
+			"workspace_id": string(ws.ID), "shim_pid": pid, "socket_path": socketPath,
+		})
+		return false, "", false
+	default:
+		log.Error("daemon.boot.adopt", "a shim recorded as spawned is alive but never announced itself within the adoption bound; the workspace is left undetermined and the daemon serves",
+			dlog.Context{
+				"workspace_id": string(ws.ID), "shim_pid": pid,
+				"socket_path": socketPath, "bound_ms": s.adoptBound.Milliseconds(),
+			})
+		return false, "", true
+	}
+}
+
+// shimAlive answers the injected liveness probe, or the kernel's.
+func (s *sequence) shimAlive(pid int) bool {
+	if s.deps.ShimAlive != nil {
+		return s.deps.ShimAlive(pid)
+	}
+	return startingshim.Alive(pid)
 }
