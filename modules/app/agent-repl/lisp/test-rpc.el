@@ -96,6 +96,9 @@ would abort the very branch a test is asserting."
     ("RestartWorkspace" agent-repl-rpc-restart-workspace
      agent-repl-wire-encode-restart-workspace-request
      agent-repl-wire-decode-restart-workspace-response)
+    ("Interrupt" agent-repl-rpc-interrupt
+     agent-repl-wire-encode-interrupt-request
+     agent-repl-wire-decode-interrupt-response)
     ("SetWorkspacePriority" agent-repl-rpc-set-workspace-priority
      agent-repl-wire-encode-set-workspace-priority-request
      agent-repl-wire-decode-set-workspace-priority-response)
