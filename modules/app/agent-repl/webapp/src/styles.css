@@ -1297,7 +1297,10 @@ pre {
 .bubble.user {
   background: var(--user);
   width: fit-content;
-  max-width: 60%;
+  /* The blue prompt bubble caps 15% below its prior 60% (owner ruling,
+     2026-09-14): 60% * 0.85 = 51%. ONLY the max width changes — the margin
+     below keeps its bias off the unscaled --agent-bubble-cap. */
+  max-width: 51%;
   margin-left: auto;
   margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
   /* The prompt's verbatim <pre> carried no leading of its own, so it fell to
@@ -1499,7 +1502,10 @@ pre {
 .bubble.assistant {
   background: var(--assistant);
   width: fit-content;
-  max-width: var(--agent-bubble-cap);
+  /* The purple response bubble caps 15% below the shared bubble cap (owner
+     ruling, 2026-09-14): 82.5% * 0.85. ONLY the max width changes — the
+     margin below keeps its bias off the unscaled --agent-bubble-cap. */
+  max-width: calc(var(--agent-bubble-cap) * 0.85);
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
   margin-right: auto;
 }
