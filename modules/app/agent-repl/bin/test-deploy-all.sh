@@ -710,6 +710,23 @@ else
     fail "--elisp hot-loads changed .el, skipping test-*.el and deleted files" "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
+# --- 7b. a plain deploy (no --elisp) hot-loads the full module set by default
+# Owner ruling 2026-09-14: deploy live-reloads Emacs. With no range given, the
+# deployed checkout is the source of truth, so the whole canonical module set is
+# reloaded — the same heartbeat-safe set the core.el path expands to.
+d="$TMP/t7b"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && grep -q "full module reload (default" "$d/stdout" \
+   && log_has 'emacsclient --eval (load .*core.el' \
+   && log_has 'emacsclient --eval (load .*workspace.el' \
+   && log_has 'emacsclient --eval (load .*status.el' \
+   && log_before 'load .*status.el' 'assert-heartbeat-armed'; then
+    pass "a plain deploy hot-loads the full module set into the running Emacs"
+else
+    fail "a plain deploy hot-loads the full module set into the running Emacs" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
 # --- 8. --force propagates to build-frontend ---------------------------------
 d="$TMP/t8"; mkdir -p "$d"
 seed_deployed "$d" shim-store bin-v0
