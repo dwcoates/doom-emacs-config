@@ -10,8 +10,9 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   SEPARATION_ARMS,
   drawFeedSessionSeparation,
+  separationBoundsFeed,
 } from "../../../src/feed/rows/separation.js";
-import { harness, rowContext, userPromptRow } from "../harness.js";
+import { harness, rowContext, separationRow, userPromptRow } from "../harness.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 beforeEach(() => {
@@ -354,5 +355,26 @@ describe("drawFeedSessionSeparation: the record of the row", () => {
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-separation");
     expect(record.level.case).toBe("info");
+  });
+});
+
+// WHICH DIVIDERS THE FEED BEGINS AT. Only the two that cut context: after them
+// the rows above are no longer the conversation the agent has.
+
+describe("separationBoundsFeed", () => {
+  it("a compaction bounds the feed", () => {
+    expect(separationBoundsFeed(separationRow("cut", "compacted"))).toBe(true);
+  });
+
+  it("a clear bounds the feed", () => {
+    expect(separationBoundsFeed(separationRow("cut", "cleared"))).toBe(true);
+  });
+
+  it("a compaction that FAILED bounds nothing, having cut nothing", () => {
+    expect(separationBoundsFeed(separationRow("cut", "compactionFailed"))).toBe(false);
+  });
+
+  it("a row that is not a separation bounds nothing", () => {
+    expect(separationBoundsFeed(userPromptRow("p1", "hello"))).toBe(false);
   });
 });
