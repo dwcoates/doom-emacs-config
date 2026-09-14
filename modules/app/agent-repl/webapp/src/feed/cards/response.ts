@@ -67,10 +67,12 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
 import { bubbleScroll } from "../bubble-scroll.js";
+import { formatAge } from "../../duration.js";
 import { renderMarkdown, inline } from "../../markdown.js";
 import { findTreeRegion, renderTreeHtml } from "../../metaprompt-tree.js";
-import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
+import { tick } from "../ticking.js";
 import type { RowContext } from "./context.js";
 
 /** The attribute the shown length is carried on across a redraw. */
@@ -104,7 +106,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const corner = document.createElement("span");
   corner.className = "turn-meta";
   if (u.usage !== undefined) {
-    corner.appendChild(drawFeedResponseUsageStamp(u.usage, `${path}.usage`));
+    corner.appendChild(drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`));
   }
   bubble.appendChild(corner);
 
@@ -271,19 +273,69 @@ export function drawFeedResponseNotice(u: FeedResponseNotice, path: string): HTM
   return heading;
 }
 
-/** The cost corner's figure, drawn verbatim. */
+/** The class the corner wears while its timestamp is revealed. */
+export const USAGE_REVEALED_CLASS = "usage-corner--revealed";
+
+/**
+ * The cost corner: the token figure, drawn verbatim, and — once the response
+ * has SETTLED — the relative timestamp it reveals when hovered or focused.
+ *
+ * THE TWO SIT IN A RIGHT-ANCHORED ROW so the figure stays where it always sat
+ * and the timestamp grows in from the RIGHT edge, sliding the figure LEFT to
+ * make room (owner ruling, 2026-09-14). The slide is one continuous ~0.5s CSS
+ * transition on the timestamp's width and offset, so mouse-leave runs the same
+ * transition backwards for free rather than snapping — the stylesheet owns it,
+ * and `prefers-reduced-motion` drops it. A state class is toggled here too, so
+ * a keyboard focus reveals the same timestamp a hover does.
+ *
+ * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
+ * once per shared tick, so "5m 30s ago" stays current while it is on screen.
+ * The subscription is taken through `tick`, which marks the element, so the
+ * feed's teardown of the bubble — a re-push replacing the row, or the turn-end
+ * backstop that stops every clock in a settled turn — unsubscribes it with no
+ * disposer to remember here.
+ *
+ * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
+ * a corner with no settled instant is the plain figure alone.
+ */
 export function drawFeedResponseUsageStamp(
   u: FeedResponseUsageStamp,
+  rc: RowContext,
   path: string,
 ): HTMLElement {
+  const atMs = u.atMs === 0n ? 0 : msOf(u.atMs, `${path}.at_ms`);
   log.debug("drawing a response usage stamp", {
     operation: "feed.cards.response.usage-stamp",
-    context: { path },
+    context: { path, settled: atMs > 0 },
   });
+
+  const corner = document.createElement("span");
+  corner.className = "usage-corner";
+
   const stamp = document.createElement("span");
   stamp.className = "usage-stamp";
   stamp.textContent = u.text;
-  return stamp;
+  corner.appendChild(stamp);
+
+  if (atMs > 0) {
+    const ago = document.createElement("span");
+    ago.className = "usage-ago";
+    tick(ago, rc.ctx.ticker, (nowMs) => {
+      ago.textContent = `${formatAge(nowMs - atMs)} ago`;
+    });
+    corner.appendChild(ago);
+
+    // A focusable hover target: focus reveals the same timestamp a hover does.
+    corner.tabIndex = 0;
+    const reveal = (): void => corner.classList.add(USAGE_REVEALED_CLASS);
+    const hide = (): void => corner.classList.remove(USAGE_REVEALED_CLASS);
+    corner.addEventListener("mouseenter", reveal);
+    corner.addEventListener("mouseleave", hide);
+    corner.addEventListener("focusin", reveal);
+    corner.addEventListener("focusout", hide);
+  }
+
+  return corner;
 }
 
 /**

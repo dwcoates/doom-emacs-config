@@ -518,6 +518,14 @@ message FeedResponseProse {
 message FeedResponseUsageStamp {
   // The formatted figure, drawn verbatim.
   string text = 1;
+
+  // When the response SETTLED, epoch ms — the instant the relative timestamp
+  // the client reveals on hover counts back from ("5m 30s ago"). Filled by the
+  // daemon from the same clock every other feed timestamp uses, at the moment
+  // the fold settles; a settle is stamped ONCE, so a re-push serves the same
+  // instant. UNSET (zero) while the response is still arriving: there is no
+  // settled instant yet, and the client reveals no timestamp for a zero.
+  int64 at_ms = 2;
 }
 
 // The grey tool-call bubble: one shared shell — head (name + badge), the
