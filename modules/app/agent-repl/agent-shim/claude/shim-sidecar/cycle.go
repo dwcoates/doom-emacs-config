@@ -1138,6 +1138,13 @@ func (s *sidecar) mainAgentFor(target discover.Target) string {
 // record's write and upsert identities are digested from its file position,
 // which has not moved.
 func (s *sidecar) rekeyRotations() {
+	// ONE QUESTION FOR THE WHOLE WATCHED SET, ASKED OF THE LINK DIRECTORIES
+	// RATHER THAN OF EVERY ID. Resolve is an in-memory lookup and remembers the
+	// ids nothing links; this is the event that makes a remembered miss wrong,
+	// and it costs one readdir plus a stat per shim workspace however many
+	// watchers there are. Re-globbing per id instead is what made a steady-state
+	// sidecar hold most of a core and stretched a poll tick to seconds.
+	s.identity.RecheckLinks()
 	for path, w := range s.watchers {
 		if w.ctx == nil {
 			continue
