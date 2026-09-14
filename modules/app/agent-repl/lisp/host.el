@@ -72,7 +72,6 @@
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--live-ws-names "workspace" ())
-(declare-function agent-repl--pseudo-workspace-name-p "core" (ws))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
 (defvar agent-repl--eager-open-in-progress)
@@ -1101,16 +1100,16 @@ is what moves `:conn\=' to the new daemon (`agent-repl-host--attach\=') and
 frontend.el derives the page url from `agent-repl-host-conn\='.  It is a
 no-op for a workspace with no live webview, so a headless one costs
 nothing."
-  (let* ((all-names (agent-repl--live-ws-names))
-         ;; persp-mode's OWN perspectives ride in that list -- `persp-nil-name'
-         ;; ("none") and Doom's initial "main".  They are not workspaces, own
-         ;; no project directory and never will, so walking them warned
+  (let* (;; persp-mode's OWN perspectives -- `persp-nil-name' ("none") and
+         ;; Doom's initial "main" -- are not workspaces, own no project
+         ;; directory and never will, so walking them warned
          ;; `link-up-skipped ws=none reason=no-dir' on every single link-up:
          ;; a warning about a condition that is not a fault, which is the
          ;; fastest way to teach a reader to ignore the ones that are.  They
-         ;; are filtered BEFORE the per-workspace refusal, never inside it.
-         (pseudo (seq-filter #'agent-repl--pseudo-workspace-name-p all-names))
-         (names (seq-remove #'agent-repl--pseudo-workspace-name-p all-names))
+         ;; are filtered BEFORE the per-workspace refusal, never inside it --
+         ;; now at the SOURCE: `agent-repl--live-ws-names' excludes every
+         ;; pseudo perspective, so this walk cannot see one.
+         (names (agent-repl--live-ws-names))
          (wanted (agent-repl-host--selected-dir))
          (eligible (seq-filter (lambda (ws) (agent-repl--ws-get ws :project-dir)) names))
          (outstanding (length eligible))
@@ -1123,11 +1122,6 @@ nothing."
                    (when (zerop outstanding)
                      (agent-repl-host--reassert-selection wanted)))))
     (setq agent-repl-host-reselect-pending wanted)
-    (when pseudo
-      (agent-repl--log '(:agent-repl-central
-                         "a persp-mode pseudo perspective owns no workspace sink")
-                       "elisp.host.link-up-pseudo-filtered count=%d names=%S"
-                       (length pseudo) pseudo))
     (agent-repl--info '(:agent-repl-central "link recovery spans every workspace")
                       "elisp.host.link-up workspaces=%d selection=%S"
                       (length names) wanted)

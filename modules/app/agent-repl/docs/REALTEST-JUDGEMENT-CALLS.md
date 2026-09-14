@@ -15,6 +15,17 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## No pseudo workspaces (2026-09-14)
+
+Owner ruling, quoted: "I don't want 'main' or 'none' workspaces showing up
+anywhere as possibilities. For example, currently they show up with `SPC p p`
+for switching to workspace."
+
+| call | what was decided |
+|---|---|
+| where the filter lives | At the SOURCE, not per reader. `agent-repl--live-ws-names` now excludes every `agent-repl--pseudo-workspace-name-p` name, and `agent-repl--ws-list-names` drops Doom's "main" as well as the `persp-nil-name` sentinel it already dropped. Every user-facing enumeration was audited and reaches the user through one of those two, or through the daemon's roster rows, which never carry a perspective: the `SPC p p` switcher, `agent-repl--read-known-workspace`, `agent-repl-verbs--registered-ws-names`, `agent-repl--roster-recent-names`, the `s-{`/`s-}`/`M-<n>` cycling and the tab-bar order (both `agent-repl--drawn-tab-names`, i.e. the roster walk). host.el's local `seq-remove` filter is deleted with its `link-up-pseudo-filtered` record, since the walk can no longer see one. The pseudo predicate is unchanged and still read by log routing (`agent-repl--log-sink-workspace`, `agent-repl--resolve-log-workspace`), the `:project-dir` write refusal, `agent-repl--land-after-teardown` (which must still see the persps it may NOT land in) and panels.el's current-perspective guard. Doom's own `+workspace/*` commands are untouched. |
+| the poll partition's placeholders | `agent-repl--ws-project-poll-partition` no longer reports "main"/"none" as placeholders, because they are no longer candidates at all; its test now uses two dir-less real registrations, and a new test asserts the pseudo names produce neither a pollable nor a placeholder. |
+
 ## Copyable text (2026-09-14)
 
 Owner ruling, quoted: "ensure that everything in the webapp (all text) can be
