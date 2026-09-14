@@ -46,6 +46,7 @@ import type {
   FooterStatusActivityColdGateCost,
   FooterStatusActivityContextBudget,
   FooterStatusActivityContextInjected,
+  FooterStatusActivityFault,
   FooterStatusActivityGatedCall,
   FooterStatusActivityHook,
   FooterStatusActivityInterrupting,
@@ -484,6 +485,8 @@ function drawActivityKind(
       return drawFooterStatusActivityQueryDied(kind.value);
     case "startFailed":
       return drawFooterStatusActivityStartFailed(kind.value);
+    case "fault":
+      return drawFooterStatusActivityFault(kind.value);
     case "closeBlocked":
       return drawFooterStatusActivityCloseBlocked(kind.value);
     default: {
@@ -560,6 +563,25 @@ export function drawFooterStatusActivityStartFailed(
     "footer-activity-start-failed",
     `${u.detail} · ${u.droppedPrompts} held ${prompts} dropped`,
   );
+}
+
+/**
+ * A STANDING DAEMON FAULT: the kind, then what it says.
+ *
+ * Drawn in the same cell and the same style as the bring-up failure beside it,
+ * because it is the same thing said about the other eighteen fault kinds — the
+ * owner's ruling of 2026-09-13 is that every one of them reaches the strip.
+ *
+ * THE KIND IS RENDERED LOWERCASE WITH SPACES, footer.proto's rule for the arm
+ * cells applied to the one activity field that carries an arm's name. The
+ * detail is the daemon's own composed sentence, drawn verbatim; a kind whose
+ * name says the whole thing carries none, and the line is then the kind alone
+ * rather than a dangling separator.
+ */
+export function drawFooterStatusActivityFault(u: FooterStatusActivityFault): HTMLElement {
+  const kind = u.kind.replace(/_/g, " ");
+  if (u.detail === "") return textLine("footer-activity-fault", kind);
+  return textLine("footer-activity-fault", `${kind} · ${u.detail}`);
 }
 
 /** The close-blocked reasons, verbatim. */
