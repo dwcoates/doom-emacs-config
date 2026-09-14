@@ -20,8 +20,9 @@
 //	--config-roots     comma-separated config roots (~/.claude,~/.claude-chesscom)
 //	--spool-root       task-spool root (/tmp; resolves claude-<uid>/… itself)
 //	--log              size-capped rotating log file
-//	--poll-interval    how often each watched file is polled (1s)
-//	--rescan-interval  how often discovery runs (30s)
+//	--poll-interval    how often each watched file is polled, and how often the
+//	                   directory-change probe looks for NEW files (1s)
+//	--rescan-interval  how often the FULL discovery enumeration runs (30s)
 //
 // The LOST policy's windows (internal/stale) are configurable too, so the
 // integration suite can exercise a conclusion in milliseconds instead of
@@ -123,8 +124,8 @@ func main() {
 	configRoots := flag.String("config-roots", "~/.claude,~/.claude-chesscom", "comma-separated config roots")
 	spoolRoot := flag.String("spool-root", "/tmp", "task-spool root (resolves claude-<uid>/ itself)")
 	logPath := flag.String("log", filepath.Join(base, "log", "shim-claude-sidecar.log"), "log file path (size-capped, rotated into N generations)")
-	pollInterval := flag.Duration("poll-interval", DefaultPollInterval, "how often each watched file is polled")
-	rescanInterval := flag.Duration("rescan-interval", DefaultRescanInterval, "how often discovery runs")
+	pollInterval := flag.Duration("poll-interval", DefaultPollInterval, "how often each watched file is polled, and how often the directory-change probe looks for new files")
+	rescanInterval := flag.Duration("rescan-interval", DefaultRescanInterval, "how often the full discovery enumeration runs")
 	// The LOST windows are STRINGS rather than flag.Duration values because
 	// flag.Duration cannot tell "the operator passed nothing" from "the operator
 	// passed 0s", and it answers a malformed value by printing usage and exiting
