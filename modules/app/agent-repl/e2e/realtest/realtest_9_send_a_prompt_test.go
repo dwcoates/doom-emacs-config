@@ -483,6 +483,32 @@ func TestRealtestSendAPrompt(t *testing.T) {
 	// the harvester reads through the link.
 	preserved := wsActPreserveSinks(ws)
 
+	// EVERY EDGE BELOW IS SCANNED AGAINST THE CURRENT WORKSPACE SET, and that
+	// is not a refinement — it is the difference between reading this run's
+	// evidence and reading none of it.
+	//
+	// `sources` above was enumerated BEFORE the registration, from `openBefore`,
+	// so it holds five canonical links for every workspace that already existed
+	// and NONE for the one this run just minted. Every edge this realtest is
+	// about — the shim's `shim.engine.turn`, the daemon's `deliver`, the
+	// webapp's feed draws — is written into the NEW workspace's own sinks, so a
+	// wait over the pre-registration set is waiting on files it never opens.
+	// Sweep rt-run35 is exactly that: the run reported "waited 3m0s for the shim
+	// to open a turn" and "THE FEED WROTE NOTHING" while the minted workspace's
+	// shim log plainly held the turn record, timestamped inside the window.
+	//
+	// So the set is re-enumerated once here, against the workspace set the state
+	// database holds now, the same way the final harvest does it. The SNAPSHOT
+	// is deliberately not retaken: it is keyed by inode, so a source it already
+	// knows is still read from where this run left it, and a source that did not
+	// exist when it was taken is read whole from zero (harvest.go,
+	// `resolveReads`) — which is precisely what a sink the run itself created
+	// needs.
+	turnSources := rt9Sources(t, home, afterRegister)
+	t.Logf("scanning %d log source(s) for the turn's edges, re-enumerated against the %d workspace(s) the "+
+		"state database holds now (the pre-registration set had %d source(s) and none of %s's)",
+		len(turnSources), len(afterRegister), len(sources), ws.ID)
+
 	// EVERY ACT BELOW ADDRESSES THE WORKSPACE THE EDITOR IS STANDING ON, and
 	// nothing takes it as a parameter: `SPC o v` focuses the CURRENT
 	// workspace's composer and `agent-repl-send` submits to the CURRENT
@@ -546,7 +572,7 @@ func TestRealtestSendAPrompt(t *testing.T) {
 
 	// SUBMIT: the editor's own account of the submission leaving it.
 	submitAt, submitOK := rt9AwaitEdge(ctx, t, "the editor to record the submission (`elisp.input.send`)",
-		rt9SubmitCeiling, sources, snapshot, preserved, pressedAt, rt9SendRe,
+		rt9SubmitCeiling, turnSources, snapshot, preserved, pressedAt, rt9SendRe,
 		func(hit rt9Hit) bool { return strings.Contains(hit.Text, "ws="+wsName) })
 	if !submitOK {
 		t.Errorf("`RET` was pressed in %q's composer and no `elisp.input.send` record names that workspace "+
@@ -583,7 +609,7 @@ func TestRealtestSendAPrompt(t *testing.T) {
 
 	// DELIVERED: the daemon handing the prompt to the shim.
 	deliverAt, deliverOK := rt9AwaitEdge(ctx, t, "the daemon to deliver the prompt to the shim",
-		rt9TurnCeiling, sources, snapshot, preserved, pressedAt, rt9DeliverRe,
+		rt9TurnCeiling, turnSources, snapshot, preserved, pressedAt, rt9DeliverRe,
 		func(hit rt9Hit) bool { return hit.NamesWorkspace(ws) })
 	if !deliverOK {
 		t.Errorf("no `daemon.promptqueue.deliver` record inside the run window names workspace %s (%q), so "+
@@ -592,11 +618,11 @@ func TestRealtestSendAPrompt(t *testing.T) {
 
 	// THE SUBMIT DOOR'S OWN RECORD, reported rather than asserted: it is DEBUG
 	// on the ordinary path and the deployed daemon runs at INFO.
-	rt9ReportSubmitDoor(t, sources, snapshot, preserved, pressedAt, ws, wsName, &manifest)
+	rt9ReportSubmitDoor(t, turnSources, snapshot, preserved, pressedAt, ws, wsName, &manifest)
 
 	// TURN OPENED: the shim accepting the turn.
 	openedAt, openedOK := rt9AwaitEdge(ctx, t, "the shim to open a turn for the prompt",
-		rt9TurnCeiling, sources, snapshot, preserved, pressedAt, rt9TurnOpenedRe,
+		rt9TurnCeiling, turnSources, snapshot, preserved, pressedAt, rt9TurnOpenedRe,
 		func(hit rt9Hit) bool { return hit.NamesWorkspace(ws) })
 	if !openedOK {
 		t.Errorf("no `shim.engine.turn` record inside the run window says the shim opened a turn for "+
@@ -631,7 +657,7 @@ func TestRealtestSendAPrompt(t *testing.T) {
 
 	// ---- The feed ------------------------------------------------------
 
-	rt9AssertTheAnswerIsInTheFeed(ctx, t, sources, snapshot, preserved, pressedAt, ws, wsName, &manifest)
+	rt9AssertTheAnswerIsInTheFeed(ctx, t, turnSources, snapshot, preserved, pressedAt, ws, wsName, &manifest)
 
 	// ---- The arm, through the whole turn -------------------------------
 
@@ -1525,9 +1551,18 @@ func rt9AnyNaming(hits []rt9Hit, ws Workspace) bool {
 // them all, and it reads the per-workspace sinks rather than the global service
 // logs wherever both would carry the record.
 //
-// The sources are re-enumerated against the CURRENT workspace set on every
-// call, plus the preserved sinks, so a sink that appeared after the snapshot —
-// a workspace this run itself registered — is read.
+// IT DOES NOT ENUMERATE ANYTHING. `base` is whatever the caller hands it, and
+// the caller owes it a set enumerated against the CURRENT workspace set — which
+// is why the turn's edges are scanned over `turnSources`, re-enumerated after
+// the registration, and not over the set built before the run had a workspace
+// to send to. A comment here once claimed this function re-enumerated per call;
+// it never did, and while that claim stood every edge in the turn was being
+// waited for over files the minted workspace does not write to.
+//
+// The preserved sinks are merged in on top, and the offsets come from the
+// run-start snapshot by inode: a source the snapshot knew resumes where the run
+// left it, and one that appeared afterwards is read whole from zero
+// (harvest.go, `resolveReads`).
 func rt9Scan(base []Source, snap Snapshot, preserved []Source, since time.Time,
 	re *regexp.Regexp) ([]rt9Hit, error) {
 	var hits []rt9Hit
@@ -1672,6 +1707,98 @@ func rt9Describe(list []Workspace) string {
 	parts := make([]string, 0, len(list))
 	for _, ws := range list {
 		parts = append(parts, fmt.Sprintf("%s (%s at %s)", ws.ID, ws.Name, ws.Dir))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// ---- The one thing about this reader that is unit-testable --------------
+
+// TestRt9ScanReadsASourceThatAppearedAfterTheSnapshotFromZero pins the property
+// the pre-registration source set silently broke: a sink that did not exist
+// when the snapshot was taken is read WHOLE, from byte zero, and its records
+// are found.
+//
+// It drives no editor and spawns nothing; it is the same shape as the
+// wsActForget unit tests further up this package.
+//
+// The scenario is exactly the one sweep rt-run35 hit: at snapshot time the run
+// knows one workspace's shim sink; the workspace it is about to register does
+// not exist yet, and its sink appears mid-run carrying the record every edge
+// wait is looking for. If the offset for the new source came from anywhere but
+// zero — a path-keyed default, or the other source's size — the record would be
+// seeked past and the run would report a turn that plainly happened as one that
+// never did.
+func TestRt9ScanReadsASourceThatAppearedAfterTheSnapshotFromZero(t *testing.T) {
+	root := t.TempDir()
+	since := time.Now().Add(-time.Minute)
+	stamp := time.Now().Format(time.RFC3339Nano)
+
+	rt9WriteRecord := func(path, workspaceID, operation, message string) {
+		t.Helper()
+		line, err := json.Marshal(record{
+			Timestamp: stamp, Level: "INFO", Operation: operation,
+			Message: message, WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			t.Fatalf("render a log record: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create the directory holding %s: %v", path, err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		defer file.Close()
+		if _, err := file.Write(append(line, '\n')); err != nil {
+			t.Fatalf("append a record to %s: %v", path, err)
+		}
+	}
+
+	// Arrange: one sink standing before the run, long enough that its size
+	// would seek past the whole of the sink that appears later.
+	standing := filepath.Join(root, "standing", "shim.log")
+	for i := 0; i < 8; i++ {
+		rt9WriteRecord(standing, "standing-ws", "shim.engine.turn",
+			"opened a turn, delivered its prompt, and painted the opening page")
+	}
+	standingSource := Source{Name: "workspace.shim.log", Path: standing, Kind: KindJSONL, Workspace: "standing-ws"}
+	snap := TakeSnapshot([]Source{standingSource})
+
+	// Act: the run registers a workspace, its sink appears, and the shim writes
+	// the turn record into it. The scan is handed the CURRENT source set.
+	minted := filepath.Join(root, "minted", "shim.log")
+	rt9WriteRecord(minted, "minted-ws", "shim.engine.turn",
+		"opened a turn, delivered its prompt, and painted the opening page")
+	mintedSource := Source{Name: "workspace.shim.log", Path: minted, Kind: KindJSONL, Workspace: "minted-ws"}
+
+	hits, err := rt9Scan([]Source{standingSource, mintedSource}, snap, nil, since, rt9TurnOpenedRe)
+	if err != nil {
+		t.Fatalf("scan the sources for the turn marker: %v", err)
+	}
+
+	// Assert: the minted workspace's record is among the hits, and the standing
+	// sink's pre-snapshot records are not — the offsets still apply.
+	if !rt9AnyNaming(hits, Workspace{ID: "minted-ws"}) {
+		t.Errorf("rt9Scan found no `shim.engine.turn` record for the workspace whose sink appeared after the "+
+			"snapshot; a source the snapshot never saw must be read whole from zero. It found %d hit(s): %s",
+			len(hits), rt9DescribeHits(hits))
+	}
+	if rt9AnyNaming(hits, Workspace{ID: "standing-ws"}) {
+		t.Errorf("rt9Scan re-read the standing sink's pre-snapshot records, so the snapshot offsets are not "+
+			"being applied and every earlier run's records would be reported as this run's. It found %d "+
+			"hit(s): %s", len(hits), rt9DescribeHits(hits))
+	}
+}
+
+// rt9DescribeHits renders a hit list for a failure message.
+func rt9DescribeHits(hits []rt9Hit) string {
+	if len(hits) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		parts = append(parts, fmt.Sprintf("%s in %s", hit.WorkspaceID, hit.Source.Path))
 	}
 	return strings.Join(parts, "; ")
 }
