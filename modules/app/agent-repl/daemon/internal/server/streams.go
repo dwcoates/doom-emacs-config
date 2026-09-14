@@ -63,6 +63,26 @@ func (s *server) streamContext(ctx context.Context) (context.Context, context.Ca
 	return streamCtx, cancel
 }
 
+// backgroundContext detaches work from the REQUEST's cancellation while still
+// ending it with the daemon. context.WithoutCancel keeps the request's values
+// (log scope and the like) but drops its cancellation, so a client deadline or
+// disconnect can never cancel the work — the exact fix for a `git worktree add`
+// that a cancelled request context used to kill mid-run. Cancellation is then
+// re-supplied from the daemon's own lifetime alone, so the work still stops
+// when the daemon closes and never outlives it. The caller MUST call the
+// returned cancel, or the s.life watcher goroutine leaks.
+func (s *server) backgroundContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	bgCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	go func() {
+		select {
+		case <-s.life.Done():
+			cancel()
+		case <-bgCtx.Done():
+		}
+	}()
+	return bgCtx, cancel
+}
+
 // serveTopic pumps one topic onto one server stream under the subscription
 // invariant. It is a free function because Go methods take no type parameters.
 func serveTopic[T comparable, R any](
@@ -464,29 +484,83 @@ func (s *server) WatchDaemon(
 	return s.watchDaemon(ctx, req.Msg, out)
 }
 
-// watchDaemon is the body, written to whatever sink carries it.
+// watchDaemon is the body, written to whatever sink carries it. It merges the
+// daemon's TWO topics onto one wire, as serveWeb merges the web stream's state
+// and event topics: daemonTopic carries state (the drain schedule, the
+// stand-down announcement), daemonEventTopic carries events (workspace-mutation
+// progress). They are merged here in publication order per topic. The
+// announcement machinery — the daemonWatcher the orderly exit flushes onto —
+// hangs off the STATE topic's shutdown push alone; an event never satisfies it.
 func (s *server) watchDaemon(
 	ctx context.Context,
 	_ *agentreplv1.WatchDaemonRequest,
 	out streamSink[agentreplv1.WatchDaemonResponse],
 ) error {
+	streamCtx, cancel := s.streamContext(ctx)
+	defer cancel()
+
+	states := s.daemonTopic.Subscribe(streamCtx)
+	events := s.daemonEventTopic.Subscribe(streamCtx)
+
 	w := &daemonWatcher{sent: make(chan struct{})}
-	return serveTopicWith(s, ctx, "WatchDaemon", s.log, &s.daemonTopic, out,
-		func(push *agentreplv1.WatchDaemonResponse) *agentreplv1.WatchDaemonResponse { return push },
-		topicHooks[*agentreplv1.WatchDaemonResponse]{
-			attached: func() func() {
-				s.addDaemonWatcher(w)
-				// A DEPARTING STREAM IS A SATISFIED ONE: the announcer waits
-				// for delivery or for the stream to be gone, never for a
-				// client that has already stopped listening.
-				return func() { s.removeDaemonWatcher(w) }
-			},
-			sent: func(push *agentreplv1.WatchDaemonResponse) {
-				if push.GetShutdownAnnounced() != nil {
-					w.done()
-				}
-			},
-		})
+	s.addDaemonWatcher(w)
+	// A DEPARTING STREAM IS A SATISFIED ONE: the announcer waits for delivery
+	// or for the stream to be gone, never for a client that has stopped
+	// listening.
+	defer s.removeDaemonWatcher(w)
+	s.acceptStream(ctx, "WatchDaemon")
+	s.log.Debug("WatchDaemon", "accepted a standing stream", nil)
+
+	for {
+		var push *agentreplv1.WatchDaemonResponse
+		var fromState bool
+		select {
+		case <-streamCtx.Done():
+			s.log.Debug("WatchDaemon", "the standing stream ended on cancellation", nil)
+			return nil
+		case state, ok := <-states:
+			if !ok {
+				s.log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if state == nil {
+				s.log.Error("WatchDaemon", "a publisher raised an empty view; it was not sent", nil)
+				continue
+			}
+			push, fromState = state, true
+		case event, ok := <-events:
+			if !ok {
+				s.log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if event == nil {
+				s.log.Error("WatchDaemon", "a publisher raised an empty push; it was not sent", nil)
+				continue
+			}
+			push, fromState = event, false
+		}
+		if err := out.Send(push); err != nil {
+			s.log.Debug("WatchDaemon", "the standing stream's client went away",
+				dlog.Context{"cause": err.Error()})
+			return nil
+		}
+		// The stand-down announcement rides the STATE topic; only it satisfies
+		// the announcer's latch, so a mutation-progress event can never make a
+		// departing daemon think its stand-down reached this client.
+		if fromState && push.GetShutdownAnnounced() != nil {
+			w.done()
+		}
+	}
+}
+
+// MutationProgress pushes one workspace-mutation progress event onto every
+// WatchDaemon stream, keyed on the op_id it carries. It rides the event topic,
+// never the state topic, so it is not replayed to a late subscriber in place of
+// the standing drain banner.
+func (s *server) MutationProgress(progress *agentreplv1.WorkspaceMutationProgress) {
+	s.daemonEventTopic.Publish(&agentreplv1.WatchDaemonResponse{
+		Push: &agentreplv1.WatchDaemonResponse_MutationProgress{MutationProgress: progress},
+	})
 }
 
 // holdParticipant records that one of a workspace's two per-workspace streams

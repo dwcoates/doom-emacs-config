@@ -51,6 +51,7 @@
   (load (expand-file-name "test-keybindings.el" dir) nil t)
   (load (expand-file-name "test-log-timestamp.el" dir) nil t)
   (load (expand-file-name "test-magit.el" dir) nil t)
+  (load (expand-file-name "test-mutation-progress.el" dir) nil t)
   (load (expand-file-name "test-notes.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
   (load (expand-file-name "test-open-progress.el" dir) nil t)

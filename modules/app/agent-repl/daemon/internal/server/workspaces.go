@@ -122,7 +122,38 @@ func (s *server) CreateWorkspace(
 		spec.Priority = &priority
 	}
 
-	created, err := s.deps.Verbs.Create(ctx, spec)
+	// THE WORK RUNS DETACHED FROM THE REQUEST CONTEXT in both forms. bgCtx
+	// keeps this request's values but drops its cancellation, so a client
+	// deadline or disconnect can never cancel `git worktree add` mid-run — the
+	// defect that silently failed a create. It ends only with the daemon.
+	bgCtx, cancel := s.backgroundContext(ctx)
+
+	// OPTION B: a create that carries an op_id is ACKED NOW and worked in the
+	// background. The rpc returns at once so a slow naming call or worktree add
+	// never leaves the client without feedback, and every stage and the
+	// terminal outcome ride WatchDaemon keyed on the op_id
+	// (workspace_mutation_progress.proto). A create WITHOUT an op_id keeps the
+	// legacy synchronous contract: the same detached work, but this rpc waits
+	// for it and answers success/error itself.
+	if opID := req.Msg.GetOpId(); opID != "" {
+		spec.Progress = createProgressReporter{server: s, opID: opID}
+		go func() {
+			// The goroutine OWNS the cancel: cancelling in the handler would
+			// tear bgCtx down the instant the ack returns, which is the very
+			// cancellation this detaches from.
+			defer cancel()
+			s.runBackgroundCreate(bgCtx, rpc, spec, opID)
+		}()
+		resp.Result = &agentreplv1.CreateWorkspaceResponse_Accepted{
+			Accepted: &agentreplv1.CreateWorkspaceAccepted{OpId: opID},
+		}
+		s.log.Info("daemon.server.create_workspace", "accepted a create and detached it to the background",
+			dlog.Context{"op_id": opID})
+		return connect.NewResponse(resp), nil
+	}
+
+	defer cancel()
+	created, err := s.deps.Verbs.Create(bgCtx, spec)
 	if err != nil {
 		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 	}
@@ -132,6 +163,95 @@ func (s *server) CreateWorkspace(
 		Success: &agentreplv1.CreateWorkspaceSuccess{Workspace: refOf(created)},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// runBackgroundCreate performs an option-B create to completion and publishes
+// its terminal outcome on the mutation-progress channel. It runs in its own
+// goroutine under a context detached from the accepting request, so nothing the
+// client does can cancel it; the daemon owns it to completion.
+func (s *server) runBackgroundCreate(ctx context.Context, rpc string, spec workspace.CreateSpec, opID string) {
+	created, err := s.deps.Verbs.Create(ctx, spec)
+	if err != nil {
+		s.publishCreateFailed(rpc, opID, err)
+		return
+	}
+	s.log.Info("daemon.server.create_workspace", "created a workspace",
+		dlog.Context{"workspace": string(created.ID), "dir": created.Dir, "op_id": opID})
+	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
+		OpId: opID,
+		Event: &agentreplv1.WorkspaceMutationProgress_Create{
+			Create: &agentreplv1.WorkspaceCreateProgress{
+				Step: &agentreplv1.WorkspaceCreateProgress_Succeeded{
+					Succeeded: &agentreplv1.WorkspaceCreateSucceeded{
+						Workspace: refOf(created),
+						Name:      created.Name,
+					},
+				},
+			},
+		},
+	})
+}
+
+// publishCreateFailed maps a background create's error onto a terminal failure
+// event, mirroring the synchronous form: a typed refusal it would have answered
+// on `error`, or an internal error it would have failed the rpc with. The
+// underlying cause is already in the daemon log (the verb records it at ERROR);
+// an internal failure is re-surfaced here at ERROR too, because after the ack
+// there is no rpc error left to carry it.
+func (s *server) publishCreateFailed(rpc, opID string, err error) {
+	failed := &agentreplv1.WorkspaceCreateFailed{}
+	if refused, ok := s.asRefusal(err); ok {
+		resp := &agentreplv1.CreateWorkspaceResponse{}
+		if s.refuse(s.log, rpc, resp, refused) == nil {
+			failed.Cause = &agentreplv1.WorkspaceCreateFailed_Refusal{Refusal: resp.GetError()}
+		}
+	}
+	if failed.Cause == nil {
+		s.log.Error("daemon.server.create_workspace", "a background create failed",
+			dlog.Context{"op_id": opID, "cause": err.Error()})
+		failed.Cause = &agentreplv1.WorkspaceCreateFailed_Internal{Internal: err.Error()}
+	}
+	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
+		OpId: opID,
+		Event: &agentreplv1.WorkspaceMutationProgress_Create{
+			Create: &agentreplv1.WorkspaceCreateProgress{
+				Step: &agentreplv1.WorkspaceCreateProgress_Failed{Failed: failed},
+			},
+		},
+	})
+}
+
+// createProgressReporter relays a create's stage transitions onto the
+// mutation-progress channel, keyed on the op_id the create was accepted under.
+// It satisfies workspace.CreateProgress, keeping the verb itself proto-free.
+type createProgressReporter struct {
+	server *server
+	opID   string
+}
+
+func (r createProgressReporter) Stage(stage workspace.CreateStage) {
+	var wire agentreplv1.WorkspaceCreateStage
+	switch stage {
+	case workspace.CreateStageDerivingName:
+		wire = agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_DERIVING_NAME
+	case workspace.CreateStageCreatingWorktree:
+		wire = agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_CREATING_WORKTREE
+	default:
+		// An unmapped stage is a bug in this switch, not a client condition —
+		// but a create's progress relay must never take the daemon down, so it
+		// is surfaced loudly and the create proceeds unaffected.
+		r.server.log.Error("daemon.server.create_workspace", "an unmapped create stage was reported; it was not relayed",
+			dlog.Context{"op_id": r.opID, "stage": int(stage)})
+		return
+	}
+	r.server.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
+		OpId: r.opID,
+		Event: &agentreplv1.WorkspaceMutationProgress_Create{
+			Create: &agentreplv1.WorkspaceCreateProgress{
+				Step: &agentreplv1.WorkspaceCreateProgress_Stage{Stage: wire},
+			},
+		},
+	})
 }
 
 // mergeActions renders the configured merge actions.
