@@ -85,8 +85,13 @@ export function offerableOptions(options: readonly ModelOption[]): ModelOption[]
   const marker = syntheticMarkerLiteral();
   return options.filter((option, index) => {
     const model = requireMessage(option.model, `TopbarModelSelector.options[${index}].model`);
-    if (model.name !== marker) return true;
-    log.warn(`the daemon served the ${marker} marker as a selectable model; skipping it`, {
+    // NAMES NO MODEL, BY EITHER SPELLING. The synthetic marker and an empty
+    // name are the two ways the daemon can serve the "let the CLI pick"
+    // pseudo-row, and both are unselectable — a SetModel echoing one back would
+    // be refused as not in the catalog. The marker check alone missed the empty
+    // spelling, which drew as a nameless, pickable row.
+    if (model.name !== marker && model.name.trim() !== "") return true;
+    log.warn(`the daemon served a row that names no model (${JSON.stringify(model.name)}); skipping it`, {
       operation: "topbar.model-synthetic-option",
       context: { index },
     });
