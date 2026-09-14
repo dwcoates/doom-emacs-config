@@ -62,7 +62,7 @@ import type { StopControls } from "./stop.js";
 import {
   allowanceUnreadSentence,
   drawFooterAllowance,
-  orderedAllowances,
+  orderedSheetAllowances,
   remainingLabel,
   type FooterActivity,
 } from "./strip.js";
@@ -297,7 +297,9 @@ export function drawFooterTokensLineVerdict(
  * `FooterActivity` the strip drew, drawn again without a width to fight. The
  * allowance cells are the strip's own drawing (`drawFooterAllowance`) in the
  * strip's own order, so a reader who opens the sheet finds the line they were
- * reading rather than a rearranged one.
+ * reading rather than a rearranged one — plus the OVERAGE window, the one
+ * allowance the strip has no room for (`orderedSheetAllowances`), drawn as
+ * one more row of exactly that kind when the vendor reported it.
  *
  * TWO ARMS ONLY. `rate_limited` and `context_budget` are the activity oneof's
  * usage arms; every other arm is about the turn rather than the account and
@@ -312,7 +314,7 @@ export function drawFooterUsageRows(
   const kind = activity.kind;
   if (kind.case === "rateLimited") {
     const rows: HTMLElement[] = [usageHeader("account usage")];
-    for (const allowance of orderedAllowances(kind.value)) {
+    for (const allowance of orderedSheetAllowances(kind.value)) {
       const row = usageRow("allowance");
       row.setAttribute("data-usage-allowance", allowance.label);
       row.appendChild(
