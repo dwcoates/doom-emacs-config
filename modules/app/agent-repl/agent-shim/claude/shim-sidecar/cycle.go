@@ -10,7 +10,14 @@
 // read position can only ever come from a cursor the store handed us, because:
 //
 //   - `cursors` is nil unless a cycle recovered it, and only `recover` sets it;
-//   - `rescan` is the only thing that builds a tailer, and it asserts that;
+//   - `watchTargets` is the only thing that builds a tailer, and it asserts
+//     that. TWO callers reach it and no third may be added without extending
+//     this list: `rescan`, the full periodic enumeration, and `discoverChanged`,
+//     the per-poll directory-change probe that exists so a NEW transcript is
+//     read within one poll rather than one rescan. The contract was once
+//     spelled "rescan is the only thing that builds a tailer"; the probe
+//     EXTENDS it explicitly rather than slipping around it, and it is bound by
+//     every clause below exactly as the rescan is;
 //   - suspension DROPS every tailer, so a resumed cycle rebuilds each one from
 //     the position this cycle's store handed it — never from a remembered one;
 //   - after construction a tailer advances only through Commit, which the poll
@@ -234,7 +241,10 @@ type sidecar struct {
 	// rather than becoming the log's entire content.
 	defects map[string]*fileDefect
 	// watchedThisPass counts the files ONE rescan started watching, so the
-	// pass can state a count rather than a record per file.
+	// pass can state a count rather than a record per file. The change probe
+	// increments it too — `watch` is shared — but only the rescan reads it, and
+	// the rescan zeroes it as its first act, so what it reports is always the
+	// rescan's own tally.
 	watchedThisPass int
 	// rewound remembers which files have had their one boot rewind, so the
 	// bounded backward scan happens once per file per process rather than on
@@ -415,6 +425,13 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 		case <-rescanT.C:
 			s.producing(s.rescan)
 		case <-pollT.C:
+			// DISCOVERY FIRST, THEN THE READ, so a file the probe finds on this
+			// tick has its first records picked up on this same tick rather than
+			// one poll later. The two go through `producing` SEPARATELY: the
+			// probe can itself suspend production (a store that cannot answer for
+			// a newly discovered file's cursor), and pollAll must not run against
+			// the cursors that suspension just dropped.
+			s.producing(s.discoverChanged)
 			s.producing(s.pollAll)
 			s.endCatchupOnFirstDrainedPass()
 		case <-sweepT.C:
@@ -693,12 +710,13 @@ func (s *sidecar) reportResumed() {
 	s.attempts = 0
 }
 
-// rescan discovers targets and creates a tailer for each new one, seeded from
-// the cursor THIS cycle's store handed us.
+// rescan discovers targets across EVERY root and creates a tailer for each new
+// one, seeded from the cursor THIS cycle's store handed us.
 //
-// This is the ONLY place a tailer is ever built, which is why it asserts the
-// invariant: a tailer built without a recovered cursor map starts at offset 0,
-// and that silent cold start is the bug the whole cycle exists to prevent.
+// It is the FULL enumeration and the backstop: whatever the per-poll change
+// probe beside it misses — a directory whose mtime granularity swallowed a
+// write, a spool tree that appeared under a root the probe does not stat — is
+// found here, at this interval, exactly as it was before the probe existed.
 func (s *sidecar) rescan() {
 	s.requireCursors("rescan")
 	now := s.now()
@@ -714,7 +732,77 @@ func (s *sidecar) rescan() {
 	s.identity.Refresh()
 	s.rekeyRotations()
 	s.refreshSpawnFacts()
-	for _, target := range s.disc.Scan() {
+	if _, ok := s.watchTargets(s.disc.Scan(), now); !ok {
+		return
+	}
+	s.reportRescan()
+}
+
+// discoverChanged is the PER-POLL discovery path: it stats the directories the
+// globs enumerate and watches whatever a directory whose mtime moved turns out
+// to hold, on this tick rather than at the next rescan.
+//
+// WHY IT EXISTS. Discovery ran only on the rescan interval, so a transcript the
+// vendor created one instant after a scan waited out the whole 30s before a
+// single byte of it was read. Realtest 9, sweep rt-run36: a fresh workspace's
+// first turn concluded at 23:22:44, the vendor wrote its transcript at 23:22:44,
+// and tail-pickup came at 23:23:14. The prompt, the turn end and the
+// final-answer mark were all already drawn by the other planes; the assistant's
+// ANSWER TEXT, which only this process reads, was thirty seconds late.
+//
+// IT IS NOT A NARROWER SCAN. Nothing was removed from what discovery looks at —
+// narrowing it "only serves to obfuscate inefficiency" (owner's standing rule) —
+// and the full Scan still runs at its own interval, refreshing holds, meta
+// re-checks and every shape this probe does not reach.
+//
+// THE IDENTITY RECORDS ARE RE-READ BEFORE ANY NEW FILE IS WATCHED, exactly as
+// rescan does it and for the same reason: a transcript watched before its
+// rotation link file is visible books its records under the vendor's new id,
+// which the store then refuses for the life of that file. The refresh happens
+// only on a tick that actually found something, so an idle poll still costs one
+// stat per candidate directory and nothing else.
+func (s *sidecar) discoverChanged() {
+	s.requireCursors("discoverChanged")
+	changed := s.disc.ScanChanged()
+	if len(changed) == 0 {
+		return
+	}
+	now := s.now()
+	defer s.flushCatchupSummaries(now.UnixMilli())
+	s.identity.Refresh()
+	for _, dir := range changed {
+		watched, ok := s.watchTargets(dir.Targets, now)
+		if watched > 0 {
+			// THE ONE RECORD THIS PATH STATES AT NORMAL VERBOSITY, and only when
+			// the change led somewhere: a directory that changed and held nothing
+			// new says nothing, and the per-tick "I looked" is debug, in the
+			// discoverer itself.
+			s.log.With(logging.Context{
+				Operation: "discover-change", Path: dir.Dir, Repeat: logging.Repeat(watched),
+			}).Log("a watched directory changed since the last poll: %d newly discovered file(s) under it are being read from this tick rather than at the next rescan", watched)
+		}
+		if !ok {
+			// The store could not answer for a file's cursor, so production is
+			// suspended and every remaining target would be watched with cursors
+			// this cycle no longer has. Same abandonment as the rescan's.
+			return
+		}
+	}
+}
+
+// watchTargets builds a tailer for each target not already watched, seeded from
+// the cursor THIS cycle's store handed us. It answers how many files it started
+// watching, and whether the pass may continue.
+//
+// THIS IS THE ONLY PLACE A TAILER IS EVER BUILT, which is why it asserts the
+// invariant: a tailer built without a recovered cursor map starts at offset 0,
+// and that silent cold start is the bug the whole cycle exists to prevent. Both
+// discovery paths — the full rescan and the change probe — come through here, so
+// the assertion covers both by construction rather than by each remembering it.
+func (s *sidecar) watchTargets(targets []discover.Target, now time.Time) (int, bool) {
+	s.requireCursors("watchTargets")
+	watched := 0
+	for _, target := range targets {
 		if _, ok := s.watchers[target.Path]; ok {
 			continue
 		}
@@ -753,11 +841,12 @@ func (s *sidecar) rescan() {
 			// REST OF THE PASS IS ABANDONED rather than continued: production is
 			// suspended now, and every remaining target would be watched with
 			// cursors this cycle no longer has.
-			return
+			return watched, false
 		}
 		s.watch(resolved, identity, cursor, now)
+		watched++
 	}
-	s.reportRescan()
+	return watched, true
 }
 
 // reportRescan states, ONCE PER PASS, what the pass did to the watched set.
