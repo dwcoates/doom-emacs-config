@@ -86,6 +86,61 @@ vendor DID lose a uuid, and the link between them is not in evidence here. It
 would take either a vendor-side log or a reproduction against a transcript
 carrying the old boundary shape to settle it.
 
+## The keep-alive rewind anchor (2026-09-14)
+
+The timeline, read off the owner's live workspace `explanation-engine`
+(dir hash `99808d49`), not re-derived:
+
+- The shim submits a keep-alive prompt every four minutes
+  (`KEEPALIVE_INTERVAL_MS`, `engine/keepalive.ts`) to keep the vendor's
+  five-minute prompt cache warm.
+- Before delivering a REAL prompt after keep-alive turns, `yieldObligation`
+  (`engine/session.ts`) REWINDS the vendor: it closes the query and reopens it
+  with `resume` plus `resumeSessionAt: <anchor>`.
+- The anchor was set in `onSdkMessage` from EVERY SDK message carrying a `uuid`
+  while no keep-alive turn was open — `system:init`, `result` and the other
+  SDK-level messages included. All of them declare a `uuid` in `sdk.d.ts`; none
+  of those uuids names a transcript record.
+- Twice on 2026-09-14 the owner's SECOND real prompt after a resume died at
+  once. The vendor exited 1 with `No message found with message.uuid of:
+  19e047a0-…`, and earlier with `b64f2741-…`. Neither uuid appears in any
+  transcript in that project directory. After a cold-gate resume the only
+  non-keep-alive messages the shim had seen were the opening's init and control
+  messages, so the anchor was one of those.
+- The prompt was LOST and the feed read "the run broke while executing".
+
+`b64f2741-…` is the same uuid the hibernate loop's finding D above could not
+trace. D's conclusion stands as written — the malformed boundary shape was real
+and is fixed, and D explicitly declined to claim it caused the lost uuid. This
+section is the cause: the uuid was never a transcript record to begin with,
+because the shim minted it as an anchor out of a non-transcript message.
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-14 | What may anchor a keep-alive rewind? | ONLY an `assistant` message's uuid, produced while a real (non-keep-alive) turn is open. `KeepaliveRewind.noteRecord` takes the MESSAGE and its turn, not a uuid, and applies the filter itself | `sdk.d.ts` states the type at the option: "The message ID should be from `SDKAssistantMessage.uuid`". Every other message carries a uuid anyway, so a caller-side filter is a rule that can be got wrong; taking the message means the call site never extracts a uuid and cannot pass the wrong one | Restore the uuid-shaped `noteRecord(uuid, keepalive)` in `engine/keepalive.ts` and extract the uuid at the call site in `engine/session.ts` |
+| 2026-09-14 | Does an anchor survive a compaction, a conversation reset, or a query rebinding? | No. Each CLEARS it, and the next real prompt then carries the keep-alive turns instead of rewinding | A uuid from before a boundary may name no record the resume can find, and the cost of NOT rewinding is keep-alive text in one turn's context — cheap, visible, and recoverable. The cost of rewinding to a dead uuid is the session | Drop the `rewind.clearAnchor` calls from `startQuery`, `noteRewindBoundary` and `compact` in `engine/session.ts` |
+| 2026-09-14 | The vendor refuses the anchor after the prompt is already queued. Let the session die, or recover? | Recover: one ERROR with the anchor and the vendor's words, reopen WITHOUT `resumeSessionAt`, deliver the SAME prompt, raise a `keepaliveFailed` fault on `shim-engine-keepalive-rewind` | A rewind is the shim's own optimization; the prompt is the user's work. Losing the user's work to the optimization's failure is the defect. The refusal is consumed before the fold so the feed shows the answer rather than "the run broke while executing", and the fault is what keeps the failure visible rather than silent | Delete `recoverFromRewindRefusal` / `abandonRewind` in `engine/session.ts`; `onQueryLost` then owns the death again |
+| 2026-09-14 | A refused rewind that is recovered reuses `keepaliveFailed` rather than a new fault kind. Its own component, or the beat's? | Its own: `shim-engine-keepalive-rewind`, cleared by the next rewind that lands | A keep-alive beat succeeding says nothing about whether the vendor will resume at an anchor, and a shared component would let one clear the other's fault — the exact defect the per-component rule in `engine/session.ts` exists for. No new proto arm was needed, so none was added | Push the fault on `KEEPALIVE_COMPONENT` instead |
+| 2026-09-14 | The rewind's records were debug. Raise them? | INFO: the "REWINDING…" line with the anchor's uuid and turn, the rewind that lands, the anchor that is cleared and why, and the real prompt that proceeds with NO rewind | When a rewind goes wrong the only evidence anyone has is which uuid the shim chose and why. These two deaths were diagnosable at all only because `resume_session_at` was in the log; leaving the rest at debug leaves the next one invisible | Lower the five sites listed in `test/log-classification.test.ts`'s `RECLASSIFIED_SITES` |
+
+### Do `system:init` and `result` really carry a uuid?
+
+YES, both, and both REQUIRED. In
+`node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts`: `SDKSystemMessage`
+(`type: 'system'`, `subtype: 'init'`) declares `uuid: UUID`, and
+`SDKResultSuccess` / `SDKResultError` (`type: 'result'`) declare `uuid: UUID`.
+`SDKAssistantMessage` declares one too — and it is the only one
+`resumeSessionAt` names.
+
+The mock ALREADY emits them the way the real vendor does and needed no change:
+`emitInit` goes through `emit`, which mints a uuid on every message, and
+`result` and `systemRecord` mint one explicitly so the stream row and the
+transcript row share it. That is what makes the regression reproducible —
+`test/integration/turn.test.ts`, "the rewind target is an ASSISTANT record of
+the transcript", drives a real turn, a keep-alive turn and a real prompt
+against the mock and asserts the uuid the VENDOR was handed names an
+`assistant` record in the transcript the mock wrote.
+
 ## Sidecar discovery latency (2026-09-13)
 
 | Date | Question | Decision | Why | How to reverse |
