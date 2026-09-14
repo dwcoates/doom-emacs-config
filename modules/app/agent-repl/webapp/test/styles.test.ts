@@ -287,3 +287,109 @@ describe("the bubble geometry: a scrollbar that is there whenever it can scroll"
     expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/overflow-y:\s*scroll/);
   });
 });
+
+/**
+ * THE FOOTER STATUS WAVE'S STYLESHEET CONTRACT.
+ *
+ * Three facts live only in the file — the letters never re-measure, the wave
+ * runs at the period the inline delays are computed against, and a reader who
+ * asked for reduced motion gets none of it — so they are asserted here rather
+ * than in the drawing suite, which can only see classes.
+ */
+describe("the footer status wave's stylesheet contract", () => {
+  /** The declarations of the rule whose selector list contains SELECTOR. */
+  function ruleFor(css: string, selector: string): string | undefined {
+    return rulesOf(css).find((rule) => rule.selectors.includes(selector))?.declarations;
+  }
+
+  /**
+   * The `prefers-reduced-motion: reduce` block, and the file without it.
+   *
+   * Split by brace matching rather than by a slice, because the same selector
+   * appears on both sides: a plain `indexOf` walk would hand the base rule's
+   * lookup the override's declarations, which is exactly backwards.
+   */
+  function reducedMotionSplit(): { block: string; rest: string } {
+    const at = stylesheet.indexOf("@media (prefers-reduced-motion: reduce)");
+    if (at === -1) throw new Error("no reduced-motion block in the stylesheet");
+    const open = stylesheet.indexOf("{", at);
+    let depth = 0;
+    for (let cursor = open; cursor < stylesheet.length; cursor += 1) {
+      if (stylesheet[cursor] === "{") depth += 1;
+      if (stylesheet[cursor] === "}") depth -= 1;
+      if (depth === 0) {
+        return {
+          block: stylesheet.slice(open + 1, cursor),
+          rest: stylesheet.slice(0, at) + stylesheet.slice(cursor + 1),
+        };
+      }
+    }
+    throw new Error("the reduced-motion block is never closed");
+  }
+
+  /** The reduced-motion override's body. */
+  function reducedMotionBlock(): string {
+    return reducedMotionSplit().block;
+  }
+
+  /** The stylesheet with the reduced-motion overrides taken out. */
+  function baseSheet(): string {
+    return reducedMotionSplit().rest;
+  }
+
+  it("scales the letter rather than resizing it, so the word's width never moves", () => {
+    // Arrange / Act
+    const keyframes = /@keyframes pfooter-status-wave \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1];
+
+    // Assert
+    expect(keyframes).toMatch(/transform:\s*scale\(1\.15\)/);
+  });
+
+  it("never touches font-size, which would re-lay the whole strip out", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/font-size/);
+  });
+
+  it("makes the letter an inline-block, which is what lets a transform apply", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/display:\s*inline-block/);
+  });
+
+  it("alternates the pass, so the bulge travels forwards and then backwards", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/animation:\s*pfooter-status-wave 2\.6s ease-in-out infinite alternate/);
+  });
+
+  it("promotes no layer, so WebKit rasterises the glyph at the scale it paints", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/will-change|translateZ|backface-visibility/);
+  });
+
+  it("declares no animation-delay, which every letter overrides inline", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/animation-delay/);
+  });
+
+  it("stops the wave outright under prefers-reduced-motion", () => {
+    // Arrange / Act
+    const declarations = ruleFor(reducedMotionBlock(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/animation:\s*none/);
+  });
+});
