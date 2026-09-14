@@ -22,7 +22,6 @@ import {
   FeedRowSchema,
   FeedShellSchema,
   FeedSimpleToolCallSchema,
-  FeedUserPromptSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../../src/feed/bubble-scroll.js";
 import { agenticBubble } from "../../src/feed/cards/controls.js";
@@ -30,7 +29,6 @@ import { drawFeedResponse } from "../../src/feed/cards/response.js";
 import { drawFeedShell } from "../../src/feed/cards/shell.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import { drawFeedAgentPrompt } from "../../src/feed/rows/agent-prompt.js";
-import { drawFeedUserPrompt } from "../../src/feed/rows/user-prompt.js";
 import { mountBubble } from "../../src/feed/bubble.js";
 import { defaultBubbleBody } from "../../src/feed/renderers.js";
 import { feedId, harness, rowContext, stubRenderers, subagentRow } from "./harness.js";
@@ -68,22 +66,10 @@ const KINDS: readonly Kind[] = [
     scroll: `.${BUBBLE_SCROLL_CLASS}`,
     siblings: true,
   },
-  {
-    name: "a person's own prompt",
-    draw: () =>
-      drawFeedUserPrompt(
-        create(FeedUserPromptSchema, {
-          author: { label: "You" },
-          result: {
-            case: "success",
-            value: { body: { blocks: [{ block: { case: "text", value: { text: "hi" } } }] } },
-          },
-        }),
-      ),
-    meta: ".prompt-author",
-    scroll: `.${BUBBLE_SCROLL_CLASS}`,
-    siblings: true,
-  },
+  // A person's own prompt is NOT one of these kinds: it carries no metadata
+  // strip at all (no "You" label, no other attribution) since the owner ruled
+  // it gone (2026-09-14), so there is no meta/scroll nesting for this table to
+  // assert about it.
   {
     name: "an agent-addressed prompt",
     draw: () =>
