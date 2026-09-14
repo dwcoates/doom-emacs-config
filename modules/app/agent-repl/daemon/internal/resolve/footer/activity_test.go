@@ -430,14 +430,16 @@ func TestEveryRateLimitWindowMatchesItsAllowance(t *testing.T) {
 	tests := []struct {
 		name   string
 		window *conversationv1.SessionRateLimitType
-		// weekly reports which allowance the verdict must land on.
-		weekly bool
+		// want names the allowance the verdict must land on; every other
+		// allowance must be left without a status arm.
+		want string
 	}{
-		{name: "five hour is the session allowance", window: fiveHourWindow()},
-		{name: "seven day is the weekly allowance", window: sevenDayWindow(), weekly: true},
-		{name: "seven day opus is the weekly allowance", window: sevenDayOpusWindow(), weekly: true},
-		{name: "seven day sonnet is the weekly allowance", window: sevenDaySonnetWindow(), weekly: true},
-		{name: "seven day overage included is the weekly allowance", window: sevenDayOverageIncludedWindow(), weekly: true},
+		{name: "five hour is the session allowance", window: fiveHourWindow(), want: "session"},
+		{name: "seven day is the weekly allowance", window: sevenDayWindow(), want: "weekly"},
+		{name: "seven day opus is the weekly allowance", window: sevenDayOpusWindow(), want: "weekly"},
+		{name: "seven day sonnet is the weekly allowance", window: sevenDaySonnetWindow(), want: "weekly"},
+		{name: "seven day overage included is the weekly allowance", window: sevenDayOverageIncludedWindow(), want: "weekly"},
+		{name: "overage is the overage allowance", window: overageWindow(), want: "overage"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -450,30 +452,56 @@ func TestEveryRateLimitWindowMatchesItsAllowance(t *testing.T) {
 
 			// Assert
 			line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
-			landed, other := line.GetSession(), line.GetWeekly()
-			if tc.weekly {
-				landed, other = other, landed
+			drawn := map[string]*frontendv1.FooterAllowance{
+				"session": line.GetSession(),
+				"weekly":  line.GetWeekly(),
+				"overage": line.GetOverage(),
 			}
-			if landed.GetAllowed() == nil || other.GetStatus() != nil {
-				t.Fatalf("session = %+v weekly = %+v, want the verdict on one allowance only", line.GetSession(), line.GetWeekly())
+			for label, allowance := range drawn {
+				verdicted := allowance.GetStatus() != nil
+				if verdicted != (label == tc.want) {
+					t.Fatalf("%s status = %+v, want the verdict on %s alone", label, allowance.GetStatus(), tc.want)
+				}
 			}
 		})
 	}
 }
 
-func TestTheOverageWindowIsLoggedAndDrawnNowhere(t *testing.T) {
+// THE OVERAGE WINDOW IS ITS OWN CELL. It used to be logged and dropped,
+// because the contract had no allowance for it; the figure the vendor
+// reported now lands where a reader can see it.
+func TestTheOverageWindowCarriesItsOwnFigures(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
-	// Act: the contract carries no overage cell.
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(overageWindow(), 95, 5*time.Hour))
+	// Act
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(overageWindow(), 42, 3*time.Hour))
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetOverage()
+	wantResetsAtS := instant.Add(3 * time.Hour).UnixMilli() / 1000
+	if got.GetUtilization() != 0.42 || got.GetResetsAtS() != wantResetsAtS {
+		t.Fatalf("overage = %+v, want utilization 0.42 and reset %d", got, wantResetsAtS)
+	}
+}
+
+// AN UNREPORTED OVERAGE WINDOW DRAWS ABSENT, like an unreported weekly one:
+// most accounts never have one, and a synthesized zero would read as a
+// figure the vendor stated.
+func TestAnUnreportedOverageWindowDrawsNoAllowance(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
 	// Assert
 	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
-	if line.GetSession().GetStatus() != nil || line.GetWeekly().GetStatus() != nil {
-		t.Fatalf("session = %+v weekly = %+v, want the overage verdict drawn nowhere", line.GetSession(), line.GetWeekly())
+	if line.GetOverage() != nil {
+		t.Fatalf("overage = %+v, want no allowance for a window the vendor never reported", line.GetOverage())
 	}
 }
 

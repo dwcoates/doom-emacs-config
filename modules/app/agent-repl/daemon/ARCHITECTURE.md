@@ -723,7 +723,8 @@ Rulings already binding; code swaps to the generated arms when it lands:
 - The VERDICT (`FooterAllowance.status` arm) comes from
   `SessionUpdate.rate_limit_status`, matched by window: five_hour →
   session; seven_day / seven_day_opus / seven_day_sonnet /
-  seven_day_overage_included → weekly; `overage` → the overage note. It
+  seven_day_overage_included → weekly; `overage` → the `overage`
+  allowance, its own cell since 2026-09-13. It
   stays UNSET until a rate-limit event for that window has been seen — an
   unset status oneof is LEGAL ("no vendor verdict observed yet").
 - The allowance line draws as soon as a usage sample exists; the verdict

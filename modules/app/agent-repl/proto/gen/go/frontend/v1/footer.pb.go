@@ -5821,16 +5821,20 @@ func (x *FooterStatusActivityBlockedOnUser) GetDetail() string {
 	return ""
 }
 
-// The rate-limit rung. The vendor bills TWO independent allowances (rolling
-// five-hour session, seven-day weekly) reported through one event; both
-// figures are shown so a reader can tell WHICH allowance the newsworthy
-// percentage belongs to.
+// The rate-limit rung. The vendor bills independent allowances (rolling
+// five-hour session, seven-day weekly, and an overage window beyond them)
+// reported through one event; every figure it reports is shown so a reader
+// can tell WHICH allowance the newsworthy percentage belongs to.
 type FooterStatusActivityRateLimited struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The rolling five-hour session allowance.
 	Session *FooterAllowance `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
 	// The seven-day weekly allowance.
 	Weekly *FooterAllowance `protobuf:"bytes,2,opt,name=weekly,proto3" json:"weekly,omitempty"`
+	// The overage allowance — the window the vendor bills BEYOND the two
+	// above, reported through the same rate-limit event. UNSET until the
+	// vendor has reported the overage window, which most accounts never do.
+	Overage *FooterAllowance `protobuf:"bytes,4,opt,name=overage,proto3" json:"overage,omitempty"`
 	// What the newest account-usage SAMPLE managed to read. UNSET means no
 	// sample has been observed and the figures above came from a rate-limit
 	// event alone.
@@ -5888,6 +5892,13 @@ func (x *FooterStatusActivityRateLimited) GetSession() *FooterAllowance {
 func (x *FooterStatusActivityRateLimited) GetWeekly() *FooterAllowance {
 	if x != nil {
 		return x.Weekly
+	}
+	return nil
+}
+
+func (x *FooterStatusActivityRateLimited) GetOverage() *FooterAllowance {
+	if x != nil {
+		return x.Overage
 	}
 	return nil
 }
@@ -9932,10 +9943,11 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\"FooterStatusActivityAuthenticating\x12\x12\n" +
 	"\x04line\x18\x01 \x01(\tR\x04line\";\n" +
 	"!FooterStatusActivityBlockedOnUser\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xcb\x01\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x83\x02\n" +
 	"\x1fFooterStatusActivityRateLimited\x126\n" +
 	"\asession\x18\x01 \x01(\v2\x1c.frontend.v1.FooterAllowanceR\asession\x124\n" +
-	"\x06weekly\x18\x02 \x01(\v2\x1c.frontend.v1.FooterAllowanceR\x06weekly\x12:\n" +
+	"\x06weekly\x18\x02 \x01(\v2\x1c.frontend.v1.FooterAllowanceR\x06weekly\x126\n" +
+	"\aoverage\x18\x04 \x01(\v2\x1c.frontend.v1.FooterAllowanceR\aoverage\x12:\n" +
 	"\x06sample\x18\x03 \x01(\v2\".frontend.v1.FooterAllowanceSampleR\x06sample\"\x93\x04\n" +
 	"\x15FooterAllowanceSample\x12K\n" +
 	"\tavailable\x18\x01 \x01(\v2+.frontend.v1.FooterAllowanceSampleAvailableH\x00R\tavailable\x12g\n" +
@@ -10452,75 +10464,76 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	74,  // 131: frontend.v1.FooterStatusActivityWakeup.reason:type_name -> frontend.v1.FooterStatusActivityWakeupReason
 	89,  // 132: frontend.v1.FooterStatusActivityRateLimited.session:type_name -> frontend.v1.FooterAllowance
 	89,  // 133: frontend.v1.FooterStatusActivityRateLimited.weekly:type_name -> frontend.v1.FooterAllowance
-	81,  // 134: frontend.v1.FooterStatusActivityRateLimited.sample:type_name -> frontend.v1.FooterAllowanceSample
-	82,  // 135: frontend.v1.FooterAllowanceSample.available:type_name -> frontend.v1.FooterAllowanceSampleAvailable
-	83,  // 136: frontend.v1.FooterAllowanceSample.service_unavailable:type_name -> frontend.v1.FooterAllowanceSampleServiceUnavailable
-	84,  // 137: frontend.v1.FooterAllowanceSample.window_unavailable:type_name -> frontend.v1.FooterAllowanceSampleWindowUnavailable
-	85,  // 138: frontend.v1.FooterAllowanceSample.utilization_unavailable:type_name -> frontend.v1.FooterAllowanceSampleUtilizationUnavailable
-	86,  // 139: frontend.v1.FooterAllowanceSample.sampling_failure:type_name -> frontend.v1.FooterAllowanceSampleSamplingFailure
-	90,  // 140: frontend.v1.FooterAllowance.allowed:type_name -> frontend.v1.FooterAllowanceAllowed
-	91,  // 141: frontend.v1.FooterAllowance.allowed_warning:type_name -> frontend.v1.FooterAllowanceAllowedWarning
-	92,  // 142: frontend.v1.FooterAllowance.rejected:type_name -> frontend.v1.FooterAllowanceRejected
-	95,  // 143: frontend.v1.FooterTokensCell.input:type_name -> frontend.v1.FooterTokensCellInput
-	96,  // 144: frontend.v1.FooterTokensCell.alarm:type_name -> frontend.v1.FooterTokensCellAlarm
-	97,  // 145: frontend.v1.FooterTokensCell.verdict:type_name -> frontend.v1.FooterTokensCellVerdict
-	98,  // 146: frontend.v1.FooterTokensCellVerdict.complete:type_name -> frontend.v1.FooterTokensCellVerdictComplete
-	99,  // 147: frontend.v1.FooterTokensCellVerdict.incomplete:type_name -> frontend.v1.FooterTokensCellVerdictIncomplete
-	100, // 148: frontend.v1.FooterTokensCellVerdict.invalid:type_name -> frontend.v1.FooterTokensCellVerdictInvalid
-	104, // 149: frontend.v1.FooterLiveWorkChips.agents:type_name -> frontend.v1.FooterChipAgents
-	105, // 150: frontend.v1.FooterLiveWorkChips.tasks:type_name -> frontend.v1.FooterChipTasks
-	106, // 151: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
-	103, // 152: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
-	102, // 153: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
-	120, // 154: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
-	132, // 155: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
-	138, // 156: frontend.v1.FooterExpanded.tasks:type_name -> frontend.v1.FooterExpandedTasks
-	146, // 157: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
-	115, // 158: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
-	108, // 159: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
-	109, // 160: frontend.v1.FooterExpandedCrons.rows:type_name -> frontend.v1.FooterCronRow
-	110, // 161: frontend.v1.FooterCronRow.schedule:type_name -> frontend.v1.FooterCronRowSchedule
-	111, // 162: frontend.v1.FooterCronRow.prompt:type_name -> frontend.v1.FooterCronRowPrompt
-	112, // 163: frontend.v1.FooterCronRow.next_fire:type_name -> frontend.v1.FooterCronRowNextFire
-	113, // 164: frontend.v1.FooterCronRow.recurring:type_name -> frontend.v1.FooterCronRowRecurring
-	114, // 165: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
-	116, // 166: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
-	117, // 167: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
-	118, // 168: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
-	119, // 169: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
-	121, // 170: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
-	122, // 171: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	123, // 172: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	124, // 173: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
-	125, // 174: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
-	126, // 175: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
-	127, // 176: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
-	128, // 177: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
-	129, // 178: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
-	130, // 179: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
-	131, // 180: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
-	133, // 181: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
-	150, // 182: frontend.v1.FooterAgentRow.target:type_name -> frontend.v1.FeedId
-	134, // 183: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
-	135, // 184: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
-	136, // 185: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
-	137, // 186: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
-	139, // 187: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
-	141, // 188: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
-	140, // 189: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
-	142, // 190: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
-	143, // 191: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
-	145, // 192: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
-	144, // 193: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
-	147, // 194: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
-	150, // 195: frontend.v1.FooterShellRow.target:type_name -> frontend.v1.FeedId
-	148, // 196: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
-	149, // 197: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
-	198, // [198:198] is the sub-list for method output_type
-	198, // [198:198] is the sub-list for method input_type
-	198, // [198:198] is the sub-list for extension type_name
-	198, // [198:198] is the sub-list for extension extendee
-	0,   // [0:198] is the sub-list for field type_name
+	89,  // 134: frontend.v1.FooterStatusActivityRateLimited.overage:type_name -> frontend.v1.FooterAllowance
+	81,  // 135: frontend.v1.FooterStatusActivityRateLimited.sample:type_name -> frontend.v1.FooterAllowanceSample
+	82,  // 136: frontend.v1.FooterAllowanceSample.available:type_name -> frontend.v1.FooterAllowanceSampleAvailable
+	83,  // 137: frontend.v1.FooterAllowanceSample.service_unavailable:type_name -> frontend.v1.FooterAllowanceSampleServiceUnavailable
+	84,  // 138: frontend.v1.FooterAllowanceSample.window_unavailable:type_name -> frontend.v1.FooterAllowanceSampleWindowUnavailable
+	85,  // 139: frontend.v1.FooterAllowanceSample.utilization_unavailable:type_name -> frontend.v1.FooterAllowanceSampleUtilizationUnavailable
+	86,  // 140: frontend.v1.FooterAllowanceSample.sampling_failure:type_name -> frontend.v1.FooterAllowanceSampleSamplingFailure
+	90,  // 141: frontend.v1.FooterAllowance.allowed:type_name -> frontend.v1.FooterAllowanceAllowed
+	91,  // 142: frontend.v1.FooterAllowance.allowed_warning:type_name -> frontend.v1.FooterAllowanceAllowedWarning
+	92,  // 143: frontend.v1.FooterAllowance.rejected:type_name -> frontend.v1.FooterAllowanceRejected
+	95,  // 144: frontend.v1.FooterTokensCell.input:type_name -> frontend.v1.FooterTokensCellInput
+	96,  // 145: frontend.v1.FooterTokensCell.alarm:type_name -> frontend.v1.FooterTokensCellAlarm
+	97,  // 146: frontend.v1.FooterTokensCell.verdict:type_name -> frontend.v1.FooterTokensCellVerdict
+	98,  // 147: frontend.v1.FooterTokensCellVerdict.complete:type_name -> frontend.v1.FooterTokensCellVerdictComplete
+	99,  // 148: frontend.v1.FooterTokensCellVerdict.incomplete:type_name -> frontend.v1.FooterTokensCellVerdictIncomplete
+	100, // 149: frontend.v1.FooterTokensCellVerdict.invalid:type_name -> frontend.v1.FooterTokensCellVerdictInvalid
+	104, // 150: frontend.v1.FooterLiveWorkChips.agents:type_name -> frontend.v1.FooterChipAgents
+	105, // 151: frontend.v1.FooterLiveWorkChips.tasks:type_name -> frontend.v1.FooterChipTasks
+	106, // 152: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
+	103, // 153: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
+	102, // 154: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
+	120, // 155: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
+	132, // 156: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
+	138, // 157: frontend.v1.FooterExpanded.tasks:type_name -> frontend.v1.FooterExpandedTasks
+	146, // 158: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
+	115, // 159: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
+	108, // 160: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
+	109, // 161: frontend.v1.FooterExpandedCrons.rows:type_name -> frontend.v1.FooterCronRow
+	110, // 162: frontend.v1.FooterCronRow.schedule:type_name -> frontend.v1.FooterCronRowSchedule
+	111, // 163: frontend.v1.FooterCronRow.prompt:type_name -> frontend.v1.FooterCronRowPrompt
+	112, // 164: frontend.v1.FooterCronRow.next_fire:type_name -> frontend.v1.FooterCronRowNextFire
+	113, // 165: frontend.v1.FooterCronRow.recurring:type_name -> frontend.v1.FooterCronRowRecurring
+	114, // 166: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
+	116, // 167: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
+	117, // 168: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
+	118, // 169: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
+	119, // 170: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
+	121, // 171: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
+	122, // 172: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	123, // 173: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	124, // 174: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
+	125, // 175: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
+	126, // 176: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
+	127, // 177: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
+	128, // 178: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
+	129, // 179: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
+	130, // 180: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
+	131, // 181: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
+	133, // 182: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
+	150, // 183: frontend.v1.FooterAgentRow.target:type_name -> frontend.v1.FeedId
+	134, // 184: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
+	135, // 185: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
+	136, // 186: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
+	137, // 187: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
+	139, // 188: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
+	141, // 189: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
+	140, // 190: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
+	142, // 191: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
+	143, // 192: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
+	145, // 193: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
+	144, // 194: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
+	147, // 195: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
+	150, // 196: frontend.v1.FooterShellRow.target:type_name -> frontend.v1.FeedId
+	148, // 197: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
+	149, // 198: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
+	199, // [199:199] is the sub-list for method output_type
+	199, // [199:199] is the sub-list for method input_type
+	199, // [199:199] is the sub-list for extension type_name
+	199, // [199:199] is the sub-list for extension extendee
+	0,   // [0:199] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }
