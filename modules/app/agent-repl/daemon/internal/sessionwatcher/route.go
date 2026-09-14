@@ -314,6 +314,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		})
 		w.sinks.Feed.OnContextCut(w.ws, agent, update.GetContextCut(), at, w.addr)
 		w.sinks.Footer.OnContextCut(w.ws, agent, update.GetContextCut())
+		w.sinks.Topbar.OnContextCut(w.ws, agent, update.GetContextCut())
 
 	case update.GetApiError() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})
