@@ -230,6 +230,33 @@ last user-prompt record within it.
   offsets. When the window holds no turn start the store's cursor stands —
   reading from an arbitrary older position would be worse than not rewinding.
 
+### It is for files that can carry a turn in flight, not for the corpus
+
+The joins the rewind re-warms exist only for a turn this reader was half-way
+through. A transcript that stopped growing hours ago, whose restored cursor
+already sits at its end, holds none — and rewinding it anyway is how a restart
+came to re-read the owner's entire history. Realtest 9, sweep rt-run37: a deploy
+restarted the sidecar at 23:44:21, catch-up did not end until 23:46:45, the first
+rescan rewound 1353 transcripts of which 1132 had last grown over 108 hours
+earlier, and each produced a `residue-drop-summary` for two records it stored
+none of.
+
+- A TRANSCRIPT IS REWOUND IFF IT COULD STILL BE MID-TURN: its mtime is within
+  the LOST tracker's own `AgentSilence` window, OR its restored cursor is behind
+  the file's current end. The second arm is what makes the first safe — durable
+  bytes this reader never converted ARE the half-converted turn, however old the
+  file is — and the window is REUSED, not duplicated: "an agent has stopped
+  working on this" is a bound this process already owns (`Tracker.Windows()`).
+- A FILE WHOSE mtime AND SIZE CANNOT BE READ IS REWOUND, and the refusal to read
+  them is stated. Nothing there can prove the file cold.
+- DISCOVERY IS NOT NARROWED BY ANY OF THIS. Every file is still enumerated,
+  classified and watched; a file at rest is watched FROM ITS CURSOR, and the
+  ordinary poll reads it the instant it grows. Narrowing discovery "only serves
+  to obfuscate inefficiency" (owner's standing rule) and nothing here does.
+- THE SHAPE OF THE WALK IS STATED ONCE. Both per-file decisions are verbose, so
+  one INFO `boot-rewind-summary` at the catch-up edge carries the two counts —
+  rewound, and at-rest — beside the other summaries the walk owes.
+
 ## The hold
 
 A record can be UNSETTLED at the end of a batch: its meaning depends on the
@@ -536,6 +563,9 @@ INFO records and rolled the 64 MB durable log five times over.
   an abandoned pass (a store outage, a shutdown) has not drained the corpus, so
   the window stays open. Both latches are process-lifetime: a later store bounce
   must not reopen a window whose summaries were already stated.
+- A PASS IS NOT A TICK. The walk is sliced (see "A poll pass yields the tick"),
+  so `drainedPass` is about the PASS: it latches when the last of the roster the
+  pass enrolled has been polled, across however many ticks that took.
 - THE CLOSE STATES ITSELF. `EndCatchup` writes one INFO `catchup-summary` per
   operation that demoted anything (`reason` names the operation, `repeat_count`
   the total; an operation that demoted nothing states nothing), and `cycle.go`
@@ -545,6 +575,34 @@ INFO records and rolled the 64 MB durable log five times over.
 - NOTHING IS SILENCED, HERE EITHER. The demoted record is written in full at
   DEBUG, so a subject that asserts the per-item detail reads the log with
   `AGENT_REPL_LOG_LEVEL=debug`.
+
+## A poll pass yields the tick to discovery
+
+`pollAll` used to walk the whole watched set to completion inside one tick. On a
+restart's corpus walk that tick lasted MINUTES, and nothing else on the poll
+timer ran while it did: not `discoverChanged`, so no new transcript was found,
+and not the first poll of a file that had just been found. Realtest 9, sweep
+rt-run37: the boot walk ran 23:44:21–23:46:45, a fresh workspace's turn concluded
+at 23:46:41 inside it, and its answer rows reached the store at ~23:47:44.
+
+- ONE PASS, MANY SLICES. A pass polls watchers in a stable order for at most
+  `PollInterval / 2` and resumes at the next pending watcher on the following
+  tick. The bound is DERIVED, never configured: a fraction of an interval the
+  operator already chose cannot be misset against it.
+- THE FIRST WATCHER OF A TICK IS ALWAYS POLLED, whatever the bound says. A slice
+  that expired before any work was done would be a pass that never advances.
+- A FILE DISCOVERED MID-PASS IS ENROLLED AT THE HEAD, which is the whole point:
+  behind a boot walk's thousands of watchers it would wait out the very minutes
+  the change probe exists to save.
+- THE PASS OWNS "EVERY WATCHER, EXACTLY ONCE". `pollPass.seen` is the roster it
+  enrolled and `pending` what is left of it, so a resumed pass neither re-walks
+  what it did nor skips what it has not — which is what `drainedPass`, and so
+  the catch-up window's close, stands on.
+- A SUSPENSION RETIRES THE PASS with the tailers it was walking, so an abandoned
+  pass can never close the catch-up window. `rekeyRotations` and the
+  abandon-the-pass arms are unchanged.
+- IT STATES NOTHING NEW AT INFO. The spent slice is one DEBUG record naming how
+  many watchers it walked and how many remain.
 
 ## Shutdown is bounded
 
@@ -1124,6 +1182,19 @@ the suite rather than quietly shrinking what the feed can show.
   itself (R9's resume rule). THE WORKSPACE KEY IS ENUMERATED, NEVER DERIVED:
   the reader holds only the vendor's lossy, non-invertible cwd slug, so it
   globs `<state>/shim/*` and takes the key from the records.
+- RESOLUTION IS AN IN-MEMORY LOOKUP ON THE POLL PATH, and one directory question
+  stands behind it. `rekeyRotations` resolves EVERY WATCHER ON EVERY TICK, and
+  `Resolve` used to glob `<state>/shim/*/vendor-id/<id>.json` for every id in
+  neither map — ~2900 globs a second on the owner's machine, ~1100 of them for
+  cold runs that never resolve. A 10s `sample` of the live sidecar (pid 96084)
+  found it holding 76–101% of a core inside `filepath.Glob` under `Resolve`, with
+  poll ticks running seconds long. The index now remembers the ids it looked for
+  and did not find, and `Index.RecheckLinks` — one readdir of `<state>/shim` plus
+  a stat per workspace, asked ONCE per tick by `rekeyRotations` — drops those
+  misses when a link directory's mtime moved. Same shape as the discovery change
+  probe, and for the same reason: a link file lands INSIDE
+  `shim/<key>/vendor-id/`, so one stat answers for every id under it. `Refresh`
+  clears the misses outright and is the backstop for a write the mtime missed.
 - THE BOOK IS RE-RESOLVED BY EVERY POLL AND EVERY RESCAN (`cycle.go`'s
   `rekeyRotations`, called from `pollAll` and `rescan`), because discovery order
   is not causal order: a link that lands after the transcript was first seen
