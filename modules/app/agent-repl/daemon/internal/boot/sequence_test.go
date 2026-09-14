@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1262,4 +1263,291 @@ func TestAStandDownDuringTheBringUpIsNotRecordedAsAnError(t *testing.T) {
 			t.Fatalf("the ordered stand-down was recorded at %q: %q", r.Level, r.Message)
 		}
 	}
+}
+
+// bootStepClock is a Clock that never sleeps: After fires at once and ADVANCES
+// the clock, so a bounded poll pays its real number of passes in no wall time.
+type bootStepClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *bootStepClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *bootStepClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	fired := c.now
+	c.mu.Unlock()
+	ch := make(chan time.Time, 1)
+	ch <- fired
+	return ch
+}
+
+// bindAfter makes one socket path read ABSENT for the first n probes and LIVE
+// from then on, which is a shim finishing its Node startup partway through the
+// wait. Every other path keeps the harness's scripted answer.
+func bindAfter(h *harness, path string, n int) func(*Deps, *harness) {
+	var seen int
+	return func(deps *Deps, _ *harness) {
+		deps.SocketProbe = func(probed string) (shimsocket.State, error) {
+			if probed != path {
+				if state, ok := h.socketProbes[probed]; ok {
+					return state, nil
+				}
+				return shimsocket.StateAbsent, nil
+			}
+			seen++
+			if seen > n {
+				return shimsocket.StateLive, nil
+			}
+			return shimsocket.StateAbsent, nil
+		}
+	}
+}
+
+// TestABootWaitsForAShimItsPredecessorSpawned pins the whole starting-shim
+// invariant at the boot. A free lock and an absent socket are ALSO what a shim
+// forked tens of milliseconds ago looks like -- it takes its conversation lock
+// inside StartSession and Node binds its socket later still -- so a boot that
+// read that as "no shim survives" spawned a SECOND shim onto one session
+// socket and the shim refused the bind and died (2026-09-13: spawn at T+0,
+// daemon killed at T+60ms, successor spawning at T+80ms, the survivor binding
+// at T+110ms, the newcomer dying at T+190ms). The registry's recorded spawn
+// pid is the fact that separates the two, and the three outcomes below are the
+// whole of what it can say.
+func TestABootWaitsForAShimItsPredecessorSpawned(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange
+		recordPID bool
+		alive     bool
+		bindAfter int // -1 never binds
+		// assert
+		wantAdopted      bool
+		wantClientless   bool
+		wantUndetermined bool
+	}{
+		{
+			name:        "a live recorded spawn that announces itself is adopted, not spawned over",
+			recordPID:   true,
+			alive:       true,
+			bindAfter:   2,
+			wantAdopted: true,
+		},
+		{
+			name:           "a recorded spawn whose process is dead leaves the workspace client-less",
+			recordPID:      true,
+			alive:          false,
+			bindAfter:      -1,
+			wantClientless: true,
+		},
+		{
+			name:           "no recorded spawn at all is the ordinary client-less workspace",
+			recordPID:      false,
+			alive:          true,
+			bindAfter:      -1,
+			wantClientless: true,
+		},
+		{
+			name:             "a live recorded spawn that never announces itself leaves the workspace undetermined",
+			recordPID:        true,
+			alive:            true,
+			bindAfter:        -1,
+			wantUndetermined: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			const recordedPID = 4242
+			var h *harness
+			h = newHarness(t, func(deps *Deps, harn *harness) {
+				h = harn
+				deps.Clock = &bootStepClock{now: instant}
+				deps.ShimAlive = func(pid int) bool {
+					if pid != recordedPID {
+						t.Fatalf("liveness asked about pid %d, want the recorded %d", pid, recordedPID)
+					}
+					return tt.alive
+				}
+				deps.AdoptBound = 200 * time.Millisecond
+			})
+			ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+			socket := h.deps.Layout.ShimSocket(string(ws.ID))
+			if tt.bindAfter >= 0 {
+				bindAfter(h, socket, tt.bindAfter)(&h.deps, h)
+				seq, err := New(h.deps)
+				if err != nil {
+					t.Fatalf("boot.New: %v", err)
+				}
+				h.seq = seq
+			}
+			if tt.recordPID {
+				pid := recordedPID
+				if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
+					t.Fatalf("SetSpawnedShimPID: %v", err)
+				}
+			}
+
+			// Act.
+			report, err := h.seq.Run(context.Background())
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			// Assert.
+			if got := contains(report.Adopted, ws.ID); got != tt.wantAdopted {
+				t.Fatalf("report.Adopted contains %s = %v, want %v (%+v)", ws.ID, got, tt.wantAdopted, report.Adopted)
+			}
+			if got := containsWorkspace(report.PendingBringUp, ws.ID); got != tt.wantClientless {
+				t.Fatalf("report.PendingBringUp contains %s = %v, want %v", ws.ID, got, tt.wantClientless)
+			}
+			if got := contains(report.Undetermined, ws.ID); got != tt.wantUndetermined {
+				t.Fatalf("report.Undetermined contains %s = %v, want %v", ws.ID, got, tt.wantUndetermined)
+			}
+		})
+	}
+}
+
+// TestAnAnnouncedStartingShimIsAdoptedAsTheInertSurvivorItIs pins WHICH
+// adoption a starting shim gets. It has taken no conversation lock, so it
+// carries no session and must not reach the bounce accounting as one.
+func TestAnAnnouncedStartingShimIsAdoptedAsTheInertSurvivorItIs(t *testing.T) {
+	// Arrange.
+	const recordedPID = 4242
+	var h *harness
+	h = newHarness(t, func(deps *Deps, harn *harness) {
+		h = harn
+		deps.Clock = &bootStepClock{now: instant}
+		deps.ShimAlive = func(int) bool { return true }
+		deps.AdoptBound = 200 * time.Millisecond
+	})
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	socket := h.deps.Layout.ShimSocket(string(ws.ID))
+	bindAfter(h, socket, 1)(&h.deps, h)
+	seq, err := New(h.deps)
+	if err != nil {
+		t.Fatalf("boot.New: %v", err)
+	}
+	h.seq = seq
+	pid := recordedPID
+	if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
+		t.Fatalf("SetSpawnedShimPID: %v", err)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if !contains(report.AdoptedInert, ws.ID) {
+		t.Fatalf("report.AdoptedInert = %v, want the starting shim carried as inert", report.AdoptedInert)
+	}
+	if len(report.AdoptedSessions) != 0 {
+		t.Fatalf("report.AdoptedSessions = %+v, want none: a starting shim has no session", report.AdoptedSessions)
+	}
+}
+
+// TestAStartingShimThatNeverAnnouncesItselfIsRecordedAtError pins the one loud
+// record of this path. Every other outcome is the ordinary course of a boot
+// and stays at INFO.
+func TestAStartingShimThatNeverAnnouncesItselfIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	var h *harness
+	h = newHarness(t, func(deps *Deps, harn *harness) {
+		h = harn
+		deps.Clock = &bootStepClock{now: instant}
+		deps.ShimAlive = func(int) bool { return true }
+		deps.AdoptBound = 200 * time.Millisecond
+	})
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	pid := 4242
+	if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
+		t.Fatalf("SetSpawnedShimPID: %v", err)
+	}
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.boot.adopt") {
+		t.Fatalf("no error record for a spawn that never announced itself: %v", h.log.Records())
+	}
+}
+
+// TestAWaitedStartingShimIsAnnouncedAtInfo pins the two INFO records the wait
+// states: that it is waiting, and that the shim announced itself. Without them
+// a boot that paid its adoption bound reads on disk as an unexplained pause.
+func TestAWaitedStartingShimIsAnnouncedAtInfo(t *testing.T) {
+	// Arrange.
+	var h *harness
+	h = newHarness(t, func(deps *Deps, harn *harness) {
+		h = harn
+		deps.Clock = &bootStepClock{now: instant}
+		deps.ShimAlive = func(int) bool { return true }
+		deps.AdoptBound = 200 * time.Millisecond
+	})
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	bindAfter(h, h.deps.Layout.ShimSocket(string(ws.ID)), 1)(&h.deps, h)
+	seq, err := New(h.deps)
+	if err != nil {
+		t.Fatalf("boot.New: %v", err)
+	}
+	h.seq = seq
+	pid := 4242
+	if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
+		t.Fatalf("SetSpawnedShimPID: %v", err)
+	}
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	var waited, announced bool
+	for _, r := range h.log.Records() {
+		if r.Level != "info" || r.Operation != "daemon.boot.adopt" {
+			continue
+		}
+		if strings.Contains(r.Message, "still starting") {
+			waited = true
+		}
+		if strings.Contains(r.Message, "announced itself") {
+			announced = true
+		}
+	}
+	if !waited || !announced {
+		t.Fatalf("waited=%v announced=%v, want both stated at info: %v", waited, announced, h.log.Records())
+	}
+}
+
+// contains reports whether a list of workspace ids holds one.
+func contains(list []ids.WorkspaceID, want ids.WorkspaceID) bool {
+	for _, id := range list {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
+
+// containsWorkspace reports whether a list of workspace records holds one id.
+func containsWorkspace(list []wsm.Workspace, want ids.WorkspaceID) bool {
+	for _, ws := range list {
+		if ws.ID == want {
+			return true
+		}
+	}
+	return false
 }

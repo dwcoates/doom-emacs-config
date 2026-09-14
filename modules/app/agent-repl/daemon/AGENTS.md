@@ -206,6 +206,48 @@ environment. Every flag is optional.
 A lock probe that could NOT TELL is never read as free: such a workspace is
 neither adopted nor orphan-closed, and the boot report names it.
 
+### A SPAWNED SHIM'S PID IS DURABLE IN THE REGISTRY FROM THE INSTANT IT IS SPAWNED
+
+The two kernel facts do not cover the STARTING WINDOW. A shim takes its
+conversation locks inside `StartSession` and Node binds its socket ~110ms after
+the fork, so between those instants a spawned shim holds no lock and answers no
+dial -- indistinguishable, to both kernel probes, from a workspace nothing ever
+served. Measured 2026-09-13: shim spawned at T+0, its daemon SIGKILLed at
+T+60ms, the successor booting at T+65ms with `daemon.boot.adopt` "no shim
+survives for this workspace", spawning its own at T+80ms; the survivor bound at
+T+110ms and the newcomer died at T+190ms with `shim.main.fatal:
+<state>/sock/<ws>.sock already has a live listener; refusing to start a second
+shim on one session socket`.
+
+So the spawn itself is recorded:
+
+- `workspaces.spawned_shim_pid` (layout 8, `wsm.SetSpawnedShimPID`) is written
+  the INSTANT the fork returns, through `shimclient.Spec.Spawned` -- a callback
+  the supervisor invokes between `cmd.Start` and the bring-up it then blocks
+  on. Every spawn site supplies it: the fleet's bring-up and the rollout's
+  `Prelaunch`. It is NOT `sessions.shim_pid`: that one names the shim SERVING A
+  SESSION, and a registered workspace whose first shim is being forked has no
+  session row to write at all.
+- It is CLEARED when this daemon knows the process is gone: a failed start's
+  stop (`workspace/failedstart.go`) and the drain sweep's hibernation.
+- `boot.sequence.adopt` and the fleet's `bringUpClient`, on LOCK FREE + NO LIVE
+  SOCKET, read it before concluding no shim survives. A pid that is dead or
+  absent proceeds as before (the socket path is cleared and a shim is spawned).
+  A pid that is ALIVE is waited out by `internal/startingshim`, bounded by the
+  same adoption bound and driven by an injected clock rather than a sleep,
+  until the socket goes live -- and the survivor is then taken through the
+  ORDINARY inert-survivor adoption, on whichever generation of the path
+  answered.
+- The records are one INFO for the wait (pid and bound), one INFO for the
+  announcement, and one ERROR only when the bound expires. An expired bound is
+  UNDETERMINED, exactly as an unreadable lock is: a live process that may bind
+  the path at any instant is what a second shim must not race.
+
+A predecessor's shim is not this daemon's own spawn, so
+`refuseAdoptingOurOwnSpawn` does not fire on it: the supervisor's `SpawnedFor`
+ledger is the in-memory `held` set of one process and holds nothing across a
+restart.
+
 ## Environment (process contracts and test knobs)
 
 | variable | scope | meaning |
