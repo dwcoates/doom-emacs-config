@@ -39,24 +39,27 @@ ruling of 2026-09-13), `docs/REALTEST-PLAN.md` "Status", and
 - Store: schema 7, single serialized writer, read pool, ledger retention,
   no residue persisted, shape catalog (`make -C agent-shim/shim-store shapes`).
 
-## Agents in flight (background task ids in this session)
+## State after the first sweep with 9 (rt-run34, 2026-09-13 22:28)
 
-1. `a8f8f3887cc09dac1` branch `shim/start-settles-live` — the shim settles a
-   start on a control round-trip; init facts learned with the first turn.
-   THIS UNBLOCKS THE CHESS960 WORKSPACE (2b81f45a724642ef) and every real
-   session start. Merge, deploy, confirm `daemon.boot.bring_up` reports
-   failed:0.
-2. `a3204aaf2a2568db6` branch `footer/fault-kinds` — every daemon fault kind
-   reaches the footer (proto additions). Merge, deploy.
-3. `ad68aa3fd8f5ec631` branch `realtest/9-send-a-prompt` — authors
-   `TestRealtestSendAPrompt`. Merge (no deploy needed unless the fake shim
-   changed), then RUN realtest 9, remediate findings in batches, rerun to
-   twice-green, update the plan's status row.
+- All three evening branches merged and deployed (footer fault kinds,
+  realtest 9, shim start contract). Boot bring-up now failed:0.
+- rt-run34: realtests 1-8 green; gap scan 6 records all the retired start
+  contract (closed by the shim merge); realtest 9 FAILED at the `SPC o v`
+  act; 21 `daemon.dlog.sink_failure` errors in its window.
+- Owner (mid-run) reported the topbar title sits left of true center.
 
-If a notification for these never arrives, read
-`/private/tmp/claude-501/-Users-dodgecoates--config-doom/6a1b0e3a-9be5-4fdb-b4f7-d5c97ccdec15/tasks/<id>.output`
-tail, or check `git branch --list` for the branch and its worktree under
-the scratchpad.
+## Agents in flight (branches; worktrees under the scratchpad)
+
+1. `fix/rt9-composer-toggle` (wt-rt9fix): probe reads the selected
+   window, act written for the focus-input TOGGLE (composer auto-selected
+   on arrival, so the chord jumped to the webview).
+2. `fix/dlog-sink-reopen` (wt-sink): workspace loggers pinned a `*sink`
+   that CloseWorkspace's Evict closed and poisoned; resolve at write time,
+   plain close never poisons.
+3. `fix/topbar-true-center` (wt-topbar): `1fr` flank tracks floor at
+   content width; `minmax(0,1fr)` flanks so the title is at true center.
+
+Then: merge all three, deploy, rerun the full sweep, twice-green.
 
 ## The loop for realtest 9
 
