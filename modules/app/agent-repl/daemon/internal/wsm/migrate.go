@@ -68,7 +68,7 @@ ALTER TABLE workspaces ADD COLUMN spawned_shim_pid INTEGER;
 `
 
 // sessionsSelectedConfigDirDDL adds the root the USER CHOSE for a workspace.
-// Every existing row is stamped '' by the column default, which is exactly
+// Every existing row is stamped ” by the column default, which is exactly
 // right: nobody had chosen anything before this build, so every one of them
 // keeps following the path routing.
 const sessionsSelectedConfigDirDDL = `
