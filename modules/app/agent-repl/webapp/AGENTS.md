@@ -90,6 +90,7 @@ and are contract on the same terms:
 | `data-shown` | a sidebar row's expand chevron (`.chev`) | — (present exactly while the pointer is over the row, the keyboard focus is inside it, or the row's details are open; the chevron is `visibility: hidden` without it) | owner ruling 3, 2026-09-13 |
 | `data-client-verdict` | the `.pfooter` dock, while a client link verdict stands | the verdict's kind (`unary_transport`, `stream_ended`, `subscription_source_ended`, `unsubscribe_failed`, `client_log_failed`, `daemon_unreachable_card`, `frame_undecodable_card`, `feed_not_tailing`) — absent whenever the daemon's pushed view is the one drawn | webapp/footer-client-states |
 | `data-cold-gate-progress` | the cold-gate card's progress slot, inside `.hibernation-actions` | — (empty and `hidden` unless an answer is in flight AND the footer view carries a `compaction` activity; its text is the daemon's own line, verbatim) | cold-gate feedback, 2026-09-14 |
+| `data-status-wave` | the `.footer-status` cell whose arm means PROGRESS | `progress` (absent on every other status, and on the client's own composed disconnected strip); the word is then per-letter `.pfooter-wave-letter` spans inside one `.pfooter-status-word` | webapp/footer-status-wave |
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 
 ## Commands
