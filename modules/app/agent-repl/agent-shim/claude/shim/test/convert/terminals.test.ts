@@ -11,13 +11,60 @@
  * coverage run found at zero hits by calling `convertResult` with a synthetic
  * `result` message naming it via `terminal_reason` directly.
  */
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { containing } from "../expect-shapes.js";
 
-import { convertResult } from "../../src/convert/terminals.js";
+import {
+  classifyVendorApiFailure,
+  convertResult,
+  redactVendorMessage,
+  VENDOR_MESSAGE_MAX,
+} from "../../src/convert/terminals.js";
+import type { VendorApiError } from "../../src/convert/terminals.js";
 import type { conversationv1 } from "../../src/proto.js";
+import type { ContextOverrides } from "./fold-harness.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { foldContext } from "./fold-harness.js";
+
+const mockedWriteSync = vi.mocked(writeSync);
+
+/** Every JSONL record the shim persisted to fd 3 since the last clear. */
+function persistedRecords(): Array<{
+  operation: string;
+  message: string;
+  context: Record<string, unknown>;
+}> {
+  return (mockedWriteSync.mock.calls as unknown as Array<[number, Buffer, number, number]>).map(
+    ([, bytes, offset, length]) =>
+      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
+        operation: string;
+        message: string;
+        context: Record<string, unknown>;
+      },
+  );
+}
+
+/** Fold an api_error terminal and return the diagnostic record it emitted. */
+function diagnosticRecord(
+  apiErrorStatus: number | null,
+  errors: readonly string[],
+  vendor: VendorApiError,
+  overrides: ContextOverrides,
+): { operation: string; context: Record<string, unknown> } | undefined {
+  mockedWriteSync.mockClear();
+  const message = {
+    type: "result",
+    uuid: "result-uuid-diag",
+    terminal_reason: "api_error",
+    errors,
+    api_error_status: apiErrorStatus,
+  } as unknown as Extract<SdkMessage, { type: "result" }>;
+  convertResult(message, foldContext(overrides), undefined, vendor);
+  return persistedRecords().find((record) =>
+    record.operation.startsWith("shim.vendor."),
+  );
+}
 
 function resultMessage(terminalReason: string): Extract<SdkMessage, { type: "result" }> {
   return {
@@ -329,5 +376,115 @@ describe.each([
     // Assert
     const result = output.turnEnded?.frame?.result;
     expect(result?.case === "failure" ? result.value.failure.case : undefined).toBe(expectedCase);
+  });
+});
+
+/**
+ * The vendor API-failure DIAGNOSTIC record.
+ *
+ * The owner intermittently sees a credential rejection or a "model or resource
+ * does not exist" on a live workspace, and the cause is only recoverable after
+ * the fact with the class, the status, the vendor's own sentence, the account
+ * config-dir the failing token belonged to, and the model, all on one greppable
+ * record. This pins that record for each of the two classes that matter.
+ */
+describe("the vendor API-failure diagnostic record", () => {
+  it("fires shim.vendor.auth_rejected with class, status, message and config-dir for an authentication_failed result", () => {
+    // Arrange, Act.
+    const record = diagnosticRecord(
+      401,
+      ["the credential was rejected — sign in again"],
+      { errorClass: "authentication_failed" },
+      { claudeConfigDir: "/home/acct/.claude", model: "claude-opus-5" },
+    );
+
+    // Assert.
+    expect(record?.operation).toBe("shim.vendor.auth_rejected");
+    expect(record?.context.vendor_error).toBe("authentication_failed");
+    expect(record?.context.http_status).toBe(401);
+    expect(record?.context.vendor_message).toBe("the credential was rejected — sign in again");
+    expect(record?.context.claude_config_dir).toBe("/home/acct/.claude");
+    expect(record?.context.model).toBe("claude-opus-5");
+  });
+
+  it("fires shim.vendor.model_missing with class, status, message and config-dir for a model-not-found result", () => {
+    // Arrange, Act.
+    const record = diagnosticRecord(
+      404,
+      ["the model or resource does not exist"],
+      { errorClass: "model_not_found" },
+      { claudeConfigDir: "/home/acct/.claude-chesscom", model: "claude-opus-5" },
+    );
+
+    // Assert.
+    expect(record?.operation).toBe("shim.vendor.model_missing");
+    expect(record?.context.vendor_error).toBe("model_not_found");
+    expect(record?.context.http_status).toBe(404);
+    expect(record?.context.vendor_message).toBe("the model or resource does not exist");
+    expect(record?.context.claude_config_dir).toBe("/home/acct/.claude-chesscom");
+    expect(record?.context.model).toBe("claude-opus-5");
+  });
+});
+
+/**
+ * The classifier: which greppable operation a failure lands under.
+ */
+describe("classifyVendorApiFailure", () => {
+  it("names a 401 an auth rejection", () => {
+    expect(classifyVendorApiFailure(401, undefined, "")).toBe("shim.vendor.auth_rejected");
+  });
+
+  it("names a credential class an auth rejection even without a status", () => {
+    expect(classifyVendorApiFailure(undefined, "authentication_failed", "")).toBe(
+      "shim.vendor.auth_rejected",
+    );
+  });
+
+  it("names a 404 a missing model", () => {
+    expect(classifyVendorApiFailure(404, undefined, "")).toBe("shim.vendor.model_missing");
+  });
+
+  it("names a does-not-exist sentence a missing model", () => {
+    expect(classifyVendorApiFailure(undefined, undefined, "the model or resource does not exist")).toBe(
+      "shim.vendor.model_missing",
+    );
+  });
+
+  it("names anything else the generic api_error", () => {
+    expect(classifyVendorApiFailure(500, "server_error", "internal")).toBe("shim.vendor.api_error");
+  });
+});
+
+/**
+ * The redactor: a credential must never ride the vendor sentence into the log.
+ */
+describe("redactVendorMessage", () => {
+  it("masks a bearer token embedded in the sentence", () => {
+    const masked = redactVendorMessage("auth failed for Bearer abc123DEF456ghi789");
+    expect(masked).toBe("auth failed for Bearer [redacted]");
+  });
+
+  it("masks an sk- api key embedded in the sentence", () => {
+    const masked = redactVendorMessage("rejected key sk-ant-0123456789abcdef");
+    expect(masked).toContain("[redacted-key]");
+    expect(masked).not.toContain("sk-ant-0123456789abcdef");
+  });
+
+  it("masks a JWT embedded in the sentence", () => {
+    const masked = redactVendorMessage("token eyJhbGciOi.eyJzdWIiOiJ1c2VyIn0 was rejected");
+    expect(masked).toContain("[redacted-jwt]");
+    expect(masked).not.toContain("eyJhbGciOi");
+  });
+
+  it("truncates a sentence longer than the bound", () => {
+    const masked = redactVendorMessage("x".repeat(VENDOR_MESSAGE_MAX + 50));
+    expect(masked).toHaveLength(VENDOR_MESSAGE_MAX + 1);
+    expect(masked.endsWith("…")).toBe(true);
+  });
+
+  it("leaves an ordinary sentence untouched", () => {
+    expect(redactVendorMessage("the credential was rejected — sign in again")).toBe(
+      "the credential was rejected — sign in again",
+    );
   });
 });
