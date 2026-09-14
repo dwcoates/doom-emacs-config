@@ -1508,6 +1508,20 @@ WARN and must never reach the `unknown-error-arm' ERROR branch."
     ;; Assert
     (should-not agent-repl-test-input--queued)))
 
+;;;; ---- Keybindings -----------------------------------------------------
+
+(ert-deftest agent-repl-test-input-ck-interrupts-the-turn ()
+  "`C-c C-k' in the composer is bound to the turn interrupt.
+Bound with `define-key' (not the `map!' form, a no-op under `emacs -Q'),
+so the binding itself is observable here -- restored on the very chord that
+used to interrupt before the overhaul."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-c C-k"))
+              #'agent-repl-interrupt-turn)))
+
+(ert-deftest agent-repl-test-input-interrupt-turn-is-a-command ()
+  "The chord's target is a real interactive command, not a dead symbol."
+  (should (commandp #'agent-repl-interrupt-turn)))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here
