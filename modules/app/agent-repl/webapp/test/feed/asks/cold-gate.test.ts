@@ -394,6 +394,11 @@ describe("a refused gate answer", () => {
       cause: { case: "noSession", value: {} },
       text: "the workspace has no session to answer",
     },
+    {
+      arm: "reopenFailed",
+      cause: { case: "reopenFailed", value: { detail: "the producer has already written rows" } },
+      text: "the session did not come back from the re-open: the producer has already written rows",
+    },
   ] as const;
 
   for (const c of causes) {
@@ -406,6 +411,31 @@ describe("a refused gate answer", () => {
       expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([c.arm, c.text]);
     });
   }
+
+  it("words a re-open failure the daemon could not explain", async () => {
+    // A FAILED RE-OPEN WITH NO ACCOUNT still says what happened. The empty
+    // detail is legal on the wire, and the sentence must not trail a colon
+    // into nothing.
+    const h = askHarness({ coldGate: refused({ case: "reopenFailed", value: { detail: "" } }) });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    await settle();
+    expect(el.querySelector(".hibernation-actions .refusal")?.textContent).toBe(
+      "the session did not come back from the re-open",
+    );
+  });
+
+  it("leaves the gate answerable after a failed re-open", async () => {
+    // THE GATE IS NOT SPENT: the daemon did not retire it, so the buttons come
+    // back and the user can try another remediation.
+    const h = askHarness({
+      coldGate: refused({ case: "reopenFailed", value: { detail: "the shim refused" } }),
+    });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    await settle();
+    expect([...el.querySelectorAll("button")].every((b) => !b.disabled)).toBe(true);
+  });
 
   it("words every cause the schema declares", () => {
     expect(causes.map((c) => c.arm).sort()).toEqual(
