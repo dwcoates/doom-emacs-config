@@ -22,12 +22,23 @@
  * loses, and a label that names only the price cannot be weighed against one
  * that names only the loss.
  *
+ * THE WAIT IS THE DAEMON'S SENTENCE, NOT THIS CARD'S. "compact and resume"
+ * starts a compaction that runs for as long as it runs — a minute is ordinary —
+ * with every button on this card latched inert. The daemon composes the phase
+ * line for exactly that on the footer's own stream
+ * (`FooterStatusThinkingActivity.compaction`), so the card SUBSCRIBES to the
+ * line the footer already has (`src/footer/progress.ts`) and draws it verbatim
+ * in its progress slot. It opens no stream of its own, it composes no sentence
+ * of its own, and a moment the footer carries no compaction line is a moment
+ * the slot is empty rather than one this end fills with a placeholder.
+ *
  * EVERY COMPACT VALUE IS ECHOED FROM THE MENU. The summarizer is the served
  * `AgentModel` handed back whole; the scope is one of the served enum values.
  * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
  * is a MALFORMED VIEW rather than a scope this end quietly words as "everything".
  */
 import { formatTickedAge } from "../../duration.js";
+import { onCompactionProgress } from "../../footer/progress.js";
 import { formatTokens } from "../../format.js";
 import { log } from "../../log.js";
 import {
@@ -306,6 +317,19 @@ function drawActions(
   const actions = document.createElement("div");
   actions.className = "hibernation-actions";
 
+  // THE PROGRESS SLOT, empty until an answer is in flight. It is built here —
+  // once, with the card — rather than appended when a click lands, so an answer
+  // in flight changes the card's TEXT and its disabled buttons and nothing
+  // else. `hibernation-pending` is the gate's ancestor's own class for exactly
+  // this line ("a decision in flight"), already in the sheet: no new style, no
+  // new colour. It is HIDDEN while empty, because an empty element still
+  // carries that class's margin and an always-on gap under the buttons would
+  // be a layout change of this end's invention.
+  const progress = document.createElement("div");
+  progress.className = "hibernation-pending";
+  progress.setAttribute("data-cold-gate-progress", "");
+  progress.hidden = true;
+
   const buttons: HTMLButtonElement[] = [];
   const pay = actionRow("pay", COLD_GATE_COPY.pay, buttons);
   const clear = actionRow("clear", COLD_GATE_COPY.clear, buttons);
@@ -327,9 +351,9 @@ function drawActions(
   compactRow.append(opener, compactHint);
   actions.append(compactRow);
 
-  const submenu = drawCompactSubmenu(rc, menu, buttons, actions, path);
+  const submenu = drawCompactSubmenu(rc, menu, buttons, actions, progress, path);
   submenu.el.hidden = true;
-  actions.append(submenu.el);
+  actions.append(submenu.el, progress);
   buttons.push(opener);
   opener.addEventListener("click", () => {
     submenu.el.hidden = !submenu.el.hidden;
@@ -340,10 +364,10 @@ function drawActions(
   });
 
   pay.button.addEventListener("click", () => {
-    void answer(rc, actions, buttons, { kind: "pay" });
+    void answer(rc, actions, buttons, progress, { kind: "pay" });
   });
   clear.button.addEventListener("click", () => {
-    void answer(rc, actions, buttons, { kind: "clear" });
+    void answer(rc, actions, buttons, progress, { kind: "clear" });
   });
   return actions;
 }
@@ -384,6 +408,7 @@ function drawCompactSubmenu(
   menu: FeedColdGateCompactMenu,
   buttons: HTMLButtonElement[],
   actions: HTMLElement,
+  progress: HTMLElement,
   path: string,
 ): { el: HTMLElement } {
   const el = document.createElement("div");
@@ -459,7 +484,7 @@ function drawCompactSubmenu(
       // must not invent either value.
       throw new MalformedView(path, "the compact menu offered no model or no scope");
     }
-    void answer(rc, actions, buttons, { kind: "compact", model, scope });
+    void answer(rc, actions, buttons, progress, { kind: "compact", model, scope });
   });
   return { el };
 }
@@ -469,6 +494,7 @@ async function answer(
   rc: RowContext,
   actions: HTMLElement,
   buttons: readonly HTMLButtonElement[],
+  progress: HTMLElement,
   choice: ColdGateChoice,
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
@@ -482,6 +508,15 @@ async function answer(
       scope: choice.kind === "compact" ? choice.scope : undefined,
     },
   });
+  // THE FEEDBACK FOR THE WAIT. The buttons go inert the moment the call leaves
+  // (`whileInFlight`), and a compaction behind a `compact` answer can hold them
+  // there for a minute; without this the card would say nothing at all for that
+  // whole minute. The sentence is whatever the footer's last push carried,
+  // redrawn as the daemon pushes the next phase.
+  const unsubscribe = onCompactionProgress((text) => {
+    progress.textContent = text ?? "";
+    progress.hidden = progress.textContent === "";
+  });
   const answered = await whileInFlight(buttons, () =>
     callUnary(
       rc.ctx,
@@ -491,6 +526,12 @@ async function answer(
       AnswerColdGateResponseSchema,
     ),
   );
+  // THE WAIT IS OVER, whichever way it ended: the slot is emptied and the
+  // subscription dropped before the outcome is drawn, so a refusal is never
+  // read underneath a progress line about a compaction that has stopped.
+  unsubscribe();
+  progress.textContent = "";
+  progress.hidden = true;
   if ("failed" in answered) {
     // callUnary already logged the failure once, as its owner. What is drawn
     // here is the FEEDBACK AT THE CLICK: the buttons are already back (

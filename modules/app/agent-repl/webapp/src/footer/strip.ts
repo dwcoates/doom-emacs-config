@@ -44,6 +44,7 @@ import type {
   FooterStatusActivityBlockedOnUser,
   FooterStatusActivityCloseBlocked,
   FooterStatusActivityColdGateCost,
+  FooterStatusActivityCompaction,
   FooterStatusActivityContextBudget,
   FooterStatusActivityContextInjected,
   FooterStatusActivityFault,
@@ -469,6 +470,8 @@ function drawActivityKind(
       return drawFooterStatusActivityBlockedOnUser(kind.value);
     case "coldGateCost":
       return drawFooterStatusActivityColdGateCost(kind.value);
+    case "compaction":
+      return drawFooterStatusActivityCompaction(kind.value);
     case "interrupting":
       return drawFooterStatusActivityInterrupting(kind.value);
     case "hook":
@@ -508,6 +511,20 @@ export function drawFooterStatusActivityContextBudget(
   u: FooterStatusActivityContextBudget,
 ): HTMLElement {
   return textLine("footer-activity-context-budget", u.text);
+}
+
+/**
+ * The compaction's own progress line, verbatim.
+ *
+ * BOTH COMPACTIONS SPEAK THROUGH IT — the vendor's auto-compaction and the cold
+ * gate's "compact and resume" — and both draw under the existing
+ * `thinking · compacting` step. The daemon composes the sentence out of the
+ * phase it is in; this end adds no word of its own.
+ */
+export function drawFooterStatusActivityCompaction(
+  u: FooterStatusActivityCompaction,
+): HTMLElement {
+  return textLine("footer-activity-compaction", u.text);
 }
 
 /** The gated call's composed line, verbatim. */

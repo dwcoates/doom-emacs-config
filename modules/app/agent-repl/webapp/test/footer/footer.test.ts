@@ -4,8 +4,9 @@ import { create } from "@bufbuild/protobuf";
 import {
   WatchFooterResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
-import { FooterStripSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import { FooterStripSchema, type FooterStatus } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
+import { compactionProgress } from "../../src/footer/progress.js";
 import {
   buildWatchFooterRequest,
   mountFooter,
@@ -66,6 +67,72 @@ function mount(h: Harness = harness()) {
 describe("buildWatchFooterRequest", () => {
   it("addresses the stream to this page's workspace", () => {
     expect(buildWatchFooterRequest(harness().ctx).workspace).toEqual(WORKSPACE);
+  });
+});
+
+/** A thinking status whose activity is the daemon's compaction line. */
+function compactingStatus(text: string): FooterStatus["status"] {
+  return {
+    case: "thinking",
+    value: {
+      substatus: { case: "compacting", value: {} },
+      activity: { at: { atMs: BigInt(NOW) }, kind: { case: "compaction", value: { text } } },
+    },
+  } as FooterStatus["status"];
+}
+
+// THE COMPACTION LINE IS PUBLISHED PAGE-WIDE (owner's report, 2026-09-14): the
+// cold-gate card waits on the compaction its own click started, and the daemon
+// composes the only sentence there is for it on THIS stream.
+describe("mountFooter: the compaction line it publishes", () => {
+  it("publishes nothing before any push", async () => {
+    // Arrange / Act
+    mount();
+    await settle();
+    // Assert
+    expect(compactionProgress()).toBeNull();
+  });
+
+  it("publishes the compaction line a push carried", async () => {
+    // Arrange
+    const { h } = mount();
+    await settle();
+    // Act
+    h.tail.push(
+      pushView(footerView({ strip: strip({ status: compactingStatus("compacting · 412 of 900") }) })),
+    );
+    await settle();
+    // Assert
+    expect(compactionProgress()).toBe("compacting · 412 of 900");
+  });
+
+  it("publishes nothing for a push whose activity is some other arm", async () => {
+    // Arrange
+    const { h } = mount();
+    await settle();
+    h.tail.push(
+      pushView(footerView({ strip: strip({ status: compactingStatus("compacting · 412 of 900") }) })),
+    );
+    await settle();
+    // Act
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Assert
+    expect(compactionProgress()).toBeNull();
+  });
+
+  it("drops the line when the footer is disposed", async () => {
+    // Arrange
+    const { h, footer } = mount();
+    await settle();
+    h.tail.push(
+      pushView(footerView({ strip: strip({ status: compactingStatus("compacting · 412 of 900") }) })),
+    );
+    await settle();
+    // Act
+    footer.dispose();
+    // Assert
+    expect(compactionProgress()).toBeNull();
   });
 });
 
