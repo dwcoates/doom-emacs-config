@@ -203,6 +203,15 @@ type wsState struct {
 	// the chip and the /context panel both resolve from.
 	contextUsage *conversationv1.SessionContextUsage
 
+	// contextCut reports that a context cut (a /clear or a completed
+	// compaction) discarded the transcript the last `contextUsage` was read
+	// off, so that reading no longer describes the context. It is set by
+	// OnContextCut when the cut actually removed context and cleared by the
+	// next `context_usage` reading — the vendor's fresh answer for the cut
+	// context. While it stands and no fresh reading has landed, the chip
+	// states the count is unknown rather than a stale figure or a fabricated 0.
+	contextCut bool
+
 	// counted is every unit whose usage has been folded into the session
 	// totals, with what it reported.
 	counted map[string]usageFingerprint
