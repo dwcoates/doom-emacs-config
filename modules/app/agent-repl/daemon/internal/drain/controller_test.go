@@ -1006,3 +1006,19 @@ func TestShutdownNowLeavesTheStandDownLatched(t *testing.T) {
 		t.Fatal("the supervisor does not read as standing down after an immediate shutdown")
 	}
 }
+
+// TestDefaultIdleCutoffIsTwelveHours pins the hibernation floor: a session goes
+// unengaged for twelve hours before the idle sweep hibernates it, when no flag
+// or environment override names a different cutoff.
+func TestDefaultIdleCutoffIsTwelveHours(t *testing.T) {
+	// Arrange
+	want := 12 * time.Hour
+
+	// Act
+	got := DefaultIdleCutoff
+
+	// Assert
+	if got != want {
+		t.Fatalf("DefaultIdleCutoff = %v, want %v", got, want)
+	}
+}
