@@ -146,8 +146,27 @@ func TestARotationLinkThatAppearsMidTailMovesTheBook(t *testing.T) {
 			rotationNewID, books)
 	}
 
-	// Act: the link appears, and the rest of the transcript is written.
+	// Act: the link appears...
 	writeVendorLink(t, stateDir, rotationNewID, rotationOriginalID)
+	// ...and the tail is appended only once the reader has OBSERVED it. The
+	// production guarantee is "the book moves on the next poll after the link
+	// appears", and `pollAll` re-resolves every watched file's book BEFORE it
+	// reads a byte, so no record is ever converted under a book the disk has
+	// already contradicted. What is NOT guaranteed — and what this subject was
+	// silently leaning on — is that a tail appended in the same instant as the
+	// link is read on a LATER tick than the one that first sees the link: under
+	// load the reader can pick up both in one pass, and then there is no
+	// mid-tail rotation left to observe. Waiting on the reader's own book-move
+	// record is what makes the ordering this subject is named for real.
+	//
+	// THE RECORD IS MATCHED BY ITS IDS, NOT BY ITS PATH: the sidecar states the
+	// symlink-resolved path (/private/var/...) and the harness holds the
+	// unresolved one (/var/...), so a path comparison would never match here.
+	awaitLog(ctx, t, options.LogPath, "the book move off the rotated id", func(r logRecord) bool {
+		return r.Operation == "identity-rekey" && r.Level == "warn" &&
+			r.Context["vendor_session_id"] == rotationNewID &&
+			r.Context["book_agent_id"] == rotationOriginalID
+	})
 	for _, line := range captured.Lines[8:] {
 		g.AppendLine(line)
 	}
