@@ -716,27 +716,42 @@ func TestRealtestSendAPrompt(t *testing.T) {
 
 // ---- The acts ----------------------------------------------------------
 
-// rt9FocusTheComposer presses `SPC o v` as real key events and proves it
-// reached `agent-repl-focus-input`.
+// rt9FocusTheComposer leaves the editor standing in the workspace's composer,
+// pressing `SPC o v` as real key events and proving each press reached
+// `agent-repl-focus-input`.
+//
+// `SPC o v` IS A TOGGLE, NOT A SELECT, and this act is written for the command
+// the product actually ships. `agent-repl-focus-input` (lisp/panels.el) jumps
+// BACK to the workspace's webview when the editor is already standing in the
+// composer, and selects the composer from anywhere else. A minted workspace
+// auto-selects its composer on arrival (`maybe-autoselect-input`,
+// branch=select-input-win), so the common case here is that the first press
+// finds the composer already selected and moves the editor OFF it. An act that
+// asserted "composer" after one press was asserting the opposite of the
+// designed behavior, and read a working toggle as a chord that never arrived.
+//
+// So the act reads where the editor stands BEFORE pressing, presses once,
+// asserts the landing the toggle semantic predicts — the webview when it stood
+// on the composer, the composer otherwise — records which case it was in the
+// manifest, and presses a second time when the first landed on the webview.
 //
 // THE PROOF IS NOT A MINIBUFFER PROMPT, because this command asks nothing. It
 // is the pair realtest 8 uses for `SPC j d` and `SPC j x`: Emacs's own
 // `(recent-keys)` carrying the sequence, and the EFFECT the command exists for
-// — the workspace's composer buffer being the selected one. Either alone would
-// be weaker than the pair: the ring says the keys arrived and not what they
-// resolved to, and the selected buffer says something focused the composer and
-// not that this chord did.
+// — the predicted window being the selected one. Either alone would be weaker
+// than the pair: the ring says the keys arrived and not what they resolved to,
+// and the selected window says something moved the editor and not that this
+// chord did. Both presses are proven that same way.
 //
 // A FAILURE HERE IS FATAL, unlike the substrate's chord proof. The chord and
 // the verb are separate claims for a command that can also be entered through
-// the probe transport; here the composer being selected is a PRECONDITION for
-// everything after it, since the characters typed next go wherever the point
-// is. A run that typed its prompt into the owner's source file and pressed
-// return there would be worse than a run that stopped.
+// the probe transport; here the composer being selected WHEN THIS ACT RETURNS
+// is a PRECONDITION for everything after it, since the characters typed next go
+// wherever the point is. A run that typed its prompt into the owner's source
+// file and pressed return there would be worse than a run that stopped.
 func rt9FocusTheComposer(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver,
 	wsName string, manifest *Manifest) {
 	t.Helper()
-	defer wsActReportKeyDelivery(t, driver, manifest)
 
 	sequence := []Chord{wsActLeader, rt9OKey, rt9FocusInputKey}
 	spelled := wsActSpell(sequence)
@@ -747,48 +762,95 @@ func rt9FocusTheComposer(ctx context.Context, t *testing.T, client *Client, driv
 			"would still be testing the composer", spelled)
 	}
 
-	wsActClearPendingInput(ctx, t, client, driver, fmt.Sprintf("pressing `%s`", spelled), manifest)
+	// The reading BEFORE the press is what makes the assertion after it
+	// meaningful: the toggle's landing is a function of where the editor
+	// already stood, so a run that did not look cannot say whether the chord
+	// worked.
+	before, err := rt9ComposerSelected(ctx, client, wsName)
+	if err != nil {
+		t.Fatalf("read where the editor is standing before `%s` is pressed: %v. `%s` toggles between %q's "+
+			"composer and its webview, so which landing the press predicts cannot be known without this "+
+			"reading, and asserting either one blind would be a coin flip", spelled, err, spelled, wsName)
+	}
+
+	want := "composer"
+	if before == "composer" {
+		want = "webview"
+	}
+	note := fmt.Sprintf("before `%s` the editor is standing in %q of %q, so the toggle predicts %q for the "+
+		"first press", spelled, before, wsName, want)
+	manifest.Notes = append(manifest.Notes, note)
+	t.Logf("%s", note)
+
+	landed := rt9PressFocusInput(ctx, t, client, driver, sequence, wsName, before, want, "first", manifest)
+
+	if landed == "composer" {
+		return
+	}
+
+	// The first press jumped back to the webview, which is what the toggle
+	// does from the composer. A second press is what leaves the editor where
+	// the prompt has to be typed, and it is proven exactly as the first was.
+	rt9PressFocusInput(ctx, t, client, driver, sequence, wsName, landed, "composer", "second", manifest)
+}
+
+// rt9PressFocusInput presses `SPC o v` once and proves the landing WANT.
+//
+// It returns where the editor ended up, which is WANT: a landing anywhere else
+// is fatal, because the only reason this act exists is to know which buffer the
+// next typed character goes into.
+func rt9PressFocusInput(ctx context.Context, t *testing.T, client *Client, driver *KeyDriver,
+	sequence []Chord, wsName, from, want, ordinal string, manifest *Manifest) string {
+	t.Helper()
+	defer wsActReportKeyDelivery(t, driver, manifest)
+
+	spelled := wsActSpell(sequence)
+	wsActClearPendingInput(ctx, t, client, driver,
+		fmt.Sprintf("the %s press of `%s`", ordinal, spelled), manifest)
 	for _, chord := range sequence {
 		if err := driver.Press(ctx, chord); err != nil {
-			t.Fatalf("CHORD NOT DELIVERED: pressing %s of `%s` (%s) failed: %v",
-				chord.Emacs, spelled, chord.Why, err)
+			t.Fatalf("CHORD NOT DELIVERED: pressing %s of the %s `%s` (%s) failed: %v",
+				chord.Emacs, ordinal, spelled, chord.Why, err)
 		}
 	}
 
 	var where string
-	waitUntil(ctx, t, fmt.Sprintf("`%s` to select %q's composer", spelled, wsName), wsActChordCeiling,
+	waitUntil(ctx, t, fmt.Sprintf("the %s `%s` to move the editor from %q to %q of %q",
+		ordinal, spelled, from, want, wsName), wsActChordCeiling,
 		func() bool {
 			read, err := rt9ComposerSelected(ctx, client, wsName)
 			if err != nil {
 				return false
 			}
 			where = read
-			return read == "composer"
+			return read == want
 		})
 
 	keys, keysErr := RecentKeys(ctx, client)
 	if keysErr != nil {
-		t.Errorf("read Emacs's own (recent-keys) after `%s`: %v", spelled, keysErr)
+		t.Errorf("read Emacs's own (recent-keys) after the %s `%s`: %v", ordinal, spelled, keysErr)
 	}
 	recorded := SpellRecorded(sequence)
 	if !strings.Contains(keys, recorded) {
-		note := fmt.Sprintf("`%s` is not in Emacs's own (recent-keys) as %q, so whatever selected the "+
-			"composer cannot be credited to this chord. recent-keys ends with: %s",
-			spelled, recorded, tail(keys, 120))
+		note := fmt.Sprintf("`%s` is not in Emacs's own (recent-keys) as %q, so whatever moved the editor "+
+			"on the %s press cannot be credited to this chord. recent-keys ends with: %s",
+			spelled, recorded, ordinal, tail(keys, 120))
 		manifest.Notes = append(manifest.Notes, note)
 		t.Errorf("%s", note)
 	}
-	if where != "composer" {
-		t.Fatalf("CHORD DID NOT REACH ITS COMMAND: `%s` should have selected %q's composer and the editor is "+
-			"standing in %q instead. Emacs's own (recent-keys) ends with: %s. Everything after this types "+
-			"characters wherever the point is, so the run stops rather than typing a prompt into whatever "+
-			"buffer this is", spelled, wsName, where, tail(keys, 120))
+	if where != want {
+		t.Fatalf("CHORD DID NOT REACH ITS COMMAND: the %s `%s` was pressed with the editor standing in %q of "+
+			"%q, so `agent-repl-focus-input` should have left it in %q, and it is standing in %q instead. "+
+			"Emacs's own (recent-keys) ends with: %s. Everything after this types characters wherever the "+
+			"point is, so the run stops rather than typing a prompt into whatever buffer this is",
+			ordinal, spelled, from, wsName, want, where, tail(keys, 120))
 	}
 
-	note := fmt.Sprintf("real key events `%s` reached `agent-repl-focus-input`: %q's composer is the selected "+
-		"buffer and (recent-keys) ends with %s", spelled, wsName, tail(keys, 60))
+	note := fmt.Sprintf("the %s real key events `%s` reached `agent-repl-focus-input`: the editor moved from "+
+		"%q to %q of %q and (recent-keys) ends with %s", ordinal, spelled, from, want, wsName, tail(keys, 60))
 	manifest.Notes = append(manifest.Notes, note)
 	t.Logf("%s", note)
+	return where
 }
 
 // rt9TypePrompt enters insert state and types rt9Prompt one real key at a time.
@@ -878,12 +940,19 @@ func rt9PressSend(ctx context.Context, t *testing.T, client *Client, driver *Key
 
 // rt9ComposerSelected answers where the editor is standing, in the vocabulary
 // the caller needs: "composer" when the selected window shows this workspace's
-// own input buffer, and otherwise that window's buffer name.
+// own input buffer, "webview" when it shows the workspace's frontend buffer,
+// and otherwise that window's buffer name.
 //
-// It compares against `:input-buffer` on the workspace's own plist rather than
-// against a buffer NAME pattern, because the name is a presentation detail and
-// the plist entry is the product's own answer to "which buffer is this
-// workspace's composer".
+// THE WEBVIEW ARM IS NOT DECORATION. `SPC o v` toggles between those two
+// buffers, so "the editor is on the webview" is a LANDING this act asserts and
+// not a miss; without a name for it the probe would report the webview's buffer
+// name and the reader would have to know it to tell a working toggle from a
+// chord that went nowhere.
+//
+// It compares against `:input-buffer` and `:frontend-buffer` on the workspace's
+// own plist rather than against buffer NAME patterns, because the names are a
+// presentation detail and the plist entries are the product's own answer to
+// which buffers those are.
 //
 // IT READS THE SELECTED WINDOW'S BUFFER, NEVER `(current-buffer)`. Every probe
 // form is evaluated inside the transport's own `with-temp-file`
@@ -896,10 +965,12 @@ func rt9PressSend(ctx context.Context, t *testing.T, client *Client, driver *Key
 func rt9ComposerSelected(ctx context.Context, client *Client, wsName string) (string, error) {
 	form := fmt.Sprintf(`(let* ((ws %q)
        (sel (window-buffer (selected-window)))
-       (buf (and (fboundp 'agent-repl--ws-get) (agent-repl--ws-get ws :input-buffer))))
-  (if (and buf (buffer-live-p buf) (eq sel buf))
-      "composer"
-    (buffer-name sel)))`, wsName)
+       (buf (and (fboundp 'agent-repl--ws-get) (agent-repl--ws-get ws :input-buffer)))
+       (webview (and (fboundp 'agent-repl--ws-get) (agent-repl--ws-get ws :frontend-buffer))))
+  (cond
+   ((and buf (buffer-live-p buf) (eq sel buf)) "composer")
+   ((and webview (buffer-live-p webview) (eq sel webview)) "webview")
+   (t (buffer-name sel))))`, wsName)
 	return client.ReadString(ctx, form)
 }
 
