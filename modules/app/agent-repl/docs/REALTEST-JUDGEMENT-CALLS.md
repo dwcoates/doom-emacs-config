@@ -15,6 +15,13 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Adopting a shim still starting (2026-09-13)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | A daemon killed 60ms after spawning a shim leaves that shim holding no lock and bound to nothing. Its successor booted at T+65ms, read `daemon.boot.adopt` "no shim survives for this workspace", spawned its own at T+80ms; the survivor bound at T+110ms and the newcomer died at T+190ms with `shim.main.fatal: <state>/sock/<ws>.sock already has a live listener; refusing to start a second shim on one session socket`. Is the successor's read wrong, or is the second spawn's death acceptable? | The read is wrong, and it is fixed by making the SPAWN durable: `workspaces.spawned_shim_pid` (layout 8) is written the instant the fork returns, and a daemon that finds the lock free and the socket absent consults it — a live pid is waited out, bounded by the existing adoption bound, and then adopted through the ordinary inert-survivor path | Neither kernel fact covers the window between the fork and the shim's first bound socket: the conversation locks are taken inside `StartSession` and Node binds the socket ~110ms after the fork, so a starting shim is indistinguishable from no shim at all. `wsm.SetShimPID` could not carry it — it updates the `sessions` row, and a registered workspace whose first shim is being forked has no session row to update, which is exactly the workspace in the measured failure — so the pid is a WORKSPACE fact with its own column. An expired bound is ERROR and the workspace is left undetermined, the same answer an unreadable lock already gets | Drop the layout-8 column, remove `Spec.Spawned` and `internal/startingshim`, and delete the `awaitStartingSurvivor` branch in `daemon/internal/boot/sequence.go` and `daemon/internal/workspace/sessions.go` |
+| 2026-09-13 | The brief said to record the pid "immediately after the spawn returns". `Supervisor.Spawn` does not return at the fork — it blocks through the whole bring-up, which is the very window at issue. Record late, or move the record into the supervisor? | Move it: `shimclient.Spec.Spawned` is called synchronously with the child's pid between `cmd.Start` and the bring-up, and each spawn site supplies a closure that writes the registry | Recording after `Spawn` returns records nothing at all for the case the fix exists for: in the measured failure the first daemon was killed while still inside its own `Spawn`. The callback is the only moment the pid exists and nothing has blocked yet | Remove `Spec.Spawned` and its call site in `daemon/internal/shimclient/supervisor.go` |
+
 ## Realtest 9, first run (2026-09-13)
 
 | Date | Question | Decision | Why | How to reverse |
