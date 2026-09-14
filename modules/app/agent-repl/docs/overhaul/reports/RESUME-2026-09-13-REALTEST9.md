@@ -39,25 +39,18 @@ ruling of 2026-09-13), `docs/REALTEST-PLAN.md` "Status", and
 - Store: schema 7, single serialized writer, read pool, ledger retention,
   no residue persisted, shape catalog (`make -C agent-shim/shim-store shapes`).
 
-## State after the sixth sweep with 9 (rt-run39, 2026-09-14 00:10)
+## DONE (2026-09-14 00:5x): realtest 9 twice-green, section gate passed
 
-- Landed and deployed: sidecar boot walk scoped, poll pass sliced, identity
-  negative cache (master c46785d03). Sidecar steady-state CPU 2% (was 100%),
-  new transcripts picked up ~1s after they appear.
-- rt-run39: 1-8 green, gap scan clean; realtest 9 fails ONLY on the answer
-  text: the answer bubble IS drawn (final-answer-marked styled_bubble=true)
-  but the response renderer records nothing, and the harness waited for a
-  `feed.draw-text-block` that only prompt blocks emit.
-
-## Agents in flight
-
-1. `fix/feed-response-record` (wt-resp): `feed.draw-response` INFO with
-   characters/blocks; harness matches it and measures the phase.
-2. `fix/sidecar-workspace-cache` (wt-wscache): the sidecar's dir→workspace
-   ref cache is never invalidated; a re-registered dir carried the stale
-   id (forward refused "no longer registered").
-
-Then: merge both, deploy, rerun to twice-green, test-all, plan status.
+- rt-run40 and rt-run41 (2026-09-14 00:2x, 00:3x): realtests 1-9 all green,
+  gap scan clean both times. `bin/test-all.sh` passed on every layer (Docker
+  quit afterwards). Plan status row 9 updated; every fix in the changelog.
+- master tip bb45b6bbc, deployed (the commits after the last deploy are
+  docs and a sidecar test only).
+- Realtest 10 (interrupt a running turn) AWAITS THE OWNER: no Emacs key
+  interrupts a turn without a forced restart; the footer stop control is a
+  webview button. See docs/REALTEST-JUDGEMENT-CALLS.md "Realtest 10, the
+  interrupt key". The fake's `!hold` scenario is ready for it.
+- No agents in flight. All agent worktrees removed.
 
 ## The loop for realtest 9
 
