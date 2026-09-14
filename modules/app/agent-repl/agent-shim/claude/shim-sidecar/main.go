@@ -448,6 +448,7 @@ func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*l
 	forwarder := daemonclient.New(stateDir)
 	logf := logging.NewForwardingDurableOnlyAtLevel(terminal, file, level, forwarder).
 		With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
+	forwarder.SetRefReplacedObserver(refReplacedObserver(logf))
 	return logf, func() {
 		// BOUNDED, BECAUSE LAUNCHD IS WAITING. The drain dials the daemon once
 		// per queued record; with the daemon gone and a boot's backlog queued,
@@ -455,6 +456,27 @@ func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*l
 		logf.CloseWithin(logging.DefaultShutdownDrain)
 		_ = file.Close()
 	}, nil
+}
+
+// refReplacedObserver states, ONCE PER REPLACEMENT, that the daemon roster
+// moved a directory from one minted workspace ref to another — a workspace
+// forgotten and the same directory registered again. It is the ORDINARY shape
+// of a person closing a workspace and re-creating it over the same path, so it
+// is an `info`, never a warning; the warning is reserved for the directory the
+// roster genuinely no longer holds, which keeps its own refusal path.
+//
+// THE RECORD IS GLOBAL ON PURPOSE. A record carrying `workspace_dir` is a
+// file-scoped diagnostic and is QUEUED FOR FORWARDING (see Logger.write), and
+// this observer runs inside the forwarder — including inside the bounded drain
+// at Close, where enqueuing another forward is a panic. So the directory and
+// the two ids ride the message, which is the one place they cannot re-enter
+// the channel that produced them.
+func refReplacedObserver(logf *logging.Bound) func(dir, oldID, newID string) {
+	return func(dir, oldID, newID string) {
+		logf.With(logging.Context{Operation: "workspace-ref-replaced"}).Log(
+			"the daemon roster now registers %s as workspace %s; the cached ref %s it replaced is no longer attributable",
+			dir, newID, oldID)
+	}
 }
 
 // runWithLogger owns process-level failures once canonical logging exists.

@@ -30,12 +30,37 @@ import (
 
 const requestTimeout = 2 * time.Second
 
+// workspaceRefFreshness bounds how long a directory's daemon-minted ref is
+// reused before the roster is read again for it.
+//
+// A DIRECTORY'S WORKSPACE REF IS ONLY EVER USED WHILE THE ROSTER STILL HOLDS
+// IT. The roster moves under this cache without telling it: a workspace is
+// forgotten and the SAME directory is registered again under a NEW id, which
+// realtest 9 (sweep rt-run39) caught costing a whole session's file-scoped
+// diagnostics — every one of them addressed to a workspace the daemon had
+// dropped eight minutes earlier, refused, and written unattributed. Nothing
+// pushes that change here, so the freshness bound is what makes the staleness
+// window finite. It is the sidecar's default poll interval (main.go's
+// DefaultPollInterval, which this package cannot import): a ref may be at most
+// one poll pass behind the roster, which is the same granularity every other
+// fact this process attributes a pickup with is already read at.
+const workspaceRefFreshness = time.Second
+
 // readinessTimeout bounds the loopback connect that decides whether the daemon
 // is live. A booting daemon has bound its listener and published daemon.addr
 // but is not yet accepting, so the connect either fails fast or the kernel
 // queues it; either way a short bound keeps a readiness probe from riding the
 // full request timeout on every retry rung.
 const readinessTimeout = 250 * time.Millisecond
+
+// cachedWorkspaceRef is one directory's daemon-minted ref together with the
+// instant the roster that named it was delivered. The instant is the whole
+// point: a ref carries no expiry of its own, and the roster it came from can
+// have moved on without anything telling this process.
+type cachedWorkspaceRef struct {
+	ref    *workspacev1.WorkspaceRef
+	readAt time.Time
+}
 
 // Client resolves daemon.addr and forwards one file-scoped diagnostic through
 // agentrepl.v1.AgentRepl.ClientLog. The HTTP client is shared so sequential
@@ -45,10 +70,27 @@ type Client struct {
 	addrPath string
 	http     *http.Client
 
-	mu            sync.Mutex
+	// now is the clock every cached ref's age is measured against, injected by
+	// the tests so freshness is decided rather than waited out.
+	now func() time.Time
+	// freshness is workspaceRefFreshness, held per Client so a test can state
+	// the bound it is exercising instead of racing the real one.
+	freshness time.Duration
+
+	mu sync.Mutex
+	// cachedAddress is the daemon the whole workspace cache belongs to. A
+	// different address is a DIFFERENT ROSTER, so the entire cache is dropped
+	// rather than consulted: ids are minted per daemon and mean nothing across
+	// a handover.
 	cachedAddress string
-	cachedDir     string
-	cachedRef     *workspacev1.WorkspaceRef
+	// workspaces holds one entry PER NORMALIZED DIRECTORY. It used to be a
+	// single slot, so two directories forwarding in turn re-read the roster for
+	// every record while a re-registered directory kept its dead ref forever.
+	workspaces map[string]cachedWorkspaceRef
+	// refReplaced is told, once, that a directory's ref moved from one
+	// daemon-minted id to another. It is the ordinary re-registration, so it is
+	// an INFO the owner can join the two ids on, never a warning.
+	refReplaced func(dir, oldID, newID string)
 	// seenServing is the set of addresses this Client has ever seen ACCEPTING —
 	// a successful Ready probe or a successful Forward — keyed by the bare
 	// "host:port" the address names. daemon.addr publishes an address before
@@ -70,6 +112,9 @@ func New(stateDir string) *Client {
 			Transport: &http.Transport{Proxy: nil},
 			Timeout:   requestTimeout,
 		},
+		now:        time.Now,
+		freshness:  workspaceRefFreshness,
+		workspaces: map[string]cachedWorkspaceRef{},
 	}
 }
 
@@ -167,40 +212,84 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	client := agentreplv1connect.NewAgentReplClient(c.http, "http://"+address)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
-	workspace, err := c.resolveWorkspace(ctx, client, address, record.WorkspaceDir)
+	dir, err := normalizeWorkspaceDir(record.WorkspaceDir)
 	if err != nil {
 		return address, c.classifyForward(err, usedAddress, usedPID, usedPIDKnown)
 	}
+	workspace, err := c.resolveWorkspace(ctx, client, address, dir)
+	if err != nil {
+		return address, c.classifyForward(err, usedAddress, usedPID, usedPIDKnown)
+	}
+	departed, err := c.deliver(ctx, client, address, workspace, requestRecord)
+	if err == nil {
+		c.markServing(address)
+		return address, nil
+	}
+	c.expireWorkspace(dir)
+	if !departed {
+		return address, c.classifyForward(err, usedAddress, usedPID, usedPIDKnown)
+	}
+	// THE ROSTER MOVED UNDER THE REF THIS ATTEMPT USED, and the refusal says so
+	// in the daemon's own words. It is the ordinary shape of a directory being
+	// forgotten and registered again — a workspace closed and re-created over
+	// the same path — and the record is still perfectly attributable: the
+	// roster names that directory RIGHT NOW, under a new id. So the cached ref
+	// is dropped (above), the roster is read once more, and the record is sent
+	// again with what the roster holds. Reporting the refusal without that one
+	// re-read is what cost realtest 9 a whole session's diagnostics.
+	fresh, err := c.resolveWorkspace(ctx, client, address, dir)
+	if err != nil {
+		return address, c.classifyForward(err, usedAddress, usedPID, usedPIDKnown)
+	}
+	if _, err := c.deliver(ctx, client, address, fresh, requestRecord); err != nil {
+		// ONE RE-READ, NOT A LADDER. A refusal that survives the fresh ref is a
+		// directory the roster genuinely no longer holds, which the sentinel
+		// below already spells and forwardLoop deliberately does not retry.
+		c.expireWorkspace(dir)
+		return address, c.classifyForward(err, usedAddress, usedPID, usedPIDKnown)
+	}
+	c.markServing(address)
+	return address, nil
+}
+
+// deliver sends one attributed record and reads the daemon's answer.
+//
+// `departed` marks the ONE refusal the caller may act on: the daemon does not
+// hold the workspace this ref names. That is a fact about the REF, not about
+// the record, so the caller can re-resolve and try again; every other failure
+// is about the transport or the record and is final for this attempt.
+func (c *Client) deliver(
+	ctx context.Context,
+	client agentreplv1connect.AgentReplClient,
+	address string,
+	workspace *workspacev1.WorkspaceRef,
+	requestRecord *agentreplv1.ClientLogRecord,
+) (departed bool, err error) {
 	response, err := client.ClientLog(ctx, connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Workspace: workspace,
 		Record:    requestRecord,
 	}))
 	if err != nil {
-		c.invalidateWorkspace(address, workspace.GetId())
-		return address, c.classifyForward(fmt.Errorf("ClientLog at %s: %w", address, err), usedAddress, usedPID, usedPIDKnown)
+		return false, fmt.Errorf("ClientLog at %s: %w", address, err)
 	}
 	switch response.Msg.GetResult().(type) {
 	case *agentreplv1.ClientLogResponse_Success:
-		c.markServing(address)
-		return address, nil
+		return false, nil
 	case *agentreplv1.ClientLogResponse_Error:
-		c.invalidateWorkspace(address, workspace.GetId())
 		if response.Msg.GetError().GetUnknownWorkspace() != nil {
-			// THE WORKSPACE DEPARTED WHILE THIS RECORD WAS IN FLIGHT. The
-			// roster named it when the ref was resolved and the daemon had
-			// forgotten it by the time the record landed — the same conclusion
-			// the roster path reaches when the row is already gone, reached one
-			// round trip later. Marking it unresolvable is what stops the
-			// forwarder for this workspace: forwardLoop does not retry the
-			// sentinel, narrates it at DEBUG, and persists the record
-			// UNATTRIBUTED in the global sink, so nothing is lost.
-			return address, fmt.Errorf("ClientLog at %s: workspace %q is no longer registered: %w",
+			// THE WORKSPACE DEPARTED WHILE THIS RECORD WAS IN FLIGHT, or the
+			// ref came from a roster that has since moved. Either way the id
+			// this attempt named is dead. The caller re-resolves once; if the
+			// directory is genuinely gone from the roster, this same sentinel
+			// is what stops the forwarder for it — forwardLoop does not retry
+			// it, narrates it at DEBUG, and persists the record UNATTRIBUTED in
+			// the global sink, so nothing is lost.
+			return true, fmt.Errorf("ClientLog at %s: workspace %q is no longer registered: %w",
 				address, workspace.GetId(), logging.ErrForwardWorkspaceUnresolvable)
 		}
-		return address, fmt.Errorf("ClientLog at %s was refused", address)
+		return false, fmt.Errorf("ClientLog at %s was refused", address)
 	default:
-		c.invalidateWorkspace(address, workspace.GetId())
-		return address, fmt.Errorf("ClientLog at %s returned neither success nor error", address)
+		return false, fmt.Errorf("ClientLog at %s returned neither success nor error", address)
 	}
 }
 
@@ -242,16 +331,15 @@ func (c *Client) classifyForward(err error, usedAddress string, usedPID int, use
 	return err
 }
 
+// resolveWorkspace answers the daemon-minted ref for one NORMALIZED directory,
+// from the cache while the roster it came from is still recent enough to stand
+// for the roster now, and from the roster itself otherwise.
 func (c *Client) resolveWorkspace(
 	ctx context.Context,
 	client agentreplv1connect.AgentReplClient,
 	address string,
-	dir string,
+	wanted string,
 ) (*workspacev1.WorkspaceRef, error) {
-	wanted, err := normalizeWorkspaceDir(dir)
-	if err != nil {
-		return nil, err
-	}
 	if cached := c.cachedWorkspace(address, wanted); cached != nil {
 		return cached, nil
 	}
@@ -364,31 +452,72 @@ func workspaceRefInRoster(roster *frontendv1.WorkspaceRoster, wantedDir string) 
 	return found, nil
 }
 
+// SetRefReplacedObserver installs the sink told that a directory's cached ref
+// was replaced by a different daemon-minted id — the roster forgot the
+// workspace and registered the same directory again. It is installed after
+// construction because the logger that states it is built FROM this Client.
+func (c *Client) SetRefReplacedObserver(observe func(dir, oldID, newID string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.refReplaced = observe
+}
+
+// cachedWorkspace answers a directory's cached ref only while it may still
+// stand for the roster: same daemon, and read within the freshness bound. A
+// ref past the bound is left in place rather than deleted, so the resolve that
+// replaces it can still name the id it replaced.
 func (c *Client) cachedWorkspace(address, dir string) *workspacev1.WorkspaceRef {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.cachedAddress != address || c.cachedDir != dir || c.cachedRef == nil {
+	if c.cachedAddress != address {
+		c.dropAllLocked(address)
 		return nil
 	}
-	return copyWorkspaceRef(c.cachedRef)
+	entry, ok := c.workspaces[dir]
+	if !ok || entry.ref == nil {
+		return nil
+	}
+	if c.now().Sub(entry.readAt) >= c.freshness {
+		return nil
+	}
+	return copyWorkspaceRef(entry.ref)
 }
 
 func (c *Client) cacheWorkspace(address, dir string, ref *workspacev1.WorkspaceRef) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.cachedAddress = address
-	c.cachedDir = dir
-	c.cachedRef = copyWorkspaceRef(ref)
+	if c.cachedAddress != address {
+		c.dropAllLocked(address)
+	}
+	previous := c.workspaces[dir]
+	c.workspaces[dir] = cachedWorkspaceRef{ref: copyWorkspaceRef(ref), readAt: c.now()}
+	observe := c.refReplaced
+	c.mu.Unlock()
+	if observe == nil || previous.ref == nil || previous.ref.GetId() == ref.GetId() {
+		return
+	}
+	// OUTSIDE THE LOCK, because the observer writes a log record and this
+	// Client is the log's own forwarding boundary.
+	observe(dir, previous.ref.GetId(), ref.GetId())
 }
 
-func (c *Client) invalidateWorkspace(address, id string) {
+// dropAllLocked forgets every cached ref because the daemon changed. Ids are
+// minted per daemon, so not one of them means anything against the new one.
+func (c *Client) dropAllLocked(address string) {
+	c.cachedAddress = address
+	c.workspaces = map[string]cachedWorkspaceRef{}
+}
+
+// expireWorkspace marks one directory's ref unusable while KEEPING it, so the
+// resolve that replaces it can still state which id it replaced.
+func (c *Client) expireWorkspace(dir string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.cachedAddress == address && c.cachedRef != nil && c.cachedRef.GetId() == id {
-		c.cachedAddress = ""
-		c.cachedDir = ""
-		c.cachedRef = nil
+	entry, ok := c.workspaces[dir]
+	if !ok {
+		return
 	}
+	entry.readAt = time.Time{}
+	c.workspaces[dir] = entry
 }
 
 func copyWorkspaceRef(ref *workspacev1.WorkspaceRef) *workspacev1.WorkspaceRef {
