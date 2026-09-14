@@ -435,6 +435,15 @@ func (h *harness) separationRowID(at string) string {
 	}).GetValue()
 }
 
+// clearDividerRowID is the identity a /clear's divider takes: keyed on the turn
+// it belongs to, so the optimistic bar and the shim's confirming cut are one row.
+func (h *harness) clearDividerRowID(turn string) string {
+	return testEncode(feedid.Ref{
+		WS: testWorkspace, Feed: rootFeed(),
+		Row: feedid.RowKey{Kind: feedid.KindSeparation, ID: "context_cut:clear:" + turn},
+	}).GetValue()
+}
+
 // clearedCut is the cut a `/clear` produces.
 func clearedCut() *conversationv1.ContextCut {
 	return &conversationv1.ContextCut{
@@ -540,9 +549,10 @@ func TestAClearDeliversTheDividerAndTheTurnsAfterIt(t *testing.T) {
 	// Act.
 	page, _ := h.openPage(rootFeed(), "reader-1")
 
-	// Assert: the divider, then the later turn, and nothing else.
+	// Assert: the divider, then the later turn, and nothing else. The clear
+	// arrived while turn-2 was in flight, so its divider is keyed on that turn.
 	got := rowIDs(pageRows(t, page))
-	want := []string{h.separationRowID("entry-clear"), h.promptRowID("turn-3")}
+	want := []string{h.clearDividerRowID("turn-2"), h.promptRowID("turn-3")}
 	if len(got) != len(want) {
 		t.Fatalf("page rows = %v, want %v", got, want)
 	}

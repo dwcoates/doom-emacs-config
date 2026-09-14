@@ -50,15 +50,48 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	// A turn that ended still in plan mode BROKE the episode.
 	r.breakPlanEpisodes(s, "the turn ended while plan mode was still open")
 
+	// A /clear TURN OWNS NO TERMINAL BUBBLE. The clear interrupts the turn to
+	// cut the context, and drawing that interrupt as a card below the cleared
+	// divider is the "response cut short" bubble a clear must never leave. A
+	// CONFIRMED clear (its ContextCut arrived) suppresses its SUCCESS terminal
+	// outright; a clear that never confirmed FAILED, so its optimistic red bar is
+	// retired and the terminal is drawn — a failure is surfaced, never swallowed.
+	suppress := false
+	switch {
+	case success != nil && s.clearConfirmed[*turn]:
+		// The clear SUCCEEDED — its ContextCut confirmed it. This holds whether
+		// the terminal is watched live or replayed from history, because the
+		// replayed cut sets the same confirmation, so the bubble never returns on
+		// a restart.
+		suppress = true
+		log.Info("daemon.feed.clear_terminal_suppressed",
+			"a /clear turn concluded; the cleared divider is its outcome and no terminal bubble is drawn",
+			dlog.Context{"turn": string(*turn)})
+	case s.clearTurns[*turn]:
+		// The turn was opened as a /clear and drew an optimistic bar, but no cut
+		// ever confirmed it: the clear FAILED. Retire the phantom bar and let the
+		// terminal draw so the failure is surfaced, never swallowed.
+		r.retireOptimisticClear(s, *turn, "the /clear turn ended without cutting context")
+	}
+	delete(s.clearTurns, *turn)
+	delete(s.clearConfirmed, *turn)
+	delete(s.directiveTurns, *turn)
+
 	row := &frontendv1.FeedRow{
 		Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindTurnEnded, ID: string(*turn)}),
 		Turn: turnID,
 		Row:  &frontendv1.FeedRow_TurnEnded{TurnEnded: ended},
 	}
-	log.Debug("daemon.feed.turn_ended",
-		"a turn's terminal row was upserted",
-		dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended)})
-	r.upsert(s, at, row, true)
+	if suppress {
+		log.Debug("daemon.feed.turn_ended",
+			"a /clear turn's terminal row was suppressed",
+			dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended)})
+	} else {
+		log.Debug("daemon.feed.turn_ended",
+			"a turn's terminal row was upserted",
+			dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended)})
+		r.upsert(s, at, row, true)
+	}
 
 	// A SPAWN WHOSE START NEVER ARRIVED is the same class of producer fault,
 	// and the turn ending is the last moment its start could still have named
