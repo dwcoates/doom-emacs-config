@@ -37,7 +37,7 @@ export type PromptBlockArm =
 
 /** A text block, drawn as markdown by the client's prose renderer. */
 export function drawFeedTextBlock(block: FeedTextBlock): HTMLElement {
-  log.debug("drawing a prompt text block", {
+  log.info("drawing a prompt text block", {
     operation: "feed.draw-text-block",
     context: { characters: block.text.length },
   });
@@ -53,7 +53,7 @@ export function drawFeedTextBlock(block: FeedTextBlock): HTMLElement {
  * path itself — and the alt text is resolved too and may legitimately be empty.
  */
 export function drawFeedImageBlock(block: FeedImageBlock): HTMLElement {
-  log.debug("drawing a prompt image block", {
+  log.info("drawing a prompt image block", {
     operation: "feed.draw-image-block",
     context: { has_alt: block.alt !== "" },
   });

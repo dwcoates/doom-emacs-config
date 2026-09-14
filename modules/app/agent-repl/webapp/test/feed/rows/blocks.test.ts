@@ -14,6 +14,7 @@ import {
   drawFeedUnsupportedBlock,
   drawPromptBlockArm,
 } from "../../../src/feed/rows/blocks.js";
+import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 describe("drawFeedTextBlock", () => {
   it("renders the text as markdown, which is what the schema says it is", () => {
@@ -120,5 +121,27 @@ describe("drawPromptBlockArm: an arm this build has no case for", () => {
     // Assert
     expect(thrown).toBeInstanceOf(MalformedView);
     expect((thrown as MalformedView).detail).toBe("arm 'video' is not one this build can draw");
+  });
+});
+
+describe("the records of the drawn blocks", () => {
+  it("records a drawn text block at info, a block being drawn exactly once", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawFeedTextBlock(create(FeedTextBlockSchema, { text: "hi" }));
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-text-block");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("records a drawn image block at info, its sibling being drawn the same way", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawFeedImageBlock(create(FeedImageBlockSchema, { src: "/x.png", alt: "a" }));
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-image-block");
+    expect(record.level.case).toBe("info");
   });
 });
