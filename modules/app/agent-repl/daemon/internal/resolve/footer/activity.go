@@ -13,8 +13,16 @@ import (
 // push. The precedence is the contract's, stated once here and applied by
 // every status arm below:
 //
-//	notification  OUTRANKS everything.
-//	status-bound  ranks next — the kinds only that status admits.
+//	status-bound  ranks first where a kind EXPLAINS the standing substatus —
+//	              `start_failed` under disconnected, the wakeup countdown
+//	              under waiting, the injected item under loading. A cell that
+//	              exists to explain its step cannot be crowded out of it.
+//	fault         ranks next: a STANDING DAEMON FAULT outranks a notification,
+//	              because a notification from before the fault would otherwise
+//	              hide the condition the user has to be told about. It is the
+//	              same exception `start_failed` already held, generalized to
+//	              every fault kind by the owner's ruling of 2026-09-13.
+//	notification  ranks next.
 //	rate_limited  is SECOND-LOWEST.
 //	context_budget is LOWEST — shown only when nothing else stands.
 //
@@ -94,6 +102,22 @@ func (r *resolver) allowance(w *allowanceWindow) *frontendv1.FooterAllowance {
 	return allowance
 }
 
+// faultLine is the standing daemon fault's line, or nil when none stands, and
+// the instant it began standing.
+//
+// ONE LINE FOR EVERY FAULT FAMILY BUT ONE. The kind names itself and the
+// detail says what it says; the status and substatus cells beside it are
+// already resolved, so the line carries no third copy of the classification.
+// `shim_start_failed` keeps its own richer leaf, which counts the held prompts
+// the failure dropped.
+func (r *resolver) faultLine(s *wsState) (*frontendv1.FooterStatusActivityFault, time.Time) {
+	fault := r.standingFault(s)
+	if fault == nil {
+		return nil, time.Time{}
+	}
+	return &frontendv1.FooterStatusActivityFault{Kind: fault.Kind, Detail: fault.Detail}, fault.At
+}
+
 // budgetLine is the vendor's standing context-budget warning, or nil.
 func (r *resolver) budgetLine(s *wsState) *frontendv1.FooterStatusActivityContextBudget {
 	if s.contextBudget == nil {
@@ -105,6 +129,12 @@ func (r *resolver) budgetLine(s *wsState) *frontendv1.FooterStatusActivityContex
 // idleActivity resolves the line legal while idle: no status-bound kind
 // exists, so it is notification, then rate, then budget.
 func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusIdleActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusIdleActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusIdleActivity{
 			At:   stamp(s.notification.at),
@@ -128,6 +158,12 @@ func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity
 
 // thinkingActivity resolves the line legal while a turn runs.
 func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusThinkingActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusThinkingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusThinkingActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusThinkingActivity{
 			At:   stamp(s.notification.at),
@@ -177,6 +213,12 @@ func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusThinking
 // this never answers nil: every waiting state has a composable line by
 // construction, and a producer that cannot compose one has a bug.
 func (r *resolver) waitingActivity(s *wsState) *frontendv1.FooterStatusWaitingActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusWaitingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusWaitingActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusWaitingActivity{
 			At:   stamp(s.notification.at),
@@ -254,6 +296,12 @@ func budgetText(s *wsState) string {
 
 // interruptedActivity resolves the line legal while interrupted.
 func (r *resolver) interruptedActivity(s *wsState) *frontendv1.FooterStatusInterruptedActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusInterruptedActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusInterruptedActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusInterruptedActivity{
 			At:   stamp(s.notification.at),
@@ -277,6 +325,12 @@ func (r *resolver) interruptedActivity(s *wsState) *frontendv1.FooterStatusInter
 
 // mergingActivity resolves the line legal while merging.
 func (r *resolver) mergingActivity(s *wsState) *frontendv1.FooterStatusMergingActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusMergingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusMergingActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusMergingActivity{
 			At:   stamp(s.notification.at),
@@ -310,6 +364,12 @@ func (r *resolver) mergingActivity(s *wsState) *frontendv1.FooterStatusMergingAc
 
 // backgroundActivity resolves the line legal while detached work runs.
 func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgroundActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusBackgroundActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusBackgroundActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusBackgroundActivity{
 			At:   stamp(s.notification.at),
@@ -333,6 +393,12 @@ func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgr
 
 // blockedActivity resolves the line legal while blocked.
 func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusBlockedActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusBlockedActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusBlockedActivity{
 			At:   stamp(s.notification.at),
@@ -401,6 +467,12 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 				}},
 		}
 	}
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusDisconnectedActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusDisconnectedActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusDisconnectedActivity{
 			At:   stamp(s.notification.at),
@@ -425,6 +497,12 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 // closingActivity resolves the line legal while closing. The blocked step
 // composes its reasons here.
 func (r *resolver) closingActivity(s *wsState) *frontendv1.FooterStatusClosingActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusClosingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusClosingActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusClosingActivity{
 			At:   stamp(s.notification.at),
@@ -456,6 +534,12 @@ func (r *resolver) closingActivity(s *wsState) *frontendv1.FooterStatusClosingAc
 // loadingActivity resolves the line legal while context is being injected. It
 // is REQUIRED: the injection IS the status, so the item line always exists.
 func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingActivity {
+	if line, at := r.faultLine(s); line != nil {
+		return &frontendv1.FooterStatusLoadingActivity{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusLoadingActivity_Fault{Fault: line},
+		}
+	}
 	if line := r.notificationLine(s); line != nil {
 		return &frontendv1.FooterStatusLoadingActivity{
 			At:   stamp(s.notification.at),

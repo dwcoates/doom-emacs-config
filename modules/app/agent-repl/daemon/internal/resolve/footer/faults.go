@@ -1,0 +1,106 @@
+package footer
+
+import (
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+)
+
+// THE FOOTER'S FAULT CELL. The owner's ruling of 2026-09-13 is that every
+// daemon fault kind reaches the footer. The health package decides WHICH cell
+// each kind claims and hands the verdict here; this file is the accumulation
+// and the precedence, and nothing in it derives a mapping of its own.
+
+// OpenFault installs one standing fault. A daemon-scoped fault (an empty
+// workspace) stands on every workspace's strip.
+func (r *resolver) OpenFault(ws ids.WorkspaceID, fault Fault) {
+	ctx := dlog.Context{
+		"fault": fault.ID, "kind": fault.Kind,
+		"status": fault.Status, "substatus": fault.SubStatus,
+	}
+	if ws == "" {
+		r.mutateAll("daemon.footer.open_fault",
+			"the footer took a daemon-scoped fault onto every strip", ctx,
+			func(*wsState) {}, func() { r.daemonFaults = appendFault(r.daemonFaults, fault) })
+		return
+	}
+	r.mutate(ws, "daemon.footer.open_fault", "the footer took a standing fault", ctx,
+		func(s *wsState) { s.faults = appendFault(s.faults, fault) })
+}
+
+// CloseFault retracts a standing fault by its record id.
+func (r *resolver) CloseFault(ws ids.WorkspaceID, id string) {
+	ctx := dlog.Context{"fault": id}
+	if ws == "" {
+		r.mutateAll("daemon.footer.close_fault",
+			"the footer retracted a daemon-scoped fault from every strip", ctx,
+			func(*wsState) {}, func() { r.daemonFaults = removeFault(r.daemonFaults, id) })
+		return
+	}
+	r.mutate(ws, "daemon.footer.close_fault", "the footer retracted a standing fault", ctx,
+		func(s *wsState) { s.faults = removeFault(s.faults, id) })
+}
+
+// appendFault adds a fault, replacing an entry with the same id so a re-opened
+// record refreshes its line rather than standing twice.
+func appendFault(faults []Fault, fault Fault) []Fault {
+	for i := range faults {
+		if faults[i].ID == fault.ID {
+			faults[i] = fault
+			return faults
+		}
+	}
+	return append(faults, fault)
+}
+
+// removeFault drops the fault with this id, keeping the order of the rest.
+func removeFault(faults []Fault, id string) []Fault {
+	for i := range faults {
+		if faults[i].ID == id {
+			return append(faults[:i:i], faults[i+1:]...)
+		}
+	}
+	return faults
+}
+
+// faultRank orders the standing faults by how strong a claim they make on the
+// strip. A workspace with several open faults draws ONE line, and it is the
+// one that says the most about why the session cannot be used.
+//
+// The order is the partition's own: a session that never came up outranks one
+// that died, which outranks a severed link, which outranks a daemon that
+// cannot serve it, which outranks a non-escalating fault the session is
+// serving straight through.
+func faultRank(f Fault) int {
+	switch {
+	case f.Status == "disconnected" && f.SubStatus == "start_failed":
+		return 5
+	case f.Status == "disconnected" && f.SubStatus == "dead":
+		return 4
+	case f.Status == "disconnected":
+		return 3
+	case f.Status == "blocked":
+		return 2
+	default:
+		return 1
+	}
+}
+
+// standingFault is the ONE fault the strip draws for this workspace: the
+// strongest of its own and the daemon-scoped ones, and among equals the one
+// that was opened last, because the newest evidence is the live one. Nil when
+// nothing stands.
+func (r *resolver) standingFault(s *wsState) *Fault {
+	var best *Fault
+	consider := func(faults []Fault) {
+		for i := range faults {
+			f := &faults[i]
+			if best == nil || faultRank(*f) > faultRank(*best) ||
+				(faultRank(*f) == faultRank(*best) && f.At.After(best.At)) {
+				best = f
+			}
+		}
+	}
+	consider(s.faults)
+	consider(r.daemonFaults)
+	return best
+}

@@ -366,6 +366,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the footer resolver: %w", err)
 	}
+	// EVERY FAULT REACHES THE FOOTER (the owner's ruling of 2026-09-13). The
+	// footer learns about faults from the ONE place faults are written —
+	// the state client every raise site shares — rather than from plumbing
+	// beside each raise, which is how three fault kinds came to have a footer
+	// path and sixteen did not. Every collaborator built below takes the
+	// decorated client, so a fault opened anywhere lands on the strip.
+	p.DB = health.ObserveFaults(p.DB, footerFaults{footerResolver}, p.Surfaces)
+
 	topbarResolver, err := topbar.New(colors, p.Surfaces)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the topbar resolver: %w", err)
@@ -1195,4 +1203,27 @@ func resolveAdoptBound(value string) (time.Duration, error) {
 		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envBootAdoptBound, value)
 	}
 	return bound, nil
+}
+
+// footerFaults is the health package's fault sink, drawn on the footer. It
+// translates the health verdict into the resolver's own vocabulary and adds
+// nothing: the partition is health's, the drawing is the footer's.
+type footerFaults struct{ footer footer.Resolver }
+
+// FaultOpened puts a standing fault on the workspace's strip, or on every
+// strip when the fault is daemon-scoped.
+func (f footerFaults) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
+	f.footer.OpenFault(ws, footer.Fault{
+		ID:        string(line.ID),
+		Kind:      line.Kind,
+		Status:    string(line.Cell.Status),
+		SubStatus: line.Cell.SubStatus,
+		Detail:    line.Detail,
+		At:        line.At,
+	})
+}
+
+// FaultClosed retracts it again.
+func (f footerFaults) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
+	f.footer.CloseFault(ws, string(id))
 }
