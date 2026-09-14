@@ -15,6 +15,15 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Copyable text (2026-09-14)
+
+Owner ruling, quoted: "ensure that everything in the webapp (all text) can be
+copied to clipboard; I need to be able to do this to easily relay errors."
+
+| call | what was decided |
+|---|---|
+| what `user-select: none` is still allowed on | Only pure controls whose glyph is a state and not information: the sidebar row chevron, the two fold triangles, and the thinking fold's `::marker`. Every one is named in `webapp/test/styles.test.ts`'s allowlist with its reason, and the test fails on any rule added outside it. The workspaces rail's blanket rule (which swallowed workspace names, repo headers, task lines and the rail's error text) and `.thinking summary`'s rule are gone; the summary now carries `user-select: text` and keeps its click-to-toggle. `#task-summary` gave up `pointer-events: none` — a pointer passed straight through the topbar's objective sentence, so it could not be dragged over at all; the box shrink-wraps its own text inside the middle 44% band, so it steals no clicks beyond its own glyphs. No keydown handler in the webapp ever looked at the C key, so nothing had to be exempted; `src/copy.ts` adds a document-level `copy` fallback that writes the selection's own text via `event.clipboardData` in case the xwidget's native copy is unreliable. No copy button and no new visible element. |
+
 ## The hibernate loop (2026-09-14)
 
 The timeline, read off the owner's live workspace `chess960-review-failures-enm`
