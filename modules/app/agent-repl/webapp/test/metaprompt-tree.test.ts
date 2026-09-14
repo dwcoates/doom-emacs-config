@@ -260,6 +260,40 @@ describe("renderTreeHtml", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]).toContain("could not be wrapped");
   });
+
+  it("renders an interior fenced block as an opaque code block, not tree lines", () => {
+    // Arrange — a code fence nested beneath 1.2, with a branch after it.
+    const tree = [
+      "1 🔧 Made a file",
+      "├── 1.2 File contents",
+      "    ```python",
+      '    if __name__ == "__main__":',
+      "        main()",
+      "    ```",
+      "└── 1.3 Done",
+    ].join("\n");
+    // Act
+    const html = renderTreeHtml(tree, identity, 100);
+    // Assert — the code sits in a <pre><code>, not a tree line, and is NOT
+    // markdown-parsed, so `__name__` stays literal and is never bolded.
+    expect(html).toContain('<pre class="md-code">');
+    expect(html).toContain("__name__");
+    expect(html).not.toContain("<strong>");
+    // The fence delimiters themselves never leak as tree lines.
+    expect(html).not.toContain("```");
+    // Branches around the code still render as tree lines.
+    expect(html).toContain(`<span class="mp-prefix">└── 1.3 </span>`);
+  });
+
+  it("escapes an interior fenced block's markup rather than emitting it", () => {
+    // Arrange — a language-less fence whose body carries a raw tag.
+    const tree = ["├── 1.1 Snippet", "    ```", "    <img src=x>", "    ```", "└── 1.2 Done"].join("\n");
+    // Act
+    const html = renderTreeHtml(tree, identity, 100);
+    // Assert — the tag is escaped inside the code block, not rendered.
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img src=x&gt;");
+  });
 });
 
 describe("findTreeRegion", () => {
@@ -314,6 +348,42 @@ describe("findTreeRegion", () => {
   it("does not detect a tree that lives inside a fence", () => {
     // Act + Assert — the fence handler owns fenced trees.
     expect(findTreeRegion(`\`\`\`\n${BODY}\n\`\`\``)).toBeNull();
+  });
+
+  it("spans an interior fenced block and keeps every later branch in the region", () => {
+    // Arrange — a code fence attached beneath 1.2, with 1.3/1.4 after it: the
+    // whole thing is one tree region, the fence is interior, nothing spills.
+    const text = [
+      HEADER,
+      "1 🔧 Subagent created `hello_world.py` at the repo root",
+      "├── 1.2 File contents",
+      "    ```python",
+      "    def main() -> None:",
+      '        print("Hello, world!")',
+      "",
+      '    if __name__ == "__main__":',
+      "        main()",
+      "    ```",
+      "├── 1.3 Follows your Python conventions",
+      "└── 1.4 Verified by running `./hello_world.py`",
+    ].join("\n");
+    // Act
+    const region = findTreeRegion(text);
+    // Assert — nothing spilled into `after`, and the branches after the fence
+    // plus the fence itself all stayed inside the tree region.
+    expect(region?.after).toBe("");
+    expect(region?.before).toBe("");
+    expect(region?.tree).toContain("```python");
+    expect(region?.tree).toContain("1.3 Follows");
+    expect(region?.tree).toContain("1.4 Verified");
+  });
+
+  it("keeps a trailing fenced block with a language tag in `after`", () => {
+    // Arrange — a fence with no branch after it is trailing, not interior.
+    const region = findTreeRegion(`${HEADER}\n\n${BODY}\n\n\`\`\`python\nx = 1\n\`\`\``);
+    // Assert
+    expect(region?.tree).toBe(`${HEADER}\n\n${BODY}`);
+    expect(region?.after).toContain("```python");
   });
 
   it("returns null for ordinary prose", () => {
