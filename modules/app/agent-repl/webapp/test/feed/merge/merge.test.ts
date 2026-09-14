@@ -7,7 +7,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedMerge, drawFeedMergeGlyph } from "../../../src/feed/merge/merge.js";
-import { harness, mergeRow, rowContext } from "../harness.js";
+import { countingTicker, harness, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
 
@@ -187,5 +187,24 @@ describe("an arm this build cannot draw is a refusal, never a default", () => {
     expect((thrown as MalformedView).detail).toBe(
       "arm 'superseded' is not one this build can draw",
     );
+  });
+});
+
+describe("drawFeedMerge: a settled head's clocks", () => {
+  it("subscribes to nothing once the merge has landed", () => {
+    // Arrange.
+    const ticker = countingTicker();
+    const h = harness({ ticker });
+    // Act.
+    drawFeedMerge(mergeHead({ case: "success", endedAtMs: 12_000n, commit: "abc1234" }), rowContext(h.ctx, mergeRow("m1")));
+    // Assert.
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("subscribes to nothing once the merge has failed", () => {
+    const ticker = countingTicker();
+    const h = harness({ ticker });
+    drawFeedMerge(mergeHead({ case: "failed", endedAtMs: 12_000n, summary: "tests never passed" }), rowContext(h.ctx, mergeRow("m1")));
+    expect(ticker.live()).toBe(0);
   });
 });

@@ -13,7 +13,7 @@ import {
   drawFeedTurnEnded,
   drawFeedTurnEndedErrored,
 } from "../../../src/feed/rows/turn-ended.js";
-import { feedId, harness, rowContext, userPromptRow } from "../harness.js";
+import { countingTicker, feedId, harness, rowContext, userPromptRow } from "../harness.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 beforeEach(() => {
@@ -32,8 +32,8 @@ function ended(outcome: EndedInit["outcome"], endedAtMs = 1_000_000n): FeedTurnE
 }
 
 /** A context whose feed holds one drawable row, for the answer lookup. */
-function contextWithRow(element: HTMLElement | null) {
-  const { ctx } = harness();
+function contextWithRow(element: HTMLElement | null, ticker?: ReturnType<typeof countingTicker>) {
+  const { ctx } = harness({ ticker });
   return rowContext(ctx, userPromptRow("p1", "hi"), {
     findRowElement: () => element,
   });
@@ -398,6 +398,49 @@ describe("drawFeedTurnEnded: the retry countdown", () => {
     );
     vi.advanceTimersByTime(5_000);
     expect(el.querySelector(".turn-ended-retry")?.textContent).toBe("ready to retry");
+  });
+
+  it("stops the countdown the moment it expires, rather than rewriting its last line", () => {
+    // Arrange: a wait that runs out a second after the turn ended.
+    const ticker = countingTicker();
+    const el = drawFeedTurnEnded(
+      ended(
+        {
+          case: "errored",
+          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
+            error: { case: "rateLimited", value: { retryAfterMs: 1_000n } },
+          }),
+        },
+        1_000_000n,
+      ),
+      contextWithRow(null, ticker),
+    );
+    document.body.append(el);
+    // Act.
+    vi.advanceTimersByTime(5_000);
+    // Assert: an expired countdown holds no subscription.
+    expect(ticker.live()).toBe(0);
+    el.remove();
+  });
+
+  it("keeps counting while the wait is still running", () => {
+    const ticker = countingTicker();
+    const el = drawFeedTurnEnded(
+      ended(
+        {
+          case: "errored",
+          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
+            error: { case: "rateLimited", value: { retryAfterMs: 30_000n } },
+          }),
+        },
+        1_000_000n,
+      ),
+      contextWithRow(null, ticker),
+    );
+    document.body.append(el);
+    vi.advanceTimersByTime(5_000);
+    expect(ticker.live()).toBe(1);
+    el.remove();
   });
 
   it("words an UNSET wait as its own fact, distinct from a zero", () => {
