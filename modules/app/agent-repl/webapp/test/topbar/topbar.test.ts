@@ -381,6 +381,26 @@ describe("the strip's layout", () => {
     ]);
   });
 
+  // THE 2026-09-14 MEASUREMENT: `header#topbar` spanned x 423-2036 while the
+  // row inside it spanned only 423-1009. The header's one in-flow child is a
+  // flex item, and a flex item with no width rule shrink-wraps to its content,
+  // so the row's two free tracks were dividing the content width instead of
+  // the header's. These two declarations are what stop a future edit
+  // shrink-wrapping it again.
+  it("spans the header rather than shrink-wrapping to its content", () => {
+    // ARRANGE / ACT
+    const width = declaration(".topbar-row", "width");
+    // ASSERT
+    expect(width).toBe("100%");
+  });
+
+  it("lets the strip between the header and the row take the header's width", () => {
+    // ARRANGE / ACT
+    const grow = declaration(".topbar-strip", "flex");
+    // ASSERT
+    expect(grow).toBe("1 1 0");
+  });
+
   it("sets the chip gap tighter than the frame measure it was split from", () => {
     // ARRANGE / ACT
     const chip = token("--topbar-chip-gap");
