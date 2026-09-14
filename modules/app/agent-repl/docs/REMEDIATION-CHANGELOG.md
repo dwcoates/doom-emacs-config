@@ -3,6 +3,7 @@
 - webapp(feed): the response cost-corner hover hit area is ~4x larger (2x wide, 2x tall) via padding, canceled by an equal negative margin so the figure does not move (2026-09-14)
 - webapp sidebar: closed and killed rows (the daemon's `closed = true`, still emitted so Emacs reconciles its tabs) are dropped from both live groupings with their live descendants hoisted in place, so the `inactive` "?" row is gone and a kill from the dropdown visibly removes the workspace; the recently-merged band still draws its `closed = true` rows (owner ruling 2026-09-14: closed/killed/nuked never appear, and kill seemed to have no effect)
 - model: a session the user never modeled launches under opus (daemon freshModel defaults to "opus") and the shim omits any catalog row whose value is the synthetic marker or empty, so `<synthetic>` is never a selectable option and the default the dropdown shows is the real one (owner ruling 2026-09-14).
+- emacs: `C-c C-k` in the composer interrupts the running turn again via the Interrupt verb's `turn` target (`agent-repl-interrupt-turn`); `nothing_running` is a message not an error, and a live-agents challenge asks before also stopping them (owner request 2026-09-14).
 - webapp: the purple response and blue prompt bubbles cap 15% below their prior widths (82.5%→70.125%, 60%→51%), max-width only; other bubbles and both bubbles' margins unchanged (owner ruling 2026-09-14).
 # Remediation changelog
 
