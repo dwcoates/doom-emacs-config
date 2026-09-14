@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/classifier"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
@@ -186,6 +187,65 @@ func TestARefusedContextCutClearsTheUninterruptibleMark(t *testing.T) {
 	}
 	if got := h.q.state(theWorkspace).uninterruptible; got != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
 		t.Fatalf("uninterruptible = %s, want it cleared", got)
+	}
+}
+
+// A /clear IS REFLECTED IN THE FEED ON RECEIPT, before the shim is asked: the
+// receipt call fires so the divider and the cleared feed appear at once.
+func TestAClearReflectsInTheFeedBeforeTheShim(t *testing.T) {
+	// Arrange: capture the feed's clear-received turns AT the shim call.
+	h := newHarness(t)
+	var receivedAtShim []ids.TurnID
+	h.sender.startHook = func() { receivedAtShim = h.feed.clearReceivedTurns() }
+
+	// Act
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace,
+		Act{Kind: ActClear, Turn: "cut-1"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+
+	// Assert: the feed already knew about the clear when StartTurn was entered.
+	if len(receivedAtShim) != 1 || receivedAtShim[0] != "cut-1" {
+		t.Fatalf("clear-received at StartTurn = %v, want the clear reflected before the shim", receivedAtShim)
+	}
+}
+
+// A /compact REGISTERS AS A DIRECTIVE ON RECEIPT so it draws no prompt bubble.
+func TestACompactRegistersAsADirectiveOnReceipt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace,
+		Act{Kind: ActCompact, Turn: "cut-1"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+
+	// Assert
+	if got := h.feed.compactReceivedTurns(); len(got) != 1 || got[0] != "cut-1" {
+		t.Fatalf("compact-received = %v, want the compact registered", got)
+	}
+	if got := h.feed.clearReceivedTurns(); len(got) != 0 {
+		t.Fatalf("clear-received = %v, want a compact to draw no clear divider", got)
+	}
+}
+
+// A REFUSED CLEAR RETIRES ITS OPTIMISTIC DIVIDER, so the feed recovers rather
+// than keeping a phantom red bar for a clear that never ran.
+func TestARefusedClearRetiresItsDivider(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errors.New("the vendor query is dead")
+
+	// Act
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace,
+		Act{Kind: ActClear, Turn: "cut-1"}); err == nil {
+		t.Fatal("a refused context cut must be surfaced")
+	}
+
+	// Assert
+	if got := h.feed.cutAbortedTurns(); len(got) != 1 || got[0] != "cut-1" {
+		t.Fatalf("cut-aborted = %v, want the optimistic divider retired", got)
 	}
 }
 
