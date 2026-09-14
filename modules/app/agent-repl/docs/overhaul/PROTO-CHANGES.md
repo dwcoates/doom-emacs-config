@@ -971,3 +971,44 @@ shim reads it and states it, and the topbar resolver composes
 `TopbarTitle.text` from it in preference to the workspace name.
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+## Landing — every daemon fault kind reaches the footer (2026-09-13)
+
+USER-RULED (owner, evening batch of 2026-09-13,
+`docs/REALTEST-JUDGEMENT-CALLS.md`): every daemon fault kind reaches the
+footer; proto additions and modest changes are pre-approved for it; reuse an
+existing status where one fits; substatuses are buckets forming an onto
+relation over the activity values; status is most general, substatus less,
+activity least.
+
+### `frontend.v1` — footer.proto
+
+- `FooterStatusActivityFault { string kind = 1; string detail = 2; }` — the
+  ONE activity leaf every fault family but `shim_start_failed` shares.
+  `shim_start_failed` keeps `FooterStatusActivityStartFailed`, whose payload
+  genuinely differs (it also counts the dropped held prompts).
+- A `fault` arm in ALL TEN per-status activity oneofs, making it the FOURTH
+  status-independent activity kind beside `notification`, `rate_limited` and
+  `context_budget`. Tags: idle 5, thinking 8, waiting 11, interrupted 5,
+  merging 6, background 5, blocked 7, disconnected 6, closing 6, loading 6.
+- `FooterStatusBlocked.daemon_impaired` (tag 7,
+  `FooterSubStatusBlockedDaemonImpaired`) — the one NEW substatus, the bucket
+  for the daemon-scope faults that cost a session something it needs from the
+  daemon rather than from its shim.
+- THE FAULT PARTITION table, normative, in the `FooterStatus` header comment.
+  Four of the five buckets already existed (`start_failed`, `dead`, `severed`
+  under `disconnected`); only `daemon_impaired` is new. Four kinds
+  (`shim_reported`, `classifier_failed`, `bounce_unknown`,
+  `conversation_abandoned`) are NON-ESCALATING: they leave the status alone
+  and stand as the activity line, because the shim answered in every one of
+  them and `disconnected` closes the webapp's composer.
+
+### `agentrepl.v1` — endpoint_answer_cold_gate.proto
+
+- `AnswerColdGateError.reopen_failed` (tag 8, `AnswerColdGateReopenFailed
+  { string detail = 1; }`) — the failed re-open is a REFUSAL with an arm, not
+  the bare Connect internal the webapp words as "the daemon could not be
+  reached" about a daemon that answered
+  (`docs/FOOTER-TOPOLOGY-AUDIT.md` section 4, rows N1 4 and N1 5).
+
+Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
