@@ -293,7 +293,21 @@ message FooterStatusThinkingActivity {
     // reason — it is the condition the user has to be told about. See THE
     // FAULT PARTITION above for which fault kind lands on which cell.
     FooterStatusActivityFault fault = 8;
+    // A COMPACTION'S OWN PROGRESS, phase by phase. Both compactions speak
+    // through it — the vendor's auto-compaction and the cold gate's
+    // `compact and resume` remediation — so the two read the same under the
+    // same `thinking · compacting` step (owner ruling, 2026-09-14). It
+    // outranks nothing: it is simply the line a compaction has and the
+    // other activities are absent during one.
+    FooterStatusActivityCompaction compaction = 9;
   }
+}
+// The compaction's progress line, composed by the daemon out of the phase
+// the producer last stated ("summarizing the conversation…", "compacted and
+// resumed (101.6k → 12.4k)"). Drawn verbatim; a client words nothing.
+message FooterStatusActivityCompaction {
+  // The composed line, drawn verbatim.
+  string text = 1;
 }
 // The prompt is being delivered.
 message FooterSubStatusThinkingSubmitting {}

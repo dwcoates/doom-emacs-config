@@ -890,10 +890,17 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	}
 	log = stampSession(log, hostSessionID)
 
+	// THE PHASES ARE WATCHED BEFORE THE SHIM IS DIALED, and that ordering is
+	// the whole point: the compaction runs INSIDE StartSession, so a watch
+	// opened after the call would subscribe to a fan-out that had already sent
+	// every frame it was going to send. The stream is closed the moment
+	// StartSession answers, whichever way it answered.
+	stopPhases := f.relayCompactionPhases(ctx, log, ws, session.client, resume.OnPhase)
 	started, err := f.startSession(ctx, log, ws, session.client, source{
 		VendorSessionID: resume.VendorSessionID,
 		ColdRemediation: resume.Remediation,
 	}, previous)
+	stopPhases()
 	if err != nil {
 		return err
 	}
@@ -907,6 +914,78 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	}
 	configDir := accountRootFor(f.deps.Accounts, record.Dir, previous)
 	return f.sessionUp(ctx, log, ws, session.client, started, previous, configDir, hostSessionID)
+}
+
+// relayCompactionPhases opens a WatchSession on the parked shim for the
+// duration of one remediated re-open and hands every compaction phase it
+// carries to `onPhase`, recording each one.
+//
+// GROUNDED (owner's report, 2026-09-14). The gate's `compact` remediation
+// compacted a 101.6k-token conversation with the daemon writing exactly one
+// record — at the very end — and the footer saying nothing at all for the
+// whole of it. Every phase is now one INFO record and one footer line.
+//
+// IT IS ADDITIVE AND IT NEVER FAILS THE RE-OPEN. A watch that will not open,
+// or a stream that ends early, costs the re-open its narration and nothing
+// else: the session bring-up is the act, and refusing to bring a session up
+// because its commentary was unavailable would be a worse failure than the
+// silence this exists to end. The returned func closes the watch and JOINS the
+// reader, so nothing is still writing to the footer after the verb returns.
+func (f *Fleet) relayCompactionPhases(
+	ctx context.Context,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	client shimclient.Client,
+	onPhase func(*conversationv1.SessionCompactionProgress),
+) func() {
+	if onPhase == nil {
+		return func() {}
+	}
+	watchCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stream, err := client.WatchSession(watchCtx)
+	if err != nil {
+		cancel()
+		log.Warn(opColdGate, "the remediated re-open runs without its compaction phases: the watch would not open",
+			dlog.Context{"cause": err.Error()})
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			frame, err := stream.Recv()
+			if err != nil {
+				// The ordinary end is this relay's own cancel when the re-open
+				// answers, which is not news.
+				if watchCtx.Err() == nil {
+					log.Info(opColdGate, "the compaction phase stream ended before the re-open did",
+						dlog.Context{"cause": err.Error()})
+				}
+				return
+			}
+			progress := frame.GetUpdate().GetCompactionProgress()
+			if progress == nil {
+				continue
+			}
+			log.Info(opColdGate, "the cold gate's compaction reported a phase", dlog.Context{
+				"workspace":     string(ws),
+				"phase":         progress.GetPhase().String(),
+				"tokens_before": progress.GetTokensBefore(),
+				"tokens_after":  progress.GetTokensAfter(),
+				"error":         progress.GetError(),
+			})
+			onPhase(progress)
+		}
+	}()
+	return func() {
+		// BOTH, IN THIS ORDER. The cancel ends the request the stream was
+		// opened under; the Close ends the stream from this side, which is
+		// what unblocks a Recv that is already parked on a frame that will
+		// never come. Either alone has left the reader goroutine parked.
+		cancel()
+		stream.Close()
+		<-done
+	}
 }
 
 // bringUpPath is WHICH of the three ways a client came up, and it is a
@@ -1523,9 +1602,12 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 		options = append(options, &frontendv1.FeedColdGateModelOption{Model: m})
 	}
 
+	detail := coldGateDetail(cold)
+
 	f.mu.Lock()
 	_, stood := f.coldGates[ws]
-	f.coldGates[ws] = ServedColdGate{VendorSessionID: vendorSessionID, Models: models, Scopes: scopes}
+	f.coldGates[ws] = ServedColdGate{
+		VendorSessionID: vendorSessionID, Models: models, Scopes: scopes, Detail: detail}
 	f.lastCold[ws] = cold
 	f.mu.Unlock()
 	f.logTransition(ws, "cold_gate_standing", stood, true,
@@ -1547,14 +1629,34 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 			}},
 		}},
 	})
-	f.deps.Footer.SetColdGate(ws, footer.ColdGate{
-		Standing: true,
-		Detail:   fmt.Sprintf("the conversation is cold at %d context tokens", cold.GetContextTokens()),
-	})
+	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: true, Detail: detail})
 	f.deps.Topbar.SetColdGate(ws, topbar.ColdGate{
 		Standing:      true,
 		ContextTokens: int64(cold.GetContextTokens()),
 	})
+}
+
+// coldGateDetail is the ONE sentence a standing gate is accounted for by. The
+// footer's cold-gate line, the served gate the verbs read, and the `cold_gate`
+// arm a prompt to a parked workspace is refused with all take it from here:
+// three surfaces wording one gate three ways is how a user comes to think they
+// are looking at three problems.
+func coldGateDetail(cold *conversationv1.SessionCold) string {
+	return fmt.Sprintf("the conversation is cold at %d context tokens", cold.GetContextTokens())
+}
+
+// ColdGateDetail answers the standing gate's account for a workspace, false
+// when no gate stands. It is the promptqueue's ColdGateFunc: a prompt to a
+// parked session is refused by the gate's OWN name, carrying the gate's own
+// sentence.
+func (f *Fleet) ColdGateDetail(ws ids.WorkspaceID) (string, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	gate, ok := f.coldGates[ws]
+	if !ok {
+		return "", false
+	}
+	return gate.Detail, true
 }
 
 // recordFacts persists the session facts that outlive one shim process: the

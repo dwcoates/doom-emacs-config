@@ -41,6 +41,7 @@ import { isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { drawFooterExpanded, FOOTER_PANELS, type FooterPanel } from "./expanded.js";
+import { publishCompactionProgress } from "./progress.js";
 import { drawClientDisconnectedStrip, drawFooterStrip, footerStatusActivity } from "./strip.js";
 import { createStopControls } from "./stop.js";
 
@@ -119,6 +120,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       view = requireMessage(response.footer, "WatchFooterResponse.footer");
       draw();
       publishStatus();
+      publishProgress();
     },
   });
 
@@ -137,6 +139,8 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       log.info("disposing the footer", { operation: "footer.dispose", context: {} });
       unsubscribeFromVerdict();
       watch.cancel();
+      // The page's compaction line belongs to the stream that just stopped.
+      publishCompactionProgress(null);
       // Every clock this component started hangs off the host's subtree.
       stopTicking(host);
       host.replaceChildren();
@@ -243,6 +247,28 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     const status = requireMessage(strip.status, "FooterStrip.status");
     statusCase = requireCase(status.status, "FooterStatus.status").case;
     for (const fn of [...statusListeners]) fn(statusCase);
+  }
+
+  /**
+   * Republish the compaction line this push carried, for whoever is WAITING on
+   * the compaction rather than reading the strip.
+   *
+   * The cold gate's "compact and resume" latches its card inert for as long as
+   * the compaction runs, and the daemon's own phase line is already arriving
+   * here. Publishing it is what lets that card draw the daemon's sentence
+   * instead of composing one of its own or saying nothing at all. Any other
+   * activity arm — and an absent activity — publishes `null`: the subscriber
+   * then shows nothing.
+   *
+   * Called AFTER `draw()`, which has already walked the same view, so a
+   * malformed strip is reported by the drawing rather than here.
+   */
+  function publishProgress(): void {
+    if (view === null) return;
+    const strip = requireMessage(view.strip, "FooterView.strip");
+    const activity = footerStatusActivity(requireMessage(strip.status, "FooterStrip.status"));
+    const kind = activity?.kind;
+    publishCompactionProgress(kind?.case === "compaction" ? kind.value.text : null);
   }
 }
 
