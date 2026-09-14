@@ -15,6 +15,7 @@
  */
 import { bubbleWaveStyle } from "../../breathing.js";
 import { log } from "../../log.js";
+import { bubbleScroll } from "../bubble-scroll.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedUserPrompt,
@@ -53,10 +54,16 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   const result = requireCase(msg.result, `${PATH}.result`);
   switch (result.case) {
     case "success":
+      // The author line is the metadata strip; the body hangs in the shared
+      // scroll box beneath it, so the prompt's scrollbar starts under the
+      // attribution and lands on the bubble's right edge (owner ruling,
+      // 2026-09-14).
       bubble.append(
-        drawFeedUserPromptBody(
-          requireMessage(result.value.body, `${PATH}.success.body`),
-          `${PATH}.success.body`,
+        bubbleScroll(
+          drawFeedUserPromptBody(
+            requireMessage(result.value.body, `${PATH}.success.body`),
+            `${PATH}.success.body`,
+          ),
         ),
       );
       return bubble;

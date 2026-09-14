@@ -188,8 +188,15 @@
      panel further down). Stated once here so the nested section cannot drift
      to a cap of its own — "the same height a bubble stops at" is the
      requirement, and a second literal 25 is how that requirement quietly
-     stops being true. */
-  --feed-cap-lines: 25;
+     stops being true.
+
+     OWNER RULING, 2026-09-14 ("make the max response bubble length about 10%
+     longer"): the budget was 25 and is now 27.5 -- exactly ten percent more of
+     the SAME line box, so the cap grows without any bubble changing the leading
+     it counts in. The half line is deliberate: a budget that ends mid-line
+     leaves a sliver of the next one showing, which is itself the signal that
+     the box scrolls. */
+  --feed-cap-lines: 27.5;
   --async-border: #4fb8a8;
   /* The Merge status card (a merge-failure remediation turn): an amber wash,
      kin to --remediation, so it reads as "needs resolving" and stays distinct
@@ -370,8 +377,22 @@ body::after {
      flush with the centered response's, and follows automatically if this
      cap is retuned. Declared on the column (not just #feed) so the
      bottom-pinned #footer below the feed inherits the same cap, landing
-     the tail line's rails on the very columns the feed's bubbles hug. */
-  --agent-bubble-cap: 75%;
+     the tail line's rails on the very columns the feed's bubbles hug.
+
+     OWNER RULING, 2026-09-14 ("make the max width of response bubbles about
+     10% wider"): the cap was 75% and is now 82.5% -- exactly ten percent more
+     column. Every surface that derives from it (the centered cards, the
+     prompt's right rail, the footer dock, the turn-ended line) follows without
+     a second edit, which is the whole reason the number lives here. */
+  --agent-bubble-cap: 82.5%;
+  /* THE SCROLLBAR RIDES THE INNER EDGE (same ruling): "ensure the scrollbar of
+     the response bubble (and all bubbles, in fact) abuts (or close to) the
+     right hand side of the bubble". A bubble's own right padding used to sit
+     BETWEEN its scroll box and its border, parking the bar a visible 0.9rem
+     inside the card. Every bubble kind now drops its right inset to this
+     token and hands the inset it gave up to the CONTENT inside the scroll box,
+     so the bar lands on the edge while the text keeps the margin it had. */
+  --bubble-scroll-gap: 2px;
 }
 
 /* ---- The workspaces rail (sidebar.ts) ----------------------------------
@@ -1224,11 +1245,21 @@ pre {
    then thinned again to 0.3px, so the state border reads as a hairline
    accent on the answer rather than a heavy frame. */
 /* Every bubble — the user's prompt and the agent's response alike — is a
-   body column plus the turn's time stamped into the top-right corner. The
-   stamp holds its own column rather than overlaying the body, so a
-   full-width response line never runs beneath it. */
+   METADATA STRIP over a SCROLL BOX, stacked, in that order (owner ruling,
+   2026-09-14: the scrollbar "starts UNDER the token count / metadata in the
+   top right corner of the bubble"). The strip spans the bubble's full width
+   and sits OUTSIDE the scroll box, so the corner stamp never scrolls away from
+   the text it labels and the bar it sits above starts beneath it rather than
+   beside it.
+   IT USED TO BE A ROW — the stamp held its own flex column next to the body —
+   which put the scrollbar's whole run alongside the stamp instead of under it.
+   The right inset is `--bubble-scroll-gap` rather than the 0.9rem the left
+   still carries: that 0.9rem was the gap between the scroll box and the
+   bubble's border, and the scroll box now reaches the edge. The inset the
+   right gave up is handed to `.bubble-body`, the CONTENT wrapper inside the
+   scroll box, so the prose keeps exactly the margin it had. */
 .bubble {
-  padding: 0.6rem 0.9rem;
+  padding: 0.6rem var(--bubble-scroll-gap) 0.6rem 0.9rem;
   border-radius: 8px;
   border: 0.3px solid transparent;
   /* A quiet hint of depth: a soft drop shadow lifts the bubble off the feed
@@ -1240,8 +1271,9 @@ pre {
      thinking wave across the fill underneath it. */
   box-shadow: var(--bubble-shadow);
   display: flex;
-  align-items: flex-start;
-  gap: 0.9rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
 }
 /* A HIDDEN BUBBLE MUST ACTUALLY BE HIDDEN. The rule above sets `display`, and a
    class selector outranks the user-agent stylesheet's own `[hidden]` rule — so
@@ -1253,7 +1285,29 @@ pre {
    #login-overlay, #composer, the sidebar panes and the create forms); this
    one was missed. */
 .bubble[hidden] { display: none; }
-.bubble-body { flex: 1; min-width: 0; }
+/* THE SCROLL BOX. It is the bubble's own child, its right edge IS the bubble's
+   inner edge, and it carries no horizontal padding of its own — the two facts
+   that put the scrollbar on the bubble's right-hand side. The N-line cap rides
+   it (see the shared cap rule below), which is what gives it something to
+   scroll. */
+.bubble > .bubble-scroll {
+  padding-left: 0;
+  padding-right: 0;
+  min-width: 0;
+}
+/* THE CONTENT WRAPPER, inside the scroll box, holding the horizontal inset the
+   bubble's right padding gave up. A scrollbar is laid out between the scroll
+   box's border and its padding, so this padding is the distance from the TEXT
+   to the bar, never from the bar to the bubble. */
+.bubble-body { flex: 1; min-width: 0; padding-right: calc(0.9rem - var(--bubble-scroll-gap)); }
+/* THE METADATA STRIP: full width, above the scroll box, outside it. It keeps
+   the right inset the bubble's padding used to give it, so the stamp sits
+   where it always sat while the bar below it runs to the edge. */
+.bubble > .turn-meta,
+.bubble > .prompt-author,
+.bubble > .response-notice-heading {
+  padding-right: calc(0.9rem - var(--bubble-scroll-gap));
+}
 .bubble.user {
   background: var(--user);
   width: fit-content;
@@ -1270,12 +1324,10 @@ pre {
      drifting apart. */
   --prompt-line-h: 1.4;
   line-height: var(--prompt-line-h);
-  /* Body and hover stamp share ONE grid cell instead of the assistant's
-     side-by-side flex columns, so the bubble's width is the WIDER of the
-     two, never their sum: a roomy prompt's stamp overlays its own corner
-     and never widens the bubble, while a bubble too small to hold the stamp
-     (a bare `hello`) grows only just enough to contain the stamp. */
-  display: grid;
+  /* RETIRED: the one-grid-cell overlay of body and hover stamp. Every bubble
+     kind now stacks its metadata strip over its scroll box (owner ruling,
+     2026-09-14), and an overlaid stamp is by construction BESIDE the bar
+     rather than above it. The prompt keeps `.bubble`'s own flex column. */
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
@@ -1365,7 +1417,10 @@ pre {
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  margin: -0.3rem -0.5rem 0 0;
+  /* Only the TOP margin is negative now. The right one pulled the stamp into
+     the bubble's 0.9rem right padding; that padding is gone (see `.bubble`),
+     so pulling right would hang the stamp off the card. */
+  margin: -0.3rem 0 0 0;
   min-width: 1.75rem;
   min-height: 1.1rem;
 }
@@ -1408,22 +1463,14 @@ pre {
   color: color-mix(in srgb, var(--muted), var(--fg) 25%);
 }
 .turn-meta:hover .turn-ts { display: block; }
-/* The prompt bubble alone stacks its body and hover stamp in one grid cell
-   (see `.bubble.user`), so these scope the stamp into that shared cell so
-   the bubble's width is the WIDER of body and stamp rather than their sum:
-   pinned to the top-right corner, drawn on the bubble's own fill so it masks
-   any prompt text it overlaps, with the assistant corner's negative margins
-   dropped since grid alignment places it now. */
-.bubble.user > .bubble-body,
-.bubble.user > .turn-meta {
-  grid-area: 1 / 1;
-}
-.bubble.user > .bubble-body { min-width: 0; }
-.bubble.user > .turn-meta {
-  justify-self: end;
-  align-self: start;
-  margin: 0;
-}
+/* RETIRED with the prompt bubble's grid (see `.bubble.user`): the two
+   `grid-area: 1 / 1` placements that overlaid the stamp on the body. The
+   prompt's stamp is a metadata strip above the scroll box like every other
+   bubble's, placed by the shared rules on `.bubble`.
+   The hover stamp keeps its own zero margin, since the shared `.turn-meta`
+   negative top margin would lift it off a strip that is already the first
+   thing in the bubble. */
+.bubble.user > .turn-meta { margin: 0; }
 .bubble.user .turn-ts {
   background: var(--user);
   padding: 0 0.2rem;
@@ -1872,7 +1919,7 @@ pre {
    leading its own text actually renders at, so 25 lines means 25 of ITS
    lines. */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content,
-.bubble > .bubble-body,
+.bubble > .bubble-scroll,
 .fold-fixed > .agent-panel {
   overflow-y: auto;
   max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
@@ -1886,14 +1933,15 @@ pre {
    a prompt and an answer alike stop at 25 of their OWN text lines and scroll
    past that — one budget stated once, for both.
 
-   The cap rides the BODY rather than the bubble, so the corner stamp is never
-   scrolled away from the text it labels. The line box each bubble counts in is
+   The cap rides the SCROLL BOX rather than the bubble, so the corner stamp —
+   which is the bubble's own child, above the box — is never scrolled away from
+   the text it labels. The line box each bubble counts in is
    read from that bubble's own leading token rather than restated here, so a
    change to `.md`'s or the prompt's leading moves the cap with it instead of
    silently mis-measuring it. */
-.bubble > .bubble-body { --cap-lines: var(--feed-cap-lines); }
-.bubble.assistant > .bubble-body { --cap-line-h: calc(var(--md-line-h) * 1em); }
-.bubble.user > .bubble-body { --cap-line-h: calc(var(--prompt-line-h) * 1em); }
+.bubble > .bubble-scroll { --cap-lines: var(--feed-cap-lines); }
+.bubble.assistant > .bubble-scroll { --cap-line-h: calc(var(--md-line-h) * 1em); }
+.bubble.user > .bubble-scroll { --cap-line-h: calc(var(--prompt-line-h) * 1em); }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
 .bash-input { --cap-lines: 5; }
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
@@ -1902,6 +1950,31 @@ pre {
    caps like a Bash output, the extra absorbing the .tool-output divider. */
 .skill-input { --cap-lines: 5; }
 .skill-content { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
+/* THE SCROLLBAR RIDES THE CARD'S INNER EDGE TOO (owner ruling, 2026-09-14:
+   "and all bubbles, in fact"). A tool card's scroll boxes sit inside its own
+   0.75rem horizontal padding, which parked every bar that far in from the
+   border. The card keeps that padding — it is what insets the head line, the
+   badges and every other non-scrolling child, and there are too many of those
+   to re-inset one by one — so the SCROLL BOXES step out of it instead: a
+   negative right margin of exactly the inset they are escaping, less the
+   shared gap, and the same figure handed back as padding so the TEXT does not
+   move. A scrollbar is laid out between a scroll box's border and its padding,
+   so this padding is the distance from the text to the bar, never from the bar
+   to the card.
+   The `.bubble` kinds do it the other way round (the bubble drops its own
+   right inset and a content wrapper carries it), because a bubble's children
+   are a metadata strip and one scroll box, which is few enough to re-inset. */
+.tool-card > .tool-input,
+.tool-card > .tool-output,
+.tool-card > .tool-read-output,
+.tool-card > .bash-input,
+.tool-card > .bash-output,
+.tool-card > .diff-output,
+.tool-card > .skill-input,
+.tool-card > .skill-content {
+  margin-right: calc(var(--bubble-scroll-gap) - 0.75rem);
+  padding-right: calc(0.75rem - var(--bubble-scroll-gap));
+}
 /* Click-to-expand: a click anywhere on a capped section lifts its cap and
    lays the section out at full length, and the next click restores the
    preview. The cursor names the click's next move. One selector entry per
@@ -6012,4 +6085,59 @@ body.draining #composer-input::placeholder {
 .footer-allowance-unread {
   color: var(--muted);
   font-style: italic;
+}
+
+/* ---- bubble scrollbars (src/styles.css) --------------------------------- */
+
+/* A SCROLLBAR THAT IS THERE WHENEVER THERE IS SOMETHING TO SCROLL (owner
+   addition to the 2026-09-14 bubble-geometry ruling). WebKit's default on this
+   platform is the OVERLAY bar: it fades in on a wheel event and fades out
+   again, so a capped bubble at rest looks exactly like an uncapped one and a
+   reader has no way to tell that the answer continues below the fold.
+   Styling `::-webkit-scrollbar` at all opts the element out of the overlay
+   behaviour and into a CLASSIC bar, which WebKit paints for as long as the box
+   overflows and lays out in its own gutter — so the content is never underneath
+   it either.
+   `overflow-y` STAYS `auto`, never `scroll`: `auto` is what makes the bar
+   ABSENT when the content fits, and `scroll` would park a dead grey channel
+   down the side of every short bubble in the feed.
+   The colors are the two the sheet already has — the border grey for the
+   channel, the muted grey for the thumb — so this adds a shape, not a hue. */
+.bubble > .bubble-scroll::-webkit-scrollbar,
+.tool-input::-webkit-scrollbar,
+.tool-output::-webkit-scrollbar,
+.tool-read-output::-webkit-scrollbar,
+.bash-input::-webkit-scrollbar,
+.bash-output::-webkit-scrollbar,
+.diff-output::-webkit-scrollbar,
+.skill-input::-webkit-scrollbar,
+.skill-content::-webkit-scrollbar,
+.fold-fixed > .agent-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.bubble > .bubble-scroll::-webkit-scrollbar-track,
+.tool-input::-webkit-scrollbar-track,
+.tool-output::-webkit-scrollbar-track,
+.tool-read-output::-webkit-scrollbar-track,
+.bash-input::-webkit-scrollbar-track,
+.bash-output::-webkit-scrollbar-track,
+.diff-output::-webkit-scrollbar-track,
+.skill-input::-webkit-scrollbar-track,
+.skill-content::-webkit-scrollbar-track,
+.fold-fixed > .agent-panel::-webkit-scrollbar-track {
+  background: var(--border);
+  border-radius: 4px;
+}
+.bubble > .bubble-scroll::-webkit-scrollbar-thumb,
+.tool-input::-webkit-scrollbar-thumb,
+.tool-output::-webkit-scrollbar-thumb,
+.tool-read-output::-webkit-scrollbar-thumb,
+.bash-input::-webkit-scrollbar-thumb,
+.bash-output::-webkit-scrollbar-thumb,
+.diff-output::-webkit-scrollbar-thumb,
+.skill-input::-webkit-scrollbar-thumb,
+.skill-content::-webkit-scrollbar-thumb,
+.fold-fixed > .agent-panel::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 4px;
 }

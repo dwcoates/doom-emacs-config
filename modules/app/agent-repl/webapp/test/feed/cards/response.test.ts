@@ -267,9 +267,12 @@ describe("the notice register", () => {
       }),
       rowContext(),
     );
+    // The body is no longer the bubble's own child: it hangs in the shared
+    // scroll box (owner ruling, 2026-09-14), so the prose's position among the
+    // bubble's children IS that box's position.
     const children = [...el.children];
     const heading = children.findIndex((c) => c.classList.contains("response-notice-heading"));
-    const body = children.findIndex((c) => c.classList.contains("bubble-body"));
+    const body = children.findIndex((c) => c.classList.contains("bubble-scroll"));
     expect(heading).toBeLessThan(body);
   });
 
