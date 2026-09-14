@@ -15,6 +15,7 @@ import {
   drawFeedSubagent,
 } from "../../../src/feed/rows/subagent.js";
 import { harness, rowContext, subagentRow, type Harness } from "../harness.js";
+import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -394,3 +395,14 @@ describe("drawFeedSubagent: the stop control", () => {
   });
 });
 
+describe("drawFeedSubagent: the record of the head", () => {
+  it("records the drawn head at info, a head being drawn exactly once", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawRow(subagentRow("b1"));
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-subagent");
+    expect(record.level.case).toBe("info");
+  });
+});
