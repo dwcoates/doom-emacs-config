@@ -39,29 +39,23 @@ ruling of 2026-09-13), `docs/REALTEST-PLAN.md` "Status", and
 - Store: schema 7, single serialized writer, read pool, ledger retention,
   no residue persisted, shape catalog (`make -C agent-shim/shim-store shapes`).
 
-## State after the third sweep with 9 (rt-run36, 2026-09-13 23:21)
+## State after the fourth sweep with 9 (rt-run37, 2026-09-13 23:44)
 
-- Landed and deployed: rt9 live sources, send/feed records at INFO, footer
-  overage cell, store reader levels across a store restart (master 8e7185918).
-- rt-run36: 1-8 green; gap scan records all predate their fixes' deploy;
-  realtest 9 now measures send→submit 100ms and submit→concluded 1.2s, and
-  fails only on the answer text: the fake wrote its transcript at turn end
-  and the sidecar found it one 30s rescan later (new files are found by
-  rescan only), after the run had closed the workspace.
+- Landed and deployed: adoption of a starting shim (wsm layout 8), sidecar
+  change probe, rt9 answer wait (master 1e4bdcf60).
+- rt-run37: 1-8 green, GAP SCAN CLEAN; realtest 9 measured every phase but
+  the answer text: the deploy restarted the sidecar and its boot walk
+  (rewind of ~2900 transcripts, 2m24s) starved the poll tick, so the change
+  probe never ran and the rows reached the store ~63s after the turn.
 
-## Agents in flight (branches; worktrees under the scratchpad)
+## Agents in flight
 
-1. `fix/adopt-starting-shim` (wt-adopt): a spawned shim's pid is durable at
-   spawn; a successor with lock free + socket absent waits (bounded) for a
-   live recorded pid's socket instead of spawning a second shim. Repro:
-   e2e `TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce -count=6`.
-2. `fix/sidecar-prompt-discovery` (wt-discover): directory-mtime probe on
-   every poll tick discovers new transcripts within 1s; rescan stays the
-   backstop; no fds held.
-3. `fix/rt9-await-answer` (wt-rt9ans): the harness waits for the answer's
-   text block after the final-answer mark; new measured phase.
+1. `fix/sidecar-boot-walk` (wt-bootwalk): rewind only files that can carry
+   a turn in flight; time-sliced poll pass so discovery runs every tick.
 
-Then: merge all three, deploy, rerun the full sweep to twice-green.
+rt-run38 is running in steady state (no deploy before it) to test the
+answer path as it stands. Then: merge boot-walk, deploy, rerun to twice-green.
+The owner went to bed at ~23:50; realtest 9 is to be finished unattended.
 
 ## The loop for realtest 9
 
