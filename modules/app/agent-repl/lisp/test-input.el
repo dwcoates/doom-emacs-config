@@ -1226,6 +1226,81 @@ workspace's dwell clear another composer's badge."
           (should (eq cancelled 'composer-flash)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
+;;;; ---- The send edge is durable ----
+
+;; A user's send is a once-per-action edge, so its record has to survive the
+;; deployment's `info' threshold.  On the debug rung the send that produced a
+;; turn could not be read back at all afterwards.
+
+(defvar agent-repl-test-input--info nil
+  "Messages the stubbed `agent-repl--info' rung received, newest first.")
+
+(defvar agent-repl-test-input--debug nil
+  "Messages the stubbed `agent-repl--log' (debug) rung received, newest first.")
+
+(defmacro agent-repl-test-input--capturing-rungs (&rest body)
+  "Run BODY with the `info' and debug logging rungs captured separately."
+  (declare (indent 0))
+  `(let ((agent-repl-test-input--info nil)
+         (agent-repl-test-input--debug nil))
+     (cl-letf (((symbol-function 'agent-repl--info)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-input--info)))
+               ((symbol-function 'agent-repl--log)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-input--debug))))
+       ,@body)))
+
+(defun agent-repl-test-input--rung-has-p (messages prefix)
+  "Return non-nil when some message in MESSAGES starts with PREFIX."
+  (and (cl-find-if (lambda (m) (string-prefix-p prefix m)) messages) t))
+
+(ert-deftest agent-repl-input-send-records-the-edge-at-info ()
+  "The send a person made is recorded on the `info' rung."
+  ;; Arrange.
+  (agent-repl-test-input--with
+    (agent-repl-test-input--type "hello")
+    ;; Act.
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      ;; Assert.
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--info "elisp.input.send ws=ws-one")))))
+
+(ert-deftest agent-repl-input-send-is-never-recorded-on-the-debug-rung ()
+  "The send record must not sit below the durable threshold."
+  ;; Arrange.
+  (agent-repl-test-input--with
+    (agent-repl-test-input--type "hello")
+    ;; Act.
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      ;; Assert.
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--debug "elisp.input.send ws=")))))
+
+(ert-deftest agent-repl-input-send-empty-records-the-edge-at-info ()
+  "A send with nothing to say is still an action the person took."
+  ;; Arrange.
+  (agent-repl-test-input--with
+    ;; Act.
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      ;; Assert.
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--info "elisp.input.send-empty ws=ws-one")))))
+
+(ert-deftest agent-repl-input-send-empty-is-never-recorded-on-the-debug-rung ()
+  "The empty-send record must not sit below the durable threshold."
+  ;; Arrange.
+  (agent-repl-test-input--with
+    ;; Act.
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      ;; Assert.
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--debug "elisp.input.send-empty ws=")))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here
