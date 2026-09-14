@@ -163,8 +163,10 @@ interface EngineDeps {
    * HELD workspace lock still means a live shim owns the conversation.
    */
   readonly acquireWorkspaceLock?: (cwd: string) => LockRelease | Promise<LockRelease>;
-  /** How long StartSession waits for the vendor's own `system:init`. */
+  /** The LAST-RESORT bound on a child that answers nothing at all. */
   readonly initTimeoutMs?: number;
+  /** How long StartSession waits for its one control round-trip to answer. */
+  readonly liveSignalTimeoutMs?: number;
   /**
    * The keep-alive cadence, when something overrode the module constant.
    *
@@ -242,29 +244,53 @@ interface OpenBashWatcher {
 const WATCHER_CONCLUSION_BUDGET_MS = 1_000;
 
 /**
- * How long StartSession waits for the vendor's own `system:init`.
+ * The LAST-RESORT bound on a child that answers NOTHING AT ALL.
  *
- * STARTSESSION ALWAYS ANSWERS. The verb is unsettled until `init` arrives, and
- * five things settle it: `init` itself; a hook that BLOCKS before it (which has
- * blocked the session's own opening); a `result` carrying `is_error` (the
- * vendor refusing the opening in its own words); the query ENDING before it (a
- * child that exited, a stream that ended, an iterator that threw); or this
- * bound.
+ * STARTSESSION ALWAYS ANSWERS, and six things settle it: the PROVEN-LIVE
+ * SIGNAL (one control round-trip, {@link LIVE_SIGNAL_TIMEOUT_MS}); `init`, when
+ * a vendor still announces one before that; a hook that BLOCKS before either
+ * (which has blocked the session's own opening); a `result` carrying `is_error`
+ * (the vendor refusing the opening in its own words); the query ENDING before
+ * either (a child that exited, a stream that ended, an iterator that threw); or
+ * this bound.
  *
- * SO THIS BOUND IS FOR SILENCE, AND ONLY SILENCE. Every conclusive answer is
- * relayed the instant it lands, because waiting a bound out on an answer
- * already in hand is what let the DAEMON's 60s bound fire first and name the
- * shim instead of the vendor. Two grounded cases: a blocking
- * `SessionStart:resume` hook, and (2026-09-13, workspace 2b81f45a724642ef) a
- * resume whose vendor emitted its `SessionStart:resume` hook, succeeded it in
- * 12ms, and then said nothing for the whole 45s — twice.
+ * SO THIS BOUND IS FOR SILENCE, AND ONLY SILENCE — and after the live signal
+ * landed it is silence of a kind the round-trip's own 3s bound already catches,
+ * which leaves this for the one case that has no bound of its own: a
+ * `createQuery` that returned a child which then answers neither the control
+ * request nor anything else, so nothing ever resolves or rejects. Every
+ * conclusive answer is relayed the instant it lands, because waiting a bound
+ * out on an answer already in hand is what let the DAEMON's 60s bound fire
+ * first and name the shim instead of the vendor.
  *
  * Sized under that daemon bound on purpose: the shim knows WHY the start failed
- * and the daemon does not, so the shim must be the one that answers first. The
- * slowest thing before `init` is the vendor's MCP fan-out, which this leaves
- * ample room for.
+ * and the daemon does not, so the shim must be the one that answers first.
  */
 const INIT_TIMEOUT_MS = 45_000;
+
+/**
+ * How long one control round-trip may take before the start is refused.
+ *
+ * THE START SETTLES ON A PROVEN-LIVE SIGNAL, NOT ON `init`. Grounded 2026-09-13
+ * against claude 2.1.220 AND 2.1.270, driven exactly as this shim drives them
+ * (`--input-format stream-json`): the child emits NO `system:init` until a
+ * first user turn reaches it, while answering control requests
+ * (`supportedModels`, `supportedCommands`, `setPermissionMode`) in ~300ms
+ * throughout. A start that waited for `init` before it would accept a prompt
+ * therefore deadlocked on every real session and failed at the 45s bound.
+ *
+ * ONE ROUND-TRIP IS THE WHOLE PROOF: a child that answers a control request is
+ * spawned, connected, and taking work — which is exactly what "a prompt can be
+ * accepted" means, and what `endpoint_start_session.proto` says this verb
+ * resolves on. `supportedModels()` is the one chosen because the opening has to
+ * make it anyway: its answer IS `SessionStarted.model_catalog`, so the proof
+ * costs no extra call.
+ *
+ * TEN TIMES THE OBSERVED HEALTHY MAX. ~300ms measured, 3s bounded: small enough
+ * that a wedged child is reported in seconds rather than at the daemon's 60s,
+ * wide enough that nothing healthy can reach it.
+ */
+const LIVE_SIGNAL_TIMEOUT_MS = 3_000;
 
 /**
  * How many pre-`init` vendor messages a failed start names in its own record.
@@ -435,11 +461,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     | undefined;
   let accountUsageHandle: unknown;
   let cadence: KeepaliveCadence | undefined;
-  let initResolve: ((message: SdkMessage) => void) | undefined;
-  /** Settles the same pending start as {@link initResolve}, with a named reason. */
-  let initReject: ((reason: Error) => void) | undefined;
+  let startResolve: (() => void) | undefined;
+  /** Settles the same pending start as {@link startResolve}, with a named reason. */
+  let startReject: ((reason: Error) => void) | undefined;
   /** The pending start's own bound, cleared by whatever settles the start first. */
-  let initTimer: ReturnType<typeof setTimeout> | undefined;
+  let startTimer: ReturnType<typeof setTimeout> | undefined;
   /**
    * What the vendor DID emit before the pending start settled, kind by kind.
    *
@@ -730,6 +756,25 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (typeof state !== "string" || state === "") return;
     LOGGER.logVerbose({ fast_mode_state: state }, "the vendor stated its fast-mode state");
     pushes.push(fastModeUpdate(state, typeof reason === "string" ? reason : undefined));
+  }
+
+  /**
+   * THE PERMISSION MODE THE VENDOR SAYS IS IN FORCE.
+   *
+   * `init` states it, and since the start no longer waits for `init` that
+   * statement lands with the FIRST TURN — after the opening already announced
+   * the mode the start asked for. So it is adopted and pushed exactly like a
+   * `SetSessionPermissionMode` would be when the two disagree, and does nothing
+   * at all when they agree, which is the ordinary case.
+   */
+  function notePermissionMode(reported: conversationv1.AgentPermissionMode): void {
+    if (reported.mode.case === permissionMode.mode.case) return;
+    LOGGER.debug(
+      { previous_permission_mode: permissionMode.mode.case ?? "", permission_mode: reported.mode.case ?? "" },
+      "the vendor reported a permission mode the shim did not ask for; adopting it",
+    );
+    permissionMode = reported;
+    pushPermissionMode();
   }
 
   function pushPermissionMode(): void {
@@ -1276,7 +1321,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** Remember a message that arrived while a start was still pending. */
   function notePreInitMessage(message: SdkMessage): void {
-    if (initReject === undefined) return;
+    if (startReject === undefined) return;
     if (preInitKinds.length >= PRE_INIT_KINDS_KEPT) {
       preInitKindsDropped += 1;
       return;
@@ -1312,13 +1357,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * grounded companion, both worth naming in the refusal because neither is
    * visible anywhere else:
    *
-   *   - THE VENDOR ANNOUNCES `system:init` ONLY ONCE A FIRST TURN REACHES IT.
-   *     Driven exactly as this shim drives it (`--input-format stream-json`),
-   *     claude 2.1.220 and 2.1.270 answer control requests within 300ms and
-   *     emit no `init` at all until an input message arrives; feeding one turn
-   *     produces `init` in ~600ms in the same directory. So a start that waits
-   *     for `init` before prompting waits forever, and the bound is what ends
-   *     it (grounded 2026-09-13, workspace 2b81f45a724642ef).
+   *   - THE CHILD ANSWERED NO CONTROL REQUEST EITHER. The start no longer
+   *     waits for `init` — it settles on one control round-trip, whose own
+   *     3s bound is what a wedged child normally trips. Reaching THIS bound
+   *     means even that round-trip neither answered nor failed, so the child
+   *     is not merely quiet on its stdout: it is not serving at all.
    *   - AN UNTRUSTED WORKSPACE IS A DEGRADED ONE. It does not hang, but its
    *     permission allowlists are dropped, so a reader here should confirm the
    *     entry `trust.ts` writes is present.
@@ -1328,15 +1371,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * and this one would talk over it.
    */
   function silentStartReason(timeoutMs: number): string {
-    const bound = `the vendor did not send its init message within ${timeoutMs}ms`;
+    const bound = `the vendor neither answered a control request nor said anything within ${timeoutMs}ms`;
     const onlyHooks = preInitKinds.every((kind) => kind.startsWith("system:hook_"));
     if (!onlyHooks || preInitKindsDropped > 0 || vendorStderrTail.trim() !== "") return bound;
     const configFile = `${deps.env.configDir}/${VENDOR_CONFIG_FILE}`;
     const seen = preInitKinds.length === 0 ? "nothing at all" : "only its SessionStart hook events";
     return (
-      `${bound}: it emitted ${seen} and wrote nothing to stderr. This vendor announces ` +
-      "`system:init` only once a first turn reaches it, so a start that waits for init before " +
-      `prompting cannot settle. Also confirm projects[${JSON.stringify(trustRoot(deps.env.cwd))}].` +
+      `${bound}: it emitted ${seen} and wrote nothing to stderr. The start settles on one ` +
+      "control round-trip, so a child this quiet is not serving its control channel at all. " +
+      `Also confirm projects[${JSON.stringify(trustRoot(deps.env.cwd))}].` +
       `${TRUST_KEY} is true in ${configFile}: an untrusted workspace still runs, but with its ` +
       "permission allowlists silently dropped."
     );
@@ -1352,7 +1395,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * a bound on SILENCE rather than a bound on every kind of failure.
    */
   function settleStartOnErrorResult(message: SdkMessage): void {
-    const reject = initReject;
+    const reject = startReject;
     if (reject === undefined) return;
     if (message.type !== "result") return;
     if (!message.is_error) return;
@@ -1379,7 +1422,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * genuinely still there and genuinely silent.
    */
   function settleStartOnQueryEnd(detail: string): void {
-    const reject = initReject;
+    const reject = startReject;
     if (reject === undefined) return;
     reject(new Error(`the vendor query ended before its init message: ${detail}`));
   }
@@ -1388,15 +1431,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (message.type === "system" && message.subtype === "init") {
       setClaudeSessionId(message.session_id);
       recordAgentBinaryVersion(message.claude_code_version);
-      if (message.model.trim() === SYNTHETIC_MODEL) {
-        LOGGER.debug(
-          {},
-          "the vendor's init reported the synthetic marker as its model; keeping the model already in effect",
-        );
-      } else {
-        effectiveModel = message.model;
-      }
-      permissionMode = fromVendorPermissionMode(message.permissionMode);
+      // WHERE THE INIT FACTS LAND NOW. The start settles on a proven-live
+      // control round-trip, so this message usually arrives WITH THE FIRST
+      // TURN, long after `SessionStarted` was answered. Each fact is therefore
+      // applied through the same notifier a mid-session change uses, so a
+      // consumer that was told the start's values is told when init disagrees
+      // with them; a fact init merely restates pushes nothing.
+      LOGGER.info(
+        {
+          vendor_session_id: message.session_id,
+          model: message.model,
+          permission_mode: message.permissionMode,
+          agent_binary_version: message.claude_code_version,
+          after_start: started,
+        },
+        started
+          ? "the vendor announced its init with the first turn; applying the facts it carries to the live session"
+          : "the vendor announced its init before the start settled",
+      );
+      noteReportedModel(message.model);
+      notePermissionMode(fromVendorPermissionMode(message.permissionMode));
       noteFastMode(
         (message as { fast_mode_state?: unknown }).fast_mode_state,
         (message as { fast_mode_disabled_reason?: unknown }).fast_mode_disabled_reason,
@@ -1404,7 +1458,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (identity !== undefined && message.session_id !== identity.vendorSessionId) {
         void rotate(message.session_id);
       }
-      initResolve?.(message);
+      startResolve?.();
       return;
     }
     if (message.type === "result") {
@@ -1801,7 +1855,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function startQuery(
     binding: QuerySpec["binding"],
     resumeSessionAt?: string,
-  ): Promise<void> {
+  ): Promise<QueryLike> {
     const queue = new PromptQueue();
     const controller = new AbortController();
     const created = await deps.createQuery({
@@ -1818,17 +1872,22 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     prompts = queue;
     abort = controller;
     loop = runLoop(created);
+    return created;
   }
 
   // -- StartSession ---------------------------------------------------------
 
   /**
-   * The pending start, and the three things that settle it.
+   * The pending start, and everything that settles it.
    *
-   * `init` resolves it, {@link settleStartOnBlockingHook} rejects it with the
-   * hook's own refusal text, and this bound rejects it with the bound named.
-   * Whichever lands first clears BOTH slots and the timer, so the losers are
-   * inert rather than settling a start that a later attempt owns.
+   * {@link proveLive} resolves it on one answered control round-trip — the
+   * signal a start normally settles on; `init` resolves it too, for a vendor
+   * that still announces one first; {@link settleStartOnBlockingHook} rejects
+   * it with the hook's own refusal text; {@link settleStartOnErrorResult} and
+   * {@link settleStartOnQueryEnd} reject it with the vendor's; and this bound
+   * rejects it with the bound named. Whichever lands first clears BOTH slots
+   * and the timer, so the losers are inert rather than settling a start that a
+   * later attempt owns.
    */
   function awaitInit(): Promise<void> {
     // EVERY ATTEMPT REPORTS ITS OWN EVIDENCE. A retry that inherited the
@@ -1838,32 +1897,103 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     vendorStderrTail = "";
     return new Promise<void>((resolve, reject) => {
       const timeout = deps.initTimeoutMs ?? INIT_TIMEOUT_MS;
-      initResolve = () => {
+      startResolve = () => {
         clearPendingStart();
         resolve();
       };
-      initReject = (reason) => {
+      startReject = (reason) => {
         clearPendingStart();
         reject(reason);
       };
       if (timeout <= 0) return;
       const handle = setTimeout(() => {
-        initReject?.(new Error(silentStartReason(timeout)));
+        startReject?.(new Error(silentStartReason(timeout)));
       }, timeout);
       if (typeof (handle as { unref?: () => void }).unref === "function") {
         (handle as { unref: () => void }).unref();
       }
-      initTimer = handle;
+      startTimer = handle;
     });
   }
 
-  /** Disarm the pending start: whichever of the three settled it, the losers go. */
+  /**
+   * THE PROVEN-LIVE SIGNAL: one control round-trip, answered.
+   *
+   * A child that answers `supportedModels()` is spawned, connected and taking
+   * work, which is the whole of what `StartSession` promises — the verb
+   * resolves when a prompt can be ACCEPTED, not when the vendor has announced
+   * anything. `init` is no longer waited for because it does not come until a
+   * first turn does ({@link LIVE_SIGNAL_TIMEOUT_MS} states the grounding).
+   *
+   * THE SAME CALL THE OPENING ALREADY OWED. `SessionStarted.model_catalog` is
+   * this answer, so the proof costs nothing extra and the catalog is in hand
+   * before the opening is returned.
+   *
+   * NEVER REJECTS. Its failure is the START's failure while the start is still
+   * pending; once something else has settled the start, a catalog that will not
+   * answer is what it always was — a `SessionFault` on the catalog's own
+   * component, which a later re-read can lift.
+   */
+  async function proveLive(active: QueryLike, boundMs: number): Promise<void> {
+    try {
+      modelCatalog = modelOptions(await withinBound(active.supportedModels(), boundMs, "supportedModels"));
+      pushes.resolveComponent(MODEL_CATALOG_COMPONENT, 0);
+      if (startResolve !== undefined) {
+        LOGGER.info(
+          { bound_ms: boundMs, models: modelCatalog.length },
+          "the vendor answered a control request, so the child is proven live and the start settles on it",
+        );
+      }
+      startResolve?.();
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      if (startReject !== undefined) {
+        startReject(new Error(`the vendor did not prove itself live: ${detail}`));
+        return;
+      }
+      if (query !== active) return;
+      pushes.fault(
+        sessionFault({ kind: "vendorQueryFailed" }, MODEL_CATALOG_COMPONENT, `supportedModels failed: ${detail}`),
+      );
+    }
+  }
+
+  /**
+   * A control round-trip with a bound, and the BOUND NAMED when it is reached.
+   *
+   * A request that never answers is indistinguishable from a wedged child, and
+   * a reader who is only told "the start failed" cannot tell either from a slow
+   * one — so the refusal says which call and how long it was given.
+   */
+  function withinBound<T>(work: Promise<T>, boundMs: number, call: string): Promise<T> {
+    if (boundMs <= 0) return work;
+    return new Promise<T>((resolve, reject) => {
+      const handle = setTimeout(() => {
+        reject(new Error(`the vendor did not answer ${call} within ${boundMs}ms`));
+      }, boundMs);
+      if (typeof (handle as { unref?: () => void }).unref === "function") {
+        (handle as { unref: () => void }).unref();
+      }
+      work.then(
+        (value) => {
+          clearTimeout(handle);
+          resolve(value);
+        },
+        (err: unknown) => {
+          clearTimeout(handle);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        },
+      );
+    });
+  }
+
+  /** Disarm the pending start: whichever settler won, the losers go. */
   function clearPendingStart(): void {
-    initResolve = undefined;
-    initReject = undefined;
-    if (initTimer !== undefined) {
-      clearTimeout(initTimer);
-      initTimer = undefined;
+    startResolve = undefined;
+    startReject = undefined;
+    if (startTimer !== undefined) {
+      clearTimeout(startTimer);
+      startTimer = undefined;
     }
   }
 
@@ -1881,7 +2011,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * that difference, shared with the converter that draws the same hook.
    */
   function settleStartOnBlockingHook(message: SdkMessage): void {
-    if (initReject === undefined) return;
+    if (startReject === undefined) return;
     if (message.type !== "system" || message.subtype !== "hook_response") return;
     const blockingText = hookBlockingText(message);
     if (blockingText === undefined) return;
@@ -1894,7 +2024,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       },
       "a hook blocked the session's opening; the start is refused with the hook's own reason",
     );
-    initReject(
+    startReject(
       new Error(
         `the vendor's ${message.hook_name} hook blocked the session from opening: ${blockingText}`,
       ),
@@ -2045,12 +2175,22 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // one. This attaches the handler now; `await initialized` below still
       // throws the same reason.
       initialized.catch(() => undefined);
-      await startQuery(
+      const child = await startQuery(
         brandNew || clearedTo !== undefined
           ? { kind: "fresh", sessionId: inForce }
           : { kind: "resume", resumeSessionId: vendorSessionId },
       );
+      // THE PROOF THE START SETTLES ON, issued the moment the child exists.
+      // It runs BESIDE the other settlers rather than instead of them: a
+      // blocking hook, an error result or a query that ends can still land
+      // first and refuse the start with its own reason, and each of those is
+      // the more specific account of the same child.
+      const live = proveLive(child, deps.liveSignalTimeoutMs ?? LIVE_SIGNAL_TIMEOUT_MS);
       await initialized;
+      // AND THE CATALOG IS IN HAND BEFORE THE OPENING IS ANSWERED. When the
+      // round-trip is what settled the start this has already resolved; when
+      // `init` beat it, this is the wait that keeps `SessionStarted` whole.
+      await live;
     } catch (err) {
       // A FAILED START LEAVES THE ENGINE AS IT FOUND IT. The next StartSession
       // is a fresh attempt that settles its OWN identity, so every trace of
@@ -2145,11 +2285,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       for (const cut of held) writeContextCut(cut);
     }
     started = true;
-    const active = query;
-    if (active !== undefined) {
-      await pushModelCatalog();
-      await pushMcpServerStatus();
-    }
+    // THE CATALOG IS ALREADY IN HAND: `proveLive` pulled it, because that pull
+    // IS the round-trip the start settled on. Pulling it a second time here
+    // would spend a control call to learn what the opening already knows.
+    if (query !== undefined) await pushMcpServerStatus();
     const liveWork = await reconcile();
     // THE CADENCE BEGINS BEFORE SUCCESS RETURNS: a session that is never
     // prompted still has a cache worth keeping warm.
@@ -2171,10 +2310,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // The readiness signal, and the reason a consumer may open WatchSession
     // before anything else exists.
     pushes.push(pushes.diagnostics());
-    // The build sha and SDK version are the PROCESS's, injected at construction;
-    // only the agent binary version has to be waited for, and
-    // requireSessionRuntime refuses to answer until `system:init` stated it —
-    // which is the presence rule doing its job, not a failure.
+    // The build sha and SDK version are the PROCESS's, injected at
+    // construction. The agent binary version comes from the SDK's own bundled
+    // manifest — which is why the opening can state it without `init`, whose
+    // `claude_code_version` arrives with the first turn and OVERWRITES the
+    // manifest's answer when the two disagree (the running binary outranks the
+    // packaged declaration). `requireSessionRuntime` still refuses to build the
+    // message when NEITHER source has one: that is the presence rule doing its
+    // job, and the start fails saying so rather than sending a sentinel.
     const runtime = requireSessionRuntime();
     const started_ = create(conversationv1.SessionStartedSchema, {
       vendorSessionId: identity.vendorSessionId,
