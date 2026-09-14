@@ -7,8 +7,12 @@
  * at the right edge. The flank groups never spread, and the title between them
  * is centered on its OWN content against the whole strip rather than on what
  * the two groups leave over: the row is a three-track grid whose outer tracks
- * are equal, so a wide right group does not push the title left (styles.css,
- * owner ruling 2).
+ * are `minmax(0, 1fr)` — equal free shares with no content floor of their
+ * own — so a wide right group does not push the title left, and the middle
+ * track is capped at half the row so the title ellipsis-clips rather than
+ * growing into either group (styles.css, owner ruling 2, corrected
+ * 2026-09-13: a bare `1fr` floors each flank at its own content, which is
+ * what had been pushing the title left of center).
  *
  * EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE, so reading `drawTopbarView`
  * enumerates the topbar's subcomponents and each one's props are its own
