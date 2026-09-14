@@ -374,6 +374,19 @@ and no narrative: the commit message holds the reasoning and
 It also carries a short "standing measurements to protect" section. Update those
 numbers when a measurement genuinely improves; never when it regresses.
 
+## A regression fix leaves a breadcrumb at the fix site
+
+Owner instruction, 2026-09-14, standing. When a change fixes a REGRESSION — a
+behavior that once worked and broke — leave a brief comment at the implementation
+site naming the regression it fixes (what broke, and the shape of the fix). One
+or two lines is enough; the commit message and the changelog hold the detail.
+
+Its purpose is FORWARD regression watch. The comment is not a lock: it does not
+forbid ever changing or rolling back this code. It is a flag for the next person
+who touches this spot that this exact behavior has regressed before, so a change
+here is a place to watch for the same regression returning — and, when the risk
+looks real, to surface to the user rather than land silently.
+
 ## A repository's one-shot policy is its own
 
 Owner ruling, 2026-09-12. A repository states its one-shot and merge policy in
