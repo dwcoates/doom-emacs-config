@@ -36,6 +36,7 @@
                  agent-repl-create-child-workspace
                  agent-repl-create-child-workspace-static
                  agent-repl-fork-workspace
+                 agent-repl-register-repository
                  agent-repl-set-priority))
     (should (commandp cmd))))
 

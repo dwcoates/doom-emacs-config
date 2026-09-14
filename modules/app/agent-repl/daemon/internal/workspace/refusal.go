@@ -30,6 +30,15 @@ const (
 	ArmNotYetAdopted = "not_yet_adopted"
 	// ArmNotAWorktree is a registration whose directory is not a git worktree.
 	ArmNotAWorktree = "not_a_worktree"
+	// ArmNotInARepository is a RegisterRepository whose path is readable but
+	// lies inside no git repository with a main worktree. It is DISTINCT from
+	// ArmNotAWorktree, which is about the announced directory being a worktree
+	// itself; this arm is about the path being INSIDE a repository at all.
+	ArmNotInARepository = "not_in_a_repository"
+	// ArmUnreadablePath is a RegisterRepository whose path cannot be read at
+	// all -- it is not there, or it cannot be stat'ed -- so there is nothing to
+	// ask git about.
+	ArmUnreadablePath = "unreadable_path"
 	// ArmUngatedWithoutConsent is a model/mode combination that disables the
 	// permission gate with no consent recorded.
 	ArmUngatedWithoutConsent = "ungated_without_consent"

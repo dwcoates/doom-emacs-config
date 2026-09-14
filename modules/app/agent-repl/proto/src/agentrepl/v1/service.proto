@@ -21,6 +21,7 @@ import "agentrepl/v1/endpoint_answer_question.proto";
 import "agentrepl/v1/endpoint_answer_cold_gate.proto";
 import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
 import "agentrepl/v1/endpoint_create_workspace.proto";
+import "agentrepl/v1/endpoint_register_repository.proto";
 import "agentrepl/v1/endpoint_open_workspace.proto";
 import "agentrepl/v1/endpoint_close_workspace.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
@@ -107,6 +108,11 @@ service AgentRepl {
   // A new workspace in a repository; the daemon names and creates everything.
   // See endpoint_create_workspace.proto.
   rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
+
+  // A repository on its own, with no workspace: resolved from ANY path inside
+  // it and idempotent by the resolved dir. See
+  // endpoint_register_repository.proto.
+  rpc RegisterRepository(RegisterRepositoryRequest) returns (RegisterRepositoryResponse);
 
   // Open a registered-but-closed workspace.
   rpc OpenWorkspace(OpenWorkspaceRequest) returns (OpenWorkspaceResponse);

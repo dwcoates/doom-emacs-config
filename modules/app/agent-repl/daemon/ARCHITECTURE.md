@@ -258,6 +258,8 @@ type Git interface {
   RemoveWorktree(ctx, repoDir, worktreeDir string) error
   Nuke(ctx, repoDir, worktreeDir, branch string) error         // force both
   CommonDir(ctx, dir string) (string, error)                    // canonicalized (symlinks resolved)
+  MainWorktree(ctx, dir string) (string, error)                 // the repository's dir; a bare repo is an error
+  RepositoryOf(ctx, dir string) (string, ok bool, err error)    // MainWorktree's PROBE half: outside every repo is an ordinary false, never an error record
   SameRepo(ctx, a, b string) (bool, error)
   MergeNoFF(ctx, targetDir, sourceBranch, message string) (MergeOutcome, error)  // Landed{Commit} | Conflicted{Files}
   ConflictedFiles(ctx, dir string) ([]string, error); AbortMerge(ctx, dir string) error
@@ -438,7 +440,11 @@ host path has no id a client could ask for.
 ### workspace (`internal/workspace`)
 
 The verbs, each a function delegating to wsm + gitclient + shimclient +
-queue + resolvers: `Register`, `Create` (standard + one-shot; slug from the
+queue + resolvers: `Register`, `RegisterRepository` (a repository ON ITS OWN,
+with no workspace: resolved from ANY path inside it through `RepositoryOf`,
+idempotent by the resolved main-worktree dir, answering whether the registry
+already held it; it republishes the roster so the new repository's EMPTY
+section draws), `Create` (standard + one-shot; slug from the
 initial prompt via the naming rule; branch; worktree; layout facts recorded;
 registration only after materialization; consent check for ungated modes;
 fork = the daemon ports the parent's transcript into the child's config

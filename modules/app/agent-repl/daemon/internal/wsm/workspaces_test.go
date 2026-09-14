@@ -392,6 +392,87 @@ func TestListRepositoriesLoadsEveryRecord(t *testing.T) {
 	}
 }
 
+func TestRegisterRepositoryMintsARepositoryWithNoWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	dir := t.TempDir()
+
+	// Act
+	repo, created, err := s.RegisterRepository(context.Background(), dir, "main")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RegisterRepository: %v", err)
+	}
+	if !created {
+		t.Fatalf("RegisterRepository reported an existing record for a fresh store")
+	}
+	if repo.ID == "" || repo.DefaultBranch != "main" {
+		t.Fatalf("RegisterRepository = %+v, want a minted id and the default branch main", repo)
+	}
+}
+
+func TestRegisterRepositoryReportsARepositoryItAlreadyHeld(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	dir := t.TempDir()
+	first, _, err := s.RegisterRepository(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatalf("first RegisterRepository: %v", err)
+	}
+
+	// Act
+	again, created, err := s.RegisterRepository(context.Background(), dir, "main")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("second RegisterRepository: %v", err)
+	}
+	if created {
+		t.Fatalf("RegisterRepository minted a second record for %s", dir)
+	}
+	if again.ID != first.ID {
+		t.Fatalf("RegisterRepository = id %q, want the id %q the first mint answered", again.ID, first.ID)
+	}
+}
+
+// TestRegisterRepositoryAdoptsTheRepositoryARegisteredWorkspaceMinted pins the
+// two mint paths on ONE row: a repository RegisterWorkspace minted through
+// ensureRepo is the same repository this verb answers, never a second row for
+// one directory.
+func TestRegisterRepositoryAdoptsTheRepositoryARegisteredWorkspaceMinted(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	repo, created, err := s.RegisterRepository(context.Background(), ws.Dir, "main")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RegisterRepository: %v", err)
+	}
+	if created {
+		t.Fatalf("RegisterRepository minted a second row for the workspace's own repository")
+	}
+	if repo.ID != ws.Repo {
+		t.Fatalf("RegisterRepository = id %q, want the workspace's repository %q", repo.ID, ws.Repo)
+	}
+}
+
+func TestRegisterRepositoryRefusesABlankDirectory(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	_, _, err := s.RegisterRepository(context.Background(), "", "main")
+
+	// Assert
+	if err == nil {
+		t.Fatalf("RegisterRepository(\"\") = no error, want a refusal")
+	}
+}
+
 func TestSetClosedRecordsTheTeardown(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

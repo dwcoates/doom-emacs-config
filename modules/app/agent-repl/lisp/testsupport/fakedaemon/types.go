@@ -40,6 +40,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"SessionHealth":          func() proto.Message { return &v1.SessionHealthResponse{} },
 	"ClientLog":              func() proto.Message { return &v1.ClientLogResponse{} },
 	"RegisterWorkspace":      func() proto.Message { return &v1.RegisterWorkspaceResponse{} },
+	"RegisterRepository":     func() proto.Message { return &v1.RegisterRepositoryResponse{} },
 	"SelectWorkspace":        func() proto.Message { return &v1.SelectWorkspaceResponse{} },
 	"AdoptHostWorkspace":     func() proto.Message { return &v1.AdoptHostWorkspaceResponse{} },
 	"OpenLogin":              func() proto.Message { return &v1.OpenLoginResponse{} },

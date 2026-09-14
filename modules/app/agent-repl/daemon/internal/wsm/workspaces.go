@@ -164,6 +164,57 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 	return out, created, nil
 }
 
+// RegisterRepository records a repository on its own, with NO workspace under
+// it, idempotent by normalized dir. The bool reports whether the record was
+// minted here.
+//
+// It is ensureRepo reached directly. The repository row was previously
+// reachable only from inside RegisterWorkspace's transaction, so a repository
+// existed only once somebody worked in it; this is the same mint, in its own
+// transaction, for a repository that has no workspace yet. Nothing else about
+// the row differs -- an empty defaultBranch leaves a recorded one alone here
+// exactly as it does there.
+func (s *store) RegisterRepository(ctx context.Context, dir, defaultBranch string) (Repository, bool, error) {
+	const op = "daemon.wsm.register_repository"
+	normalized, err := normalizeDir(dir)
+	if err != nil {
+		s.log.Error(op, "refused a repository dir that cannot be normalized", withError(dlog.Context{"dir": dir}, err))
+		return Repository{}, false, err
+	}
+	fields := dlog.Context{"dir": normalized, "requested_dir": dir}
+
+	var (
+		out     Repository
+		created bool
+	)
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var existing RepoID
+		err := tx.QueryRowContext(ctx, `SELECT id FROM repositories WHERE dir = ?`, normalized).Scan(&existing)
+		switch {
+		case err == nil:
+			created = false
+		case errors.Is(err, sql.ErrNoRows):
+			created = true
+		default:
+			return err
+		}
+		id, err := ensureRepo(ctx, tx, normalized, defaultBranch)
+		if err != nil {
+			return err
+		}
+		// READ THE ROW BACK rather than composing it here: the name and the
+		// default branch a mint records are ensureRepo's to decide, and a
+		// second spelling of them in this function is the drift that makes an
+		// answer disagree with the registry it just wrote.
+		row := tx.QueryRowContext(ctx, `SELECT id, dir, name, default_branch FROM repositories WHERE id = ?`, id)
+		return row.Scan(&out.ID, &out.Dir, &out.Name, &out.DefaultBranch)
+	})
+	if err != nil {
+		return Repository{}, false, err
+	}
+	return out, created, nil
+}
+
 // ensureRepo returns the repository for a canonicalized common dir, minting one
 // on first sight. The display name is the dir's base name; the default branch
 // is the announcing caller's, which is the only party that reads it off git.

@@ -71,6 +71,12 @@ type fakeDB struct {
 	registerDir string
 	createdNew  bool
 
+	// registeredRepos records every RegisterRepository the verb made, in
+	// order, and registerRepoErr fails the write, which the fake's own slice
+	// cannot.
+	registeredRepos []registeredRepo
+	registerRepoErr error
+
 	putJobs     []wsm.CreationJob
 	putJobErr   error
 	putSessions []wsm.Session
@@ -219,6 +225,27 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	d.with(ws)
 	d.createdNew = true
 	return ws, true, nil
+}
+
+// registeredRepo is one RegisterRepository call, as the fake recorded it.
+type registeredRepo struct{ Dir, DefaultBranch string }
+
+func (d *fakeDB) RegisterRepository(_ context.Context, dir, defaultBranch string) (wsm.Repository, bool, error) {
+	if d.registerRepoErr != nil {
+		return wsm.Repository{}, false, d.registerRepoErr
+	}
+	d.registeredRepos = append(d.registeredRepos, registeredRepo{Dir: dir, DefaultBranch: defaultBranch})
+	for _, repo := range d.repositories {
+		if repo.Dir == dir {
+			return repo, false, nil
+		}
+	}
+	repo := wsm.Repository{
+		ID: ids.RepoID("repo-" + filepath.Base(dir)), Dir: dir,
+		Name: filepath.Base(dir), DefaultBranch: defaultBranch,
+	}
+	d.repositories = append(d.repositories, repo)
+	return repo, true, nil
 }
 
 func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
@@ -387,13 +414,19 @@ func (d *fakeDB) AssignWorkspaceTask(_ context.Context, id ids.WorkspaceID, task
 type fakeGit struct {
 	gitclient.Git
 
-	commonDir     string
-	mainWorktree  string
-	commonDirErr  error
-	currentBranch string
-	branchErr     error
-	defaultBranch string
-	defaultErr    error
+	commonDir    string
+	mainWorktree string
+	commonDirErr error
+	// outsideEveryRepository makes the RepositoryOf probe answer "not in a
+	// repository", which is an ordinary answer and never an error.
+	outsideEveryRepository bool
+	// repositoryOfErr fails the probe itself, which is a different fact from
+	// a path that is simply outside every repository.
+	repositoryOfErr error
+	currentBranch   string
+	branchErr       error
+	defaultBranch   string
+	defaultErr      error
 
 	resolveErr error
 	// existingBranches are the branches this repository already holds, which
@@ -430,6 +463,19 @@ func (g *fakeGit) CommonDir(context.Context, string) (string, error) {
 // exactly one of each.
 func (g *fakeGit) MainWorktree(context.Context, string) (string, error) {
 	return g.mainWorktree, g.commonDirErr
+}
+
+// RepositoryOf is the PROBE half: `outsideEveryRepository` is the ordinary
+// "not in a repository" answer, which carries no error at all, and
+// `repositoryOfErr` is the separate case of git failing to be asked.
+func (g *fakeGit) RepositoryOf(context.Context, string) (string, bool, error) {
+	if g.repositoryOfErr != nil {
+		return "", false, g.repositoryOfErr
+	}
+	if g.outsideEveryRepository {
+		return "", false, nil
+	}
+	return g.mainWorktree, true, nil
 }
 
 func (g *fakeGit) CurrentBranch(context.Context, string) (string, error) {

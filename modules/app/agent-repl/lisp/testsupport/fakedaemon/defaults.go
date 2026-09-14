@@ -161,6 +161,17 @@ func specializeDefault(method string, req, out proto.Message) error {
 			return fmt.Errorf("RegisterWorkspace: %w", err)
 		}
 		return setWorkspaceRef(success, "workspace", workspaceID(dir), dir)
+	case "RegisterRepository":
+		// RegisterRepository is IDEMPOTENT BY THE RESOLVED DIR, and the fake
+		// has no git: the path IS the repository here, cleaned, so the same
+		// path always mints the same id. `already_known` stays false unless a
+		// scenario scripts the answer itself.
+		dir := filepath.Clean(stringField(req, "path"))
+		success, err := successMessage(out)
+		if err != nil {
+			return fmt.Errorf("RegisterRepository: %w", err)
+		}
+		return setWorkspaceRef(success, "repository", workspaceID(dir), dir)
 	case "CreateWorkspace":
 		// The daemon names and creates everything; the answer carries the
 		// minted ref and the roster push is what actually opens the tab.

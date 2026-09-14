@@ -70,6 +70,9 @@ const (
 	// AgentReplCreateWorkspaceProcedure is the fully-qualified name of the AgentRepl's CreateWorkspace
 	// RPC.
 	AgentReplCreateWorkspaceProcedure = "/agentrepl.v1.AgentRepl/CreateWorkspace"
+	// AgentReplRegisterRepositoryProcedure is the fully-qualified name of the AgentRepl's
+	// RegisterRepository RPC.
+	AgentReplRegisterRepositoryProcedure = "/agentrepl.v1.AgentRepl/RegisterRepository"
 	// AgentReplOpenWorkspaceProcedure is the fully-qualified name of the AgentRepl's OpenWorkspace RPC.
 	AgentReplOpenWorkspaceProcedure = "/agentrepl.v1.AgentRepl/OpenWorkspace"
 	// AgentReplCloseWorkspaceProcedure is the fully-qualified name of the AgentRepl's CloseWorkspace
@@ -187,6 +190,7 @@ var (
 	agentReplAnswerColdGateMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
 	agentReplWatchWorkspaceRosterMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("WatchWorkspaceRoster")
 	agentReplCreateWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("CreateWorkspace")
+	agentReplRegisterRepositoryMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("RegisterRepository")
 	agentReplOpenWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("OpenWorkspace")
 	agentReplCloseWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("CloseWorkspace")
 	agentReplKillWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("KillWorkspace")
@@ -263,6 +267,10 @@ type AgentReplClient interface {
 	// A new workspace in a repository; the daemon names and creates everything.
 	// See endpoint_create_workspace.proto.
 	CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error)
+	// A repository on its own, with no workspace: resolved from ANY path inside
+	// it and idempotent by the resolved dir. See
+	// endpoint_register_repository.proto.
+	RegisterRepository(context.Context, *connect.Request[v1.RegisterRepositoryRequest]) (*connect.Response[v1.RegisterRepositoryResponse], error)
 	// Open a registered-but-closed workspace.
 	OpenWorkspace(context.Context, *connect.Request[v1.OpenWorkspaceRequest]) (*connect.Response[v1.OpenWorkspaceResponse], error)
 	// Tear down a workspace's editor state without merging — the only teardown.
@@ -451,6 +459,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplCreateWorkspaceProcedure,
 			connect.WithSchema(agentReplCreateWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		registerRepository: connect.NewClient[v1.RegisterRepositoryRequest, v1.RegisterRepositoryResponse](
+			httpClient,
+			baseURL+AgentReplRegisterRepositoryProcedure,
+			connect.WithSchema(agentReplRegisterRepositoryMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		openWorkspace: connect.NewClient[v1.OpenWorkspaceRequest, v1.OpenWorkspaceResponse](
@@ -709,6 +723,7 @@ type agentReplClient struct {
 	answerColdGate         *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
 	watchWorkspaceRoster   *connect.Client[v1.WatchWorkspaceRosterRequest, v1.WatchWorkspaceRosterResponse]
 	createWorkspace        *connect.Client[v1.CreateWorkspaceRequest, v1.CreateWorkspaceResponse]
+	registerRepository     *connect.Client[v1.RegisterRepositoryRequest, v1.RegisterRepositoryResponse]
 	openWorkspace          *connect.Client[v1.OpenWorkspaceRequest, v1.OpenWorkspaceResponse]
 	closeWorkspace         *connect.Client[v1.CloseWorkspaceRequest, v1.CloseWorkspaceResponse]
 	killWorkspace          *connect.Client[v1.KillWorkspaceRequest, v1.KillWorkspaceResponse]
@@ -804,6 +819,11 @@ func (c *agentReplClient) WatchWorkspaceRoster(ctx context.Context, req *connect
 // CreateWorkspace calls agentrepl.v1.AgentRepl.CreateWorkspace.
 func (c *agentReplClient) CreateWorkspace(ctx context.Context, req *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error) {
 	return c.createWorkspace.CallUnary(ctx, req)
+}
+
+// RegisterRepository calls agentrepl.v1.AgentRepl.RegisterRepository.
+func (c *agentReplClient) RegisterRepository(ctx context.Context, req *connect.Request[v1.RegisterRepositoryRequest]) (*connect.Response[v1.RegisterRepositoryResponse], error) {
+	return c.registerRepository.CallUnary(ctx, req)
 }
 
 // OpenWorkspace calls agentrepl.v1.AgentRepl.OpenWorkspace.
@@ -1040,6 +1060,10 @@ type AgentReplHandler interface {
 	// A new workspace in a repository; the daemon names and creates everything.
 	// See endpoint_create_workspace.proto.
 	CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error)
+	// A repository on its own, with no workspace: resolved from ANY path inside
+	// it and idempotent by the resolved dir. See
+	// endpoint_register_repository.proto.
+	RegisterRepository(context.Context, *connect.Request[v1.RegisterRepositoryRequest]) (*connect.Response[v1.RegisterRepositoryResponse], error)
 	// Open a registered-but-closed workspace.
 	OpenWorkspace(context.Context, *connect.Request[v1.OpenWorkspaceRequest]) (*connect.Response[v1.OpenWorkspaceResponse], error)
 	// Tear down a workspace's editor state without merging — the only teardown.
@@ -1224,6 +1248,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplCreateWorkspaceProcedure,
 		svc.CreateWorkspace,
 		connect.WithSchema(agentReplCreateWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRegisterRepositoryHandler := connect.NewUnaryHandler(
+		AgentReplRegisterRepositoryProcedure,
+		svc.RegisterRepository,
+		connect.WithSchema(agentReplRegisterRepositoryMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplOpenWorkspaceHandler := connect.NewUnaryHandler(
@@ -1490,6 +1520,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchWorkspaceRosterHandler.ServeHTTP(w, r)
 		case AgentReplCreateWorkspaceProcedure:
 			agentReplCreateWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplRegisterRepositoryProcedure:
+			agentReplRegisterRepositoryHandler.ServeHTTP(w, r)
 		case AgentReplOpenWorkspaceProcedure:
 			agentReplOpenWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplCloseWorkspaceProcedure:
@@ -1621,6 +1653,10 @@ func (UnimplementedAgentReplHandler) WatchWorkspaceRoster(context.Context, *conn
 
 func (UnimplementedAgentReplHandler) CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CreateWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RegisterRepository(context.Context, *connect.Request[v1.RegisterRepositoryRequest]) (*connect.Response[v1.RegisterRepositoryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RegisterRepository is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) OpenWorkspace(context.Context, *connect.Request[v1.OpenWorkspaceRequest]) (*connect.Response[v1.OpenWorkspaceResponse], error) {

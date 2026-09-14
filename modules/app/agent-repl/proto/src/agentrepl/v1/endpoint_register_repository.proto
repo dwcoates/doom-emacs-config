@@ -1,0 +1,74 @@
+// endpoint_register_repository.proto — RegisterRepository: a repository joins
+// the roster ON ITS OWN, with no workspace. SIDEBAR section.
+//
+// It exists because a repository had exactly one way in: as a SIDE EFFECT of
+// RegisterWorkspace, which mints the repository record for the worktree it is
+// announcing. So the only way to make a repository pickable — for the static
+// create, which is the one mode that names a repository by hand — was to
+// register a workspace in it first, and there was no way at all to say "this
+// repository exists" about a checkout nobody is working in yet.
+//
+// THE PATH IS ANY PATH INSIDE THE REPOSITORY, a file as readily as a
+// directory, because that is what the caller HAS: the editor's gesture is
+// "pick a file", and the repository is derived from it. The daemon resolves
+// the repository's MAIN WORKTREE from that path through git — which is what
+// workspace.v1's RepositoryRef.dir means — and normalizes it exactly as
+// RegisterWorkspace normalizes a worktree dir.
+//
+// IDEMPOTENT BY THE RESOLVED DIR, and the answer SAYS SO rather than hiding
+// it: `already_known` distinguishes "this is new" from "you already had it",
+// which is the whole difference the caller reports to the user. Neither is an
+// error.
+//
+// NOT PER-WORKSPACE. There is no ref to key on, so none of the ownership or
+// handover arms applies — the same reason RegisterWorkspace carries none.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RegisterRepositoryRequest {
+  // ANY path inside the repository, in whatever spelling the caller has: a
+  // file, a directory, a linked worktree's checkout. A PATH, not an identity:
+  // the daemon resolves the repository from it and MINTS the identity, which
+  // the response returns.
+  string path = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message RegisterRepositoryResponse {
+  oneof result {
+    RegisterRepositorySuccess success = 1;
+    RegisterRepositoryError error = 2;
+  }
+}
+// Registered (or already was — idempotence makes the two one answer, and
+// `already_known` is which of them it was).
+message RegisterRepositorySuccess {
+  // The repository's daemon-minted identity and its normalized main-worktree
+  // directory — what the roster's repository section carries and what
+  // CreateWorkspace is handed back.
+  workspace.v1.RepositoryRef repository = 1;
+  // True when the registry already held this repository, so nothing was
+  // minted. It is an ANSWER, never a refusal: a caller re-registering the
+  // repository it already registered gets its ref back and says so.
+  bool already_known = 2;
+}
+// THE ARM IS THE REFUSAL.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message RegisterRepositoryError {
+  oneof cause {
+    // The path is readable but lies inside no git work tree — or inside a
+    // bare repository, which has no main worktree to name.
+    RegisterRepositoryNotInARepository not_in_a_repository = 1;
+    // The path cannot be read at all: it is not there, or its directory
+    // cannot be stat'ed.
+    RegisterRepositoryUnreadablePath unreadable_path = 2;
+  }
+}
+message RegisterRepositoryNotInARepository {}
+message RegisterRepositoryUnreadablePath {}
