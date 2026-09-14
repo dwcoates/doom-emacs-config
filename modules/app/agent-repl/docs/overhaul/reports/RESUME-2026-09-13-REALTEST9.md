@@ -39,27 +39,29 @@ ruling of 2026-09-13), `docs/REALTEST-PLAN.md` "Status", and
 - Store: schema 7, single serialized writer, read pool, ledger retention,
   no residue persisted, shape catalog (`make -C agent-shim/shim-store shapes`).
 
-## State after the first sweep with 9 (rt-run34, 2026-09-13 22:28)
+## State after the second sweep with 9 (rt-run35, 2026-09-13 22:55)
 
-- All three evening branches merged and deployed (footer fault kinds,
-  realtest 9, shim start contract). Boot bring-up now failed:0.
-- rt-run34: realtests 1-8 green; gap scan 6 records all the retired start
-  contract (closed by the shim merge); realtest 9 FAILED at the `SPC o v`
-  act; 21 `daemon.dlog.sink_failure` errors in its window.
-- Owner (mid-run) reported the topbar title sits left of true center.
+- Landed and deployed since rt-run34: realtest 9 toggle/probe fix, daemon
+  sink re-open, topbar true center (master 166b1fe97 and after).
+- rt-run35: 1-8 green; realtest 9 failed on FOUR harness/logging findings;
+  gap scan had 4 classes (start contract closed by the shim merge; footer
+  overage cell missing; store reader errors on an ordered store restart).
 
 ## Agents in flight (branches; worktrees under the scratchpad)
 
-1. `fix/rt9-composer-toggle` (wt-rt9fix): probe reads the selected
-   window, act written for the focus-input TOGGLE (composer auto-selected
-   on arrival, so the chord jumped to the webview).
-2. `fix/dlog-sink-reopen` (wt-sink): workspace loggers pinned a `*sink`
-   that CloseWorkspace's Evict closed and poisoned; resolve at write time,
-   plain close never poisons.
-3. `fix/topbar-true-center` (wt-topbar): `1fr` flank tracks floor at
-   content width; `minmax(0,1fr)` flanks so the title is at true center.
+1. `fix/rt9-live-sources` (wt-rt9src): edge waits scanned a source set
+   enumerated before the scratch workspace existed; re-enumerate.
+2. `fix/turn-edges-info` (wt-edges): `elisp.input.send` and per-row feed
+   records were debug (never persisted); promote to info.
+3. `fix/footer-overage` (wt-overage): `FooterStatusActivityRateLimited.overage`
+   cell (proto addition), daemon routes it, webapp draws the row.
+4. `fix/store-reader-restart` (wt-reader): shim reader logs a store restart
+   at info while under its re-open budget; error only on exhaustion.
 
-Then: merge all three, deploy, rerun the full sweep, twice-green.
+Then: merge all four, deploy, rerun the full sweep, twice-green.
+Open: merge-queue e2e `TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce`
+flaked once for the sink agent (second daemon spawned instead of adopting;
+shim refused "already has a live listener"); 7 solo runs passed.
 
 ## The loop for realtest 9
 
