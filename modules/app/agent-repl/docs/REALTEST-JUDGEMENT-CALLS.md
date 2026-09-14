@@ -15,6 +15,40 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Blocked is blue, and the roster agrees with the footer (2026-09-14)
+
+Owner ruling, quoted: "the workspace erroneously is rendering a green background
+in the emacs tab-bar despite having the 'blocked' status. The background should
+be blue when blocked/detached/disconnected, not green. The sidebar is ALSO
+showing green in the webapp despite the footer showing blocked. Blocked is
+semantically blue, not green (same as detached, disconnected, or anything else
+that renders the workspace agent unusable)."
+
+Two changes landed:
+
+- **The spec change.** `proto/vocab/render-colors.json` now assigns
+  `roster_status.vendor_blocked` and `footer_status.blocked` the color `blue`
+  (both were `purple`). Every consumer follows: the webapp reads the file
+  directly; the elisp `agent-repl-status-color-table` and the Go vocab table
+  are asserted against it row for row. `merging` stays purple — it is not an
+  unusable state. Verified from the file: nothing an unusable-agent state can
+  reach is still green, and `blocked`, `disconnected`, `severed`, `dead`,
+  `degraded`, `start_failed` and `vendor_blocked` are all blue.
+
+- **The shared-classifier invariant.** The roster's `vendor_blocked` verdict and
+  the footer's `blocked` verdict are now decided by ONE predicate,
+  `footer.FailureBlocks` (`daemon/internal/resolve/footer/chips.go`), which both
+  the footer (in `OnAgentTerminal`) and the roster (in `sidebar`'s
+  `vendorBlocked`) call. They cannot drift. The green-despite-blocked bug was
+  exactly this drift: the roster kept a private six-arm allowlist that omitted
+  `authentication_failed`, so a logged-out session the footer painted `blocked`
+  fell through to `done`/`ready` (green) on the roster and its rail dot.
+
+| call | what was decided |
+|---|---|
+| the tab bar's `vendor_blocked` override | REMOVED from `surface_overrides.emacs_tab_bar` (and the elisp override table). It painted blue over a purple base to dodge a purple collision; the base is blue now, so the override repainted an arm the color it already had, which is not a divergence. The tab bar still renders `vendor_blocked` blue, by inheritance — no visible change. |
+| the breadth of "blocked" on the roster | The shared predicate is the footer's, and the footer blocks EVERY turn-ending failure (its `blockFor` default is `vendor_error`). So the roster now paints blue for run terminals it previously left green — `model_error`, `stop_hook_prevented`, `prompt_too_long`, and the rest — not just the auth/limit family the ruling named. This is forced: a narrower shared classifier would have to weaken the footer's `blocked` arm, which the invariant forbids. Two roster tests that asserted "not vendor_blocked" for an ordinary run failure and a Stop hook were inverted. If the owner wants a narrower "unusable" partition, the footer's `blockFor` default and the roster must be narrowed together in a follow-up. |
+
 ## Permission mode defaults to auto (2026-09-14)
 
 Owner ruling, quoted: "the default permission mode should be auto for the
