@@ -136,8 +136,19 @@ function harness(
     watcherConclusionBudgetMs?: number;
     /** Leave every scripted query's stream standing after `close()`. */
     closeLeavesStreamOpen?: boolean;
-    /** How long StartSession waits for the vendor's own `system:init`. */
+    /** The LAST-RESORT bound on a child that answers nothing at all. */
     initTimeoutMs?: number;
+    /** How long StartSession waits for its one control round-trip to answer. */
+    liveSignalTimeoutMs?: number;
+    /**
+     * HOLD THE PROVEN-LIVE SIGNAL on every scripted query.
+     *
+     * `supportedModels()` is what a start settles on, and a scripted query
+     * answers it in a microtask — so a suite whose subject settles a start
+     * BEFORE the live signal (a blocking hook, an error result, a stream that
+     * ends, the silence bound) never reaches its subject without this.
+     */
+    holdLiveSignal?: boolean;
     /** Refuse to create any query after this many have been created. */
     createQueryFailsFrom?: number;
     /**
@@ -206,6 +217,7 @@ function harness(
       if (options.mcp !== undefined) query.mcp = options.mcp;
       if (options.accountUsage !== undefined) query.accountUsage = options.accountUsage;
       if (options.closeLeavesStreamOpen === true) query.closeLeavesStreamOpen = true;
+      if (options.holdLiveSignal === true) query.holdModels();
       const index = queries.length;
       queries.push({ spec, query });
       options.onQueryCreated?.(query, spec, index);
@@ -225,6 +237,9 @@ function harness(
     nowMs: () => options.nowMs ?? 1_000_100,
     ...(options.withoutScheduler === true ? {} : { scheduler }),
     ...(options.initTimeoutMs === undefined ? {} : { initTimeoutMs: options.initTimeoutMs }),
+    ...(options.liveSignalTimeoutMs === undefined
+      ? {}
+      : { liveSignalTimeoutMs: options.liveSignalTimeoutMs }),
     ...(options.keepaliveIntervalMs === undefined
       ? {}
       : { keepaliveIntervalMs: options.keepaliveIntervalMs }),
@@ -447,32 +462,58 @@ describe("StartSession, fresh", () => {
     expect(h.queries[0]?.spec.model).toBeUndefined();
   });
 
-  it("reports the model the SDK chose as effective_model when none was named", async () => {
+  it("leaves effective_model UNSTATED when none was named and no init has landed", async () => {
+    // THE MODEL IS AN INIT FACT, AND INIT COMES WITH THE FIRST TURN. A start
+    // that named no model has not been told which one took effect, and the
+    // fixed schema draws absence — inventing a name here would put a model in
+    // every surface that nothing has actually chosen.
     const h = harness();
-    const pending = h.engine.startSession(freshRequestNoModel());
-    const first = await untilQuery(h, 0);
-    first.query.emit(
-      initMessage({
-        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
-        model: "claude-sonnet-5",
-      }),
-    );
-    const response = await pending;
+
+    const response = await h.engine.startSession(freshRequestNoModel());
 
     expect(
       response.result.case === "success"
         ? response.result.value.session?.effectiveModel?.name
         : undefined,
-    ).toBe("claude-sonnet-5");
+    ).toBe("");
+  });
+
+  it("pushes the model the SDK chose when the first turn's init names it", async () => {
+    // AND THEN IT IS TOLD. The init that rides the first turn carries the model
+    // the SDK settled on, and it reaches every surface as the same
+    // `model_changed` a mid-session switch does.
+    const h = harness();
+
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "modelChanged" ? update.value.effectiveModel?.name : undefined),
+      async () => {
+        await h.engine.startSession(freshRequestNoModel());
+        h.queries[0]?.query.emit(
+          initMessage({ sessionId: freshSessionId(h.queries[0].spec), model: "claude-sonnet-5" }),
+        );
+        await vi.waitFor(() => {
+          expect(h.queries[0]?.query.calls).toContain("supportedModels");
+        });
+      },
+    );
+
+    expect(seen).toContain("claude-sonnet-5");
   });
 
   it("reports the model catalog from the vendor", async () => {
-    const h = harness();
+    // The catalog is set BEFORE the query is handed over: the start's own
+    // live-signal round-trip reads it, so a suite that set it afterwards would
+    // be asserting against the read that already happened.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.models = [
+          { value: "claude-opus-5", displayName: "Opus 5", description: "the big one", supportsEffort: true, supportedEffortLevels: ["low", "high"] },
+        ];
+      },
+    });
     const pending = h.engine.startSession(freshRequest());
     const first = await untilQuery(h, 0);
-    first.query.models = [
-      { value: "claude-opus-5", displayName: "Opus 5", description: "the big one", supportsEffort: true, supportedEffortLevels: ["low", "high"] },
-    ];
     first.query.emit(
       initMessage({ sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "" }),
     );
@@ -486,10 +527,13 @@ describe("StartSession, fresh", () => {
   });
 
   it("states declared model capabilities and leaves undeclared ones unstated", async () => {
-    const h = harness();
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.models = [{ value: "m", displayName: "M", description: "d" }];
+      },
+    });
     const pending = h.engine.startSession(freshRequest());
     const first = await untilQuery(h, 0);
-    first.query.models = [{ value: "m", displayName: "M", description: "d" }];
     first.query.emit(
       initMessage({ sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "" }),
     );
@@ -720,6 +764,20 @@ describe("StartSession, fresh", () => {
  * both the boot's start and the one a cold-gate answer re-opens with.
  */
 describe("a start REFUSED after the vendor already wrote rows", () => {
+  /**
+   * HOLD THE LIVE SIGNAL ON THE FIRST QUERY ONLY.
+   *
+   * A start settles on one answered control round-trip, so a scripted query
+   * that answers it would settle these starts before the blocking hook could —
+   * and the subject here is what happens AFTER a hook refuses one. The RETRY's
+   * query must still answer, or there is no successful retry to assert.
+   */
+  const holdFirstStart = {
+    onQueryCreated: (query: ScriptedQuery, _spec: QuerySpec, index: number): void => {
+      if (index === 0) query.holdModels();
+    },
+  };
+
   /** A fold that records one row for the very message that blocks the start. */
   function writesOnTheBlockingHook(h: Harness): void {
     h.fold.entriesFor = (message) =>
@@ -735,13 +793,13 @@ describe("a start REFUSED after the vendor already wrote rows", () => {
   }
 
   it("answers the typed refusal instead of throwing the writer's un-naming refusal", async () => {
-    const h = harness();
+    const h = harness(holdFirstStart);
 
     expect(failureCause(await refusedAfterWriting(h))).toBe("vendorStartFailed");
   });
 
   it("KEEPS the writer named, because rows already carry the name", async () => {
-    const h = harness();
+    const h = harness(holdFirstStart);
 
     await refusedAfterWriting(h);
 
@@ -749,7 +807,7 @@ describe("a start REFUSED after the vendor already wrote rows", () => {
   });
 
   it("KEEPS the identity file, because the rows are on the book it names", async () => {
-    const h = harness();
+    const h = harness(holdFirstStart);
 
     await refusedAfterWriting(h);
 
@@ -759,7 +817,7 @@ describe("a start REFUSED after the vendor already wrote rows", () => {
   it("a retry reuses the identity the refused start recorded under", async () => {
     // Minting a second id would key the retry's rows to a book the first
     // attempt's rows are not on, splitting one conversation in two.
-    const h = harness();
+    const h = harness(holdFirstStart);
     await refusedAfterWriting(h);
     const recorded = freshSessionId(h.queries[0].spec);
 
@@ -772,7 +830,7 @@ describe("a start REFUSED after the vendor already wrote rows", () => {
   });
 
   it("the retry succeeds, rather than hitting the re-key guard", async () => {
-    const h = harness();
+    const h = harness(holdFirstStart);
     await refusedAfterWriting(h);
 
     const pending = h.engine.startSession(freshRequest());
@@ -784,7 +842,7 @@ describe("a start REFUSED after the vendor already wrote rows", () => {
 
   it("answers the typed refusal on a RESUME whose hook blocks the opening", async () => {
     // The live case: a resumed workspace, blocked on every boot.
-    const h = harness({ nowMs: 1_000_100 });
+    const h = harness({ nowMs: 1_000_100, ...holdFirstStart });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
     writesOnTheBlockingHook(h);
 
@@ -797,7 +855,7 @@ describe("a start REFUSED after the vendor already wrote rows", () => {
   it("answers the typed refusal on the start a COLD-GATE answer re-opens with", async () => {
     // The second live case: the owner answered the gate with `clear`, and the
     // un-naming refusal came back through AnswerColdGate's transport.
-    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000, ...holdFirstStart });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
     writesOnTheBlockingHook(h);
     const clear = create(conversationv1.SessionColdRemediationSchema, {
@@ -1293,10 +1351,13 @@ describe("SetSessionModel", () => {
   });
 
   it("refuses a model the catalog does not carry", async () => {
-    const h = harness();
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.models = [{ value: "claude-opus-5", displayName: "O", description: "d" }];
+      },
+    });
     const pending = h.engine.startSession(freshRequest());
     const first = await untilQuery(h, 0);
-    first.query.models = [{ value: "claude-opus-5", displayName: "O", description: "d" }];
     first.query.emit(
       initMessage({ sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "" }),
     );
@@ -4253,13 +4314,20 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
    * these arms used to sit out the full 45s before answering — long enough for
    * the daemon's own bound to fire first and blame the shim.
    *
+   * EVERY HARNESS HERE HOLDS THE PROVEN-LIVE SIGNAL. A start now settles on one
+   * answered control round-trip, and a scripted query answers it in a
+   * microtask — so without the hold the start would succeed before any of these
+   * subjects (a stream that ends, an error result, a blocking hook, the
+   * silence bound) could land, and every one of these tests would be asserting
+   * a race rather than the arm it names.
+   *
    * Every bound here is generous ON PURPOSE: a test that passed because the
    * bound fired would prove the opposite of what it claims.
    */
   const AMPLE = 60_000;
 
   it("settles the start when the vendor's stream ENDS before its init", async () => {
-    const h = harness({ initTimeoutMs: AMPLE });
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
 
     (await untilQuery(h, 0)).query.end();
@@ -4268,7 +4336,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   });
 
   it("names the query's end as the reason when the stream ends before the init", async () => {
-    const h = harness({ initTimeoutMs: AMPLE });
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
 
     (await untilQuery(h, 0)).query.end();
@@ -4280,7 +4348,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   });
 
   it("settles the start when the vendor's stream THROWS before its init", async () => {
-    const h = harness({ initTimeoutMs: AMPLE });
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     const first = await untilQuery(h, 0);
 
@@ -4297,7 +4365,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   });
 
   it("settles the start when the vendor answers the opening with an error result", async () => {
-    const h = harness({ initTimeoutMs: AMPLE });
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
 
     (await untilQuery(h, 0)).query.emit(errorResultMessage());
@@ -4309,7 +4377,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
     // THE VENDOR'S WORDS, NOT THE SHIM'S. "No conversation found with session
     // ID ..." is an answer a reader can act on; "did not send its init message"
     // is not.
-    const h = harness({ initTimeoutMs: AMPLE });
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
 
     (await untilQuery(h, 0)).query.emit(
@@ -4325,11 +4393,14 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   it("leaves a SUCCESSFUL result before the init to the turn engine", async () => {
     // Only an ERROR result ends an opening. A success-shaped result is an
     // ordinary terminal and must not refuse a session that then opens fine.
-    const h = harness({ initTimeoutMs: AMPLE });
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     const first = await untilQuery(h, 0);
     first.query.emit(resultMessage());
     first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
+    // The opening still wants its catalog, which the hold was keeping back so
+    // the result could land first.
+    first.query.releaseModels();
 
     expect((await pending).result.case).toBe("success");
   });
@@ -4337,7 +4408,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   it("carries the vendor child's stderr into a start that timed out on silence", async () => {
     // THE BOUND STILL FIRES FOR TRUE SILENCE, and when the child explained
     // itself on stderr the refusal says so rather than reporting the quiet.
-    const h = harness({ initTimeoutMs: 5 });
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).spec.onStderr?.("Error: the resume handle is not recognized");
 
@@ -4350,7 +4421,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   it("closes the vendor query a failed start had opened", async () => {
     // NO ORPHANED CHILD. The retry must be the only writer on the
     // conversation; the failed attempt's query is not left running beside it.
-    const h = harness({ initTimeoutMs: 5 });
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
 
     await h.engine.startSession(freshRequest());
 
@@ -4360,7 +4431,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   it("raises no query_died fault for the query a failed start closed", async () => {
     // A RELEASED QUERY'S END IS NOT THE SESSION'S DEATH. Reporting one left a
     // shim that had merely refused a start carrying a permanent vendor fault.
-    const h = harness({ initTimeoutMs: 5 });
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pushed: string[] = [];
     const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
     const reading = (async () => {
@@ -4382,7 +4453,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   it("records what the vendor DID emit before the start failed", async () => {
     // THE NEXT OCCURRENCE EXPLAINS ITSELF. The grounded failure's only evidence
     // was a store frame decoded by hand, because nothing logged the kinds.
-    const h = harness({ initTimeoutMs: 5 });
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const before = logCursor();
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "success", output: "" }));
@@ -4397,7 +4468,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
     // A SILENT START IS DIAGNOSED FROM THE SHIM'S SIDE OR NOT AT ALL. Which
     // account root and which trust key govern this directory is half of that,
     // and it was on neither side's record.
-    const h = harness({ initTimeoutMs: 5 });
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const before = logCursor();
 
     await h.engine.startSession(freshRequest());
@@ -4407,19 +4478,18 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
     );
   });
 
-  it("names the vendor's init-on-first-turn behavior when only hook events arrived", async () => {
-    // THE GROUNDED SILENCE HAS A CAUSE, AND THE REFUSAL SHOULD SAY IT. Driven
-    // as this shim drives it, the vendor answers control requests at once and
-    // emits `system:init` only when a first turn reaches it, so "hook events
-    // then nothing" is the shape of a start that can never settle rather than
-    // of a slow one.
-    const h = harness({ initTimeoutMs: 5 });
+  it("names the control round-trip the start settles on when only hook events arrived", async () => {
+    // THE GROUNDED SILENCE HAS A CAUSE, AND THE REFUSAL SHOULD SAY IT. The
+    // start settles on one control round-trip, so "hook events then nothing,
+    // and no control answer either" is the shape of a child that is not
+    // serving at all rather than of a slow one.
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "success", output: "" }));
 
     const response = await pending;
     expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
-      "This vendor announces `system:init` only once a first turn reaches it",
+      "The start settles on one control round-trip, so a child this quiet is not serving its control channel at all",
     );
   });
 
@@ -4427,7 +4497,7 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
     // THE COMPANION FAULT. An untrusted workspace does not hang, but it runs
     // with its permission allowlists dropped and says so only on a stderr line
     // nobody reads, so the one refusal a reader does see names the key.
-    const h = harness({ initTimeoutMs: 5 });
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "success", output: "" }));
 
@@ -4441,43 +4511,44 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
     // A VENDOR THAT WAS TALKING HAS A MORE SPECIFIC STORY. The init-on-first-
     // turn reading would talk over it, so it is claimed only for the shape it
     // was grounded on.
-    const h = harness({ initTimeoutMs: 5 });
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).query.emit(assistantMessage("uuid-pre-init"));
 
     const response = await pending;
     expect(response.result.case === "failure" ? response.result.value.detail : "").toBe(
-      "the vendor did not send its init message within 5ms",
+      "the vendor neither answered a control request nor said anything within 5ms",
     );
   });
 });
 
 describe("StartSession's remaining refusals", () => {
-  it("refuses vendor_start_failed when the vendor never sends its init", async () => {
-    // The init is the only thing StartSession waits for; without a bound a
-    // silent vendor would hold the verb open forever.
-    const h = harness({ initTimeoutMs: 5 });
+  it("refuses vendor_start_failed when the vendor answers nothing at all", async () => {
+    // A CHILD THAT ANSWERS NEITHER ITS CONTROL CHANNEL NOR ITS STREAM. Without
+    // a last-resort bound it would hold the verb open forever.
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: 60_000, holdLiveSignal: true });
 
     expect(failureCause(await h.engine.startSession(freshRequest()))).toBe("vendorStartFailed");
   });
 
-  it("names the bound it waited out when the vendor never sends its init", async () => {
+  it("names the bound it waited out when the vendor answers nothing at all", async () => {
     // A HANG THAT ANSWERS SAYS WHY. The daemon relays this detail verbatim, so
     // the bound that fired has to be in it.
-    const h = harness({ initTimeoutMs: 5 });
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: 60_000, holdLiveSignal: true });
 
     const response = await h.engine.startSession(freshRequest());
 
     expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
-      "did not send its init message within 5ms",
+      "neither answered a control request nor said anything within 5ms",
     );
   });
 
   it("refuses at once when a hook blocks before the vendor's init", async () => {
     // THE GROUNDED CASE: a blocking `SessionStart:resume` hook, after which the
     // vendor says nothing more. Waiting out a bound for a refusal already in
-    // hand is what left every boot bring-up hanging.
-    const h = harness();
+    // hand is what left every boot bring-up hanging. The live signal is HELD so
+    // the hook is what settles this start rather than a race with it.
+    const h = harness({ holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
 
@@ -4485,7 +4556,7 @@ describe("StartSession's remaining refusals", () => {
   });
 
   it("names the hook and its own reason when a hook blocks before the init", async () => {
-    const h = harness();
+    const h = harness({ holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
 
@@ -4549,17 +4620,76 @@ describe("StartSession's remaining refusals", () => {
     expect((await pending).result.case).toBe("success");
   });
 
-  it("reports a supportedModels failure as a session fault rather than failing the start", async () => {
+  it("REFUSES the start when the vendor will not answer supportedModels", async () => {
+    // THAT CALL IS THE START'S PROOF OF LIFE. A child that refuses it has not
+    // shown it can take work, so the opening is a refusal that names the
+    // vendor's own reason rather than a session with an empty picker.
     const h = harness({
       onQueryCreated: (query) => {
         query.supportedModels = () => Promise.reject(new Error("the vendor cannot list its models"));
       },
     });
+
+    const response = await h.engine.startSession(freshRequest());
+
+    expect(failureCause(response)).toBe("vendorStartFailed");
+  });
+
+  it("names the vendor's own reason when the live signal is refused", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = () => Promise.reject(new Error("the vendor cannot list its models"));
+      },
+    });
+
+    const response = await h.engine.startSession(freshRequest());
+
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      "the vendor did not prove itself live: the vendor cannot list its models",
+    );
+  });
+
+  it("names the round-trip's bound when the vendor never answers supportedModels", async () => {
+    // A BOUND THAT FIRES SAYS WHICH CALL AND HOW LONG. The daemon relays this
+    // detail verbatim, and "the start failed" tells a reader nothing.
+    const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+
+    const response = await h.engine.startSession(freshRequest());
+
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
+      "the vendor did not answer supportedModels within 5ms",
+    );
+  });
+
+  it("reports a supportedModels failure AFTER the start as a session fault", async () => {
+    // ONCE THE START HAS SETTLED the catalog is an ordinary pulled fact again:
+    // a read that fails raises the catalog's own component fault, which a
+    // later read can lift, and takes nothing else down with it.
+    let reads = 0;
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = async (): Promise<ModelInfoLike[]> => {
+          reads += 1;
+          if (reads === 1) return query.models;
+          throw new Error("the vendor cannot list its models");
+        };
+      },
+    });
+    await started(h);
     const before = h.engine.pushes.faultCount;
 
-    await started(h);
-
-    expect(h.engine.pushes.faultCount).toBeGreaterThan(before);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+    await vi.waitFor(() => {
+      expect(h.engine.pushes.faultCount).toBeGreaterThan(before);
+    });
   });
 });
 
@@ -5323,14 +5453,37 @@ describe("a vendor failure that is not an Error", () => {
   });
 
   it("carries a bare-string supportedModels rejection into the fault", async () => {
+    // THE SECOND READ, not the first: the first IS the start's live signal, and
+    // a bare-string rejection there is carried by the START's refusal instead
+    // (its own test). This is the pulled-fact path, where the same string has
+    // to reach the fault whole.
+    let reads = 0;
     const h = harness({
       onQueryCreated: (query) => {
-        query.supportedModels = () => Promise.reject("the catalog endpoint went away");
+        query.supportedModels = async (): Promise<ModelInfoLike[]> => {
+          reads += 1;
+          if (reads === 1) return query.models;
+          throw "the catalog endpoint went away";
+        };
       },
     });
+    await started(h);
 
     const details = await faultDetailsWhile(h, async () => {
-      await started(h);
+      await h.engine.startTurn(
+        create(shimv1.StartTurnRequestSchema, {
+          turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+          said: textSaid("go"),
+          origin: conversationv1.PromptOrigin.USER_SENT,
+          pageSize: 5,
+        }),
+      );
+      h.queries[0]?.query.emit(resultMessage());
+      // The re-probe rides the turn's end asynchronously; the collector must
+      // still be reading when its fault lands.
+      await vi.waitFor(() => {
+        expect(reads).toBe(2);
+      });
     });
 
     expect(details).toContain("supportedModels failed: the catalog endpoint went away");
@@ -6732,21 +6885,26 @@ describe("a component that recovers", () => {
 
   it("clears the model catalog's fault when the next read answers", async () => {
     // Arrange.
+    // The FIRST read is the start's own live signal, which has to answer or
+    // there is no session to fault; the fault under test is the read after it.
     let reads = 0;
     const h = harness({
       onQueryCreated: (query) => {
         query.supportedModels = async (): Promise<ModelInfoLike[]> => {
           reads += 1;
-          if (reads === 1) throw new Error("the vendor is busy");
+          if (reads === 2) throw new Error("the vendor is busy");
           return query.models;
         };
       },
     });
     await started(h);
-    expect(faultyComponents(h)).toContain("vendor-model-catalog");
+    await closeATurn(h, "turn-1");
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).toContain("vendor-model-catalog");
+    });
 
     // Act.
-    await closeATurn(h, "turn-1");
+    await closeATurn(h, "turn-2");
 
     // Assert.
     await vi.waitFor(() => {
