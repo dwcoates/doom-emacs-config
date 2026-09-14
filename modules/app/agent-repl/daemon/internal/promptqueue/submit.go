@@ -36,6 +36,19 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		return disposition, err
 	}
 
+	// A COLD GATE IS ITS OWN REFUSAL, AND IT IS DECIDED BEFORE THE SESSION IS
+	// LOOKED FOR. A parked workspace HAS a shim and has no watcher, so read
+	// through the session lookup it answered `no_session` — a sentence about a
+	// session that was up and serving, which sent three prompts to the wrong
+	// explanation on 2026-09-14. The gate is the fact; it is named as the fact.
+	if q.deps.ColdGate != nil {
+		if detail, gated := q.deps.ColdGate(sub.WS); gated {
+			log.Info(opSubmit, "the session is parked at its cold gate, so the submission is refused by the gate's own name",
+				dlog.Context{"detail": detail})
+			return Disposition{}, &ColdGateRefusal{Detail: detail}
+		}
+	}
+
 	sender, ok := q.deps.Client(sub.WS)
 	if !ok {
 		// A HIBERNATED SESSION IS IDLE, NOT DEAD. The prompt is its revival,

@@ -548,7 +548,14 @@ Fixed treatments per arm, never a composed sentence: the resolved arm IS
 the gate.  Every other arm sends -- `:merge-parked' with the badge below,
 and `:open', `:no-session', `:terminal' and `:unknown' plainly, because
 SubmitPrompt has no precondition and the daemon starts or revives the
-session implicitly.")
+session implicitly -- EXCEPT when that session is parked at its COLD
+GATE.  A cold gate is a precondition SubmitPrompt does not satisfy: the
+shim is up and serving, and it takes no prompt until the user answers the
+gate in the panel (clear / compact / resume).  The daemon refuses such a
+submission with `SubmitPromptError''s own `cold_gate' arm, which
+`agent-repl--input-on-error' draws; the gate still SENDS rather than
+guessing, because the daemon is the authority on that standing and
+answers by name.")
 
 (defconst agent-repl--input-merge-parked-badge
   "merge parked -- prompts go to the resolution agent"
@@ -737,6 +744,21 @@ recorded at ERROR rather than drawn as a plain refusal."
       (message "agent-repl: refused -- %s%s" label
                (if (string-empty-p detail) "" (format " (%s)" detail))))))
 
+(defconst agent-repl--input-cold-gate-flash
+  "cold gate: answer it in the panel (clear / compact / resume)"
+  "The composer flash for `SubmitPromptError''s `cold_gate' arm.
+A SESSION EXISTS -- the shim is up, which is exactly why the gate could
+be raised -- and it takes no prompt until the gate is answered, which
+happens in the panel and nowhere else.  So the sentence names the place
+the answer is given rather than reporting a broken session.")
+
+(defconst agent-repl--input-no-session-flash
+  "no session; the daemon is starting it"
+  "The composer flash for `SubmitPromptError''s `no_session' arm.
+A workspace with NO SESSION AT ALL, which is the daemon's own to bring
+up.  Nothing is owed by the user and nothing is owed by this composer, so
+the sentence states the fact and the prompt is neither held nor lost.")
+
 (defun agent-repl--input-on-error (ws said origin raw error key)
   "Handle a `SubmitPromptError' for WS.  The composer KEEPS its text.
 ERROR is the decoded error message.  Its `merging' arm means the prompt
@@ -746,7 +768,11 @@ and are routed to host.el.  Its `duplicate_submission' arm says the key
 was already accepted, so the earlier submission stands and nothing is
 resent.  Its `bubble_refused' arm is the SHIM's refusal of a
 bubble-addressed prompt, relayed by kind and drawn to the user without
-being queued.  Every other arm is a refusal this composer
+being queued.  Its `cold_gate' arm says a session EXISTS and is parked on
+the user's remediation choice, and its `no_session' arm says there is no
+session at all; both are answered elsewhere -- the panel and the daemon's
+own bring-up -- so both are drawn and neither is queued.  Every other arm
+is a refusal this composer
 has no treatment for: it is recorded at ERROR naming the arm and drawn to
 the user, and the text stays where it is.
 
@@ -769,6 +795,30 @@ refusal can re-drive the very prompt that was refused."
                          ws origin arm key)
        (agent-repl--input-flash ws "already submitted")
        (message "agent-repl: this submission's key was already accepted; the earlier submission stands"))
+      (:cold-gate
+       ;; The session is PARKED AT ITS COLD GATE.  It exists and is
+       ;; serving; it simply takes no prompt until the user answers the
+       ;; gate in the panel, so this is an ANSWER about a standing the
+       ;; user resolves, not a fault and not an outage: it is recorded at
+       ;; WARN, the prompt is NOT queued (a re-drive would meet the same
+       ;; gate), and the text stays where it is.  The gate's own `detail'
+       ;; -- the same sentence the gate card and the footer carry -- is
+       ;; echoed verbatim; it is never switched on.
+       (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
+         (agent-repl--warn ws "elisp.input.refused-cold-gate ws=%s origin=%S arm=%S detail=%s"
+                           ws origin arm detail)
+         (agent-repl--input-flash ws agent-repl--input-cold-gate-flash)
+         (message "agent-repl: %s%s" agent-repl--input-cold-gate-flash
+                  (if (string-empty-p detail) "" (format " (%s)" detail)))))
+      (:no-session
+       ;; The workspace has NO SESSION AT ALL, which is the daemon's own
+       ;; to bring up.  Like the cold gate this is an answer rather than a
+       ;; transport failure, so it is recorded at WARN and the prompt is
+       ;; not queued; the text stays so the user can resubmit once the
+       ;; session is up.
+       (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S" ws origin arm)
+       (agent-repl--input-flash ws agent-repl--input-no-session-flash)
+       (message "agent-repl: %s" agent-repl--input-no-session-flash))
       (:bubble-refused
        ;; The SHIM refused a bubble-addressed prompt and the daemon relayed
        ;; the refusal BY KIND.  Both kinds are the same answer to the user

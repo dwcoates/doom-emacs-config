@@ -166,7 +166,27 @@ message SubmitPromptError {
     // relays that refusal by kind — the daemon never judges a subagent's
     // turn itself (why tag 8 retired). (Landing 7, 2026-09-02.)
     SubmitPromptBubbleRefused bubble_refused = 11;
+    // The workspace's session is PARKED AT ITS COLD GATE. A session EXISTS
+    // — the shim is up and serving, which is exactly why the gate could be
+    // raised — and it takes no prompt until the gate is answered. It is a
+    // different answer from `no_session`, which is a workspace with no
+    // session at all, and the two are acted on differently: a cold gate is
+    // answered in the panel (clear / compact / resume), while a missing
+    // session is the daemon's own to bring up. Before this arm existed the
+    // gate answered `no_session` and every client said the wrong thing
+    // about a session that was up (owner's report, 2026-09-14).
+    SubmitPromptColdGate cold_gate = 12;
   }
+}
+
+// The cold-gate refusal: the session is parked on the user's remediation
+// choice and nothing may be submitted to it until the gate is answered.
+message SubmitPromptColdGate {
+  // THE GATE'S OWN ACCOUNT of what was refused cold, verbatim — the same
+  // sentence the gate card and the footer's `cold_gate_cost` line carry, so
+  // a client with no feed open still tells the user WHY, in the words the
+  // rest of the surfaces use. Never switched on.
+  string detail = 1;
 }
 
 // The shim's refusal of a bubble-addressed prompt, relayed. ONE arm, the

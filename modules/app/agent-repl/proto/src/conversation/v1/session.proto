@@ -216,7 +216,47 @@ message SessionUpdate {
     // draws it in place of the workspace name whenever the vendor has stated
     // one (owner ruling, 2026-09-13: THE TITLE IS THE WORKSPACE SUMMARY).
     SessionTitle title = 29;
+    // A COMPACTION'S PHASE, as it happens. The shim states one of these at
+    // every edge of a compaction it runs — the cold gate's `compact`
+    // remediation included, which runs INSIDE StartSession and so has no
+    // turn of its own to narrate through. A consumer that draws progress
+    // draws this; nothing else states it. Additive, 2026-09-14: before it
+    // the cold gate's compaction ran for a minute with nothing anywhere
+    // saying so.
+    SessionCompactionProgress compaction_progress = 30;
   }
+}
+
+// WHERE A COMPACTION HAS GOT TO. The phases are the edges the shim can
+// actually observe, in order; a consumer draws the last one stated.
+enum SessionCompactionPhase {
+  // Never sent; an unset phase is a malformed frame.
+  SESSION_COMPACTION_PHASE_UNSPECIFIED = 0;
+  // The summarizing turn was started against the conversation.
+  SESSION_COMPACTION_PHASE_SUMMARIZING = 1;
+  // The summary came back and the boundary was appended to the transcript:
+  // the context is cut from here on.
+  SESSION_COMPACTION_PHASE_SUMMARIZED = 2;
+  // The session is being resumed from the summary.
+  SESSION_COMPACTION_PHASE_RESUMING = 3;
+  // The resumed session is up.
+  SESSION_COMPACTION_PHASE_STARTED = 4;
+  // The compaction did not complete; `error` says why.
+  SESSION_COMPACTION_PHASE_FAILED = 5;
+}
+
+// One phase of one compaction, with whatever figures that phase knows.
+message SessionCompactionProgress {
+  // Which phase. REQUIRED.
+  SessionCompactionPhase phase = 1;
+  // Context tokens the conversation held BEFORE the compaction, as the
+  // transcript stated them. Zero means not known at this phase.
+  uint64 tokens_before = 2;
+  // Context tokens it holds AFTER it. Zero means not known yet — only the
+  // phases at or after `summarized` can state it.
+  uint64 tokens_after = 3;
+  // Why a `failed` phase failed, verbatim. Empty on every other phase.
+  string error = 4;
 }
 
 // The vendor's summary of the conversation, verbatim.

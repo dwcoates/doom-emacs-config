@@ -732,6 +732,10 @@ type fakeFooter struct {
 	dirs map[ids.WorkspaceID]string
 	// parked records every park state the verbs installed or lifted, in order.
 	parked []bool
+	// coldAnswers is every cold-gate answer state the footer was handed, in
+	// order, the clearing nil included: the ORDER is the assertion, because
+	// the act has to reach the strip before the shim is dialed.
+	coldAnswers []*footer.ColdGateAnswer
 }
 
 func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
@@ -754,6 +758,22 @@ func (f *fakeFooter) SetClosing(ws ids.WorkspaceID, blocked *footer.CloseBlocked
 
 func (f *fakeFooter) SetColdGate(ws ids.WorkspaceID, gate footer.ColdGate) {
 	f.coldGates[ws] = gate
+}
+
+func (f *fakeFooter) SetColdGateAnswer(_ ids.WorkspaceID, answer *footer.ColdGateAnswer) {
+	f.coldAnswers = append(f.coldAnswers, answer)
+}
+
+// coldAnswerLines is every non-clearing line the footer was handed, in order.
+func (f *fakeFooter) coldAnswerLines() []string {
+	out := []string{}
+	for _, answer := range f.coldAnswers {
+		if answer == nil {
+			continue
+		}
+		out = append(out, answer.Text)
+	}
+	return out
 }
 
 func (f *fakeFooter) SetInterrupting(ws ids.WorkspaceID, on bool) {
@@ -830,6 +850,12 @@ type fakeSessions struct {
 	// is the refusal it answers with instead.
 	resumes   []ColdResume
 	resumeErr error
+	// resumePhases are the compaction phases this fake relays back through
+	// ColdResume.OnPhase, in order, standing in for the shim's own stream.
+	resumePhases []*conversationv1.SessionCompactionProgress
+	// observeResume runs at the TOP of ResumeCold, before anything else, so a
+	// test can read the surfaces as they stood when the shim was dialed.
+	observeResume func()
 	// detachEntered is closed when a detached start begins and detachHold is
 	// what it then waits on, for the one test whose subject is that the caller
 	// does NOT wait. A nil detachHold runs the start inline.
@@ -892,10 +918,20 @@ func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) e
 func (s *fakeSessions) Live(ws ids.WorkspaceID) bool { return s.live[ws] }
 
 func (s *fakeSessions) ResumeCold(_ context.Context, ws ids.WorkspaceID, resume ColdResume) error {
+	// The observer runs BEFORE anything else this fake does, which is what
+	// lets a test read the footer exactly as the shim would first be dialed.
+	if s.observeResume != nil {
+		s.observeResume()
+	}
 	if s.resumeErr != nil {
 		return s.resumeErr
 	}
 	s.resumes = append(s.resumes, resume)
+	for _, phase := range s.resumePhases {
+		if resume.OnPhase != nil {
+			resume.OnPhase(phase)
+		}
+	}
 	s.live[ws] = true
 	return nil
 }

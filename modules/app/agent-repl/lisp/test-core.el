@@ -377,6 +377,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "agent-repl: this submission's key was already accepted; the earlier submission stands"
      "reports idempotent acceptance to the submitting user")
     ("input.el" agent-repl--input-on-error
+     "agent-repl: %s%s"
+     "tells the user their prompt met the cold gate and where to answer it")
+    ("input.el" agent-repl--input-on-error
+     "agent-repl: %s"
+     "tells the user the workspace has no session yet and the daemon is starting one")
+    ("input.el" agent-repl--input-on-error
      "agent-repl: submission refused (%S)"
      "reports why the user's prompt was not accepted")
     ("input.el" agent-repl--input-on-failure

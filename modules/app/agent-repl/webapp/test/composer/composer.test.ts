@@ -97,6 +97,14 @@ const bubbleRefusal =
       },
     } as never);
 
+/** A cold-gate refusal carrying the gate's own DETAIL. */
+const coldGateRefusal =
+  (detail: string) =>
+  (): SubmitPromptResponse =>
+    create(SubmitPromptResponseSchema, {
+      result: { case: "error", value: { reason: { case: "coldGate", value: { detail } } } },
+    } as never);
+
 /** A bubble refusal whose `kind` oneof sets no arm. */
 const bubbleRefusalUnsetKind = (): SubmitPromptResponse =>
   create(SubmitPromptResponseSchema, {
@@ -490,6 +498,57 @@ describe("the refusals", () => {
 
   it("keeps the words in the box through a duplicate-submission refusal", async () => {
     const h = mount(refusalError("duplicateSubmission"));
+    await sendText(h, "hello");
+    expect(h.input.value).toBe("hello");
+    h.handle.dispose();
+  });
+
+  // GROUNDED 2026-09-14 (owner's report): three prompts to a workspace parked
+  // at its cold gate were refused `no_session` against a session that was up,
+  // and the composer said the workspace had no session to prompt.
+  it("tells a cold-gated submitter the session is parked at its gate", async () => {
+    const h = mount(coldGateRefusal(""));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain(
+      "parked at its cold gate",
+    );
+    h.handle.dispose();
+  });
+
+  it("sends a cold-gated submitter to the panel the gate is answered in", async () => {
+    const h = mount(coldGateRefusal(""));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain(
+      "answer it in the panel",
+    );
+    h.handle.dispose();
+  });
+
+  it("draws the gate's own account after the stem when the refusal carries one", async () => {
+    const h = mount(coldGateRefusal("182k tokens would be re-read"));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain(
+      "(182k tokens would be re-read)",
+    );
+    h.handle.dispose();
+  });
+
+  it("draws no empty parenthetical when the cold gate carries no detail", async () => {
+    const h = mount(coldGateRefusal(""));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).not.toContain("(");
+    h.handle.dispose();
+  });
+
+  it("labels the cold-gate refusal with its own arm, not noSession", async () => {
+    const h = mount(coldGateRefusal(""));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.getAttribute("data-arm")).toBe("coldGate");
+    h.handle.dispose();
+  });
+
+  it("keeps the words in the box through a cold-gate refusal", async () => {
+    const h = mount(coldGateRefusal(""));
     await sendText(h, "hello");
     expect(h.input.value).toBe("hello");
     h.handle.dispose();

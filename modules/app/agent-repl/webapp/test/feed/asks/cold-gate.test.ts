@@ -26,6 +26,10 @@ import {
   scopeLabel,
   scopeName,
 } from "../../../src/feed/asks/cold-gate.js";
+import {
+  publishCompactionProgress,
+  resetCompactionProgress,
+} from "../../../src/footer/progress.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 
@@ -86,7 +90,13 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  resetCompactionProgress();
 });
+
+/** The gate's progress slot, as the card built it. */
+function progressSlot(el: HTMLElement): HTMLElement | null {
+  return el.querySelector<HTMLElement>("[data-cold-gate-progress]");
+}
 
 describe("scopeName", () => {
   const cases = [
@@ -305,6 +315,102 @@ describe("answering the gate", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
     expect([...el.querySelectorAll("button")].every((b) => b.disabled)).toBe(true);
+  });
+
+  // GROUNDED 2026-09-14 (owner's report): "compact and resume" ran a ~60s
+  // compaction with the buttons inert and NOTHING anywhere saying so. The
+  // daemon composes the phase line on the footer's own stream; the card draws
+  // it while it waits, and draws nothing of its own.
+  it("draws the daemon's compaction line while the answer is in flight", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    publishCompactionProgress("compacting · summarizing 412 messages");
+    // Act
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    // Assert
+    expect(progressSlot(el)?.textContent).toBe("compacting · summarizing 412 messages");
+  });
+
+  it("redraws the slot as the daemon pushes the next phase", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    // Act
+    publishCompactionProgress("compacting · writing the summary");
+    // Assert
+    expect(progressSlot(el)?.textContent).toBe("compacting · writing the summary");
+  });
+
+  it("draws exactly the sentence the footer carried, composing none of its own", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Act
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    publishCompactionProgress("anything at all");
+    // Assert: the whole slot IS the daemon's string — no stem, no suffix.
+    expect(progressSlot(el)?.textContent).toBe("anything at all");
+  });
+
+  it("shows nothing while the footer carries no compaction line", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Act
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    // Assert
+    expect(progressSlot(el)?.textContent).toBe("");
+  });
+
+  it("keeps the slot out of the card while there is nothing to say", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Act
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    // Assert
+    expect(progressSlot(el)?.hidden).toBe(true);
+  });
+
+  it("reveals the slot the moment the daemon has a phase to report", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    // Act
+    publishCompactionProgress("compacting · reading the transcript");
+    // Assert
+    expect(progressSlot(el)?.hidden).toBe(false);
+  });
+
+  it("clears the slot once the answer resolves", async () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    publishCompactionProgress("compacting · summarizing 412 messages");
+    // Act
+    await settle();
+    // Assert
+    expect(progressSlot(el)?.textContent).toBe("");
+  });
+
+  it("stops following the footer once the answer resolved", async () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    await settle();
+    // Act
+    publishCompactionProgress("compacting · a LATER compaction entirely");
+    // Assert
+    expect(progressSlot(el)?.textContent).toBe("");
+  });
+
+  it("clears the slot when the answer was refused", async () => {
+    // Arrange
+    const h = askHarness({ fail: true });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    publishCompactionProgress("compacting · summarizing 412 messages");
+    // Act
+    await settle();
+    // Assert
+    expect(progressSlot(el)?.textContent).toBe("");
   });
 
   it("draws nothing on success — the resolved trace is the row's re-push", async () => {

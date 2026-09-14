@@ -5084,6 +5084,190 @@ describe("the cold gate's COMPACT remediation", () => {
       response.result.case === "failure" ? response.result.value.detail : undefined,
     ).toBe("the vendor refused another query");
   });
+
+  /** A `pay` remediation: the caller elects to pay for the cold read. */
+  const payRemediation = (): conversationv1.SessionColdRemediation =>
+    create(conversationv1.SessionColdRemediationSchema, {
+      remediation: { case: "pay", value: create(conversationv1.SessionColdPaySchema, {}) },
+    });
+
+  /**
+   * Watch every `compaction_progress` frame the engine pushes, IN ORDER, and
+   * interleave it with whatever else the caller records in `timeline`.
+   *
+   * The fan-out's own subscriber is an async iterator, so a frame it delivers
+   * cannot be ordered against a synchronous event like "the summarizing query
+   * was created". The push itself can: it happens on the engine's own stack.
+   */
+  function watchPhases(
+    h: Harness,
+    timeline: string[],
+  ): { frames: conversationv1.SessionCompactionProgress[] } {
+    const frames: conversationv1.SessionCompactionProgress[] = [];
+    const real = h.engine.pushes.push.bind(h.engine.pushes);
+    vi.spyOn(h.engine.pushes, "push").mockImplementation((update) => {
+      if (update.update.case === "compactionProgress") {
+        frames.push(update.update.value);
+        timeline.push(conversationv1.SessionCompactionPhase[update.update.value.phase]);
+      }
+      return real(update);
+    });
+    return { frames };
+  }
+
+  /**
+   * A cold resume, driven to its own answer.
+   *
+   * `queryIndex` is which created query is the REAL session's: a `compact`
+   * answer spends query 0 on the throwaway summarizer, a `pay` answer spends
+   * none, so the session's own query is the next one either way.
+   */
+  async function coldResume(
+    h: Harness,
+    remediation: conversationv1.SessionColdRemediation,
+    queryIndex: number,
+  ): Promise<shimv1.StartSessionResponse> {
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1", remediation));
+    (await untilQuery(h, queryIndex)).query.emit(initMessage({ sessionId: "resume-1" }));
+    return pending;
+  }
+
+  /** The same, for the `compact` answer this suite is about. */
+  const compactedResume = (h: Harness): Promise<shimv1.StartSessionResponse> =>
+    coldResume(h, compactRemediation(), 1);
+
+  /** A harness whose throwaway summarizing query answers with a summary. */
+  const summarizing = (timeline?: string[]): Harness =>
+    harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index !== 0) return;
+        timeline?.push("summarizing-query");
+        query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
+      },
+    });
+
+  it("pushes SUMMARIZING before the summarizing query is created", async () => {
+    // Arrange: the compaction happens inside StartSession, so the frame that
+    // says it started must precede the query that does the work — otherwise
+    // the opening of the wait is unnarrated.
+    const timeline: string[] = [];
+    const h = summarizing(timeline);
+    watchPhases(h, timeline);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    expect(timeline.slice(0, 2)).toEqual(["SUMMARIZING", "summarizing-query"]);
+  });
+
+  it("carries the transcript's own before figure on the SUMMARIZED frame", async () => {
+    // Arrange
+    const timeline: string[] = [];
+    const h = summarizing();
+    const watched = watchPhases(h, timeline);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    const summarized = watched.frames.find(
+      (frame) => frame.phase === conversationv1.SessionCompactionPhase.SUMMARIZED,
+    );
+    expect(summarized?.tokensBefore).toBe(BigInt(FIXTURE_CONTEXT_TOKENS));
+  });
+
+  it("carries the summary's own output tokens as the SUMMARIZED after figure", async () => {
+    // Arrange: what remains in context after the cut IS the summary, so its
+    // output tokens are the only honest "after" figure the shim holds.
+    const timeline: string[] = [];
+    const h = summarizing();
+    const watched = watchPhases(h, timeline);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    const summarized = watched.frames.find(
+      (frame) => frame.phase === conversationv1.SessionCompactionPhase.SUMMARIZED,
+    );
+    expect(summarized?.tokensAfter).toBe(BigInt(2));
+  });
+
+  it("pushes FAILED carrying the failure's own wording", async () => {
+    // Arrange
+    const timeline: string[] = [];
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index !== 0) return;
+        query.emit({
+          ...(resultMessage("88888888-8888-4888-8888-888888888888") as unknown as Record<string, unknown>),
+          subtype: "error_max_turns",
+        } as never);
+      },
+    });
+    const watched = watchPhases(h, timeline);
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    // Assert
+    const failed = watched.frames.find(
+      (frame) => frame.phase === conversationv1.SessionCompactionPhase.FAILED,
+    );
+    expect(failed?.error).toBe("the summarizing session ended as error_max_turns");
+  });
+
+  it("pushes RESUMING then STARTED, in that order, once the compaction landed", async () => {
+    // Arrange
+    const timeline: string[] = [];
+    const h = summarizing();
+    watchPhases(h, timeline);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    expect(timeline).toEqual(["SUMMARIZING", "SUMMARIZED", "RESUMING", "STARTED"]);
+  });
+
+  it("restates the compaction's figures on the STARTED frame", async () => {
+    // Arrange: `started` is pushed from StartSession, which never read the
+    // transcript's size — it restates what the compaction measured.
+    const timeline: string[] = [];
+    const h = summarizing();
+    const watched = watchPhases(h, timeline);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    const started_ = watched.frames.find(
+      (frame) => frame.phase === conversationv1.SessionCompactionPhase.STARTED,
+    );
+    expect([started_?.tokensBefore, started_?.tokensAfter]).toEqual([
+      BigInt(FIXTURE_CONTEXT_TOKENS),
+      BigInt(2),
+    ]);
+  });
+
+  it("pushes no compaction phase for a gate answered with PAY", async () => {
+    // Arrange: `pay` cuts nothing, so a progress frame would narrate a
+    // compaction that never happened.
+    const timeline: string[] = [];
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    watchPhases(h, timeline);
+
+    // Act
+    await coldResume(h, payRemediation(), 0);
+
+    // Assert
+    expect(timeline).toEqual([]);
+  });
 });
 
 describe("reconciliation when the record cannot describe the work", () => {

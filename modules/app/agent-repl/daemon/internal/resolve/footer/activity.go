@@ -175,6 +175,18 @@ func (r *resolver) thinkingActivity(s *wsState) *frontendv1.FooterStatusThinking
 			Kind: &frontendv1.FooterStatusThinkingActivity_Notification{Notification: line},
 		}
 	}
+	if s.compaction != nil {
+		// A COMPACTION OUTRANKS THE REST OF THE THINKING LINES. Whichever
+		// producer is compacting — the vendor, or a cold gate's answered
+		// remediation — the progress of the act in flight is the one thing the
+		// reader is waiting on, and the hook/retry/injection lines belong to a
+		// turn that is not running (owner ruling, 2026-09-14).
+		return &frontendv1.FooterStatusThinkingActivity{
+			At: stamp(s.compaction.at),
+			Kind: &frontendv1.FooterStatusThinkingActivity_Compaction{
+				Compaction: &frontendv1.FooterStatusActivityCompaction{Text: s.compaction.text}},
+		}
+	}
 	if s.hook != nil {
 		return &frontendv1.FooterStatusThinkingActivity{
 			At: stamp(s.hook.at),

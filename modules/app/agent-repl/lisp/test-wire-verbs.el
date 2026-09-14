@@ -1077,9 +1077,9 @@ here."
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptError")
                        #'string<)
-                 '("bubbleRefused" "duplicateSubmission" "feedNotInWorkspace"
-                   "feedUndecodable" "merging" "noSession" "notYetAdopted"
-                   "transferringAway" "unknownWorkspace"
+                 '("bubbleRefused" "coldGate" "duplicateSubmission"
+                   "feedNotInWorkspace" "feedUndecodable" "merging" "noSession"
+                   "notYetAdopted" "transferringAway" "unknownWorkspace"
                    "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-action-arms-pinned ()
@@ -1934,6 +1934,29 @@ breach."
                    (agent-repl-test-wire-verbs--parse "{\"agentBusy\":{},\"nope\":1}"))
                   :type 'agent-repl-wire-error)))
 
+(ert-deftest agent-repl-test-wire-verbs-submit-error-cold-gate-arm ()
+  "SubmitPromptError's `cold_gate' arm decodes with the gate's own account."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"coldGate\":{\"detail\":\"context cold\"}}"))
+                   '(:reason (:arm :cold-gate :value (:detail "context cold")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-cold-gate-detail-default ()
+  "SubmitPromptColdGate's omitted detail is the empty string."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-wire-decode-submit-prompt-cold-gate
+                               (agent-repl-test-wire-verbs--parse "{}"))
+                              :detail)
+                   ""))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-cold-gate-unknown-field ()
+  "An unknown field on SubmitPromptColdGate is refused, not dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-cold-gate
+                   (agent-repl-test-wire-verbs--parse "{\"detail\":\"x\",\"nope\":1}"))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-submit-bubble-kind-arms-pinned ()
   "SubmitPromptBubbleRefused's kind oneof has exactly the arms this codec
 decodes."
@@ -1948,7 +1971,7 @@ decodes."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()

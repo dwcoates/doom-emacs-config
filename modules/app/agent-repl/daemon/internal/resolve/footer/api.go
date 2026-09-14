@@ -124,6 +124,44 @@ type ColdGate struct {
 	Detail string
 }
 
+// ColdGateAnswer is a standing cold gate's answer BEING SPENT — the whole
+// stretch from the click to the outcome, which before 2026-09-14 was invisible:
+// the owner answered a gate, the shim compacted for a minute, the session came
+// back, and the strip said nothing at any point of it (owner's report,
+// 2026-09-14).
+//
+// IT REUSES THE EXISTING VOCABULARY AND ADDS NONE (owner ruling, 2026-09-14):
+// the status is `thinking`, the step is the one the chosen remediation already
+// has — `compacting` for a compaction, `clearing` for a clear, `submitting` for
+// a paid resume — and the line is the daemon's own progress sentence for the
+// phase the producer last stated. It OUTRANKS the standing gate it is
+// answering, because the gate is not lifted until the re-open succeeds and the
+// user must see the answer being spent rather than the question again.
+type ColdGateAnswer struct {
+	// Choice is the remediation being spent: "pay", "clear" or "compact".
+	Choice string
+	// Text is the daemon's COMPOSED progress line for where the answer has got
+	// to. Never empty: an answer with nothing to say about itself is the state
+	// this type exists to end.
+	//
+	// WHEN it began standing is the RESOLVER's stamp, taken from the resolver's
+	// own clock like every other `at` on this strip, so a caller cannot hand
+	// the footer an instant from a different clock than the one the view is
+	// rendered against.
+	Text string
+}
+
+// The cold-gate remediations, spelled once. The verb that answers a gate and
+// the footer that draws the answer must not spell them differently.
+const (
+	// ChoicePay is the gate's "pay and resume".
+	ChoicePay = "pay"
+	// ChoiceClear is the gate's "clear and start fresh".
+	ChoiceClear = "clear"
+	// ChoiceCompact is the gate's "compact and resume".
+	ChoiceCompact = "compact"
+)
+
 // SessionAct is what a turn was started to do. A prompt is the ordinary case;
 // the two session acts have their own thinking substatus, and the daemon is
 // the only thing that knows which act it submitted.
@@ -183,6 +221,11 @@ type Resolver interface {
 	SetClosing(ws ids.WorkspaceID, blocked *CloseBlocked)
 	// SetColdGate installs the standing cold gate.
 	SetColdGate(ws ids.WorkspaceID, gate ColdGate)
+	// SetColdGateAnswer installs the gate answer in flight, nil to clear it.
+	// The verb that spends an answer calls it ONCE AT THE CLICK, before it
+	// dials the shim, again for every phase the producer relays, and once more
+	// with nil when the answer has landed or failed.
+	SetColdGateAnswer(ws ids.WorkspaceID, answer *ColdGateAnswer)
 	// SetInterrupting fires the waiting-interrupting status the MOMENT an
 	// interrupt registers, before the real turn end arrives.
 	SetInterrupting(ws ids.WorkspaceID, on bool)

@@ -51,6 +51,10 @@ type refusal struct {
 	// AdoptWebWorkspace's no_transfer_announced on every non-handover page
 	// boot. It is logged at INFO and never as a fault.
 	Info bool
+	// Op is the operation the record is filed under, empty to file it under
+	// the rpc's own name (which is what every refusal did before SubmitPrompt
+	// needed its refusals findable beside the prompt handler's own records).
+	Op string
 }
 
 // asRefusal normalizes a component error into a refusal, reporting false for an
@@ -81,6 +85,13 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 	var shimRefusal *workspace.ShimRefusal
 	if errors.As(err, &shimRefusal) {
 		return s.fill(refusal{Arm: shimRefusal.Arm, Reason: shimRefusal.Detail}), true
+	}
+	// THE COLD GATE'S OWN SENTENCE, not this package's error string: the arm's
+	// `detail` is what a client shows the user, and it must read the way the
+	// gate card and the footer's cold-gate line read.
+	var coldGate *promptqueue.ColdGateRefusal
+	if errors.As(err, &coldGate) {
+		return s.fill(refusal{Arm: "cold_gate", Reason: coldGate.Detail}), true
 	}
 
 	switch {
@@ -155,10 +166,14 @@ func (s *server) fill(r refusal) refusal {
 // means the refusal is now the response's `error` arm.
 func (s *server) refuse(log dlog.Logger, rpc string, resp proto.Message, r refusal) *connect.Error {
 	if setResponseError(resp, r.Arm, r.Fields) {
+		op := rpc
+		if r.Op != "" {
+			op = r.Op
+		}
 		if r.Info {
-			log.Info(rpc, "answered a typed refusal", dlog.Context{"arm": r.Arm, "reason": r.Reason})
+			log.Info(op, "answered a typed refusal", dlog.Context{"arm": r.Arm, "reason": r.Reason})
 		} else {
-			log.Debug(rpc, "answered a typed refusal", dlog.Context{"arm": r.Arm, "reason": r.Reason})
+			log.Debug(op, "answered a typed refusal", dlog.Context{"arm": r.Arm, "reason": r.Reason})
 		}
 		return nil
 	}

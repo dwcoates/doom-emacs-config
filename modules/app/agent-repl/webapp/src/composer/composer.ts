@@ -37,6 +37,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type {
   SubmitPromptBubbleRefused,
+  SubmitPromptColdGate,
   SubmitPromptError,
   SubmitPromptRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
@@ -436,11 +437,28 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
       return "this workspace has no session to prompt — your text is kept";
     case "bubbleRefused":
       return bubbleRefusedSentence(reason.value);
+    case "coldGate":
+      return coldGateSentence(reason.value);
     default: {
       const other: { case: string } = reason;
       return unreachableArm("SubmitPromptError.reason", other.case);
     }
   }
+}
+
+/**
+ * THE SESSION IS PARKED AT ITS COLD GATE, and the gate is answered in the panel.
+ *
+ * NOT `no_session`, which is a workspace with no session at all: here a session
+ * exists — that is why a gate could be raised — and it takes no prompt until the
+ * reader picks a remediation. The words say where to go, because the card is
+ * already on the page and the prompt is kept for after it is answered.
+ * `detail` is the gate's own account, drawn after the stem when it sent one and
+ * never switched on.
+ */
+function coldGateSentence(gate: SubmitPromptColdGate): string {
+  const stem = "the session is parked at its cold gate — answer it in the panel; your text is kept";
+  return gate.detail === "" ? stem : `${stem} (${gate.detail})`;
 }
 
 /**

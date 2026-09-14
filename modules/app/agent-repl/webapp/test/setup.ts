@@ -5,6 +5,7 @@ import {
   resetLoggingForTests,
   setLogger,
 } from "../src/log.js";
+import { resetCompactionProgress } from "../src/footer/progress.js";
 import { clearClientFailures } from "../src/rpc/link.js";
 import { installResizeObserver } from "./resize-observer.js";
 
@@ -35,4 +36,9 @@ beforeEach(() => {
   // Production has one page and one verdict; each test gets the same fresh
   // start. AFTER the logger, because clearing a standing verdict logs.
   clearClientFailures();
+  // THE COMPACTION LINE IS PAGE-WIDE STATE TOO, and for the same reason: a
+  // file that pushed a footer mid-compaction would otherwise leave the next
+  // file's cold-gate card drawing a sentence no daemon in that test ever sent,
+  // and its footer mount's listener subscribed against a torn-down page.
+  resetCompactionProgress();
 });

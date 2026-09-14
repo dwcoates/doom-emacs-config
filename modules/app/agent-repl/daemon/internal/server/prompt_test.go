@@ -279,3 +279,109 @@ func TestBubbleRefusedPassesOtherRefusalsThrough(t *testing.T) {
 		t.Fatalf("refusal = %+v, want the input untouched", out)
 	}
 }
+
+// ---- every typed refusal of SubmitPrompt is recorded ----------------------
+//
+// Owner's report, 2026-09-14: three prompts were refused inside thirteen
+// seconds and the daemon wrote no record of any of them — the refusal path
+// logs at DEBUG and production runs at INFO, so the whole episode existed only
+// in the editor's log. An answer nothing records is an invisible action.
+
+func TestSubmitRefusalIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	s := &server{}
+	log := &recordingLogger{}
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	cerr := s.refuse(log, "SubmitPrompt", resp,
+		submitRefusal(refusal{Arm: "no_session", Reason: "no live session"}))
+
+	// Assert.
+	if cerr != nil {
+		t.Fatalf("refuse = %v, want the refusal encoded onto the response", cerr)
+	}
+	if got := log.at("INFO"); len(got) != 1 || got[0].Context["arm"] != "no_session" {
+		t.Fatalf("INFO records = %v, want exactly one naming the arm", log.records)
+	}
+}
+
+func TestSubmitRefusalIsRecordedUnderThePromptHandlersOperation(t *testing.T) {
+	// Arrange.
+	s := &server{}
+	log := &recordingLogger{}
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	_ = s.refuse(log, "SubmitPrompt", resp,
+		submitRefusal(refusal{Arm: "merging", Reason: "a merge is in flight"}))
+
+	// Assert.
+	if got := log.at("INFO"); len(got) != 1 || got[0].Operation != opSubmit {
+		t.Fatalf("INFO records = %v, want one filed under %q", log.records, opSubmit)
+	}
+}
+
+func TestAnUnmarkedRefusalStaysAtDebugUnderItsRpc(t *testing.T) {
+	// Arrange. Nothing else's records move: only SubmitPrompt was ruled.
+	s := &server{}
+	log := &recordingLogger{}
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	_ = s.refuse(log, "SubmitPrompt", resp, refusal{Arm: "no_session", Reason: "no live session"})
+
+	// Assert.
+	debug := log.at("DEBUG")
+	if len(debug) != 1 || debug[0].Operation != "SubmitPrompt" {
+		t.Fatalf("DEBUG records = %v, want one under the rpc's own name", log.records)
+	}
+}
+
+func TestSubmitRefusalCarriesTheColdGateArm(t *testing.T) {
+	// Arrange.
+	s := &server{}
+	log := &recordingLogger{}
+	resp := &agentreplv1.SubmitPromptResponse{}
+	detail := "the conversation is cold at 101600 context tokens"
+
+	// Act.
+	cerr := s.refuse(log, "SubmitPrompt", resp,
+		submitRefusal(s.fill(refusal{Arm: "cold_gate", Reason: detail})))
+
+	// Assert.
+	if cerr != nil {
+		t.Fatalf("refuse = %v, want the cold_gate arm encoded", cerr)
+	}
+	if got := resp.GetError().GetColdGate().GetDetail(); got != detail {
+		t.Fatalf("cold_gate detail = %q, want the gate's own sentence", got)
+	}
+}
+
+func TestAColdGateRefusalMapsOntoItsOwnArm(t *testing.T) {
+	// Arrange.
+	s := &server{}
+	err := &promptqueue.ColdGateRefusal{Detail: "the conversation is cold at 101600 context tokens"}
+
+	// Act.
+	got, ok := s.asRefusal(err)
+
+	// Assert.
+	if !ok || got.Arm != "cold_gate" {
+		t.Fatalf("asRefusal = (%+v, %v), want the cold_gate arm", got, ok)
+	}
+}
+
+func TestAColdGateRefusalCarriesTheGatesSentenceAlone(t *testing.T) {
+	// Arrange. The queue's own package name must not reach the user.
+	s := &server{}
+	detail := "the conversation is cold at 101600 context tokens"
+
+	// Act.
+	got, _ := s.asRefusal(&promptqueue.ColdGateRefusal{Detail: detail})
+
+	// Assert.
+	if got.Reason != detail {
+		t.Fatalf("reason = %q, want the gate's sentence alone", got.Reason)
+	}
+}

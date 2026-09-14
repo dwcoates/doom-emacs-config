@@ -675,6 +675,8 @@ type harness struct {
 	reviveErr  error
 	reviveHook func()
 	noSession  bool
+	// coldGate is the standing gate's own account, empty when no gate stands.
+	coldGate string
 }
 
 // waitRevivals joins every background revival the queue started.
@@ -719,6 +721,9 @@ func newHarness(t *testing.T) *harness {
 			return nil
 		},
 		Watcher: func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession },
+		ColdGate: func(ids.WorkspaceID) (string, bool) {
+			return h.coldGate, h.coldGate != ""
+		},
 		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
 			h.parked = append(h.parked, said)
 			return "guidance-turn", h.parkedErr
