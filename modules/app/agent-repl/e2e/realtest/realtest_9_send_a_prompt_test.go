@@ -120,6 +120,11 @@ import (
 //	            treatment on the answering row, which is the feed's own
 //	            statement that the answer is drawn in it
 //	            (webapp/src/feed/rows/turn-ended.ts).
+//	answer drawn
+//	            `feed.draw-response` — INFO on a response row's first draw and
+//	            on its settled one, carrying `characters` and `blocks`
+//	            (webapp/src/feed/cards/response.ts). It is the edge the turn's
+//	            last phase is measured to.
 //
 // FOUR EDGES ITEM 9 NAMES DO NOT EXIST, and each is recorded in
 // docs/REALTEST-JUDGEMENT-CALLS.md as a LOGGING DEFECT for the lead to
@@ -150,8 +155,15 @@ import (
 //     tables hold the prompt and not the response. So "the answer text is in
 //     the feed" is asserted in two halves that meet: the feed MARKED an
 //     answering row for this turn (`feed.final-answer-marked`), and the feed
-//     DREW a text block of exactly the length of the scenario's known opening
-//     sentence (`feed.draw-text-block`, `characters`).
+//     DREW a response bubble holding at least the scenario's known opening
+//     sentence (`feed.draw-response`, `characters` and `blocks`).
+//
+//     THIS HALF USED TO NAME A RECORD THE PRODUCT DOES NOT WRITE FOR AN ANSWER.
+//     `feed.draw-text-block` is the prompt block vocabulary's, and the response
+//     renderer recorded nothing at all, so rt-run36..39 waited out the ceiling
+//     for a 21-character block that no path emits. The record is the webapp's
+//     now (`feed.draw-response`, webapp/src/feed/cards/response.ts) and the
+//     assumption is gone.
 //
 // # A DEDICATED SCRATCH REPOSITORY, AND REAL GIT
 //
@@ -296,9 +308,17 @@ var (
 	rt9TurnOpenedRe = regexp.MustCompile(`(^|\s)shim\.engine\.turn\s+opened a turn`)
 	// rt9FeedUserPromptRe is the webapp drawing the user's own bubble.
 	rt9FeedUserPromptRe = regexp.MustCompile(`(^|\s)feed\.draw-user-prompt(\s|$)`)
-	// rt9FeedTextBlockRe is the webapp drawing one assistant text block. Its
-	// `characters` context field is what carries the block's length.
-	rt9FeedTextBlockRe = regexp.MustCompile(`(^|\s)feed\.draw-text-block(\s|$)`)
+	// rt9FeedResponseRe is the webapp drawing an agent response bubble. Its
+	// `characters` context field carries the prose the row drew and `blocks`
+	// how many prose blocks it drew, and it is INFO on a row's first draw and
+	// on its settled one (webapp/src/feed/cards/response.ts).
+	//
+	// IT IS NOT `feed.draw-text-block`. That record belongs to the PROMPT block
+	// vocabulary (webapp/src/feed/rows/blocks.ts) and no path draws an
+	// assistant response through it, which is why sweeps rt-run36..39 waited
+	// out the ceiling for a 21-character block that no code emits while the
+	// answer was plainly on the page.
+	rt9FeedResponseRe = regexp.MustCompile(`(^|\s)feed\.draw-response(\s|$)`)
 	// rt9FeedFinalAnswerRe is the webapp marking the answering row with the
 	// final-answer treatment: the feed's own statement that the answer is in
 	// it.
@@ -1228,9 +1248,27 @@ func rt9AssertTheArm(ctx context.Context, t *testing.T, client *Client, watch *r
 //   - the feed MARKED an answering row for this turn
 //     (`feed.final-answer-marked`), which is the feed's own statement that the
 //     answer is drawn in it and not merely that a turn ended;
-//   - the feed DREW a text block of exactly the length of rt9AnswerOpening
-//     (`feed.draw-text-block`'s `characters`), which ties a drawn block to the
-//     scenario's known text without the log having to carry the text.
+//   - the feed DREW a response bubble holding at least the scenario's known
+//     opening sentence (`feed.draw-response`, `characters` >= its length and
+//     `blocks` >= 1), which ties a drawn bubble to a known text without the
+//     log having to carry the text.
+//
+// THE SECOND HALF USED TO NAME `feed.draw-text-block` AND A LENGTH OF EXACTLY
+// 21, AND THAT WAS FALSE. `feed.draw-text-block` is the PROMPT block
+// vocabulary's record (webapp/src/feed/rows/blocks.ts); a response is drawn by
+// the response renderer, which wrote nothing at all until `feed.draw-response`
+// was added. So sweeps rt-run36..39 waited out the ceiling for a record no code
+// path emits, while `feed.final-answer-marked` in the same runs reported
+// `styled_bubble: true` — the mark finding and styling the answering
+// `.bubble.assistant`, which is the answer, drawn.
+//
+// THE COMPARISON IS `>=`, NOT `==`, because the daemon folds a response's
+// fragments into ONE bubble row and re-pushes the whole row as it grows
+// (daemon/internal/resolve/feed/response.go, "THE PROSE FOLD"): the settled
+// bubble holds the opening sentence, the thinking prose after it and the
+// echoed conclusion, so an equality would only ever match a bubble caught
+// mid-arrival. `blocks` is stated by the same record and asserted at one or
+// more, so a fold that ever grew a second block is visible rather than assumed.
 //
 // THE WHOLE ASSERTION IS GATED ON THE FEED HAVING WRITTEN ANYTHING AT ALL. If
 // no `feed.*` record reached this workspace's `webapp.log` inside the window,
@@ -1240,18 +1278,23 @@ func rt9AssertTheArm(ctx context.Context, t *testing.T, client *Client, watch *r
 // they read three failures that all have the same cause.
 //
 // THE TWO HALVES ARE WAITED FOR SEPARATELY, because they arrive by different
-// paths and the second one is LATER. The final-answer mark is drawn from the
-// turn-end path the instant the turn concludes; the answer's text blocks come
-// the long way round — vendor transcript, sidecar, store, daemon, feed — and
-// land after it. Scanning for the blocks once the mark is up read the blocks
-// that existed at that instant, which in rt-run36 was the USER PROMPT'S own
-// 31-character block and nothing else, and the run failed saying the feed had
-// drawn no 21-character block. So the block is WAITED for on its own ceiling.
-// Nothing is excluded by ordering: the prompt's block being in the list
-// alongside the answer's is the ordinary case.
+// paths. The final-answer mark is drawn from the turn-end path the instant the
+// turn concludes; the answer's prose comes the long way round — vendor
+// transcript, sidecar, store, daemon, feed — and in rt-run36 landed a minute
+// after it. Scanning once the mark was up read the feed at the earliest moment
+// the answer could not yet be in it, so the draw is WAITED for on its own
+// ceiling.
 //
-// It returns the instant the answer's own text block was drawn, so the turn's
-// last phase can be measured from the conclusion to it.
+// NO TIMESTAMP FLOOR IS PUT UNDER THAT WAIT, deliberately. The wait is
+// SEQUENCED after the mark, but a settled response drawn BEFORE the turn's
+// terminal row is the healthy ordering and not a miss, and a floor at the mark
+// would make the run wait out its ceiling for a draw that had already happened.
+// The earliest qualifying draw is the edge, and the phase measured from it
+// reports a negative delta when the answer beat the conclusion's reading —
+// which is itself the answer to the question the phase asks.
+//
+// It returns the instant the answer's own bubble was drawn, so the turn's last
+// phase can be measured from the conclusion to it.
 func rt9AssertTheAnswerIsInTheFeed(ctx context.Context, t *testing.T, sources []Source, snap Snapshot,
 	preserved []Source, since time.Time, ws Workspace, wsName string, manifest *Manifest) (time.Time, bool) {
 	t.Helper()
@@ -1305,50 +1348,81 @@ func rt9AssertTheAnswerIsInTheFeed(ctx context.Context, t *testing.T, sources []
 		t.Logf("the feed marked the turn's answering row with the final-answer treatment")
 	}
 
-	// THE ANSWER'S TEXT BLOCK IS WAITED FOR, NOT SCANNED FOR ONCE. It comes by
-	// a different path from the mark above and lands after it, so the mark
-	// standing says nothing about the block being drawn yet.
+	// THE ANSWER'S BUBBLE IS WAITED FOR, NOT SCANNED FOR ONCE. It comes by a
+	// different path from the mark above, so the mark standing says nothing
+	// about the prose being drawn yet.
 	want := len([]rune(rt9AnswerOpening))
 	drawnAt, drawn := rt9AwaitEdge(ctx, t,
-		fmt.Sprintf("the webapp to draw the answer's own text block of %d characters in the feed", want),
-		rt9FeedCeiling, sources, snap, preserved, since, rt9FeedTextBlockRe,
-		func(hit rt9Hit) bool {
-			if !hit.Names(ws) {
-				return false
-			}
-			characters, ok := hit.ContextInt("characters")
-			return ok && characters == want
-		})
+		fmt.Sprintf("the webapp to draw a response bubble of at least %d characters in the feed", want),
+		rt9FeedCeiling, sources, snap, preserved, since, rt9FeedResponseRe,
+		func(hit rt9Hit) bool { return rt9AnswerDrawn(hit, ws, want) })
 	if !drawn {
-		// The diagnostic names every block the feed DID draw, which is what
-		// tells a reader whether the wrong text arrived or none did.
-		blocks, scanErr := rt9Scan(sources, snap, preserved, since, rt9FeedTextBlockRe)
+		// The diagnostic names every response draw the feed DID make, which is
+		// what tells a reader whether a shorter answer arrived or none did.
+		draws, scanErr := rt9Scan(sources, snap, preserved, since, rt9FeedResponseRe)
 		if scanErr != nil {
-			t.Errorf("read the feed's text-block records for workspace %s (%q): %v", ws.ID, wsName, scanErr)
+			t.Errorf("read the feed's response-draw records for workspace %s (%q): %v", ws.ID, wsName, scanErr)
 			return time.Time{}, false
 		}
-		lengths := make([]int, 0, len(blocks))
-		for _, hit := range blocks {
-			if !hit.Names(ws) {
-				continue
-			}
-			characters, ok := hit.ContextInt("characters")
-			if !ok {
-				continue
-			}
-			lengths = append(lengths, characters)
-		}
-		t.Errorf("the feed drew no text block of %d characters for workspace %s (%q) within %s of the turn "+
-			"concluding, which is the length of the fake vendor's known opening sentence %q. The blocks it "+
-			"did draw were %v characters long. No log carries a feed row's prose, so the length is the only "+
-			"thing that ties a drawn block to a known text; a mismatch here says the answer that reached the "+
-			"feed is not the one the scenario produced", want, ws.ID, wsName, rt9FeedCeiling,
-			rt9AnswerOpening, lengths)
+		t.Errorf("the feed drew no response bubble of at least %d characters for workspace %s (%q) within %s "+
+			"of the turn concluding, %d being the length of the fake vendor's known opening sentence %q. The "+
+			"response draws it did make were %s. No log carries a feed row's prose, so the character count is "+
+			"the only thing that ties a drawn bubble to a known text; a count that never reaches it says the "+
+			"answer that reached the feed is not the one the scenario produced", want, ws.ID, wsName,
+			rt9FeedCeiling, want, rt9AnswerOpening, rt9DescribeResponseDraws(draws, ws))
 		return time.Time{}, false
 	}
-	t.Logf("the feed drew a text block of %d characters, the length of the scenario's known opening sentence",
-		want)
+	t.Logf("the feed drew a response bubble of at least %d characters, the length of the scenario's known "+
+		"opening sentence", want)
 	return drawnAt, true
+}
+
+// rt9AnswerDrawn reports whether ONE `feed.draw-response` record is this
+// workspace drawing an answer that could hold the scenario's opening sentence.
+//
+// It is a named function rather than a closure so it can be driven over a
+// fixture record by TestRt9AnswerDrawnAcceptsOnlyAWorkspacesLongEnoughDraw,
+// which needs no editor: the acceptance rule is the whole of what changed when
+// the marker moved off `feed.draw-text-block`, and a rule only a live sweep can
+// exercise is a rule nothing checks between sweeps.
+//
+// A record missing either field is REFUSED rather than assumed: `characters`
+// and `blocks` are both stated by the producer, and a draw whose fields cannot
+// be read is a record this reader does not understand.
+func rt9AnswerDrawn(hit rt9Hit, ws Workspace, want int) bool {
+	if !hit.Names(ws) {
+		return false
+	}
+	characters, ok := hit.ContextInt("characters")
+	if !ok || characters < want {
+		return false
+	}
+	blocks, ok := hit.ContextInt("blocks")
+	return ok && blocks >= 1
+}
+
+// rt9DescribeResponseDraws renders this workspace's response draws for a
+// failure message.
+func rt9DescribeResponseDraws(hits []rt9Hit, ws Workspace) string {
+	parts := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		if !hit.Names(ws) {
+			continue
+		}
+		characters, hasCharacters := hit.ContextInt("characters")
+		blocks, hasBlocks := hit.ContextInt("blocks")
+		if !hasCharacters || !hasBlocks {
+			parts = append(parts, fmt.Sprintf("a draw at %s whose `characters`/`blocks` could not be read",
+				hit.At.Format(time.RFC3339Nano)))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%d characters in %d block(s) at %s", characters, blocks,
+			hit.At.Format(time.RFC3339Nano)))
+	}
+	if len(parts) == 0 {
+		return "(none)"
+	}
+	return strings.Join(parts, "; ")
 }
 
 // rt9ReportSubmitDoor scans for the queue's own submit record and reports what
@@ -1442,8 +1516,8 @@ func rt9ReportPhases(t *testing.T, manifest *Manifest, timings rt9Timings) {
 				"end is when the run read the stamp and not the stamp itself"},
 		{"turn concluded -> answer text drawn", timings.Concluded, timings.AnswerDrawn,
 			timings.ConcludedOK && timings.AnswerOK,
-			"the daemon's `closed_at` being readable to the `feed.draw-text-block` record for the " +
-				"answer's own opening sentence; an OBSERVATION CEILING and not a budget, like every " +
+			"the daemon's `closed_at` being readable to the `feed.draw-response` record for the " +
+				"answer's own bubble; an OBSERVATION CEILING and not a budget, like every " +
 				"phase here. Its start is the run's READ of the stamp rather than the stamp, so a block " +
 				"already drawn when the run got round to reading reports as a negative delta — which is " +
 				"itself the answer to the question the phase exists to ask"},
@@ -1827,6 +1901,107 @@ func TestRt9ScanReadsASourceThatAppearedAfterTheSnapshotFromZero(t *testing.T) {
 		t.Errorf("rt9Scan re-read the standing sink's pre-snapshot records, so the snapshot offsets are not "+
 			"being applied and every earlier run's records would be reported as this run's. It found %d "+
 			"hit(s): %s", len(hits), rt9DescribeHits(hits))
+	}
+}
+
+// TestRt9AnswerDrawnAcceptsOnlyAWorkspacesLongEnoughDraw pins the acceptance
+// rule the answer assertion now rests on, over a real `feed.draw-response`
+// record read the way a sweep reads one.
+//
+// It drives no editor and spawns nothing: the record is written into a temp
+// sink, scanned with the marker the run uses, and handed to the matcher. The
+// rule is the whole of what changed when the marker moved off
+// `feed.draw-text-block`, and a rule only a live sweep can exercise is a rule
+// nothing checks between sweeps — which is how the 21-character assumption
+// survived four of them.
+func TestRt9AnswerDrawnAcceptsOnlyAWorkspacesLongEnoughDraw(t *testing.T) {
+	want := len([]rune(rt9AnswerOpening))
+	ws := Workspace{ID: "answering-ws"}
+
+	cases := []struct {
+		name        string
+		workspaceID string
+		context     map[string]any
+		accepted    bool
+	}{
+		{
+			name:        "the settled answer's own bubble",
+			workspaceID: ws.ID,
+			context:     map[string]any{"characters": want + 200, "blocks": 1, "settled": true},
+			accepted:    true,
+		},
+		{
+			name:        "a bubble caught exactly at the opening sentence",
+			workspaceID: ws.ID,
+			context:     map[string]any{"characters": want, "blocks": 1, "settled": false},
+			accepted:    true,
+		},
+		{
+			name:        "a bubble that has not yet grown to the opening sentence",
+			workspaceID: ws.ID,
+			context:     map[string]any{"characters": want - 1, "blocks": 1, "settled": false},
+			accepted:    false,
+		},
+		{
+			name:        "a draw stating no block, which is not a drawn bubble",
+			workspaceID: ws.ID,
+			context:     map[string]any{"characters": want + 200, "blocks": 0, "settled": true},
+			accepted:    false,
+		},
+		{
+			name:        "a draw whose `characters` the record does not carry",
+			workspaceID: ws.ID,
+			context:     map[string]any{"blocks": 1, "settled": true},
+			accepted:    false,
+		},
+		{
+			name:        "another workspace's answer, drawn in the same window",
+			workspaceID: "someone-elses-ws",
+			context:     map[string]any{"characters": want + 200, "blocks": 1, "settled": true},
+			accepted:    false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: one `feed.draw-response` record in a sink of its own.
+			root := t.TempDir()
+			since := time.Now().Add(-time.Minute)
+			path := filepath.Join(root, "webapp.log")
+			context, err := json.Marshal(tc.context)
+			if err != nil {
+				t.Fatalf("render the record's context: %v", err)
+			}
+			line, err := json.Marshal(record{
+				Timestamp: time.Now().Format(time.RFC3339Nano), Level: "INFO",
+				Operation: "feed.draw-response", Message: "drew a response bubble settled",
+				WorkspaceID: tc.workspaceID, Context: context,
+			})
+			if err != nil {
+				t.Fatalf("render a log record: %v", err)
+			}
+			if err := os.WriteFile(path, append(line, '\n'), 0o644); err != nil {
+				t.Fatalf("write %s: %v", path, err)
+			}
+			source := Source{Name: "workspace.webapp.log", Path: path, Kind: KindJSONL, Workspace: tc.workspaceID}
+
+			// Act: read it the way the run's wait reads it.
+			hits, err := rt9Scan([]Source{source}, TakeSnapshot(nil), nil, since, rt9FeedResponseRe)
+			if err != nil {
+				t.Fatalf("scan the sink for the response draw: %v", err)
+			}
+			if len(hits) != 1 {
+				t.Fatalf("the marker matched %d record(s) in a sink holding one `feed.draw-response`: %s",
+					len(hits), rt9DescribeHits(hits))
+			}
+			accepted := rt9AnswerDrawn(hits[0], ws, want)
+
+			// Assert.
+			if accepted != tc.accepted {
+				t.Errorf("rt9AnswerDrawn accepted=%t for %s, want %t. The record was %s", accepted,
+					rt9DescribeResponseDraws(hits, Workspace{ID: tc.workspaceID}), tc.accepted, line)
+			}
+		})
 	}
 }
 
