@@ -1399,18 +1399,38 @@ func (f *Fleet) portAcrossAccounts(
 	return nil
 }
 
-// freshModel answers the model a fresh session names, or nil when the user
-// chose none.
+// DefaultLaunchModel is the model a fresh session runs under when the user
+// named none (owner ruling 2026-09-14: "the default model should be opus ...
+// what's selected if the user does nothing").
 //
-// LANDING 7: StartSessionFresh.model is OPTIONAL and an unset one means the
-// SDK's own default, so the daemon no longer substitutes a model of its own —
-// it states the user's choice or says nothing. SessionStarted.effective_model
-// is what took effect, and recordFacts persists that.
+// `opus` is a FAMILY ALIAS, not a pinned version: the SDK's availableModels
+// documents that "opus" allows any opus version, and the served catalog carries
+// an opus row of its own — so naming the alias here launches a real, nameable
+// model that modelSelector can match to its option, rather than the empty
+// override that surfaces as the `<synthetic>` marker.
+//
+// IT IS THE MODEL FAMILY THIS REPO ALREADY NAMES: the fake catalog's own
+// default model is spelled "opus" (fakeshim.DefaultModel), so the daemon states
+// the same word its own catalog does rather than inventing a pinned id.
+const DefaultLaunchModel = "opus"
+
+// freshModel answers the model a fresh session names.
+//
+// A CHOICE, OR THE DEFAULT — NEVER THE VENDOR'S OWN. StartSessionFresh.model is
+// optional on the wire, but an unset one let the SDK pick whatever it liked and
+// the CLI then reported that pick as the `<synthetic>` marker, which names no
+// selectable model — so the button had no selection and "the actual default"
+// was nothing at all. This reverses landing 7's "substitute nothing": an unset
+// choice becomes DefaultLaunchModel, so a session the user never modeled runs
+// under opus and the selector draws opus as the selection.
+// SessionStarted.effective_model is what took effect, and recordFacts persists
+// that.
 func freshModel(recorded string) *conversationv1.AgentModel {
-	if recorded == "" {
-		return nil
+	name := recorded
+	if name == "" {
+		name = DefaultLaunchModel
 	}
-	return &conversationv1.AgentModel{Name: recorded}
+	return &conversationv1.AgentModel{Name: name}
 }
 
 // DefaultStartSessionBound bounds ONE StartSession call.

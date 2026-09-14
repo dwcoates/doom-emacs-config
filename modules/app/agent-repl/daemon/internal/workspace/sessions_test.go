@@ -1503,16 +1503,36 @@ func TestFreshModelNamesTheRecordedModel(t *testing.T) {
 	}
 }
 
-// TestFreshModelLeavesTheModelUnsetWhenTheCreateNamedNone is the landing-7
-// contract: StartSessionFresh.model is optional and UNSET means the SDK's own
-// default, so the daemon substitutes nothing of its own.
-func TestFreshModelLeavesTheModelUnsetWhenTheCreateNamedNone(t *testing.T) {
+// TestFreshModelDefaultsToOpusWhenTheCreateNamedNone is the owner ruling of
+// 2026-09-14: a session the user never modeled runs under opus, not the
+// vendor's own pick (which the CLI reports as the <synthetic> marker).
+func TestFreshModelDefaultsToOpusWhenTheCreateNamedNone(t *testing.T) {
 	// Arrange / Act.
 	got := freshModel("")
 
 	// Assert.
-	if got != nil {
-		t.Fatalf("freshModel(\"\") = %v, want an unset model", got)
+	if got.GetName() != DefaultLaunchModel {
+		t.Fatalf("freshModel(\"\") = %v, want the %q default", got, DefaultLaunchModel)
+	}
+}
+
+// TestStartFreshOfAnUnmodeledSessionAsksTheShimForOpus is the same ruling from
+// the daemon's side: the launch request names opus when the row modeled none.
+func TestStartFreshOfAnUnmodeledSessionAsksTheShimForOpus(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	fresh := f.client.requests[0].GetFresh()
+	if fresh == nil || fresh.GetModel().GetName() != DefaultLaunchModel {
+		t.Fatalf("StartSession request = %v, want an unmodeled start launched under opus", f.client.requests[0])
 	}
 }
 
