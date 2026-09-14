@@ -344,6 +344,36 @@ unowned workspace webview unrepresentable rather than merely unlikely."
                         name err))))
   buf)
 
+(defun agent-repl--frontend-remap-stock-reload ()
+  "Point this webview buffer's stock reload keys at our own reload command.
+
+Run from `agent-repl-frontend-webview-adopt-hook' with the adopted
+webview buffer current.  The stock `xwidget-webkit-history-reload' (bound
+to \\`g' in `xwidget-webkit-mode-map') calls
+`xwidget-webkit-back-forward-list', which is VOID in this Emacs build:
+pressing the stock reload key in one of our panels signals \"Symbol's
+function definition is void\" instead of reloading.  The sibling
+`xwidget-webkit-reload' walks history at offset zero, which is also not
+what a redeploy needs.
+
+Both are remapped, buffer-locally, to
+`agent-repl-frontend-reload-webview' — the command that re-navigates the
+panel to its workspace URL, the correct reload after the daemon redeploys
+the bundle.  A fresh keymap parented on the live local map carries the
+remap, so ONLY our panels are affected; plain `xwidget-webkit-mode'
+buffers elsewhere keep the stock (broken) bindings untouched, and every
+other stock xwidget binding still resolves through the parent."
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map (current-local-map))
+    (define-key map [remap xwidget-webkit-history-reload]
+                #'agent-repl-frontend-reload-webview)
+    (define-key map [remap xwidget-webkit-reload]
+                #'agent-repl-frontend-reload-webview)
+    (use-local-map map)))
+
+(add-hook 'agent-repl-frontend-webview-adopt-hook
+          #'agent-repl--frontend-remap-stock-reload)
+
 (defun agent-repl--frontend-watch-load (ws buf)
   "Report BUF's load-finished events for WS to the open-progress ladder.
 
