@@ -18,7 +18,8 @@ import (
 )
 
 // Feed addresses one feed within a workspace: the root feed, one agent's
-// sub-feed, or one merge bubble's sub-feed. Exactly one of the three is set.
+// sub-feed, one merge bubble's sub-feed, or one detached shell bubble's
+// sub-feed. Exactly one of the four is set.
 type Feed struct {
 	// Root marks the workspace's top-level feed.
 	Root bool
@@ -27,11 +28,20 @@ type Feed struct {
 	// Merge, when set, addresses a merge bubble's sub-feed, keyed by the merge
 	// lease that owns it.
 	Merge *LeaseID
+	// Shell, when set, addresses a detached shell bubble's sub-feed — where the
+	// shell's spool streams as the bubble BODY — keyed by the detached work id
+	// that owns it. A shell head row (KindShellHead) resolves to exactly this,
+	// the way a subagent bubble row resolves to Feed{Agent}.
+	Shell *ShellID
 }
 
 // LeaseID is the merge lease a merge sub-feed belongs to — an alias of the
 // one spelling in internal/ids, which feedid and wsm share.
 type LeaseID = ids.LeaseID
+
+// ShellID is the detached work id a shell sub-feed belongs to — the handle the
+// shim addresses the run's spool by.
+type ShellID string
 
 // Ref is a fully qualified row address: which workspace, which feed, which
 // row.
@@ -64,7 +74,12 @@ const (
 	KindMergeTab         RowKind = "merge_tab"
 	KindDetachedSubagent RowKind = "detached_subagent"
 	KindDetachedShell    RowKind = "detached_shell"
-	KindSynth            RowKind = "synth"
+	// KindShellHead is a detached shell bubble's HEAD row — the command, clock
+	// and stop, carried on the parent feed. Its FeedId resolves (via DecodeFeed)
+	// to the shell's own sub-feed, distinct from the KindDetachedShell spool
+	// BODY row that rides that sub-feed.
+	KindShellHead RowKind = "shell_head"
+	KindSynth     RowKind = "synth"
 )
 
 // AllRowKinds is every row kind, in declaration order. Decode accepts exactly
@@ -81,6 +96,7 @@ var AllRowKinds = []RowKind{
 	KindMergeTab,
 	KindDetachedSubagent,
 	KindDetachedShell,
+	KindShellHead,
 	KindSynth,
 }
 
@@ -122,6 +138,7 @@ const (
 	feedRoot  = "r"
 	feedAgent = "a"
 	feedMerge = "m"
+	feedShell = "s"
 )
 
 func encodeFeedFields(feed Feed) (kind, value string, err error) {
@@ -137,6 +154,10 @@ func encodeFeedFields(feed Feed) (kind, value string, err error) {
 	if feed.Merge != nil {
 		set++
 		kind, value = feedMerge, string(*feed.Merge)
+	}
+	if feed.Shell != nil {
+		set++
+		kind, value = feedShell, string(*feed.Shell)
 	}
 	if set != 1 {
 		return "", "", fmt.Errorf("feedid: exactly one feed arm must be set, %d are", set)
@@ -162,6 +183,12 @@ func decodeFeedFields(kind, value string) (Feed, error) {
 		}
 		lease := LeaseID(value)
 		return Feed{Merge: &lease}, nil
+	case feedShell:
+		if value == "" {
+			return Feed{}, fmt.Errorf("feedid: shell feed carries no work id")
+		}
+		shell := ShellID(value)
+		return Feed{Shell: &shell}, nil
 	default:
 		return Feed{}, fmt.Errorf("feedid: unknown feed discriminator %q", kind)
 	}
@@ -254,7 +281,8 @@ func EncodeFeed(ws WorkspaceID, feed Feed) *frontendv1.FeedId {
 }
 
 // DecodeFeed parses a feed-addressing FeedId. A subagent bubble row decodes to
-// Feed{Agent: created}; a merge head decodes to Feed{Merge: lease}.
+// Feed{Agent: created}; a merge head decodes to Feed{Merge: lease}; a shell head
+// decodes to Feed{Shell: work}.
 func DecodeFeed(id *frontendv1.FeedId) (WorkspaceID, Feed, error) {
 	ws, feed, row, err := decode(id)
 	if err != nil {
@@ -273,6 +301,14 @@ func DecodeFeed(id *frontendv1.FeedId) (WorkspaceID, Feed, error) {
 		}
 		lease := LeaseID(row.ID)
 		return ws, Feed{Merge: &lease}, nil
+	case row.Kind == KindShellHead:
+		// A shell head row addresses the shell's own sub-feed, where the spool
+		// streams as the bubble body.
+		if row.ID == "" {
+			return "", Feed{}, fmt.Errorf("feedid: shell head carries no work id")
+		}
+		shell := ShellID(row.ID)
+		return ws, Feed{Shell: &shell}, nil
 	default:
 		return "", Feed{}, fmt.Errorf("feedid: row kind %q addresses no sub-feed", row.Kind)
 	}
