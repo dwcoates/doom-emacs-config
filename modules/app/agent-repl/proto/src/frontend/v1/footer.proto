@@ -896,15 +896,19 @@ message FooterStatusActivityBlockedOnUser {
   string detail = 1;
 }
 
-// The rate-limit rung. The vendor bills TWO independent allowances (rolling
-// five-hour session, seven-day weekly) reported through one event; both
-// figures are shown so a reader can tell WHICH allowance the newsworthy
-// percentage belongs to.
+// The rate-limit rung. The vendor bills independent allowances (rolling
+// five-hour session, seven-day weekly, and an overage window beyond them)
+// reported through one event; every figure it reports is shown so a reader
+// can tell WHICH allowance the newsworthy percentage belongs to.
 message FooterStatusActivityRateLimited {
   // The rolling five-hour session allowance.
   FooterAllowance session = 1;
   // The seven-day weekly allowance.
   FooterAllowance weekly = 2;
+  // The overage allowance — the window the vendor bills BEYOND the two
+  // above, reported through the same rate-limit event. UNSET until the
+  // vendor has reported the overage window, which most accounts never do.
+  FooterAllowance overage = 4;
   // What the newest account-usage SAMPLE managed to read. UNSET means no
   // sample has been observed and the figures above came from a rate-limit
   // event alone.
