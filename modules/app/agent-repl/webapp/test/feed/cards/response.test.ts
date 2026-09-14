@@ -18,10 +18,13 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
+  USAGE_REVEALED_CLASS,
   drawFeedResponse,
   proseHtml,
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
+import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
+import stylesheet from "../../../src/styles.css?raw";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
@@ -222,6 +225,129 @@ describe("the usage stamp", () => {
       rowContext(),
     );
     expect(el.querySelector(".usage-stamp")).toBeNull();
+  });
+});
+
+describe("the usage corner's hover timestamp", () => {
+  /** A settled response whose corner carries a token figure and a settle instant. */
+  function settled(atMs: bigint) {
+    return response({
+      usage: { text: "2.1k", atMs },
+      result: { case: "success", value: { prose: { markdown: "done" } } },
+    });
+  }
+
+  it("holds the figure and its timestamp side by side once settled", () => {
+    // Arrange, Act
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    // Assert: both elements sit in the one corner.
+    const corner = el.querySelector(".turn-meta .usage-corner");
+    expect([
+      corner?.querySelector(".usage-stamp")?.textContent,
+      corner?.querySelector(".usage-ago") !== null,
+    ]).toEqual(["2.1k", true]);
+  });
+
+  it("reads the timestamp from at_ms, relative and human-readable", () => {
+    // Arrange: the settle was five and a half minutes ago.
+    vi.setSystemTime(331_000);
+    // Act
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-ago")?.textContent).toBe("5m 30s ago");
+  });
+
+  it("advances the timestamp on a later tick", async () => {
+    // Arrange
+    vi.setSystemTime(331_000);
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    document.body.appendChild(el);
+    // Act: half a minute later, the shared clock has ticked.
+    await vi.advanceTimersByTimeAsync(30_000);
+    // Assert
+    expect(el.querySelector(".usage-ago")?.textContent).toBe("6m ago");
+  });
+
+  it("reveals the timestamp when the corner is hovered", () => {
+    // Arrange
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    // Act
+    corner.dispatchEvent(new Event("mouseenter"));
+    // Assert
+    expect(corner.classList.contains(USAGE_REVEALED_CLASS)).toBe(true);
+  });
+
+  it("hides the timestamp again when the pointer leaves", () => {
+    // Arrange: a corner already revealed.
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    corner.dispatchEvent(new Event("mouseenter"));
+    // Act
+    corner.dispatchEvent(new Event("mouseleave"));
+    // Assert
+    expect(corner.classList.contains(USAGE_REVEALED_CLASS)).toBe(false);
+  });
+
+  it("reveals the timestamp on keyboard focus too", () => {
+    // Arrange
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    // Act
+    corner.dispatchEvent(new Event("focusin"));
+    // Assert: focusable, and the focus reveals the same timestamp a hover does.
+    expect([corner.tabIndex, corner.classList.contains(USAGE_REVEALED_CLASS)]).toEqual([0, true]);
+  });
+
+  it("draws no timestamp while the response is still arriving", () => {
+    // Arrange, Act: usage stated at open, but no settle instant yet.
+    const el = drawFeedResponse(
+      response({
+        usage: { text: "2.1k", atMs: 0n },
+        result: { case: "update", value: { prose: { markdown: "typing" } } },
+      }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(".usage-ago")).toBeNull();
+  });
+
+  it("stops the timestamp's clock when the bubble is disposed", () => {
+    // Arrange: a settled corner whose clock is live.
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    expect(el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(1);
+    // Act: whoever discards the bubble stops its clocks.
+    stopTicking(el);
+    // Assert
+    expect(el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
+  });
+
+  it("takes no clock at all for an arriving corner, since it draws no timestamp", () => {
+    // Arrange, Act
+    const el = drawFeedResponse(
+      response({
+        usage: { text: "2.1k", atMs: 0n },
+        result: { case: "update", value: { prose: { markdown: "typing" } } },
+      }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
+  });
+
+  it("slides the timestamp over one continuous half-second transition", () => {
+    // Arrange / Act: the rule the .usage-ago element is styled by.
+    const rule = /\.usage-ago\s*\{([^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    // Assert: a 0.5s transition is what gives the reveal AND the reverse.
+    expect(rule).toMatch(/transition:[^;]*0\.5s/);
+  });
+
+  it("shows and hides the timestamp with no slide under reduced motion", () => {
+    // Arrange: the reduced-motion block.
+    const at = stylesheet.indexOf("@media (prefers-reduced-motion: reduce)");
+    const block = stylesheet.slice(at);
+    // Assert: the timestamp's transition is dropped there.
+    expect(block).toMatch(/\.usage-ago\s*\{[^}]*transition:\s*none/);
   });
 });
 

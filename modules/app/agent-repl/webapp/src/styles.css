@@ -4013,12 +4013,58 @@ body.draining #composer-input::placeholder {
    all the existing `.bubble.assistant.md` treatment, unchanged. These are the
    corner stamp and the two state marks. */
 
-/* The cost corner: the daemon's composed figure, drawn verbatim in the token
-   amber the footer's token cell wears, so the same idea reads the same color
-   wherever it appears. */
+/* The cost corner: the token figure, and the settled timestamp it reveals on
+   hover. The two sit in a RIGHT-ANCHORED row so the figure sits where it always
+   sat and the timestamp grows in from the right edge, sliding the figure left
+   to make room (owner ruling, 2026-09-14). `overflow: hidden` clips the
+   timestamp while it is collapsed off the right. */
+.usage-corner {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: flex-end;
+  max-width: 100%;
+  overflow: hidden;
+}
+/* The cost corner's figure, drawn verbatim in the token amber the footer's
+   token cell wears, so the same idea reads the same color wherever it appears. */
 .usage-stamp {
   color: var(--info-tokens);
   font-variant-numeric: tabular-nums;
+}
+/* THE HOVER TIMESTAMP: the response's settled time, relative and live
+   ("5m 30s ago"). Grey (the shared muted token) and a relative notch smaller
+   than the figure beside it. Collapsed to zero width and pushed off the right
+   edge until the corner is hovered or focused; the reveal and — because
+   mouse-leave merely drops the state — the reverse are ONE continuous 0.5s
+   transition on width, offset and opacity, never a snap. */
+.usage-ago {
+  color: var(--muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+  max-width: 0;
+  margin-left: 0;
+  opacity: 0;
+  transform: translateX(100%);
+  transition:
+    max-width 0.5s ease,
+    margin-left 0.5s ease,
+    opacity 0.5s ease,
+    transform 0.5s ease;
+}
+.usage-corner:hover .usage-ago,
+.usage-corner:focus-within .usage-ago,
+.usage-corner.usage-corner--revealed .usage-ago {
+  max-width: 8rem;
+  margin-left: 0.35rem;
+  opacity: 1;
+  transform: translateX(0);
+}
+/* Reduced motion: reveal and hide the timestamp with no slide. */
+@media (prefers-reduced-motion: reduce) {
+  .usage-ago {
+    transition: none;
+  }
 }
 /* The arriving indicator trails the prose that has landed so far. The dots are
    the same animated ellipsis every other live face uses. */
