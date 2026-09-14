@@ -23,6 +23,24 @@ copied to clipboard; I need to be able to do this to easily relay errors."
 | call | what was decided |
 |---|---|
 | what `user-select: none` is still allowed on | Only pure controls whose glyph is a state and not information: the sidebar row chevron, the two fold triangles, and the thinking fold's `::marker`. Every one is named in `webapp/test/styles.test.ts`'s allowlist with its reason, and the test fails on any rule added outside it. The workspaces rail's blanket rule (which swallowed workspace names, repo headers, task lines and the rail's error text) and `.thinking summary`'s rule are gone; the summary now carries `user-select: text` and keeps its click-to-toggle. `#task-summary` gave up `pointer-events: none` — a pointer passed straight through the topbar's objective sentence, so it could not be dragged over at all; the box shrink-wraps its own text inside the middle 44% band, so it steals no clicks beyond its own glyphs. No keydown handler in the webapp ever looked at the C key, so nothing had to be exempted; `src/copy.ts` adds a document-level `copy` fallback that writes the selection's own text via `event.clipboardData` in case the xwidget's native copy is unreliable. No copy button and no new visible element. |
+## The feed begins at the newest separation (2026-09-14)
+
+Owner ruling, quoted: "after compaction, nothing in the feed is rendered above
+the orange divider and the compaction summary. E.g., you shouldn't see
+consecutive compactions in the feed. clear = everything before the clear is no
+longer shown/delivered (not including the divider bar), and same for compaction
+with the exception that we want to see the compaction summary."
+
+| call | what was decided |
+|---|---|
+| which separation arms bound the feed | `cleared` and `compacted` only. `compaction_failed` cut NOTHING — that is the whole of what its divider says — and the two worktree arms change no context, so neither may hide the conversation behind it. |
+| where the compaction summary lives | On the divider row itself (`FeedContextCutCompacted.summary`), as the feed already modelled it. Nothing was moved or added: keeping the divider is what keeps the summary, which is why "the divider and its summary" is one row and not two. |
+| a delivery bound, not a purge | No row is retired, no `feedid` is reminted, and the store's book pointers are untouched. The daemon simply does not serve or push what is above the bound. A `FeedSessionSeparation` push moves it forward, and the webapp drops every row above it from the DOM (INFO `feed.truncated-at-separation`). |
+| the bound is derived, never stored | `deliverable` reads the newest bounding separation off the row order at every page rather than remembering a pointer. A history replay and the live plane draw into the same feed by different routes, so a remembered pointer could disagree with the order; a derived one cannot. A walk left standing past a bound that moved under it is clamped to the new start at INFO. |
+| what `load-older` answers at the bound | The EXISTING "no older page" answer — `FeedPageSuccess.at_start` — never a new arm and never the `history_replay_truncated` error, which is reserved for a hole the feed did not choose. |
+| the separation fold toggle stays | It was never what hid the rows above: what it folds is the compaction's summary INSIDE the divider. It is untouched, and so is the divider's look. |
+| three e2e cases were amended | They asserted over a feed that kept everything: a per-turn terminal COUNT that a context cut makes go down, "two cleared dividers" (precisely what the ruling forbids), and a pre-hibernation turn that revival's own compaction now legitimately puts behind the divider. Each was restated in terms the ruling permits rather than weakened — see the commit. |
+
 ## The cold gate's feedback (2026-09-14)
 
 Three defects, reported by the owner off the `explanation-engine` workspace
