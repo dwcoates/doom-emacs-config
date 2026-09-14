@@ -349,18 +349,42 @@ func TestRowIsVendorBlockedOnAnAccountLevelFailure(t *testing.T) {
 	}
 }
 
-func TestRowIsNotVendorBlockedOnAnOrdinaryRunFailure(t *testing.T) {
+// A turn that ended in failure cannot proceed until the user acts, which is
+// what the footer paints `blocked` and the roster paints vendor_blocked (blue).
+// The roster and the footer decide this through the SAME predicate
+// (footer.FailureBlocks), so a failure the footer blocks the roster blocks too —
+// the owner's 2026-09-14 ruling that the roster agrees with the footer.
+func TestRowIsVendorBlockedOnAnOrdinaryRunFailure(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
 
-	// Act: a run that failed is not a session that cannot proceed.
+	// Act.
 	r.OnAgentTerminal(theWS, agent("a1"), nil, nil, &conversationv1.AgentFailure{
 		Failure: &conversationv1.AgentFailure_ModelError{
 			ModelError: &conversationv1.AgentModelError{}}})
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got == "vendor_blocked" {
-		t.Fatal("an ordinary run failure blocked the row on the vendor")
+	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
+		t.Fatalf("status = %q, want vendor_blocked", got)
+	}
+}
+
+func TestRowIsVendorBlockedOnAnAuthenticationFailure(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act: a logged-out account is exactly the "unusable" the footer paints
+	// blocked and the roster must paint vendor_blocked (blue), not fall through
+	// to done/ready (green).
+	r.OnAgentTerminal(theWS, agent("a1"), nil, nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+			ApiRequestFailed: &conversationv1.ApiRequestFailed{
+				Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{
+					AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}}})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
+		t.Fatalf("status = %q, want vendor_blocked", got)
 	}
 }
 
@@ -397,8 +421,10 @@ func TestRowIsVendorBlockedOnEachPurpleRunTerminal(t *testing.T) {
 	}
 }
 
-// A Stop hook is the user's own configuration, not the vendor refusing.
-func TestRowIsNotVendorBlockedOnAStopHookPrevention(t *testing.T) {
+// A Stop hook ended the run short of its ask, so the turn cannot be treated as
+// complete: the footer paints it `blocked` and the roster agrees through the
+// shared predicate, so both read blue rather than the roster drifting to green.
+func TestRowIsVendorBlockedOnAStopHookPrevention(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
 
@@ -408,8 +434,8 @@ func TestRowIsNotVendorBlockedOnAStopHookPrevention(t *testing.T) {
 			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}})
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got == "vendor_blocked" {
-		t.Fatal("a Stop hook blocked the row on the vendor")
+	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
+		t.Fatalf("status = %q, want vendor_blocked", got)
 	}
 }
 
