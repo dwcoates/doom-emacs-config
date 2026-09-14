@@ -411,3 +411,16 @@ describe("the footer status wave's stylesheet contract", () => {
     expect(declarations).toMatch(/animation:\s*none/);
   });
 });
+
+describe("the cost corner's hover hit area", () => {
+  it("enlarges the hover region with padding and cancels it with an equal negative margin", () => {
+    // Arrange / Act
+    const corner = declarationsOf(".usage-corner");
+
+    // Assert — the padding grows the hoverable box (roughly 2x wide, 2x tall);
+    // the equal, opposite negative margin keeps the token figure in place and
+    // shifts no neighbor.
+    expect(corner).toMatch(/padding:\s*0\.4rem\s+1\.25rem/);
+    expect(corner).toMatch(/margin:\s*-0\.4rem\s+-1\.25rem/);
+  });
+})
