@@ -377,8 +377,10 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 				VendorSessionId: vendorID,
 				Runtime:         &conversationv1.SessionRuntime{ShimBuildSha: s.buildSHA()},
 				EffectiveModel:  &conversationv1.AgentModel{Name: DefaultModel},
+				// THE REAL SHIM'S UNSTATED MODE, which is `auto` (owner
+				// ruling 2026-09-14) and no longer the vendor's `default`.
 				PermissionMode: &conversationv1.AgentPermissionMode{
-					Mode: &conversationv1.AgentPermissionMode_Default{Default: &conversationv1.AgentPermissionModeDefault{}},
+					Mode: &conversationv1.AgentPermissionMode_Auto{Auto: &conversationv1.AgentPermissionModeAuto{}},
 				},
 				ModelCatalog: DefaultCatalog(),
 				LiveWork:     s.liveWork(),

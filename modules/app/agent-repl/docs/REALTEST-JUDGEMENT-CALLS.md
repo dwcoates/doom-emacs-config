@@ -15,6 +15,18 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Permission mode defaults to auto (2026-09-14)
+
+Owner ruling, quoted: "the default permission mode should be auto for the
+SDK/shim. So there should be no `default` option in the dropdown in the topbar,
+it should just default to 'auto' in the dropdown."
+
+| call | what was decided |
+|---|---|
+| what happens to a session already running under the vendor's `default` | The picker does NOT relabel it. `topbar.SwitchableModes` drops `default` from the served options, and `permissionModePicker` already synthesizes the current option from the mode in force when the served set does not carry it — so a pre-ruling session shows `default` as the mode it is actually running under, unselectable, and the reader can move it to any offered mode. The daemon upgrades it at the NEXT start: `workspace.permissionMode` maps the stored `"default"` onto the auto arm, the shim is asked for `auto`, reports `auto` back, and `recordFacts` rewrites the row from that report. Nothing rewrites a row without a start, because nothing else knows the session came up. |
+| whether `default` stays representable at all | Yes, everywhere it can be REPORTED. Both shim conversion tables carry `default` in full and `workspace.permissionModeName` still writes it down, because the vendor may state it for a session started before the ruling and a fact reported is a fact recorded. What changed is that nothing PICKS it: no mint, no fallback, no dropdown row. |
+| whether `auto` needs the ungated-mode consent gate | No, and it already did not. `auto` KEEPS a gate — a classifier decides each ask instead of the user — which is why it is absent from `workspace.UngatedPermissionModes`. That also means the standing guarantee that an unrecognized mode name never resolves to a gate-dropping mode survives the new fallback, and it now has its own test. |
+| where the option list lives | The daemon. `webapp/src/topbar/permission-mode.ts` draws exactly what it is served and validates nothing (the topbar schema is fixed; an option list is content). The webapp change is its fake daemon's `PERMISSION_MODES` fixture plus the coverage of the no-`default`, auto-first and live-`default` cases. |
 ## No pseudo workspaces (2026-09-14)
 
 Owner ruling, quoted: "I don't want 'main' or 'none' workspaces showing up
