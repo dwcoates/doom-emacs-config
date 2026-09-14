@@ -423,4 +423,23 @@ describe("the cost corner's hover hit area", () => {
     expect(corner).toMatch(/padding:\s*0\.4rem\s+1\.25rem/);
     expect(corner).toMatch(/margin:\s*-0\.4rem\s+-1\.25rem/);
   });
+
+  it("reveals the duration off a hover anywhere in the bubble, not only the small corner", () => {
+    // Arrange / Act — hovering the small corner used to put the cursor right
+    // on top of the timestamp it had just revealed. Keying the reveal off the
+    // whole bubble means most hover positions never sit near the duration.
+    const bubbleWide = declarationsOf(".bubble.assistant:hover .usage-ago");
+
+    // Assert
+    expect(bubbleWide).toMatch(/max-width:\s*8rem/);
+    expect(bubbleWide).toMatch(/opacity:\s*1/);
+  });
+
+  it("keeps the reveal on keyboard focus anywhere in the bubble, not only the corner", () => {
+    // Arrange / Act
+    const bubbleFocus = declarationsOf(".bubble.assistant:focus-within .usage-ago");
+
+    // Assert
+    expect(bubbleFocus).toMatch(/max-width:\s*8rem/);
+  });
 })
