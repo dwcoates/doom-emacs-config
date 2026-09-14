@@ -1441,6 +1441,91 @@ func TestAClearDeliveredOnBothPlanesDrawsOneDivider(t *testing.T) {
 	}
 }
 
+// THE REAL /clear PATH DRAWS ONLY ITS BAR, AND A FOLLOW-UP PROMPT IS THE ONLY
+// BUBBLE. A /clear submitted as a directive runs as its own turn: the shim lays
+// down the turn's prompt, an empty "(no content)" response, the ContextCut, and
+// an interrupted-by-user terminal. None of those may draw a bubble — only the
+// cleared divider stands. A normal prompt sent after it is held behind the
+// uninterruptible clear and released when the clear ends, so its presence proves
+// the whole clear turn routed; it must be the ONLY prompt bubble, drawn below
+// the bar (the owner saw the /clear bubble render after such a follow-up).
+func TestAClearDrawsOnlyItsBarThenTheFollowUpPromptOnTheRealPath(t *testing.T) {
+	t.Parallel()
+	// Arrange: a /clear run as a directive turn.
+	f := newOpened(t, harness.Opts{})
+	cutResp := f.submit("/clear", "k-clear-realpath", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	clearTurn := cutResp.GetSuccess().GetTurn().GetTurn()
+	if clearTurn.GetValue() == "" {
+		t.Fatalf("SubmitPrompt(/clear) = %v, want the minted turn", cutResp)
+	}
+	clearPrompt := &conversationv1.AgentPrompt{
+		Id:     clearTurn,
+		Agent:  &conversationv1.AgentId{Value: mainAgent},
+		Said:   said("/clear"),
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+	}
+	emptyResponse := activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("resp-clear"),
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
+			Result: &conversationv1.AgentResponse_Success{Success: &conversationv1.AgentResponseSuccess{
+				Prose: &conversationv1.AgentResponseProse{Markdown: ""},
+			}},
+		}},
+	})
+	cleared := updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{
+			Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
+		}},
+	})
+
+	// Act: the shim lays the whole /clear turn down, then a normal prompt is
+	// sent (held behind the uninterruptible clear, released when it ends).
+	f.shim.PushUserPrompt(mainAgent, clearPrompt)
+	f.shim.PushAgentFrame(mainAgent, emptyResponse)
+	f.shim.PushAgentFrame(mainAgent, cleared)
+	f.shim.PushAgentFrame(mainAgent, interruptedFrame(mainAgent))
+	f.submit("hello", "k-after-clear", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Assert: open the feed once it carries the follow-up prompt — which is drawn
+	// only after the clear turn ended, so every /clear frame has routed — and
+	// census the delivered page.
+	page, _ := f.openFeedOnceCarrying("the follow-up prompt after the clear", func(p *frontendv1.FeedPage) bool {
+		for _, r := range p.GetSuccess().GetRows() {
+			if promptText(r) == "hello" {
+				return true
+			}
+		}
+		return false
+	})
+	dividers, prompts, responses, terminals := 0, 0, 0, 0
+	for _, r := range page.GetSuccess().GetRows() {
+		if r.GetSeparation().GetCleared() != nil {
+			dividers++
+		}
+		if r.GetUserPrompt() != nil {
+			prompts++
+		}
+		if r.GetActivity().GetResponse() != nil {
+			responses++
+		}
+		if r.GetTurnEnded().GetInterrupted() != nil {
+			terminals++
+		}
+	}
+	if dividers != 1 {
+		t.Fatalf("cleared dividers = %d, want exactly 1", dividers)
+	}
+	if prompts != 1 {
+		t.Fatalf("user-prompt rows = %d, want only the follow-up 'hello' (the /clear draws none)", prompts)
+	}
+	if responses != 0 {
+		t.Fatalf("response rows = %d, want none — the /clear's empty response draws no cut-short bubble", responses)
+	}
+	if terminals != 0 {
+		t.Fatalf("interrupted terminals = %d, want none for a /clear", terminals)
+	}
+}
+
 func TestContextCutCompactedDrawsASeparationWithFormattedTokens(t *testing.T) {
 	t.Parallel()
 	// Arrange

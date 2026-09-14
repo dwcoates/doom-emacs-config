@@ -20,6 +20,21 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	fold := s.prose(unit)
 	log := r.logger(s.id)
 
+	// A CONTEXT-CUT DIRECTIVE PRODUCES NO RESPONSE BUBBLE. /clear and /compact
+	// emit an empty "(no content)" response the webapp would draw as a cut-short
+	// card below the bar; a directive's only visible outcome is its separation
+	// bar. A genuine user-stop of a real turn keeps its partial prose — only a
+	// directive draws nothing. Marked per unit so the OTHER store plane's later
+	// re-delivery of the same response, after the terminal cleared the in-flight
+	// turn, is dropped too.
+	if s.directiveUnits[unit] || (s.turnStamp != nil && s.directiveTurns[*s.turnStamp]) {
+		s.directiveUnits[unit] = true
+		log.Debug("daemon.feed.directive_response_suppressed",
+			"a context-cut directive's response frame drew no bubble",
+			dlog.Context{"unit": unit})
+		return nil, errNotARow
+	}
+
 	// THE STAMP IS THE API RESPONSE'S FIGURES, not this unit's: usage rides
 	// exactly one unit per API response and it is usually a sibling (the
 	// thinking block's). Filing is idempotent, so drawing this bubble from a
