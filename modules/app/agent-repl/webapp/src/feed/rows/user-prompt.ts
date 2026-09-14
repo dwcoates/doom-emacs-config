@@ -19,7 +19,6 @@ import { bubbleScroll } from "../bubble-scroll.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedUserPrompt,
-  FeedUserPromptAuthor,
   FeedUserPromptBlock,
   FeedUserPromptBody,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -50,15 +49,15 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   const bubble = document.createElement("div");
   bubble.className = "bubble user";
   startPromptWave(bubble);
-  bubble.append(drawFeedUserPromptAuthor(requireMessage(msg.author, `${PATH}.author`)));
+  // The author is still a required field on the wire (a message with none is
+  // malformed, not merely unattributed) — validated but no longer drawn: the
+  // bubble carries no "You" label or other attribution (owner ruling,
+  // 2026-09-14).
+  requireMessage(msg.author, `${PATH}.author`);
 
   const result = requireCase(msg.result, `${PATH}.result`);
   switch (result.case) {
     case "success":
-      // The author line is the metadata strip; the body hangs in the shared
-      // scroll box beneath it, so the prompt's scrollbar starts under the
-      // attribution and lands on the bubble's right edge (owner ruling,
-      // 2026-09-14).
       bubble.append(
         bubbleScroll(
           drawFeedUserPromptBody(
@@ -71,20 +70,6 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
     default:
       return unreachableArm(`${PATH}.result`, result.case);
   }
-}
-
-/**
- * The author label ("You", or the spawning agent's name under a bubble).
- *
- * Drawn as its own element rather than folded into the body, because it is the
- * bubble's own attribution and must not scroll away with the text when the
- * body hits its cap.
- */
-export function drawFeedUserPromptAuthor(author: FeedUserPromptAuthor): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "prompt-author";
-  el.textContent = author.label;
-  return el;
 }
 
 /**

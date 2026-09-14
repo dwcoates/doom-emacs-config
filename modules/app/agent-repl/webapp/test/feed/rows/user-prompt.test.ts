@@ -36,9 +36,9 @@ describe("drawFeedUserPrompt: the bubble", () => {
     expect(el.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
   });
 
-  it("draws the author label the daemon resolved", () => {
+  it("draws no author label, however the daemon resolved it", () => {
     const el = drawFeedUserPrompt(prompt([], "Explore"));
-    expect(el.querySelector(".prompt-author")?.textContent).toBe("Explore");
+    expect(el.querySelector(".prompt-author")).toBeNull();
   });
 
   it("puts the blocks in the capped body, which the stylesheet already caps", () => {
