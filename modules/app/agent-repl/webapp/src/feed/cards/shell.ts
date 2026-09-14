@@ -163,6 +163,11 @@ export function drawFeedShell(u: FeedShell, rc: RowContext): HTMLElement {
           ? `${SETTLED_WORDS.lost}${lostCauseClause(outcome.value)}`
           : SETTLED_WORDS[outcome.case];
       head.append(word);
+      // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. The settled clock is
+      // frozen at the span the MESSAGE reports (ended - started), never at the
+      // wall clock, and this element holds no live subscription from here on —
+      // including one a previous draw left on a REUSED element.
+      stopTicking(el);
       break;
     }
     default:

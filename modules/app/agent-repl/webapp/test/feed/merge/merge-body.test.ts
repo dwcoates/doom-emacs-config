@@ -4,6 +4,8 @@ import { create } from "@bufbuild/protobuf";
 import { FeedBreadcrumbSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { mergeBubbleBody } from "../../../src/feed/merge/merge-body.js";
 import { harness, mergeRow, rowContext } from "../harness.js";
+import { createTicker } from "../../../src/clock.js";
+import { tick } from "../../../src/feed/ticking.js";
 import { FakeSubfeed, childRow, id, tabRow } from "./fixtures.js";
 
 beforeEach(() => {
@@ -307,6 +309,47 @@ describe("drawLooseRows: a row that belongs to no drawn tab", () => {
       "r1",
     ]);
     dispose();
+  });
+
+  it("stops the clocks of a loose row a later push drops", () => {
+    // Arrange: a loose row holding a clock.
+    const view = new FakeSubfeed([
+      tabRow("t1", { kind: "tests", state: "live" }),
+      childRow("r1", "gone", "orphan"),
+    ]);
+    const { host, dispose } = mount(view);
+    const loose = host.querySelector('.merge-loose-rows [data-feed-row="r1"]');
+    if (loose === null) throw new Error("fixture drew no loose row");
+    let ticks = 0;
+    tick(loose, createTicker(1000), () => (ticks += 1));
+
+    // Act: the row leaves the feed.
+    view.push([tabRow("t1", { kind: "tests", state: "live" })]);
+    vi.advanceTimersByTime(5000);
+
+    // Assert: only the first paint ever ran.
+    expect(ticks).toBe(1);
+    dispose();
+  });
+
+  it("stops the clocks its parts hold when the body is disposed", () => {
+    // Arrange.
+    const view = new FakeSubfeed([
+      tabRow("t1", { kind: "tests", state: "live" }),
+      childRow("r1", "gone", "orphan"),
+    ]);
+    const { host, dispose } = mount(view);
+    const loose = host.querySelector('.merge-loose-rows [data-feed-row="r1"]');
+    if (loose === null) throw new Error("fixture drew no loose row");
+    let ticks = 0;
+    tick(loose, createTicker(1000), () => (ticks += 1));
+
+    // Act.
+    dispose();
+    vi.advanceTimersByTime(5000);
+
+    // Assert.
+    expect(ticks).toBe(1);
   });
 
   it("leaves a row parented to a drawn tab out of the loose host", () => {

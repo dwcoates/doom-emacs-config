@@ -14,6 +14,8 @@ import {
 } from "../../src/feed/renderers.js";
 import { feedId, harness, mergeTabRow, responseRow, rowContext, userPromptRow } from "./harness.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { createTicker } from "../../src/clock.js";
+import { tick } from "../../src/feed/ticking.js";
 import type { RowRenderers } from "../../src/feed/renderers.js";
 
 beforeEach(() => {
@@ -83,6 +85,42 @@ describe("arrangeSubfeedRows", () => {
     const host = document.createElement("div");
     arrangeSubfeedRows(host, viewOf([responseRow("a"), responseRow("b", "x", "a")]));
     expect(host.querySelector(`[data-feed-row="a"] [${NEST_ATTRIBUTE}] [data-feed-row="b"]`)).not.toBeNull();
+  });
+
+  it("stops the clocks of a row it drops, so a dropped row cannot tick unseen", () => {
+    // Arrange: a laid-out row holding a clock.
+    const host = document.createElement("div");
+    const rows = [responseRow("a"), responseRow("b")];
+    const view = viewOf(rows);
+    arrangeSubfeedRows(host, view);
+    const dropped = host.querySelector('[data-feed-row="b"]');
+    if (dropped === null) throw new Error("fixture drew no row b");
+    let ticks = 0;
+    tick(dropped, createTicker(1000), () => (ticks += 1));
+    // Act: the next arrangement omits it (deletion is row OMISSION).
+    rows.pop();
+    arrangeSubfeedRows(host, view);
+    vi.advanceTimersByTime(5000);
+    // Assert: only the immediate first paint ever ran.
+    expect(ticks).toBe(1);
+  });
+
+  it("keeps the clocks of a row it merely MOVES into a container", () => {
+    // Arrange.
+    const host = document.createElement("div");
+    const rows = [responseRow("a"), responseRow("b")];
+    const view = viewOf(rows);
+    arrangeSubfeedRows(host, view);
+    const moved = host.querySelector('[data-feed-row="b"]');
+    if (moved === null) throw new Error("fixture drew no row b");
+    let ticks = 0;
+    tick(moved, createTicker(1000), () => (ticks += 1));
+    // Act: b becomes a's child, which is a move rather than a discard.
+    rows[1] = responseRow("b", "x", "a");
+    arrangeSubfeedRows(host, view);
+    vi.advanceTimersByTime(2000);
+    // Assert.
+    expect(ticks).toBe(3);
   });
 
   it("places a row whose container this feed never drew at the top level", () => {
