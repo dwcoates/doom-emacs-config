@@ -477,6 +477,36 @@ func TestThePickerServesExactlyTheFixedSwitchableSet(t *testing.T) {
 	}
 }
 
+func TestALiveDefaultIsTheDrawnCurrentButNotAnOffer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_PermissionModeChanged{
+			PermissionModeChanged: &conversationv1.SessionPermissionModeChanged{
+				PermissionMode: &conversationv1.AgentPermissionMode{
+					Mode: &conversationv1.AgentPermissionMode_Default{
+						Default: &conversationv1.AgentPermissionModeDefault{},
+					},
+				},
+			},
+		},
+	})
+
+	// Assert
+	got := h.view(t).GetPermissionModePicker()
+	if got.GetCurrent().GetMode() != "default" {
+		t.Fatalf("current = %+v, want the vendor's default drawn as the mode in force", got.GetCurrent())
+	}
+	for _, option := range got.GetOptions() {
+		if option.GetMode() == "default" {
+			t.Fatalf("options = %+v, want the live default absent from the offers", got.GetOptions())
+		}
+	}
+}
+
 func TestAPermissionModeChangeMovesTheCurrentOption(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
