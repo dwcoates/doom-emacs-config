@@ -1,3 +1,4 @@
+- emacs: `C-c C-k` in the composer interrupts the running turn again via the Interrupt verb's `turn` target (`agent-repl-interrupt-turn`); `nothing_running` is a message not an error, and a live-agents challenge asks before also stopping them (owner request 2026-09-14).
 - webapp: the purple response and blue prompt bubbles cap 15% below their prior widths (82.5%→70.125%, 60%→51%), max-width only; other bubbles and both bubbles' margins unchanged (owner ruling 2026-09-14).
 # Remediation changelog
 
