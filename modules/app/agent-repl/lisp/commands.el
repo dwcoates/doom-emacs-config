@@ -26,9 +26,12 @@
 ;; roster order strictly, priority included, and the resolver does the
 ;; ordering.  The switch-to-N chords are NOT in that category and are back:
 ;; a numeral that names a SLOT OF THE DRAWN BAR reads the given order
-;; instead of authoring one.  The interrupt family: no interrupt verb
-;; exists in the contract, and the footer owns that gesture.  Close, kill
-;; and nuke: `verbs.el' owns them as thin wrappers now.  The per-workspace
+;; instead of authoring one.  The interrupt family: the CLEAN TURN STOP is
+;; back on `C-c C-k' (`agent-repl-interrupt-turn', verbs.el) against the
+;; `Interrupt' verb's `turn' target, restored by owner order; the fan-wide
+;; and detached-work stops remain the footer's, whose `all_agents' and
+;; FeedId targets need feed vocabulary this client does not hold.  Close,
+;; kill and nuke: `verbs.el' owns them as thin wrappers now.  The per-workspace
 ;; clipboard: dead with the host command loop that populated it.
 
 ;;; Code:

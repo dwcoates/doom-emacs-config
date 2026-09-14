@@ -87,6 +87,7 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm-plist))
+(declare-function agent-repl-interrupt-turn "agent-repl-verbs" (&optional ws))
 (declare-function agent-repl-prompt-queue-offer "agent-repl-prompt-queue"
                   (ws said origin raw &optional key))
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
@@ -1075,6 +1076,16 @@ sits behind a harness re-read."
       ;; reflex would suggest: `C-r' is vacated for the output feed's
       ;; incremental search, whose isearch reflex wants it.
       :ni "C-M-r"     #'agent-repl-history-search)
+
+;; `C-c C-k' interrupts the running turn -- the chord that used to do it
+;; before the overhaul, restored against today's `Interrupt' verb.  It is
+;; bound with `define-key' rather than through the `map!' form above so the
+;; binding is OBSERVABLE under `emacs -Q' (where `map!' is a no-op stub) and
+;; the keybinding suite can assert it, mirroring the numerals map.  A
+;; `C-c'-prefixed chord is not shadowed by any evil state map, so a binding
+;; on the mode map is live in both normal and insert state exactly as the
+;; old `:ni' entry was.
+(define-key agent-repl-input-mode-map (kbd "C-c C-k") #'agent-repl-interrupt-turn)
 
 (provide 'input)
 

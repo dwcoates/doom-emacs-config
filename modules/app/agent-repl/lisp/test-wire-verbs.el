@@ -2331,6 +2331,173 @@ carries."
                  (sort (list "adoptionWindowExpired" "logSinkPoisoned" "deployScriptFailed" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable")
                        #'string<))))
 
+;;;; ---- Interrupt -------------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-turn-request ()
+  "An InterruptRequest for the turn target names the turn arm and spells
+`confirm_agents' false."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-interrupt-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :target '(:arm :turn :value nil)
+                           :confirm-agents nil)))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"turn\":{},\"confirmAgents\":false}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-confirm-agents-true ()
+  "A re-sent turn stop states `confirm_agents' true."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-interrupt-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :target '(:arm :turn :value nil)
+                           :confirm-agents t)))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"turn\":{},\"confirmAgents\":true}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-all-agents-request ()
+  "An InterruptRequest for the fan-wide target names the allAgents arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-interrupt-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :target '(:arm :all-agents :value nil)
+                           :confirm-agents nil)))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"allAgents\":{},\"confirmAgents\":false}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-request-requires-workspace ()
+  "An InterruptRequest with no workspace is a required-field breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-interrupt-request
+                   (list :target '(:arm :turn :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-request-requires-target ()
+  "An InterruptRequest with no target arm is a required-field breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-interrupt-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-detached-target-refused ()
+  "The detached target has no encoder here -- Emacs holds no FeedId to build --
+so authoring it is refused rather than sent malformed."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-interrupt-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :target '(:arm :detached :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-interrupted-turn ()
+  "An interrupted turn decodes to the interrupted_turn success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"interruptedTurn\":{}}}"))
+                   '(:arm :success :value (:arm :interrupted-turn :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-nothing-running ()
+  "A stop that found the session quiet decodes to the nothing_running SUCCESS
+arm, never an error."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"nothingRunning\":{}}}"))
+                   '(:arm :success :value (:arm :nothing-running :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-interrupted-detached ()
+  "The interrupted_detached arm carries the count the stop reached."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"interruptedDetached\":{\"count\":3}}}"))
+                   '(:arm :success :value (:arm :interrupted-detached :value (:count 3)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-success-unset-outcome ()
+  "A success with no outcome arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-interrupt-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-confirm-required ()
+  "The confirm_required challenge decodes with its live-agent count."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"confirmRequired\":{\"liveAgentCount\":2}}}"))
+                   '(:arm :error :value (:cause (:arm :confirm-required :value (:live-agent-count 2))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-no-session ()
+  "A workspace with no session decodes to the no_session refusal arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"noSession\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :no-session :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-shim-refused ()
+  "A relayed shim refusal decodes with the shim's own detail."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"shimRefused\":{\"detail\":\"already idle\"}}}"))
+                   '(:arm :error :value (:cause (:arm :shim-refused :value (:detail "already idle"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-unknown-workspace ()
+  "An unknown workspace decodes to the unknown_workspace refusal arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"unknownWorkspace\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :unknown-workspace :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-ref-mismatch ()
+  "A ref mismatch decodes with the registry's own dir."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":\"/w/real\"}}}"))
+                   '(:arm :error :value (:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-transferring-away ()
+  "A handover decodes to transferring_away with the successor address."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}}"))
+                   '(:arm :error :value (:cause (:arm :transferring-away :value (:address "127.0.0.1:9"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-unset-kind ()
+  "An error with no kind arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-interrupt-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-unknown-kind ()
+  "A future interrupt-refusal arm arrives as an unknown key and is loud."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-interrupt-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{\"somethingNew\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-target-arms-pinned ()
+  "InterruptRequest's target oneof has exactly the three arms the proto declares;
+Emacs encodes two of them and refuses the FeedId-bearing `detached'."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptRequest")
+                       #'string<)
+                 (sort (list "turn" "detached" "allAgents") #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-success-arms-pinned ()
+  "InterruptSuccess's outcome oneof has exactly the three arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptSuccess")
+                       #'string<)
+                 (sort (list "interruptedTurn" "interruptedDetached" "nothingRunning")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-arms-pinned ()
+  "InterruptError's kind oneof has exactly the eight arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptError")
+                       #'string<)
+                 (sort (list "confirmRequired" "unknownWorkspace" "workspaceRefMismatch"
+                             "transferringAway" "notYetAdopted" "notDetachedWork"
+                             "noSession" "shimRefused")
+                       #'string<))))
+
 (provide 'test-wire-verbs)
 
 ;;; test-wire-verbs.el ends here

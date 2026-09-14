@@ -173,6 +173,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :merge))
                 ((symbol-function 'agent-repl-rpc-restart-workspace)
                  (agent-repl-test-verbs--stub :restart))
+                ((symbol-function 'agent-repl-rpc-interrupt)
+                 (agent-repl-test-verbs--stub :interrupt))
                 ((symbol-function 'agent-repl-rpc-create-workspace)
                  (agent-repl-test-verbs--stub :create))
                 ((symbol-function 'agent-repl-rpc-register-repository)
@@ -364,6 +366,100 @@ answers a bare success, which is what almost every verb's success is."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-restart "ws-one" t)
     (should (eq (plist-get (agent-repl-test-verbs--request :restart) :force) t))))
+
+;;;; ---- Interrupt -------------------------------------------------------
+
+(ert-deftest agent-repl-verbs-interrupt-targets-the-turn ()
+  "`agent-repl-verb-interrupt' aims the Interrupt at the running turn."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :interrupted-turn :value nil)))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (equal (plist-get (agent-repl-test-verbs--request :interrupt) :target)
+                   '(:arm :turn :value nil)))))
+
+(ert-deftest agent-repl-verbs-interrupt-first-ask-does-not-confirm-agents ()
+  "The first ask never speculatively sets `confirm_agents'."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :interrupted-turn :value nil)))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (eq (plist-get (agent-repl-test-verbs--request :interrupt) :confirm-agents) nil))))
+
+(ert-deftest agent-repl-verbs-interrupt-turn-stopped-is-a-message ()
+  "An interrupted turn draws a calm message."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :interrupted-turn :value nil)))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "turn stopped"))))
+
+(ert-deftest agent-repl-verbs-interrupt-nothing-running-is-a-message-not-an-error ()
+  "No turn in flight is answered by `nothing_running' and drawn as a message,
+never signalled as an error."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :nothing-running :value nil)))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "nothing to interrupt"))))
+
+(ert-deftest agent-repl-verbs-interrupt-detached-count-is-stated ()
+  "A confirmed stop that also ended agents states the count."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :interrupted-detached :value (:count 3))))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "3 agents also ended"))))
+
+(ert-deftest agent-repl-verbs-interrupt-confirm-yes-resends-with-confirm-agents ()
+  "Confirming the challenge re-sends the identical stop with `confirm_agents'."
+  (agent-repl-test-verbs--with nil
+    (let ((calls 0)
+          (requests nil))
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_prompt) t))
+                ((symbol-function 'agent-repl-rpc-interrupt)
+                 (lambda (_conn request &rest keys)
+                   (push request requests)
+                   (setq calls (1+ calls))
+                   (funcall (plist-get keys :on-response)
+                            (if (= calls 1)
+                                '(:arm :error :value
+                                  (:cause (:arm :confirm-required :value (:live-agent-count 2))))
+                              '(:arm :success :value (:arm :interrupted-turn :value nil)))))))
+        (agent-repl-verb-interrupt "ws-one")
+        ;; Two calls: the challenged first ask, then the confirmed re-send.
+        (should (= calls 2))
+        ;; `requests' is newest-first: the re-send carries confirm, the first not.
+        (should (eq (plist-get (car requests) :confirm-agents) t))
+        (should (eq (plist-get (cadr requests) :confirm-agents) nil))))))
+
+(ert-deftest agent-repl-verbs-interrupt-confirm-no-leaves-the-turn-running ()
+  "Declining the challenge sends nothing further and says the turn stands."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :error :value
+                                  (:cause (:arm :confirm-required :value (:live-agent-count 2)))))))
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_prompt) nil)))
+      (agent-repl-verb-interrupt "ws-one")
+      (should (agent-repl-test-verbs--messaged-p "turn left running"))
+      ;; Only the first ask went out; declining resends nothing.
+      (should (= 1 (length agent-repl-test-verbs--sent))))))
+
+(ert-deftest agent-repl-verbs-interrupt-no-session-is-reported ()
+  "A `no_session' refusal is surfaced through the generic refusal path."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :error :value (:cause (:arm :no-session :value nil))))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "interrupt refused: no-session"))))
+
+(ert-deftest agent-repl-verbs-interrupt-transport-failure-is-loud ()
+  "A transport failure of the interrupt is reported, never swallowed."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:failure (:kind :unreachable :message "boom"))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "interrupt failed"))))
+
+(ert-deftest agent-repl-verbs-interrupt-command-targets-current-workspace ()
+  "`agent-repl-interrupt-turn' acts on the current workspace's ref."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :interrupted-turn :value nil)))))
+    (agent-repl-interrupt-turn)
+    (should (equal (plist-get (agent-repl-test-verbs--request :interrupt) :workspace)
+                   (agent-repl-test-verbs--ref)))))
 
 (ert-deftest agent-repl-verbs-set-priority-carries-the-level ()
   "SetWorkspacePriority carries the level arm when one is given."
