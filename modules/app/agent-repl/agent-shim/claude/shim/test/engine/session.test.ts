@@ -161,6 +161,14 @@ function harness(
     /** Refuse to create any query after this many have been created. */
     createQueryFailsFrom?: number;
     /**
+     * Refuse EXACTLY the nth query creation (0-based), letting the rest through.
+     *
+     * The keep-alive rewind's recovery opens a SECOND query after the one it
+     * was refused, so a suite that has to fail only the rewind cannot use
+     * `createQueryFailsFrom`, which would take the recovery down with it.
+     */
+    createQueryFailsAt?: number;
+    /**
      * Reject EVERY `createQuery` with this exact value.
      *
      * Distinct from `createQueryFailsFrom`, which always rejects with an
@@ -205,6 +213,8 @@ function harness(
 ): Harness {
   const stateDir = options.over?.stateDir ?? scratch();
   const configDir = options.over?.configDir ?? scratch();
+  /** Creations that were REFUSED, which `queries` does not count. */
+  let refusedQueries = 0;
   const cwd = "/ws";
   const persistence = new RecordingPersistence();
   const fold = new RecordingFold();
@@ -229,6 +239,10 @@ function harness(
       if (options.createQueryRejection !== undefined) return Promise.reject(options.createQueryRejection);
       if (options.createQueryFailsFrom !== undefined && queries.length >= options.createQueryFailsFrom) {
         return Promise.reject(new Error("the vendor refused another query"));
+      }
+      if (options.createQueryFailsAt === queries.length + refusedQueries) {
+        refusedQueries++;
+        return Promise.reject(new Error("No message found with message.uuid of: assistant-uuid"));
       }
       const query = new ScriptedQuery();
       if (options.backgroundTasks === true) query.backgroundTaskAnswer = true;
@@ -1369,23 +1383,284 @@ describe("the keep-alive turn", () => {
   it("REWINDS the vendor context before the next real prompt", async () => {
     const h = harness();
     await started(h);
-    // A real record, then a keep-alive turn, then a real prompt.
-    await h.engine.onSdkMessage(resultMessage("real-uuid"));
-    h.scheduler.fire(0);
-    await new Promise((resolve) => setImmediate(resolve));
-    h.queries.at(-1)?.query.emit(resultMessage("keepalive-uuid"));
-    await new Promise((resolve) => setImmediate(resolve));
+    // A real turn that leaves an ASSISTANT record, then a keep-alive turn.
+    await realTurn(h, "turn-0", [assistantMessage("real-assistant-uuid")]);
+    await keepaliveTurn(h, []);
 
-    await h.engine.startTurn(
-      create(shimv1.StartTurnRequestSchema, {
-        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
-        said: textSaid("go"),
-        origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
-      }),
-    );
+    await realPrompt(h, "turn-1");
 
-    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid");
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-assistant-uuid");
+  });
+});
+
+/**
+ * THE ANCHOR, AND THE TWO DEAD UUIDS OF 2026-09-14.
+ *
+ * `resumeSessionAt` is declared to take an `SDKAssistantMessage.uuid`. The
+ * vendor's `system:init` and `result` messages carry required uuids too, and a
+ * query opened at one of those is refused — `No message found with message.uuid
+ * of: 19e047a0-…` — which killed the owner's session and lost the prompt it was
+ * carrying. Every case below is one shape that must never reach the vendor as a
+ * rewind target, or one boundary the anchor must not cross.
+ */
+describe("the keep-alive rewind anchor", () => {
+  it("anchors on the assistant record of a real turn", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+
+    // Act.
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Assert.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("assistant-uuid");
+  });
+
+  it("never anchors on the `system:init` uuid", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+
+    // Act. An init arriving mid-turn, exactly as a resumed vendor emits one.
+    await realTurn(h, "turn-0", [
+      assistantMessage("assistant-uuid"),
+      initMessage({ sessionId: "session-1" }),
+    ]);
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Assert. `initMessage`'s uuid is 11111111-…; the assistant's is the anchor.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("assistant-uuid");
+  });
+
+  it("never anchors on a `result` uuid", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+
+    // Act. The result is what ENDS the real turn, so it is the last uuid seen.
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")], "result-uuid");
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Assert.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("assistant-uuid");
+  });
+
+  it("never anchors on a keep-alive turn's OWN assistant record", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+
+    // Act.
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, [assistantMessage("keepalive-assistant-uuid")]);
+    await realPrompt(h, "turn-1");
+
+    // Assert.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("assistant-uuid");
+  });
+
+  it("proceeds WITHOUT a rewind when the vendor compacted since the anchor", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+
+    // Act.
+    await h.engine.onSdkMessage(compactBoundaryMessage("boundary-uuid"));
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Assert. A uuid from before the cut may name no record the resume can find.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBeUndefined();
+  });
+
+  it("proceeds WITHOUT a rewind when the vendor reset the conversation since the anchor", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+
+    // Act.
+    await h.engine.onSdkMessage(conversationResetMessage("reset-uuid"));
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Assert.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBeUndefined();
+  });
+
+  it("does not open a second query at all when the anchor was cleared", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await h.engine.onSdkMessage(compactBoundaryMessage("boundary-uuid"));
+    const before = h.queries.length;
+
+    // Act.
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Assert.
+    expect(h.queries.length).toBe(before);
+  });
+});
+
+/**
+ * THE REWIND IS SURVIVABLE.
+ *
+ * When the vendor refuses the anchor, the prompt the rewind was performed FOR
+ * must still be delivered. It reaches the shim two ways: as an error result
+ * naming the uuid, and as the child simply ending its stream having said so on
+ * stderr.
+ */
+describe("a keep-alive rewind the vendor refuses", () => {
+  /** Bring a session to the moment a rewind has just been performed. */
+  async function rewound(delivered: string[]): Promise<Harness> {
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+    return h;
+  }
+
+  /** The vendor's refusal, in its own words. */
+  const refusal = (): SdkMessage =>
+    errorResultMessage({ errors: ["No message found with message.uuid of: assistant-uuid"] });
+
+  /** The faults standing on the session right now. */
+  function standingFaults(h: Harness): conversationv1.SessionFault[] {
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("the engine stated no diagnostics");
+    const health = update.value.health;
+    return health.case === "unhealthy" ? health.value.faults : [];
+  }
+
+  it("reopens the query WITHOUT a rewind", async () => {
+    // Arrange.
+    const delivered: string[] = [];
+    const h = await rewound(delivered);
+
+    // Act.
+    await h.engine.onSdkMessage(refusal());
+
+    // Assert.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBeUndefined();
+  });
+
+  it("reopens it as a plain RESUME of the same conversation", async () => {
+    // Arrange.
+    const delivered: string[] = [];
+    const h = await rewound(delivered);
+
+    // Act.
+    await h.engine.onSdkMessage(refusal());
+
+    // Assert.
+    expect(h.queries.at(-1)?.spec.binding.kind).toBe("resume");
+  });
+
+  it("RE-DELIVERS the prompt the rewind was carrying", async () => {
+    // Arrange.
+    const delivered: string[] = [];
+    const h = await rewound(delivered);
+
+    // Act.
+    await h.engine.onSdkMessage(refusal());
+    for (let attempt = 0; attempt < 50 && !delivered.slice(1).includes("go"); attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Assert. The prompt reaches the REPLACEMENT query, not only the dead one.
+    expect(delivered.filter((prompt) => prompt === "go").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("raises a session fault so the footer says what happened", async () => {
+    // Arrange.
+    const delivered: string[] = [];
+    const h = await rewound(delivered);
+
+    // Act.
+    await h.engine.onSdkMessage(refusal());
+
+    // Assert.
+    expect(standingFaults(h).map((fault) => fault.kind.case)).toContain("keepaliveFailed");
+  });
+
+  it("names the refused anchor in the fault's detail", async () => {
+    // Arrange.
+    const delivered: string[] = [];
+    const h = await rewound(delivered);
+
+    // Act.
+    await h.engine.onSdkMessage(refusal());
+
+    // Assert.
+    expect(standingFaults(h).some((fault) => fault.detail.includes("assistant-uuid"))).toBe(true);
+  });
+
+  it("does NOT report the session's query as dead", async () => {
+    // Arrange.
+    const delivered: string[] = [];
+    const h = await rewound(delivered);
+
+    // Act.
+    await h.engine.onSdkMessage(refusal());
+
+    // Assert.
+    expect(standingFaults(h).map((fault) => fault.kind.case)).not.toContain("vendorQueryFailed");
+  });
+
+  it("DROPS the anchor, so the prompt after it rewinds nowhere", async () => {
+    // Arrange.
+    const delivered: string[] = [];
+    const h = await rewound(delivered);
+    await h.engine.onSdkMessage(refusal());
+
+    // Act.
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-2");
+
+    // Assert.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBeUndefined();
+  });
+
+  it("falls back to a plain resume when the rewind's query never starts", async () => {
+    // Arrange. Creation 1 is the rewind's; creation 0 opened the session.
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered, createQueryFailsAt: 1 });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act.
+    await realPrompt(h, "turn-1");
+
+    // Assert.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBeUndefined();
+  });
+
+  it("DELIVERS the prompt on that plain resume", async () => {
+    // Arrange.
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered, createQueryFailsAt: 1 });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act.
+    await realPrompt(h, "turn-1");
+    for (let attempt = 0; attempt < 50 && !delivered.includes("go"); attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Assert.
+    expect(delivered).toContain("go");
   });
 });
 
@@ -3973,6 +4248,59 @@ function assistantMessage(uuid: string): SdkMessage {
     parent_tool_use_id: null,
     message: { id: "msg_1", role: "assistant", content: [] },
   } as never;
+}
+
+/** The vendor's own compaction divider, which the anchor must not cross. */
+function compactBoundaryMessage(uuid: string): SdkMessage {
+  return {
+    type: "system",
+    subtype: "compact_boundary",
+    uuid,
+    session_id: "s",
+    compact_metadata: { trigger: "auto", pre_tokens: 100 },
+  } as never;
+}
+
+/** The vendor retiring the conversation, which the anchor must not cross. */
+function conversationResetMessage(uuid: string): SdkMessage {
+  return {
+    type: "conversation_reset",
+    uuid,
+    session_id: "s",
+    new_conversation_id: "00000000-0000-4000-8000-000000000abc",
+  } as never;
+}
+
+/** Open a real turn, without waiting on anything it produces. */
+async function realPrompt(h: Harness, turnId: string): Promise<void> {
+  await h.engine.startTurn(
+    create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+      said: textSaid("go"),
+      origin: conversationv1.PromptOrigin.USER_SENT,
+      pageSize: 5,
+    }),
+  );
+}
+
+/** A whole real turn: the prompt, the records it produced, and its result. */
+async function realTurn(
+  h: Harness,
+  turnId: string,
+  records: SdkMessage[],
+  resultUuid = `${turnId}-result-uuid`,
+): Promise<void> {
+  await realPrompt(h, turnId);
+  for (const record of records) await h.engine.onSdkMessage(record);
+  await h.engine.onSdkMessage(resultMessage(resultUuid));
+}
+
+/** A whole keep-alive turn, beaten by the suite's own scheduler. */
+async function keepaliveTurn(h: Harness, records: SdkMessage[]): Promise<void> {
+  h.scheduler.fire(0);
+  await new Promise((resolve) => setImmediate(resolve));
+  for (const record of records) await h.engine.onSdkMessage(record);
+  await h.engine.onSdkMessage(resultMessage("keepalive-result-uuid"));
 }
 
 /** One activity frame row, as the fold produces them. */
