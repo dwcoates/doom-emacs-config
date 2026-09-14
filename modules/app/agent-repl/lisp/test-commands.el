@@ -772,6 +772,29 @@ routed to a sink that does not exist."
     (should (member "elisp.commands.switch-to-workspace-chosen ws=second"
                     (agent-repl-test-commands--info-messages)))))
 
+(ert-deftest agent-repl-test-commands-switch-to-project-offers-no-pseudo-perspectives ()
+  "The `SPC p p' switcher never offers \"main\" or \"none\" as a workspace.
+It completes over `agent-repl--live-ws-names', which excludes persp-mode's
+own perspectives at the source, so the candidates are real workspaces only."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none")
+          (+workspaces-main "main")
+          (offered nil))
+      (agent-repl--ws-put "none" :repl-state :inactive)
+      (agent-repl--ws-put "main" :agent-state :idle)
+      (agent-repl--ws-put "real-ws" :project-dir "/tmp/real")
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt candidates &rest _)
+                   (setq offered candidates)
+                   "real-ws"))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil)))
+        ;; Act
+        (agent-repl-switch-to-project))
+      ;; Assert
+      (should (equal offered '("real-ws"))))))
+
 (ert-deftest agent-repl-test-commands-switch-to-project-refuses-with-no-workspaces ()
   "With nothing live there is nothing to switch to."
   (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
