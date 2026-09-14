@@ -38,7 +38,7 @@ const IdleCutoffEnv = "AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS"
 
 // DefaultIdleCutoff is the cutoff when neither the flag nor the environment
 // names one.
-const DefaultIdleCutoff = 4 * time.Hour
+const DefaultIdleCutoff = 12 * time.Hour
 
 // DefaultSweepEvery is the idle sweep's cadence under Run.
 const DefaultSweepEvery = 5 * time.Minute
