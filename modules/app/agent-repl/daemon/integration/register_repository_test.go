@@ -98,10 +98,12 @@ func TestRegisterRepositoryAdoptsARepositoryAWorkspaceAlreadyMinted(t *testing.T
 	}
 }
 
-// TestRegisterRepositoryPutsAnEmptySectionOnTheRoster is the whole visible
-// consequence: a repository with no workspace draws a section, or the user has
-// no evidence the registration happened.
-func TestRegisterRepositoryPutsAnEmptySectionOnTheRoster(t *testing.T) {
+// TestRegisterRepositoryPutsTheMainWorktreeRowOnTheRoster is the whole visible
+// consequence of the 2026-09-14 ruling: the repository's section carries the
+// main worktree as a workspace row, which is what makes it selectable at all.
+// The section used to be drawn EMPTY, and an empty section is exactly what the
+// owner reported as "not available for selection".
+func TestRegisterRepositoryPutsTheMainWorktreeRowOnTheRoster(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
@@ -112,16 +114,58 @@ func TestRegisterRepositoryPutsAnEmptySectionOnTheRoster(t *testing.T) {
 	id := registerRepository(t, d, repo.Dir).GetSuccess().GetRepository().GetId()
 
 	// Assert
-	got := awaitRoster(t, d, roster, "a roster carrying the newly registered repository",
+	got := awaitRoster(t, d, roster, "a roster carrying the newly registered repository's workspace row",
 		func(r *frontendv1.WorkspaceRoster) bool {
-			return repoSectionByID(r, id) != nil
+			return len(repoSectionByID(r, id).GetRows().GetRows()) == 1
 		})
 	section := repoSectionByID(got, id)
-	if rows := section.GetRows().GetRows(); len(rows) != 0 {
-		t.Fatalf("the new repository's section carries %d rows, want none", len(rows))
-	}
 	if section.GetHeader().GetLabel().GetText() == "" {
 		t.Fatalf("the new repository's section has no header label: %v", section)
+	}
+}
+
+// TestRegisterRepositoryRegistersTheMainWorktreeAsAWorkspace drives the ruling
+// end to end through the fake git: a FILE is picked, git resolves the
+// repository it is in, and the main worktree comes back as a registered
+// workspace.
+func TestRegisterRepositoryRegistersTheMainWorktreeAsAWorkspace(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+
+	// Act
+	success := registerRepository(t, d, filepath.Join(repo.Dir, "README.md")).GetSuccess()
+
+	// Assert
+	if got := success.GetWorkspace().GetDir(); got != repo.Dir {
+		t.Fatalf("RegisterRepository = workspace dir %q, want the main worktree %q", got, repo.Dir)
+	}
+	if success.GetWorkspace().GetId() == "" {
+		t.Fatalf("RegisterRepository = %v, want a minted workspace id", success)
+	}
+	if success.GetWorkspaceAlreadyKnown() {
+		t.Fatalf("RegisterRepository reported workspace_already_known for a workspace nothing had registered")
+	}
+}
+
+// TestRegisterRepositoryAdoptsTheWorkspaceAlreadyRegisteredForTheMainWorktree
+// pins the reuse half: a directory RegisterWorkspace already announced is
+// adopted, never minted a second time.
+func TestRegisterRepositoryAdoptsTheWorkspaceAlreadyRegisteredForTheMainWorktree(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	success := registerRepository(t, f.d, filepath.Join(f.repo.Dir, "README.md")).GetSuccess()
+
+	// Assert
+	if !success.GetWorkspaceAlreadyKnown() {
+		t.Fatalf("RegisterRepository = workspace_already_known false, want the workspace already registered")
+	}
+	if got := success.GetWorkspace().GetId(); got != f.ws.GetId() {
+		t.Fatalf("RegisterRepository = workspace %q, want the registered workspace %q", got, f.ws.GetId())
 	}
 }
 
