@@ -12,6 +12,7 @@ Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — t
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
 - realtest 9: the focus act is written for the toggle `SPC o v` really is (read where the editor stands, press, assert the predicted landing, press again from the webview) and its selection probe reads `(window-buffer (selected-window))` instead of the transport's own temp buffer (rt-run34, rt9FocusTheComposer)
+- webapp topbar: the strip's row is `minmax(0, 1fr) fit-content(50%) minmax(0, 1fr)`, so both flank tracks are equal and floorless and the title sits at the strip's true center whatever the flanks hold (owner report, "the CENTER and ONLY the center should be in the center", 2026-09-13)
 - daemon footer: every daemon fault kind reaches the strip -- `health.ObserveFaults` decorates the ONE state client every raise site shares, and `internal/health/footer.go` maps each kind to (status, substatus, activity) at open and retracts it at close (owner ruling, every daemon fault kind reaches the footer, 2026-09-13)
 - footer proto: `FooterStatusActivityFault{kind, detail}` in all ten activity oneofs plus `blocked · daemon_impaired`, the one new substatus; four of the five buckets already existed (same ruling)
 - daemon cold gate: a failed re-open ANSWERS with `AnswerColdGateError.reopen_failed{detail}` and opens the `cold_gate_reopen_failed` fault, instead of a Connect internal the webapp worded as an unreachable daemon (FOOTER-TOPOLOGY-AUDIT section 4, two incidents 2026-09-13)

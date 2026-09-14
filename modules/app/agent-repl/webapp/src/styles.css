@@ -5298,29 +5298,44 @@ body.draining #composer-input::placeholder {
   position: relative;
 }
 
-/* THREE TRACKS, AND THE OUTER TWO ARE THE SAME SIZE (owner ruling 2,
-   2026-09-13). The title is centered on ITS OWN CONTENT against the whole
-   strip — the middle character of a three-letter title sits at the strip's
-   exact midpoint — rather than on whatever the left and right groups leave
-   over, which is what a flex row gives and what put the title off-center by
-   half the difference between the two groups.
+/* THREE TRACKS, AND THE OUTER TWO ARE THE SAME SIZE, ALWAYS (owner ruling 2,
+   2026-09-13, corrected 2026-09-13 by the owner's report that the strip read
+   `<login>      <center><chips>` instead of `<login>    <center>    <chips>`).
+   The title is centered on ITS OWN CONTENT against the whole strip — the
+   middle character of a three-letter title sits at the strip's exact
+   midpoint — rather than on whatever the left and right groups leave over.
 
-   `1fr` twice is the entire mechanism: two equal free tracks with the
-   content-sized title between them. The outer tracks keep their AUTO MINIMUM
-   deliberately, which is the overflow rule: a group is never squeezed, and a
-   title with less free space than it wants ellipsis-clips inside
-   `minmax(0, auto)` instead of overlapping either group. A title that outgrows
-   the free space therefore stops being centered before it ever collides —
-   losing the centering is the concession, never the collision.
+   `minmax(0, 1fr)` twice is the entire mechanism, and the ZERO FLOOR is the
+   correction. A bare `1fr` is `minmax(auto, 1fr)`, whose floor is that track's
+   own min-content: whenever the free share fell below what the right group
+   (model, mode, fast mode, context, warnings) wanted, the right track was
+   floored at its content while the left one kept the share, the two flanks
+   stopped being equal, and the title was pushed left by exactly half the
+   difference — the strip the owner reported. Flooring both tracks at 0 makes
+   the two free shares equal by construction, whatever either group holds, so
+   the title's midpoint is the row's midpoint at every width.
+
+   `fit-content(50%)` IS THE CLAMP, and it is why the title cannot reach a
+   flank. The middle track is content-sized, and a content-sized track is
+   sized BEFORE the free tracks get their share, so an unbounded title would
+   eat the strip and leave the two groups nothing — the title, not the groups,
+   is the greedy one here. Capping the middle at half the row's content box
+   leaves a quarter of it to each flank as a floor, and the title
+   ellipsis-clips at that cap instead of growing into either group. Losing the
+   title's tail is the concession; a collision never is.
+
+   The groups take `min-width: 0` for the same reason the title does: below
+   their quarter they compress and each cell clips by its own rule (the
+   account chip already ellipsizes) rather than spilling over the title.
 
    Grid rather than an absolutely centered title layer: absolute positioning
    cannot know either group's width, so it can only guess a max-width and
-   still overlap an asymmetric strip, where the tracks make non-overlap a
-   fact of the layout. The reveal layer is unaffected either way — it is the
-   row's SIBLING inside the host, not a descendant. */
+   still overlap an asymmetric strip, where the tracks make both the centering
+   and the non-overlap facts of the layout. The reveal layer is unaffected
+   either way — it is the row's SIBLING inside the host, not a descendant. */
 .topbar-row {
   display: grid;
-  grid-template-columns: 1fr minmax(0, auto) 1fr;
+  grid-template-columns: minmax(0, 1fr) fit-content(50%) minmax(0, 1fr);
   align-items: center;
   /* ONE TOKEN, BOTH DISTANCES (owner ruling 1). The gap between cells and the
      inset at the strip's edges are the same measure by definition, so a change
@@ -5334,23 +5349,28 @@ body.draining #composer-input::placeholder {
 /* Each group is a row of cells that hugs its OWN edge of its free track, so
    the strip's first cell sits at the left edge of the strip and its last cell
    at the right one. Written out per group rather than shared, because the one
-   declaration that differs is the whole point of the pair. */
+   declaration that differs is the whole point of the pair. `min-width: 0` is
+   the same declaration in both: the tracks are floored at zero so the title
+   stays centered, and a group that would not compress with its track would
+   spill out of it and over the title. */
 .topbar-left {
   display: flex;
   align-items: center;
   gap: var(--topbar-cell-gap);
   justify-self: start;
+  min-width: 0;
 }
 .topbar-right {
   display: flex;
   align-items: center;
   gap: var(--topbar-cell-gap);
   justify-self: end;
+  min-width: 0;
 }
-/* THE MIDDLE TRACK. Sized to its content by the template above, so this rule
-   carries only what happens when the content does not fit: ellipsis rather
-   than wrapping, because the strip is one line high by definition and the
-   whole title is in the tooltip. */
+/* THE MIDDLE TRACK. Sized to its content up to the template's half-row cap, so
+   this rule carries only what happens when the content does not fit: ellipsis
+   rather than wrapping, because the strip is one line high by definition and
+   the whole title is in the tooltip. */
 .topbar-title {
   min-width: 0;
   overflow: hidden;
