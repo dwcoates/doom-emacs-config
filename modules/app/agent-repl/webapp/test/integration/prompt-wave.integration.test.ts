@@ -23,6 +23,7 @@ import { ROOT_FEED } from "./fake-daemon";
 import {
   WORKSPACE_ID,
   feedId,
+  responseRow,
   turnEndedConcludedRow,
   turnId,
   userPromptRow,
@@ -77,6 +78,66 @@ describe("the prompt bubble's thinking wave, across a turn", () => {
       afterEnding: null,
       sameElement: true,
       text: true,
+    });
+  });
+
+  it("holds the wave through the turn's own final answer, releasing it only at turn_ended", async () => {
+    // THE BOUNDARY THE 'settled too early' REPORT NAMES: a turn's answering
+    // response landing must NOT settle the prompt — the feed marks the final
+    // answer only when the `turn_ended` row is drawn (turn-ended.ts), so a
+    // response arriving `success` while the turn is still open is the agent's
+    // answer taking shape, not the turn ending. The one prior case ends the
+    // turn on the push AFTER the prompt; this drives the realistic order —
+    // prompt, a streaming update, the settled answer, THEN the turn's end — and
+    // asserts the band survives every step until the last.
+    //
+    // Arrange — the app booted on a live tail, the prompt delivered.
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      userPromptRow("do the thing", { id: feedId("p1"), turn: turnId("t1") }),
+    );
+    await harness.settle();
+    const afterPrompt = bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE);
+
+    // Act 1 — the answer streams in, then settles, both on the prompt's turn.
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      responseRow("update", "thinking", { id: feedId("r1"), turn: turnId("t1") }),
+    );
+    await harness.settle();
+    const afterStreaming = bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE);
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      responseRow("success", "the answer", { id: feedId("r1"), turn: turnId("t1") }),
+    );
+    await harness.settle();
+    const afterFinalResponse = bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE);
+
+    // Act 2 — the turn ends, naming that settled response as its answer.
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      turnEndedConcludedRow(feedId("r1"), { id: feedId("e1"), turn: turnId("t1") }),
+    );
+    await harness.settle();
+
+    // Assert — waving from draw, through the streamed and the settled answer,
+    // and only the turn's end takes it away.
+    expect({
+      afterPrompt,
+      afterStreaming,
+      afterFinalResponse,
+      afterTurnEnded: bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE),
+    }).toEqual({
+      afterPrompt: PROMPT_WAVE_WORKING,
+      afterStreaming: PROMPT_WAVE_WORKING,
+      afterFinalResponse: PROMPT_WAVE_WORKING,
+      afterTurnEnded: null,
     });
   });
 
