@@ -280,12 +280,13 @@ export function agentPromptRow(
  */
 export function turnEndedRow(
   id: string,
-  turn: string,
+  turn: string | undefined,
   outcome: "concluded" | "errored" | "interrupted" = "concluded",
+  answer?: string,
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
-    turn: create(TurnIdSchema, { value: turn }),
+    turn: turn === undefined ? undefined : create(TurnIdSchema, { value: turn }),
     row: {
       case: "turnEnded",
       value: create(FeedTurnEndedSchema, {
@@ -301,17 +302,26 @@ export function turnEndedRow(
               }
             : outcome === "interrupted"
               ? { case: "interrupted", value: {} }
-              : { case: "concluded", value: {} },
+              : {
+                  case: "concluded",
+                  value: answer === undefined ? {} : { answer: feedId(answer) },
+                },
       }),
     },
   });
 }
 
 /** A response row, the commonest activity. */
-export function responseRow(id: string, markdown = "hi", parent?: string): FeedRow {
+export function responseRow(
+  id: string,
+  markdown = "hi",
+  parent?: string,
+  turn?: string,
+): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
     parent: parent === undefined ? undefined : { row: feedId(parent) },
+    turn: turn === undefined ? undefined : create(TurnIdSchema, { value: turn }),
     row: {
       case: "activity",
       value: {

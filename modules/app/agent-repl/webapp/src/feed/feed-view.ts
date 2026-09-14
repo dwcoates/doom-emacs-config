@@ -65,7 +65,7 @@ import type {
 import { stopTicking } from "./ticking.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
-import { drawFeedTurnEnded } from "./rows/turn-ended.js";
+import { FINAL_ANSWER_ATTRIBUTE, drawFeedTurnEnded } from "./rows/turn-ended.js";
 import { drawFeedSessionSeparation } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
@@ -145,6 +145,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   const listeners = new Set<() => void>();
   let crumbs: readonly FeedBreadcrumb[] = [];
   let disposed = false;
+  // THE SETTLED-TURN SET, MEMOIZED. Every drawn row is held against it, so
+  // recomputing it per row would make one page's paint quadratic in its rows.
+  // `null` = stale; only the two things that can change it drop it (see
+  // `settledTurns`).
+  let settled: ReadonlySet<string> | null = null;
 
   opts.host.setAttribute("data-feed", opts.feed === "root" ? "root" : opts.feed.value);
 
@@ -326,6 +331,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    */
   function adopt(row: FeedRow, index: number): void {
     const id = requireMessage(row.id, "FeedRow.id").value;
+    // A terminal row landing (or a row that WAS one being replaced) is one of
+    // the two things that move the settled-turn set.
+    if (row.row.case === "turnEnded" || states.get(id)?.row.row.case === "turnEnded") {
+      forgetSettled();
+    }
     const held = states.get(id);
     if (held !== undefined) {
       held.row = row;
@@ -352,6 +362,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
 
   /** Drop every row: the feed is being repainted from a fresh newest page. */
   function clearRows(): void {
+    forgetSettled();
     for (const state of states.values()) {
       state.bubble?.dispose();
       stopTicking(state.element);
@@ -377,6 +388,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     if (!state.dirty) return state.element;
     state.dirty = false;
     drawBody(state);
+    // A FRESH PROMPT BUBBLE ARRIVES WAVING (`startPromptWave`), so the row it
+    // was drawn for is reconciled HERE, on the same synchronous pass, rather
+    // than only in `announce`. Every draw path reaches this function — the row
+    // list, the merge strip's own redraw on a tab pick — and a settled prompt
+    // redrawn outside a push would otherwise start waving again and stay that
+    // way until the next row arrived.
+    markPromptWave(state, settledTurns());
     return state.element;
   }
 
@@ -404,6 +422,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     state.body = body;
     state.element.prepend(body);
     mirrorState(state);
+    // The concluded arm puts the final-answer mark on the row it NAMES, which
+    // is the other thing that can settle a turn.
+    if (state.row.row.case === "turnEnded") forgetSettled();
   }
 
   /**
@@ -650,22 +671,24 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /**
-   * THE THINKING WAVE, on the working prompt and on no other.
+   * THE THINKING WAVE: ON EVERY PROMPT UNTIL ITS TURN IS SETTLED.
    *
-   * The wave says "the daemon has this prompt and is still on it". Which prompt
-   * that is, this feed already knows and has always known: a row names its turn
-   * (`FeedRow.turn`), and a turn's `turn_ended` row is the terminal fact whose
-   * ABSENCE is what "live" means (feed.proto, FeedRow.turn_ended). So the mark
-   * is that absence, read off the rows already held — no new signal, no second
-   * notion of liveness to drift from the one the rest of the feed uses.
+   * THE INVARIANT (owner ruling, 2026-09-14): a prompt bubble waves from the
+   * moment it is drawn until its turn's final answer lands. The bubble arrives
+   * waving — `startPromptWave` stamps it at construction — and this pass is
+   * the RECONCILIATION over it: a reload that paints thirty settled prompts
+   * ends with thirty still bubbles, because this runs on the same pass that
+   * drew them.
    *
-   * A PROMPT WITH NO TURN NEVER WAVES. `turn` is optional, and a prompt row
-   * that carries none belongs to no turn this feed can watch conclude; waving
-   * it would be a band that could never stop.
+   * SO IT ONLY EVER TAKES THE WAVE AWAY FROM A SETTLED TURN. A prompt whose
+   * turn has not ended keeps it, and a prompt that names NO TURN keeps it too:
+   * a locally minted prompt the daemon has not yet stamped is one the reader
+   * can see and cannot possibly have an answer to, and leaving it still would
+   * say the page is idle at the one moment it certainly is not. The turn's
+   * settlement is the only thing that stops the band.
    *
-   * FAILURE AND INTERRUPTION SETTLE IT LIKE CONCLUSION DOES. All three are
-   * `turn_ended` arms — the turn is over however it ended — so this asks only
-   * whether the row is there, never which arm it drew.
+   * WHAT COUNTS AS SETTLED is `settledTurns` below — the final-answer mark or
+   * the `turn_ended` row, whichever this feed saw first.
    *
    * IT TOUCHES ONLY THE ATTRIBUTE. The bubble element is the one the row's last
    * draw produced and it is left standing: nothing here marks a row dirty or
@@ -673,26 +696,74 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * text untouched beneath it.
    */
   function markWorkingPrompts(): void {
-    const ended = new Set<string>();
+    const turns = settledTurns();
     for (const id of order) {
       const state = states.get(id);
       if (state === undefined) continue;
-      if (state.row.row.case !== "turnEnded") continue;
-      if (state.row.turn !== undefined) ended.add(state.row.turn.value);
+      markPromptWave(state, turns);
     }
+  }
+
+  /**
+   * The turns this feed has seen the end of, however they ended.
+   *
+   * TWO FACTS, EITHER OF WHICH IS THE END, because the ruling names the final
+   * answer and the schema names the terminal row and they are not guaranteed
+   * to be the same moment:
+   *  - the FINAL-ANSWER mark on a row of this turn (`markFinalAnswer` in
+   *    turn-ended.ts). This is the one the reader actually sees arrive — the
+   *    green-bordered answer — and the ruling ends the wave on it.
+   *  - the turn's own `turn_ended` row, which is the terminal fact whose
+   *    ABSENCE is what "live" means (feed.proto, FeedRow.turn_ended). It is
+   *    what settles a turn that ends with NO answer — errored, interrupted —
+   *    so a dead turn never keeps waving.
+   */
+  function settledTurns(): ReadonlySet<string> {
+    if (settled !== null) return settled;
+    const found = new Set<string>();
     for (const id of order) {
       const state = states.get(id);
       if (state === undefined) continue;
-      if (state.row.row.case !== "userPrompt" && state.row.row.case !== "agentPrompt") continue;
-      const bubble = state.element.querySelector<HTMLElement>(".bubble.user");
-      if (bubble === null) continue;
       const turn = state.row.turn;
-      if (turn !== undefined && !ended.has(turn.value)) {
-        bubble.setAttribute(PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING);
-      } else {
-        bubble.removeAttribute(PROMPT_WAVE_ATTRIBUTE);
+      if (turn === undefined) continue;
+      if (state.row.row.case === "turnEnded") {
+        found.add(turn.value);
+        continue;
       }
+      if (state.element.getAttribute(FINAL_ANSWER_ATTRIBUTE) === "true") found.add(turn.value);
     }
+    settled = found;
+    return found;
+  }
+
+  /**
+   * Drop the memo, because something that decides settlement moved.
+   *
+   * ONLY TWO THINGS CAN: a `turn_ended` row arriving or being cleared, and a
+   * `turn_ended` row being DRAWN (its concluded arm is what puts the
+   * final-answer mark on the answering row). Everything else — a response
+   * growing, a card settling — leaves the set exactly as it was, which is what
+   * keeps a thousand-row paint linear.
+   */
+  function forgetSettled(): void {
+    settled = null;
+  }
+
+  /** One row's prompt bubble, held against SETTLED. A non-prompt row is a no-op. */
+  function markPromptWave(state: RowState, settled: ReadonlySet<string>): void {
+    if (state.row.row.case !== "userPrompt" && state.row.row.case !== "agentPrompt") return;
+    const bubble = state.element.querySelector<HTMLElement>(".bubble.user");
+    if (bubble === null) return;
+    const turn = state.row.turn;
+    if (turn !== undefined && settled.has(turn.value)) {
+      bubble.removeAttribute(PROMPT_WAVE_ATTRIBUTE);
+      return;
+    }
+    // NEVER A REMOVAL HERE. The bubble is already waving from its draw; this
+    // re-asserts it for the one case the draw could not cover — a bubble built
+    // before this build's `startPromptWave` existed on some other path — and
+    // is otherwise a no-op.
+    bubble.setAttribute(PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING);
   }
 
   // ---- lookups ----------------------------------------------------------
