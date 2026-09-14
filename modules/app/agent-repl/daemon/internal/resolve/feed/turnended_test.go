@@ -1213,3 +1213,37 @@ func TestATerminalStatesAMidTurnApiFailureItDidNotDieOf(t *testing.T) {
 		t.Fatalf("headline = %q, want the surviving mid-turn failure folded in as evidence", headline)
 	}
 }
+
+// THE DISCRIMINATOR IS THE CUT, NOT THE INTERRUPTED ARM. A /clear and a footer
+// stop both arrive as AgentSuccess.interrupted.by_user; the ONLY difference is
+// whether a ContextCut accompanied the turn's end. The user-stop must draw its
+// interrupted terminal (visible feedback that the stop took effect), and the
+// clear must draw none.
+func TestInterruptedTerminalDrawsForAUserStopButNotAClear(t *testing.T) {
+	// Arrange: a clear turn (with a confirming cut) and, separately, an ordinary
+	// user-stopped turn — both ending on the same interrupted-by-user arm.
+	h := newHarness(t)
+
+	// A /clear: registered, its cut confirmed.
+	h.resolver.OnClearReceived(testWorkspace, ids.TurnID("clear-turn"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("clear-turn"))
+	h.resolver.OnContextCut(testWorkspace, mainAgent(),
+		&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}},
+		&conversationv1.HistoryPointer{Value: "entry-clear"}, noAddress())
+
+	// An ordinary turn the user stops — no cut.
+	h.deliverPrompt("stop-turn", "do the thing")
+
+	// Act: both end on interrupted-by-user.
+	h.terminal("clear-turn", interruptedByUser(), nil)
+	h.terminal("stop-turn", interruptedByUser(), nil)
+
+	// Assert: the clear drew no terminal; the user-stop drew its interrupted one.
+	if h.hasTerminalRow("clear-turn") {
+		t.Fatal("the /clear drew a terminal bubble; only its divider is its outcome")
+	}
+	if h.terminalRow("stop-turn").GetInterrupted() == nil {
+		t.Fatalf("user-stop outcome = %T, want a visible interrupted terminal",
+			h.terminalRow("stop-turn").GetOutcome())
+	}
+}

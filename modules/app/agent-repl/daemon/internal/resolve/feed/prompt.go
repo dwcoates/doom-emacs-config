@@ -43,6 +43,15 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			running := ids.TurnID(turn.GetValue())
 			s.turnInFlight = &running
 			s.turnStamp = &running
+			// THE PROMPT ITSELF MARKS ITS TURN A DIRECTIVE. The prompt is the
+			// turn's FIRST frame on every path, so recognising the /clear or
+			// /compact literal here registers the turn before its response and
+			// terminal are drawn — the suppression no longer depends on the
+			// ContextCut frame arriving first (live OnClearReceived) and so holds
+			// on a fresh-resolver history replay too.
+			if isContextCutDirective(prompt.GetSaid()) {
+				s.directiveTurns[running] = true
+			}
 		}
 		// A CONTEXT-CUT DIRECTIVE DRAWS NO PROMPT BUBBLE. /clear and /compact are
 		// directives, not conversational prompts; their only visible outcome is
