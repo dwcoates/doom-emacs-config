@@ -5,6 +5,10 @@ import { FeedUserPromptSchema } from "../../../../proto/gen/ts/frontend/v1/feed_
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedUserPrompt } from "../../../src/feed/rows/user-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import {
+  PROMPT_WAVE_ATTRIBUTE,
+  PROMPT_WAVE_WORKING,
+} from "../../../src/breathing.js";
 
 /** A prompt with the given blocks. */
 function prompt(blocks: unknown[], author = "You") {
@@ -23,6 +27,13 @@ describe("drawFeedUserPrompt: the bubble", () => {
   it("stamps the wave's phase inline, so a redraw does not jump it back", () => {
     const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
     expect(el.getAttribute("style")).toMatch(/animation-delay:-\d+ms/);
+  });
+
+  it("waves from the moment it is drawn, before the feed has said anything", () => {
+    // The invariant (owner ruling, 2026-09-14): a prompt bubble waves from its
+    // draw. The feed is what stops it, never what starts it.
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    expect(el.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
   });
 
   it("draws the author label the daemon resolved", () => {
