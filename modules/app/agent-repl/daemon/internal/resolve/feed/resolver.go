@@ -165,11 +165,22 @@ type wsState struct {
 	clearedTurnByPointer map[string]ids.TurnID
 	// directiveTurns is the set of turns the daemon opened as a context-cut
 	// DIRECTIVE — /clear or /compact. A directive is not a conversational prompt,
-	// so it draws no user-prompt bubble: its only visible outcome is the
-	// separation bar and the feed it clears. The set is what lets drawAgentPrompt
-	// skip the bubble the shim's own prompt frame would otherwise draw below the
-	// optimistic divider.
+	// so it draws no user-prompt bubble AND no response bubble: its only visible
+	// outcome is the separation bar and the feed it clears. The set is what lets
+	// drawAgentPrompt and drawResponse skip the prompt/response frames the shim
+	// emits for the directive turn.
+	//
+	// IT IS NEVER FORGOTTEN once set. Each store plane delivers the directive's
+	// frames independently, and the file plane's copy can land AFTER the turn's
+	// terminal has cleared the in-flight fact; a set that dropped the turn at the
+	// terminal let that late copy draw a stale bubble below the bar (the owner's
+	// "/clear renders after a later prompt").
 	directiveTurns map[ids.TurnID]bool
+	// directiveUnits is the set of response units a directive turn produced, so a
+	// LATE re-delivery of that response — after the terminal cleared the in-flight
+	// turn, when the unit can no longer be attributed to its directive turn — is
+	// suppressed too.
+	directiveUnits map[string]bool
 	// answerRows maps a response activity id to the row it drew, so the turn's
 	// conclusion can name its answering row.
 	answerRows map[string]*frontendv1.FeedId
@@ -399,6 +410,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		clearConfirmed:       map[ids.TurnID]bool{},
 		clearedTurnByPointer: map[string]ids.TurnID{},
 		directiveTurns:       map[ids.TurnID]bool{},
+		directiveUnits:       map[string]bool{},
 		answerRows:           map[string]*frontendv1.FeedId{},
 
 		unitAPIResponse:  map[string]uint64{},

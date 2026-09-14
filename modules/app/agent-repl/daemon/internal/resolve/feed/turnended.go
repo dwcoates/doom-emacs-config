@@ -73,9 +73,13 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		// terminal draw so the failure is surfaced, never swallowed.
 		r.retireOptimisticClear(s, *turn, "the /clear turn ended without cutting context")
 	}
-	delete(s.clearTurns, *turn)
-	delete(s.clearConfirmed, *turn)
-	delete(s.directiveTurns, *turn)
+	// THE DIRECTIVE FLAGS ARE NOT FORGOTTEN AT THE TERMINAL. Each store plane
+	// delivers the directive's prompt, response and terminal independently, and
+	// the file plane's copy can land after this terminal; a flag dropped here let
+	// that late copy draw a stale prompt/response/terminal below the bar (the
+	// owner's "/clear renders after a later prompt"). The turn ids are unique, so
+	// keeping the flags is cheap and is what makes the suppression hold across
+	// every delivery of the turn's frames.
 
 	row := &frontendv1.FeedRow{
 		Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindTurnEnded, ID: string(*turn)}),
