@@ -316,6 +316,12 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	log.Info("daemon.shimclient.spawn", "shim spawned", dlog.Context{
 		"pid": cmd.Process.Pid, "uds": spec.UDSPath,
 	})
+	// THE PID IS HANDED OUT BEFORE ANYTHING BLOCKS. The bring-up below is
+	// where this call spends its ~110ms of Node startup, and a daemon that
+	// dies inside it has left a shim nothing durable names. See Spec.Spawned.
+	if spec.Spawned != nil {
+		spec.Spawned(cmd.Process.Pid)
+	}
 	go c.reap()
 
 	if err := c.bringUp(ctx); err != nil {

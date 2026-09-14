@@ -173,6 +173,14 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		log.Error(opSweep, "could not clear the hibernated session's shim pid", withCause(fields, err))
 		return false
 	}
+	// AND SO IS THE SPAWN THE REGISTRY RECORDS. That pid exists so a successor
+	// daemon waits for a shim that is still starting instead of spawning a
+	// second one; a hibernated workspace's shim is gone, and a pid left behind
+	// would make the next boot wait out its whole adoption bound for it.
+	if err := c.deps.DB.SetSpawnedShimPID(ctx, ws, nil); err != nil {
+		log.Error(opSweep, "could not clear the hibernated workspace's recorded spawn pid", withCause(fields, err))
+		return false
+	}
 	// AND SO IS THE FOOTER'S, AND THE CONNECTIVITY INDICATOR'S. Both are
 	// in-memory accumulations fed by events, so unlike the roster they cannot
 	// read the terminal back -- they are told here, after the record exists,
