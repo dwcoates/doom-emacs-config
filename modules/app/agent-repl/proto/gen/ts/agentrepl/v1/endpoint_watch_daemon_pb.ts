@@ -14,13 +14,15 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { DrainReason } from "./drain_reason_pb";
 import { file_agentrepl_v1_drain_reason } from "./drain_reason_pb";
+import type { WorkspaceMutationProgress } from "./workspace_mutation_progress_pb";
+import { file_agentrepl_v1_workspace_mutation_progress } from "./workspace_mutation_progress_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_watch_daemon.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_daemon: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZGFlbW9uLnByb3RvEgxhZ2VudHJlcGwudjEiFAoSV2F0Y2hEYWVtb25SZXF1ZXN0IuABChNXYXRjaERhZW1vblJlc3BvbnNlEkMKEnNodXRkb3duX2Fubm91bmNlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkFubm91bmNlZEgAEj0KD2RyYWluX3NjaGVkdWxlZBgCIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpblNjaGVkdWxlZEgAEj0KD2RyYWluX2NhbmNlbGxlZBgDIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpbkNhbmNlbGxlZEgAQgYKBHB1c2ginwEKF0RhZW1vblNodXRkb3duQW5ub3VuY2VkEhQKB2FkZHJlc3MYASABKAlIAIgBARIwCgVjYXVzZRgCIAEoCzIhLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkNhdXNlEhoKEmV4cGVjdGVkX291dGFnZV9tcxgDIAEoAxIUCgxtaW50ZWRfYXRfbXMYBCABKANCCgoIX2FkZHJlc3Mi7AEKE0RhZW1vblNodXRkb3duQ2F1c2USSgoSc2VsZl9tZXJnZV9yb2xsb3V0GAEgASgLMiwuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duU2VsZk1lcmdlUm9sbG91dEgAEkUKD3NjaGVkdWxlZF9kcmFpbhgCIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93blNjaGVkdWxlZERyYWluSAASOgoJaW1tZWRpYXRlGAMgASgLMiUuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duSW1tZWRpYXRlSABCBgoEa2luZCIgCh5EYWVtb25TaHV0ZG93blNlbGZNZXJnZVJvbGxvdXQiSQocRGFlbW9uU2h1dGRvd25TY2hlZHVsZWREcmFpbhIpCgZyZWFzb24YASABKAsyGS5hZ2VudHJlcGwudjEuRHJhaW5SZWFzb24iRAoXRGFlbW9uU2h1dGRvd25JbW1lZGlhdGUSKQoGcmVhc29uGAEgASgLMhkuYWdlbnRyZXBsLnYxLkRyYWluUmVhc29uIlAKFERhZW1vbkRyYWluU2NoZWR1bGVkEg0KBWF0X21zGAEgASgDEikKBnJlYXNvbhgCIAEoCzIZLmFnZW50cmVwbC52MS5EcmFpblJlYXNvbiIWChREYWVtb25EcmFpbkNhbmNlbGxlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_drain_reason]);
+  fileDesc("CihhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZGFlbW9uLnByb3RvEgxhZ2VudHJlcGwudjEiFAoSV2F0Y2hEYWVtb25SZXF1ZXN0IqYCChNXYXRjaERhZW1vblJlc3BvbnNlEkMKEnNodXRkb3duX2Fubm91bmNlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkFubm91bmNlZEgAEj0KD2RyYWluX3NjaGVkdWxlZBgCIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpblNjaGVkdWxlZEgAEj0KD2RyYWluX2NhbmNlbGxlZBgDIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpbkNhbmNlbGxlZEgAEkQKEW11dGF0aW9uX3Byb2dyZXNzGAQgASgLMicuYWdlbnRyZXBsLnYxLldvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3NIAEIGCgRwdXNoIp8BChdEYWVtb25TaHV0ZG93bkFubm91bmNlZBIUCgdhZGRyZXNzGAEgASgJSACIAQESMAoFY2F1c2UYAiABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uU2h1dGRvd25DYXVzZRIaChJleHBlY3RlZF9vdXRhZ2VfbXMYAyABKAMSFAoMbWludGVkX2F0X21zGAQgASgDQgoKCF9hZGRyZXNzIuwBChNEYWVtb25TaHV0ZG93bkNhdXNlEkoKEnNlbGZfbWVyZ2Vfcm9sbG91dBgBIAEoCzIsLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93blNlbGZNZXJnZVJvbGxvdXRIABJFCg9zY2hlZHVsZWRfZHJhaW4YAiABKAsyKi5hZ2VudHJlcGwudjEuRGFlbW9uU2h1dGRvd25TY2hlZHVsZWREcmFpbkgAEjoKCWltbWVkaWF0ZRgDIAEoCzIlLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkltbWVkaWF0ZUgAQgYKBGtpbmQiIAoeRGFlbW9uU2h1dGRvd25TZWxmTWVyZ2VSb2xsb3V0IkkKHERhZW1vblNodXRkb3duU2NoZWR1bGVkRHJhaW4SKQoGcmVhc29uGAEgASgLMhkuYWdlbnRyZXBsLnYxLkRyYWluUmVhc29uIkQKF0RhZW1vblNodXRkb3duSW1tZWRpYXRlEikKBnJlYXNvbhgBIAEoCzIZLmFnZW50cmVwbC52MS5EcmFpblJlYXNvbiJQChREYWVtb25EcmFpblNjaGVkdWxlZBINCgVhdF9tcxgBIAEoAxIpCgZyZWFzb24YAiABKAsyGS5hZ2VudHJlcGwudjEuRHJhaW5SZWFzb24iFgoURGFlbW9uRHJhaW5DYW5jZWxsZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_drain_reason, file_agentrepl_v1_workspace_mutation_progress]);
 
 /**
  * Empty on purpose: the stream is daemon-scoped, so there is nothing to
@@ -71,6 +73,20 @@ export type WatchDaemonResponse = Message<"agentrepl.v1.WatchDaemonResponse"> & 
      */
     value: DaemonDrainCancelled;
     case: "drainCancelled";
+  } | {
+    /**
+     * Staged progress for an in-flight workspace mutation, keyed on the
+     * client-minted op_id it echoes. Unlike the drain and shutdown arms —
+     * standing daemon STATE re-pushed to late subscribers — this is a
+     * transient EVENT: it rides a separate event topic merged onto this
+     * stream, exactly as the per-workspace web stream merges its transfer
+     * event beside its session-identity state, so a late subscriber replaying
+     * the state arms is never handed a stale progress event in their place.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceMutationProgress mutation_progress = 4;
+     */
+    value: WorkspaceMutationProgress;
+    case: "mutationProgress";
   } | { case: undefined; value?: undefined };
 };
 

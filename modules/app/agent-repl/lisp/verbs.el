@@ -90,6 +90,9 @@
 (declare-function agent-repl-rpc-restart-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-interrupt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-create-workspace "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-mutation-progress-new-op-id "mutation-progress" ())
+(declare-function agent-repl-mutation-progress-register "mutation-progress" (op-id &rest callbacks))
+(declare-function agent-repl-mutation-progress-forget "mutation-progress" (op-id))
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
@@ -261,14 +264,17 @@ the user as the verb, the word refused, the arm keyword, and the fields."
 
 ;;;; ---- The one dispatcher ----------------------------------------------
 
-(cl-defun agent-repl-verbs--send (rpc conn request &key ws op on-success on-error)
-  "Send REQUEST through RPC on CONN and dispatch the three answer shapes.
+(cl-defun agent-repl-verbs--send (rpc conn request &key ws op on-success on-error on-accepted)
+  "Send REQUEST through RPC on CONN and dispatch the answer shapes.
 OP names the verb for the log.  ON-SUCCESS receives the decoded success
 value and is the ONLY place editor state changes.  ON-ERROR, when given,
 receives the decoded error value and OWNS the reporting for that verb;
-without it a daemon-authored refusal is reported generically.  A transport
-failure never reaches ON-ERROR: nobody answering and the daemon refusing
-are different facts."
+without it a daemon-authored refusal is reported generically.  ON-ACCEPTED,
+when given, receives the decoded accepted value -- the option-B ack a
+mutation returns when its real outcome will arrive on the progress channel
+rather than on this rpc; an accepted answer with no ON-ACCEPTED is an
+unexpected shape and is logged.  A transport failure never reaches
+ON-ERROR: nobody answering and the daemon refusing are different facts."
   (let ((request-id (or (plist-get request :idempotency-key)
                         (agent-repl--next-log-request-id)))
         (log-ws (or ws agent-repl--global-log-scope)))
@@ -294,6 +300,15 @@ are different facts."
                         (let ((value (plist-get response :value)))
                           (unless (and on-error (funcall on-error value))
                             (agent-repl-verbs--on-refusal ws op value))))
+                       (:accepted
+                        ;; THE OPTION-B ACK: the mutation was accepted and its
+                        ;; outcome rides the progress channel, so nothing
+                        ;; terminal happens here.
+                        (agent-repl--info ws "elisp.verbs.ack op=%s ws=%s outcome=accepted" op ws)
+                        (if on-accepted
+                            (funcall on-accepted (plist-get response :value))
+                          (agent-repl--error
+                           ws "elisp.verbs.unexpected-accepted op=%s ws=%s" op ws)))
                        (arm
                         (agent-repl--error
                          ws "elisp.verbs.unknown-response-arm op=%s ws=%s arm=%S"
@@ -641,42 +656,95 @@ and the new workspace\'s tab arrives through the roster push."
     (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-fork-without-parent repository=%S form=%S"
                        repository form)
     (user-error "agent-repl: a fork needs a parent workspace"))
-  ;; THE NAMING CALL IS PART OF THE WAIT.  A create that supplies no name is
-  ;; named by a headless model call the DAEMON makes inside `Create\=', before
-  ;; the worktree exists, so the user\='s wait between the keystroke and the
-  ;; new workspace now carries it.  `CreateWorkspace\=' is unary and has no
-  ;; progress channel, so the phase is echoed HERE, immediately before the
-  ;; rpc is issued -- the owner\='s standing rule that startup phases are
-  ;; messages, not only a mode line.  The daemon-side fact is its own
-  ;; `daemon.workspace.naming\=' record.
-  (unless name
-    (message "agent-repl: naming the workspace..."))
-  (agent-repl-verbs--send
-   #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
-   (list :repository repository
-         :form (agent-repl-verbs--create-form
-                form :initial-prompt initial-prompt :base-ref base-ref :name name
-                :merge-actions merge-actions
-                :prompt prompt)
-         :parent (when parent
-                   (append (list :workspace parent) (when fork (list :fork fork))))
-         :model model
-         :priority (agent-repl-verbs--level-arm priority)
-         :allow-ungated allow-ungated)
-   :op "create"
-   :on-success
-   (lambda (success)
-     (message "agent-repl: workspace requested")
-     ;; The minted ref is the FIRST place this workspace has an identity,
-     ;; and it is claimed here rather than at the selection: a one-shot is
-     ;; fire-and-forget and never selects, but it still opens its panels
-     ;; when its tab arrives (owner ruling, 2026-09-13, item 6).
-     (agent-repl--panels-note-arrival-reason
-      (plist-get (plist-get success :workspace) :id)
-      (if fork "forked" "created"))
-     (when select
-       (agent-repl-verbs--select-created success)))
-   :on-error #'agent-repl-verbs--create-refusal))
+  ;; OPTION B.  The create is ACKED at once and worked in the daemon's
+  ;; background, detached from this request so a client deadline can never kill
+  ;; `git worktree add' mid-run.  Its staged progress and terminal outcome
+  ;; arrive on the daemon-level WatchDaemon stream keyed on OP-ID -- the one
+  ;; channel open before this workspace exists.  The callbacks that render them
+  ;; are registered BEFORE the send, so a progress event never outruns them.
+  (let ((op-id (agent-repl-mutation-progress-new-op-id))
+        (arrival-reason (if fork "forked" "created")))
+    (agent-repl-mutation-progress-register
+     op-id
+     :on-stage #'agent-repl-verbs--create-stage-message
+     :on-succeeded
+     (lambda (value)
+       (let ((ref (plist-get value :workspace))
+             (name (plist-get value :name)))
+         (message "agent-repl: workspace created: %s" name)
+         ;; The minted ref is the FIRST place this workspace has an identity;
+         ;; the arrival reason is claimed here so a one-shot (which never
+         ;; selects) still opens its panels when its tab arrives.
+         (agent-repl--panels-note-arrival-reason (plist-get ref :id) arrival-reason)
+         (when select
+           (agent-repl-verbs-select-minted ref))))
+     :on-failed #'agent-repl-verbs--create-failure)
+    ;; THE ACK UX IS IMMEDIATE: the minibuffer reflects the create the instant
+    ;; the command runs, not when the slow work finishes -- the owner's rule
+    ;; that phases are messages, not only a mode line.
+    (message "agent-repl: creating workspace...")
+    (agent-repl-verbs--send
+     #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
+     (list :repository repository
+           :form (agent-repl-verbs--create-form
+                  form :initial-prompt initial-prompt :base-ref base-ref :name name
+                  :merge-actions merge-actions
+                  :prompt prompt)
+           :parent (when parent
+                     (append (list :workspace parent) (when fork (list :fork fork))))
+           :model model
+           :priority (agent-repl-verbs--level-arm priority)
+           :allow-ungated allow-ungated
+           :op-id op-id)
+     :op "create"
+     :on-accepted
+     (lambda (_accepted)
+       (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
+                         "elisp.verbs.create-accepted op-id=%s" op-id))
+     :on-success
+     ;; A daemon that answered success synchronously (an op_id it did not
+     ;; honor) still landed the workspace: run the terminal and drop the op.
+     (lambda (success)
+       (agent-repl-mutation-progress-forget op-id)
+       (agent-repl--panels-note-arrival-reason
+        (plist-get (plist-get success :workspace) :id) arrival-reason)
+       (when select
+         (agent-repl-verbs--select-created success)))
+     :on-error
+     ;; A SYNCHRONOUS refusal (validation, an unknown repository) is answered
+     ;; on the rpc before the work detaches, so no progress will follow: forget
+     ;; the op and word the refusal, falling through for arms it does not claim.
+     (lambda (value)
+       (agent-repl-mutation-progress-forget op-id)
+       (agent-repl-verbs--create-refusal value)))))
+
+(defun agent-repl-verbs--create-stage-message (stage)
+  "Echo the minibuffer line for a create STAGE keyword."
+  (message "agent-repl: %s"
+           (pcase stage
+             (:deriving-name "deriving workspace name...")
+             (:creating-worktree "creating workspace git worktree...")
+             (_ (format "workspace creation stage %s" stage)))))
+
+(defun agent-repl-verbs--create-failure (arm detail)
+  "Surface a background create's failure LOUDLY, never silently.
+ARM is the failure kind -- `:refusal' with a typed CreateWorkspaceError
+value, or `:internal' with the daemon's own sentence (the full cause is in
+the daemon log)."
+  (pcase arm
+    (:refusal
+     ;; The SAME wording a synchronous refusal gets: the create-specific
+     ;; refusals Emacs words itself, and every other arm falls through.
+     (unless (agent-repl-verbs--create-refusal detail)
+       (agent-repl-verbs--on-refusal nil "create" detail)))
+    (:internal
+     (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
+                        "elisp.verbs.create-failed-internal detail=%S" detail)
+     (message "agent-repl: workspace creation failed: %s" detail))
+    (_
+     (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
+                        "elisp.verbs.create-failed-unknown arm=%S detail=%S" arm detail)
+     (message "agent-repl: workspace creation failed"))))
 
 (defun agent-repl-verbs--create-refusal (value)
   "Draw the create refusals Emacs words itself, from VALUE.

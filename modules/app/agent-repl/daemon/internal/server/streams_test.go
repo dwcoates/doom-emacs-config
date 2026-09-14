@@ -359,3 +359,48 @@ func TestAHostStreamCloseStatesTheHopDown(t *testing.T) {
 		t.Fatalf("footer participant edge = %+v, want the host hop stated down", edge)
 	}
 }
+
+// TestWatchDaemonReplaysTheDrainBannerBesideNotInsteadOfAProgressEvent pins the
+// state/event topic separation: after a drain schedule is armed and a
+// mutation-progress event is pushed, a LATE subscriber must still replay the
+// standing drain schedule. If progress rode the state topic, the schedule would
+// be the event's casualty and the banner would be lost to whoever attached next.
+func TestWatchDaemonReplaysTheDrainBannerBesideNotInsteadOfAProgressEvent(t *testing.T) {
+	// Arrange: a standing drain schedule (state) and, after it, a
+	// mutation-progress event (event).
+	h := newHarness(t)
+	s := h.Server.(*server)
+	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 42})
+	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
+		OpId: "op-x",
+		Event: &agentreplv1.WorkspaceMutationProgress_Create{
+			Create: &agentreplv1.WorkspaceCreateProgress{
+				Step: &agentreplv1.WorkspaceCreateProgress_Stage{
+					Stage: agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_DERIVING_NAME,
+				},
+			},
+		},
+	})
+
+	// Act: a late subscriber replays each topic's latest.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	if err != nil {
+		t.Fatalf("open the stream: %v", err)
+	}
+
+	// Assert: among the replayed pushes, the drain schedule survived.
+	sawDrain := false
+	for i := 0; i < 2; i++ {
+		if !stream.Receive() {
+			break
+		}
+		if stream.Msg().GetDrainScheduled().GetAtMs() == 42 {
+			sawDrain = true
+		}
+	}
+	if !sawDrain {
+		t.Fatal("a late subscriber lost the drain banner; the progress event replaced the standing state")
+	}
+}

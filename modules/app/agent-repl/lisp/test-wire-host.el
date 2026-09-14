@@ -986,6 +986,70 @@ replaces it."
                  (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired")
                        #'string<))))
 
+
+;;;; ---- Workspace-mutation progress on WatchDaemon --------------------
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-stage ()
+  "A create stage push decodes to the op id and the stage keyword."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"mutationProgress\":{\"opId\":\"op-1\",\"create\":{"
+                          "\"stage\":\"WORKSPACE_CREATE_STAGE_DERIVING_NAME\"}}}"))
+                 '(:arm :mutation-progress
+                   :value (:op-id "op-1"
+                           :event (:arm :create
+                                   :value (:arm :stage :value :deriving-name)))))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-succeeded ()
+  "A succeeded push decodes to the minted ref and the workspace name."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"mutationProgress\":{\"opId\":\"op-2\",\"create\":{"
+                          "\"succeeded\":{\"workspace\":{\"id\":\"w\",\"dir\":\"/d\"},"
+                          "\"name\":\"minted\"}}}}"))
+                 '(:arm :mutation-progress
+                   :value (:op-id "op-2"
+                           :event (:arm :create
+                                   :value (:arm :succeeded
+                                           :value (:workspace (:id "w" :dir "/d")
+                                                   :name "minted"))))))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-failed-internal ()
+  "A failed push with an internal error decodes to the internal sentence."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"mutationProgress\":{\"opId\":\"op-3\",\"create\":{"
+                          "\"failed\":{\"internal\":\"materialize worktree: boom\"}}}}"))
+                 '(:arm :mutation-progress
+                   :value (:op-id "op-3"
+                           :event (:arm :create
+                                   :value (:arm :failed
+                                           :value (:arm :internal
+                                                   :value "materialize worktree: boom"))))))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-failed-refusal ()
+  "A failed push with a typed refusal decodes to the CreateWorkspaceError arm."
+  (let* ((decoded (agent-repl-test-wire-host--decode
+                   #'agent-repl-wire-decode-watch-daemon-response
+                   (concat "{\"mutationProgress\":{\"opId\":\"op-4\",\"create\":{"
+                           "\"failed\":{\"refusal\":{\"namingFailed\":{\"model\":\"haiku\","
+                           "\"cause\":\"timeout\",\"attempts\":2,\"answer\":\"\"}}}}}}")))
+         (step (plist-get (plist-get (plist-get decoded :value) :event) :value))
+         (cause (plist-get step :value))
+         (error-val (plist-get cause :value)))
+    (should (eq (plist-get step :arm) :failed))
+    (should (eq (plist-get cause :arm) :refusal))
+    (should (eq (plist-get (plist-get error-val :cause) :arm) :naming-failed))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-unknown-stage-is-a-breach ()
+  "An unknown stage enum name is refused, not guessed at."
+  (should-error
+   (agent-repl-test-wire-host--decode
+    #'agent-repl-wire-decode-watch-daemon-response
+    (concat "{\"mutationProgress\":{\"opId\":\"op-5\",\"create\":{"
+            "\"stage\":\"WORKSPACE_CREATE_STAGE_TELEPORT\"}}}"))))
+
+
 (provide 'test-wire-host)
 
 ;;; test-wire-host.el ends here
