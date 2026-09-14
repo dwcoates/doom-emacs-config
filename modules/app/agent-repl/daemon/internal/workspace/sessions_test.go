@@ -1376,8 +1376,11 @@ func TestLockDirFallsBackToTheEnvironmentOverride(t *testing.T) {
 	}
 }
 
+// `default` LEFT THE TABLE by the owner's 2026-09-14 ruling: permissionMode no
+// longer produces that arm for anyone, so there is nothing for it to round
+// trip through. Its replacement guarantee is the upgrade test below.
 func TestPermissionModeRoundTripsEveryArm(t *testing.T) {
-	tests := []string{"default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"}
+	tests := []string{"acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"}
 	for _, name := range tests {
 		t.Run(name, func(t *testing.T) {
 			// Arrange in the table. Act.
@@ -1390,14 +1393,66 @@ func TestPermissionModeRoundTripsEveryArm(t *testing.T) {
 	}
 }
 
-func TestPermissionModeOfAnUnknownNameIsTheGatedDefault(t *testing.T) {
-	// Arrange: an unknown name never resolves to a mode that disables the gate.
+func TestPermissionModeOfAnUnknownNameIsAuto(t *testing.T) {
+	// Arrange: an unknown name resolves to auto, which KEEPS the gate.
 	// Act.
 	got := permissionMode("something-nobody-implemented")
 
 	// Assert.
-	if got.GetDefault() == nil {
-		t.Fatalf("permissionMode(unknown) = %v, want the default (gated) mode", got)
+	if got.GetAuto() == nil {
+		t.Fatalf("permissionMode(unknown) = %v, want auto", got)
+	}
+}
+
+func TestPermissionModeOfAnUnknownNameNeverDropsTheGate(t *testing.T) {
+	// Arrange: the standing guarantee the auto ruling must not weaken.
+	// Act.
+	got := permissionMode("something-nobody-implemented")
+
+	// Assert.
+	if got.GetBypass() != nil || got.GetDontAsk() != nil {
+		t.Fatalf("permissionMode(unknown) = %v, want a mode that keeps the gate", got)
+	}
+}
+
+func TestPermissionModeOfAnEmptyNameIsAuto(t *testing.T) {
+	// Arrange: a row that never recorded a mode. Act.
+	got := permissionMode("")
+
+	// Assert.
+	if got.GetAuto() == nil {
+		t.Fatalf("permissionMode(\"\") = %v, want auto", got)
+	}
+}
+
+// A SESSION ROW STORED BEFORE THE RULING carries "default"; the next start
+// asks the shim for auto instead, and recordFacts then rewrites the row from
+// what the shim reports.
+func TestAStoredDefaultIsUpgradedToAutoAtTheNextStart(t *testing.T) {
+	// Arrange. Act.
+	got := permissionMode("default")
+
+	// Assert.
+	if got.GetAuto() == nil {
+		t.Fatalf("permissionMode(\"default\") = %v, want auto", got)
+	}
+}
+
+func TestStartFreshOfAStoredDefaultAsksTheShimForAuto(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, PermissionMode: "default"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	fresh := f.client.requests[0].GetFresh()
+	if fresh == nil || fresh.GetPermissionMode().GetAuto() == nil {
+		t.Fatalf("StartSession request = %v, want the stored default started as auto", f.client.requests[0])
 	}
 }
 

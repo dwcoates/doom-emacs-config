@@ -1137,7 +1137,7 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 	// (harness.StartDaemon's DefaultConfigDir), not SPEC.md's illustrative
 	// "a@x" — that example names a shape, never this harness's value.
 	wantValues := map[string]string{
-		"Account": "default@example.invalid", "Model": "opus", "Permission mode": "default"}
+		"Account": "default@example.invalid", "Model": "opus", "Permission mode": "auto"}
 	for _, row := range status.GetRows()[1:] {
 		if want := wantValues[row.GetLabel()]; row.GetValue() != want {
 			t.Fatalf("status panel row %q value = %q, want %q", row.GetLabel(), row.GetValue(), want)
@@ -1412,25 +1412,26 @@ func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
 
 func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdatesOnlyOnThePush(t *testing.T) {
 	t.Parallel()
-	// Arrange: the served set is topbar.SwitchableModes, a FIXED six-mode set
+	// Arrange: the served set is topbar.SwitchableModes, a FIXED five-mode set
 	// the resolver installs regardless of what the fake session states, so
 	// there is always an alternate to switch to -- the earlier t.Skip here
-	// was dead code that could never fire.
+	// was dead code that could never fire. `default` LEFT the set by the
+	// owner's 2026-09-14 ruling and `auto` leads it.
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
 	first := awaitTopbar(t, f, topbar, "the initial permission-mode picker", func(v *frontendv1.TopbarView) bool {
 		return len(v.GetPermissionModePicker().GetOptions()) > 0
 	})
-	wantModes := []string{"default", "accept_edits", "plan", "bypass", "dont_ask", "auto"}
+	wantModes := []string{"auto", "accept_edits", "plan", "bypass", "dont_ask"}
 	var gotModes []string
 	for _, opt := range first.GetPermissionModePicker().GetOptions() {
 		gotModes = append(gotModes, opt.GetMode())
 	}
 	if !sameOrder(gotModes, wantModes) {
-		t.Fatalf("permission_mode_picker.options = %v, want exactly the six switchable modes in order %v", gotModes, wantModes)
+		t.Fatalf("permission_mode_picker.options = %v, want exactly the five switchable modes in order %v", gotModes, wantModes)
 	}
-	if got := first.GetPermissionModePicker().GetCurrent().GetMode(); got != "default" {
-		t.Fatalf("permission_mode_picker.current = %q, want the fake session's default mode %q", got, "default")
+	if got := first.GetPermissionModePicker().GetCurrent().GetMode(); got != "auto" {
+		t.Fatalf("permission_mode_picker.current = %q, want the fake session's unstated mode %q", got, "auto")
 	}
 	target := "accept_edits"
 

@@ -85,3 +85,65 @@ func TestTheServedPickerCarriesTheModeInForceAsCurrent(t *testing.T) {
 		t.Fatalf("permission mode = %q (held %v), want plan", facts.PermissionMode, ok)
 	}
 }
+
+// TestTheServedSetNeverOffersTheVendorsDefault pins the owner's 2026-09-14
+// ruling: `default` is not a mode a reader can pick.
+func TestTheServedSetNeverOffersTheVendorsDefault(t *testing.T) {
+	// Arrange.
+	r, ws := newModesResolver(t)
+
+	// Act.
+	r.OnSessionStarted(ws, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Assert.
+	modes, _ := r.PermissionModes(ws)
+	for _, mode := range modes {
+		if mode == "default" {
+			t.Fatalf("modes = %v, want no default option", modes)
+		}
+	}
+}
+
+// TestTheServedSetLeadsWithAuto pins that the mode every session now runs
+// under is the first one the dropdown offers.
+func TestTheServedSetLeadsWithAuto(t *testing.T) {
+	// Arrange.
+	r, ws := newModesResolver(t)
+
+	// Act.
+	r.OnSessionStarted(ws, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Assert.
+	modes, _ := r.PermissionModes(ws)
+	if len(modes) == 0 || modes[0] != "auto" {
+		t.Fatalf("modes = %v, want auto first", modes)
+	}
+}
+
+// TestALiveDefaultIsDrawnAsCurrentWithoutBecomingAnOption covers the honest
+// display of a session started before the ruling: the picker states the mode
+// actually in force and still offers no way to pick it back.
+func TestALiveDefaultIsDrawnAsCurrentWithoutBecomingAnOption(t *testing.T) {
+	// Arrange.
+	r, ws := newModesResolver(t)
+
+	// Act.
+	r.OnSessionStarted(ws, &conversationv1.SessionStarted{
+		VendorSessionId: "vendor-1",
+		PermissionMode: &conversationv1.AgentPermissionMode{
+			Mode: &conversationv1.AgentPermissionMode_Default{Default: &conversationv1.AgentPermissionModeDefault{}},
+		},
+	})
+
+	// Assert.
+	facts, ok := r.StatusFacts(ws)
+	if !ok || facts.PermissionMode != "default" {
+		t.Fatalf("permission mode = %q (held %v), want the vendor's default", facts.PermissionMode, ok)
+	}
+	modes, _ := r.PermissionModes(ws)
+	for _, mode := range modes {
+		if mode == "default" {
+			t.Fatalf("modes = %v, want the live default absent from the options", modes)
+		}
+	}
+}

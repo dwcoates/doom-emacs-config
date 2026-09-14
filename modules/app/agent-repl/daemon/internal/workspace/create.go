@@ -29,6 +29,12 @@ import (
 // The spellings are the vendor's own, in both the camel-case form the CLI uses
 // and the snake-case form the mode oneof's arm names spell, because a mode
 // reaches the daemon as a bare string.
+// DefaultPermissionMode is the mode a session is MINTED under when the
+// creation names none (owner ruling 2026-09-14: "the default permission mode
+// should be auto for the SDK/shim"). It is the mode the topbar's picker leads
+// with, and the vendor's `default` is offered nowhere.
+const DefaultPermissionMode = "auto"
+
 var UngatedPermissionModes = map[string]bool{
 	"bypassPermissions": true,
 	"bypass":            true,
@@ -274,7 +280,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		HostSessionID:  wsm.NewHostSessionID(),
 		ConfigDir:      v.deps.Accounts.ConfigDirFor(record.Dir),
 		Model:          spec.Model,
-		PermissionMode: spec.PermissionMode,
+		PermissionMode: mintedPermissionMode(spec.PermissionMode),
 		StartedAt:      v.now(),
 	}
 	if spec.ForkFrom != nil {
@@ -304,6 +310,18 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	})
 	v.republishRegistry(ctx, log, opCreate)
 	return record, nil
+}
+
+// mintedPermissionMode is the mode the new session's row carries: what the
+// creation asked for, or DefaultPermissionMode when it asked for nothing. The
+// row is written rather than left empty so the stored fact and the mode the
+// session actually runs under are the same string, and the topbar reads the
+// mode in force off that row without inferring anything.
+func mintedPermissionMode(requested string) string {
+	if requested == "" {
+		return DefaultPermissionMode
+	}
+	return requested
 }
 
 // validateCreate refuses the forms that cannot be built, before anything is
