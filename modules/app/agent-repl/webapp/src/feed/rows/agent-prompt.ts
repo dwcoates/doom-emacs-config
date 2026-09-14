@@ -12,7 +12,7 @@
  * mapping is one base function per message; sharing the BODY vocabulary is what
  * keeps the two from drifting, and that sharing is `blocks.ts`.
  */
-import { bubbleWaveStyle } from "../../breathing.js";
+import { startPromptWave } from "../../breathing.js";
 import { log } from "../../log.js";
 import { armName } from "../renderers.js";
 import { requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -55,7 +55,7 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
   });
   const bubble = document.createElement("div");
   bubble.className = "bubble user prompt-agent";
-  bubble.setAttribute("style", bubbleWaveStyle());
+  startPromptWave(bubble);
   bubble.append(drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`)));
   bubble.append(
     drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
