@@ -39,29 +39,29 @@ ruling of 2026-09-13), `docs/REALTEST-PLAN.md` "Status", and
 - Store: schema 7, single serialized writer, read pool, ledger retention,
   no residue persisted, shape catalog (`make -C agent-shim/shim-store shapes`).
 
-## State after the second sweep with 9 (rt-run35, 2026-09-13 22:55)
+## State after the third sweep with 9 (rt-run36, 2026-09-13 23:21)
 
-- Landed and deployed since rt-run34: realtest 9 toggle/probe fix, daemon
-  sink re-open, topbar true center (master 166b1fe97 and after).
-- rt-run35: 1-8 green; realtest 9 failed on FOUR harness/logging findings;
-  gap scan had 4 classes (start contract closed by the shim merge; footer
-  overage cell missing; store reader errors on an ordered store restart).
+- Landed and deployed: rt9 live sources, send/feed records at INFO, footer
+  overage cell, store reader levels across a store restart (master 8e7185918).
+- rt-run36: 1-8 green; gap scan records all predate their fixes' deploy;
+  realtest 9 now measures send→submit 100ms and submit→concluded 1.2s, and
+  fails only on the answer text: the fake wrote its transcript at turn end
+  and the sidecar found it one 30s rescan later (new files are found by
+  rescan only), after the run had closed the workspace.
 
 ## Agents in flight (branches; worktrees under the scratchpad)
 
-1. `fix/rt9-live-sources` (wt-rt9src): edge waits scanned a source set
-   enumerated before the scratch workspace existed; re-enumerate.
-2. `fix/turn-edges-info` (wt-edges): `elisp.input.send` and per-row feed
-   records were debug (never persisted); promote to info.
-3. `fix/footer-overage` (wt-overage): `FooterStatusActivityRateLimited.overage`
-   cell (proto addition), daemon routes it, webapp draws the row.
-4. `fix/store-reader-restart` (wt-reader): shim reader logs a store restart
-   at info while under its re-open budget; error only on exhaustion.
+1. `fix/adopt-starting-shim` (wt-adopt): a spawned shim's pid is durable at
+   spawn; a successor with lock free + socket absent waits (bounded) for a
+   live recorded pid's socket instead of spawning a second shim. Repro:
+   e2e `TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce -count=6`.
+2. `fix/sidecar-prompt-discovery` (wt-discover): directory-mtime probe on
+   every poll tick discovers new transcripts within 1s; rescan stays the
+   backstop; no fds held.
+3. `fix/rt9-await-answer` (wt-rt9ans): the harness waits for the answer's
+   text block after the final-answer mark; new measured phase.
 
-Then: merge all four, deploy, rerun the full sweep, twice-green.
-Open: merge-queue e2e `TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce`
-flaked once for the sink agent (second daemon spawned instead of adopting;
-shim refused "already has a live listener"); 7 solo runs passed.
+Then: merge all three, deploy, rerun the full sweep to twice-green.
 
 ## The loop for realtest 9
 
