@@ -137,6 +137,23 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 			withCause(fields, err))
 		return false
 	}
+	// A COMPACTION THAT IS UNDER WAY IS NOT A FAILURE, AND NOT AN ACK. The
+	// directive is two-phase precisely because a compaction is a real vendor
+	// turn and StandBound is a sum of TEARDOWN bounds: the shim answers that
+	// the work has started and finishes it past this rpc, and this pass simply
+	// defers. The next pass is acked at once, because the shim never compacts
+	// a transcript twice.
+	//
+	// DEBUG AND NOT AN ERROR. While the answer WAS the compaction's
+	// completion, every pass recorded a failed directive, never stood the
+	// session down, and re-ran the whole summary turn five minutes later --
+	// thirteen of them on one workspace in one morning (2026-09-14), with an
+	// ERROR beside each one saying nothing had gone wrong that anybody could
+	// fix.
+	if answer.GetCompacting() != nil {
+		log.Debug(opSweep, "compaction in flight; deferring the hibernation", fields)
+		return false
+	}
 	if refusal := answer.GetError(); refusal != nil {
 		// A REFUSAL IS AN ANSWER. turn_in_flight simply defers; the other two
 		// arms are worth a warning, and defer just the same.
@@ -146,6 +163,15 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		} else {
 			log.Warn(opSweep, "the shim refused to hibernate; deferring", refused)
 		}
+		return false
+	}
+	// AND EVERY OTHER ARM IS A DEFERRAL, NOT A STAND-DOWN. The three arms
+	// above are the whole of what this daemon knows how to read; anything else
+	// is a shim built against a contract this daemon has not been taught, and
+	// standing a session down on an answer nobody here understood would kill a
+	// session whose transcript was never compacted.
+	if answer.GetSuccess() == nil {
+		log.Error(opSweep, "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the hibernation", fields)
 		return false
 	}
 
