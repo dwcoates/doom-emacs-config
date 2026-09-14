@@ -149,6 +149,24 @@ describe("the bubble geometry: the two caps", () => {
     expect(root).toMatch(/--feed-cap-lines:\s*27\.5\s*;/);
   });
 
+  it("caps the purple response bubble 15% below the shared cap, and only its max width", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble.assistant");
+
+    // Assert — 82.5% * 0.85; the margin still biases off the unscaled cap.
+    expect(bubble).toMatch(/max-width:\s*calc\(var\(--agent-bubble-cap\)\s*\*\s*0\.85\)/);
+    expect(bubble).toMatch(/margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+  });
+
+  it("caps the blue prompt bubble 15% below its prior 60%, and only its max width", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble.user");
+
+    // Assert — 60% * 0.85 = 51%; the margin still biases off the unscaled cap.
+    expect(bubble).toMatch(/max-width:\s*51%/);
+    expect(bubble).toMatch(/margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+  });
+
   it("leaves no second copy of the old 75% cap behind", () => {
     // Arrange / Act / Assert
     expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(
