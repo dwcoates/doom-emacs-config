@@ -252,9 +252,72 @@ offset, so a restart re-reads it too.
 
 `internal/discover`. BOTH account config roots are discovery roots
 (`--config-roots`, default `~/.claude,~/.claude-chesscom`): the second
-account's transcripts are invisible otherwise. A periodic `Scan` is the
-sidecar's only discovery path (`RescanInterval`) — there is no fsnotify
-watcher; a prior one existed with no caller and was deleted.
+account's transcripts are invisible otherwise.
+
+### Two discovery paths, and neither one is fsnotify
+
+There is no fsnotify watcher and no per-file kqueue: this process holds NO
+descriptor open for a file it is not reading, because thousands of held
+descriptors is what the file-table exhaustion of 2026-09-13 was made of (38
+ENFILE meta reads in one afternoon). Discovery polls.
+
+- `Scan` (`RescanInterval`, 30s) is the FULL enumeration and the backstop. It
+  globs every shape under every root, refreshes the holds and the meta
+  re-checks, and is the authority: whatever the probe misses is found here.
+- `ScanChanged` (`PollInterval`, 1s, `change.go`) is the ACCELERATOR. It stats
+  the directories the globs enumerate and re-enumerates (one `ReadDir`) only
+  those whose mtime MOVED, so a NEW file is watched within one poll instead of
+  one rescan.
+
+WHY THE PROBE EXISTS. Discovery ran only on the rescan tick, so a transcript the
+vendor wrote one instant after a scan waited out the whole 30s before a byte of
+it was read. Realtest 9, sweep rt-run36: a fresh workspace's first turn concluded
+at 23:22:44, the vendor wrote `projects/<slug>/e37f7527-….jsonl` at 23:22:44, and
+`tail-pickup` came at 23:23:14. The daemon, the shim and the webapp had already
+drawn the prompt, the turn end and the final-answer mark — only the ANSWER TEXT,
+which nothing but this process reads, was thirty seconds late.
+
+- IT IS NOT A NARROWER SCAN. Nothing was removed from what discovery looks at:
+  narrowing it "only serves to obfuscate inefficiency" (owner's standing rule),
+  and a shorter blanket rescan would spend the whole glob sixty times a minute.
+  The probe asks the DIRECTORY, not the files — a new file moves the mtime of the
+  directory it lands in, so one stat answers for everything under it at once.
+- THE COST IS MEASURED, not asserted. On the owner's machine (2 config roots, 102
+  project directories, 2928 targets, a spool root of /private/tmp with 23539
+  children) the candidate set is 189 directories, an idle probe costs 0.22–0.32ms,
+  and the full `Scan` costs 820ms. So the probe is 189 stats/second against the
+  scan's 27ms/s amortized — two orders of magnitude cheaper per second than the
+  enumeration it front-runs.
+- THE SPOOL ROOT IS DELIBERATELY NOT A CANDIDATE. In production it is
+  /private/tmp, whose mtime moves whenever anything on the box writes a temp
+  file; probing it would re-crawl 23539 entries on most ticks, which is the
+  blanket rescan this design exists to avoid, once a second. Every directory
+  BELOW a spool tree the scan has already seen is a candidate, so a new
+  `<task>.output` in a known `tasks/` directory is found on the next poll; a
+  brand-new spool TREE waits for the next `Scan`, exactly as it did before.
+- THE PROBE IS ALLOWED TO MISS, and `Scan` is why that is safe: a write inside
+  the microseconds between a scan's glob and its stat, a filesystem whose mtime
+  granularity swallowed a write, a directory nothing discoverable has ever been
+  put in. Each of those costs what it cost before the probe existed — one rescan
+  interval — and never more.
+- A VANISHED DIRECTORY IS AN ORDINARY END. Session directories, workflow
+  directories and task spools are deleted constantly; a candidate that is gone
+  is dropped from the set and states NOTHING. A directory that is real and
+  UNREADABLE is a different fact — every file under it now waits for the full
+  rescan — and is stated once per directory per condition at `warn`
+  (`discover-change`), repeats verbose, exactly like the `discover-meta` holds.
+- ITS RECORDS: one `discover-change` INFO when a directory change actually led to
+  a newly WATCHED file (naming the directory and the count, written by the cycle,
+  which is what knows), and one `discover-change` DEBUG per tick otherwise
+  (candidates stat'd / changed / re-enumerated). A 1Hz probe contributes nothing
+  to a normal-verbosity log.
+- BOTH PATHS BUILD TAILERS THROUGH ONE FUNCTION. `cycle.go`'s
+  `watchTargets` is the only place a tailer is ever built and it asserts the
+  store-unreachable invariant; `rescan` and `discoverChanged` are its only two
+  callers. The cycle header used to say "rescan is the only thing that builds a
+  tailer" — the probe EXTENDED that contract explicitly rather than routing
+  around it, and is bound by every clause of it (including abandoning the rest of
+  the pass when the store cannot answer for a file's cursor).
 
 Four kinds of file, all written by the vendor's agent binary:
 
