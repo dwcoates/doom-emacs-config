@@ -62,7 +62,7 @@ import type {
   RowRenderers,
   SubfeedView,
 } from "./renderers.js";
-import { stopTicking } from "./ticking.js";
+import { replaceTicking, stopTicking } from "./ticking.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { FINAL_ANSWER_ATTRIBUTE, drawFeedTurnEnded } from "./rows/turn-ended.js";
@@ -231,7 +231,48 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     for (const fn of [...listeners]) fn();
     markLatestPrompt();
     markWorkingPrompts();
+    stopEndedTurns();
     followTail();
+  }
+
+  /**
+   * THE BACKSTOP: every timer in a turn stops when the turn ends.
+   *
+   * A card is meant to stop its own clock the moment its unit settles, and a
+   * replace site is meant to stop the element it discards. This runs AFTER the
+   * listeners have redrawn, and sweeps whatever those two missed: once a turn
+   * has a `turn_ended` row on the page, nothing inside that turn's rows is
+   * still counting, because nothing in a finished turn can still be running.
+   *
+   * THE TURN'S OWN END ROW IS EXEMPT. Its retry countdown is a clock about
+   * what happens NEXT, not about the work that just stopped, and it stops
+   * itself when it expires.
+   *
+   * A stop here is a DEFECT SIGNAL, not routine housekeeping — the card that
+   * needed it failed the first rule — so it is recorded with the rows it
+   * stopped, which is what makes that card findable afterwards.
+   */
+  function stopEndedTurns(): void {
+    const ended = new Set<string>();
+    for (const state of states.values()) {
+      if (state.row.row.case !== "turnEnded") continue;
+      const turn = state.row.turn;
+      if (turn !== undefined) ended.add(turn.value);
+    }
+    if (ended.size === 0) return;
+    const stopped: string[] = [];
+    for (const state of states.values()) {
+      if (state.row.row.case === "turnEnded") continue;
+      const turn = state.row.turn;
+      if (turn === undefined || !ended.has(turn.value)) continue;
+      if (stopTicking(state.element) === 0) continue;
+      stopped.push(requireMessage(state.row.id, "FeedRow.id").value);
+    }
+    if (stopped.length === 0) return;
+    log.debug("a turn ended with clocks still running; the backstop stopped them", {
+      operation: "feed.turn-end-stopped-clocks",
+      context: { feed: feedName(), turns: [...ended].join(","), rows: stopped.join(",") },
+    });
   }
 
   /**
@@ -250,7 +291,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     });
     switch (result.case) {
       case "success": {
-        errorSlot.replaceChildren();
+        replaceTicking(errorSlot);
         const edge = requireCase(result.value.edge, "FeedPageSuccess.edge");
         if (edge.case === "hasMore") opts.host.prepend(loadMore);
         else loadMore.remove();
@@ -306,7 +347,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       operation: "feed.page-error",
       context: { feed: feedName(), arm: kind.case },
     });
-    errorSlot.replaceChildren(el);
+    replaceTicking(errorSlot, [el]);
   }
 
   /** One live upsert: replace in place if seen, append if new. */

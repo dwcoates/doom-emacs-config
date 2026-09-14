@@ -46,6 +46,7 @@ import {
   mergeTabsOf,
   type MergeTab,
 } from "./tab-strip.js";
+import { replaceTicking, stopTicking } from "../ticking.js";
 import { drawFeedMergeQueue } from "./queue.js";
 import { drawTestSuites } from "./tests-tab.js";
 import type { FeedMergeMergeLine } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -89,8 +90,9 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
       operation: "merge.draw-body",
       context: { tabs: tabs.length, active: active?.kind ?? "none", picked: picked ?? "auto" },
     });
-    strip.replaceChildren(
-      ...tabs.map((tab) => {
+    replaceTicking(
+      strip,
+      tabs.map((tab) => {
         const el = drawFeedMergeTab(tab, { active: tab.id === active?.id });
         el.addEventListener("click", () => {
           picked = tab.id;
@@ -125,11 +127,10 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
   return {
     dispose(): void {
       unsubscribe();
-      breadcrumbs.remove();
-      strip.remove();
-      summary.remove();
-      panel.remove();
-      loose.remove();
+      for (const part of [breadcrumbs, strip, summary, panel, loose]) {
+        stopTicking(part);
+        part.remove();
+      }
     },
   };
 };
@@ -145,8 +146,8 @@ export function drawLooseRows(
   tabs: readonly MergeTab[],
   view: SubfeedView,
 ): void {
-  host.replaceChildren();
   const placed = new Set(tabs.map((tab) => tab.id));
+  const loose: HTMLElement[] = [];
   for (const row of view.rows()) {
     if (row.row.case === "mergeTab") continue;
     const parent = row.parent?.row?.value;
@@ -155,8 +156,12 @@ export function drawLooseRows(
       operation: "merge.unplaced-row",
       context: { row: row.id?.value ?? "unset", parent: parent ?? "none" },
     });
-    host.append(view.drawRow(row));
+    loose.push(view.drawRow(row));
   }
+  // Through the ONE replace helper: a row that stopped being loose (it found
+  // its tab, or left the feed) is unsubscribed as it is dropped, and one that
+  // is still here is merely moved and keeps its clocks.
+  replaceTicking(host, loose);
 }
 
 /**
@@ -166,7 +171,7 @@ export function drawLooseRows(
  * the outcome once and does not restate what is already below it.
  */
 export function drawSummary(host: HTMLElement, tab: MergeTab | undefined): void {
-  host.replaceChildren();
+  replaceTicking(host);
   host.hidden = true;
   if (tab === undefined || tab.state !== "settled" || tab.outcome !== "failed") return;
   const settled = tab.value["state"] as { value: { outcome: { value: { summary: string } } } };
@@ -184,7 +189,9 @@ export function drawTabBody(
   view: SubfeedView,
   rc: RowContext,
 ): void {
-  host.replaceChildren();
+  // The tab body is redrawn whole on every change; whatever the previous tab
+  // drew is DISCARDED here, so it is unsubscribed here too.
+  replaceTicking(host);
   if (tab === undefined) return;
   host.setAttribute("data-merge-tab-body", tab.kind);
 

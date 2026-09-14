@@ -34,6 +34,7 @@ import { drawFeedMerge } from "./merge/merge.js";
 import { mergeBubbleBody } from "./merge/merge-body.js";
 import type { Handle } from "../failure/overlay.js";
 import { log } from "../log.js";
+import { stopTicking } from "./ticking.js";
 import type {
   FeedArtifact,
   FeedBreadcrumb,
@@ -227,8 +228,10 @@ export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
   return {
     dispose(): void {
       unsubscribe();
-      breadcrumbs.remove();
-      rows.remove();
+      for (const part of [breadcrumbs, rows]) {
+        stopTicking(part);
+        part.remove();
+      }
     },
   };
 };
@@ -282,6 +285,11 @@ export function drawFeedBreadcrumb(crumb: FeedBreadcrumb, rc: RowContext): HTMLE
  * container would state a grouping the daemon did not.
  */
 export function arrangeSubfeedRows(host: HTMLElement, view: SubfeedView): void {
+  // WHAT WAS DRAWN BEFORE, so a row this arrangement DROPS can be unsubscribed
+  // rather than left ticking against an element nobody can see. A row that is
+  // re-placed is merely moved and keeps its clocks; only one the arrangement
+  // did not put back is stopped, below.
+  const before = [...host.querySelectorAll("[data-feed-row]")];
   // Every nesting slot is emptied first, so a row that stopped being in the
   // feed (deletion is ROW OMISSION on the next push) cannot linger inside a
   // container that is still drawn.
@@ -308,6 +316,17 @@ export function arrangeSubfeedRows(host: HTMLElement, view: SubfeedView): void {
     nestSlot(container).append(el);
   }
   host.replaceChildren(...top);
+  let stopped = 0;
+  for (const el of before) {
+    if (host.contains(el)) continue;
+    stopped += stopTicking(el);
+  }
+  if (stopped > 0) {
+    log.debug("stopped the clocks of rows this arrangement dropped", {
+      operation: "feed.arrange-dropped-rows",
+      context: { dropped: stopped },
+    });
+  }
 }
 
 /** A container row's nesting slot, created on the first child that needs it. */
