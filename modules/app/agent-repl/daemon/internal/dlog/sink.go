@@ -33,6 +33,21 @@ var linkDirRel = filepath.Join(".claude", "emacs")
 // silently downgraded into a global write.
 var ErrPoisoned = errors.New("log sink poisoned")
 
+// ErrSinkClosed reports a write reaching a sink whose descriptor has already
+// been released, by eviction or by shutdown.
+//
+// IT IS DELIBERATELY NOT ErrPoisoned. Poison means the sink FAILED -- its cap
+// maintenance or its write did -- and a poisoned sink must refuse for the rest
+// of the runtime. A closed one merely has no descriptor at this instant: its
+// target is remembered, and the next workspace-bound record re-opens it and
+// goes on appending (see openSink). Closing used to poison, and every
+// long-lived component holding an evicted workspace's logger then turned its
+// ordinary records into sink_failure errors on stderr -- 21 of them in one
+// realtest sweep. Nothing routes a record to a closed sink any more (the
+// workspace logger resolves through the surfaces at write time), so this
+// answer is the guard on a handle retained somewhere else, not a routine path.
+var ErrSinkClosed = errors.New("log sink is closed")
+
 // sink is one workspace-owned durable JSONL file: a canonical symlink inside
 // the workspace pointing at a unique target the daemon created under the state
 // root's logs directory, plus the append-mode descriptor on that target.
@@ -65,6 +80,9 @@ type sink struct {
 	hardCeiling   bool
 	hardReported  bool
 	poison        error
+	// closed says the descriptor has been released. It is separate from
+	// poison because a released handle is not a failure; see ErrSinkClosed.
+	closed bool
 }
 
 // openSink resolves this runtime's target for one workspace sink, opens it
@@ -253,6 +271,9 @@ func (s *sink) write(line []byte) error {
 	if s.poison != nil {
 		return s.poison
 	}
+	if s.closed {
+		return s.closedErrLocked()
+	}
 	if s.name == "shim" {
 		return s.writeShimLocked(line)
 	}
@@ -317,6 +338,9 @@ func (s *sink) scan() (scanResult, error) {
 	if s.poison != nil {
 		return scanResult{}, s.poison
 	}
+	if s.closed {
+		return scanResult{}, s.closedErrLocked()
+	}
 	if s.name != "shim" {
 		return scanResult{}, nil
 	}
@@ -365,6 +389,9 @@ func (s *sink) rotateShim() (bool, error) {
 	defer s.mu.Unlock()
 	if s.poison != nil {
 		return false, s.poison
+	}
+	if s.closed {
+		return false, s.closedErrLocked()
 	}
 	if s.name != "shim" || !s.rotatePending {
 		return false, nil
@@ -431,6 +458,12 @@ func (s *sink) poisonLocked(cause error) {
 		ErrPoisoned, s.workspaceID, s.workspaceDir, s.name, cause)
 }
 
+// closedErrLocked is the workspace-attributed refusal of a released handle.
+func (s *sink) closedErrLocked() error {
+	return fmt.Errorf("%w: workspace %s (%s) sink %s.log",
+		ErrSinkClosed, s.workspaceID, s.workspaceDir, s.name)
+}
+
 // poisoned reports the sink's poison, or nil while it is healthy.
 func (s *sink) poisoned() error {
 	s.mu.Lock()
@@ -445,6 +478,9 @@ func (s *sink) borrowFile() (*os.File, error) {
 	if s.poison != nil {
 		return nil, s.poison
 	}
+	if s.closed {
+		return nil, s.closedErrLocked()
+	}
 	f := s.file.File()
 	if f == nil {
 		return nil, fmt.Errorf("borrow shim log target %q: the rotating file is closed", s.target)
@@ -455,18 +491,23 @@ func (s *sink) borrowFile() (*os.File, error) {
 // close releases the descriptor. The canonical link and the target are left in
 // place: readers keep resolving them, and a later runtime makes its own
 // target rather than trusting this one.
+//
+// A CLOSE DOES NOT POISON. The sink is marked closed, which is a statement
+// about the handle and not about the file: the surfaces remember the target,
+// and the workspace's next record re-opens it and appends. A poison outlives
+// the runtime by design and is reserved for what ErrPoisoned documents -- a
+// failed cap maintenance or a failed write -- so a close that set it turned
+// every later record of an evicted workspace into a reported failure.
 func (s *sink) close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.file == nil {
+		s.closed = true
 		return nil
 	}
 	err := s.file.Close()
 	s.file = nil
-	if s.poison == nil {
-		s.poison = fmt.Errorf("%w: workspace %s sink %s.log is closed",
-			ErrPoisoned, s.workspaceID, s.name)
-	}
+	s.closed = true
 	if err != nil {
 		return fmt.Errorf("close log target %q: %w", s.target, err)
 	}
