@@ -2487,6 +2487,178 @@ arm this codec does not know is refused as an unknown field."
    #'agent-repl-wire-decode-session-health-response-success
    #'agent-repl-wire-decode-session-health-response-error))
 
+
+;;;; ---- Interrupt ------------------------------------------------------
+;;
+;; Interrupt is a FEED verb whose ARM IS THE TARGET.  Emacs authors only the
+;; two targets it can name from what it holds: `turn' (the running vendor
+;; query) and `all_agents' (the fan-wide stop).  The `detached' target names
+;; a bubble by `frontend.v1.FeedId', vocabulary Emacs has no feed to build,
+;; so no encoder is offered for it and an attempt to send it is refused as an
+;; unknown oneof arm rather than an ill-formed FeedId reaching the wire.
+
+(defun agent-repl-wire-encode-interrupt-turn (_present)
+  "Encode InterruptTurn.  Empty: the arm's presence IS the target."
+  nil)
+
+(defun agent-repl-wire-encode-interrupt-all-agents (_present)
+  "Encode InterruptAllAgents.  Empty: the arm's presence IS the target."
+  nil)
+
+(defun agent-repl-wire-encode-interrupt-request-workspace (ref)
+  "Encode InterruptRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-interrupt-request-target (value)
+  "Encode InterruptRequest's `target' oneof from VALUE.
+VALUE is (:arm KEYWORD :value V).  Only `turn' and `all-agents' can be
+authored here; `detached' is refused as an unknown arm because Emacs holds
+no feed from which to build its FeedId."
+  (agent-repl-wire-verbs--encode-oneof
+   "InterruptRequest" "target" value
+   (list (list :turn 'turn #'agent-repl-wire-encode-interrupt-turn)
+         (list :all-agents 'allAgents #'agent-repl-wire-encode-interrupt-all-agents))))
+
+(defun agent-repl-wire-encode-interrupt-request (request)
+  "Encode InterruptRequest from plist REQUEST.
+REQUEST is (:workspace REF :target (:arm KEYWORD :value V) :confirm-agents
+BOOL).  `confirm_agents' is spelled EXPLICITLY even when false, mirroring
+`force' on RestartWorkspace and the footer: the challenge answer is a fact
+the request states, never an omitted default."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-interrupt-request confirm=%S"
+                    (and (plist-get request :confirm-agents) t))
+  (list (cons 'workspace
+              (agent-repl-wire-encode-interrupt-request-workspace
+               (agent-repl-wire-verbs--require "InterruptRequest" "workspace"
+                                                (plist-get request :workspace))))
+        (agent-repl-wire-encode-interrupt-request-target
+         (agent-repl-wire-verbs--require "InterruptRequest" "target"
+                                          (plist-get request :target)))
+        (cons 'confirmAgents
+              (agent-repl-wire-verbs--encode-bool (plist-get request :confirm-agents)))))
+
+(defun agent-repl-wire-decode-interrupt-interrupted-turn (json)
+  "Decode InterruptedTurn from JSON.  Empty: the turn was interrupted."
+  (agent-repl-wire-verbs--decode-empty "InterruptedTurn" json))
+
+(defun agent-repl-wire-decode-interrupt-interrupted-detached (json)
+  "Decode InterruptedDetached from JSON into a plist (`:count').
+COUNT is how many detached agents the stop reached."
+  (let ((message "InterruptedDetached"))
+    (agent-repl-wire-verbs--check-keys message json '(count))
+    (list :count (agent-repl-wire--decode-int64 message 'count json))))
+
+(defun agent-repl-wire-decode-interrupt-nothing-running (json)
+  "Decode InterruptNothingRunning from JSON.  Empty: nothing was running -- an
+ANSWER (a stop that found the session already quiet), never a failure."
+  (agent-repl-wire-verbs--decode-empty "InterruptNothingRunning" json))
+
+(defun agent-repl-wire-decode-interrupt-success (json)
+  "Decode InterruptSuccess from JSON into (:arm ARM :value V).
+THE ARM IS WHAT THE STOP DID, so each outcome is its own arm; `nothing_running'
+is one of them, not a failure smuggled into success."
+  (let ((message "InterruptSuccess"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(interruptedTurn interruptedDetached nothingRunning))
+    (agent-repl-wire-verbs--decode-oneof
+     message "outcome" json
+     (list (list 'interruptedTurn :interrupted-turn
+                 #'agent-repl-wire-decode-interrupt-interrupted-turn)
+           (list 'interruptedDetached :interrupted-detached
+                 #'agent-repl-wire-decode-interrupt-interrupted-detached)
+           (list 'nothingRunning :nothing-running
+                 #'agent-repl-wire-decode-interrupt-nothing-running)))))
+
+(defun agent-repl-wire-decode-interrupt-confirm-required (json)
+  "Decode InterruptConfirmRequired from JSON into a plist (`:live-agent-count').
+LIVE-AGENT-COUNT is how many live detached agents a turn stop would also end."
+  (let ((message "InterruptConfirmRequired"))
+    (agent-repl-wire-verbs--check-keys message json '(liveAgentCount))
+    (list :live-agent-count
+          (agent-repl-wire--decode-int64 message 'liveAgentCount json))))
+
+(defun agent-repl-wire-decode-interrupt-unknown-workspace (json)
+  "Decode InterruptUnknownWorkspace from JSON.  Empty: the workspace id is not
+in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "InterruptUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-interrupt-workspace-ref-mismatch (json)
+  "Decode InterruptWorkspaceRefMismatch from JSON into a plist (`:registry-dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "InterruptWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir
+          (agent-repl-wire-verbs--decode-string message 'registryDir json))))
+
+(defun agent-repl-wire-decode-interrupt-transferring-away (json)
+  "Decode InterruptTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "InterruptTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address
+          (agent-repl-wire-verbs--decode-string message 'address json))))
+
+(defun agent-repl-wire-decode-interrupt-not-yet-adopted (json)
+  "Decode InterruptNotYetAdopted from JSON.  Empty: a joining daemon has not
+finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "InterruptNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-interrupt-not-detached-work (json)
+  "Decode InterruptNotDetachedWork from JSON.  Empty: the FeedId names no
+detached item."
+  (agent-repl-wire-verbs--decode-empty "InterruptNotDetachedWork" json))
+
+(defun agent-repl-wire-decode-interrupt-no-session (json)
+  "Decode InterruptNoSession from JSON.  Empty: the workspace has no session to
+interrupt."
+  (agent-repl-wire-verbs--decode-empty "InterruptNoSession" json))
+
+(defun agent-repl-wire-decode-interrupt-shim-refused (json)
+  "Decode InterruptShimRefused from JSON into a plist (`:detail').
+DETAIL is the shim's own account of the refusal."
+  (let ((message "InterruptShimRefused"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail
+          (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-interrupt-error (json)
+  "Decode InterruptError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset kind is a contract breach and an arm
+this codec does not know is refused as an unknown field.  The oneof is
+spelled `:cause' so `verbs.el's' arm-generic refusal handling reads it
+with the same accessor every other verb's error uses."
+  (let ((message "InterruptError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(confirmRequired unknownWorkspace workspaceRefMismatch
+                    transferringAway notYetAdopted notDetachedWork noSession
+                    shimRefused))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "kind" json
+           (list (list 'confirmRequired :confirm-required
+                       #'agent-repl-wire-decode-interrupt-confirm-required)
+                 (list 'unknownWorkspace :unknown-workspace
+                       #'agent-repl-wire-decode-interrupt-unknown-workspace)
+                 (list 'workspaceRefMismatch :workspace-ref-mismatch
+                       #'agent-repl-wire-decode-interrupt-workspace-ref-mismatch)
+                 (list 'transferringAway :transferring-away
+                       #'agent-repl-wire-decode-interrupt-transferring-away)
+                 (list 'notYetAdopted :not-yet-adopted
+                       #'agent-repl-wire-decode-interrupt-not-yet-adopted)
+                 (list 'notDetachedWork :not-detached-work
+                       #'agent-repl-wire-decode-interrupt-not-detached-work)
+                 (list 'noSession :no-session
+                       #'agent-repl-wire-decode-interrupt-no-session)
+                 (list 'shimRefused :shim-refused
+                       #'agent-repl-wire-decode-interrupt-shim-refused))))))
+
+(defun agent-repl-wire-decode-interrupt-response (json)
+  "Decode InterruptResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "InterruptResponse" json
+   #'agent-repl-wire-decode-interrupt-success
+   #'agent-repl-wire-decode-interrupt-error))
+
 (provide 'agent-repl-wire-verbs)
 
 ;;; wire-verbs.el ends here
