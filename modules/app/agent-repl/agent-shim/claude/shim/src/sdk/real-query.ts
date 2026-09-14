@@ -27,7 +27,8 @@
  * exists. A user's independently-upgraded `claude` is not this session's
  * engine.
  */
-import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import { spawn } from "node:child_process";
+import type { Options, SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { bindLog } from "../log.js";
 import { systemPromptOption } from "../metaprompt.js";
 import { importRealSDK } from "../vendor-guard.js";
@@ -92,6 +93,84 @@ export interface RealQuerySpec {
    * has none.
    */
   readonly onStderr?: (data: string) => void;
+  /**
+   * How the vendor child ENDED: its exit code, or the signal that killed it.
+   *
+   * THE FACT THAT IS OTHERWISE UNRECORDED. When the query dies the shim has
+   * the SDK's own wording for it and nothing else — and the SDK's wording is
+   * about the stream, not about the process. A vendor that died on 2026-09-14
+   * left `getContextUsage failed`, then `ProcessTransport is not ready for
+   * writing`, then "the vendor query is gone", and the immediate cause was
+   * simply not on the record: no exit code, no signal, no stderr beside it.
+   *
+   * Absence means the caller does not want it, and then nothing about the
+   * spawn changes.
+   */
+  readonly onChildExit?: (exit: VendorChildExit) => void;
+}
+
+/** How the vendor child ended. */
+export interface VendorChildExit {
+  /** The exit code, or absence when a signal ended it. */
+  readonly code: number | null;
+  /** The signal that ended it, or absence when it exited on its own. */
+  readonly signal: string | null;
+}
+
+/** How a child is actually spawned. Injected so a suite spawns nothing. */
+export type SpawnChild = (options: SpawnOptions) => SpawnedProcess;
+
+/**
+ * Spawn the vendor child exactly as the SDK would, and WATCH IT END.
+ *
+ * WHY A CUSTOM SPAWNER AT ALL. `Options.spawnClaudeCodeProcess` is the only
+ * declared surface that puts the child itself in the shim's hands, and the
+ * child's exit code and signal live nowhere else: the SDK reports the stream's
+ * death, not the process's.
+ *
+ * IT WIRES STDERR TOO, AND THAT IS NOT OPTIONAL. `SpawnedProcess` declares
+ * stdin and stdout and says nothing about stderr, so a custom spawner is where
+ * the `Options.stderr` callback stops being fed. Feeding it here is what keeps
+ * the vendor's own words — "No conversation found with session ID ..." and
+ * every other refusal it prints — on the record; a spawner that forgot this
+ * would trade a death's exit code for every start's reason.
+ *
+ * WHAT THE SDK'S OWN SPAWN DOES THAT THIS DOES NOT, and why each is covered:
+ *   - it checks the executable exists before spawning. Without the check the
+ *     failure arrives as an `error` event carrying ENOENT, which the SDK
+ *     already listens for and turns into the same refusal.
+ *   - it delays `exit` until the child's stderr has also closed, so its own
+ *     exit errors quote a complete stderr tail. The shim keeps its own bounded
+ *     stderr ring for the whole life of the child, so the record this exists
+ *     to write quotes that ring rather than the SDK's message.
+ */
+export function vendorSpawner(
+  onChildExit: (exit: VendorChildExit) => void,
+  onStderr?: (data: string) => void,
+  spawnChild: SpawnChild = defaultSpawn,
+): SpawnChild {
+  return (options: SpawnOptions): SpawnedProcess => {
+    const child = spawnChild(options);
+    child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
+      onChildExit({ code, signal });
+    });
+    const errors = (child as { stderr?: NodeJS.ReadableStream | null }).stderr;
+    if (onStderr !== undefined && errors != null) {
+      errors.setEncoding("utf8");
+      errors.on("data", (chunk: string | Buffer) => onStderr(chunk.toString()));
+    }
+    return child;
+  };
+}
+
+/** The plain spawn the SDK would have performed. */
+function defaultSpawn(options: SpawnOptions): SpawnedProcess {
+  return spawn(options.command, options.args, {
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    env: options.env,
+    signal: options.signal,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 }
 
 /**
@@ -119,7 +198,13 @@ export function realQueryOptions(spec: RealQuerySpec): Options {
     // making the account root authoritative rather than inherited by luck.
     env: { ...process.env, CLAUDE_CONFIG_DIR: spec.claudeConfigDir },
     ...(spec.model === undefined ? {} : { model: spec.model }),
-    ...(spec.onStderr === undefined ? {} : { stderr: spec.onStderr }),
+    // THE STDERR CALLBACK OR THE SPAWNER, NEVER BOTH. A custom spawner is
+    // where `Options.stderr` stops being fed (`SpawnedProcess` declares no
+    // stderr), so the spawner takes the callback over when there is one and
+    // the two can never double-report the same chunk.
+    ...(spec.onChildExit === undefined
+      ? { ...(spec.onStderr === undefined ? {} : { stderr: spec.onStderr }) }
+      : { spawnClaudeCodeProcess: vendorSpawner(spec.onChildExit, spec.onStderr) }),
     ...(spec.binding.kind === "fresh"
       ? { sessionId: spec.binding.sessionId }
       : {

@@ -134,6 +134,16 @@ export interface QuerySpec {
    * child printed. Optional: the mocked vendor has no child and no stderr.
    */
   readonly onStderr?: (chunk: string) => void;
+  /**
+   * How the vendor child ENDED: its exit code, or the signal that killed it.
+   *
+   * THE FACT A DEATH WAS OTHERWISE MISSING. When the query goes the shim has
+   * the SDK's wording for the STREAM ending and nothing about the process, so
+   * a vendor that died mid-morning on 2026-09-14 left three messages about
+   * transports and nothing at all about why its process was gone. Optional:
+   * the mocked vendor has no child to end.
+   */
+  readonly onChildExit?: (exit: { code: number | null; signal: string | null }) => void;
 }
 
 /** Build one query. `--fake` swaps the implementation and nothing else. */
@@ -490,8 +500,23 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let preInitKinds: string[] = [];
   /** Whether {@link preInitKinds} dropped anything to its bound. */
   let preInitKindsDropped = 0;
-  /** The tail of the vendor child's stderr, kept for the start's own detail. */
+  /**
+   * The tail of the vendor child's stderr, for the child's WHOLE LIFE.
+   *
+   * Reset by each start ATTEMPT, so a retry's refusal quotes its own child and
+   * not its predecessor's; never reset after that, so a death hours later
+   * still quotes whatever the child last said. Bounded by
+   * {@link VENDOR_STDERR_KEPT}.
+   */
   let vendorStderrTail = "";
+  /**
+   * How the vendor child ended, once it has.
+   *
+   * Read by {@link onQueryLost}, which is the one record a reader has for a
+   * death. Absent means the child has not ended — or, for the mocked vendor,
+   * that there was never a child to end.
+   */
+  let vendorExit: { code: number | null; signal: string | null } | undefined;
   let loop: Promise<void> | undefined;
   /**
    * The hibernation compaction that is running past the directive that asked
@@ -1374,6 +1399,36 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     LOGGER.debug({ characters: chunk.length }, "the vendor child wrote to stderr");
   }
 
+  /** Remember how the vendor child ended, for the death record. */
+  function noteVendorExit(exit: { code: number | null; signal: string | null }): void {
+    vendorExit = exit;
+    LOGGER.debug(
+      { vendor_exit_code: exit.code ?? -1, vendor_exit_signal: exit.signal ?? "" },
+      "the vendor child ended",
+    );
+  }
+
+  /**
+   * WHAT THE SHIM KNOWS ABOUT A DEAD VENDOR, ALL OF IT, IN ONE PLACE.
+   *
+   * The SDK's own wording describes the STREAM ending; the exit code, the
+   * signal and the child's last words describe the PROCESS, and on 2026-09-14
+   * none of the three was anywhere on the record — the shim reported
+   * `getContextUsage failed`, then that the transport was not ready for
+   * writing, then that the query was gone, and the immediate cause could not
+   * be recovered afterwards from any log.
+   */
+  function vendorDeathFields(): Record<string, string | number> {
+    return {
+      // -1 AND "" FOR ABSENCE, NOT OMISSION. A field that disappears when
+      // there is no answer makes "the child exited 0" and "no child ever
+      // ended" the same record, and those are opposite diagnoses.
+      vendor_exit_code: vendorExit?.code ?? -1,
+      vendor_exit_signal: vendorExit?.signal ?? "",
+      vendor_stderr: vendorStderrTail.trim(),
+    };
+  }
+
   /**
    * A START'S DETAIL CARRIES THE VENDOR'S OWN WORDS WHEN THERE ARE ANY.
    *
@@ -1814,7 +1869,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** The query is gone: settle any pending start, unwedge the callbacks, report. */
   function onQueryLost(detail: string): void {
-    LOGGER.error({ cause: detail }, "the vendor query is gone");
+    LOGGER.error({ cause: detail, ...vendorDeathFields() }, "the vendor query is gone");
     // BEFORE ANYTHING ELSE. A start still waiting on `init` has its answer the
     // moment the query it was waiting on ends, and the teardown below would
     // otherwise run while the verb sat out the rest of its bound.
@@ -1901,6 +1956,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       abortController: controller,
       prompt: queue,
       onStderr: noteVendorStderr,
+      onChildExit: noteVendorExit,
       ...(effectiveModel === "" ? {} : { model: effectiveModel }),
       ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
     });
