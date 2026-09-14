@@ -71,7 +71,7 @@ import {
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
-import { SYNTHETIC_MODEL } from "../model.js";
+import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
 import { fastModeUpdate } from "../convert/session-updates.js";
 import { backupTranscript } from "./backup.js";
@@ -1392,7 +1392,23 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       xhigh: conversationv1.AgentEffortLevel.XHIGH,
       max: conversationv1.AgentEffortLevel.MAX,
     };
-    return models.map((model) =>
+    // A CATALOG ROW THAT NAMES NO MODEL IS NOT AN OPTION. The vendor's catalog
+    // can carry a row whose `value` is the synthetic marker or empty — the
+    // "let the CLI pick" pseudo-entry — and normalizeModel collapses both to
+    // "no model override". Such a row is unselectable (SetModel would refuse it
+    // as not naming a model), so it is dropped HERE, at the producer, and never
+    // reaches SessionStarted.model_catalog. The webapp keeps its own guard as
+    // defense in depth, but the daemon should never be served one to begin
+    // with.
+    const selectable = models.filter((model) => {
+      if (normalizeModel(model.value) !== "") return true;
+      LOGGER.debug(
+        { value: model.value, display_name: model.displayName },
+        "the vendor offered a catalog row that names no model; it is not selectable and is omitted",
+      );
+      return false;
+    });
+    return selectable.map((model) =>
       create(conversationv1.ModelOptionSchema, {
         model: create(conversationv1.AgentModelSchema, { name: model.value }),
         displayName: model.displayName,
