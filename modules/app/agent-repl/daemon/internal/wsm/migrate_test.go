@@ -510,3 +510,49 @@ func TestTheMigrationAddsTheSelectedAccountRootColumn(t *testing.T) {
 		t.Fatalf("sessions.selected_config_dir exists %d times after the migration, want 1", got)
 	}
 }
+
+// TestTheMigrationAddsTheSpawnedShimPidColumn pins the layout-8 step: a file
+// written before a spawn's pid was durable carries the column afterwards, and
+// its existing rows read as "no spawn outstanding".
+func TestTheMigrationAddsTheSpawnedShimPidColumn(t *testing.T) {
+	// Arrange — a file written before a spawn left any durable trace.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[int](t, s,
+		`SELECT count(*) FROM pragma_table_info('workspaces') WHERE name = 'spawned_shim_pid'`)
+	if got != 1 {
+		t.Fatalf("workspaces.spawned_shim_pid exists %d times after the migration, want 1", got)
+	}
+}
+
+// TestTheMigratedRowsCarryNoOutstandingSpawn pins what the new column means for
+// a row that predates it: NULL, which every reader takes as "no daemon has a
+// spawn outstanding here" rather than a pid to probe.
+func TestTheMigratedRowsCarryNoOutstandingSpawn(t *testing.T) {
+	// Arrange
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[int](t, s,
+		`SELECT count(*) FROM workspaces WHERE spawned_shim_pid IS NOT NULL`)
+	if got != 0 {
+		t.Fatalf("%d migrated workspace rows carry a spawned pid, want none", got)
+	}
+}

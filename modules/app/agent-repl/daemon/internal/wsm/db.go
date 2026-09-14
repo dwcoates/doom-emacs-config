@@ -75,6 +75,11 @@ type DB interface {
 	// SetShimPID records, or clears with nil, the pid of the shim process
 	// serving a workspace's session. The rollout's intent manifest names it.
 	SetShimPID(ctx context.Context, id WorkspaceID, pid *int) error
+	// SetSpawnedShimPID records, or clears with nil, the pid of a shim a
+	// daemon SPAWNED for this workspace, written at the instant the fork
+	// returns. A successor daemon that finds the workspace lock free and the
+	// socket absent reads it before concluding no shim survives.
+	SetSpawnedShimPID(ctx context.Context, id WorkspaceID, pid *int) error
 
 	// AcquireLease takes the workspace's occupancy lease for holder under
 	// policy, refusing when it is already held.

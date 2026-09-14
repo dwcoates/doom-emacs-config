@@ -54,6 +54,15 @@ CREATE TABLE workspaces (
   last_selected_at INTEGER,
   merged_at        INTEGER,
   serving_instance TEXT,
+  -- The pid of a shim a daemon SPAWNED for this workspace, written at the
+  -- instant the fork returned and cleared when that spawn is stood down. It
+  -- is NOT sessions.shim_pid: that one names the shim SERVING A SESSION and
+  -- exists only once a session row does, so it says nothing at all about the
+  -- window between the fork and the shim's first bound socket -- the window
+  -- in which a successor daemon reads "lock free, socket absent" and spawns a
+  -- SECOND shim onto one session socket. See spawnedShimPidDDL and
+  -- boot.sequence's starting-survivor wait.
+  spawned_shim_pid INTEGER,
   created_at       INTEGER NOT NULL
 );
 
