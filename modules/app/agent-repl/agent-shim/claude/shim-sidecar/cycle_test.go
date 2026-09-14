@@ -2440,3 +2440,92 @@ func TestTheChangeProbeRefusesToBuildATailerWithoutCursors(t *testing.T) {
 	}()
 	h.sc.discoverChanged()
 }
+
+// TestTheBootRewindIsForFilesThatCanCarryATurnInFlight pins the rewind's SCOPE.
+// The joins it re-warms exist only for a turn this reader was half-way through,
+// so a transcript that stopped growing long ago with its cursor already at its
+// end has nothing to re-warm — and re-reading the whole historical corpus is
+// what made a restart's catch-up take minutes while a live workspace waited.
+func TestTheBootRewindIsForFilesThatCanCarryATurnInFlight(t *testing.T) {
+	turn := int64(len(promptLine + "\n" + assistantLine + "\n"))
+	tests := []struct {
+		name       string
+		age        time.Duration
+		offset     int64
+		wantOffset int64
+	}{
+		{
+			// At rest: beyond the agent-silence window AND read to the end.
+			name: "a transcript at rest is watched from its cursor with no re-read",
+			age:  4 * time.Hour, offset: 2 * turn, wantOffset: 2 * turn,
+		},
+		{
+			// Inside the silence window, so a turn of it may be in flight.
+			name: "a transcript that grew recently is rewound to its turn start",
+			age:  time.Minute, offset: 2 * turn, wantOffset: turn,
+		},
+		{
+			// Durable bytes this reader never converted ARE the half-converted
+			// turn, however long ago the file stopped growing.
+			name: "a cursor behind the file's end is rewound however old the file is",
+			age:  4 * time.Hour, offset: turn, wantOffset: 0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, &fakeStore{})
+			path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
+			aged := h.clock.Add(-tc.age)
+			if err := os.Chtimes(path, aged, aged); err != nil {
+				t.Fatalf("stamping %s: %v", path, err)
+			}
+			h.store.cursors = []*storev1.CursorState{{
+				FileId: identityOf(t, path), Path: path, Offset: tc.offset,
+			}}
+
+			// Act.
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+
+			// Assert.
+			if got := h.sc.watchers[path].tailer.Offset(); got != tc.wantOffset {
+				t.Fatalf("offset after the boot rewind = %d, want %d", got, tc.wantOffset)
+			}
+		})
+	}
+}
+
+// TestTheBootRewindStatesWhatTheWalkReRead asserts the one INFO record that
+// says how big the boot walk actually was. Both per-file decisions are verbose,
+// so without this summary nothing at normal verbosity distinguishes a restart
+// that re-read two transcripts from one that re-read two thousand.
+func TestTheBootRewindStatesWhatTheWalkReRead(t *testing.T) {
+	// Arrange: one transcript at rest and one still inside the silence window.
+	h := newHarness(t, &fakeStore{})
+	turn := int64(len(promptLine + "\n" + assistantLine + "\n"))
+	cold := h.transcript(t, "sess-cold", promptLine, assistantLine)
+	warm := h.transcript(t, "sess-warm", promptLine, assistantLine)
+	aged := h.clock.Add(-4 * time.Hour)
+	if err := os.Chtimes(cold, aged, aged); err != nil {
+		t.Fatalf("stamping %s: %v", cold, err)
+	}
+	h.store.cursors = []*storev1.CursorState{
+		{FileId: identityOf(t, cold), Path: cold, Offset: turn},
+		{FileId: identityOf(t, warm), Path: warm, Offset: turn},
+	}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: the boot walk drains, which is the edge the summary is stated at.
+	h.sc.pollAll()
+	h.sc.endCatchupOnFirstDrainedPass()
+
+	// Assert.
+	record := h.requireOnce(t, "boot-rewind-summary", "info")
+	if got := ctxInt(t, record, "repeat_count"); got != 2 {
+		t.Fatalf("boot-rewind-summary repeat_count = %d, want both transcripts counted", got)
+	}
+}
