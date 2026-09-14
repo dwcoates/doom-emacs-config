@@ -180,9 +180,11 @@ func TestALinkThatAppearsAfterARefreshIsFoundWithoutOne(t *testing.T) {
 	writeAgentID(t, stateDir, wsKey, original)
 	idx, _ := index(t, stateDir)
 	idx.Refresh()
-	if got := idx.Resolve(rotated); got.Original != rotated {
-		t.Fatalf("precondition: the unlinked id resolved to %q, want itself", got.Original)
-	}
+
+	// The id is deliberately NOT asked about first. A miss is remembered until
+	// the next refresh (see TestAMissIsGlobbedOnceUntilARefresh), so a
+	// precondition lookup here would be asserting the cache rather than the
+	// fallback this subject is about.
 
 	// Act: the shim rotates, and the id is asked about before the next refresh.
 	writeVendorLink(t, stateDir, wsKey, rotated, original)
@@ -350,5 +352,111 @@ func TestRotatedNamesOnlyAMovedBook(t *testing.T) {
 				t.Errorf("Rotated(%q) = %t, want %t", tc.asked, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestAMissIsGlobbedOnceUntilARefresh pins the negative cache, which is what
+// makes Resolve an in-memory lookup on the poll path.
+//
+// `rekeyRotations` resolves EVERY WATCHER ON EVERY POLL TICK. Re-globbing each
+// miss made a steady-state sidecar (pid 96084, a 10s `sample`) spend 76-101% of
+// a core inside filepath.Glob for ~2900 ids a second, ~1100 of which belonged to
+// cold runs that would never resolve, and stretched poll ticks to seconds.
+func TestAMissIsGlobbedOnceUntilARefresh(t *testing.T) {
+	t.Parallel()
+	// Arrange: a refresh that saw no link, and one lookup that globbed for it.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	if got := idx.Resolve(rotated); got.Source != SourceUnrecorded {
+		t.Fatalf("precondition: the unlinked id resolved as %+v, want unrecorded", got)
+	}
+
+	// Act: a link appears and the id is asked about again, with no refresh in
+	// between. The answer is the remembered miss, which is the PROOF no second
+	// glob ran — a glob would have found the file that is now on disk.
+	writeVendorLink(t, stateDir, wsKey, rotated, original)
+	got := idx.Resolve(rotated)
+
+	// Assert.
+	if got.Original != rotated || got.Source != SourceUnrecorded {
+		t.Errorf("the second lookup of a missing id resolved to %+v, want the remembered miss; it globbed the disk again", got)
+	}
+}
+
+// TestARefreshClearsTheRememberedMiss is the bound on the cache: the one event
+// that can make yesterday's miss wrong is a refresh, and a refresh clears it.
+// Refresh runs at every rescan AND on every poll tick where the change probe
+// found something, which is exactly when a new link can have been written.
+func TestARefreshClearsTheRememberedMiss(t *testing.T) {
+	t.Parallel()
+	// Arrange: a remembered miss.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	if got := idx.Resolve(rotated); got.Source != SourceUnrecorded {
+		t.Fatalf("precondition: the unlinked id resolved as %+v, want unrecorded", got)
+	}
+	writeVendorLink(t, stateDir, wsKey, rotated, original)
+
+	// Act.
+	idx.Refresh()
+
+	// Assert.
+	if got := idx.Resolve(rotated); got.Original != original || got.Source != SourceVendorLink {
+		t.Errorf("after a refresh the link written since the miss resolved to %+v, want %q from its link file", got, original)
+	}
+}
+
+// TestRecheckLinksDropsTheMissWhenALinkAppears is what keeps the negative cache
+// from costing a guarantee: "a link that appears mid-tail moves the book on the
+// very next poll" turns on the link being WRITTEN, not on the rescan cadence,
+// and the poll path asks the link directories that question once per tick.
+func TestRecheckLinksDropsTheMissWhenALinkAppears(t *testing.T) {
+	t.Parallel()
+	// Arrange: a remembered miss, and a link written after it.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	if got := idx.Resolve(rotated); got.Source != SourceUnrecorded {
+		t.Fatalf("precondition: the unlinked id resolved as %+v, want unrecorded", got)
+	}
+	writeVendorLink(t, stateDir, wsKey, rotated, original)
+
+	// Act: one poll tick's recheck, with no full refresh.
+	idx.RecheckLinks()
+
+	// Assert.
+	if got := idx.Resolve(rotated); got.Original != original || got.Source != SourceVendorLink {
+		t.Errorf("after the recheck the link resolved to %+v, want %q from its link file", got, original)
+	}
+}
+
+// TestRecheckLinksKeepsTheMissWhenNothingChanged is the other half: the recheck
+// exists to make the miss CHEAP, so a tree nobody wrote to must leave it alone.
+func TestRecheckLinksKeepsTheMissWhenNothingChanged(t *testing.T) {
+	t.Parallel()
+	// Arrange: a remembered miss over a tree that holds a link directory.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	writeVendorLink(t, stateDir, wsKey, stranger, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	if got := idx.Resolve(rotated); got.Source != SourceUnrecorded {
+		t.Fatalf("precondition: the unlinked id resolved as %+v, want unrecorded", got)
+	}
+
+	// Act: a tick's recheck over an untouched tree, then the link appears
+	// WITHOUT another recheck.
+	idx.RecheckLinks()
+	writeVendorLink(t, stateDir, wsKey, rotated, original)
+
+	// Assert: the recheck that ran saw nothing and kept the miss, which is the
+	// proof it did not re-glob.
+	if got := idx.Resolve(rotated); got.Source != SourceUnrecorded {
+		t.Errorf("a recheck over an unchanged tree dropped the remembered miss: %+v", got)
 	}
 }
