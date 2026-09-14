@@ -444,9 +444,60 @@ func (w *fakeWatcher) handovers() int {
 // fakeFeed records the synthesized rows.
 type fakeFeed struct {
 	feed.Resolver
-	mu      sync.Mutex
-	rows    []*frontendv1.FeedRow
-	address *sessionwatcher.OutputAddress
+	mu              sync.Mutex
+	rows            []*frontendv1.FeedRow
+	address         *sessionwatcher.OutputAddress
+	clearReceived   []ids.TurnID
+	compactReceived []ids.TurnID
+	cutAborted      []ids.TurnID
+}
+
+// OnClearReceived records the turns a /clear drew its optimistic divider for.
+func (f *fakeFeed) OnClearReceived(_ ids.WorkspaceID, turn ids.TurnID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.clearReceived = append(f.clearReceived, turn)
+}
+
+// OnCompactReceived records the turns registered as a /compact directive.
+func (f *fakeFeed) OnCompactReceived(_ ids.WorkspaceID, turn ids.TurnID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compactReceived = append(f.compactReceived, turn)
+}
+
+// OnContextCutAborted records the turns whose optimistic divider was retired.
+func (f *fakeFeed) OnContextCutAborted(_ ids.WorkspaceID, turn ids.TurnID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cutAborted = append(f.cutAborted, turn)
+}
+
+// clearReceivedTurns answers the turns OnClearReceived was called for.
+func (f *fakeFeed) clearReceivedTurns() []ids.TurnID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]ids.TurnID, len(f.clearReceived))
+	copy(out, f.clearReceived)
+	return out
+}
+
+// compactReceivedTurns answers the turns OnCompactReceived was called for.
+func (f *fakeFeed) compactReceivedTurns() []ids.TurnID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]ids.TurnID, len(f.compactReceived))
+	copy(out, f.compactReceived)
+	return out
+}
+
+// cutAbortedTurns answers the turns OnContextCutAborted was called for.
+func (f *fakeFeed) cutAbortedTurns() []ids.TurnID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]ids.TurnID, len(f.cutAborted))
+	copy(out, f.cutAborted)
+	return out
 }
 
 func (f *fakeFeed) UpsertSynthesized(_ ids.WorkspaceID, _ feedid.Feed, row *frontendv1.FeedRow) {

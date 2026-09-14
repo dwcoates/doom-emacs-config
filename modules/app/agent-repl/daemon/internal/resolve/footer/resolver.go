@@ -208,14 +208,20 @@ func (r *resolver) clockCell(s *wsState) *frontendv1.FooterClock {
 // edge — only the daemon's own caller knows a turn carries a /clear or a
 // compaction — so a turn already installed by SetTurn keeps its act rather
 // than being demoted to an ordinary prompt.
+//
+// A TURN ALREADY INSTALLED BY SetTurn KEEPS ITS START TIME TOO. The submitting
+// phase begins the instant the daemon accepts the prompt, before the shim is
+// asked; the turn-open edge that follows is the same turn, not a new one, so it
+// must not reset the strip's clock to the later turn-open instant. Only a turn
+// the edge is the FIRST to hear of (no SetTurn ran) starts the clock here.
 func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 	r.mutate(ws, "daemon.footer.on_turn_opened", "the footer took the turn-open edge",
 		dlog.Context{"turn_id": string(turn)}, func(s *wsState) {
-			act := ActPrompt
+			started := &TurnStarted{At: r.opts.clock.Now(), Act: ActPrompt}
 			if s.turn != nil {
-				act = s.turn.Act
+				started = s.turn
 			}
-			r.applyTurnStarted(s, &TurnStarted{At: r.opts.clock.Now(), Act: act})
+			r.applyTurnStarted(s, started)
 		})
 }
 

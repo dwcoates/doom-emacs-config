@@ -39,11 +39,16 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	// rather than drawing the prompt twice.
 	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
 
-	// THE ROSTER'S TURN FACT IS THE DAEMON'S OWN. Nothing on the shim's streams
-	// says a turn was accepted — its first frame is an activity, by which time
-	// `submitting` is over — so a roster left to infer it reads `ready` for a
-	// workspace whose turn is running.
-	q.deps.Sidebar.SetTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
+	// THE TURN FACT IS THE DAEMON'S OWN, AND IT IS PUBLISHED ON RECEIPT — before
+	// the shim is asked. Nothing on the shim's streams says a turn was accepted —
+	// its first frame is an activity, by which time `submitting` is over — so a
+	// client left to infer it reads `ready`/idle for a workspace whose turn is
+	// starting. Both the footer and the roster take `thinking · submitting` now,
+	// each as its own immediate publish, so the STALL of the (blocking) StartTurn
+	// below is shown as submitting rather than as idle.
+	submitting := &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt}
+	q.deps.Footer.SetTurn(sub.WS, submitting)
+	q.deps.Sidebar.SetTurn(sub.WS, submitting)
 
 	// THE WATCHER LEARNS THE TURN BEFORE THE SHIM DOES. The shim can put the
 	// turn's frames — its terminal included — on the agent stream before this
@@ -52,13 +57,18 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	watcher.OnTurnOpening(sub.WS, sub.Turn)
 	success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
 	if err != nil {
+		// The submitting phase was published; the shim then refused. The failure
+		// is surfaced to the caller (which answers the rpc with it) rather than
+		// swallowed, and the footer and roster drop the submitting turn so no
+		// workspace is left showing a `submitting` phase for a turn that never ran.
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
+		q.deps.Footer.SetTurn(sub.WS, nil)
 		q.deps.Sidebar.SetTurn(sub.WS, nil)
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
 
-	// The shim TOOK the turn: the roster's `submitting` window is over.
+	// The shim TOOK the turn: the `submitting` window is over.
 	q.deps.Sidebar.AckTurn(sub.WS)
 
 	if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {

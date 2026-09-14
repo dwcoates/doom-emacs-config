@@ -142,6 +142,19 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 	q.deps.Footer.SetTurn(ws, started)
 	q.deps.Sidebar.SetTurn(ws, started)
 
+	// A CONTEXT CUT IS REFLECTED IN THE FEED THE INSTANT IT IS ACCEPTED, before
+	// the shim is asked. A /clear draws its cleared divider now — the red bar and
+	// the cleared feed appear immediately, and the shim's later ContextCut
+	// confirms that SAME divider with its "context cleared" subtext. Neither
+	// directive draws a user-prompt bubble: they are directives, not
+	// conversational prompts, and their only visible outcome is the bar.
+	switch command {
+	case conversationv1.SessionCommand_SESSION_COMMAND_CLEAR:
+		q.deps.Feed.OnClearReceived(ws, turn)
+	case conversationv1.SessionCommand_SESSION_COMMAND_COMPACT:
+		q.deps.Feed.OnCompactReceived(ws, turn)
+	}
+
 	// The watcher learns the cut's turn before the shim does, for the reason
 	// deliverToSession states: a terminal can beat StartTurn's response back.
 	watcher, watching := q.deps.Watcher(ws)
@@ -153,6 +166,9 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 		if watching {
 			watcher.OnTurnOpenFailed(ws, turn)
 		}
+		// The optimistic divider promised a cut the shim refused; retire it so the
+		// feed recovers to exactly what it showed before.
+		q.deps.Feed.OnContextCutAborted(ws, turn)
 		q.deps.Footer.SetTurn(ws, nil)
 		q.deps.Sidebar.SetTurn(ws, nil)
 		q.clearUninterruptible(ws)
